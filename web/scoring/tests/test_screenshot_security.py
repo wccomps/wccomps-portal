@@ -166,3 +166,67 @@ def test_png_upload_saved_with_detected_type(team, blue_team_user, mock_quotient
     _submit_incident(blue_team_user, _upload(PNG, "shot.png", "text/html"))
 
     assert IncidentScreenshot.objects.get().mime_type == "image/png"
+
+
+# --- rejected uploads: an error message and nothing saved, not a 500 ------------------------------
+
+
+def _submit_red(user, uploads: list[SimpleUploadedFile]):
+    from scoring.models import AttackType
+
+    attack = AttackType.objects.create(name="Credential reuse")
+    client = Client()
+    client.force_login(user)
+    return client.post(
+        reverse("scoring:submit_red_score"),
+        {
+            "source_ip_type": "single",
+            "source_ip": "10.0.0.9",
+            "attack_type": attack.id,
+            "affected_teams": [Team.objects.get().id],
+            "screenshots": uploads,
+        },
+    )
+
+
+@pytest.mark.parametrize("problem", ["too_many", "too_big"])
+def test_rejected_incident_upload_shows_the_error(team, blue_team_user, mock_quotient_client, problem, monkeypatch):
+    uploads = [_upload(PNG, f"s{n}.png") for n in range(21)] if problem == "too_many" else [_upload(PNG)]
+    if problem == "too_big":
+        monkeypatch.setattr("scoring.screenshots.MAX_SCREENSHOT_SIZE", 10)
+    client = Client()
+    client.force_login(blue_team_user)
+
+    response = client.post(
+        reverse("scoring:submit_incident_report"),
+        {
+            "source_ip": "10.0.0.9",
+            "attack_description": "saw it",
+            "attack_detected_at": timezone.now().strftime("%Y-%m-%dT%H:%M"),
+            "screenshots": uploads,
+        },
+    )
+
+    assert response.status_code == 200
+    assert b"File upload failed" in response.content
+    assert not IncidentReport.objects.exists()
+
+
+@pytest.mark.parametrize("problem", ["too_many", "too_big"])
+def test_rejected_red_team_upload_shows_the_error(team, red_team_user, mock_quotient_client, problem, monkeypatch):
+    uploads = [_upload(PNG, f"s{n}.png") for n in range(21)] if problem == "too_many" else [_upload(PNG)]
+    if problem == "too_big":
+        monkeypatch.setattr("scoring.screenshots.MAX_SCREENSHOT_SIZE", 10)
+
+    response = _submit_red(red_team_user, uploads)
+
+    assert response.status_code == 200
+    assert b"File upload failed" in response.content
+    assert not RedTeamScore.objects.exists()
+
+
+def test_red_team_finding_with_screenshots_is_saved(team, red_team_user, mock_quotient_client):
+    response = _submit_red(red_team_user, [_upload(PNG, "a.png"), _upload(PDF, "b.pdf")])
+
+    assert response.status_code == 302
+    assert RedTeamScreenshot.objects.filter(finding=RedTeamScore.objects.get()).count() == 2

@@ -17,7 +17,7 @@ from ..models import (
     RedTeamScreenshot,
 )
 from ..quotient_sync import get_box_metadata, get_cached_team_count
-from ..screenshots import read_screenshot, screenshot_response
+from ..screenshots import ScreenshotError, read_screenshots, screenshot_response
 
 
 def _normalize_red_score_post(post_data: QueryDict) -> QueryDict:
@@ -240,61 +240,12 @@ def submit_red_score(request: HttpRequest) -> HttpResponse:
         form = RedTeamScoreForm(post_data, request.FILES, team_count=team_count, user=user)
 
         if form.is_valid():
-            cd = form.cleaned_data
-
-            finding = RedTeamScore.objects.create(
-                attack_type=cd["attack_type"],
-                affected_boxes=cd.get("affected_boxes", []),
-                source_ip=cd.get("source_ip") if not cd.get("source_ip_pool") else None,
-                source_ip_pool=cd.get("source_ip_pool"),
-                submitted_by=user,
-                notes=cd.get("notes", ""),
-                affected_service=cd.get("affected_service", ""),
-                destination_ip_template=cd.get("destination_ip_template", ""),
-                universally_attempted=cd.get("universally_attempted", False),
-                persistence_established=cd.get("persistence_established", False),
-                root_access=cd.get("root_access", False),
-                user_access=cd.get("user_access", False),
-                privilege_escalation=cd.get("privilege_escalation", False),
-                credentials_recovered=cd.get("credentials_recovered", False),
-                sensitive_files_recovered=cd.get("sensitive_files_recovered", False),
-                credit_cards_recovered=cd.get("credit_cards_recovered", False),
-                pii_recovered=cd.get("pii_recovered", False),
-                encrypted_db_recovered=cd.get("encrypted_db_recovered", False),
-                db_decrypted=cd.get("db_decrypted", False),
-                points_per_team=0,
-            )
-            finding.points_per_team = finding.calculate_points()
-            finding.save(update_fields=["points_per_team"])
-            finding.affected_teams.set(cd["affected_teams"])
-            finding.contributors.add(user)
-
-            screenshots = request.FILES.getlist("screenshots")
-            max_screenshots = 20
-
-            screenshot_error = False
-            if len(screenshots) > max_screenshots:
-                transaction.set_rollback(True)
-                messages.error(request, f"Maximum {max_screenshots} screenshots allowed per submission")
-                screenshot_error = True
+            try:
+                screenshots = read_screenshots(request.FILES.getlist("screenshots"))
+            except ScreenshotError as e:
+                messages.error(request, f"File upload failed: {e}")
             else:
-                try:
-                    for screenshot in screenshots:
-                        file_data, filename, mime_type = read_screenshot(screenshot)
-                        RedTeamScreenshot.objects.create(
-                            finding=finding,
-                            file_data=file_data,
-                            filename=filename,
-                            mime_type=mime_type,
-                        )
-                except Exception as e:
-                    transaction.set_rollback(True)
-                    messages.error(request, f"File upload failed: {str(e)}")
-                    screenshot_error = True
-
-            if not screenshot_error:
-                messages.success(request, f"Finding #{finding.id} created successfully.")
-                return redirect("scoring:red_team_scores")
+                return _create_red_score(request, form, user, screenshots)
     else:
         form = RedTeamScoreForm(team_count=team_count, user=user)
 
@@ -304,6 +255,44 @@ def submit_red_score(request: HttpRequest) -> HttpResponse:
         "user_pools": user_pools,
     }
     return render(request, "scoring/submit_red_finding.html", context)
+
+
+def _create_red_score(
+    request: HttpRequest, form: RedTeamScoreForm, user: User, screenshots: list[tuple[bytes, str, str]]
+) -> HttpResponse:
+    cd = form.cleaned_data
+    finding = RedTeamScore.objects.create(
+        attack_type=cd["attack_type"],
+        affected_boxes=cd.get("affected_boxes", []),
+        source_ip=cd.get("source_ip") if not cd.get("source_ip_pool") else None,
+        source_ip_pool=cd.get("source_ip_pool"),
+        submitted_by=user,
+        notes=cd.get("notes", ""),
+        affected_service=cd.get("affected_service", ""),
+        destination_ip_template=cd.get("destination_ip_template", ""),
+        universally_attempted=cd.get("universally_attempted", False),
+        persistence_established=cd.get("persistence_established", False),
+        root_access=cd.get("root_access", False),
+        user_access=cd.get("user_access", False),
+        privilege_escalation=cd.get("privilege_escalation", False),
+        credentials_recovered=cd.get("credentials_recovered", False),
+        sensitive_files_recovered=cd.get("sensitive_files_recovered", False),
+        credit_cards_recovered=cd.get("credit_cards_recovered", False),
+        pii_recovered=cd.get("pii_recovered", False),
+        encrypted_db_recovered=cd.get("encrypted_db_recovered", False),
+        db_decrypted=cd.get("db_decrypted", False),
+        points_per_team=0,
+    )
+    finding.points_per_team = finding.calculate_points()
+    finding.save(update_fields=["points_per_team"])
+    finding.affected_teams.set(cd["affected_teams"])
+    finding.contributors.add(user)
+
+    for file_data, filename, mime_type in screenshots:
+        RedTeamScreenshot.objects.create(finding=finding, file_data=file_data, filename=filename, mime_type=mime_type)
+
+    messages.success(request, f"Finding #{finding.id} created successfully.")
+    return redirect("scoring:red_team_scores")
 
 
 @require_permission("red_team", "gold_team", error_message="Only Red Team or Gold Team can view findings")
