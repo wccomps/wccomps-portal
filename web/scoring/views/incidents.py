@@ -14,7 +14,7 @@ from ..calculator import calculate_suggested_recovery_points, suggest_red_score_
 from ..forms import IncidentMatchForm, IncidentReportForm
 from ..models import IncidentReport, IncidentScreenshot
 from ..quotient_sync import get_box_metadata
-from ..screenshots import read_screenshot, screenshot_response
+from ..screenshots import ScreenshotError, read_screenshots, screenshot_response
 
 
 @transaction.atomic
@@ -35,44 +35,30 @@ def submit_incident_report(request: HttpRequest) -> HttpResponse:
         form = IncidentReportForm(team, is_admin, request.POST, request.FILES)
 
         if form.is_valid():
-            incident = form.save(commit=False)
-
-            if is_admin:
-                incident.team = form.cleaned_data["team"]
-            elif team is not None:
-                incident.team = team
+            try:
+                screenshots = read_screenshots(request.FILES.getlist("screenshots"))
+            except ScreenshotError as e:
+                messages.error(request, f"File upload failed: {e}")
             else:
-                # This should never happen due to earlier validation
-                messages.error(request, "Team assignment error")
-                return redirect("leaderboard_page")
+                incident = form.save(commit=False)
 
-            incident.submitted_by = user
-            incident.save()
+                if is_admin:
+                    incident.team = form.cleaned_data["team"]
+                elif team is not None:
+                    incident.team = team
+                else:
+                    # This should never happen due to earlier validation
+                    messages.error(request, "Team assignment error")
+                    return redirect("leaderboard_page")
 
-            screenshots = request.FILES.getlist("screenshots")
-            max_screenshots = 20
+                incident.submitted_by = user
+                incident.save()
 
-            screenshot_error = False
-            if len(screenshots) > max_screenshots:
-                transaction.set_rollback(True)
-                messages.error(request, f"Maximum {max_screenshots} screenshots allowed per submission")
-                screenshot_error = True
-            else:
-                try:
-                    for screenshot in screenshots:
-                        file_data, filename, mime_type = read_screenshot(screenshot)
-                        IncidentScreenshot.objects.create(
-                            incident=incident,
-                            file_data=file_data,
-                            filename=filename,
-                            mime_type=mime_type,
-                        )
-                except Exception as e:
-                    transaction.set_rollback(True)
-                    messages.error(request, f"File upload failed: {str(e)}")
-                    screenshot_error = True
+                for file_data, filename, mime_type in screenshots:
+                    IncidentScreenshot.objects.create(
+                        incident=incident, file_data=file_data, filename=filename, mime_type=mime_type
+                    )
 
-            if not screenshot_error:
                 messages.success(request, f"Incident report #{incident.id} submitted successfully")
                 return redirect("scoring:view_incident_report", incident_id=incident.id)
     else:
