@@ -1,5 +1,5 @@
 import json
-from typing import Callable
+from collections.abc import Callable
 
 import pytest
 from django.contrib.auth.models import User

@@ -10,6 +10,7 @@ urlpatterns = [
     path("checkins/", views.team_checkins, name="team_checkins"),
     path("review/", views.review_queue, name="review_queue"),
     path("checks/", views.check_list, name="check_list"),
+    path("checks/auto-assign/", views.auto_assign_all, name="auto_assign_all"),
     path("checks/create/", views.check_create, name="check_create"),
     path("checks/<int:check_id>/", views.check_detail, name="check_detail"),
     path("checks/<int:check_id>/edit/", views.check_edit, name="check_edit"),

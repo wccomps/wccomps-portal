@@ -1,5 +1,5 @@
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Callable
 
 import pytest
 from django.contrib.auth.models import User

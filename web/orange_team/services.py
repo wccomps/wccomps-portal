@@ -57,9 +57,7 @@ def rebalance_unstarted(check: OrangeCheck, checked_in_users: list[User]) -> int
     n = len(checked_in_users)
     count = 0
     with transaction.atomic():
-        pending = list(
-            check.assignments.select_for_update().filter(status="pending").order_by("team__team_number")
-        )
+        pending = list(check.assignments.select_for_update().filter(status="pending").order_by("team__team_number"))
         for i, assignment in enumerate(pending):
             assignee = checked_in_users[i % n]
             if assignment.user_id != assignee.id:

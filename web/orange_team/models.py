@@ -61,7 +61,7 @@ class OrangeCheck(models.Model):
     def max_score(self) -> int:
         criteria_total = self.criteria.aggregate(total=models.Sum("points"))["total"]
         if criteria_total is not None:
-            return criteria_total
+            return int(criteria_total)
         return self.max_points
 
     @property
