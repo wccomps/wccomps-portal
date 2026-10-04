@@ -217,9 +217,8 @@ def inject_grades(test_teams, admin_user):
 @pytest.fixture
 def final_scores(test_teams):
     """Service scores that rank Team 1 over Team 2 under 1:1 modifiers; Team 3 has no activity."""
-    ScoringTemplate.objects.create(
-        service_modifier=Decimal("1"), inject_modifier=Decimal("1"), orange_modifier=Decimal("1")
-    )
+    # Maxes proportional to weights -> every derived modifier is exactly 1 (raw == scaled).
+    ScoringTemplate.objects.create(service_max=Decimal("40"), inject_max=Decimal("40"), orange_max=Decimal("20"))
     ServiceScore.objects.create(team=test_teams[0], service_points=Decimal("500.00"), sla_violations=Decimal("-10"))
     ServiceScore.objects.create(team=test_teams[1], service_points=Decimal("450.00"))
 

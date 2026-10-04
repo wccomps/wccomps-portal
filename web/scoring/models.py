@@ -100,37 +100,13 @@ class ScoringTemplate(models.Model):
         help_text="Maximum possible raw orange team check points",
     )
 
-    # Optional: direct scaling modifiers (bypass weight-based derivation)
-    service_modifier = models.DecimalField(
-        max_digits=10,
-        decimal_places=4,
-        null=True,
-        blank=True,
-        help_text="Direct scaling modifier for service (overrides weight-based calculation)",
-    )
-    inject_modifier = models.DecimalField(
-        max_digits=10,
-        decimal_places=4,
-        null=True,
-        blank=True,
-        help_text="Direct scaling modifier for injects (overrides weight-based calculation)",
-    )
-    orange_modifier = models.DecimalField(
-        max_digits=10,
-        decimal_places=4,
-        null=True,
-        blank=True,
-        help_text="Direct scaling modifier for orange team (overrides weight-based calculation)",
-    )
-
     def clean(self) -> None:
-        """Validate that weights sum to 100 (when not using direct modifiers)."""
+        """Validate that the category weights sum to 100."""
         from django.core.exceptions import ValidationError
 
-        if not (self.service_modifier and self.inject_modifier and self.orange_modifier):
-            total = (self.service_weight or 0) + (self.inject_weight or 0) + (self.orange_weight or 0)
-            if total != Decimal("100"):
-                raise ValidationError(f"Weights must sum to 100 (currently {total})")
+        total = (self.service_weight or 0) + (self.inject_weight or 0) + (self.orange_weight or 0)
+        if total != Decimal("100"):
+            raise ValidationError(f"Weights must sum to 100 (currently {total})")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
