@@ -187,7 +187,7 @@ class TestCheckDuplicate:
 
 
 class TestCheckAssign:
-    def test_assign_distributes_teams(self) -> None:
+    def test_auto_assign_distributes_teams(self) -> None:
         lead = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=lead, authentik_id="g1", groups=["WCComps_GoldTeam"])
         o1 = User.objects.create_user(username="orange1")
@@ -202,35 +202,36 @@ class TestCheckAssign:
         Team.objects.create(team_number=4, team_name="T4")
         client = Client()
         client.login(username="gold1", password="test")
-        response = client.post(
-            f"/orange-team/checks/{check.pk}/assign/",
-            {"user_ids": [o1.pk, o2.pk]},
-        )
+        response = client.post(f"/orange-team/checks/{check.pk}/auto-assign/")
         assert response.status_code == 302
         assert OrangeAssignment.objects.filter(orange_check=check).count() == 4
-        # Each assignment should have result rows
+        # Each assignment should have result rows for the criteria check
         for assignment in OrangeAssignment.objects.filter(orange_check=check):
             assert assignment.results.count() == 1
         check.refresh_from_db()
         assert check.status == "active"
 
-    def test_assign_no_users_shows_error(self) -> None:
+    def test_auto_assign_no_checked_in_users_is_noop(self) -> None:
         lead = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=lead, authentik_id="g1", groups=["WCComps_GoldTeam"])
         check = OrangeCheck.objects.create(title="Test", description="Desc", created_by=lead)
+        Team.objects.create(team_number=1, team_name="T1")
         client = Client()
         client.login(username="gold1", password="test")
-        response = client.post(f"/orange-team/checks/{check.pk}/assign/")
+        response = client.post(f"/orange-team/checks/{check.pk}/auto-assign/")
         assert response.status_code == 302
+        assert OrangeAssignment.objects.filter(orange_check=check).count() == 0
 
-    def test_get_redirects(self) -> None:
+    def test_assign_get_renders_grid(self) -> None:
         lead = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=lead, authentik_id="g1", groups=["WCComps_GoldTeam"])
         check = OrangeCheck.objects.create(title="Test", description="Desc", created_by=lead)
+        Team.objects.create(team_number=1, team_name="T1")
         client = Client()
         client.login(username="gold1", password="test")
         response = client.get(f"/orange-team/checks/{check.pk}/assign/")
-        assert response.status_code == 302
+        assert response.status_code == 200
+        assert b"Team 1" in response.content
 
 
 class TestCheckEdit:

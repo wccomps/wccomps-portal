@@ -12,7 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from core.auth_utils import has_permission, require_permission
-from orange_team.forms import AssignmentRejectForm, CheckAssignForm, FollowUpForm, OrangeCheckForm, extract_criteria
+from orange_team.forms import AssignmentRejectForm, FollowUpForm, OrangeCheckForm, extract_criteria
 from orange_team.models import (
     OrangeAssignment,
     OrangeAssignmentResult,
@@ -25,6 +25,7 @@ from orange_team.services import (
     assign_all_checks,
     auto_assign_check,
     create_orange_score_from_assignment,
+    rebalance_unstarted,
     update_check_criteria,
 )
 from team.models import Team
@@ -321,30 +322,76 @@ def check_duplicate(request: HttpRequest, check_id: int) -> HttpResponse:
 
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
 def check_assign(request: HttpRequest, check_id: int) -> HttpResponse:
-    """Assign checked-in users to score teams for a check."""
+    """Show the assign grid for a check: every active team with its volunteer dropdown."""
+    orange_check = get_object_or_404(OrangeCheck, pk=check_id)
+    existing = {
+        a.team_id: a for a in OrangeAssignment.objects.filter(orange_check=orange_check).select_related("user", "team")
+    }
+    active_teams = Team.objects.filter(is_active=True).order_by("team_number")
+    rows = [{"team": team, "assignment": existing.get(team.id)} for team in active_teams]
+    on_shift = list(User.objects.filter(orange_checkins__is_active=True).distinct().order_by("username"))
+    scored = sum(1 for a in existing.values() if a.status == "approved")
+    return render(
+        request,
+        "orange_team/assign.html",
+        {
+            "orange_check": orange_check,
+            "rows": rows,
+            "on_shift": on_shift,
+            "scored": scored,
+            "team_total": len(rows),
+            "is_lead": True,
+        },
+    )
+
+
+@require_permission("orange_team_lead", error_message="Only leads can manage checks")
+def check_auto_assign(request: HttpRequest, check_id: int) -> HttpResponse:
+    """Rotate on-shift volunteers across this check's teams (pending/missing cells only)."""
     if request.method != "POST":
-        return redirect("orange_team:check_detail", check_id=check_id)
-
-    orange_check = get_object_or_404(OrangeCheck.objects.prefetch_related("criteria"), pk=check_id)
-    checked_in = User.objects.filter(orange_checkins__is_active=True).distinct()
-    form = CheckAssignForm(request.POST, choices=[(u.pk, u.username) for u in checked_in])
-    if not form.is_valid():
-        messages.error(request, "Select at least one user to assign.")
-        return redirect("orange_team:check_detail", check_id=check_id)
-
-    users = list(User.objects.filter(pk__in=form.cleaned_data["user_ids"]))
-    active_teams = list(Team.objects.filter(is_active=True).order_by("team_number"))
-
-    if not active_teams:
-        messages.error(request, "No active teams found.")
-        return redirect("orange_team:check_detail", check_id=check_id)
-
-    auto_assign_check(orange_check, users, active_teams)
+        return redirect("orange_team:check_assign", check_id=check_id)
+    orange_check = get_object_or_404(OrangeCheck, pk=check_id)
+    users = list(User.objects.filter(orange_checkins__is_active=True).distinct())
+    teams = list(Team.objects.filter(is_active=True).order_by("team_number"))
+    ordered = list(OrangeCheck.objects.order_by("scheduled_at", "created_at").values_list("pk", flat=True))
+    offset = ordered.index(orange_check.pk) if orange_check.pk in ordered else 0
+    count = auto_assign_check(orange_check, users, teams, rotation_offset=offset)
     orange_check.status = "active"
     orange_check.save(update_fields=["status"])
+    messages.success(request, f"Auto-assigned {count} teams across {len(users)} volunteers.")
+    return redirect("orange_team:check_assign", check_id=check_id)
 
-    messages.success(request, f"Assigned {len(active_teams)} teams across {len(users)} users.")
-    return redirect("orange_team:check_detail", check_id=check_id)
+
+@require_permission("orange_team_lead", error_message="Only leads can manage checks")
+def check_rebalance(request: HttpRequest, check_id: int) -> HttpResponse:
+    """Spread only the pending teams across whoever is still on shift."""
+    if request.method != "POST":
+        return redirect("orange_team:check_assign", check_id=check_id)
+    orange_check = get_object_or_404(OrangeCheck, pk=check_id)
+    users = list(User.objects.filter(orange_checkins__is_active=True).distinct())
+    count = rebalance_unstarted(orange_check, users)
+    messages.success(request, f"Rebalanced {count} unstarted teams.")
+    return redirect("orange_team:check_assign", check_id=check_id)
+
+
+@require_permission("orange_team_lead", error_message="Only leads can manage checks")
+def reassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
+    """Reassign one team's volunteer; scored teams are locked."""
+    if request.method != "POST":
+        return redirect("orange_team:dashboard")
+    assignment = get_object_or_404(OrangeAssignment.objects.select_related("orange_check", "team"), pk=assignment_id)
+    check_id = assignment.orange_check_id
+    if assignment.status in ("submitted", "approved"):
+        messages.error(request, "Scored teams can't be reassigned.")
+        return redirect("orange_team:check_assign", check_id=check_id)
+    new_user = User.objects.filter(pk=request.POST.get("user_id") or 0, orange_checkins__is_active=True).first()
+    if new_user is None:
+        messages.error(request, "Pick a volunteer who is checked in.")
+        return redirect("orange_team:check_assign", check_id=check_id)
+    assignment.user = new_user
+    assignment.save(update_fields=["user"])
+    messages.success(request, f"Reassigned Team {assignment.team.team_number} to {new_user.username}.")
+    return redirect("orange_team:check_assign", check_id=check_id)
 
 
 def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
