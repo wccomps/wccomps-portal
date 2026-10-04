@@ -227,6 +227,10 @@ class AuthentikManager:
             state = "enabled" if enabled else "disabled"
             logger.info(f"Set binding {binding_pk} to {state}")
             return True
+        except httpx.HTTPStatusError as e:
+            # Log Authentik's response body (why the 400 etc.), not just the status code
+            logger.exception(str(self._handle_response_error(e.response, f"Update binding {binding_pk}")))
+            return False
         except Exception as e:
             logger.exception(f"Failed to update binding {binding.get('pk')}: {e}")
             return False

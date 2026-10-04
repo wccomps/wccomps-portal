@@ -1,5 +1,6 @@
 """Tests for AuthentikManager update_user_discord_id method."""
 
+import logging
 from unittest.mock import MagicMock, Mock, patch
 
 import httpx
@@ -147,3 +148,31 @@ class TestUpdateUserDiscordId:
 
         with pytest.raises(httpx.HTTPStatusError):
             manager.update_user_discord_id("someuser", 123456789, "u-1")
+
+
+class TestUpdateBindingEnabled:
+    """update_binding_enabled logs Authentik's response body so a 400 is diagnosable."""
+
+    @pytest.fixture
+    def manager(self):
+        with patch("core.authentik_manager.settings") as mock_settings:
+            mock_settings.AUTHENTIK_URL = "https://auth.example.com"
+            mock_settings.AUTHENTIK_TOKEN = "test-token"
+            mgr = AuthentikManager()
+            mgr.client = Mock()
+            return mgr
+
+    def test_logs_response_body_on_http_error(self, manager, caplog):
+        resp = MagicMock()
+        resp.status_code = 400
+        resp.url = "https://auth.example.com/api/v3/policies/bindings/abc/"
+        resp.json.return_value = {"non_field_errors": ["Enabled cannot be set on this binding"]}
+        resp.text = '{"non_field_errors": ["Enabled cannot be set on this binding"]}'
+        resp.raise_for_status.side_effect = httpx.HTTPStatusError("400", request=MagicMock(), response=resp)
+        manager.client.put.return_value = resp
+
+        with caplog.at_level(logging.ERROR):
+            result = manager.update_binding_enabled({"pk": "abc", "enabled": False}, True)
+
+        assert result is False
+        assert "Enabled cannot be set on this binding" in caplog.text
