@@ -48,7 +48,6 @@ NAV_MAPPING: dict[str, tuple[str, str]] = {
     "bulk_approve_orange_adjustments": ("orange", "portal"),
     # Orange Team Challenges (orange_team app)
     "dashboard": ("orange", "dashboard"),
-    "team_checkins": ("orange", "checkins"),
     "review_queue": ("orange", "review"),
     "check_list": ("orange", "checks"),
     "check_create": ("orange", "checks"),

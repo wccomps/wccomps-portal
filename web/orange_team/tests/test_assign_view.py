@@ -3,6 +3,7 @@ from collections.abc import Callable
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
+from django.urls import NoReverseMatch, reverse
 
 from orange_team.models import OrangeAssignment, OrangeCheck, OrangeCheckIn
 from team.models import Team
@@ -60,3 +61,8 @@ def test_reassign_blocked_on_scored(lead_client: Client, create_user_with_groups
     lead_client.post(f"/orange-team/assignments/{a.id}/reassign/", {"user_id": str(v2.id)})
     a.refresh_from_db()
     assert a.user_id == v1.id
+
+
+def test_team_checkins_url_removed() -> None:
+    with pytest.raises(NoReverseMatch):
+        reverse("orange_team:team_checkins")

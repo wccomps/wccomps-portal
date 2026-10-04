@@ -84,7 +84,7 @@ def toggle_checkin(request: HttpRequest) -> HttpResponse:
 def admin_toggle_checkin(request: HttpRequest, user_id: int) -> HttpResponse:
     """Toggle check-in/out for another user (lead only)."""
     if request.method != "POST":
-        return redirect("orange_team:team_checkins")
+        return redirect("orange_team:check_list")
     target_user = User.objects.get(pk=user_id)
     active = OrangeCheckIn.objects.filter(user=target_user, is_active=True).first()
     if active:
@@ -93,18 +93,7 @@ def admin_toggle_checkin(request: HttpRequest, user_id: int) -> HttpResponse:
         active.save()
     else:
         OrangeCheckIn.objects.create(user=target_user)
-    return redirect("orange_team:team_checkins")
-
-
-@require_permission("orange_team_lead", error_message="Only leads can view team check-ins")
-def team_checkins(request: HttpRequest) -> HttpResponse:
-    """Lead view showing all checked-in orange team members."""
-    checked_in_members = OrangeCheckIn.objects.filter(is_active=True).select_related("user")
-    return render(
-        request,
-        "orange_team/checkins.html",
-        {"checked_in_members": checked_in_members, "is_lead": True},
-    )
+    return redirect("orange_team:check_list")
 
 
 @require_permission("orange_team_lead", error_message="Only leads can review assignments")

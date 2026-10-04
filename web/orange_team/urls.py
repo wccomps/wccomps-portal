@@ -7,7 +7,6 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("check-in/", views.toggle_checkin, name="toggle_checkin"),
     path("check-in/<int:user_id>/", views.admin_toggle_checkin, name="admin_toggle_checkin"),
-    path("checkins/", views.team_checkins, name="team_checkins"),
     path("review/", views.review_queue, name="review_queue"),
     path("checks/", views.check_list, name="check_list"),
     path("checks/auto-assign/", views.auto_assign_all, name="auto_assign_all"),
