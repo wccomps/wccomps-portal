@@ -12,8 +12,10 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import require_permission
 from core.tickets_config import get_all_categories, get_category_config
+from team.models import Team
 from ticketing.forms import TicketVerifyForm
 from ticketing.models import Ticket, TicketHistory
+from ticketing.scoring_sync import recompute_team_ticket_adjustment
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +154,8 @@ def ops_verify_ticket(request: HttpRequest, ticket_number: str) -> HttpResponse:
         },
     )
 
+    recompute_team_ticket_adjustment(ticket.team)
+
     logger.info(f"Ticket {ticket_number} points verified by {authentik_username}: {ticket.points_charged} points")
 
     referer = request.META.get("HTTP_REFERER", "")
@@ -169,12 +173,14 @@ def ops_batch_verify_tickets(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)
     authentik_username = user.username
     now = timezone.now()
+    approved_team_ids: set[int] = set()
 
     def approve(ticket: Ticket) -> None:
         ticket.is_approved = True
         ticket.approved_by = user
         ticket.approved_at = now
         ticket.save()
+        approved_team_ids.add(ticket.team_id)
         TicketHistory.objects.create(
             ticket=ticket,
             action="points_verified",
@@ -195,5 +201,7 @@ def ops_batch_verify_tickets(request: HttpRequest) -> HttpResponse:
         item_label="ticket",
         on_item=approve,
     )
+    for team in Team.objects.filter(pk__in=approved_team_ids):
+        recompute_team_ticket_adjustment(team)
     logger.info(f"Batch verified tickets by {authentik_username}")
     return result

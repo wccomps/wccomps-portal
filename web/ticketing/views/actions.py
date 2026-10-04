@@ -19,6 +19,7 @@ from ticketing.lifecycle import (
     unclaim_ticket,
 )
 from ticketing.models import Ticket
+from ticketing.scoring_sync import recompute_team_ticket_adjustment
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ def ticket_cancel(request: HttpRequest, ticket_number: str) -> HttpResponse:
         messages.error(request, error or "Failed to cancel ticket")
         return redirect("ticket_detail", ticket_number=ticket_number)
 
+    recompute_team_ticket_adjustment(ticket.team)
     logger.info(f"Ticket {ticket_number} cancelled by {authentik_username} via web")
 
     return redirect("ticket_list")
@@ -315,6 +317,7 @@ def ticket_reopen(request: HttpRequest, ticket_number: str) -> HttpResponse:
         messages.error(request, error or "Failed to reopen ticket")
         return redirect("ticket_detail", ticket_number=ticket_number)
 
+    recompute_team_ticket_adjustment(ticket.team)
     logger.info(
         f"Ticket {ticket_number} reopened by {authentik_username}" + (f": {reopen_reason}" if reopen_reason else "")
     )
