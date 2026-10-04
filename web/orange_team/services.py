@@ -21,8 +21,9 @@ def auto_assign_check(
 ) -> int:
     """Assign on-shift volunteers to teams for a check, rotated by rotation_offset.
 
-    Submitted/approved cells are left untouched (locked to their scorer); pending or
-    missing cells are (re)assigned round-robin. Returns the number of cells changed.
+    Only cells that are still pending (or don't exist yet) are (re)assigned round-robin;
+    any cell a volunteer has already started, submitted, or had approved — or rejected —
+    is left untouched, keeping its volunteer and score. Returns the number of cells changed.
     """
     if not checked_in_users:
         return 0
@@ -33,8 +34,6 @@ def auto_assign_check(
         existing = {a.team_id: a for a in check.assignments.select_for_update()}
         for j, team in enumerate(sorted(teams, key=lambda t: t.team_number)):
             current = existing.get(team.id)
-            # Only pending or missing cells are (re)assigned; a volunteer who has started
-            # (in_progress), submitted, or had the cell approved keeps it and their score.
             if current is not None and current.status != "pending":
                 continue
             assignee = checked_in_users[(j + rotation_offset) % n]
@@ -44,11 +43,16 @@ def auto_assign_check(
                     current.save(update_fields=["user"])
                     count += 1
                 continue
-            assignment = OrangeAssignment.objects.create(orange_check=check, user=assignee, team=team)
-            OrangeAssignmentResult.objects.bulk_create(
-                OrangeAssignmentResult(assignment=assignment, criterion=c) for c in criteria
+            # get_or_create (not create): a concurrent run or double-submit that already
+            # inserted this (check, team) resolves to one row instead of an IntegrityError.
+            assignment, created = OrangeAssignment.objects.get_or_create(
+                orange_check=check, team=team, defaults={"user": assignee}
             )
-            count += 1
+            if created:
+                OrangeAssignmentResult.objects.bulk_create(
+                    OrangeAssignmentResult(assignment=assignment, criterion=c) for c in criteria
+                )
+                count += 1
     return count
 
 

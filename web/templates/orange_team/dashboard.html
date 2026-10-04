@@ -167,15 +167,15 @@
                                 <c-badge variant="claimed">
                                     Submitted
                                 </c-badge>
-                            {% elif assignment.window_state == "open" %}
+                            {% elif assignment.orange_check.window_state == "open" %}
                                 <c-badge variant="info">
                                     Open now
                                 </c-badge>
-                            {% elif assignment.window_state == "upcoming" %}
+                            {% elif assignment.orange_check.window_state == "upcoming" %}
                                 <c-badge variant="neutral">
                                     Opens {{ assignment.orange_check.scheduled_at|date:"H:i" }}
                                 </c-badge>
-                            {% elif assignment.window_state == "closed" %}
+                            {% elif assignment.orange_check.window_state == "closed" %}
                                 <c-badge variant="warning">
                                     Window closed
                                 </c-badge>

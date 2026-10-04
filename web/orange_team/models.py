@@ -2,6 +2,7 @@ from datetime import datetime
 
 from django.contrib.auth.models import User
 from django.db import models
+from django.utils import timezone
 
 
 class OrangeCheckIn(models.Model):
@@ -80,6 +81,18 @@ class OrangeCheck(models.Model):
     def is_closed(self, now: datetime) -> bool:
         end = self.window_end
         return end is not None and now >= end
+
+    @property
+    def window_state(self) -> str:
+        """The check's scheduling state for display: open / upcoming / closed / unscheduled."""
+        now = timezone.now()
+        if self.is_open(now):
+            return "open"
+        if self.is_upcoming(now):
+            return "upcoming"
+        if self.is_closed(now):
+            return "closed"
+        return "unscheduled"
 
 
 class OrangeCheckCriterion(models.Model):

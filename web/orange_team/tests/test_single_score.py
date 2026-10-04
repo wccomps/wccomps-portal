@@ -1,4 +1,3 @@
-import json
 from collections.abc import Callable
 
 import pytest
@@ -22,31 +21,6 @@ def setup(create_user_with_groups: Callable[..., User]) -> tuple[Client, OrangeA
     return c, assignment
 
 
-def test_save_single_score(setup: tuple[Client, OrangeAssignment]) -> None:
-    c, a = setup
-    resp = c.post(
-        f"/orange-team/assignments/{a.id}/save/",
-        data=json.dumps({"score": 14}),
-        content_type="application/json",
-    )
-    assert resp.status_code == 200
-    a.refresh_from_db()
-    assert a.score == 14
-    assert a.status == "in_progress"
-
-
-def test_save_single_score_over_max_rejected(setup: tuple[Client, OrangeAssignment]) -> None:
-    c, a = setup
-    resp = c.post(
-        f"/orange-team/assignments/{a.id}/save/",
-        data=json.dumps({"score": 99}),
-        content_type="application/json",
-    )
-    assert resp.status_code == 400
-    a.refresh_from_db()
-    assert a.score is None
-
-
 def test_submit_persists_posted_score_without_prior_save(setup: tuple[Client, OrangeAssignment]) -> None:
     # Typing a score and clicking Submit (without a separate autosave) must persist it.
     c, a = setup
@@ -65,15 +39,13 @@ def test_submit_rejects_posted_score_over_max(setup: tuple[Client, OrangeAssignm
     assert a.score is None
 
 
-def test_submit_keeps_single_score(setup: tuple[Client, OrangeAssignment]) -> None:
+def test_submit_without_posted_score_keeps_existing(setup: tuple[Client, OrangeAssignment]) -> None:
+    # A criteria-free submit with no score posted keeps the stored score (not recomputed to 0).
     c, a = setup
-    c.post(
-        f"/orange-team/assignments/{a.id}/save/",
-        data=json.dumps({"score": 14}),
-        content_type="application/json",
-    )
+    a.score = 14
+    a.save()
     resp = c.post(f"/orange-team/assignments/{a.id}/submit/")
     assert resp.status_code == 302
     a.refresh_from_db()
     assert a.status == "submitted"
-    assert a.score == 14  # not recomputed to 0 from absent criteria
+    assert a.score == 14

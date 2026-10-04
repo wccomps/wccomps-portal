@@ -47,7 +47,6 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
     active_checkin = OrangeCheckIn.objects.filter(user=user, is_active=True).first()
 
-    now = timezone.now()
     my_assignments = list(
         OrangeAssignment.objects.filter(user=user)
         .exclude(status__in=["approved", "rejected"])
@@ -56,15 +55,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         .order_by("orange_check__scheduled_at", "orange_check__title", "team__team_number")
     )
     for assignment in my_assignments:
-        check = assignment.orange_check
-        state = "none"
-        if check.is_open(now):
-            state = "open"
-        elif check.is_upcoming(now):
-            state = "upcoming"
-        elif check.is_closed(now):
-            state = "closed"
-        assignment.window_state = state  # type: ignore[attr-defined]  # view-only display flag
+        # Which scoring UI to show — criteria rubric vs a single score — from the
+        # already-prefetched results, so this stays one query.
         assignment.has_criteria = len(assignment.results.all()) > 0  # type: ignore[attr-defined]
 
     followups = OrangeFollowUp.objects.filter(user=user, dismissed=False).select_related(
@@ -77,7 +69,6 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "assignments": my_assignments,
         "followups": followups,
         "is_lead": is_lead,
-        "now": now,
     }
 
     return render(request, "orange_team/dashboard.html", context)
@@ -142,15 +133,6 @@ def check_list(request: HttpRequest) -> HttpResponse:
         .select_related("created_by")
         .order_by("scheduled_at", "-created_at")
     )
-    for check in checks:
-        state = "draft"
-        if check.is_open(now):
-            state = "open"
-        elif check.is_upcoming(now):
-            state = "upcoming"
-        elif check.is_closed(now):
-            state = "closed"
-        check.window_state = state  # type: ignore[attr-defined]  # view-only display flag
     checkins = list(OrangeCheckIn.objects.filter(is_active=True).select_related("user").order_by("checked_in_at"))
     by_user: dict[int, list[OrangeAssignment]] = {}
     for assignment in (
@@ -179,7 +161,7 @@ def check_list(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "orange_team/check_list.html",
-        {"checks": checks, "volunteers": volunteers, "now": now, "is_lead": True},
+        {"checks": checks, "volunteers": volunteers, "is_lead": True},
     )
 
 
@@ -188,7 +170,7 @@ def auto_assign_all(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:check_list")
     now = timezone.now()
-    # Only checks with an open or future window — skip drafts (no schedule) and closed ones.
+    # Every scheduled check that isn't closed yet — skips drafts (no schedule) and past windows.
     checks = [
         check
         for check in OrangeCheck.objects.filter(scheduled_at__isnull=False).order_by("scheduled_at", "created_at")
@@ -248,13 +230,11 @@ def check_detail(request: HttpRequest, check_id: int) -> HttpResponse:
         OrangeCheck.objects.prefetch_related("criteria", "assignments__user", "assignments__team"),
         pk=check_id,
     )
-    checked_in_users = User.objects.filter(orange_checkins__is_active=True).distinct()
     return render(
         request,
         "orange_team/check_detail.html",
         {
             "orange_check": orange_check,
-            "checked_in_users": checked_in_users,
             "is_lead": True,
         },
     )
@@ -368,9 +348,7 @@ def check_auto_assign(request: HttpRequest, check_id: int) -> HttpResponse:
     orange_check = get_object_or_404(OrangeCheck, pk=check_id)
     users = list(User.objects.filter(orange_checkins__is_active=True).distinct())
     teams = list(Team.objects.filter(is_active=True).order_by("team_number"))
-    ordered = list(OrangeCheck.objects.order_by("scheduled_at", "created_at").values_list("pk", flat=True))
-    offset = ordered.index(orange_check.pk) if orange_check.pk in ordered else 0
-    count = auto_assign_check(orange_check, users, teams, rotation_offset=offset)
+    count = auto_assign_check(orange_check, users, teams)
     orange_check.status = "active"
     orange_check.save(update_fields=["status"])
     messages.success(request, f"Auto-assigned {count} teams across {len(users)} volunteers.")
@@ -432,29 +410,9 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
 
     try:
         data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid data"}, status=400)
-
-    if "score" in data:
-        if assignment.orange_check.criteria.exists():
-            return JsonResponse({"error": "This check uses criteria"}, status=400)
-        try:
-            score = int(data["score"])
-        except TypeError, ValueError:
-            return JsonResponse({"error": "Invalid score"}, status=400)
-        max_score = assignment.orange_check.max_score
-        if score < 0 or score > max_score:
-            return JsonResponse({"error": "Score out of range"}, status=400)
-        assignment.score = score
-        if assignment.status == "pending":
-            assignment.status = "in_progress"
-        assignment.save()
-        return JsonResponse({"score": score, "max_score": max_score})
-
-    try:
         criterion_id = data["criterion_id"]
         met = data["met"]
-    except KeyError:
+    except json.JSONDecodeError, KeyError:
         return JsonResponse({"error": "Invalid data"}, status=400)
 
     result = get_object_or_404(OrangeAssignmentResult, assignment=assignment, criterion_id=criterion_id)

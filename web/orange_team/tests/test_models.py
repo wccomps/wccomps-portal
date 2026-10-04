@@ -135,3 +135,25 @@ class TestOrangeCheckWindow:
         assert check.is_open(now) is False
         assert check.is_upcoming(now) is False
         assert check.is_closed(now) is False
+
+    def test_window_state(self) -> None:
+        now = timezone.now()
+        assert (
+            OrangeCheck.objects.create(
+                title="o", description="d", scheduled_at=now - timedelta(minutes=5), time_limit=timedelta(hours=1)
+            ).window_state
+            == "open"
+        )
+        assert (
+            OrangeCheck.objects.create(
+                title="u", description="d", scheduled_at=now + timedelta(hours=1), time_limit=timedelta(minutes=10)
+            ).window_state
+            == "upcoming"
+        )
+        assert (
+            OrangeCheck.objects.create(
+                title="c", description="d", scheduled_at=now - timedelta(hours=2), time_limit=timedelta(minutes=10)
+            ).window_state
+            == "closed"
+        )
+        assert OrangeCheck.objects.create(title="dft", description="d").window_state == "unscheduled"
