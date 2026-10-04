@@ -311,6 +311,8 @@ def reopen_ticket(
             return None, "Ticket not found."
         if error := refusal(ticket, "reopen"):
             return None, error
+        if ticket.is_approved:
+            return None, "Cannot reopen an approved ticket."
 
         old_assignee = ticket.assigned_to
         refunded_points = ticket.points_charged

@@ -112,6 +112,20 @@ def test_reopen_view(ticketing_admin_user, team):
     assert _effects(ticket) == (["reopened"], ["reopened"], [])
 
 
+def test_reopen_refused_once_approved(ticketing_admin_user, team):
+    ticket = _ticket(team, "resolved", is_approved=True, points_charged=25)
+
+    changed, error = lifecycle.reopen_ticket(ticket.id, "x", user=ticketing_admin_user)
+
+    assert changed is None
+    assert error == "Cannot reopen an approved ticket."
+    assert _effects(ticket) == ([], [], [])
+    ticket.refresh_from_db()
+    assert ticket.status == "resolved"
+    assert ticket.is_approved
+    assert ticket.points_charged == 25
+
+
 def test_cancel_view(blue_team_user, team):
     ticket = _ticket(team, "open")
     _post(blue_team_user, "ticket_cancel", ticket)
