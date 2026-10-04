@@ -308,9 +308,29 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
 
     try:
         data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid data"}, status=400)
+
+    if "score" in data:
+        if assignment.orange_check.criteria.exists():
+            return JsonResponse({"error": "This check uses criteria"}, status=400)
+        try:
+            score = int(data["score"])
+        except TypeError, ValueError:
+            return JsonResponse({"error": "Invalid score"}, status=400)
+        max_score = assignment.orange_check.max_score
+        if score < 0 or score > max_score:
+            return JsonResponse({"error": "Score out of range"}, status=400)
+        assignment.score = score
+        if assignment.status == "pending":
+            assignment.status = "in_progress"
+        assignment.save()
+        return JsonResponse({"score": score, "max_score": max_score})
+
+    try:
         criterion_id = data["criterion_id"]
         met = data["met"]
-    except json.JSONDecodeError, KeyError:
+    except KeyError:
         return JsonResponse({"error": "Invalid data"}, status=400)
 
     result = get_object_or_404(OrangeAssignmentResult, assignment=assignment, criterion_id=criterion_id)
@@ -340,7 +360,9 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
         messages.error(request, "Assignment already submitted.")
         return redirect("orange_team:dashboard")
 
-    assignment.score = assignment.calculate_score()
+    if assignment.orange_check.criteria.exists():
+        assignment.score = assignment.calculate_score()
+    # criteria-free checks keep the directly-entered assignment.score
     assignment.status = "submitted"
     assignment.submitted_at = timezone.now()
     assignment.save()
