@@ -60,6 +60,20 @@ def test_rerun_preserves_scored_cells(users: list[User], teams: list[Team]) -> N
     assert pending.user_id == users[1].id
 
 
+def test_rerun_preserves_in_progress_cells(users: list[User], teams: list[Team]) -> None:
+    check = OrangeCheck.objects.create(title="C", description="d", max_points=20)
+    auto_assign_check(check, users, teams)
+    started = OrangeAssignment.objects.get(orange_check=check, team=teams[0])
+    started.status = "in_progress"
+    started.score = 15
+    started.user = users[0]
+    started.save()
+    auto_assign_check(check, [users[1]], teams)  # re-run with a different roster
+    started.refresh_from_db()
+    assert started.user_id == users[0].id  # not handed to another volunteer
+    assert started.score == 15  # partial score not carried onto someone else
+
+
 def test_rebalance_moves_pending_off_absent(users: list[User], teams: list[Team]) -> None:
     check = OrangeCheck.objects.create(title="C", description="d")
     auto_assign_check(check, users, teams)

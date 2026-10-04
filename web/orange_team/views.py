@@ -12,7 +12,14 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from core.auth_utils import has_permission, require_permission
-from orange_team.forms import AssignmentRejectForm, FollowUpForm, OrangeCheckForm, ReassignForm, extract_criteria
+from orange_team.forms import (
+    AssignmentRejectForm,
+    FollowUpForm,
+    OrangeCheckForm,
+    ReassignForm,
+    SubmitScoreForm,
+    extract_criteria,
+)
 from orange_team.models import (
     OrangeAssignment,
     OrangeAssignmentResult,
@@ -180,7 +187,13 @@ def check_list(request: HttpRequest) -> HttpResponse:
 def auto_assign_all(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:check_list")
-    checks = list(OrangeCheck.objects.order_by("scheduled_at", "created_at"))
+    now = timezone.now()
+    # Only checks with an open or future window — skip drafts (no schedule) and closed ones.
+    checks = [
+        check
+        for check in OrangeCheck.objects.filter(scheduled_at__isnull=False).order_by("scheduled_at", "created_at")
+        if not check.is_closed(now)
+    ]
     users = list(User.objects.filter(orange_checkins__is_active=True).distinct())
     teams = list(Team.objects.filter(is_active=True).order_by("team_number"))
     total = assign_all_checks(checks, users, teams)
@@ -473,7 +486,15 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
 
     if assignment.orange_check.criteria.exists():
         assignment.score = assignment.calculate_score()
-    # criteria-free checks keep the directly-entered assignment.score
+    else:
+        score_form = SubmitScoreForm(request.POST)
+        if score_form.is_valid() and score_form.cleaned_data.get("score") is not None:
+            posted = score_form.cleaned_data["score"]
+            if posted > assignment.orange_check.max_score:
+                messages.error(request, f"Score must be between 0 and {assignment.orange_check.max_score}.")
+                return redirect("orange_team:dashboard")
+            assignment.score = posted
+        # else: keep any score already saved on the assignment
     assignment.status = "submitted"
     assignment.submitted_at = timezone.now()
     assignment.save()

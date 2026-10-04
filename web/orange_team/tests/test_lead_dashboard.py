@@ -32,12 +32,46 @@ def test_dashboard_shows_coverage_and_volunteers(
 
 
 def test_auto_assign_all_creates_assignments(lead_client: Client, create_user_with_groups: Callable[..., User]) -> None:
+    from datetime import timedelta
+
+    from django.utils import timezone
+
     vol = create_user_with_groups("v1", ["WCComps_OrangeTeam"])
     OrangeCheckIn.objects.create(user=vol)
-    OrangeCheck.objects.create(title="C1", description="d")
-    OrangeCheck.objects.create(title="C2", description="d")
+    now = timezone.now()
+    OrangeCheck.objects.create(
+        title="C1", description="d", scheduled_at=now - timedelta(minutes=5), time_limit=timedelta(hours=1)
+    )
+    OrangeCheck.objects.create(
+        title="C2", description="d", scheduled_at=now - timedelta(minutes=5), time_limit=timedelta(hours=1)
+    )
     Team.objects.create(team_number=1, team_name="T1")
     Team.objects.create(team_number=2, team_name="T2")
     resp = lead_client.post("/orange-team/checks/auto-assign/")
     assert resp.status_code == 302
     assert OrangeAssignment.objects.count() == 4
+
+
+def test_auto_assign_all_skips_unscheduled_and_closed(
+    lead_client: Client, create_user_with_groups: Callable[..., User]
+) -> None:
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    vol = create_user_with_groups("v1", ["WCComps_OrangeTeam"])
+    OrangeCheckIn.objects.create(user=vol)
+    Team.objects.create(team_number=1, team_name="T1")
+    now = timezone.now()
+    draft = OrangeCheck.objects.create(title="Draft", description="d")  # no schedule
+    closed = OrangeCheck.objects.create(
+        title="Closed", description="d", scheduled_at=now - timedelta(hours=2), time_limit=timedelta(minutes=30)
+    )
+    live = OrangeCheck.objects.create(
+        title="Live", description="d", scheduled_at=now - timedelta(minutes=5), time_limit=timedelta(hours=1)
+    )
+    resp = lead_client.post("/orange-team/checks/auto-assign/")
+    assert resp.status_code == 302
+    assert OrangeAssignment.objects.filter(orange_check=draft).count() == 0
+    assert OrangeAssignment.objects.filter(orange_check=closed).count() == 0
+    assert OrangeAssignment.objects.filter(orange_check=live).count() == 1

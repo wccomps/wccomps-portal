@@ -33,7 +33,9 @@ def auto_assign_check(
         existing = {a.team_id: a for a in check.assignments.select_for_update()}
         for j, team in enumerate(sorted(teams, key=lambda t: t.team_number)):
             current = existing.get(team.id)
-            if current is not None and current.status in ("submitted", "approved"):
+            # Only pending or missing cells are (re)assigned; a volunteer who has started
+            # (in_progress), submitted, or had the cell approved keeps it and their score.
+            if current is not None and current.status != "pending":
                 continue
             assignee = checked_in_users[(j + rotation_offset) % n]
             if current is not None:

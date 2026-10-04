@@ -1,5 +1,5 @@
 import re
-from typing import TypedDict, cast
+from typing import TypedDict
 
 from django import forms
 from django.http import QueryDict
@@ -11,16 +11,6 @@ class OrangeCheckForm(forms.Form):
     scheduled_at = forms.DateTimeField(required=False)  # read in the viewer's timezone
     max_points = forms.IntegerField(min_value=0, required=False)
     time_limit_minutes = forms.IntegerField(required=False, min_value=1)
-
-
-class CheckAssignForm(forms.Form):
-    user_ids = forms.TypedMultipleChoiceField(coerce=int)
-
-    def __init__(self, *args: object, choices: list[tuple[int, str]] | None = None, **kwargs: object) -> None:
-        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
-        if choices:
-            field = cast(forms.TypedMultipleChoiceField, self.fields["user_ids"])
-            field.choices = choices
 
 
 class FollowUpForm(forms.Form):
@@ -35,6 +25,10 @@ class AssignmentRejectForm(forms.Form):
 
 class ReassignForm(forms.Form):
     user_id = forms.IntegerField()
+
+
+class SubmitScoreForm(forms.Form):
+    score = forms.IntegerField(required=False, min_value=0)
 
 
 class CriterionInput(TypedDict):

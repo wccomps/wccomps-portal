@@ -43,45 +43,6 @@
                 this.saving = false;
             }
         }));
-        Alpine.data('singleScore', () => ({
-            score: 0,
-            maxScore: 0,
-            saving: false,
-            saved: false,
-            saveError: '',
-            init() {
-                this.score = parseInt(this.$el.dataset.score) || 0;
-                this.maxScore = parseInt(this.$el.dataset.maxScore) || 0;
-                this._saveUrl = this.$el.dataset.saveUrl;
-            },
-            setScore(e) {
-                this.score = e.target.value;
-                this.saved = false;
-            },
-            async save() {
-                this.saving = true;
-                this.saved = false;
-                this.saveError = '';
-                try {
-                    const resp = await fetch(this._saveUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() },
-                        body: JSON.stringify({score: parseInt(this.score) || 0})
-                    });
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        this.score = data.score;
-                        this.maxScore = data.max_score;
-                        this.saved = true;
-                    } else {
-                        this.saveError = 'Score must be between 0 and ' + this.maxScore;
-                    }
-                } catch (err) {
-                    this.saveError = 'Save failed (network error)';
-                }
-                this.saving = false;
-            }
-        }));
     });
     </script>
     <c-page_header title="My Checks" subtitle="Your assigned orange team checks" />
@@ -187,10 +148,10 @@
                     </tr>
                 </c-slot>
                 {% for assignment in assignments %}
-                    <tr {% if assignment.has_criteria %}x-data="assignmentRow"{% else %}x-data="singleScore"{% endif %}
+                    <tr {% if assignment.has_criteria %}x-data="assignmentRow"
                         data-score="{{ assignment.score|default:'0' }}"
                         data-max-score="{{ assignment.orange_check.max_score }}"
-                        data-save-url="{% url 'orange_team:assignment_save' assignment.pk %}">
+                        data-save-url="{% url 'orange_team:assignment_save' assignment.pk %}"{% endif %}>
                         <td>Team {{ assignment.team.team_number }}</td>
                         <td>{{ assignment.orange_check.title }}</td>
                         <td>
@@ -251,28 +212,22 @@
                             {% else %}
                                 <div class="d-flex items-center gap-10">
                                     <input type="number"
-                                           :value="score"
-                                           @input="setScore"
+                                           name="score"
+                                           form="submit-{{ assignment.pk }}"
+                                           value="{{ assignment.score|default:'' }}"
                                            min="0"
                                            max="{{ assignment.orange_check.max_score }}"
                                            class="input-sm"
                                            aria-label="Score for Team {{ assignment.team.team_number }}"
                                            {% if assignment.status == "submitted" %}disabled{% endif %}>
                                     <span class="text-muted">/ {{ assignment.orange_check.max_score }}</span>
-                                    {% if assignment.status != "submitted" %}
-                                        <c-button type="button" variant="default" x-on:click="save">Save</c-button>
-                                    {% endif %}
-                                    <span x-show="saved" class="text-success text-sm" x-cloak>Saved</span>
                                 </div>
-                                <span x-show="saveError"
-                                      x-text="saveError"
-                                      class="text-danger text-sm d-block"
-                                      x-cloak></span>
                             {% endif %}
                         </td>
                         <td>
                             {% if assignment.status != "submitted" %}
                                 <form method="post"
+                                      id="submit-{{ assignment.pk }}"
                                       action="{% url 'orange_team:assignment_submit' assignment.pk %}"
                                       onsubmit="return confirm('Submit this check? You cannot edit the score after submission.')">
                                     {% csrf_token %}

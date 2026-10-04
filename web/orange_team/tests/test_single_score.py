@@ -47,6 +47,24 @@ def test_save_single_score_over_max_rejected(setup: tuple[Client, OrangeAssignme
     assert a.score is None
 
 
+def test_submit_persists_posted_score_without_prior_save(setup: tuple[Client, OrangeAssignment]) -> None:
+    # Typing a score and clicking Submit (without a separate autosave) must persist it.
+    c, a = setup
+    resp = c.post(f"/orange-team/assignments/{a.id}/submit/", {"score": "16"})
+    assert resp.status_code == 302
+    a.refresh_from_db()
+    assert a.status == "submitted"
+    assert a.score == 16
+
+
+def test_submit_rejects_posted_score_over_max(setup: tuple[Client, OrangeAssignment]) -> None:
+    c, a = setup
+    c.post(f"/orange-team/assignments/{a.id}/submit/", {"score": "999"})
+    a.refresh_from_db()
+    assert a.status != "submitted"
+    assert a.score is None
+
+
 def test_submit_keeps_single_score(setup: tuple[Client, OrangeAssignment]) -> None:
     c, a = setup
     c.post(
