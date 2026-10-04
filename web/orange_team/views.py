@@ -25,7 +25,9 @@ from orange_team.services import assign_teams_round_robin, create_orange_score_f
 from team.models import Team
 
 
-@require_permission("orange_team", "gold_team", error_message="Only Orange Team members can access this page")
+@require_permission(
+    "orange_team", "gold_team", "orange_team_lead", error_message="Only Orange Team members can access this page"
+)
 def dashboard(request: HttpRequest) -> HttpResponse:
     """Orange team dashboard showing check-in status and assignments."""
     user = cast(User, request.user)
@@ -44,7 +46,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "assignment__orange_check", "assignment__team"
     )
 
-    is_lead = has_permission(user, "gold_team")
+    is_lead = has_permission(user, "orange_team_lead")
     context: dict[str, object] = {
         "active_checkin": active_checkin,
         "assignments": my_assignments,
@@ -55,7 +57,9 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     return render(request, "orange_team/dashboard.html", context)
 
 
-@require_permission("orange_team", "gold_team", error_message="Only Orange Team members can access this page")
+@require_permission(
+    "orange_team", "gold_team", "orange_team_lead", error_message="Only Orange Team members can access this page"
+)
 def toggle_checkin(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:dashboard")
@@ -70,7 +74,7 @@ def toggle_checkin(request: HttpRequest) -> HttpResponse:
     return redirect("orange_team:dashboard")
 
 
-@require_permission("gold_team", error_message="Only leads can manage check-ins")
+@require_permission("orange_team_lead",error_message="Only leads can manage check-ins")
 def admin_toggle_checkin(request: HttpRequest, user_id: int) -> HttpResponse:
     """Toggle check-in/out for another user (lead only)."""
     if request.method != "POST":
@@ -86,7 +90,7 @@ def admin_toggle_checkin(request: HttpRequest, user_id: int) -> HttpResponse:
     return redirect("orange_team:team_checkins")
 
 
-@require_permission("gold_team", error_message="Only leads can view team check-ins")
+@require_permission("orange_team_lead",error_message="Only leads can view team check-ins")
 def team_checkins(request: HttpRequest) -> HttpResponse:
     """Lead view showing all checked-in orange team members."""
     checked_in_members = OrangeCheckIn.objects.filter(is_active=True).select_related("user")
@@ -97,7 +101,7 @@ def team_checkins(request: HttpRequest) -> HttpResponse:
     )
 
 
-@require_permission("gold_team", error_message="Only leads can review assignments")
+@require_permission("orange_team_lead",error_message="Only leads can review assignments")
 def review_queue(request: HttpRequest) -> HttpResponse:
     """Lead view showing submitted assignments awaiting review."""
     review_assignments = (
@@ -112,7 +116,7 @@ def review_queue(request: HttpRequest) -> HttpResponse:
     )
 
 
-@require_permission("gold_team", error_message="Only leads can manage checks")
+@require_permission("orange_team_lead",error_message="Only leads can manage checks")
 def check_list(request: HttpRequest) -> HttpResponse:
     checks = (
         OrangeCheck.objects.annotate(
@@ -125,7 +129,7 @@ def check_list(request: HttpRequest) -> HttpResponse:
     return render(request, "orange_team/check_list.html", {"checks": checks, "is_lead": True})
 
 
-@require_permission("gold_team", error_message="Only leads can manage checks")
+@require_permission("orange_team_lead",error_message="Only leads can manage checks")
 def check_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = OrangeCheckForm(request.POST)
@@ -164,7 +168,7 @@ def check_create(request: HttpRequest) -> HttpResponse:
     return render(request, "orange_team/check_form.html", {"mode": "create", "is_lead": True})
 
 
-@require_permission("gold_team", error_message="Only leads can manage checks")
+@require_permission("orange_team_lead",error_message="Only leads can manage checks")
 def check_detail(request: HttpRequest, check_id: int) -> HttpResponse:
     orange_check = get_object_or_404(
         OrangeCheck.objects.prefetch_related("criteria", "assignments__user", "assignments__team"),
@@ -182,7 +186,7 @@ def check_detail(request: HttpRequest, check_id: int) -> HttpResponse:
     )
 
 
-@require_permission("gold_team", error_message="Only leads can manage checks")
+@require_permission("orange_team_lead",error_message="Only leads can manage checks")
 def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
     orange_check = get_object_or_404(OrangeCheck, pk=check_id)
 
@@ -232,7 +236,7 @@ def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
     )
 
 
-@require_permission("gold_team", error_message="Only leads can manage checks")
+@require_permission("orange_team_lead",error_message="Only leads can manage checks")
 def check_duplicate(request: HttpRequest, check_id: int) -> HttpResponse:
     """Duplicate a check and its criteria into a new draft."""
     if request.method != "POST":
@@ -257,7 +261,7 @@ def check_duplicate(request: HttpRequest, check_id: int) -> HttpResponse:
     return redirect("orange_team:check_detail", check_id=new_check.pk)
 
 
-@require_permission("gold_team", error_message="Only leads can manage checks")
+@require_permission("orange_team_lead",error_message="Only leads can manage checks")
 def check_assign(request: HttpRequest, check_id: int) -> HttpResponse:
     """Assign checked-in users to score teams for a check."""
     if request.method != "POST":
@@ -285,7 +289,11 @@ def check_assign(request: HttpRequest, check_id: int) -> HttpResponse:
 
 def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
     """Autosave a criterion result for an assignment."""
-    if not (has_permission(request.user, "orange_team") or has_permission(request.user, "gold_team")):
+    if not (
+        has_permission(request.user, "orange_team")
+        or has_permission(request.user, "gold_team")
+        or has_permission(request.user, "orange_team_lead")
+    ):
         return JsonResponse({"error": "Access denied"}, status=403)
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
@@ -316,7 +324,9 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
     return JsonResponse({"score": score, "max_score": max_score})
 
 
-@require_permission("orange_team", "gold_team", error_message="Only Orange Team members can access this page")
+@require_permission(
+    "orange_team", "gold_team", "orange_team_lead", error_message="Only Orange Team members can access this page"
+)
 def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:dashboard")
@@ -342,7 +352,9 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
     return redirect("orange_team:dashboard")
 
 
-@require_permission("orange_team", "gold_team", error_message="Only Orange Team members can access this page")
+@require_permission(
+    "orange_team", "gold_team", "orange_team_lead", error_message="Only Orange Team members can access this page"
+)
 def followup_create(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:dashboard")
@@ -366,7 +378,9 @@ def followup_create(request: HttpRequest) -> HttpResponse:
     return redirect("orange_team:dashboard")
 
 
-@require_permission("orange_team", "gold_team", error_message="Only Orange Team members can access this page")
+@require_permission(
+    "orange_team", "gold_team", "orange_team_lead", error_message="Only Orange Team members can access this page"
+)
 def followup_dismiss(request: HttpRequest, followup_id: int) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:dashboard")
@@ -378,7 +392,7 @@ def followup_dismiss(request: HttpRequest, followup_id: int) -> HttpResponse:
     return redirect("orange_team:dashboard")
 
 
-@require_permission("gold_team", error_message="Only leads can approve assignments")
+@require_permission("orange_team_lead",error_message="Only leads can approve assignments")
 def assignment_approve(request: HttpRequest, assignment_id: int) -> HttpResponse:
     """Approve a submitted orange team check, creating an OrangeTeamScore record."""
     if request.method != "POST":
@@ -410,7 +424,7 @@ def assignment_approve(request: HttpRequest, assignment_id: int) -> HttpResponse
     return redirect("orange_team:review_queue")
 
 
-@require_permission("gold_team", error_message="Only leads can reject assignments")
+@require_permission("orange_team_lead",error_message="Only leads can reject assignments")
 def assignment_reject(request: HttpRequest, assignment_id: int) -> HttpResponse:
     """Reject a submitted assignment, sending it back to the teamer."""
     if request.method != "POST":
@@ -442,7 +456,7 @@ def assignment_reject(request: HttpRequest, assignment_id: int) -> HttpResponse:
     return redirect("orange_team:review_queue")
 
 
-@require_permission("gold_team", error_message="Only leads can export scores")
+@require_permission("orange_team_lead",error_message="Only leads can export scores")
 def export_scores(request: HttpRequest) -> HttpResponse:
     assignments = (
         OrangeAssignment.objects.filter(status__in=["submitted", "approved"])
