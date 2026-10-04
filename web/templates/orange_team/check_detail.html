@@ -6,21 +6,21 @@
 {% block orange_content %}
     <c-page_header title="{{ orange_check.title }}">
         <c-slot name="subtitle">
-            {% if orange_check.status == "draft" %}
-                <c-badge variant="neutral">
-                    Draft
-                </c-badge>
-            {% elif orange_check.status == "scheduled" %}
+            {% if orange_check.window_state == "open" %}
                 <c-badge variant="info">
-                    Scheduled
+                    Live
                 </c-badge>
-            {% elif orange_check.status == "active" %}
-                <c-badge variant="success">
-                    Active
+            {% elif orange_check.window_state == "upcoming" %}
+                <c-badge variant="neutral">
+                    Upcoming
                 </c-badge>
-            {% elif orange_check.status == "closed" %}
+            {% elif orange_check.window_state == "closed" %}
                 <c-badge variant="warning">
                     Closed
+                </c-badge>
+            {% else %}
+                <c-badge variant="neutral">
+                    Not scheduled
                 </c-badge>
             {% endif %}
         </c-slot>

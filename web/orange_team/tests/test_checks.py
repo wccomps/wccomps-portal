@@ -174,7 +174,6 @@ class TestCheckDuplicate:
         assert response.status_code == 302
         copy = OrangeCheck.objects.get(title="Original (copy)")
         assert copy.criteria.count() == 1
-        assert copy.status == "draft"
 
     def test_get_redirects(self) -> None:
         user = User.objects.create_user(username="gold1", password="test")
@@ -208,8 +207,6 @@ class TestCheckAssign:
         # Each assignment should have result rows for the criteria check
         for assignment in OrangeAssignment.objects.filter(orange_check=check):
             assert assignment.results.count() == 1
-        check.refresh_from_db()
-        assert check.status == "active"
 
     def test_auto_assign_no_checked_in_users_is_noop(self) -> None:
         lead = User.objects.create_user(username="gold1", password="test")

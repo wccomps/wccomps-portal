@@ -32,16 +32,8 @@ class OrangeCheckIn(models.Model):
 class OrangeCheck(models.Model):
     """A check template with rubric criteria, created by a lead."""
 
-    STATUS_CHOICES = [
-        ("draft", "Draft"),
-        ("scheduled", "Scheduled"),
-        ("active", "Active"),
-        ("closed", "Closed"),
-    ]
-
     title = models.CharField(max_length=200)
     description = models.TextField(help_text="Steps/instructions for the orange teamer")
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
     scheduled_at = models.DateTimeField(null=True, blank=True, help_text="When assignments go live")
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="created_checks")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -56,7 +48,7 @@ class OrangeCheck(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        return f"[{self.status}] {self.title}"
+        return self.title
 
     @property
     def max_score(self) -> int:

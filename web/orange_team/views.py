@@ -302,7 +302,6 @@ def check_duplicate(request: HttpRequest, check_id: int) -> HttpResponse:
             title=f"{original.title} (copy)",
             description=original.description,
             created_by=user,
-            status="draft",
         )
         for criterion in original.criteria.all():
             OrangeCheckCriterion.objects.create(
@@ -349,8 +348,6 @@ def check_auto_assign(request: HttpRequest, check_id: int) -> HttpResponse:
     users = list(User.objects.filter(orange_checkins__is_active=True).distinct())
     teams = list(Team.objects.filter(is_active=True).order_by("team_number"))
     count = auto_assign_check(orange_check, users, teams)
-    orange_check.status = "active"
-    orange_check.save(update_fields=["status"])
     messages.success(request, f"Auto-assigned {count} teams across {len(users)} volunteers.")
     return redirect("orange_team:check_assign", check_id=check_id)
 

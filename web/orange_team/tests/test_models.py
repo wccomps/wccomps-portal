@@ -38,7 +38,6 @@ class TestOrangeCheck:
         check = OrangeCheck.objects.create(
             title="Password Reset", description="Ask team to reset password", created_by=user
         )
-        assert check.status == "draft"
         assert check.max_score == 0
 
     def test_max_score_from_criteria(self) -> None:
