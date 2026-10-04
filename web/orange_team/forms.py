@@ -33,6 +33,10 @@ class AssignmentRejectForm(forms.Form):
     notes = forms.CharField(required=False)
 
 
+class ReassignForm(forms.Form):
+    user_id = forms.IntegerField()
+
+
 class CriterionInput(TypedDict):
     id: int | None
     label: str

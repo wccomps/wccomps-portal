@@ -54,6 +54,10 @@
                 this.maxScore = parseInt(this.$el.dataset.maxScore) || 0;
                 this._saveUrl = this.$el.dataset.saveUrl;
             },
+            setScore(e) {
+                this.score = e.target.value;
+                this.saved = false;
+            },
             async save() {
                 this.saving = true;
                 this.saved = false;
@@ -247,7 +251,8 @@
                             {% else %}
                                 <div class="d-flex items-center gap-10">
                                     <input type="number"
-                                           x-model="score"
+                                           :value="score"
+                                           @input="setScore"
                                            min="0"
                                            max="{{ assignment.orange_check.max_score }}"
                                            class="input-sm"

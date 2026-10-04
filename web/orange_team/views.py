@@ -12,7 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from core.auth_utils import has_permission, require_permission
-from orange_team.forms import AssignmentRejectForm, FollowUpForm, OrangeCheckForm, extract_criteria
+from orange_team.forms import AssignmentRejectForm, FollowUpForm, OrangeCheckForm, ReassignForm, extract_criteria
 from orange_team.models import (
     OrangeAssignment,
     OrangeAssignmentResult,
@@ -386,7 +386,11 @@ def reassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
     if assignment.status in ("submitted", "approved"):
         messages.error(request, "Scored teams can't be reassigned.")
         return redirect("orange_team:check_assign", check_id=check_id)
-    new_user = User.objects.filter(pk=request.POST.get("user_id") or 0, orange_checkins__is_active=True).first()
+    form = ReassignForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Pick a volunteer who is checked in.")
+        return redirect("orange_team:check_assign", check_id=check_id)
+    new_user = User.objects.filter(pk=form.cleaned_data["user_id"], orange_checkins__is_active=True).first()
     if new_user is None:
         messages.error(request, "Pick a volunteer who is checked in.")
         return redirect("orange_team:check_assign", check_id=check_id)
