@@ -19,6 +19,9 @@
                             <c-table_header sortable="false">
                                 Current Grade
                             </c-table_header>
+                            <c-table_header sortable="false">
+                                Feedback
+                            </c-table_header>
                         </tr>
                     </c-slot>
                     {% for item in team_data %}
@@ -47,6 +50,12 @@
                                 {% else %}
                                     <small class="text-muted">Not graded</small>
                                 {% endif %}
+                            </td>
+                            <td>
+                                <textarea name="feedback_team_{{ item.team.team_number }}"
+                                          class="vTextField w-full"
+                                          rows="2"
+                                          placeholder="Feedback for the team (optional)">{% if item.feedback %}{{ item.feedback }}{% endif %}</textarea>
                             </td>
                         </tr>
                     {% endfor %}

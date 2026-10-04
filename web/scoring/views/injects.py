@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
-from core.auth_utils import require_permission
+from core.auth_utils import has_permission, require_permission
 from team.models import Team
 
 from ..forms import ApproveInjectFeedbackForm, SaveInjectFeedbackForm
@@ -57,22 +57,35 @@ def inject_grading(request: HttpRequest) -> HttpResponse:
                     g.team_id: g for g in InjectScore.objects.select_for_update().filter(inject_id=selected_inject_id)
                 }
 
+                # Feedback is approved as it is saved only when the white team lead enters it.
+                is_lead = has_permission(user, "white_team_lead")
                 for team in teams:
-                    points_value = grading_form.cleaned_data.get(f"points_team_{team.team_number}")
-                    if points_value is None:
-                        continue
-                    # The form posts every team's points as the page loaded them. A field this grader didn't
-                    # change must not overwrite a grade someone else saved since (a stale page)
-                    if (
-                        f"loaded_team_{team.team_number}" in request.POST
-                        and points_value == grading_form.cleaned_data.get(f"loaded_team_{team.team_number}")
-                    ):
-                        continue
+                    num = team.team_number
+                    points_value = grading_form.cleaned_data.get(f"points_team_{num}")
+                    feedback_value = grading_form.cleaned_data.get(f"feedback_team_{num}") or ""
+                    feedback_value = feedback_value.replace("\r\n", "\n").strip()
                     grade = current.get(team.id)
-                    # Same points as stored: nothing to restamp or send back for review
-                    if grade and grade.points_awarded == points_value:
+
+                    # The form posts every team's points as the page loaded them; only write a value this grader
+                    # changed (vs the loaded one) and that differs from what is stored, so a stale page can't revert
+                    # a grade saved since.
+                    points_edited = (
+                        points_value is not None
+                        and not (
+                            f"loaded_team_{num}" in request.POST
+                            and points_value == grading_form.cleaned_data.get(f"loaded_team_{num}")
+                        )
+                        and (grade is None or grade.points_awarded != points_value)
+                    )
+                    stored_feedback = (grade.feedback if grade else "").replace("\r\n", "\n").strip()
+                    feedback_edited = feedback_value != stored_feedback
+
+                    if not points_edited and not feedback_edited:
                         continue
                     if grade is None:
+                        if points_value is None:
+                            # No grade and no points: nothing to attach feedback to
+                            continue
                         # get_or_create: another grader may be saving this team's first grade right now
                         grade, _ = InjectScore.objects.select_for_update().get_or_create(
                             team=team,
@@ -83,14 +96,20 @@ def inject_grading(request: HttpRequest) -> HttpResponse:
                                 "graded_by": user,
                             },
                         )
+
                     grade.inject_name = selected_inject.title
-                    grade.points_awarded = points_value
-                    grade.graded_by = user
-                    grade.graded_at = timezone.now()
-                    # An approval was of the old points; the new ones go back for review
-                    grade.is_approved = False
-                    grade.approved_by = None
-                    grade.approved_at = None
+                    if points_edited and points_value is not None:  # the None check is for the type checker
+                        grade.points_awarded = points_value
+                        grade.graded_by = user
+                        grade.graded_at = timezone.now()
+                        # An approval was of the old points; the new ones go back for review
+                        grade.is_approved = False
+                        grade.approved_by = None
+                        grade.approved_at = None
+                    if feedback_edited:
+                        grade.feedback = feedback_value
+                        grade.feedback_approved = is_lead
+                        grade.feedback_approved_by = user if is_lead else None
                     grade.save()
                     grades_saved += 1
 
@@ -114,6 +133,7 @@ def inject_grading(request: HttpRequest) -> HttpResponse:
                     "team": team,
                     "grade": grade,
                     "points": grade.points_awarded if grade else None,
+                    "feedback": grade.feedback if grade else "",
                 }
             )
 

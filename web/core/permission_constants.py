@@ -12,6 +12,8 @@ PERMISSION_MAP: dict[str, list[str]] = {
     "gold_team": ["WCComps_GoldTeam", "WCComps_Discord_Admin"],
     "white_team": ["WCComps_WhiteTeam", "WCComps_GoldTeam", "WCComps_Discord_Admin"],
     "orange_team": ["WCComps_OrangeTeam", "WCComps_GoldTeam", "WCComps_Discord_Admin"],
+    "white_team_lead": ["WCComps_WhiteTeam_Lead", "WCComps_GoldTeam", "WCComps_Discord_Admin"],
+    "orange_team_lead": ["WCComps_OrangeTeam_Lead", "WCComps_GoldTeam", "WCComps_Discord_Admin"],
     "red_team": ["WCComps_RedTeam", "WCComps_Discord_Admin"],
     "helper_eligible": ["WCComps_Ticketing_Support", "WCComps_Quotient_Injects", "WCComps_Discord_Admin"],
 }
