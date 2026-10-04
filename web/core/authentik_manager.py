@@ -115,28 +115,35 @@ class AuthentikManager:
         )
 
     def list_applications(self) -> list[str]:
-        url = f"{self.base_url}/api/v3/core/applications/"
-        slugs: list[str] = []
+        """App slugs for the add-app picker, via /providers/all/.
+
+        This lists every app that has a provider, regardless of which apps the service account may
+        open (the application list would return only those). It needs the service account's role to
+        hold the "Can view provider" global permission (authentik_core.view_provider); without it the
+        request 403s and this returns nothing.
+        """
+        url = f"{self.base_url}/api/v3/providers/all/"
+        slugs: set[str] = set()
         try:
             page = 1
             while True:
-                params: dict[str, str | int] = {"page_size": 100, "page": page, "superuser_full_list": "true"}
+                params: dict[str, str | int] = {"page_size": 100, "page": page}
                 self._log_request("GET", url, params=params)
                 response = self.client.get(url, params=params)
                 response.raise_for_status()
                 data = response.json()
-                results = data.get("results", [])
-                slugs.extend([app.get("slug", "") for app in results if app.get("slug")])
-                pagination = data.get("pagination", {})
-                if not pagination.get("next"):
+                for provider in data.get("results", []):
+                    slug = provider.get("assigned_application_slug")
+                    if slug:
+                        slugs.add(slug)
+                if not data.get("pagination", {}).get("next"):
                     break
                 page += 1
-            slugs = sorted(slugs)
-            logger.info(f"Found {len(slugs)} applications in Authentik")
-            return slugs
+            logger.info(f"Found {len(slugs)} application slugs via providers")
+            return sorted(slugs)
         except Exception as e:
-            logger.exception(f"Failed to list applications: {e}")
-            return slugs
+            logger.exception(f"Failed to list applications via providers: {e}")
+            return []
 
     def get_application_by_slug(self, slug: str) -> AuthentikApplication | None:
         """Get application details by exact slug, via the retrieve endpoint.

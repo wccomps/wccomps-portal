@@ -430,7 +430,8 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
 def admin_competition_apps(request: HttpRequest) -> JsonResponse:
     """Suggestions for the add-app field, fetched after the page renders (the call takes ~1s).
 
-    Authentik lists only the apps the service account itself may open, so any other slug is typed in.
+    Lists every app with a provider (see AuthentikManager.list_applications). A slug with no provider
+    (e.g. a launcher-only app) won't appear but can still be typed; add validates it by direct lookup.
     """
     user = cast(User, request.user)
     if not _has_admin_or_gold_access(user):
