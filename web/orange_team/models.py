@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from django.contrib.auth.models import User
 from django.db import models
 
@@ -43,6 +45,10 @@ class OrangeCheck(models.Model):
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="created_checks")
     created_at = models.DateTimeField(auto_now_add=True)
     closed_at = models.DateTimeField(null=True, blank=True)
+    max_points = models.PositiveIntegerField(default=0, help_text="Max score when the check has no criteria")
+    time_limit = models.DurationField(
+        null=True, blank=True, help_text="How long the window stays open from scheduled_at"
+    )
 
     class Meta:
         db_table = "orange_check"
@@ -53,7 +59,27 @@ class OrangeCheck(models.Model):
 
     @property
     def max_score(self) -> int:
-        return self.criteria.aggregate(total=models.Sum("points"))["total"] or 0
+        criteria_total = self.criteria.aggregate(total=models.Sum("points"))["total"]
+        if criteria_total is not None:
+            return criteria_total
+        return self.max_points
+
+    @property
+    def window_end(self) -> datetime | None:
+        if self.scheduled_at is None or self.time_limit is None:
+            return None
+        return self.scheduled_at + self.time_limit
+
+    def is_open(self, now: datetime) -> bool:
+        end = self.window_end
+        return end is not None and self.scheduled_at is not None and self.scheduled_at <= now < end
+
+    def is_upcoming(self, now: datetime) -> bool:
+        return self.scheduled_at is not None and now < self.scheduled_at
+
+    def is_closed(self, now: datetime) -> bool:
+        end = self.window_end
+        return end is not None and now >= end
 
 
 class OrangeCheckCriterion(models.Model):
