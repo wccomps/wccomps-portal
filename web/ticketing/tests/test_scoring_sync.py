@@ -65,7 +65,7 @@ def test_verify_view_sets_adjustment(admin_user) -> None:
     assert ServiceScore.objects.get(team=team).point_adjustments == Decimal("-25")
 
 
-def test_reopen_view_clears_adjustment(admin_user) -> None:
+def test_reopen_leaves_approved_adjustment_intact(admin_user) -> None:
     from django.test import Client
     from django.urls import reverse
 
@@ -76,7 +76,10 @@ def test_reopen_view_clears_adjustment(admin_user) -> None:
     client = Client()
     client.force_login(admin_user)
     client.post(reverse("ticket_reopen", args=[t.ticket_number]), {})
-    assert ServiceScore.objects.get(team=team).point_adjustments == Decimal("0")
+    # An approved ticket cannot be reopened, so its charge stays deducted.
+    t.refresh_from_db()
+    assert t.is_approved
+    assert ServiceScore.objects.get(team=team).point_adjustments == Decimal("-25")
 
 
 def test_recompute_all_covers_every_team_with_tickets() -> None:
