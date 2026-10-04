@@ -60,20 +60,13 @@ RECOVERY_POINT_RATIO = Decimal("0.80")
 
 
 def _get_modifiers(template: ScoringTemplate) -> tuple[Decimal, Decimal, Decimal]:
-    """Get scaling modifiers from template.
+    """Derive each category's scaling modifier from its weight and raw maximum.
 
-    Uses direct modifier fields if set, otherwise derives from category weights:
         total_pool = max(raw_max / (weight/100))
         modifier = (weight/100) × total_pool / raw_max
-    """
-    # Use direct modifiers when available (exact, no rounding loss)
-    if (
-        template.service_modifier is not None
-        and template.inject_modifier is not None
-        and template.orange_modifier is not None
-    ):
-        return template.service_modifier, template.inject_modifier, template.orange_modifier
 
+    The maxes are the single source of truth: editing one re-derives the scale.
+    """
     hundred = Decimal("100")
     pairs = [
         (template.service_weight, template.service_max),

@@ -13,9 +13,8 @@ from team.models import Team
 
 @pytest.fixture
 def unit_modifiers(db):
-    return ScoringTemplate.objects.create(
-        service_modifier=Decimal("1"), inject_modifier=Decimal("1"), orange_modifier=Decimal("1")
-    )
+    # Maxes proportional to weights -> every derived modifier is exactly 1 (raw == scaled).
+    return ScoringTemplate.objects.create(service_max=Decimal("40"), inject_max=Decimal("40"), orange_max=Decimal("20"))
 
 
 def _team(number, service, is_active=True):
