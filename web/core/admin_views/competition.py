@@ -70,6 +70,9 @@ def _edit_controlled_app(
     if not form.is_valid():
         return JsonResponse({"error": "Please provide an app slug"}, status=400)
     slug = form.cleaned_data["app_slug"]
+    # Check with the lookup Start and Stop use; Authentik's app list omits apps the service account can't open
+    if add and AuthentikManager().get_application_by_slug(slug) is None:
+        return JsonResponse({"error": f"No Authentik application with the slug '{slug}'"}, status=400)
 
     with transaction.atomic():
         config = CompetitionConfig.objects.select_for_update().get(pk=config.pk)
@@ -425,7 +428,10 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
 
 
 def admin_competition_apps(request: HttpRequest) -> JsonResponse:
-    """Authentik's app slugs for the add-app picker, fetched after the page renders (the call takes ~1s)."""
+    """Suggestions for the add-app field, fetched after the page renders (the call takes ~1s).
+
+    Authentik lists only the apps the service account itself may open, so any other slug is typed in.
+    """
     user = cast(User, request.user)
     if not _has_admin_or_gold_access(user):
         return JsonResponse({"error": "Access denied"}, status=403)

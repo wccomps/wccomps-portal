@@ -1,5 +1,7 @@
 """Controlled-app edits apply one slug to the current list, so a stale page can't drop others."""
 
+from unittest.mock import patch
+
 import pytest
 from django.test import Client
 from django.urls import reverse
@@ -14,6 +16,17 @@ def admin_client(admin_user):
     client = Client()
     client.force_login(admin_user)
     return client
+
+
+@pytest.fixture(autouse=True)
+def authentik_apps():
+    """Slugs Authentik knows; get_application_by_slug finds these whatever its app list shows."""
+    known = {"scoring", "netbird", "containerssh", "quotient2", "competitions"}
+    with patch(
+        "core.admin_views.competition.AuthentikManager.get_application_by_slug",
+        side_effect=lambda slug: {"slug": slug} if slug in known else None,
+    ) as lookup:
+        yield lookup
 
 
 @pytest.fixture
@@ -151,3 +164,18 @@ def test_setting_the_schedule_leaves_an_emptied_app_list_empty(admin_client, con
     config.refresh_from_db()
     assert config.controlled_applications == []
     assert config.competition_end_time is not None
+
+
+def test_add_app_rejects_a_slug_authentik_does_not_have(admin_client, config):
+    response = _post(admin_client, "add_app", app_slug="competitons")
+
+    assert response.status_code == 400
+    assert "competitons" in response.json()["error"]
+    config.refresh_from_db()
+    assert config.controlled_applications == ["scoring", "netbird"]
+
+
+def test_remove_app_does_not_need_authentik(admin_client, config, authentik_apps):
+    _post(admin_client, "remove_app", app_slug="netbird")
+
+    authentik_apps.assert_not_called()
