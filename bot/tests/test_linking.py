@@ -344,3 +344,36 @@ class TestTeamMemberLimitEnforcement:
 
         team.refresh_from_db()
         assert team.get_member_count() == 3
+
+
+class TestLinkCommandDefers:
+    """link_command defers immediately so its DB/token work can't exceed Discord's 3s window."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.django_db(transaction=True)
+    async def test_defers_then_uses_followup(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from bot.cogs import linking
+
+        cog = linking.LinkingCog(MagicMock())
+        interaction = MagicMock()
+        interaction.user.id = 123
+        interaction.response.defer = AsyncMock()
+        interaction.response.send_message = AsyncMock()
+        interaction.followup.send = AsyncMock()
+
+        with (
+            patch.object(linking, "check_rate_limit", AsyncMock(return_value=(True, 0))),
+            patch.object(
+                linking,
+                "check_existing_link",
+                AsyncMock(return_value=linking.LinkCheckResult(can_link=True, error_message="")),
+            ),
+            patch.object(linking, "create_link_token", AsyncMock(return_value="https://auth.example/link")),
+        ):
+            await linking.LinkingCog.link_command.callback(cog, interaction)
+
+        interaction.response.defer.assert_awaited_once()
+        interaction.followup.send.assert_awaited_once()
+        interaction.response.send_message.assert_not_called()

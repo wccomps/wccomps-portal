@@ -26,7 +26,7 @@ class TestLinkTokenGeneration:
             await cog.link_command.callback(cog, mock_interaction)
 
         # Verify response was sent
-        mock_interaction.response.send_message.assert_called_once()
+        mock_interaction.followup.send.assert_called_once()
 
         # Verify token was created
         token = await LinkToken.objects.filter(discord_id=mock_interaction.user.id).afirst()
@@ -36,7 +36,7 @@ class TestLinkTokenGeneration:
         assert token.expires_at > timezone.now()
 
         # Verify embed contains auth URL
-        call_args = mock_interaction.response.send_message.call_args
+        call_args = mock_interaction.followup.send.call_args
         embed = call_args.kwargs.get("embed")
         assert embed is not None
         assert f"token={token.token}" in embed.description
@@ -62,7 +62,7 @@ class TestLinkTokenGeneration:
         await cog.link_command.callback(cog, mock_interaction)
 
         # Verify rejection message
-        call_args = mock_interaction.response.send_message.call_args
+        call_args = mock_interaction.followup.send.call_args
         assert "already linked" in call_args.args[0].lower()
 
     async def test_link_command_rate_limiting(self, mock_interaction: Any, mock_bot: Any) -> None:
@@ -75,7 +75,7 @@ class TestLinkTokenGeneration:
         await cog.link_command.callback(cog, mock_interaction)
 
         # Verify rate limit rejection
-        call_args = mock_interaction.response.send_message.call_args
+        call_args = mock_interaction.followup.send.call_args
         assert "rate limit" in call_args.args[0].lower()
 
     async def test_link_command_with_staff_link(self, mock_interaction: Any, mock_bot: Any) -> None:
@@ -101,7 +101,7 @@ class TestLinkTokenGeneration:
         assert token is not None
 
         # Verify response was sent
-        mock_interaction.response.send_message.assert_called_once()
+        mock_interaction.followup.send.assert_called_once()
 
         # The staff link stays active until the new link replaces it.
         assert await DiscordLink.objects.filter(discord_id=discord_id, is_active=True).aexists()
