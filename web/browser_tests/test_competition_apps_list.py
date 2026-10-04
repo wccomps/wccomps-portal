@@ -36,9 +36,9 @@ def test_stale_page_edit_keeps_apps_added_elsewhere(live_server, pw_browser):
             config.save()
 
             # Add from the stale page
-            page.locator("form:has(option[value=quotient2]) select").select_option("quotient2")
+            page.get_by_label("Authentik application slug").fill("quotient2")
             with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):
-                page.locator("form:has(option[value=quotient2]) button[type=submit]").click()
+                page.get_by_role("button", name="Add").click()
 
             config.refresh_from_db()
             assert config.controlled_applications == ["scoring", "netbird", "containerssh", "quotient2"]
@@ -49,5 +49,34 @@ def test_stale_page_edit_keeps_apps_added_elsewhere(live_server, pw_browser):
 
             config.refresh_from_db()
             assert config.controlled_applications == ["scoring", "containerssh", "quotient2"]
+    finally:
+        context.close()
+
+
+def test_a_slug_missing_from_authentiks_app_list_can_be_typed_in(live_server, pw_browser):
+    """Authentik lists only the apps the service account may open; a staff-only app is still addable."""
+    from core.models import CompetitionConfig
+
+    config = CompetitionConfig.get_config()
+    config.controlled_applications = ["scoring"]
+    config.save()
+
+    user = _create_role_user("admin", None)
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    manager = MagicMock()
+    manager.list_applications.return_value = AVAILABLE  # no "competitions"
+    manager.get_application_by_slug.side_effect = lambda slug: {"slug": slug} if slug == "competitions" else None
+
+    try:
+        with patch("core.admin_views.competition.AuthentikManager", return_value=manager):
+            page.goto(f"{live_server.url}/ops/admin/competition/")
+            page.get_by_label("Authentik application slug").fill("competitions")
+            with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):
+                page.get_by_role("button", name="Add").click()
+
+            config.refresh_from_db()
+            assert config.controlled_applications == ["scoring", "competitions"]
+            page.locator("button[aria-label='Remove app'][data-app=competitions]").wait_for()
     finally:
         context.close()

@@ -11,6 +11,7 @@ from django.http import HttpResponse
 from django.utils.http import content_disposition_header
 
 MAX_SCREENSHOT_SIZE = 50 * 1024 * 1024  # largest real upload so far was ~31MB (a .tar.gz)
+MAX_SCREENSHOTS = 20  # per submission
 
 # Raster images only: SVG can carry script
 _SIGNATURES: tuple[tuple[bytes, str], ...] = (
@@ -50,6 +51,16 @@ def read_screenshot(upload: UploadedFile[bytes]) -> tuple[bytes, str, str]:
     if len(data) > MAX_SCREENSHOT_SIZE:
         raise ScreenshotError(too_big)
     return data, name, detect_inline_type(data) or DOWNLOAD_MIME
+
+
+def read_screenshots(uploads: list[UploadedFile[bytes]]) -> list[tuple[bytes, str, str]]:
+    """Read a submission's uploads with read_screenshot; raises ScreenshotError if there are too many.
+
+    Read them before saving the submission, so a rejected file leaves nothing to roll back.
+    """
+    if len(uploads) > MAX_SCREENSHOTS:
+        raise ScreenshotError(f"Maximum {MAX_SCREENSHOTS} screenshots allowed per submission")
+    return [read_screenshot(upload) for upload in uploads]
 
 
 def screenshot_response(data: bytes, filename: str) -> HttpResponse:

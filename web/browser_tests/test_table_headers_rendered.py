@@ -60,7 +60,6 @@ PAGES_WITH_TABLES = {
     "scoring:inject_grading",
     "orange_team:dashboard",
     "orange_team:check_list",
-    "orange_team:team_checkins",
     "orange_team:review_queue",
     "orange_team:check_detail",
     "team_packet",

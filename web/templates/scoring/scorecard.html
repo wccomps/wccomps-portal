@@ -356,5 +356,36 @@
                 </c-table>
             </c-module>
         {% endif %}
+        {% if orange_scores %}
+            <c-module>
+                <h2>Orange Team Detail</h2>
+                <c-table id="orange_details" aria_label="Orange team checks">
+                    <c-slot name="headers">
+                        <tr>
+                            <c-table_header sortable="false">
+                                Check
+                            </c-table_header>
+                            <c-table_header sortable="false" class="text-right">
+                                Points
+                            </c-table_header>
+                        </tr>
+                    </c-slot>
+                    {% for o in orange_scores %}
+                        <tr>
+                            <td>{{ o.description }}</td>
+                            <td class="text-right">{{ o.points_awarded|floatformat:0 }}</td>
+                        </tr>
+                    {% endfor %}
+                    <tr class="row-total">
+                        <td>
+                            <strong>Total</strong>
+                        </td>
+                        <td class="text-right">
+                            <strong>{{ orange_total|floatformat:0 }}</strong>
+                        </td>
+                    </tr>
+                </c-table>
+            </c-module>
+        {% endif %}
     </div>
 {% endblock content %}

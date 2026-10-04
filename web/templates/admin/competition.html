@@ -121,15 +121,19 @@
                     </template>
                 </div>
                 <form @submit.prevent="addApp" class="d-flex gap-10 items-center">
-                    <select :value="newApp"
-                            @change="setField"
-                            data-field="newApp"
-                            class="vTextField w-150">
-                        <option value="">Select app...</option>
+                    <input type="text"
+                           list="authentik-apps"
+                           :value="newApp"
+                           @input="setField"
+                           data-field="newApp"
+                           placeholder="App slug"
+                           aria-label="Authentik application slug"
+                           class="vTextField w-200">
+                    <datalist id="authentik-apps">
                         <template x-for="app in availableApps" :key="app">
-                            <option :value="app" x-text="app"></option>
+                            <option :value="app"></option>
                         </template>
-                    </select>
+                    </datalist>
                     <c-button type="submit" variant="default" ::disabled="addDisabled">
                         Add
                     </c-button>

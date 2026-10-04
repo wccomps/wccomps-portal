@@ -1,5 +1,8 @@
+from datetime import datetime
+
 from django.contrib.auth.models import User
 from django.db import models
+from django.utils import timezone
 
 
 class OrangeCheckIn(models.Model):
@@ -29,31 +32,59 @@ class OrangeCheckIn(models.Model):
 class OrangeCheck(models.Model):
     """A check template with rubric criteria, created by a lead."""
 
-    STATUS_CHOICES = [
-        ("draft", "Draft"),
-        ("scheduled", "Scheduled"),
-        ("active", "Active"),
-        ("closed", "Closed"),
-    ]
-
     title = models.CharField(max_length=200)
     description = models.TextField(help_text="Steps/instructions for the orange teamer")
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
     scheduled_at = models.DateTimeField(null=True, blank=True, help_text="When assignments go live")
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="created_checks")
     created_at = models.DateTimeField(auto_now_add=True)
     closed_at = models.DateTimeField(null=True, blank=True)
+    max_points = models.PositiveIntegerField(default=0, help_text="Max score when the check has no criteria")
+    time_limit = models.DurationField(
+        null=True, blank=True, help_text="How long the window stays open from scheduled_at"
+    )
 
     class Meta:
         db_table = "orange_check"
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        return f"[{self.status}] {self.title}"
+        return self.title
 
     @property
     def max_score(self) -> int:
-        return self.criteria.aggregate(total=models.Sum("points"))["total"] or 0
+        criteria_total = self.criteria.aggregate(total=models.Sum("points"))["total"]
+        if criteria_total is not None:
+            return int(criteria_total)
+        return self.max_points
+
+    @property
+    def window_end(self) -> datetime | None:
+        if self.scheduled_at is None or self.time_limit is None:
+            return None
+        return self.scheduled_at + self.time_limit
+
+    def is_open(self, now: datetime) -> bool:
+        end = self.window_end
+        return end is not None and self.scheduled_at is not None and self.scheduled_at <= now < end
+
+    def is_upcoming(self, now: datetime) -> bool:
+        return self.scheduled_at is not None and now < self.scheduled_at
+
+    def is_closed(self, now: datetime) -> bool:
+        end = self.window_end
+        return end is not None and now >= end
+
+    @property
+    def window_state(self) -> str:
+        """The check's scheduling state for display: open / upcoming / closed / unscheduled."""
+        now = timezone.now()
+        if self.is_open(now):
+            return "open"
+        if self.is_upcoming(now):
+            return "upcoming"
+        if self.is_closed(now):
+            return "closed"
+        return "unscheduled"
 
 
 class OrangeCheckCriterion(models.Model):

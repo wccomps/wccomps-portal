@@ -1,0 +1,103 @@
+{% extends "orange_team/base.html" %}
+{% load cotton %}
+{% block orange_title %}
+    Assign Volunteers - Orange Team
+{% endblock orange_title %}
+{% block orange_content %}
+    <c-page_header title="Assign Volunteers"
+                   subtitle="{{ orange_check.title }}"
+                   parent_url="{% url 'orange_team:check_list' %}"
+                   parent_label="Orange Team Dashboard" />
+    <c-module title="Teams">
+        <c-slot name="toolbar">
+            <form method="post" action="{% url 'orange_team:check_auto_assign' orange_check.pk %}" class="d-inline">
+                {% csrf_token %}
+                <c-button type="submit" variant="primary">Auto-assign</c-button>
+            </form>
+            <form method="post" action="{% url 'orange_team:check_rebalance' orange_check.pk %}" class="d-inline">
+                {% csrf_token %}
+                <c-button type="submit">Rebalance unstarted</c-button>
+            </form>
+            <span class="text-muted">{{ scored }} of {{ team_total }} scored</span>
+        </c-slot>
+        {% if rows %}
+            <c-table id="assign-list" aria_label="Team assignments">
+                <c-slot name="headers">
+                    <tr>
+                        <c-table_header sortable="false">
+                            Team
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Assigned to
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Status
+                        </c-table_header>
+                    </tr>
+                </c-slot>
+                {% for row in rows %}
+                    <tr>
+                        <td>
+                            <strong>Team {{ row.team.team_number }}</strong>
+                        </td>
+                        <td>
+                            {% if row.assignment and row.assignment.status != "submitted" and row.assignment.status != "approved" %}
+                                <form method="post"
+                                      action="{% url 'orange_team:reassign_team' row.assignment.pk %}"
+                                      class="d-flex gap-10 items-center">
+                                    {% csrf_token %}
+                                    <select name="user_id" aria-label="Assigned volunteer for Team {{ row.team.team_number }}">
+                                        {% for u in on_shift %}
+                                            <option value="{{ u.pk }}"
+                                                    {% if row.assignment.user_id == u.pk %}selected{% endif %}>
+                                                {{ u.username }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                    <c-button type="submit">Save</c-button>
+                                </form>
+                            {% elif row.assignment %}
+                                {{ row.assignment.user.username }}
+                            {% else %}
+                                <span class="text-muted">Unassigned</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if not row.assignment %}
+                                <c-badge variant="neutral">
+                                    Unassigned
+                                </c-badge>
+                            {% elif row.assignment.status == "approved" %}
+                                <c-badge variant="success">
+                                    Scored · {{ row.assignment.score }}
+                                </c-badge>
+                            {% elif row.assignment.status == "submitted" %}
+                                <c-badge variant="info">
+                                    Submitted
+                                </c-badge>
+                            {% elif row.assignment.status == "in_progress" %}
+                                <c-badge variant="info">
+                                    In progress
+                                </c-badge>
+                            {% elif row.assignment.status == "rejected" %}
+                                <c-badge variant="warning">
+                                    Rejected
+                                </c-badge>
+                            {% else %}
+                                <c-badge variant="neutral">
+                                    Pending
+                                </c-badge>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </c-table>
+            <p class="text-muted mt-10">
+                Scored teams are locked to the volunteer who scored them; reassigning affects only pending and in-progress teams.
+            </p>
+        {% else %}
+            <c-empty_state title="No active teams"
+                           description="Add teams before assigning this check." />
+        {% endif %}
+    </c-module>
+{% endblock orange_content %}

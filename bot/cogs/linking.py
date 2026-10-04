@@ -97,9 +97,13 @@ class LinkingCog(commands.Cog):
         """Generate a link token for user authentication."""
         user_id = interaction.user.id
 
+        # Defer at once: the rate-limit, existing-link and token queries can exceed Discord's
+        # 3s interaction window under load, which raised 10062 Unknown interaction during the competition.
+        await interaction.response.defer(ephemeral=True)
+
         is_allowed, attempt_count = await check_rate_limit(user_id)
         if not is_allowed:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"Rate limit exceeded. You have made {attempt_count} link attempts in the last hour. "
                 f"Please wait before trying again (limit: {RATE_LIMIT_MAX} per hour).",
                 ephemeral=True,
@@ -110,13 +114,13 @@ class LinkingCog(commands.Cog):
 
         link_check = await check_existing_link(user_id)
         if not link_check.can_link:
-            await interaction.response.send_message(link_check.error_message, ephemeral=True)
+            await interaction.followup.send(link_check.error_message, ephemeral=True)
             return
 
         auth_url = await create_link_token(user_id, str(interaction.user))
         embed = build_link_embed(auth_url)
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
         logger.info(f"Generated link token for {interaction.user} ({user_id})")
 
     async def send_link_dm(self, user: discord.User | discord.Member) -> bool:

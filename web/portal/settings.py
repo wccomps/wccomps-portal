@@ -285,5 +285,12 @@ LOGGING = {
             "level": "ERROR",
             "propagate": False,
         },
+        # httpx logs "HTTP Request: <method> <url>" at INFO; the URL carries the Discord
+        # webhook token and OAuth codes, so keep its request lines out of the logs.
+        "httpx": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
     },
 }

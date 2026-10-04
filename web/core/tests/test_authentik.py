@@ -176,3 +176,40 @@ class TestUpdateBindingEnabled:
 
         assert result is False
         assert "Enabled cannot be set on this binding" in caplog.text
+
+
+class TestListApplications:
+    """list_applications gathers app slugs from /providers/all/, including staff-only apps."""
+
+    @pytest.fixture
+    def manager(self):
+        with patch("core.authentik_manager.settings") as mock_settings:
+            mock_settings.AUTHENTIK_URL = "https://auth.example.com"
+            mock_settings.AUTHENTIK_TOKEN = "test-token"
+            mgr = AuthentikManager()
+            mgr.client = Mock()
+            return mgr
+
+    def test_collects_slugs_from_providers(self, manager):
+        resp = MagicMock()
+        resp.json.return_value = {
+            "pagination": {"next": 0},
+            "results": [
+                {"assigned_application_slug": "competitions"},
+                {"assigned_application_slug": "scoring"},
+                {"assigned_application_slug": "competitions"},  # duplicate across provider types
+                {"assigned_application_slug": None},  # provider with no app
+            ],
+        }
+        manager.client.get.return_value = resp
+
+        assert manager.list_applications() == ["competitions", "scoring"]
+        assert "providers/all" in manager.client.get.call_args.args[0]
+
+    def test_returns_empty_without_view_provider_permission(self, manager):
+        resp = MagicMock()
+        resp.status_code = 403
+        resp.raise_for_status.side_effect = httpx.HTTPStatusError("403", request=MagicMock(), response=resp)
+        manager.client.get.return_value = resp
+
+        assert manager.list_applications() == []
