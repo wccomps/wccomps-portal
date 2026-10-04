@@ -15,7 +15,7 @@
         Edit Check
     {% endif %}
     "
-                   subtitle="Define a check with rubric criteria" />
+                   subtitle="Define a check with a max, a window, and optional criteria" />
     <c-module>
         <form method="post"
               {% if mode == "edit" %}action="{% url 'orange_team:check_edit' orange_check.pk %}"{% endif %}
@@ -42,15 +42,35 @@
                 </c-form_field>
                 <c-form_field label="Scheduled At"
                               id="id_scheduled_at"
-                              help_text="When assignments go live (optional)">
+                              help_text="When the window opens (optional)">
                     <input type="datetime-local"
                            class="vTextField"
                            id="id_scheduled_at"
                            name="scheduled_at"
                            {% if orange_check.scheduled_at %}value="{{ orange_check.scheduled_at|date:'Y-m-d\TH:i' }}"{% endif %}>
                 </c-form_field>
+                <c-form_field label="Time limit (minutes)"
+                              id="id_time_limit_minutes"
+                              help_text="How long the window stays open from the scheduled time (optional)">
+                    <input type="number"
+                           class="vTextField"
+                           id="id_time_limit_minutes"
+                           name="time_limit_minutes"
+                           min="1"
+                           value="{{ time_limit_minutes|default:'' }}">
+                </c-form_field>
+                <c-form_field label="Max points"
+                              id="id_max_points"
+                              help_text="Used when the check has no criteria">
+                    <input type="number"
+                           class="vTextField"
+                           id="id_max_points"
+                           name="max_points"
+                           min="0"
+                           value="{{ orange_check.max_points|default:'0' }}">
+                </c-form_field>
             </c-fieldset>
-            <c-fieldset heading="Rubric Criteria">
+            <c-fieldset heading="Rubric Criteria (optional)">
                 <template x-for="(criterion, index) in criteria" :key="criterion.n">
                     <div class="form-row d-flex items-end gap-10">
                         <input type="hidden" :name="criterion.idName" :value="criterion.id">
@@ -131,7 +151,7 @@
             }
             var data = document.getElementById('criteria-data');
             var saved = data ? JSON.parse(data.textContent) : [];
-            if (!saved.length) saved = [{id: '', label: '', points: ''}];
+            if (!saved.length) saved = [];
             return {
                 submitting: false,
                 criteria: saved.map(function(c, i) { return row(i, c); }),

@@ -9,7 +9,6 @@
     {% if is_lead %}
         <c-nav>
             <c-nav_item name="dashboard" href="{% url 'orange_team:dashboard' %}">Dashboard</c-nav_item>
-            <c-nav_item name="checkins" href="{% url 'orange_team:team_checkins' %}">Team Check-ins</c-nav_item>
             <c-nav_item name="review" href="{% url 'orange_team:review_queue' %}">Review Queue</c-nav_item>
             <c-nav_item name="checks" href="{% url 'orange_team:check_list' %}">Manage Checks</c-nav_item>
         </c-nav>

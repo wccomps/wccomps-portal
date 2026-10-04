@@ -1,5 +1,3 @@
-import random
-
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils import timezone
@@ -15,37 +13,75 @@ from orange_team.models import (
 from team.models import Team
 
 
-def assign_teams_round_robin(
+def auto_assign_check(
     check: OrangeCheck,
     checked_in_users: list[User],
     teams: list[Team],
+    rotation_offset: int = 0,
 ) -> int:
-    random.shuffle(teams)
+    """Assign on-shift volunteers to teams for a check, rotated by rotation_offset.
+
+    Only cells that are still pending (or don't exist yet) are (re)assigned round-robin;
+    any cell a volunteer has already started, submitted, or had approved — or rejected —
+    is left untouched, keeping its volunteer and score. Returns the number of cells changed.
+    """
+    if not checked_in_users:
+        return 0
+    n = len(checked_in_users)
     criteria = list(check.criteria.all())
     count = 0
-
     with transaction.atomic():
-        for i, team in enumerate(teams):
-            assigned_user = checked_in_users[i % len(checked_in_users)]
-            if OrangeAssignment.objects.filter(orange_check=check, team=team).exists():
+        existing = {a.team_id: a for a in check.assignments.select_for_update()}
+        for j, team in enumerate(sorted(teams, key=lambda t: t.team_number)):
+            current = existing.get(team.id)
+            if current is not None and current.status != "pending":
                 continue
-            assignment = OrangeAssignment.objects.create(
-                orange_check=check,
-                user=assigned_user,
-                team=team,
+            assignee = checked_in_users[(j + rotation_offset) % n]
+            if current is not None:
+                if current.user_id != assignee.id:
+                    current.user = assignee
+                    current.save(update_fields=["user"])
+                    count += 1
+                continue
+            # get_or_create (not create): a concurrent run or double-submit that already
+            # inserted this (check, team) resolves to one row instead of an IntegrityError.
+            assignment, created = OrangeAssignment.objects.get_or_create(
+                orange_check=check, team=team, defaults={"user": assignee}
             )
-            for criterion in criteria:
-                OrangeAssignmentResult.objects.create(
-                    assignment=assignment,
-                    criterion=criterion,
-                    met=False,
+            if created:
+                OrangeAssignmentResult.objects.bulk_create(
+                    OrangeAssignmentResult(assignment=assignment, criterion=c) for c in criteria
                 )
-            count += 1
-
-        check.status = "active"
-        check.save()
-
+                count += 1
     return count
+
+
+def rebalance_unstarted(check: OrangeCheck, checked_in_users: list[User]) -> int:
+    """Redistribute only pending assignments evenly across the given volunteers."""
+    if not checked_in_users:
+        return 0
+    n = len(checked_in_users)
+    count = 0
+    with transaction.atomic():
+        pending = list(check.assignments.select_for_update().filter(status="pending").order_by("team__team_number"))
+        for i, assignment in enumerate(pending):
+            assignee = checked_in_users[i % n]
+            if assignment.user_id != assignee.id:
+                assignment.user = assignee
+                assignment.save(update_fields=["user"])
+                count += 1
+    return count
+
+
+def assign_all_checks(
+    checks: list[OrangeCheck],
+    checked_in_users: list[User],
+    teams: list[Team],
+) -> int:
+    total = 0
+    for offset, check in enumerate(checks):
+        total += auto_assign_check(check, checked_in_users, teams, rotation_offset=offset)
+    return total
 
 
 def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) -> None:

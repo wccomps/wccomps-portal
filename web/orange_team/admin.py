@@ -29,8 +29,7 @@ class OrangeCheckInAdmin(admin.ModelAdmin[OrangeCheckIn]):
 
 @admin.register(OrangeCheck)
 class OrangeCheckAdmin(admin.ModelAdmin[OrangeCheck]):
-    list_display = ("title", "status", "created_by", "created_at")
-    list_filter = ("status",)
+    list_display = ("title", "scheduled_at", "created_by", "created_at")
     search_fields = ("title",)
     inlines = [OrangeCheckCriterionInline]
 

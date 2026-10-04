@@ -1,7 +1,7 @@
 {% extends "orange_team/base.html" %}
 {% load cotton %}
 {% block orange_title %}
-    Orange Team Dashboard
+    My Checks - Orange Team
 {% endblock orange_title %}
 {% block orange_content %}
     <script>
@@ -11,7 +11,6 @@
             maxScore: 0,
             saving: false,
             saveError: '',
-            _saveUrl: '',
             get scoreDisplay() { return this.score + ' / ' + this.maxScore; },
             init() {
                 this.score = parseInt(this.$el.dataset.score) || 0;
@@ -46,8 +45,7 @@
         }));
     });
     </script>
-    <c-page_header title="Orange Team Dashboard"
-                   subtitle="Check-in status and assigned checks" />
+    <c-page_header title="My Checks" subtitle="Your assigned orange team checks" />
     <c-module>
         <div class="status-bar">
             <div class="d-flex justify-between items-center flex-wrap gap-10">
@@ -82,8 +80,7 @@
         </div>
     </c-module>
     {% if followups %}
-        <c-module>
-            <h2>Follow-Up Reminders</h2>
+        <c-module title="Follow-Up Reminders">
             <c-table id="followups" aria_label="Follow-up reminders">
                 <c-slot name="headers">
                     <tr>
@@ -125,126 +122,154 @@
             </c-table>
         </c-module>
     {% endif %}
-    <c-module>
-        <h2>My Assignments</h2>
+    <c-module title="My Checks">
         {% if assignments %}
-            {% regroup assignments by orange_check.title as checks %}
-            {% for check in checks %}
-                <h3>{{ check.grouper }}</h3>
-                <c-table aria_label="Assignments for {{ check.grouper }}">
-                    <c-slot name="headers">
-                        <tr>
-                            <c-table_header sortable="false">
-                                Team
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Status
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Score
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Criteria
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Actions
-                            </c-table_header>
-                        </tr>
-                    </c-slot>
-                    {% for assignment in check.list %}
-                        <tr x-data="assignmentRow"
-                            data-score="{{ assignment.score|default:'0' }}"
-                            data-max-score="{{ assignment.orange_check.max_score }}"
-                            data-save-url="{% url 'orange_team:assignment_save' assignment.pk %}">
-                            <td>Team {{ assignment.team.team_number }}</td>
-                            <td>
-                                {% if assignment.status == "pending" %}
-                                    <c-badge variant="warning">
-                                        Pending
-                                    </c-badge>
-                                {% elif assignment.status == "in_progress" %}
-                                    <c-badge variant="info">
-                                        In Progress
-                                    </c-badge>
-                                {% elif assignment.status == "submitted" %}
-                                    <c-badge variant="claimed">
-                                        Submitted
-                                    </c-badge>
-                                {% endif %}
-                            </td>
-                            <td>
+            <c-table id="my-checks" aria_label="My assigned checks">
+                <c-slot name="headers">
+                    <tr>
+                        <c-table_header sortable="false">
+                            Team
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Check
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Window
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Status
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Score
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Actions
+                        </c-table_header>
+                    </tr>
+                </c-slot>
+                {% for assignment in assignments %}
+                    <tr {% if assignment.has_criteria %}x-data="assignmentRow"
+                        data-score="{{ assignment.score|default:'0' }}"
+                        data-max-score="{{ assignment.orange_check.max_score }}"
+                        data-save-url="{% url 'orange_team:assignment_save' assignment.pk %}"{% endif %}>
+                        <td>Team {{ assignment.team.team_number }}</td>
+                        <td>{{ assignment.orange_check.title }}</td>
+                        <td>
+                            {% if assignment.orange_check.scheduled_at %}
+                                {{ assignment.orange_check.scheduled_at|date:"H:i" }}
+                                {% if assignment.orange_check.window_end %}–{{ assignment.orange_check.window_end|date:"H:i" }}{% endif %}
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if assignment.status == "submitted" %}
+                                <c-badge variant="claimed">
+                                    Submitted
+                                </c-badge>
+                            {% elif assignment.orange_check.window_state == "open" %}
+                                <c-badge variant="info">
+                                    Open now
+                                </c-badge>
+                            {% elif assignment.orange_check.window_state == "upcoming" %}
+                                <c-badge variant="neutral">
+                                    Opens {{ assignment.orange_check.scheduled_at|date:"H:i" }}
+                                </c-badge>
+                            {% elif assignment.orange_check.window_state == "closed" %}
+                                <c-badge variant="warning">
+                                    Window closed
+                                </c-badge>
+                            {% else %}
+                                <c-badge variant="neutral">
+                                    Not scheduled
+                                </c-badge>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if assignment.has_criteria %}
                                 <span x-text="scoreDisplay" aria-live="polite">{{ assignment.score|default:"0" }} / {{ assignment.orange_check.max_score }}</span>
+                                <details>
+                                    <summary>Criteria</summary>
+                                    <ul class="plain-list">
+                                        {% for result in assignment.results.all %}
+                                            <li>
+                                                <label>
+                                                    <input type="checkbox"
+                                                           {% if result.met %}checked{% endif %}
+                                                           data-criterion-id="{{ result.criterion.pk }}"
+                                                           @change="saveCriterion"
+                                                           {% if assignment.status == "submitted" %}disabled{% endif %}>
+                                                    {{ result.criterion.label }} ({{ result.criterion.points }} pts)
+                                                </label>
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                </details>
                                 <span x-show="saveError"
                                       x-text="saveError"
                                       class="text-danger text-sm d-block"
                                       x-cloak></span>
-                            </td>
-                            <td>
-                                <ul class="plain-list">
-                                    {% for result in assignment.results.all %}
-                                        <li>
-                                            <label>
-                                                <input type="checkbox"
-                                                       {% if result.met %}checked{% endif %}
-                                                       data-criterion-id="{{ result.criterion.pk }}"
-                                                       @change="saveCriterion"
-                                                       {% if assignment.status == "submitted" %}disabled{% endif %}>
-                                                {{ result.criterion.label }} ({{ result.criterion.points }} pts)
-                                            </label>
-                                        </li>
-                                    {% empty %}
-                                        <span class="text-muted">No criteria recorded</span>
-                                    {% endfor %}
-                                </ul>
-                            </td>
-                            <td>
-                                {% if assignment.status != "submitted" %}
-                                    <form method="post"
-                                          action="{% url 'orange_team:assignment_submit' assignment.pk %}"
-                                          onsubmit="return confirm('Submit this assignment? You cannot edit criteria after submission.')">
-                                        {% csrf_token %}
-                                        <c-button type="submit" variant="primary">
-                                            Submit
-                                        </c-button>
-                                    </form>
-                                {% else %}
-                                    <c-badge variant="claimed">
-                                        Submitted
-                                    </c-badge>
-                                {% endif %}
-                                <details>
-                                    <summary>Set Reminder</summary>
-                                    <form method="post"
-                                          action="{% url 'orange_team:followup_create' %}"
-                                          class="d-flex gap-10 items-end">
-                                        {% csrf_token %}
-                                        <input type="hidden" name="assignment_id" value="{{ assignment.pk }}">
-                                        <label>
-                                            Minutes:
-                                            <input type="number"
-                                                   name="minutes"
-                                                   value="15"
-                                                   min="1"
-                                                   max="480"
-                                                   class="input-sm">
-                                        </label>
-                                        <label>
-                                            Note:
-                                            <input type="text" name="note" placeholder="Optional note">
-                                        </label>
-                                        <c-button type="submit" variant="primary">
-                                            Set
-                                        </c-button>
-                                    </form>
-                                </details>
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </c-table>
-            {% endfor %}
+                            {% else %}
+                                <div class="d-flex items-center gap-10">
+                                    <input type="number"
+                                           name="score"
+                                           form="submit-{{ assignment.pk }}"
+                                           value="{{ assignment.score|default:'' }}"
+                                           min="0"
+                                           max="{{ assignment.orange_check.max_score }}"
+                                           class="input-sm"
+                                           aria-label="Score for Team {{ assignment.team.team_number }}"
+                                           {% if assignment.status == "submitted" %}disabled{% endif %}>
+                                    <span class="text-muted">/ {{ assignment.orange_check.max_score }}</span>
+                                </div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if assignment.status != "submitted" %}
+                                <form method="post"
+                                      id="submit-{{ assignment.pk }}"
+                                      action="{% url 'orange_team:assignment_submit' assignment.pk %}"
+                                      onsubmit="return confirm('Submit this check? You cannot edit the score after submission.')">
+                                    {% csrf_token %}
+                                    <c-button type="submit" variant="primary">
+                                        Submit
+                                    </c-button>
+                                </form>
+                            {% else %}
+                                <span class="text-muted">Awaiting approval</span>
+                            {% endif %}
+                            <details>
+                                <summary>Set Reminder</summary>
+                                <form method="post"
+                                      action="{% url 'orange_team:followup_create' %}"
+                                      class="d-flex gap-10 items-end">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="assignment_id" value="{{ assignment.pk }}">
+                                    <label>
+                                        Minutes:
+                                        <input type="number"
+                                               name="minutes"
+                                               value="15"
+                                               min="1"
+                                               max="480"
+                                               class="input-sm">
+                                    </label>
+                                    <label>
+                                        Note:
+                                        <input type="text" name="note" placeholder="Optional note">
+                                    </label>
+                                    <c-button type="submit" variant="primary">
+                                        Set
+                                    </c-button>
+                                </form>
+                            </details>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </c-table>
         {% else %}
-            <c-empty_state title="No assignments"
-                           description="You have no pending checks assigned to you." />
+            <c-empty_state title="No checks"
+                           description="You have no checks assigned to you yet." />
         {% endif %}
     </c-module>
 {% endblock orange_content %}

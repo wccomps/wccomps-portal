@@ -29,7 +29,7 @@ class TestDashboard:
         client.login(username="orange1", password="test")
         response = client.get("/orange-team/")
         assert response.status_code == 200
-        assert b"Orange Team Dashboard" in response.content
+        assert b"My Checks" in response.content
 
     def test_gold_team_can_access(self) -> None:
         user = User.objects.create_user(username="gold1", password="test")
@@ -64,7 +64,7 @@ class TestDashboard:
         client.login(username="orange3", password="test")
         response = client.get("/orange-team/")
         assert response.status_code == 200
-        assert b"No assignments" in response.content
+        assert b"No checks" in response.content
 
     def test_checked_out_by_default(self) -> None:
         user = User.objects.create_user(username="orange4", password="test")

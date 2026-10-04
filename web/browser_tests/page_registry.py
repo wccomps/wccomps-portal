@@ -211,11 +211,6 @@ PAGES: list[PageDef] = [
         denied_roles=["blue_team", "red_team", "orange_team", "unauthenticated"],
     ),
     PageDef(
-        url_name="orange_team:team_checkins",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "orange_team", "unauthenticated"],
-    ),
-    PageDef(
         url_name="orange_team:review_queue",
         allowed_roles=["gold_team", "admin"],
         denied_roles=["blue_team", "orange_team", "unauthenticated"],

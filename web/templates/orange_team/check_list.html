@@ -1,32 +1,39 @@
 {% extends "orange_team/base.html" %}
 {% load cotton %}
 {% block orange_title %}
-    Manage Checks - Orange Team
+    Orange Team Dashboard
 {% endblock orange_title %}
 {% block orange_content %}
-    <c-page_header title="Manage Checks" subtitle="Create and manage orange team checks" />
-    <c-module>
+    <c-page_header title="Orange Team Dashboard" subtitle="Coverage and volunteers" />
+    <c-module title="Checks">
         <c-slot name="toolbar">
             <c-link href="{% url 'orange_team:check_create' %}" variant="add">Create Check</c-link>
+            <form method="post" action="{% url 'orange_team:auto_assign_all' %}" class="d-inline">
+                {% csrf_token %}
+                <c-button type="submit" variant="primary">Auto-assign all</c-button>
+            </form>
         </c-slot>
         {% if checks %}
             <c-table id="check-list" aria_label="Orange team checks">
                 <c-slot name="headers">
                     <tr>
                         <c-table_header sortable="false">
-                            Title
+                            Check
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Window
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Max
                         </c-table_header>
                         <c-table_header sortable="false">
                             Status
                         </c-table_header>
                         <c-table_header sortable="false">
-                            Criteria
+                            Scored
                         </c-table_header>
                         <c-table_header sortable="false">
-                            Assignments
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Created
+                            Actions
                         </c-table_header>
                     </tr>
                 </c-slot>
@@ -36,33 +43,103 @@
                             <strong><a href="{% url 'orange_team:check_detail' check.pk %}">{{ check.title }}</a></strong>
                         </td>
                         <td>
-                            {% if check.status == "draft" %}
-                                <c-badge variant="neutral">
-                                    Draft
-                                </c-badge>
-                            {% elif check.status == "scheduled" %}
+                            {% if check.scheduled_at %}
+                                {{ check.scheduled_at|date:"H:i" }}
+                                {% if check.window_end %}–{{ check.window_end|date:"H:i" }}{% endif %}
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ check.max_score }}</td>
+                        <td>
+                            {% if check.window_state == "open" %}
                                 <c-badge variant="info">
-                                    Scheduled
+                                    Live
                                 </c-badge>
-                            {% elif check.status == "active" %}
-                                <c-badge variant="success">
-                                    Active
+                            {% elif check.window_state == "upcoming" %}
+                                <c-badge variant="neutral">
+                                    Upcoming
                                 </c-badge>
-                            {% elif check.status == "closed" %}
+                            {% elif check.window_state == "closed" %}
                                 <c-badge variant="warning">
                                     Closed
                                 </c-badge>
+                            {% else %}
+                                <c-badge variant="neutral">
+                                    Draft
+                                </c-badge>
                             {% endif %}
                         </td>
-                        <td>{{ check.criteria_count }}</td>
-                        <td>{{ check.assignment_count }}</td>
-                        <td>{{ check.created_at|date:"M d, Y H:i" }}</td>
+                        <td>{{ check.scored_count }}/{{ check.team_total }}</td>
+                        <td>
+                            <a href="{% url 'orange_team:check_edit' check.pk %}">Edit</a>
+                            ·
+                            <a href="{% url 'orange_team:check_assign' check.pk %}">Assign</a>
+                        </td>
                     </tr>
                 {% endfor %}
             </c-table>
         {% else %}
             <c-empty_state title="No checks"
                            description="Create your first orange team check to get started." />
+        {% endif %}
+    </c-module>
+    <c-module title="Volunteers">
+        {% if volunteers %}
+            <c-table id="volunteer-list" aria_label="Orange team volunteers on shift">
+                <c-slot name="headers">
+                    <tr>
+                        <c-table_header sortable="false">
+                            Volunteer
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Since
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            On now
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Up next
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Open tasks
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Actions
+                        </c-table_header>
+                    </tr>
+                </c-slot>
+                {% for v in volunteers %}
+                    <tr>
+                        <td>{{ v.user.username }}</td>
+                        <td>{{ v.checkin.checked_in_at|date:"H:i" }}</td>
+                        <td>
+                            {% if v.current_task %}
+                                Team {{ v.current_task.team.team_number }} · {{ v.current_task.orange_check.title }}
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if v.next_task %}
+                                Team {{ v.next_task.team.team_number }} · {{ v.next_task.orange_check.title }}
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ v.open_count }}</td>
+                        <td>
+                            <form method="post" action="{% url 'orange_team:admin_toggle_checkin' v.user.pk %}">
+                                {% csrf_token %}
+                                <c-button type="submit" variant="warning">Check out</c-button>
+                            </form>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </c-table>
+        {% else %}
+            <c-empty_state title="No one checked in"
+                           description="Volunteers appear here once they check in." />
         {% endif %}
     </c-module>
 {% endblock orange_content %}

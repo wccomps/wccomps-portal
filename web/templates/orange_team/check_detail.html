@@ -6,21 +6,21 @@
 {% block orange_content %}
     <c-page_header title="{{ orange_check.title }}">
         <c-slot name="subtitle">
-            {% if orange_check.status == "draft" %}
-                <c-badge variant="neutral">
-                    Draft
-                </c-badge>
-            {% elif orange_check.status == "scheduled" %}
+            {% if orange_check.window_state == "open" %}
                 <c-badge variant="info">
-                    Scheduled
+                    Live
                 </c-badge>
-            {% elif orange_check.status == "active" %}
-                <c-badge variant="success">
-                    Active
+            {% elif orange_check.window_state == "upcoming" %}
+                <c-badge variant="neutral">
+                    Upcoming
                 </c-badge>
-            {% elif orange_check.status == "closed" %}
+            {% elif orange_check.window_state == "closed" %}
                 <c-badge variant="warning">
                     Closed
+                </c-badge>
+            {% else %}
+                <c-badge variant="neutral">
+                    Not scheduled
                 </c-badge>
             {% endif %}
         </c-slot>
@@ -29,6 +29,7 @@
         <c-slot name="toolbar">
             <c-link href="{% url 'orange_team:check_edit' orange_check.pk %}"
                     variant="change">Edit</c-link>
+            <c-link href="{% url 'orange_team:check_assign' orange_check.pk %}">Assign</c-link>
             <c-form action="{% url 'orange_team:check_duplicate' orange_check.pk %}"
                     class="d-inline">
                 {% csrf_token %}
@@ -143,31 +144,4 @@
                            description="Assign checked-in users to distribute this check across teams." />
         {% endif %}
     </c-module>
-    {% if orange_check.status == "draft" or orange_check.status == "scheduled" %}
-        <c-module>
-            <h2>Assign Users</h2>
-            {% if checked_in_users %}
-                <c-form action="{% url 'orange_team:check_assign' orange_check.pk %}">
-                    {% csrf_token %}
-                    <c-fieldset heading="Checked-In Users">
-                        {% for user in checked_in_users %}
-                            <div class="form-row">
-                                <label>
-                                    <input type="checkbox" name="user_ids" value="{{ user.pk }}">
-                                    {{ user.username }}
-                                </label>
-                            </div>
-                        {% endfor %}
-                    </c-fieldset>
-                    <c-button_row>
-                        <c-button type="submit" variant="primary" ::disabled="submitting">
-                            Assign Teams
-                        </c-button>
-                    </c-button_row>
-                </c-form>
-            {% else %}
-                <p class="text-muted">No users are currently checked in.</p>
-            {% endif %}
-        </c-module>
-    {% endif %}
 {% endblock orange_content %}
