@@ -389,6 +389,29 @@
                 </tbody>
             </table>
         {% endif %}
+        {% if orange_scores %}
+            <h2>Orange Team Detail</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Check</th>
+                        <th class="text-right">Points</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for o in orange_scores %}
+                        <tr>
+                            <td>{{ o.description }}</td>
+                            <td class="text-right">{{ o.points_awarded|floatformat:0 }}</td>
+                        </tr>
+                    {% endfor %}
+                    <tr class="row-total">
+                        <td>Total</td>
+                        <td class="text-right">{{ orange_total|floatformat:0 }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        {% endif %}
         <div class="footer">Generated on {% now "Y-m-d H:i" %} | WCComps Scoring System</div>
     </body>
 </html>
