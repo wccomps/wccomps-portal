@@ -40,13 +40,25 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
     active_checkin = OrangeCheckIn.objects.filter(user=user, is_active=True).first()
 
-    my_assignments = (
+    now = timezone.now()
+    my_assignments = list(
         OrangeAssignment.objects.filter(user=user)
         .exclude(status__in=["approved", "rejected"])
         .select_related("orange_check", "team")
         .prefetch_related("results__criterion")
-        .order_by("orange_check__title", "team__team_number")
+        .order_by("orange_check__scheduled_at", "orange_check__title", "team__team_number")
     )
+    for assignment in my_assignments:
+        check = assignment.orange_check
+        state = "none"
+        if check.is_open(now):
+            state = "open"
+        elif check.is_upcoming(now):
+            state = "upcoming"
+        elif check.is_closed(now):
+            state = "closed"
+        assignment.window_state = state  # type: ignore[attr-defined]  # view-only display flag
+        assignment.has_criteria = len(assignment.results.all()) > 0  # type: ignore[attr-defined]
 
     followups = OrangeFollowUp.objects.filter(user=user, dismissed=False).select_related(
         "assignment__orange_check", "assignment__team"
@@ -58,6 +70,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "assignments": my_assignments,
         "followups": followups,
         "is_lead": is_lead,
+        "now": now,
     }
 
     return render(request, "orange_team/dashboard.html", context)
