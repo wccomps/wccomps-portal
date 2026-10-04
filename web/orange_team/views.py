@@ -21,7 +21,7 @@ from orange_team.models import (
     OrangeCheckIn,
     OrangeFollowUp,
 )
-from orange_team.services import assign_teams_round_robin, create_orange_score_from_assignment, update_check_criteria
+from orange_team.services import auto_assign_check, create_orange_score_from_assignment, update_check_criteria
 from team.models import Team
 
 
@@ -283,7 +283,9 @@ def check_assign(request: HttpRequest, check_id: int) -> HttpResponse:
         messages.error(request, "No active teams found.")
         return redirect("orange_team:check_detail", check_id=check_id)
 
-    assign_teams_round_robin(orange_check, users, active_teams)
+    auto_assign_check(orange_check, users, active_teams)
+    orange_check.status = "active"
+    orange_check.save(update_fields=["status"])
 
     messages.success(request, f"Assigned {len(active_teams)} teams across {len(users)} users.")
     return redirect("orange_team:check_detail", check_id=check_id)
