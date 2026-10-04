@@ -371,6 +371,9 @@ class DiscordQueueProcessor:
         elif action == "cancelled":
             await thread.send(f"Ticket cancelled by **{actor}**")
         elif action == "reopened":
+            # Resolving archived and locked the thread (cogs/ticketing.py); only staff can post in a locked one
+            if isinstance(thread, discord.Thread) and (thread.archived or thread.locked):
+                await thread.edit(archived=False, locked=False)
             msg = f"Ticket reopened by **{actor}**"
             if payload.reason:
                 msg += f"\nReason: {payload.reason}"

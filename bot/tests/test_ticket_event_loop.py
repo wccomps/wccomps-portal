@@ -96,3 +96,30 @@ async def test_updates_for_threadless_ticket_complete_and_refresh_dashboard(clai
         task_type="post_comment", payload={"ticket_id": claimed_ticket.id, "comment_id": comment.id}
     )
     await processor._handle_post_comment(task.typed_payload())
+
+
+@pytest.mark.parametrize(("action", "unlocks"), [("reopened", True), ("claimed", False)])
+async def test_reopen_unlocks_the_archived_thread(claimed_ticket: Ticket, action: str, unlocks: bool) -> None:
+    """Resolving archives and locks the thread; a team can't post in it again until the reopen unlocks it."""
+    claimed_ticket.discord_thread_id = 5551
+    await claimed_ticket.asave(update_fields=["discord_thread_id"])
+    thread = MagicMock(spec=discord.Thread)
+    thread.archived = True
+    thread.locked = True
+    calls: list[str] = []
+    thread.edit = AsyncMock(side_effect=lambda **kwargs: calls.append(f"edit {kwargs}"))
+    thread.send = AsyncMock(side_effect=lambda *args, **kwargs: calls.append("send"))
+    bot = MagicMock(spec=discord.Client)
+    bot.unified_dashboard = MagicMock()
+    bot.get_channel.return_value = thread
+    processor = DiscordQueueProcessor(bot)
+
+    task = await DiscordTask.objects.acreate(
+        task_type="post_ticket_update",
+        ticket=claimed_ticket,
+        payload={"ticket_id": claimed_ticket.id, "action": action, "actor": "v"},
+    )
+    await processor._handle_post_ticket_update(task.typed_payload())
+
+    expected = ["edit {'archived': False, 'locked': False}", "send"] if unlocks else ["send"]
+    assert calls == expected
