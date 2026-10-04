@@ -140,11 +140,11 @@ def check_create(request: HttpRequest) -> HttpResponse:
         title = form.cleaned_data["title"]
         description = form.cleaned_data["description"]
         scheduled_at = form.cleaned_data["scheduled_at"] or None
+        max_points = form.cleaned_data.get("max_points") or 0
+        minutes = form.cleaned_data.get("time_limit_minutes")
+        time_limit = timedelta(minutes=minutes) if minutes else None
 
         criteria = extract_criteria(request.POST)
-        if not criteria:
-            messages.error(request, "At least one criterion is required.")
-            return render(request, "orange_team/check_form.html", {"mode": "create", "is_lead": True})
 
         user = cast(User, request.user)
         with transaction.atomic():
@@ -152,6 +152,8 @@ def check_create(request: HttpRequest) -> HttpResponse:
                 title=title,
                 description=description,
                 scheduled_at=scheduled_at,
+                max_points=max_points,
+                time_limit=time_limit,
                 created_by=user,
             )
             for c in criteria:
@@ -203,20 +205,18 @@ def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
         title = form.cleaned_data["title"]
         description = form.cleaned_data["description"]
         scheduled_at = form.cleaned_data["scheduled_at"] or None
+        max_points = form.cleaned_data.get("max_points") or 0
+        minutes = form.cleaned_data.get("time_limit_minutes")
+        time_limit = timedelta(minutes=minutes) if minutes else None
 
         criteria_data = extract_criteria(request.POST)
-        if not criteria_data:
-            messages.error(request, "At least one criterion is required.")
-            return render(
-                request,
-                "orange_team/check_form.html",
-                {"mode": "edit", "orange_check": orange_check, "is_lead": True},
-            )
 
         with transaction.atomic():
             orange_check.title = title
             orange_check.description = description
             orange_check.scheduled_at = scheduled_at
+            orange_check.max_points = max_points
+            orange_check.time_limit = time_limit
             orange_check.save()
             update_check_criteria(orange_check, criteria_data)
 
@@ -224,6 +224,7 @@ def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
         return redirect("orange_team:check_detail", check_id=orange_check.pk)
 
     existing_criteria = list(orange_check.criteria.values("id", "label", "points"))
+    time_limit_minutes = int(orange_check.time_limit.total_seconds() // 60) if orange_check.time_limit else ""
     return render(
         request,
         "orange_team/check_form.html",
@@ -231,6 +232,7 @@ def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
             "mode": "edit",
             "orange_check": orange_check,
             "existing_criteria": existing_criteria,
+            "time_limit_minutes": time_limit_minutes,
             "is_lead": True,
         },
     )

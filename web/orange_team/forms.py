@@ -9,6 +9,8 @@ class OrangeCheckForm(forms.Form):
     title = forms.CharField(max_length=200)
     description = forms.CharField(required=False)
     scheduled_at = forms.DateTimeField(required=False)  # read in the viewer's timezone
+    max_points = forms.IntegerField(min_value=0, required=False)
+    time_limit_minutes = forms.IntegerField(required=False, min_value=1)
 
 
 class CheckAssignForm(forms.Form):

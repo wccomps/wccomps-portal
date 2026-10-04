@@ -86,7 +86,8 @@ class TestCheckCreate:
         )
         assert response.status_code == 200  # re-renders form with error
 
-    def test_create_requires_criteria(self) -> None:
+    def test_create_without_criteria_uses_max_points(self) -> None:
+        # Criteria are optional; a check can define its max directly instead.
         user = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
         client = Client()
@@ -96,9 +97,13 @@ class TestCheckCreate:
             {
                 "title": "Test Check",
                 "description": "test",
+                "max_points": "20",
             },
         )
-        assert response.status_code == 200  # re-renders form with error
+        assert response.status_code == 302
+        check = OrangeCheck.objects.get(title="Test Check")
+        assert check.criteria.count() == 0
+        assert check.max_score == 20
 
     def test_get_shows_form(self) -> None:
         user = User.objects.create_user(username="gold1", password="test")
