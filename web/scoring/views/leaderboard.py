@@ -10,7 +10,7 @@ from django.template.loader import render_to_string
 from core.auth_utils import require_permission
 
 from ..calculator import Standing, calculate_team_score_detailed, compute_standings, get_leaderboard, get_standing
-from ..models import InjectScore, RedTeamScore, ServiceDetail
+from ..models import InjectScore, OrangeTeamScore, RedTeamScore, ServiceDetail
 
 
 class _CategoryRank(TypedDict):
@@ -215,6 +215,8 @@ def build_scorecard_context(score: Standing, standings: list[Standing]) -> dict[
     stats = _compute_scorecard_stats(score, standings)
     detailed = calculate_team_score_detailed(team)
 
+    orange_scores = OrangeTeamScore.objects.filter(team=team, is_approved=True).order_by("description")
+
     return {
         "team": team,
         "score": score,
@@ -222,6 +224,8 @@ def build_scorecard_context(score: Standing, standings: list[Standing]) -> dict[
         "stats": stats,
         "red_total": sum(r.points_per_team for r in red_scores),
         "inject_total": sum(i["points"] for i in stats["inject_stats"]),
+        "orange_scores": orange_scores,
+        "orange_total": sum(o.points_awarded for o in orange_scores),
         "service_total": sum(s["points"] for s in stats["service_stats"]),
         "scaling": {
             "service_raw": detailed["service_raw"],
