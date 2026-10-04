@@ -38,9 +38,7 @@ from orange_team.services import (
 from team.models import Team
 
 
-@require_permission(
-    "orange_team", "gold_team", "orange_team_lead", error_message="Only Orange Team members can access this page"
-)
+@require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
 def dashboard(request: HttpRequest) -> HttpResponse:
     """Orange team dashboard showing check-in status and assignments."""
     user = cast(User, request.user)
@@ -74,9 +72,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     return render(request, "orange_team/dashboard.html", context)
 
 
-@require_permission(
-    "orange_team", "gold_team", "orange_team_lead", error_message="Only Orange Team members can access this page"
-)
+@require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
 def toggle_checkin(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:dashboard")
@@ -390,11 +386,7 @@ def reassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
 
 def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
     """Autosave a criterion result for an assignment."""
-    if not (
-        has_permission(request.user, "orange_team")
-        or has_permission(request.user, "gold_team")
-        or has_permission(request.user, "orange_team_lead")
-    ):
+    if not (has_permission(request.user, "orange_team") or has_permission(request.user, "orange_team_lead")):
         return JsonResponse({"error": "Access denied"}, status=403)
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
@@ -425,9 +417,7 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
     return JsonResponse({"score": score, "max_score": max_score})
 
 
-@require_permission(
-    "orange_team", "gold_team", "orange_team_lead", error_message="Only Orange Team members can access this page"
-)
+@require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
 def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:dashboard")
@@ -463,9 +453,7 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
     return redirect("orange_team:dashboard")
 
 
-@require_permission(
-    "orange_team", "gold_team", "orange_team_lead", error_message="Only Orange Team members can access this page"
-)
+@require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
 def followup_create(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:dashboard")
@@ -489,9 +477,7 @@ def followup_create(request: HttpRequest) -> HttpResponse:
     return redirect("orange_team:dashboard")
 
 
-@require_permission(
-    "orange_team", "gold_team", "orange_team_lead", error_message="Only Orange Team members can access this page"
-)
+@require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
 def followup_dismiss(request: HttpRequest, followup_id: int) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:dashboard")
