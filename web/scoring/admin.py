@@ -267,7 +267,9 @@ class ScoringTemplateAdmin(admin.ModelAdmin[ScoringTemplate]):
         "orange_weight",
         "updated_at",
     ]
-    readonly_fields = ["created_at", "updated_at"]
+    # The maxima are derived from competition data (service sync, inject grade/metadata
+    # sync, orange checks), not hand-edited, so they are read-only here too.
+    readonly_fields = ["service_max", "inject_max", "orange_max", "created_at", "updated_at"]
 
     fieldsets = [
         (

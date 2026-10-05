@@ -6,6 +6,7 @@ from quotient.client import QuotientClient
 
 from team.models import Team
 
+from .maxes import inject_max_from_titles, service_max_from_details, set_template_max
 from .models import QuotientMetadataCache, ServiceDetail, ServiceScore
 
 
@@ -80,6 +81,11 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
             synced_by=user,
         )
 
+    # Keep the reactive inject scaling current: inject point values live in the titles.
+    injects = client.get_injects(force_refresh=True)
+    if injects:
+        set_template_max("inject_max", inject_max_from_titles([inject.title for inject in injects]))
+
     return metadata
 
 
@@ -134,6 +140,9 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
         ]
         ServiceDetail.objects.bulk_create(details)
         details_synced += len(details)
+
+    # Keep the reactive service scaling current: the max service points at full uptime.
+    set_template_max("service_max", service_max_from_details())
 
     return {
         "teams_created": teams_created,

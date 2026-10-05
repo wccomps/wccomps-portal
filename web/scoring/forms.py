@@ -374,7 +374,9 @@ class IncidentMatchForm(forms.ModelForm[IncidentReport]):
 
 
 class ScoringTemplateForm(forms.ModelForm[ScoringTemplate]):
-    """Form for configuring scoring weights and raw maximums."""
+    """Form for configuring scoring weights. The raw maxima are derived from competition
+    data (service sync, inject grade/metadata sync, orange checks), so they are not edited
+    here; the config page shows them read-only."""
 
     class Meta:
         model = ScoringTemplate
@@ -382,19 +384,12 @@ class ScoringTemplateForm(forms.ModelForm[ScoringTemplate]):
             "service_weight",
             "inject_weight",
             "orange_weight",
-            "service_max",
-            "inject_max",
-            "orange_max",
         ]
         weight_attrs = {"min": "0", "max": "100", "step": "1", "class": "form-control"}
-        max_attrs = {"min": "0", "step": "1", "class": "form-control"}
         widgets = {
             "service_weight": forms.NumberInput(attrs=weight_attrs),
             "inject_weight": forms.NumberInput(attrs=weight_attrs),
             "orange_weight": forms.NumberInput(attrs=weight_attrs),
-            "service_max": forms.NumberInput(attrs=max_attrs),
-            "inject_max": forms.NumberInput(attrs=max_attrs),
-            "orange_max": forms.NumberInput(attrs=max_attrs),
         }
 
 

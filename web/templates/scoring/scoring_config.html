@@ -38,22 +38,21 @@
                 </div>
             </c-fieldset>
             <c-fieldset heading="Raw Maximums">
-                <p class="text-muted mb-10">Maximum possible raw points in each category. Used to compute scaling modifiers.</p>
+                <p class="text-muted mb-10">
+                    Maximum possible raw points in each category, used to compute the scaling modifiers.
+                    These are derived automatically from the competition's own data (service from the
+                    Quotient score sync, inject from the inject point values, orange from the check
+                    definitions), so they are shown read-only here.
+                </p>
                 <div class="max-points-grid">
-                    <c-form_field label="Service Max"
-                                  help_text="{{ form.service_max.help_text }}"
-                                  id="{{ form.service_max.id_for_label }}">
-                        {{ form.service_max }}
+                    <c-form_field label="Service Max">
+                        <span class="readonly-value">{{ template.service_max }}</span>
                     </c-form_field>
-                    <c-form_field label="Inject Max"
-                                  help_text="{{ form.inject_max.help_text }}"
-                                  id="{{ form.inject_max.id_for_label }}">
-                        {{ form.inject_max }}
+                    <c-form_field label="Inject Max">
+                        <span class="readonly-value">{{ template.inject_max }}</span>
                     </c-form_field>
-                    <c-form_field label="Orange Check Max"
-                                  help_text="{{ form.orange_max.help_text }}"
-                                  id="{{ form.orange_max.id_for_label }}">
-                        {{ form.orange_max }}
+                    <c-form_field label="Orange Check Max">
+                        <span class="readonly-value">{{ template.orange_max }}</span>
                     </c-form_field>
                 </div>
             </c-fieldset>
