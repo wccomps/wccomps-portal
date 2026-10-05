@@ -120,12 +120,25 @@
                     </c-form_field>
                 </c-fieldset>
                 <div class="text-muted text-sm">
-                    <strong>Review Guidelines:</strong>
+                    <strong>Scoring rubric.</strong> Points = base (what was caught) x quality (how well it was handled).
+                    Credit only verified malicious findings backed by evidence; our images ship clean, so any confirmed
+                    non-baseline artifact is real (a legitimate service reported as malicious scores 0).
                     <ul class="mb-0">
-                        <li>Verify evidence shows IP addresses and timestamps</li>
-                        <li>Match to corresponding red team finding if applicable</li>
-                        <li>Award points based on detection quality and mitigation</li>
-                        <li>Leave unmatched if no corresponding red finding exists</li>
+                        <li>
+                            <strong>Base (MITRE ATT&CK tactic):</strong>
+                            Initial Access / Impact / Exfiltration = 100;
+                            Priv-Esc / Credential Access / Lateral Movement = 75;
+                            Execution / Persistence / Command and Control = 50;
+                            Reconnaissance / Discovery (or a noticed failed attempt) = 25.
+                            Tie a C2/persistence finding back to its initial-access vector to earn the higher base.
+                        </li>
+                        <li>
+                            <strong>Quality (NIST SP 800-61 phase reached):</strong>
+                            Identification = 0.2; + accurate technique/evidence (Pyramid of Pain: TTPs over tools over IPs) = 0.4;
+                            + Containment / Eradication / Recovery = 0.8.
+                        </li>
+                        <li>If the team was also charged by a red finding, award the better of {this, the offset recovery}, not both.</li>
+                        <li>Note the ATT&CK tactic and NIST phase in the Assessment so the team's feedback is a teaching note.</li>
                     </ul>
                 </div>
                 <c-button_row class="mt-20 justify-end">

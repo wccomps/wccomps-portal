@@ -121,6 +121,11 @@
                                 <c-score_value :value="incident.points_returned" format="signed" />
                             </strong>
                         </c-detail_row>
+                        {% if incident.approval_notes %}
+                            <c-detail_row label="Assessment">
+                                {{ incident.approval_notes|linebreaksbr }}
+                            </c-detail_row>
+                        {% endif %}
                     </c-detail_grid>
                 </c-fieldset>
             {% else %}
