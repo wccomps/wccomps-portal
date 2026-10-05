@@ -138,6 +138,7 @@
                             <td class="action-checkbox" role="gridcell">
                                 <input type="checkbox"
                                        @change="toggleItem"
+                                       :checked="selectedMap.{{ item.ticket.ticket_number|jskey }}"
                                        value="{{ item.ticket.ticket_number }}"
                                        data-ticket-id="{{ item.ticket.ticket_number }}"
                                        aria-label="Select ticket {{ item.ticket.ticket_number }}" />

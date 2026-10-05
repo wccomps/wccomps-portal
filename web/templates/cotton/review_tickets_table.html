@@ -59,6 +59,7 @@
                                            name="ticket_ids"
                                            value="{{ item.ticket.id }}"
                                            data-ticket-id="{{ item.ticket.id }}"
+                                           :checked="selectedMap.{{ item.ticket.id|jskey }}"
                                            @change="toggleItem">
                                 {% endif %}
                             </td>

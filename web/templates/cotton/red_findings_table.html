@@ -83,6 +83,7 @@
                                                name="finding_ids"
                                                value="{{ finding.id }}"
                                                data-finding-id="{{ finding.id }}"
+                                               :checked="selectedMap.{{ finding.id|jskey }}"
                                                @change="toggleItem">
                                     {% endif %}
                                 </td>

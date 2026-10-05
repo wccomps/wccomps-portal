@@ -160,37 +160,47 @@ function streamMixin(url) {
  * @param {string} dataAttr — HTML data attribute suffix (e.g. 'incident-id').
  * Call this.initBulkSelect() from your init() method.
  */
+function jsKey(id) {
+    // Mirror of the `jskey` template filter: a valid JS identifier for a row id.
+    return 'k' + String(id).replace(/\W/g, '_');
+}
+
 function bulkSelectMixin(dataAttr) {
     const camel = dataAttr.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
     return {
-        selected: [],
+        // Reactive map keyed by jsKey(id). Each row binds :checked="selectedMap.<key>",
+        // so Alpine owns the checkbox state — the CSP build cannot evaluate selected.includes(id),
+        // and an imperative sync was being clobbered by Alpine's render pass.
+        selectedMap: {},
         selectableIds: [],
         submitting: false,
         initBulkSelect() {
             this.selectableIds = Array.from(
                 this.$el.querySelectorAll('[data-' + dataAttr + ']'),
             ).map(el => el.dataset[camel]);
+            const map = {};
+            this.selectableIds.forEach(id => { map[jsKey(id)] = false; });
+            this.selectedMap = map;
+        },
+        get selected() {
+            return this.selectableIds.filter(id => this.selectedMap[jsKey(id)]);
         },
         get allSelected() {
-            return this.selected.length === this.selectableIds.length && this.selectableIds.length > 0;
+            return this.selectableIds.length > 0
+                && this.selectableIds.every(id => this.selectedMap[jsKey(id)]);
         },
         get someSelected() {
-            return this.selected.length > 0 && this.selected.length < this.selectableIds.length;
+            const count = this.selected.length;
+            return count > 0 && count < this.selectableIds.length;
         },
         toggleAll() {
-            this.selected = this.allSelected ? [] : [...this.selectableIds];
-            this.syncCheckboxes();
+            const target = !this.allSelected;
+            const map = {};
+            this.selectableIds.forEach(id => { map[jsKey(id)] = target; });
+            this.selectedMap = map;
         },
         toggleItem(e) {
-            const val = e.target.value;
-            const idx = this.selected.indexOf(val);
-            if (e.target.checked && idx === -1) this.selected.push(val);
-            else if (!e.target.checked && idx > -1) this.selected.splice(idx, 1);
-        },
-        syncCheckboxes() {
-            this.$el.querySelectorAll('input[type="checkbox"][value]').forEach(cb => {
-                cb.checked = this.selected.includes(cb.value);
-            });
+            this.selectedMap[jsKey(e.target.value)] = e.target.checked;
         },
     };
 }

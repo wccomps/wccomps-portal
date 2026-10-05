@@ -46,6 +46,8 @@
                                 <input type="checkbox"
                                        name="score_ids"
                                        value="{{ score.id }}"
+                                       data-feedback-id="{{ score.id }}"
+                                       :checked="selectedMap.{{ score.id|jskey }}"
                                        @change="toggleItem"
                                        aria-label="Select {{ score.inject_name }} Team {{ score.team.team_number }}">
                             {% endif %}
