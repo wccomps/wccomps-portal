@@ -302,12 +302,12 @@ def inject_grades_bulk_approve(request: HttpRequest) -> HttpResponse:
 def review_inject_feedback(request: HttpRequest) -> HttpResponse:
     """Gold/White team review of inject feedback before showing to teams."""
     inject_filter = request.GET.get("inject", "")
-    status_filter = request.GET.get("status", "pending")
+    status_filter = request.GET.get("status", "all")
 
     scores = (
         InjectScore.objects.filter(is_approved=True)
         .exclude(inject_id="qualifier-total")
-        .exclude(notes="")
+        .exclude(feedback="")
         .select_related("team", "feedback_approved_by")
         .order_by("inject_name", "team__team_number")
     )
@@ -322,7 +322,7 @@ def review_inject_feedback(request: HttpRequest) -> HttpResponse:
     inject_choices = (
         InjectScore.objects.filter(is_approved=True)
         .exclude(inject_id="qualifier-total")
-        .exclude(notes="")
+        .exclude(feedback="")
         .values_list("inject_id", "inject_name")
         .distinct()
         .order_by("inject_id")
