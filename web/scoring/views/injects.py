@@ -13,6 +13,7 @@ from core.auth_utils import has_permission, require_permission
 from team.models import Team
 
 from ..forms import ApproveInjectFeedbackForm, SaveInjectFeedbackForm
+from ..maxes import inject_max_from_titles, inject_points, set_template_max
 from ..models import InjectScore
 
 MIN_GRADES_FOR_OUTLIER = 3
@@ -59,6 +60,7 @@ def inject_grading(request: HttpRequest) -> HttpResponse:
 
                 # Feedback is approved as it is saved only when the white team lead enters it.
                 is_lead = has_permission(user, "white_team_lead")
+                inject_max_points = inject_points(selected_inject.title)  # same for every team this inject
                 for team in teams:
                     num = team.team_number
                     points_value = grading_form.cleaned_data.get(f"points_team_{num}")
@@ -98,6 +100,7 @@ def inject_grading(request: HttpRequest) -> HttpResponse:
                         )
 
                     grade.inject_name = selected_inject.title
+                    grade.max_points = inject_max_points
                     if points_edited and points_value is not None:  # the None check is for the type checker
                         grade.points_awarded = points_value
                         grade.graded_by = user
@@ -115,6 +118,10 @@ def inject_grading(request: HttpRequest) -> HttpResponse:
 
                 if grades_saved:
                     messages.success(request, f"Saved {grades_saved} grades for {selected_inject.title}")
+                    # Keep the reactive inject scaling current from the inject point values. After
+                    # commit, so a failure deriving the max can never roll back the saved grades.
+                    titles = [i.title for i in injects]
+                    transaction.on_commit(lambda: set_template_max("inject_max", inject_max_from_titles(titles)))
             return redirect(f"{reverse('scoring:inject_grading')}?inject={selected_inject_id}")
         errors = "; ".join(f"{field.removeprefix('points_team_')}: {e[0]}" for field, e in grading_form.errors.items())
         messages.error(request, f"Nothing saved. Fix these teams' points: {errors}")

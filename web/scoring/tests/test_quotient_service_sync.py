@@ -63,6 +63,26 @@ def test_sync_attaches_scores_and_uptimes_to_the_named_team() -> None:
 
 
 @pytest.mark.django_db
+def test_sync_derives_service_max() -> None:
+    from decimal import Decimal
+
+    from scoring.models import ScoringTemplate
+
+    Team.objects.create(team_number=3, team_name="Three")
+    ScoringTemplate.objects.create(
+        service_weight=Decimal("40"),
+        inject_weight=Decimal("40"),
+        orange_weight=Decimal("20"),
+        service_max=Decimal("1"),
+    )
+
+    sync_service_scores()
+
+    # web: 40 points at 0.9 uptime -> 44.44 -> 44
+    assert ScoringTemplate.objects.first().service_max == Decimal("44")
+
+
+@pytest.mark.django_db
 def test_a_second_sync_fetches_fresh_scores(monkeypatch) -> None:
     """Sync is an explicit fetch: the client's 5-minute cache must not hand back the previous numbers."""
     team3 = Team.objects.create(team_number=3, team_name="Three")
