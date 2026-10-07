@@ -269,15 +269,25 @@ class TestLeaderboardAccess:
 
         assert response.status_code == 200
 
-    def test_orange_team_denied_access(self, create_user_with_groups) -> None:
-        """Orange Team members should be denied access to the leaderboard."""
+    def test_orange_team_can_access_leaderboard(self, create_user_with_groups) -> None:
+        """Orange Team members should have access to the leaderboard."""
         user = create_user_with_groups("orange_user", ["WCComps_OrangeTeam"])
         client = Client()
         client.force_login(user)
 
         response = client.get(reverse("leaderboard_page"))
 
-        assert response.status_code == 302
+        assert response.status_code == 200
+
+    def test_ticketing_support_can_access_leaderboard(self, create_user_with_groups) -> None:
+        """Ticketing Support members should have access to the leaderboard."""
+        user = create_user_with_groups("ticketing_support", ["WCComps_Ticketing_Support"])
+        client = Client()
+        client.force_login(user)
+
+        response = client.get(reverse("leaderboard_page"))
+
+        assert response.status_code == 200
 
     def test_user_with_no_groups_denied_access(self, create_user_with_groups) -> None:
         """Users with no groups should be denied access to the leaderboard."""

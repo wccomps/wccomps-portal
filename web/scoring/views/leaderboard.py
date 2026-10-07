@@ -56,7 +56,14 @@ class _ScorecardStats(TypedDict):
     insights: list[str]
 
 
-@require_permission("gold_team", "white_team", "red_team", "ticketing_admin")
+@require_permission(
+    "gold_team",
+    "white_team",
+    "red_team",
+    "ticketing_admin",
+    "orange_team",
+    "ticketing_support",
+)
 def leaderboard(request: HttpRequest) -> HttpResponse:
     """Restricted leaderboard view."""
     return render(request, "scoring/leaderboard.html", {"scores": get_leaderboard()})
@@ -251,6 +258,8 @@ def _scorecard_context(team_number: int) -> dict[str, object]:
     "white_team",
     "red_team",
     "ticketing_admin",
+    "orange_team",
+    "ticketing_support",
     error_message="Only authorized staff can view scorecards",
 )
 def scorecard(request: HttpRequest, team_number: int) -> HttpResponse:
@@ -264,6 +273,8 @@ def scorecard(request: HttpRequest, team_number: int) -> HttpResponse:
     "white_team",
     "red_team",
     "ticketing_admin",
+    "orange_team",
+    "ticketing_support",
     error_message="Only authorized staff can export scorecards",
 )
 def scorecard_pdf(request: HttpRequest, team_number: int) -> HttpResponse:

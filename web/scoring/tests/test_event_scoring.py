@@ -262,6 +262,20 @@ class TestScorecardView:
         response = client.get(url)
         assert response.status_code == 200
 
+    def test_orange_team_can_access(self, orange_team_user, teams, scores):
+        client = Client()
+        client.force_login(orange_team_user)
+        url = reverse("leaderboard_scorecard", args=[1])
+        response = client.get(url)
+        assert response.status_code == 200
+
+    def test_ticketing_support_can_access(self, ticketing_support_user, teams, scores):
+        client = Client()
+        client.force_login(ticketing_support_user)
+        url = reverse("leaderboard_scorecard", args=[1])
+        response = client.get(url)
+        assert response.status_code == 200
+
     def test_returns_404_for_missing_team(self, gold_team_user, teams, scores):
         client = Client()
         client.force_login(gold_team_user)
@@ -368,6 +382,26 @@ class TestScorecardPdf:
     def test_pdf_returns_pdf_content_type(self, gold_team_user, teams, scores):
         client = Client()
         client.force_login(gold_team_user)
+        url = reverse("leaderboard_scorecard_pdf", args=[1])
+        response = client.get(url)
+
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/pdf"
+        assert 'filename="team-01-scorecard.pdf"' in response["Content-Disposition"]
+
+    def test_orange_team_can_access(self, orange_team_user, teams, scores):
+        client = Client()
+        client.force_login(orange_team_user)
+        url = reverse("leaderboard_scorecard_pdf", args=[1])
+        response = client.get(url)
+
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/pdf"
+        assert 'filename="team-01-scorecard.pdf"' in response["Content-Disposition"]
+
+    def test_ticketing_support_can_access(self, ticketing_support_user, teams, scores):
+        client = Client()
+        client.force_login(ticketing_support_user)
         url = reverse("leaderboard_scorecard_pdf", args=[1])
         response = client.get(url)
 
