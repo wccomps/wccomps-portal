@@ -4,11 +4,32 @@
     Leaderboard
 {% endblock title %}
 {% block content %}
+    {% if is_admin %}
+        <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('leaderboardNames', () => ({
+                showSchools: {% if show_schools %}true{% else %}false{% endif %},
+                get showTeams() { return !this.showSchools; },
+                toggle() { this.showSchools = !this.showSchools; },
+            }));
+        });
+        </script>
+    {% endif %}
     <c-page_header title="Leaderboard" />
-    <c-module>
-        <c-slot name="title">
-            Leaderboard
-        </c-slot>
+    <c-module {% if is_admin %}x-data="leaderboardNames"{% endif %}>
+        {% if is_admin %}
+            <c-slot name="toolbar">
+                <c-button type="button"
+                          variant="default"
+                          id="toggle-names-btn"
+                          class="no-print"
+                          aria-label="Toggle player and school names"
+                          @click="toggle">
+                    <span {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Show School Names</span>
+                    <span {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>Show Player Names</span>
+                </c-button>
+            </c-slot>
+        {% endif %}
         {% if scores %}
             <c-table id="result_list" aria_label="Score leaderboard">
                 <c-slot name="headers">
@@ -17,7 +38,12 @@
                             Rank
                         </c-table_header>
                         <c-table_header sortable="false">
-                            Team
+                            {% if is_admin %}
+                                <span {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Team</span>
+                                <span {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>School</span>
+                            {% else %}
+                                Team
+                            {% endif %}
                         </c-table_header>
                         <c-table_header sortable="false"
                                         class="text-right"
@@ -61,7 +87,20 @@
                         </td>
                         <td>
                             <a href="{% url 'leaderboard_scorecard' score.team.team_number %}"
-                               title="View scorecard">Team {{ score.team.team_number }}</a>
+                               title="View scorecard">
+                                {% if is_admin %}
+                                    <span class="team-name" {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Team {{ score.team.team_number }}</span>
+                                    <span class="school-name" {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>
+                                        {% if score.school_name %}
+                                            {{ score.school_name }}
+                                        {% else %}
+                                            Team {{ score.team.team_number }}
+                                        {% endif %}
+                                    </span>
+                                {% else %}
+                                    Team {{ score.team.team_number }}
+                                {% endif %}
+                            </a>
                         </td>
                         <td class="text-right">{{ score.service_points|floatformat:0 }}</td>
                         <td class="text-right">{{ score.inject_points|floatformat:0 }}</td>

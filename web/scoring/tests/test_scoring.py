@@ -36,7 +36,7 @@ from scoring.models import (
     ScoringTemplate,
     ServiceScore,
 )
-from team.models import Team
+from team.models import SchoolInfo, Team
 
 
 class ScoringFormulaTests(TestCase):
@@ -308,6 +308,66 @@ class TestLeaderboardAccess:
         response = client.get(reverse("leaderboard_page"))
 
         assert response.status_code == 200
+
+    def test_leaderboard_has_single_header(self, create_user_with_groups) -> None:
+        """The leaderboard page should only have one header that says Leaderboard."""
+        user = create_user_with_groups("gold_user", ["WCComps_GoldTeam"])
+        client = Client()
+        client.force_login(user)
+
+        response = client.get(reverse("leaderboard_page"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "<h2>Leaderboard</h2>" not in content
+        assert "breadcrumbs" in content
+        assert "Leaderboard" in content
+
+    def test_discord_admin_can_toggle_school_names(self, create_user_with_groups) -> None:
+        """Discord admin sees the school names toggle button and school name markup."""
+        team = Team.objects.create(team_number=1, team_name="Team 1")
+        SchoolInfo.objects.create(team=team, school_name="Test University", contact_email="test@example.edu")
+        ServiceScore.objects.create(team=team, service_points=100)
+
+        admin_user = create_user_with_groups("admin_user", ["WCComps_Discord_Admin"])
+        client = Client()
+        client.force_login(admin_user)
+
+        response = client.get(reverse("leaderboard_page"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "toggle-names-btn" in content
+        assert "Show School Names" in content
+        assert "Show Player Names" in content
+        assert "Test University" in content
+        assert "Team 1" in content
+
+    def test_discord_admin_schools_query_param(self, create_user_with_groups) -> None:
+        """Discord admin with ?schools=1 loads with show_schools active."""
+        admin_user = create_user_with_groups("admin_user", ["WCComps_Discord_Admin"])
+        client = Client()
+        client.force_login(admin_user)
+
+        response = client.get(reverse("leaderboard_page") + "?schools=1")
+        assert response.status_code == 200
+        assert response.context["show_schools"] is True
+
+    def test_non_admin_cannot_toggle_school_names(self, create_user_with_groups) -> None:
+        """Non-admin roles should not see the toggle button or school names."""
+        team = Team.objects.create(team_number=1, team_name="Team 1")
+        SchoolInfo.objects.create(team=team, school_name="Test University", contact_email="test@example.edu")
+        ServiceScore.objects.create(team=team, service_points=100)
+
+        gold_user = create_user_with_groups("gold_user", ["WCComps_GoldTeam"])
+        client = Client()
+        client.force_login(gold_user)
+
+        response = client.get(reverse("leaderboard_page") + "?schools=1")
+        assert response.status_code == 200
+        assert response.context.get("show_schools", False) is False
+        content = response.content.decode()
+        assert "toggle-names-btn" not in content
+        assert "Show School Names" not in content
+        assert "Test University" not in content
 
 
 class InjectScoreApprovalTests(TestCase):

@@ -7,7 +7,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 from django.template.loader import render_to_string
 
-from core.auth_utils import require_permission
+from core.auth_utils import has_permission, require_permission
 
 from ..calculator import Standing, calculate_team_score_detailed, compute_standings, get_leaderboard, get_standing
 from ..models import InjectScore, OrangeTeamScore, RedTeamScore, ServiceDetail
@@ -66,7 +66,19 @@ class _ScorecardStats(TypedDict):
 )
 def leaderboard(request: HttpRequest) -> HttpResponse:
     """Restricted leaderboard view."""
-    return render(request, "scoring/leaderboard.html", {"scores": get_leaderboard()})
+    is_admin = has_permission(request.user, "admin")
+    show_schools = is_admin and (
+        request.GET.get("schools", "").lower() in ("1", "true", "yes")
+        or request.GET.get("names", "").lower() in ("school", "schools")
+    )
+    return render(
+        request,
+        "scoring/leaderboard.html",
+        {
+            "scores": get_leaderboard(),
+            "show_schools": show_schools,
+        },
+    )
 
 
 def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _ScorecardStats:

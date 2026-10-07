@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import TypedDict
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, QuerySet, Sum
 from django.http import Http404
 
@@ -218,13 +219,20 @@ class Standing:
     def has_scoring_activity(self) -> bool:
         return any(getattr(self, field) != 0 for field in SCORE_COMPONENT_FIELDS)
 
+    @property
+    def school_name(self) -> str:
+        try:
+            return self.team.school_info.school_name
+        except ObjectDoesNotExist:
+            return ""
+
 
 def compute_standings() -> list[Standing]:
     """Every active team's score, highest first.
 
     Teams with scoring activity that are not excluded are ranked 1..n; the rest have rank None.
     """
-    teams = list(Team.objects.filter(is_active=True).order_by("team_number"))
+    teams = list(Team.objects.filter(is_active=True).select_related("school_info").order_by("team_number"))
     raw = _raw_scores(teams)
     template = _template()
     excluded_team_ids = set(ScoringExclusion.objects.values_list("team_id", flat=True))
