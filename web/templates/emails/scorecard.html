@@ -84,6 +84,17 @@
                 background: #dbeafe;
             }
 
+            .advisory {
+                background: #fffbeb;
+                border-left: 4px solid #f59e0b;
+                padding: 15px;
+                border-radius: 4px;
+                margin: 20px 0;
+                font-size: 14px;
+                color: #78350f;
+                line-height: 1.5;
+            }
+
             .footer {
                 text-align: center;
                 padding: 20px;
@@ -149,6 +160,9 @@
                         <td>{{ total_score }}</td>
                     </tr>
                 </table>
+                {% if custom_message %}
+                    <div class="advisory">{{ custom_message|linebreaksbr }}</div>
+                {% endif %}
                 <p>Thank you for participating!</p>
             </div>
             <div class="footer">

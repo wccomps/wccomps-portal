@@ -15,7 +15,9 @@ Score Summary:
 Total Score: {{ total_score }}
 Rank: {{ rank }} of {{ total_teams }}
 
-Thank you for participating!
+{% if custom_message %}{{ custom_message }}
+
+{% endif %}Thank you for participating!
 
 ---
 WCComps Competition{% endautoescape %}

@@ -77,6 +77,7 @@ def leaderboard(request: HttpRequest) -> HttpResponse:
         {
             "scores": get_leaderboard(),
             "show_schools": show_schools,
+            "is_admin": is_admin,
         },
     )
 
