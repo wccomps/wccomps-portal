@@ -89,7 +89,7 @@
             showWarning: true,
             showForm: true,
             done: false,
-            customMessage: `{{ default_message|escapejs }}`,
+            customMessage: '',
             setField(e) { this[e.target.dataset.field] = e.target.value; },
 
             async sendEmails() {
