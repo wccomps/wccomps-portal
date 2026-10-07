@@ -166,6 +166,14 @@ body.dashboard #content {
     color: #fff;
 }
 
+/* Action links styled as buttons */
+a.button {
+    display: inline-block;
+    text-align: center;
+    vertical-align: middle;
+    box-sizing: border-box;
+}
+
 
 /* Team status in mappings page */
 .field-status > div:first-child {
@@ -1031,5 +1039,10 @@ td textarea[x-ref="editor"] {
 }
 #content-main:not(.show-schools) .school-name {
     display: none;
+}
+table thead th .text span .team-name,
+table thead th .text span .school-name {
+    padding: 0;
+    display: inline;
 }
 

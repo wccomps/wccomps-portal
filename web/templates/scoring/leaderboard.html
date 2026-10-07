@@ -99,9 +99,7 @@
                             </td>
                             <td class="text-right">{{ score.service_points|floatformat:0 }}</td>
                             <td class="text-right">{{ score.inject_points|floatformat:0 }}</td>
-                            <td class="text-right">
-                                <c-score_value :value="score.orange_points" format="signed" />
-                            </td>
+                            <td class="text-right">{{ score.orange_points|floatformat:0 }}</td>
                             <td class="text-right">
                                 <c-score_value :value="score.red_deductions" />
                             </td>
@@ -134,26 +132,20 @@
                 </c-empty_state>
             {% endif %}
             <c-button_row class="mt-10 justify-end">
-                <c-link href="{% url 'scoring:export_scorecards' %}"
-                        variant="default"
-                        class="button">Download All PDFs</c-link>
-                <c-link href="{% url 'scoring:api_scores' %}"
-                        variant="default"
-                        class="button">JSON</c-link>
+                <c-link href="{% url 'scoring:export_scorecards' %}" variant="primary">Download All PDFs</c-link>
+                <c-link href="{% url 'scoring:api_scores' %}" variant="primary">JSON</c-link>
                 {% if is_gold_team or is_admin %}
-                    <c-link href="{% url 'scoring:email_scorecards' %}"
-                            variant="default"
-                            class="button">Email All Scorecards</c-link>
+                    <c-link href="{% url 'scoring:email_scorecards' %}" variant="primary">Email All Scorecards</c-link>
                     <form method="post" action="{% url 'scoring:sync_scores' %}" class="m-0">
                         {% csrf_token %}
-                        <c-button type="submit" variant="default">
+                        <c-button type="submit" variant="primary">
                             Sync Service Scores
                         </c-button>
                     </form>
                 {% endif %}
                 {% if is_admin %}
                     <c-button type="button"
-                              variant="default"
+                              variant="primary"
                               id="toggle-names-btn"
                               class="no-print"
                               aria-label="Toggle player and school names"

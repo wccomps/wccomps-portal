@@ -369,6 +369,42 @@ class TestLeaderboardAccess:
         assert "Show School Names" not in content
         assert "Test University" not in content
 
+    def test_leaderboard_orange_points_plain_white(self, create_user_with_groups) -> None:
+        """Orange team points should render as plain text, not green with +."""
+        from scoring.models import OrangeTeamScore, ScoringTemplate
+
+        ScoringTemplate.objects.create(service_max=Decimal("40"), inject_max=Decimal("40"), orange_max=Decimal("20"))
+        team = Team.objects.create(team_number=1, team_name="Team 1")
+        OrangeTeamScore.objects.create(team=team, points_awarded=Decimal("25"), description="test", is_approved=True)
+
+        admin_user = create_user_with_groups("admin_user", ["WCComps_Discord_Admin"])
+        client = Client()
+        client.force_login(admin_user)
+
+        response = client.get(reverse("leaderboard_page"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        # Should render 25 as plain text in the table cell, not wrapped in score-positive or signed +
+        assert '<td class="text-right">25</td>' in content
+        assert "+25" not in content
+
+    def test_leaderboard_buttons_primary_styling(self, create_user_with_groups) -> None:
+        """Buttons at the bottom of leaderboard should use primary button styling."""
+        admin_user = create_user_with_groups("admin_user", ["WCComps_Discord_Admin"])
+        client = Client()
+        client.force_login(admin_user)
+
+        response = client.get(reverse("leaderboard_page"))
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "Download All PDFs" in content
+        assert "JSON" in content
+        assert "Email All Scorecards" in content
+        assert "Sync Service Scores" in content
+        # Links and buttons should have the 'button default' class
+        assert 'class="button default "' in content
+        assert 'class="button  default "' in content or 'class="button default "' in content
+
 
 class InjectScoreApprovalTests(TestCase):
     """Test approval tracking fields on InjectScore model."""
