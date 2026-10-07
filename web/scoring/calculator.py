@@ -226,6 +226,10 @@ class Standing:
         except ObjectDoesNotExist:
             return ""
 
+    @property
+    def school_emails(self) -> list[str]:
+        return self.team.school_emails
+
 
 def compute_standings() -> list[Standing]:
     """Every active team's score, highest first.

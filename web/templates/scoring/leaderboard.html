@@ -9,7 +9,7 @@
         function registerLeaderboardNames() {
             Alpine.data('leaderboardNames', () => ({
                 showSchools: {% if show_schools %}true{% else %}false{% endif %},
-                get showTeams() { return !this.showSchools; },
+                get namesClass() { return this.showSchools ? 'show-schools' : ''; },
                 toggle() { this.showSchools = !this.showSchools; },
             }));
         }
@@ -21,7 +21,8 @@
         </script>
     {% endif %}
     <div id="content-main"
-         {% if is_admin %}x-data="leaderboardNames"{% endif %}>
+         class="{% if show_schools %}show-schools{% endif %}"
+         {% if is_admin %}x-data="leaderboardNames" :class="namesClass"{% endif %}>
         <c-page_header title="Leaderboard" />
         <c-module>
             {% if scores %}
@@ -33,8 +34,8 @@
                             </c-table_header>
                             <c-table_header sortable="false">
                                 {% if is_admin %}
-                                    <span {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Team</span>
-                                    <span {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>School</span>
+                                    <span class="team-name">Team</span>
+                                    <span class="school-name">School</span>
                                 {% else %}
                                     Team
                                 {% endif %}
@@ -83,10 +84,8 @@
                                 <a href="{% url 'leaderboard_scorecard' score.team.team_number %}"
                                    title="View scorecard">
                                     {% if is_admin %}
-                                        <span class="team-name"
-                                              {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Team {{ score.team.team_number }}</span>
-                                        <span class="school-name"
-                                              {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>
+                                        <span class="team-name">Team {{ score.team.team_number }}</span>
+                                        <span class="school-name">
                                             {% if score.school_name %}
                                                 {{ score.school_name }}
                                             {% else %}
@@ -159,8 +158,8 @@
                               class="no-print"
                               aria-label="Toggle player and school names"
                               @click="toggle">
-                        <span {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Show School Names</span>
-                        <span {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>Show Player Names</span>
+                        <span class="team-name">Show School Names</span>
+                        <span class="school-name">Show Player Names</span>
                     </c-button>
                 {% endif %}
             </c-button_row>

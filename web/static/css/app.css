@@ -1022,3 +1022,14 @@ td textarea[x-ref="editor"] {
         margin-top: 4px;
     }
 }
+
+/* ============================================
+   LEADERBOARD (Team/School Name Toggle)
+   ============================================ */
+#content-main.show-schools .team-name {
+    display: none;
+}
+#content-main:not(.show-schools) .school-name {
+    display: none;
+}
+

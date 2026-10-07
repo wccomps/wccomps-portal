@@ -2,7 +2,7 @@ import logging
 from collections.abc import Iterable
 
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
 from django.db.models.base import ModelBase
 from django.utils import timezone
@@ -92,6 +92,14 @@ class Team(models.Model):
 
     def is_full(self) -> bool:
         return self.get_member_count() >= self.max_members
+
+    @property
+    def school_emails(self) -> list[str]:
+        """Contact emails for this team from SchoolInfo, or empty list if none."""
+        try:
+            return self.school_info.emails
+        except ObjectDoesNotExist:
+            return []
 
 
 class DiscordLink(models.Model):
@@ -297,3 +305,8 @@ class SchoolInfo(models.Model):
 
     def __str__(self) -> str:
         return f"{self.school_name} (Team {self.team.team_number})"
+
+    @property
+    def emails(self) -> list[str]:
+        """All non-empty contact emails for the school."""
+        return [e for e in (self.contact_email, self.secondary_email) if e]
