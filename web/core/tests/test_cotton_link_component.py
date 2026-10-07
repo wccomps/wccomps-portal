@@ -37,6 +37,18 @@ class TestCottonLinkComponent:
         html = self._render('<c-link href="/test">Plain</c-link>')
         assert 'role="button"' not in html
 
+    def test_cancel_variant_renders_button_role(self) -> None:
+        """variant='cancel' renders class='btn-secondary' and role='button'."""
+        html = self._render('<c-link href="/test" variant="cancel">Cancel</c-link>')
+        assert 'class="btn-secondary "' in html
+        assert 'role="button"' in html
+
+    def test_btn_class_renders_button_role(self) -> None:
+        """Explicit class containing 'btn' renders role='button'."""
+        html = self._render('<c-link href="/test" class="btn btn-secondary">Back</c-link>')
+        assert 'class="btn btn-secondary"' in html
+        assert 'role="button"' in html
+
     def test_explicit_role_is_preserved(self) -> None:
         """Explicit role should be preserved and not overwritten."""
         html = self._render('<c-link href="/test" role="tab">Tab</c-link>')

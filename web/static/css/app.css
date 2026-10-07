@@ -397,14 +397,24 @@ a.button:active {
 
 /* Secondary button */
 .btn-secondary {
+    display: inline-block;
     padding: 5px 10px;
     font-size: 13px;
     border: 1px solid var(--hairline-color, #ddd);
     background: var(--body-bg, white);
+    color: var(--body-fg);
     border-radius: 4px;
     cursor: pointer;
+    text-decoration: none !important;
+    vertical-align: middle;
+    box-sizing: border-box;
 }
-.btn-secondary:hover { background: var(--darkened-bg, #f8f8f8); }
+.btn-secondary:hover,
+.btn-secondary:focus {
+    background: var(--darkened-bg, #f8f8f8);
+    text-decoration: none !important;
+    color: var(--body-fg);
+}
 
 /* Team selector button */
 .team-btn {

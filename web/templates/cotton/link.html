@@ -3,7 +3,7 @@
 <c-vars href="#" variant="default" class id role="" />
 <a href="{{ href }}"
    {% if id %}id="{{ id }}"{% endif %}
-   {% if role %}role="{{ role }}"{% elif variant == 'primary' or variant == 'danger' or 'button' in class %}role="button"{% endif %}
+   {% if role %}role="{{ role }}"{% elif variant == 'primary' or variant == 'danger' or variant == 'cancel' or 'button' in class or 'btn' in class %}role="button"{% endif %}
    {{ attrs }}
    class="{% if variant == 'primary' %}button default {% elif variant == 'history' %}historylink {% elif variant == 'add' %}addlink {% elif variant == 'change' %}changelink {% elif variant == 'danger' %}button warning{% elif variant == 'cancel' %}btn-secondary {% endif %}{{ class }}">
     {{ slot }}
