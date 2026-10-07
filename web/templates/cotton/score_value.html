@@ -6,6 +6,5 @@
 {% with num_value=value|add:0 %}
     <span {{ attrs }}
           class="{% if num_value > 0 %}score-positive{% elif num_value < 0 %}score-negative{% else %}score-zero{% endif %}">
-        {% if format == "signed" and num_value > 0 %}+{% endif %}
-    {{ value }}</span>
+    {% if format == "signed" and num_value > 0 %}+{% endif %}{{ value|floatformat:0 }}</span>
 {% endwith %}

@@ -1,46 +1,49 @@
+import io
+import json
+import logging
+import zipfile
 from collections.abc import Iterator
 
+import weasyprint
+from django.conf import settings
+from django.contrib import messages
+from django.core import mail
 from django.http import HttpRequest, HttpResponse, StreamingHttpResponse
+from django.shortcuts import redirect, render
+from django.template.loader import render_to_string
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from core.auth_utils import require_permission
 from core.utils import ndjson_progress, run_detached
 
+from .. import export
 from ..calculator import Standing, compute_standings, get_leaderboard, get_standing
 from ..forms import ScorecardEmailForm
 from .leaderboard import build_scorecard_context
 
+logger = logging.getLogger(__name__)
+
 
 @require_permission("gold_team", error_message="Only Gold Team members can access this")
 def export_index(request: HttpRequest) -> HttpResponse:
-    from django.shortcuts import render
-
     return render(request, "scoring/export_index.html")
 
 
 @require_permission("gold_team", error_message="Only Gold Team members can access this")
 def export_dataset(request: HttpRequest, dataset: str) -> HttpResponse:
-    from .. import export
-
     return export.export_dataset(dataset, request.GET.get("format", "csv").lower())
 
 
 @require_permission("gold_team", error_message="Only Gold Team members can access this")
 def export_all(request: HttpRequest) -> HttpResponse:
     """Export all scoring data as a zip file (admin only)."""
-    from ..export import export_all_zip
-
-    return export_all_zip()
+    return export.export_all_zip()
 
 
 @require_permission("gold_team", error_message="Only Gold Team members can access this")
 def export_scorecards(request: HttpRequest) -> HttpResponse:
     """Export all team scorecards as a zip of PDFs."""
-    import io
-    import zipfile
-
-    from django.utils import timezone
-
     standings = compute_standings()
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -59,20 +62,12 @@ def _send_scorecard_email(
     recipients: list[str], context: dict[str, object], team_number: int, pdf_bytes: bytes
 ) -> bool:
     """Send a scorecard email using Django's email backend."""
-    import logging
-
-    from django.conf import settings
-    from django.core.mail import EmailMultiAlternatives
-    from django.template.loader import render_to_string
-
-    logger = logging.getLogger(__name__)
-
     try:
         subject = render_to_string("emails/scorecard_subject.txt", context).strip()
         text_content = render_to_string("emails/scorecard.txt", context)
         html_content = render_to_string("emails/scorecard.html", context)
 
-        email = EmailMultiAlternatives(
+        email = mail.EmailMultiAlternatives(
             subject=subject,
             body=text_content,
             from_email=settings.DEFAULT_FROM_EMAIL,
@@ -89,17 +84,8 @@ def _send_scorecard_email(
 
 def _build_email_context(score: Standing, total_teams: int, custom_message: str = "") -> dict[str, object]:
     """Build email template context for a team's scorecard."""
-    from django.utils import timezone
-
-    from team.models import SchoolInfo
-
     team = score.team
-
-    try:
-        school_info = team.school_info
-        school_name = school_info.school_name
-    except SchoolInfo.DoesNotExist:
-        school_name = team.team_name
+    school_name = score.school_name or team.team_name
 
     return {
         "event_date": timezone.now(),
@@ -120,9 +106,6 @@ def _build_email_context(score: Standing, total_teams: int, custom_message: str 
 
 
 def _generate_team_pdf(score: Standing, standings: list[Standing], request: HttpRequest) -> bytes:
-    import weasyprint
-    from django.template.loader import render_to_string
-
     context = build_scorecard_context(score, standings)
     html_string = render_to_string("scoring/scorecard_print.html", context, request=request)
     pdf_bytes: bytes = weasyprint.HTML(string=html_string).write_pdf()
@@ -131,28 +114,11 @@ def _generate_team_pdf(score: Standing, standings: list[Standing], request: Http
 
 def _stream_email_scorecards(request: HttpRequest, custom_message: str = "") -> Iterator[str]:
     """Generator that sends scorecard emails and yields NDJSON progress."""
-    import json
-    import logging
-
-    from team.models import SchoolInfo
-
-    logger = logging.getLogger(__name__)
-
     standings = compute_standings()
     scores = get_leaderboard(standings)
     total_teams = len(scores)
 
-    sendable = []
-    for score in scores:
-        team = score.team
-        try:
-            school_info = team.school_info
-            emails = [school_info.contact_email]
-            if school_info.secondary_email:
-                emails.append(school_info.secondary_email)
-            sendable.append((team, score, emails))
-        except SchoolInfo.DoesNotExist:
-            continue
+    sendable = [(score.team, score, score.school_emails) for score in scores if score.school_emails]
 
     total = len(sendable)
     if total == 0:
@@ -181,44 +147,22 @@ def _stream_email_scorecards(request: HttpRequest, custom_message: str = "") -> 
 @require_permission("gold_team", error_message="Only Gold Team members can email scorecards")
 def email_scorecards(request: HttpRequest) -> HttpResponse:
     """Email scorecards confirmation page (GET only)."""
-    from django.contrib import messages
-    from django.shortcuts import redirect, render
-
-    from team.models import SchoolInfo
-
     scores = get_leaderboard()
 
     if not scores:
         messages.error(request, "No ranked teams yet.")
         return redirect("leaderboard_page")
 
-    team_rows = []
-    for score in scores:
-        team = score.team
-        try:
-            school_info = team.school_info
-            emails_list = [school_info.contact_email]
-            if school_info.secondary_email:
-                emails_list.append(school_info.secondary_email)
-            team_rows.append(
-                {
-                    "team": team,
-                    "score": score,
-                    "school_name": school_info.school_name,
-                    "emails": emails_list,
-                    "has_email": True,
-                }
-            )
-        except SchoolInfo.DoesNotExist:
-            team_rows.append(
-                {
-                    "team": team,
-                    "score": score,
-                    "school_name": "",
-                    "emails": [],
-                    "has_email": False,
-                }
-            )
+    team_rows = [
+        {
+            "team": score.team,
+            "score": score,
+            "school_name": score.school_name,
+            "emails": score.school_emails,
+            "has_email": bool(score.school_emails),
+        }
+        for score in scores
+    ]
 
     teams_with_email = sum(1 for r in team_rows if r["has_email"])
     teams_without_email = sum(1 for r in team_rows if not r["has_email"])
@@ -240,7 +184,7 @@ def email_scorecards(request: HttpRequest) -> HttpResponse:
 def stream_email_scorecards(request: HttpRequest) -> StreamingHttpResponse:
     """Stream scorecard email sending progress as NDJSON."""
     form = ScorecardEmailForm(request.POST)
-    custom_message = form.cleaned_data["custom_message"].strip() if form.is_valid() else ""
+    custom_message = form.get_custom_message()
     return StreamingHttpResponse(
         run_detached(_stream_email_scorecards(request, custom_message=custom_message)),
         content_type="application/x-ndjson",
@@ -250,28 +194,19 @@ def stream_email_scorecards(request: HttpRequest) -> StreamingHttpResponse:
 @require_permission("gold_team", error_message="Only Gold Team members can email scorecards")
 def email_scorecard(request: HttpRequest, team_number: int) -> HttpResponse:
     """Email scorecard to a single team. GET shows confirmation, POST sends."""
-    from django.contrib import messages
-    from django.shortcuts import redirect, render
-
-    from team.models import SchoolInfo
-
     standings = compute_standings()
     score = get_standing(team_number, standings)
     team = score.team
+    emails = score.school_emails
+    school_name = score.school_name
 
-    try:
-        school_info = team.school_info
-        emails = [school_info.contact_email]
-        if school_info.secondary_email:
-            emails.append(school_info.secondary_email)
-        school_name = school_info.school_name
-    except SchoolInfo.DoesNotExist:
+    if not emails:
         messages.error(request, f"Team {team_number} has no school info / contact email.")
         return redirect("leaderboard_scorecard", team_number=team_number)
 
     if request.method == "POST":
         form = ScorecardEmailForm(request.POST)
-        custom_message = form.cleaned_data["custom_message"].strip() if form.is_valid() else ""
+        custom_message = form.get_custom_message()
         email_ctx = _build_email_context(score, len(get_leaderboard(standings)), custom_message=custom_message)
         pdf_bytes = _generate_team_pdf(score, standings, request)
 

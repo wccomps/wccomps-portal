@@ -9,7 +9,7 @@
         function registerLeaderboardNames() {
             Alpine.data('leaderboardNames', () => ({
                 showSchools: {% if show_schools %}true{% else %}false{% endif %},
-                get showTeams() { return !this.showSchools; },
+                get namesClass() { return this.showSchools ? 'show-schools' : ''; },
                 toggle() { this.showSchools = !this.showSchools; },
             }));
         }
@@ -21,7 +21,8 @@
         </script>
     {% endif %}
     <div id="content-main"
-         {% if is_admin %}x-data="leaderboardNames"{% endif %}>
+         class="{% if show_schools %}show-schools{% endif %}"
+         {% if is_admin %}x-data="leaderboardNames" :class="namesClass"{% endif %}>
         <c-page_header title="Leaderboard" />
         <c-module>
             {% if scores %}
@@ -33,8 +34,8 @@
                             </c-table_header>
                             <c-table_header sortable="false">
                                 {% if is_admin %}
-                                    <span {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Team</span>
-                                    <span {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>School</span>
+                                    <span class="team-name">Team</span>
+                                    <span class="school-name">School</span>
                                 {% else %}
                                     Team
                                 {% endif %}
@@ -83,10 +84,8 @@
                                 <a href="{% url 'leaderboard_scorecard' score.team.team_number %}"
                                    title="View scorecard">
                                     {% if is_admin %}
-                                        <span class="team-name"
-                                              {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Team {{ score.team.team_number }}</span>
-                                        <span class="school-name"
-                                              {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>
+                                        <span class="team-name">Team {{ score.team.team_number }}</span>
+                                        <span class="school-name">
                                             {% if score.school_name %}
                                                 {{ score.school_name }}
                                             {% else %}
@@ -100,9 +99,7 @@
                             </td>
                             <td class="text-right">{{ score.service_points|floatformat:0 }}</td>
                             <td class="text-right">{{ score.inject_points|floatformat:0 }}</td>
-                            <td class="text-right">
-                                <c-score_value :value="score.orange_points" format="signed" />
-                            </td>
+                            <td class="text-right">{{ score.orange_points|floatformat:0 }}</td>
                             <td class="text-right">
                                 <c-score_value :value="score.red_deductions" />
                             </td>
@@ -135,32 +132,26 @@
                 </c-empty_state>
             {% endif %}
             <c-button_row class="mt-10 justify-end">
-                <c-link href="{% url 'scoring:export_scorecards' %}"
-                        variant="default"
-                        class="button">Download All PDFs</c-link>
-                <c-link href="{% url 'scoring:api_scores' %}"
-                        variant="default"
-                        class="button">JSON</c-link>
+                <c-link href="{% url 'scoring:export_scorecards' %}" variant="primary">Download All PDFs</c-link>
+                <c-link href="{% url 'scoring:api_scores' %}" variant="primary">JSON</c-link>
                 {% if is_gold_team or is_admin %}
-                    <c-link href="{% url 'scoring:email_scorecards' %}"
-                            variant="default"
-                            class="button">Email All Scorecards</c-link>
+                    <c-link href="{% url 'scoring:email_scorecards' %}" variant="primary">Email All Scorecards</c-link>
                     <form method="post" action="{% url 'scoring:sync_scores' %}" class="m-0">
                         {% csrf_token %}
-                        <c-button type="submit" variant="default">
+                        <c-button type="submit" variant="primary">
                             Sync Service Scores
                         </c-button>
                     </form>
                 {% endif %}
                 {% if is_admin %}
                     <c-button type="button"
-                              variant="default"
+                              variant="primary"
                               id="toggle-names-btn"
                               class="no-print"
                               aria-label="Toggle player and school names"
                               @click="toggle">
-                        <span {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Show School Names</span>
-                        <span {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>Show Player Names</span>
+                        <span class="team-name">Show School Names</span>
+                        <span class="school-name">Show Player Names</span>
                     </c-button>
                 {% endif %}
             </c-button_row>

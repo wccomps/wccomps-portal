@@ -420,3 +420,9 @@ class ApproveInjectFeedbackForm(forms.Form):
 
 class ScorecardEmailForm(forms.Form):
     custom_message = forms.CharField(required=False, widget=forms.Textarea)
+
+    def get_custom_message(self) -> str:
+        """Return stripped custom message if form is valid, else empty string."""
+        if self.is_valid():
+            return str(self.cleaned_data.get("custom_message", "")).strip()
+        return ""

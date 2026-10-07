@@ -73,3 +73,27 @@ class TestScoreValueComponentRendering:
         """Various values should get the appropriate CSS class."""
         html = self._render_component(value)
         assert expected_class in html
+
+    def test_decimal_zero_renders_as_integer_zero(self) -> None:
+        """Values like 0.00 or Decimal('0.00') should render as '0' without trailing decimals."""
+        from decimal import Decimal
+
+        template_str = '<c-score_value :value="val" />'
+        compiled = CottonCompiler().process(template_str)
+        template = Template(compiled)
+        html = template.render(Context({"val": Decimal("0.00")}))
+        assert "score-zero" in html
+        assert ">0<" in html.replace(" ", "").replace("\n", "")
+        assert "0.00" not in html
+
+    def test_decimal_signed_renders_as_integer(self) -> None:
+        """Signed decimal values with .00 should render without decimals."""
+        from decimal import Decimal
+
+        template_str = '<c-score_value :value="val" format="signed" />'
+        compiled = CottonCompiler().process(template_str)
+        template = Template(compiled)
+        html = template.render(Context({"val": Decimal("15.00")}))
+        assert "score-positive" in html
+        assert "+15" in html.replace(" ", "").replace("\n", "")
+        assert "15.00" not in html
