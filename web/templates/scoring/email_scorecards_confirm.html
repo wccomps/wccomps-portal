@@ -21,7 +21,9 @@
                               help_text="Optional message to include in all scorecard emails. Leave blank to omit.">
                     <textarea name="custom_message"
                               id="id_custom_message"
-                              x-model="customMessage"
+                              :value="customMessage"
+                              @input="setField"
+                              data-field="customMessage"
                               class="vLargeTextField"
                               rows="5"
                               ::disabled="loading"></textarea>
@@ -88,6 +90,7 @@
             showForm: true,
             done: false,
             customMessage: `{{ default_message|escapejs }}`,
+            setField(e) { this[e.target.dataset.field] = e.target.value; },
 
             async sendEmails() {
                 this.loading = true;

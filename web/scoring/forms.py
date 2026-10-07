@@ -416,3 +416,7 @@ class SaveInjectFeedbackForm(forms.Form):
 
 class ApproveInjectFeedbackForm(forms.Form):
     score_id = forms.IntegerField()
+
+
+class ScorecardEmailForm(forms.Form):
+    custom_message = forms.CharField(required=False, widget=forms.Textarea)
