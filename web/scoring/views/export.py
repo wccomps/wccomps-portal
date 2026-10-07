@@ -7,6 +7,7 @@ from core.auth_utils import require_permission
 from core.utils import ndjson_progress, run_detached
 
 from ..calculator import Standing, compute_standings, get_leaderboard, get_standing
+from ..forms import ScorecardEmailForm
 from .leaderboard import build_scorecard_context
 
 
@@ -248,7 +249,8 @@ def email_scorecards(request: HttpRequest) -> HttpResponse:
 @require_permission("gold_team", error_message="Only Gold Team members can email scorecards")
 def stream_email_scorecards(request: HttpRequest) -> StreamingHttpResponse:
     """Stream scorecard email sending progress as NDJSON."""
-    custom_message = request.POST.get("custom_message", "").strip()
+    form = ScorecardEmailForm(request.POST)
+    custom_message = form.cleaned_data["custom_message"].strip() if form.is_valid() else ""
     return StreamingHttpResponse(
         run_detached(_stream_email_scorecards(request, custom_message=custom_message)),
         content_type="application/x-ndjson",
@@ -278,7 +280,8 @@ def email_scorecard(request: HttpRequest, team_number: int) -> HttpResponse:
         return redirect("leaderboard_scorecard", team_number=team_number)
 
     if request.method == "POST":
-        custom_message = request.POST.get("custom_message", "").strip()
+        form = ScorecardEmailForm(request.POST)
+        custom_message = form.cleaned_data["custom_message"].strip() if form.is_valid() else ""
         email_ctx = _build_email_context(score, len(get_leaderboard(standings)), custom_message=custom_message)
         pdf_bytes = _generate_team_pdf(score, standings, request)
 
