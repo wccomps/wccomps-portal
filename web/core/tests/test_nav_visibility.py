@@ -58,9 +58,9 @@ EXPECTED_PRIMARY_NAV: dict[str, set[str]] = {
     "blue_team": {"Incident Report"},
     "red_team": {"Red Team Findings", "Leaderboard"},
     "gold_team": {"Incident Report", "Orange Team", "Leaderboard", "Scoring Review", "White Team", "Competition"},
-    "orange_team": {"Orange Team"},
+    "orange_team": {"Orange Team", "Leaderboard"},
     "white_team": {"Incident Report", "Leaderboard", "Scoring Review", "White Team"},
-    "ticketing_support": {"Tickets"},
+    "ticketing_support": {"Tickets", "Leaderboard"},
     "ticketing_admin": {"Tickets", "Leaderboard"},
     "admin": {
         "Tickets",

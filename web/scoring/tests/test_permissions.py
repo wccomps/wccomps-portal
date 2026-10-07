@@ -4,6 +4,8 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
+from team.models import Team
+
 pytestmark = pytest.mark.django_db
 
 
@@ -44,19 +46,19 @@ class TestLeaderboardPermissions:
         response = client.get(reverse("leaderboard_page"))
         assert response.status_code == 200
 
-    def test_orange_team_denied(self, orange_team_user):
-        """Orange Team should not access leaderboard."""
+    def test_orange_team_allowed(self, orange_team_user):
+        """Orange Team should access leaderboard."""
         client = Client()
         client.force_login(orange_team_user)
         response = client.get(reverse("leaderboard_page"))
-        assert response.status_code == 302
+        assert response.status_code == 200
 
-    def test_ticketing_support_denied(self, ticketing_support_user):
-        """Ticketing Support should not access leaderboard."""
+    def test_ticketing_support_allowed(self, ticketing_support_user):
+        """Ticketing Support should access leaderboard."""
         client = Client()
         client.force_login(ticketing_support_user)
         response = client.get(reverse("leaderboard_page"))
-        assert response.status_code == 302
+        assert response.status_code == 200
 
     def test_ticketing_admin_allowed(self, ticketing_admin_user):
         """Ticketing Admin should access leaderboard."""
@@ -71,6 +73,94 @@ class TestLeaderboardPermissions:
         client.force_login(admin_user)
         response = client.get(reverse("leaderboard_page"))
         assert response.status_code == 200
+
+
+class TestScorecardPermissions:
+    """Test permissions for scorecard and scorecard PDF views."""
+
+    @pytest.fixture
+    def test_team(self):
+        return Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
+
+    def test_unauthenticated_redirects_to_login(self, unauthenticated_client, test_team):
+        """Unauthenticated users should be redirected to login."""
+        response = unauthenticated_client.get(reverse("leaderboard_scorecard", args=[test_team.team_number]))
+        assert response.status_code == 302
+        assert "/accounts/" in response.url or "login" in response.url
+
+        pdf_response = unauthenticated_client.get(reverse("leaderboard_scorecard_pdf", args=[test_team.team_number]))
+        assert pdf_response.status_code == 302
+        assert "/accounts/" in pdf_response.url or "login" in pdf_response.url
+
+    def test_blue_team_denied(self, blue_team_user, test_team):
+        """Blue Team should not access scorecard or PDF export."""
+        client = Client()
+        client.force_login(blue_team_user)
+        assert client.get(reverse("leaderboard_scorecard", args=[test_team.team_number])).status_code == 302
+        assert client.get(reverse("leaderboard_scorecard_pdf", args=[test_team.team_number])).status_code == 302
+
+    def test_red_team_allowed(self, red_team_user, test_team):
+        """Red Team should access scorecard and PDF export."""
+        client = Client()
+        client.force_login(red_team_user)
+        assert client.get(reverse("leaderboard_scorecard", args=[test_team.team_number])).status_code == 200
+        pdf_response = client.get(reverse("leaderboard_scorecard_pdf", args=[test_team.team_number]))
+        assert pdf_response.status_code == 200
+        assert pdf_response["Content-Type"] == "application/pdf"
+
+    def test_gold_team_allowed(self, gold_team_user, test_team):
+        """Gold Team should access scorecard and PDF export."""
+        client = Client()
+        client.force_login(gold_team_user)
+        assert client.get(reverse("leaderboard_scorecard", args=[test_team.team_number])).status_code == 200
+        pdf_response = client.get(reverse("leaderboard_scorecard_pdf", args=[test_team.team_number]))
+        assert pdf_response.status_code == 200
+        assert pdf_response["Content-Type"] == "application/pdf"
+
+    def test_white_team_allowed(self, white_team_user, test_team):
+        """White Team should access scorecard and PDF export."""
+        client = Client()
+        client.force_login(white_team_user)
+        assert client.get(reverse("leaderboard_scorecard", args=[test_team.team_number])).status_code == 200
+        pdf_response = client.get(reverse("leaderboard_scorecard_pdf", args=[test_team.team_number]))
+        assert pdf_response.status_code == 200
+        assert pdf_response["Content-Type"] == "application/pdf"
+
+    def test_orange_team_allowed(self, orange_team_user, test_team):
+        """Orange Team should access scorecard and PDF export."""
+        client = Client()
+        client.force_login(orange_team_user)
+        assert client.get(reverse("leaderboard_scorecard", args=[test_team.team_number])).status_code == 200
+        pdf_response = client.get(reverse("leaderboard_scorecard_pdf", args=[test_team.team_number]))
+        assert pdf_response.status_code == 200
+        assert pdf_response["Content-Type"] == "application/pdf"
+
+    def test_ticketing_support_allowed(self, ticketing_support_user, test_team):
+        """Ticketing Support should access scorecard and PDF export."""
+        client = Client()
+        client.force_login(ticketing_support_user)
+        assert client.get(reverse("leaderboard_scorecard", args=[test_team.team_number])).status_code == 200
+        pdf_response = client.get(reverse("leaderboard_scorecard_pdf", args=[test_team.team_number]))
+        assert pdf_response.status_code == 200
+        assert pdf_response["Content-Type"] == "application/pdf"
+
+    def test_ticketing_admin_allowed(self, ticketing_admin_user, test_team):
+        """Ticketing Admin should access scorecard and PDF export."""
+        client = Client()
+        client.force_login(ticketing_admin_user)
+        assert client.get(reverse("leaderboard_scorecard", args=[test_team.team_number])).status_code == 200
+        pdf_response = client.get(reverse("leaderboard_scorecard_pdf", args=[test_team.team_number]))
+        assert pdf_response.status_code == 200
+        assert pdf_response["Content-Type"] == "application/pdf"
+
+    def test_admin_allowed(self, admin_user, test_team):
+        """Admin (Gold Team) should access scorecard and PDF export."""
+        client = Client()
+        client.force_login(admin_user)
+        assert client.get(reverse("leaderboard_scorecard", args=[test_team.team_number])).status_code == 200
+        pdf_response = client.get(reverse("leaderboard_scorecard_pdf", args=[test_team.team_number]))
+        assert pdf_response.status_code == 200
+        assert pdf_response["Content-Type"] == "application/pdf"
 
 
 class TestRedTeamFindingsPermissions:

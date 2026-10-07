@@ -101,8 +101,16 @@ PAGES: list[PageDef] = [
     # =========================================================================
     PageDef(
         url_name="leaderboard_page",
-        allowed_roles=["gold_team", "white_team", "red_team", "ticketing_admin", "admin"],
-        denied_roles=["blue_team", "orange_team", "unauthenticated"],
+        allowed_roles=[
+            "gold_team",
+            "white_team",
+            "red_team",
+            "ticketing_admin",
+            "orange_team",
+            "ticketing_support",
+            "admin",
+        ],
+        denied_roles=["blue_team", "unauthenticated"],
     ),
     PageDef(
         url_name="scoring:scoring_config",
@@ -189,8 +197,16 @@ PAGES: list[PageDef] = [
     PageDef(
         url_name="scoring:scorecard",
         needs_data="team",
-        allowed_roles=["gold_team", "white_team", "red_team", "ticketing_admin", "admin"],
-        denied_roles=["blue_team", "orange_team", "unauthenticated"],
+        allowed_roles=[
+            "gold_team",
+            "white_team",
+            "red_team",
+            "ticketing_admin",
+            "orange_team",
+            "ticketing_support",
+            "admin",
+        ],
+        denied_roles=["blue_team", "unauthenticated"],
     ),
     # =========================================================================
     # Orange Team
