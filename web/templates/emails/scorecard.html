@@ -160,9 +160,9 @@
                         <td>{{ total_score }}</td>
                     </tr>
                 </table>
-                <div class="advisory">
-                    Be careful when hardening your systems because changing a single credential can silently break dependent services unless you update their configs too. Always report every updated password and rotated API token immediately via the Password Change Request (PCR) page on Quotient to keep scoring checks from failing. If your team gets stuck, do not let services sit red, be sure to request a consultation to get back on track instead of bleeding continuous scoring points.
-                </div>
+                {% if custom_message %}
+                    <div class="advisory">{{ custom_message|linebreaksbr }}</div>
+                {% endif %}
                 <p>Thank you for participating!</p>
             </div>
             <div class="footer">

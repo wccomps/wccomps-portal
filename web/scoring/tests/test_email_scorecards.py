@@ -123,6 +123,14 @@ class TestBulkEmailScorecardsGET:
         content = response.content.decode()
         assert "No email" in content
 
+    def test_shows_default_message(self, gold_user, final_scores, school_infos):
+        client = Client()
+        client.force_login(gold_user)
+        response = client.get(reverse("scoring:email_scorecards"))
+        content = response.content.decode()
+        assert "Be careful when hardening your systems" in content
+        assert "Password Change Request (PCR)" in content
+
     def test_redirects_when_no_scores(self, gold_user, teams):
         client = Client()
         client.force_login(gold_user)
@@ -163,6 +171,22 @@ class TestStreamEmailScorecards:
         assert messages[2]["done"] is True
         assert messages[2]["success"] is True
         assert mock_send.call_count == 2
+
+    @patch("scoring.views.export._send_scorecard_email", return_value=True)
+    def test_streams_progress_with_custom_message(self, mock_send, gold_user, final_scores, school_infos):
+        client = Client()
+        client.force_login(gold_user)
+        response = client.post(
+            reverse("scoring:stream_email_scorecards"),
+            {"custom_message": "Custom blast message"},
+        )
+        assert response["Content-Type"] == "application/x-ndjson"
+        messages = self._parse_ndjson(response)
+        assert len(messages) == 3
+        assert mock_send.call_count == 2
+        for call in mock_send.call_args_list:
+            email_ctx = call[0][1]
+            assert email_ctx["custom_message"] == "Custom blast message"
 
     @patch("scoring.views.export._send_scorecard_email", return_value=True)
     def test_skips_teams_without_school_info(self, mock_send, gold_user, teams, final_scores):
@@ -214,15 +238,26 @@ class TestSendScorecardEmail:
         assert result is True
         mock_email_cls.assert_called_once()
         assert mock_email_cls.call_args[1]["to"] == ["a@test.com", "b@test.com"]
-        body = mock_email_cls.call_args[1]["body"]
-        assert "Be careful when hardening your systems" in body
-        assert "Password Change Request (PCR)" in body
         mock_email.attach_alternative.assert_called_once()
-        html_content = mock_email.attach_alternative.call_args[0][0]
-        assert "Be careful when hardening your systems" in html_content
-        assert "Password Change Request (PCR)" in html_content
         mock_email.attach.assert_called_once_with("team-01-scorecard.pdf", b"pdf-bytes", "application/pdf")
         mock_email.send.assert_called_once_with(fail_silently=False)
+
+    @patch("django.core.mail.EmailMultiAlternatives")
+    def test_sends_email_with_custom_message(self, mock_email_cls):
+        from scoring.views.export import _send_scorecard_email
+
+        mock_email = MagicMock()
+        mock_email_cls.return_value = mock_email
+
+        ctx = {"school_name": "Test School", "custom_message": "Hardening warning message"}
+        result = _send_scorecard_email(["a@test.com"], ctx, 1, b"pdf-bytes")
+
+        assert result is True
+        body = mock_email_cls.call_args[1]["body"]
+        assert "Hardening warning message" in body
+        html_content = mock_email.attach_alternative.call_args[0][0]
+        assert "Hardening warning message" in html_content
+        assert 'class="advisory"' in html_content
 
     @patch("django.core.mail.EmailMultiAlternatives")
     def test_returns_false_on_send_failure(self, mock_email_cls):
@@ -249,6 +284,14 @@ class TestSingleEmailScorecardGET:
         assert "alpha@example.edu" in content
         assert "Alpha High" in content
 
+    def test_shows_default_message_in_form(self, gold_user, final_scores, school_infos):
+        client = Client()
+        client.force_login(gold_user)
+        response = client.get(reverse("scoring:email_scorecard", args=[1]))
+        content = response.content.decode()
+        assert "Be careful when hardening your systems" in content
+        assert "Password Change Request (PCR)" in content
+
     def test_redirects_when_no_school_info(self, gold_user, teams, final_scores):
         client = Client()
         client.force_login(gold_user)
@@ -270,6 +313,21 @@ class TestSingleEmailScorecardPOST:
         call_args = mock_send.call_args[0]
         assert call_args[0] == ["alpha@example.edu", "alpha2@example.edu"]
         assert call_args[2] == 1  # team_number
+
+    @patch("scoring.views.export._send_scorecard_email", return_value=True)
+    def test_sends_email_with_custom_message(self, mock_send, gold_user, final_scores, school_infos):
+        client = Client()
+        client.force_login(gold_user)
+        response = client.post(
+            reverse("scoring:email_scorecard", args=[1]),
+            {"custom_message": "Remember to submit PCRs!"},
+        )
+        assert response.status_code == 302
+        assert mock_send.call_count == 1
+
+        call_args = mock_send.call_args[0]
+        email_ctx = call_args[1]
+        assert email_ctx["custom_message"] == "Remember to submit PCRs!"
 
     @patch("scoring.views.export._send_scorecard_email", return_value=False)
     def test_reports_failure(self, mock_send, gold_user, final_scores, school_infos):

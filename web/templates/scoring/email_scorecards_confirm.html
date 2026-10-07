@@ -15,6 +15,18 @@
                     {% if teams_without_email %}{{ teams_without_email }} team(s) will be skipped (no contact email).{% endif %}
                 </c-alert>
             </div>
+            <div x-show="showForm" class="mt-20 mb-20">
+                <c-form_field label="Advisory Message"
+                              id="id_custom_message"
+                              help_text="Optional message to include in all scorecard emails. Leave blank to omit.">
+                    <textarea name="custom_message"
+                              id="id_custom_message"
+                              x-model="customMessage"
+                              class="vLargeTextField"
+                              rows="5"
+                              ::disabled="loading"></textarea>
+                </c-form_field>
+            </div>
             <div x-show="loading" x-cloak>
                 <c-progress_bar class="mt-10 mb-10" />
             </div>
@@ -75,6 +87,7 @@
             showWarning: true,
             showForm: true,
             done: false,
+            customMessage: `{{ default_message|escapejs }}`,
 
             async sendEmails() {
                 this.loading = true;
@@ -88,7 +101,7 @@
                 try {
                     await wcStream(
                         '{% url "scoring:stream_email_scorecards" %}',
-                        {},
+                        { custom_message: this.customMessage },
                         (msg) => {
                             this.progressStep = msg.step;
                             this.progressCurrent = msg.current;

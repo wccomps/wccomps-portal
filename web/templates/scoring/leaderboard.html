@@ -6,156 +6,164 @@
 {% block content %}
     {% if is_admin %}
         <script>
-        document.addEventListener('alpine:init', () => {
+        function registerLeaderboardNames() {
             Alpine.data('leaderboardNames', () => ({
                 showSchools: {% if show_schools %}true{% else %}false{% endif %},
                 get showTeams() { return !this.showSchools; },
                 toggle() { this.showSchools = !this.showSchools; },
             }));
-        });
+        }
+        if (window.Alpine) {
+            registerLeaderboardNames();
+        } else {
+            document.addEventListener('alpine:init', registerLeaderboardNames);
+        }
         </script>
     {% endif %}
-    <c-page_header title="Leaderboard" />
-    <c-module {% if is_admin %}x-data="leaderboardNames"{% endif %}>
-        {% if is_admin %}
-            <c-slot name="toolbar">
-                <c-button type="button"
-                          variant="default"
-                          id="toggle-names-btn"
-                          class="no-print"
-                          aria-label="Toggle player and school names"
-                          @click="toggle">
-                    <span {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Show School Names</span>
-                    <span {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>Show Player Names</span>
-                </c-button>
-            </c-slot>
-        {% endif %}
-        {% if scores %}
-            <c-table id="result_list" aria_label="Score leaderboard">
-                <c-slot name="headers">
-                    <tr>
-                        <c-table_header sortable="false">
-                            Rank
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            {% if is_admin %}
-                                <span {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Team</span>
-                                <span {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>School</span>
-                            {% else %}
-                                Team
-                            {% endif %}
-                        </c-table_header>
-                        <c-table_header sortable="false"
-                                        class="text-right"
-                                        tooltip="Points from service uptime monitoring">
-                            Services
-                        </c-table_header>
-                        <c-table_header sortable="false"
-                                        class="text-right"
-                                        tooltip="Points from inject submission grading">
-                            Injects
-                        </c-table_header>
-                        <c-table_header sortable="false"
-                                        class="text-right"
-                                        tooltip="Points from orange team checks">
-                            Orange Checks
-                        </c-table_header>
-                        <c-table_header sortable="false"
-                                        class="text-right"
-                                        tooltip="Deductions from red team findings">
-                            Red
-                        </c-table_header>
-                        <c-table_header sortable="false"
-                                        class="text-right"
-                                        tooltip="Points recovered by filing incident reports">
-                            Recovery
-                        </c-table_header>
-                        <c-table_header sortable="false"
-                                        class="text-right"
-                                        tooltip="Penalties for service level agreement violations">
-                            SLA
-                        </c-table_header>
-                        <c-table_header sortable="false" class="text-right">
-                            Total
-                        </c-table_header>
-                    </tr>
-                </c-slot>
-                {% for score in scores %}
-                    <tr>
-                        <td>
-                            <strong>{{ score.rank }}</strong>
-                        </td>
-                        <td>
-                            <a href="{% url 'leaderboard_scorecard' score.team.team_number %}"
-                               title="View scorecard">
+    <div id="content-main"
+         {% if is_admin %}x-data="leaderboardNames"{% endif %}>
+        <c-page_header title="Leaderboard" />
+        <c-module>
+            {% if scores %}
+                <c-table id="result_list" aria_label="Score leaderboard">
+                    <c-slot name="headers">
+                        <tr>
+                            <c-table_header sortable="false">
+                                Rank
+                            </c-table_header>
+                            <c-table_header sortable="false">
                                 {% if is_admin %}
-                                    <span class="team-name" {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Team {{ score.team.team_number }}</span>
-                                    <span class="school-name" {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>
-                                        {% if score.school_name %}
-                                            {{ score.school_name }}
-                                        {% else %}
-                                            Team {{ score.team.team_number }}
-                                        {% endif %}
-                                    </span>
+                                    <span {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Team</span>
+                                    <span {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>School</span>
                                 {% else %}
-                                    Team {{ score.team.team_number }}
+                                    Team
                                 {% endif %}
-                            </a>
-                        </td>
-                        <td class="text-right">{{ score.service_points|floatformat:0 }}</td>
-                        <td class="text-right">{{ score.inject_points|floatformat:0 }}</td>
-                        <td class="text-right">
-                            <c-score_value :value="score.orange_points" format="signed" />
-                        </td>
-                        <td class="text-right">
-                            <c-score_value :value="score.red_deductions" />
-                        </td>
-                        <td class="text-right">
-                            <c-score_value :value="score.incident_recovery_points" format="signed" />
-                        </td>
-                        <td class="text-right">
-                            <c-score_value :value="score.sla_penalties" />
-                        </td>
-                        <td class="text-right">
-                            <strong>{{ score.total_score|floatformat:0 }}</strong>
-                        </td>
-                    </tr>
-                {% endfor %}
-            </c-table>
-        {% else %}
-            <c-empty_state title="No scores yet">
-                {% if is_gold_team or is_admin %}
-                    <ol class="mt-5 mb-10 d-inline-block text-left">
-                        <li>
-                            Sync metadata from Quotient on the <a href="{% url 'admin_competition' %}">Competition</a> page
-                        </li>
-                        <li>
-                            Click <strong>Sync Service Scores</strong> below to pull latest data
-                        </li>
-                    </ol>
-                {% else %}
-                    <p>Scores will appear here once the competition is underway.</p>
-                {% endif %}
-            </c-empty_state>
-        {% endif %}
-        <c-button_row class="mt-10 justify-end">
-            <c-link href="{% url 'scoring:export_scorecards' %}"
-                    variant="default"
-                    class="button">Download All PDFs</c-link>
-            <c-link href="{% url 'scoring:api_scores' %}"
-                    variant="default"
-                    class="button">JSON</c-link>
-            {% if is_gold_team or is_admin %}
-                <c-link href="{% url 'scoring:email_scorecards' %}"
-                        variant="default"
-                        class="button">Email All Scorecards</c-link>
-                <form method="post" action="{% url 'scoring:sync_scores' %}" class="m-0">
-                    {% csrf_token %}
-                    <c-button type="submit" variant="default">
-                        Sync Service Scores
-                    </c-button>
-                </form>
+                            </c-table_header>
+                            <c-table_header sortable="false"
+                                            class="text-right"
+                                            tooltip="Points from service uptime monitoring">
+                                Services
+                            </c-table_header>
+                            <c-table_header sortable="false"
+                                            class="text-right"
+                                            tooltip="Points from inject submission grading">
+                                Injects
+                            </c-table_header>
+                            <c-table_header sortable="false"
+                                            class="text-right"
+                                            tooltip="Points from orange team checks">
+                                Orange Checks
+                            </c-table_header>
+                            <c-table_header sortable="false"
+                                            class="text-right"
+                                            tooltip="Deductions from red team findings">
+                                Red
+                            </c-table_header>
+                            <c-table_header sortable="false"
+                                            class="text-right"
+                                            tooltip="Points recovered by filing incident reports">
+                                Recovery
+                            </c-table_header>
+                            <c-table_header sortable="false"
+                                            class="text-right"
+                                            tooltip="Penalties for service level agreement violations">
+                                SLA
+                            </c-table_header>
+                            <c-table_header sortable="false" class="text-right">
+                                Total
+                            </c-table_header>
+                        </tr>
+                    </c-slot>
+                    {% for score in scores %}
+                        <tr>
+                            <td>
+                                <strong>{{ score.rank }}</strong>
+                            </td>
+                            <td>
+                                <a href="{% url 'leaderboard_scorecard' score.team.team_number %}"
+                                   title="View scorecard">
+                                    {% if is_admin %}
+                                        <span class="team-name"
+                                              {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Team {{ score.team.team_number }}</span>
+                                        <span class="school-name"
+                                              {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>
+                                            {% if score.school_name %}
+                                                {{ score.school_name }}
+                                            {% else %}
+                                                Team {{ score.team.team_number }}
+                                            {% endif %}
+                                        </span>
+                                    {% else %}
+                                        Team {{ score.team.team_number }}
+                                    {% endif %}
+                                </a>
+                            </td>
+                            <td class="text-right">{{ score.service_points|floatformat:0 }}</td>
+                            <td class="text-right">{{ score.inject_points|floatformat:0 }}</td>
+                            <td class="text-right">
+                                <c-score_value :value="score.orange_points" format="signed" />
+                            </td>
+                            <td class="text-right">
+                                <c-score_value :value="score.red_deductions" />
+                            </td>
+                            <td class="text-right">
+                                <c-score_value :value="score.incident_recovery_points" format="signed" />
+                            </td>
+                            <td class="text-right">
+                                <c-score_value :value="score.sla_penalties" />
+                            </td>
+                            <td class="text-right">
+                                <strong>{{ score.total_score|floatformat:0 }}</strong>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </c-table>
+            {% else %}
+                <c-empty_state title="No scores yet">
+                    {% if is_gold_team or is_admin %}
+                        <ol class="mt-5 mb-10 d-inline-block text-left">
+                            <li>
+                                Sync metadata from Quotient on the <a href="{% url 'admin_competition' %}">Competition</a> page
+                            </li>
+                            <li>
+                                Click <strong>Sync Service Scores</strong> below to pull latest data
+                            </li>
+                        </ol>
+                    {% else %}
+                        <p>Scores will appear here once the competition is underway.</p>
+                    {% endif %}
+                </c-empty_state>
             {% endif %}
-        </c-button_row>
-    </c-module>
+            <c-button_row class="mt-10 justify-end">
+                <c-link href="{% url 'scoring:export_scorecards' %}"
+                        variant="default"
+                        class="button">Download All PDFs</c-link>
+                <c-link href="{% url 'scoring:api_scores' %}"
+                        variant="default"
+                        class="button">JSON</c-link>
+                {% if is_gold_team or is_admin %}
+                    <c-link href="{% url 'scoring:email_scorecards' %}"
+                            variant="default"
+                            class="button">Email All Scorecards</c-link>
+                    <form method="post" action="{% url 'scoring:sync_scores' %}" class="m-0">
+                        {% csrf_token %}
+                        <c-button type="submit" variant="default">
+                            Sync Service Scores
+                        </c-button>
+                    </form>
+                {% endif %}
+                {% if is_admin %}
+                    <c-button type="button"
+                              variant="default"
+                              id="toggle-names-btn"
+                              class="no-print"
+                              aria-label="Toggle player and school names"
+                              @click="toggle">
+                        <span {% if show_schools %}x-show="showTeams" x-cloak{% else %}x-show="showTeams"{% endif %}>Show School Names</span>
+                        <span {% if show_schools %}x-show="showSchools"{% else %}x-show="showSchools" x-cloak{% endif %}>Show Player Names</span>
+                    </c-button>
+                {% endif %}
+            </c-button_row>
+        </c-module>
+    </div>
 {% endblock content %}

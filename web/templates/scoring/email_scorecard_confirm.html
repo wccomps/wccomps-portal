@@ -15,6 +15,14 @@
             </c-alert>
             <c-form>
                 {% csrf_token %}
+                <c-form_field label="Advisory Message"
+                              id="id_custom_message"
+                              help_text="Optional message to include in the email body. Leave blank to omit.">
+                    <textarea name="custom_message"
+                              id="id_custom_message"
+                              class="vLargeTextField"
+                              rows="5">{{ default_message }}</textarea>
+                </c-form_field>
                 <c-button_row class="mt-20 justify-end">
                     <c-link href="{% url 'leaderboard_scorecard' team.team_number %}">Cancel</c-link>
                     <c-button type="submit" variant="primary" ::disabled="submitting">

@@ -51,13 +51,8 @@ def test_scorecard_email_has_no_blank_event_name():
     assert "Event:" not in text
 
 
-def test_scorecard_email_includes_hardening_and_pcr_advisory():
-    """Scorecard emails should include the hardening advisory and PCR reminder."""
-    context = {"school_name": "Example University", "team_number": 7}
-
-    text = render_to_string("emails/scorecard.txt", context)
-    html = render_to_string("emails/scorecard.html", context)
-
+def test_scorecard_email_includes_custom_message():
+    """Scorecard emails should include custom_message when supplied."""
     advisory = (
         "Be careful when hardening your systems because changing a single credential "
         "can silently break dependent services unless you update their configs too. "
@@ -66,5 +61,23 @@ def test_scorecard_email_includes_hardening_and_pcr_advisory():
         "If your team gets stuck, do not let services sit red, be sure to request a consultation "
         "to get back on track instead of bleeding continuous scoring points."
     )
+    context = {"school_name": "Example University", "team_number": 7, "custom_message": advisory}
+
+    text = render_to_string("emails/scorecard.txt", context)
+    html = render_to_string("emails/scorecard.html", context)
+
     assert advisory in text
     assert advisory in html
+    assert 'class="advisory"' in html
+
+
+def test_scorecard_email_omits_advisory_when_no_custom_message():
+    """Scorecard emails should omit advisory markup when custom_message is absent or empty."""
+    context = {"school_name": "Example University", "team_number": 7}
+
+    text = render_to_string("emails/scorecard.txt", context)
+    html = render_to_string("emails/scorecard.html", context)
+
+    assert 'class="advisory"' not in html
+    assert "Thank you for participating!" in text
+    assert "Thank you for participating!" in html
