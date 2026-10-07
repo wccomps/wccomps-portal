@@ -214,7 +214,13 @@ class TestSendScorecardEmail:
         assert result is True
         mock_email_cls.assert_called_once()
         assert mock_email_cls.call_args[1]["to"] == ["a@test.com", "b@test.com"]
+        body = mock_email_cls.call_args[1]["body"]
+        assert "Be careful when hardening your systems" in body
+        assert "Password Change Request (PCR)" in body
         mock_email.attach_alternative.assert_called_once()
+        html_content = mock_email.attach_alternative.call_args[0][0]
+        assert "Be careful when hardening your systems" in html_content
+        assert "Password Change Request (PCR)" in html_content
         mock_email.attach.assert_called_once_with("team-01-scorecard.pdf", b"pdf-bytes", "application/pdf")
         mock_email.send.assert_called_once_with(fail_silently=False)
 
