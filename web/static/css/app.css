@@ -167,11 +167,26 @@ body.dashboard #content {
 }
 
 /* Action links styled as buttons */
-a.button {
+a.button,
+a.button:link,
+a.button:visited {
     display: inline-block;
     text-align: center;
     vertical-align: middle;
     box-sizing: border-box;
+    text-decoration: none !important;
+    padding: 10px 15px;
+    font-size: 0.8125rem;
+    font-family: var(--font-family-primary);
+    line-height: normal;
+    color: var(--button-fg);
+}
+
+a.button:hover,
+a.button:focus,
+a.button:active {
+    text-decoration: none !important;
+    color: var(--button-fg);
 }
 
 

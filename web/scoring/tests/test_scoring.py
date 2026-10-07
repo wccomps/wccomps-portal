@@ -404,6 +404,8 @@ class TestLeaderboardAccess:
         # Links and buttons should have the 'button default' class
         assert 'class="button default "' in content
         assert 'class="button  default "' in content or 'class="button default "' in content
+        # Action links styled as buttons should have role="button" so Django admin doesn't underline them
+        assert 'role="button"' in content
 
 
 class InjectScoreApprovalTests(TestCase):
