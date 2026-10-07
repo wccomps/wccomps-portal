@@ -73,4 +73,3 @@ def test_standing_school_name(unit_modifiers):
 
     assert s1.school_name == "University of Testing"
     assert s2.school_name == ""
-

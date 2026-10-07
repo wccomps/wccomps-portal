@@ -370,7 +370,6 @@ class TestLeaderboardAccess:
         assert "Test University" not in content
 
 
-
 class InjectScoreApprovalTests(TestCase):
     """Test approval tracking fields on InjectScore model."""
 
