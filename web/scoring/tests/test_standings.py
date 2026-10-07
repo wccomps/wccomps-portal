@@ -57,3 +57,20 @@ def test_inactive_and_idle_teams_are_not_ranked(unit_modifiers):
     standings = compute_standings()
 
     assert [(s.team, s.rank) for s in standings] == [(scored, 1), (idle, None)]
+
+
+@pytest.mark.django_db
+def test_standing_school_name(unit_modifiers):
+    from team.models import SchoolInfo
+
+    team1 = _team(1, "100")
+    SchoolInfo.objects.create(team=team1, school_name="University of Testing", contact_email="u@test.edu")
+    _team(2, "50")
+
+    standings = compute_standings()
+    s1 = next(s for s in standings if s.team == team1)
+    s2 = next(s for s in standings if s.team != team1)
+
+    assert s1.school_name == "University of Testing"
+    assert s2.school_name == ""
+
