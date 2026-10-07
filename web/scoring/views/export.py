@@ -87,15 +87,6 @@ def _send_scorecard_email(
         return False
 
 
-DEFAULT_SCORECARD_EMAIL_MESSAGE = (
-    "Be careful when hardening your systems because changing a single credential can silently break dependent "
-    "services unless you update their configs too. Always report every updated password and rotated API token "
-    "immediately via the Password Change Request (PCR) page on Quotient to keep scoring checks from failing. "
-    "If your team gets stuck, do not let services sit red, be sure to request a consultation to get back on track "
-    "instead of bleeding continuous scoring points."
-)
-
-
 def _build_email_context(score: Standing, total_teams: int, custom_message: str = "") -> dict[str, object]:
     """Build email template context for a team's scorecard."""
     from django.utils import timezone
@@ -240,7 +231,6 @@ def email_scorecards(request: HttpRequest) -> HttpResponse:
             "teams_with_email": teams_with_email,
             "teams_without_email": teams_without_email,
             "total_teams": len(scores),
-            "default_message": DEFAULT_SCORECARD_EMAIL_MESSAGE,
         },
     )
 
@@ -302,6 +292,5 @@ def email_scorecard(request: HttpRequest, team_number: int) -> HttpResponse:
             "score": score,
             "school_name": school_name,
             "emails": emails,
-            "default_message": DEFAULT_SCORECARD_EMAIL_MESSAGE,
         },
     )

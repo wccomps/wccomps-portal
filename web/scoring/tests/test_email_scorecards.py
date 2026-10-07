@@ -123,13 +123,14 @@ class TestBulkEmailScorecardsGET:
         content = response.content.decode()
         assert "No email" in content
 
-    def test_shows_default_message(self, gold_user, final_scores, school_infos):
+    def test_shows_advisory_message_field(self, gold_user, final_scores, school_infos):
         client = Client()
         client.force_login(gold_user)
         response = client.get(reverse("scoring:email_scorecards"))
         content = response.content.decode()
-        assert "Be careful when hardening your systems" in content
-        assert "Password Change Request (PCR)" in content
+        assert 'name="custom_message"' in content
+        assert "Advisory Message" in content
+        assert "Be careful when hardening your systems" not in content
 
     def test_redirects_when_no_scores(self, gold_user, teams):
         client = Client()
@@ -284,13 +285,14 @@ class TestSingleEmailScorecardGET:
         assert "alpha@example.edu" in content
         assert "Alpha High" in content
 
-    def test_shows_default_message_in_form(self, gold_user, final_scores, school_infos):
+    def test_shows_advisory_message_field(self, gold_user, final_scores, school_infos):
         client = Client()
         client.force_login(gold_user)
         response = client.get(reverse("scoring:email_scorecard", args=[1]))
         content = response.content.decode()
-        assert "Be careful when hardening your systems" in content
-        assert "Password Change Request (PCR)" in content
+        assert 'name="custom_message"' in content
+        assert "Advisory Message" in content
+        assert "Be careful when hardening your systems" not in content
 
     def test_redirects_when_no_school_info(self, gold_user, teams, final_scores):
         client = Client()
