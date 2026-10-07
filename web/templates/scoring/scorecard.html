@@ -59,10 +59,10 @@
                         <c-table_header sortable="false" class="text-right">
                             Rank
                         </c-table_header>
-                        <c-table_header sortable="false" class="text-right">
+                        <c-table_header sortable="false" class="text-right" tooltip="Category average across teams (for Red Team, average deductions taken)">
                             Avg
                         </c-table_header>
-                        <c-table_header sortable="false" class="text-right">
+                        <c-table_header sortable="false" class="text-right" tooltip="Maximum points earned (for Red Team, highest deductions taken)">
                             Max
                         </c-table_header>
                     </tr>
@@ -198,7 +198,7 @@
                     <td class="text-right"></td>
                 </tr>
             </c-table>
-            <p class="text-muted text-xs">Red values shown as total deductions (lower is better).</p>
+            <p class="text-muted text-xs">Red Team values: Points are deductions applied to your score. The Avg and Max columns represent deductions taken across all teams (average point loss and highest deduction taken; lower is better).</p>
             {% if scaling %}
                 <p class="text-muted text-xs">
                     Scoring weights: Service {{ scaling.service_weight|floatformat:0 }}%, Inject {{ scaling.inject_weight|floatformat:0 }}%, Orange Checks {{ scaling.orange_weight|floatformat:0 }}%.
@@ -222,6 +222,9 @@
                                 Points
                             </c-table_header>
                             <c-table_header sortable="false" class="text-right">
+                                SLA Violations
+                            </c-table_header>
+                            <c-table_header sortable="false" class="text-right">
                                 vs Avg
                             </c-table_header>
                             <c-table_header sortable="false" class="text-right">
@@ -236,6 +239,7 @@
                                 {% if svc.below_avg %}<span class="visually-hidden">(below average)</span>{% endif %}
                             </td>
                             <td class="text-right">{{ svc.points|floatformat:0 }}</td>
+                            <td class="text-right">{{ svc.sla_violations }}</td>
                             <td class="text-right">
                                 <c-score_value value="{{ svc.delta }}" format="signed" />
                             </td>
@@ -248,6 +252,9 @@
                         </td>
                         <td class="text-right">
                             <strong>{{ service_total|floatformat:0 }}</strong>
+                        </td>
+                        <td class="text-right">
+                            <strong>{{ service_sla_total }}</strong>
                         </td>
                         <td class="text-right"></td>
                         <td class="text-right"></td>

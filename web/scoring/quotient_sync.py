@@ -135,6 +135,7 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
                 service_name=svc.service_name,
                 points=Decimal(str(svc.service_points)),
                 uptime=Decimal(str(team_uptimes.get(svc.service_name, 0))),
+                sla_violations=svc.sla_violations,
             )
             for svc in team_export.services
         ]

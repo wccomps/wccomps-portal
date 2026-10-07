@@ -768,6 +768,10 @@ class ServiceDetail(models.Model):
         default=Decimal("0"),
         help_text="Uptime percentage (0.0000–1.0000)",
     )
+    sla_violations = models.IntegerField(
+        default=0,
+        help_text="Number of SLA violations",
+    )
 
     class Meta:
         db_table = "service_detail"

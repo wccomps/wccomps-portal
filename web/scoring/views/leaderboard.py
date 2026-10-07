@@ -39,6 +39,7 @@ class _ServiceStat(TypedDict):
     avg: Decimal
     delta: int
     below_avg: bool
+    sla_violations: int
 
 
 class _Neighbor(TypedDict):
@@ -171,6 +172,7 @@ def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _Sco
                 avg=svc_avg,
                 delta=int(round(svc_delta)),
                 below_avg=svc_delta < 0,
+                sla_violations=svc.sla_violations,
             )
         )
 
@@ -247,6 +249,7 @@ def build_scorecard_context(score: Standing, standings: list[Standing]) -> dict[
         "orange_scores": orange_scores,
         "orange_total": sum(o.points_awarded for o in orange_scores),
         "service_total": sum(s["points"] for s in stats["service_stats"]),
+        "service_sla_total": sum(s["sla_violations"] for s in stats["service_stats"]),
         "scaling": {
             "service_raw": detailed["service_raw"],
             "inject_raw": detailed["inject_raw"],

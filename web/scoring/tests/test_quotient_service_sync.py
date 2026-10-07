@@ -60,6 +60,7 @@ def test_sync_attaches_scores_and_uptimes_to_the_named_team() -> None:
     detail = ServiceDetail.objects.get()
     assert detail.team == team3
     assert float(detail.uptime) == pytest.approx(0.9)
+    assert detail.sla_violations == 1
 
 
 @pytest.mark.django_db

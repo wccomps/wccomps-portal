@@ -333,8 +333,8 @@ class QuotientClient:
                     ServiceExportEntry(
                         service_name=s["service_name"],
                         service_points=s["service_points"],
-                        sla_violations=s["sla_violations"],
-                        sla_penalty=s["sla_penalty"],
+                        sla_violations=s.get("sla_violations", 0),
+                        sla_penalty=s.get("sla_penalty", 0),
                     )
                     for s in team_data.get("services", [])
                 ]

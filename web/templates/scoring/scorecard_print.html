@@ -129,8 +129,8 @@
                     <th>Category</th>
                     <th class="text-right">Points</th>
                     <th class="text-right">Rank</th>
-                    <th class="text-right">Avg</th>
-                    <th class="text-right">Max</th>
+                    <th class="text-right" title="Category average across teams (for Red Team, average deductions taken)">Avg</th>
+                    <th class="text-right" title="Maximum points earned (for Red Team, highest deductions taken)">Max</th>
                 </tr>
             </thead>
             <tbody>
@@ -261,7 +261,7 @@
             </tbody>
         </table>
         <p class="footnote">
-            Red values shown as total deductions (lower is better).
+            Red Team values: Points are deductions applied to your score. The Avg and Max columns represent deductions taken across all teams (average point loss and highest deduction taken; lower is better).
             {% if scaling %}
                 <br>
                 Scoring weights: Service {{ scaling.service_weight|floatformat:0 }}%, Inject {{ scaling.inject_weight|floatformat:0 }}%, Orange Checks {{ scaling.orange_weight|floatformat:0 }}%.
@@ -277,6 +277,7 @@
                     <tr>
                         <th>Service</th>
                         <th class="text-right">Points</th>
+                        <th class="text-right">SLA Violations</th>
                         <th class="text-right">vs Avg</th>
                         <th class="text-right">Rank</th>
                     </tr>
@@ -286,6 +287,7 @@
                         <tr {% if svc.below_avg %}class="row-below-avg"{% endif %}>
                             <td>{{ svc.name }}</td>
                             <td class="text-right">{{ svc.points|floatformat:0 }}</td>
+                            <td class="text-right">{{ svc.sla_violations }}</td>
                             <td class="text-right">
                                 {% if svc.delta > 0 %}
                                     <span class="score-positive">+{{ svc.delta }}</span>
@@ -301,6 +303,7 @@
                     <tr class="row-total">
                         <td>Total</td>
                         <td class="text-right">{{ service_total|floatformat:0 }}</td>
+                        <td class="text-right">{{ service_sla_total }}</td>
                         <td></td>
                         <td></td>
                     </tr>
