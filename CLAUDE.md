@@ -24,7 +24,7 @@ uv run ruff check . && uv run djlint web/templates --lint && DJANGO_SETTINGS_MOD
 Runs on the deoxys Kubernetes cluster, deployed by Argo CD from `wccomps/wccomps-argocd`
 (`manifests/wccomps-portal/`; its README covers operations).
 - CI builds one image for web and bot on every merge to main: `ghcr.io/wccomps/wccomps-portal:sha-<short>`.
-- Deploy: PR to wccomps-argocd bumping `newTag` in `manifests/wccomps-portal/kustomization.yaml`.
+- Deploy: run `./scripts/deploy.sh` (automates bumping `newTag` in `wccomps-argocd` via PR and merge).
 - After changing its `configmap.yaml` or `secrets.yaml`, restart the web and bot Deployments.
 - `docker-compose.yml` is for anyone self-hosting the public repo (Postgres + web + bot); it isn't
   how production runs.

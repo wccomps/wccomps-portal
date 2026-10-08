@@ -79,7 +79,6 @@ jobs:
   # The production image (deployed on the deoxys cluster by wccomps/wccomps-argocd).
   # PRs only build (to catch a broken Dockerfile); pushes to main also publish to GHCR.
   images:
-    needs: lint-and-test
     runs-on: ubuntu-latest
     permissions:
       contents: read
