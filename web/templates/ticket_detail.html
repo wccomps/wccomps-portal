@@ -43,21 +43,17 @@
         }
 
         {% if is_ops %}
-            .playbook-link {
-                display: inline-flex;
-                align-items: center;
-                padding: 2px 8px;
-                font-size: 13px;
-                font-weight: 500;
-                color: var(--primary, #2563eb);
-                background: var(--primary-bg, #eff6ff);
-                border: 1px solid var(--primary-border, #bfdbfe);
-                border-radius: 4px;
-                text-decoration: none;
+            .playbook-steps {
+                margin: 0;
+                padding-left: 20px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
             }
 
-            .playbook-link:hover {
-                text-decoration: underline;
+            .playbook-steps li {
+                line-height: 1.5;
+                font-size: 14px;
             }
         {% endif %}
     </style>
@@ -98,12 +94,6 @@
                             </form>
                         {% else %}
                             <span>{{ category_name }}</span>
-                        {% endif %}
-                        {% if playbook_url %}
-                            <a href="{{ playbook_url }}"
-                               target="_blank"
-                               rel="noopener noreferrer"
-                               class="playbook-link">Playbook</a>
                         {% endif %}
                     {% else %}
                         <span>{{ category_name }}</span>
@@ -219,6 +209,15 @@
                     {% elif ticket.status == "resolved" or ticket.status == "cancelled" %}
                         <p class="help mt-5">Only the assignee changes; status and points stay as they are.</p>
                     {% endif %}
+                </c-fieldset>
+            {% endif %}
+            {% if is_ops and playbook_steps %}
+                <c-fieldset heading="Response Playbook">
+                    <ol class="playbook-steps">
+                        {% for step in playbook_steps %}
+                            <li>{{ step }}</li>
+                        {% endfor %}
+                    </ol>
                 </c-fieldset>
             {% endif %}
             <c-fieldset heading="Ticket Information">

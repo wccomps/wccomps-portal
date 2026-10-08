@@ -24,6 +24,15 @@ class TicketDashboardTest(TestCase):
             team_name="Test Team",
             authentik_group="test-group",
         )
+        for pk, name, pts in [
+            (1, "Service Scoring Validation", 0),
+            (2, "Box Reset / Scrub", 60),
+            (3, "Scoring Service Check", 10),
+            (4, "Black Team Phone Consultation", 100),
+            (5, "Red Team Activity Review", 0),
+            (6, "General Inquiry", 0),
+        ]:
+            TicketCategory.objects.get_or_create(pk=pk, defaults={"display_name": name, "points": pts})
 
     def test_format_ticket_embed_comprehensive(self) -> None:
         """Test formatting ticket embeds with various states and categories."""
@@ -32,7 +41,10 @@ class TicketDashboardTest(TestCase):
         from core.tickets_config import get_all_categories
 
         # Test basic open ticket
-        box_reset = TicketCategory.objects.get(pk=2)
+        box_reset, _ = TicketCategory.objects.get_or_create(
+            pk=2,
+            defaults={"display_name": "Box Reset", "points": 60},
+        )
         open_ticket = Ticket.objects.create(
             ticket_number="T001-001",
             team=self.team,
@@ -54,7 +66,10 @@ class TicketDashboardTest(TestCase):
         )
 
         # Test claimed ticket with assignment (assigned_to is now User, not DiscordLink)
-        scoring_check = TicketCategory.objects.get(pk=3)
+        scoring_check, _ = TicketCategory.objects.get_or_create(
+            pk=3,
+            defaults={"display_name": "Scoring Service Check", "points": 10},
+        )
         claimed_ticket = Ticket.objects.create(
             ticket_number="T001-002",
             team=self.team,
@@ -150,11 +165,14 @@ class TicketDashboardTest(TestCase):
         self.assertNotIn("Service", field_names)
         self.assertNotIn("IP Address", field_names)
 
-    def test_format_ticket_embed_never_includes_playbook_url(self) -> None:
-        """Team's Discord thread embed must never include the category playbook URL."""
-        cat = TicketCategory.objects.get(pk=2)
-        cat.playbook_url = "https://wiki.internal/playbooks/super-secret"
-        cat.save(update_fields=["playbook_url"])
+    def test_format_ticket_embed_never_includes_playbook(self) -> None:
+        """Team's Discord thread embed must never include category playbook steps."""
+        cat, _ = TicketCategory.objects.get_or_create(
+            pk=2,
+            defaults={"display_name": "Box Reset", "points": 60},
+        )
+        cat.playbook = "1. Secret step one\n2. Secret step two"
+        cat.save(update_fields=["playbook"])
 
         ticket = Ticket.objects.create(
             ticket_number="T001-101",
@@ -170,7 +188,8 @@ class TicketDashboardTest(TestCase):
             + [f.name + " " + f.value for f in embed.fields]
             + [embed.footer.text if embed.footer else ""]
         )
-        self.assertNotIn("https://wiki.internal/playbooks/super-secret", all_text)
+        self.assertNotIn("Secret step one", all_text)
+        self.assertNotIn("Secret step two", all_text)
         self.assertNotIn("Playbook", all_text)
 
 

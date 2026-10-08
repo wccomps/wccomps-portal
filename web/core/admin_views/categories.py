@@ -21,12 +21,11 @@ def admin_category_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = CategoryForm(request.POST)
         if not form.is_valid():
-            if "display_name" in form.errors:
-                error_msg = "Display name is required."
-            elif "playbook_url" in form.errors:
-                error_msg = str(form.errors["playbook_url"][0])
-            else:
-                error_msg = str(next(iter(form.errors.values()))[0])
+            error_msg = (
+                "Display name is required."
+                if "display_name" in form.errors
+                else str(next(iter(form.errors.values()))[0])
+            )
             return render(
                 request,
                 "admin/category_form.html",
@@ -39,7 +38,7 @@ def admin_category_create(request: HttpRequest) -> HttpResponse:
         TicketCategory.objects.create(
             display_name=form.cleaned_data["display_name"],
             points=form.cleaned_data["points"],
-            playbook_url=form.cleaned_data.get("playbook_url") or "",
+            playbook=form.cleaned_data.get("playbook") or "",
             required_fields=form.cleaned_data.get("required_fields") or [],
             optional_fields=form.cleaned_data.get("optional_fields") or [],
             variable_points=form.cleaned_data["variable_points"],
@@ -66,12 +65,11 @@ def admin_category_edit(request: HttpRequest, category_id: int) -> HttpResponse:
     if request.method == "POST":
         form = CategoryForm(request.POST)
         if not form.is_valid():
-            if "display_name" in form.errors:
-                error_msg = "Display name is required."
-            elif "playbook_url" in form.errors:
-                error_msg = str(form.errors["playbook_url"][0])
-            else:
-                error_msg = str(next(iter(form.errors.values()))[0])
+            error_msg = (
+                "Display name is required."
+                if "display_name" in form.errors
+                else str(next(iter(form.errors.values()))[0])
+            )
             return render(
                 request,
                 "admin/category_form.html",
@@ -84,7 +82,7 @@ def admin_category_edit(request: HttpRequest, category_id: int) -> HttpResponse:
 
         category.display_name = form.cleaned_data["display_name"]
         category.points = form.cleaned_data["points"]
-        category.playbook_url = form.cleaned_data.get("playbook_url") or ""
+        category.playbook = form.cleaned_data.get("playbook") or ""
         category.required_fields = form.cleaned_data.get("required_fields") or []
         category.optional_fields = form.cleaned_data.get("optional_fields") or []
         category.variable_points = form.cleaned_data["variable_points"]

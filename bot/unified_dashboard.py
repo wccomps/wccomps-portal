@@ -177,12 +177,21 @@ class UnifiedDashboard:
         return {k: tickets_by_category[k] for k in sorted_keys}
 
     def _build_category_field(
-        self, category_name: str, tickets: list[Ticket], guild_id: int, playbook_url: str = ""
+        self,
+        category_name: str,
+        tickets: list[Ticket],
+        guild_id: int,
+        playbook_steps: list[str] | None = None,
     ) -> tuple[str, str]:
         """Build the (name, value) embed field for one ticket category."""
         lines = []
-        if playbook_url:
-            lines.append(f"📖 [Playbook]({playbook_url})")
+        if playbook_steps:
+            lines.append("📋 **Playbook:**")
+            for idx, step in enumerate(playbook_steps[:3], 1):
+                clean_step = step if len(step) <= 80 else f"{step[:77]}..."
+                lines.append(f"{idx}. {clean_step}")
+            if len(playbook_steps) > 3:
+                lines.append(f"*(+{len(playbook_steps) - 3} more)*")
         for ticket in tickets:
             if ticket.status == "open":
                 status_emoji = "🔴"
@@ -292,7 +301,7 @@ class UnifiedDashboard:
                         "display_name": f"Category {category_id}"
                     }
                     field_name, field_value = self._build_category_field(
-                        cat_info["display_name"], cat_tickets, guild_id, cat_info.get("playbook_url", "")
+                        cat_info["display_name"], cat_tickets, guild_id, cat_info.get("playbook_steps") or []
                     )
                     embed.add_field(name=field_name, value=field_value, inline=False)
 

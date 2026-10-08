@@ -1,7 +1,26 @@
+import re
 from datetime import timedelta
 
 from django.db import models
 from django.utils import timezone
+
+
+def parse_playbook_steps(text: str) -> list[str]:
+    """Parse multiline playbook text into individual steps.
+
+    Handles plain lines, bullet points (- , * , • ), and numbered lists (1. , 1) ).
+    """
+    if not text:
+        return []
+    steps: list[str] = []
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        cleaned = re.sub(r"^(\d+[\.\)]|\*|-|•|\[[\sxX]\])\s*", "", line).strip()
+        if cleaned:
+            steps.append(cleaned)
+    return steps
 
 
 class TicketCategory(models.Model):
@@ -15,7 +34,11 @@ class TicketCategory(models.Model):
     max_points = models.IntegerField(default=0)
     user_creatable = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
-    playbook_url = models.URLField(blank=True, default="")
+    playbook = models.TextField(blank=True, default="", help_text="Staff response steps/playbook")
+
+    @property
+    def steps(self) -> list[str]:
+        return parse_playbook_steps(self.playbook)
 
     class Meta:
         ordering = ["sort_order", "display_name"]

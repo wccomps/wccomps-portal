@@ -146,8 +146,8 @@ class TestAdminCategoryCreate:
         assert response.status_code == 200
         assert b"Display name is required" in response.content
 
-    def test_post_creates_category_with_playbook_url(self, gold_team_user):
-        """POST with valid playbook_url saves it."""
+    def test_post_creates_category_with_playbook(self, gold_team_user):
+        """POST with playbook saves steps."""
         client = Client()
         client.force_login(gold_team_user)
         response = client.post(
@@ -155,28 +155,13 @@ class TestAdminCategoryCreate:
             {
                 "display_name": "Playbook Category",
                 "points": "50",
-                "playbook_url": "https://wiki.internal/playbooks/box-reset",
+                "playbook": "1. Check host\n2. Restart service",
             },
         )
         assert response.status_code == 302
         cat = TicketCategory.objects.get(display_name="Playbook Category")
-        assert cat.playbook_url == "https://wiki.internal/playbooks/box-reset"
-
-    def test_post_rejects_invalid_playbook_url(self, gold_team_user):
-        """POST with invalid URL shows validation error and does not create category."""
-        client = Client()
-        client.force_login(gold_team_user)
-        response = client.post(
-            reverse("admin_category_create"),
-            {
-                "display_name": "Invalid URL Category",
-                "points": "50",
-                "playbook_url": "not-a-valid-url",
-            },
-        )
-        assert response.status_code == 200
-        assert b"Enter a valid URL" in response.content
-        assert not TicketCategory.objects.filter(display_name="Invalid URL Category").exists()
+        assert cat.playbook == "1. Check host\n2. Restart service"
+        assert cat.steps == ["Check host", "Restart service"]
 
     def test_requires_permission(self, blue_team_user):
         """Non-admin users get 403."""
@@ -233,8 +218,8 @@ class TestAdminCategoryEdit:
         assert response.status_code == 200
         assert b"Display name is required" in response.content
 
-    def test_post_updates_category_playbook_url(self, gold_team_user, category):
-        """POST updates playbook_url on category."""
+    def test_post_updates_category_playbook(self, gold_team_user, category):
+        """POST updates playbook steps on category."""
         client = Client()
         client.force_login(gold_team_user)
         response = client.post(
@@ -242,37 +227,18 @@ class TestAdminCategoryEdit:
             {
                 "display_name": category.display_name,
                 "points": "50",
-                "playbook_url": "https://wiki.internal/playbooks/updated",
+                "playbook": "- Step one\n- Step two",
             },
         )
         assert response.status_code == 302
         category.refresh_from_db()
-        assert category.playbook_url == "https://wiki.internal/playbooks/updated"
+        assert category.playbook == "- Step one\n- Step two"
+        assert category.steps == ["Step one", "Step two"]
 
-    def test_post_rejects_invalid_playbook_url_on_edit(self, gold_team_user, category):
-        """POST with invalid URL shows error and leaves category unchanged."""
-        category.playbook_url = "https://wiki.internal/original"
-        category.save(update_fields=["playbook_url"])
-
-        client = Client()
-        client.force_login(gold_team_user)
-        response = client.post(
-            reverse("admin_category_edit", kwargs={"category_id": category.pk}),
-            {
-                "display_name": category.display_name,
-                "points": "50",
-                "playbook_url": "bad-url",
-            },
-        )
-        assert response.status_code == 200
-        assert b"Enter a valid URL" in response.content
-        category.refresh_from_db()
-        assert category.playbook_url == "https://wiki.internal/original"
-
-    def test_post_clears_playbook_url(self, gold_team_user, category):
-        """POST with empty playbook_url clears it."""
-        category.playbook_url = "https://wiki.internal/to-clear"
-        category.save(update_fields=["playbook_url"])
+    def test_post_clears_playbook(self, gold_team_user, category):
+        """POST with empty playbook clears it."""
+        category.playbook = "1. To clear"
+        category.save(update_fields=["playbook"])
 
         client = Client()
         client.force_login(gold_team_user)
@@ -281,12 +247,13 @@ class TestAdminCategoryEdit:
             {
                 "display_name": category.display_name,
                 "points": "50",
-                "playbook_url": "",
+                "playbook": "",
             },
         )
         assert response.status_code == 302
         category.refresh_from_db()
-        assert category.playbook_url == ""
+        assert category.playbook == ""
+        assert category.steps == []
 
     def test_nonexistent_category_returns_404(self, gold_team_user):
         """Editing nonexistent category returns 404."""

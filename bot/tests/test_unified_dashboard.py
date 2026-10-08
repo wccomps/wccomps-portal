@@ -409,10 +409,10 @@ class TestUnifiedDashboard:
         assert "T010-001" in field_values
         assert "Test Team" in field_values
 
-    async def test_update_dashboard_category_field_includes_playbook_url(self, box_reset_category) -> None:
-        """Category with playbook_url displays [Playbook](url) in the staff dashboard field."""
-        box_reset_category.playbook_url = "https://wiki.internal/playbooks/reset"
-        await box_reset_category.asave(update_fields=["playbook_url"])
+    async def test_update_dashboard_category_field_includes_playbook_steps(self, box_reset_category) -> None:
+        """Category with playbook displays steps in the staff dashboard field."""
+        box_reset_category.playbook = "1. First reset step\n2. Second reset step"
+        await box_reset_category.asave(update_fields=["playbook"])
 
         bot = AsyncMock(spec=discord.Client)
         dashboard = UnifiedDashboard(bot)
@@ -443,12 +443,14 @@ class TestUnifiedDashboard:
         call_kwargs = mock_message.edit.call_args[1]
         embed = call_kwargs["embed"]
         field_values = " ".join(f.value for f in embed.fields)
-        assert "[Playbook](https://wiki.internal/playbooks/reset)" in field_values
+        assert "📋 **Playbook:**" in field_values
+        assert "1. First reset step" in field_values
+        assert "2. Second reset step" in field_values
 
     async def test_update_dashboard_category_field_omits_playbook_when_none(self, box_reset_category) -> None:
-        """Category without playbook_url omits playbook link in the staff dashboard field."""
-        box_reset_category.playbook_url = ""
-        await box_reset_category.asave(update_fields=["playbook_url"])
+        """Category without playbook omits playbook in the staff dashboard field."""
+        box_reset_category.playbook = ""
+        await box_reset_category.asave(update_fields=["playbook"])
 
         bot = AsyncMock(spec=discord.Client)
         dashboard = UnifiedDashboard(bot)

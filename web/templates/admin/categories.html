@@ -51,8 +51,8 @@
                     </th>
                     <td class="field-points">{{ category.points }}</td>
                     <td class="field-playbook">
-                        {% if category.playbook_url %}
-                            <a href="{{ category.playbook_url }}" target="_blank" rel="noopener">Link</a>
+                        {% if category.steps %}
+                            <span>{{ category.steps|length }} step{{ category.steps|length|pluralize }}</span>
                         {% else %}
                             <span class="text-muted">—</span>
                         {% endif %}

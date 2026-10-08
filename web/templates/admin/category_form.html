@@ -38,14 +38,14 @@
                            class="vIntegerField"
                            value="{% if form_data %}{{ form_data.points }}{% elif category %}{{ category.points }}{% else %}0{% endif %}">
                 </c-form_field>
-                <c-form_field label="Playbook URL"
-                              id="id_playbook_url"
-                              help_text="Optional URL to staff response playbook.">
-                    <input type="url"
-                           name="playbook_url"
-                           id="id_playbook_url"
-                           class="vURLField"
-                           value="{% if form_data %}{{ form_data.playbook_url }}{% elif category %}{{ category.playbook_url }}{% endif %}">
+                <c-form_field label="Playbook Steps"
+                              id="id_playbook"
+                              help_text="Optional step-by-step instructions for staff responding to tickets in this category (one step per line).">
+                    <textarea name="playbook"
+                              id="id_playbook"
+                              rows="4"
+                              class="vLargeTextField"
+                              placeholder="1. Verify service status (one step per line)">{% if form_data %}{{ form_data.playbook }}{% elif category %}{{ category.playbook }}{% endif %}</textarea>
                 </c-form_field>
                 <c-form_field label="Sort Order" id="id_sort_order">
                     <input type="number"
