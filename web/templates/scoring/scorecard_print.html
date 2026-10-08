@@ -129,8 +129,8 @@
                     <th>Category</th>
                     <th class="text-right">Points</th>
                     <th class="text-right">Rank</th>
-                    <th class="text-right" title="Category average across teams (for Red Team, average deductions taken)">Avg</th>
-                    <th class="text-right" title="Maximum points earned (for Red Team, highest deductions taken)">Max</th>
+                    <th class="text-right">vs Avg</th>
+                    <th class="text-right">Max</th>
                 </tr>
             </thead>
             <tbody>
@@ -140,7 +140,15 @@
                         <td class="text-right">{{ score.service_points|floatformat:0 }}</td>
                         {% if svc_rank %}
                             <td class="text-right">#{{ svc_rank.rank }} of {{ stats.team_count }}</td>
-                            <td class="text-right">{{ svc_rank.avg|floatformat:0 }}</td>
+                            <td class="text-right">
+                                {% if svc_rank.delta > 0 %}
+                                    <span class="score-positive">+{{ svc_rank.delta }}</span>
+                                {% elif svc_rank.delta < 0 %}
+                                    <span class="score-negative">{{ svc_rank.delta }}</span>
+                                {% else %}
+                                    0
+                                {% endif %}
+                            </td>
                             <td class="text-right">{{ svc_rank.max|floatformat:0 }}</td>
                         {% else %}
                             <td class="text-right">—</td>
@@ -155,7 +163,15 @@
                         <td class="text-right">{{ score.inject_points|floatformat:0 }}</td>
                         {% if inj_rank %}
                             <td class="text-right">#{{ inj_rank.rank }} of {{ stats.team_count }}</td>
-                            <td class="text-right">{{ inj_rank.avg|floatformat:0 }}</td>
+                            <td class="text-right">
+                                {% if inj_rank.delta > 0 %}
+                                    <span class="score-positive">+{{ inj_rank.delta }}</span>
+                                {% elif inj_rank.delta < 0 %}
+                                    <span class="score-negative">{{ inj_rank.delta }}</span>
+                                {% else %}
+                                    0
+                                {% endif %}
+                            </td>
                             <td class="text-right">{{ inj_rank.max|floatformat:0 }}</td>
                         {% else %}
                             <td class="text-right">—</td>
@@ -170,7 +186,15 @@
                         <td class="text-right">{{ score.orange_points|floatformat:0 }}</td>
                         {% if ora_rank %}
                             <td class="text-right">#{{ ora_rank.rank }} of {{ stats.team_count }}</td>
-                            <td class="text-right">{{ ora_rank.avg|floatformat:0 }}</td>
+                            <td class="text-right">
+                                {% if ora_rank.delta > 0 %}
+                                    <span class="score-positive">+{{ ora_rank.delta }}</span>
+                                {% elif ora_rank.delta < 0 %}
+                                    <span class="score-negative">{{ ora_rank.delta }}</span>
+                                {% else %}
+                                    0
+                                {% endif %}
+                            </td>
                             <td class="text-right">{{ ora_rank.max|floatformat:0 }}</td>
                         {% else %}
                             <td class="text-right">—</td>
@@ -187,7 +211,15 @@
                         </td>
                         {% if red_rank %}
                             <td class="text-right">#{{ red_rank.rank }} of {{ stats.team_count }}</td>
-                            <td class="text-right">{{ red_rank.avg|floatformat:0 }}</td>
+                            <td class="text-right">
+                                {% if red_rank.delta > 0 %}
+                                    <span class="score-positive">+{{ red_rank.delta }}</span>
+                                {% elif red_rank.delta < 0 %}
+                                    <span class="score-negative">{{ red_rank.delta }}</span>
+                                {% else %}
+                                    0
+                                {% endif %}
+                            </td>
                             <td class="text-right">{{ red_rank.max|floatformat:0 }}</td>
                         {% else %}
                             <td class="text-right">—</td>
@@ -205,7 +237,15 @@
                             </td>
                             {% if sla_rank %}
                                 <td class="text-right">#{{ sla_rank.rank }} of {{ stats.team_count }}</td>
-                                <td class="text-right">{{ sla_rank.avg|floatformat:0 }}</td>
+                                <td class="text-right">
+                                    {% if sla_rank.delta > 0 %}
+                                        <span class="score-positive">+{{ sla_rank.delta }}</span>
+                                    {% elif sla_rank.delta < 0 %}
+                                        <span class="score-negative">{{ sla_rank.delta }}</span>
+                                    {% else %}
+                                        0
+                                    {% endif %}
+                                </td>
                                 <td class="text-right">{{ sla_rank.max|floatformat:0 }}</td>
                             {% else %}
                                 <td class="text-right">—</td>
@@ -224,7 +264,15 @@
                             </td>
                             {% if rec_rank %}
                                 <td class="text-right">#{{ rec_rank.rank }} of {{ stats.team_count }}</td>
-                                <td class="text-right">{{ rec_rank.avg|floatformat:0 }}</td>
+                                <td class="text-right">
+                                    {% if rec_rank.delta > 0 %}
+                                        <span class="score-positive">+{{ rec_rank.delta }}</span>
+                                    {% elif rec_rank.delta < 0 %}
+                                        <span class="score-negative">{{ rec_rank.delta }}</span>
+                                    {% else %}
+                                        0
+                                    {% endif %}
+                                </td>
                                 <td class="text-right">{{ rec_rank.max|floatformat:0 }}</td>
                             {% else %}
                                 <td class="text-right">—</td>
@@ -241,7 +289,15 @@
                             <td class="text-right">{{ score.point_adjustments|floatformat:0 }}</td>
                             {% if adj_rank %}
                                 <td class="text-right">#{{ adj_rank.rank }} of {{ stats.team_count }}</td>
-                                <td class="text-right">{{ adj_rank.avg|floatformat:0 }}</td>
+                                <td class="text-right">
+                                    {% if adj_rank.delta > 0 %}
+                                        <span class="score-positive">+{{ adj_rank.delta }}</span>
+                                    {% elif adj_rank.delta < 0 %}
+                                        <span class="score-negative">{{ adj_rank.delta }}</span>
+                                    {% else %}
+                                        0
+                                    {% endif %}
+                                </td>
                                 <td class="text-right">{{ adj_rank.max|floatformat:0 }}</td>
                             {% else %}
                                 <td class="text-right">—</td>
@@ -254,22 +310,31 @@
                 <tr class="row-total">
                     <td>Grand Total</td>
                     <td class="text-right">{{ score.total_score|floatformat:0 }}</td>
-                    <td></td>
-                    <td></td>
-                    <td></td>
+                    <td class="text-right">
+                        {% if score.rank %}#{{ score.rank }} of {{ stats.team_count }}{% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if stats.total_delta > 0 %}
+                            <span class="score-positive">+{{ stats.total_delta }}</span>
+                        {% elif stats.total_delta < 0 %}
+                            <span class="score-negative">{{ stats.total_delta }}</span>
+                        {% else %}
+                            0
+                        {% endif %}
+                    </td>
+                    <td class="text-right"></td>
                 </tr>
             </tbody>
         </table>
-        <p class="footnote">
-            Red Team values: Points are deductions applied to your score. The Avg and Max columns represent deductions taken across all teams (average point loss and highest deduction taken; lower is better).
-            {% if scaling %}
-                <br>
+        {% if scaling %}
+            <p class="footnote">
                 Scoring weights: Service {{ scaling.service_weight|floatformat:0 }}%, Inject {{ scaling.inject_weight|floatformat:0 }}%, Orange Checks {{ scaling.orange_weight|floatformat:0 }}%.
+                <br>
                 Service: {{ scaling.service_raw|floatformat:0 }} raw × {{ scaling.service_modifier|floatformat:2 }}
                 | Inject: {{ scaling.inject_raw|floatformat:0 }} raw × {{ scaling.inject_modifier|floatformat:2 }}
                 | Orange Checks: {{ scaling.orange_raw|floatformat:0 }} raw × {{ scaling.orange_modifier|floatformat:2 }}
-            {% endif %}
-        </p>
+            </p>
+        {% endif %}
         {% if stats.service_stats %}
             <h2>Service Uptime Detail</h2>
             <table>

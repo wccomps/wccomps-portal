@@ -19,6 +19,8 @@ class _CategoryRank(TypedDict):
     min: Decimal
     max: Decimal
     value: Decimal
+    delta: int
+    below_avg: bool
 
 
 class _InjectStat(TypedDict):
@@ -55,6 +57,7 @@ class _ScorecardStats(TypedDict):
     inject_stats: list[_InjectStat]
     neighbors: list[_Neighbor]
     insights: list[str]
+    total_delta: int
 
 
 @require_permission(
@@ -113,18 +116,17 @@ def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _Sco
         # Rank = teams scoring strictly better + 1. Red deductions are negative, so a
         # greater value (closer to 0) is better there too.
         rank = sum(1 for v in values if v > value) + 1
+        delta = value - avg
 
-        if label == "red":
-            # Store as absolute values; swap min/max so max = most deductions
-            category_ranks[label] = _CategoryRank(
-                rank=rank,
-                avg=abs(avg),
-                min=abs(mx),
-                max=abs(mn),
-                value=abs(value),
-            )
-        else:
-            category_ranks[label] = _CategoryRank(rank=rank, avg=avg, min=mn, max=mx, value=value)
+        category_ranks[label] = _CategoryRank(
+            rank=rank,
+            avg=avg,
+            min=mn,
+            max=mx,
+            value=value,
+            delta=int(round(delta)),
+            below_avg=delta < 0,
+        )
 
     # Use the same population as category ranking: only ranked, non-excluded teams
     ranked_team_ids = {s.team.pk for s in ranked}
@@ -214,6 +216,9 @@ def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _Sco
             if ns.rank is not None and ns.team != team and abs(ns.rank - score.rank) <= 1
         ]
 
+    total_avg = sum((s.total_score for s in ranked), Decimal("0")) / team_count if team_count else Decimal("0")
+    total_delta = int(round(score.total_score - total_avg))
+
     return _ScorecardStats(
         team_count=team_count,
         category_ranks=category_ranks,
@@ -221,6 +226,7 @@ def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _Sco
         inject_stats=inject_stats,
         neighbors=neighbors,
         insights=insights,
+        total_delta=total_delta,
     )
 
 

@@ -69,11 +69,15 @@ class TestComputeScorecardStats:
         assert stats["category_ranks"]["injects"]["rank"] == 2
         assert stats["category_ranks"]["orange"]["rank"] == 2
 
-        # Red values stored as absolute (positive), max = most deductions
+        # Red values signed, max = least deductions (highest score)
         red = stats["category_ranks"]["red"]
-        assert red["value"] == Decimal("500")  # abs(-500)
-        assert red["max"] == Decimal("800")  # abs(min(-800)) = most deductions
-        assert red["min"] == Decimal("100")  # abs(max(-100)) = least deductions
+        assert red["value"] == Decimal("-500")
+        assert red["max"] == Decimal("-100")
+        assert red["min"] == Decimal("-800")
+        assert red["delta"] == -33
+        assert red["below_avg"] is True
+
+        assert stats["total_delta"] == 367
 
     def test_compute_inject_stats(self, teams, scores):
         from scoring.views import _compute_scorecard_stats
@@ -305,6 +309,39 @@ class TestScorecardView:
         assert "SLA Violations" in content
         assert "tahoe-dns" in content
         assert response.context["service_sla_total"] == 7
+
+    def test_scorecard_category_breakdown_vs_avg(self, gold_team_user, teams, scores):
+        from scoring.models import AttackType, RedTeamScore
+
+        attack_type, _ = AttackType.objects.get_or_create(name="Default Credentials")
+        f1 = RedTeamScore.objects.create(
+            attack_type=attack_type,
+            points_per_team=Decimal("100"),
+            is_approved=True,
+        )
+        f1.affected_teams.add(teams[0])
+        f2 = RedTeamScore.objects.create(
+            attack_type=attack_type,
+            points_per_team=Decimal("40"),
+            is_approved=True,
+        )
+        f2.affected_teams.add(teams[1])
+        f3 = RedTeamScore.objects.create(
+            attack_type=attack_type,
+            points_per_team=Decimal("10"),
+            is_approved=True,
+        )
+        f3.affected_teams.add(teams[2])
+
+        client = Client()
+        client.force_login(gold_team_user)
+        url = reverse("leaderboard_scorecard", args=[1])
+        response = client.get(url)
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "vs Avg" in content
+        # team 1 has -100, team 2 has -40, team 3 has -10 -> avg -50 -> delta -50
+        assert "-50" in content
 
 
 class TestScorecardRedTeamDetail:
