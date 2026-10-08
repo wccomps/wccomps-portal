@@ -60,7 +60,7 @@
                             Rank
                         </c-table_header>
                         <c-table_header sortable="false" class="text-right">
-                            Avg
+                            vs Avg
                         </c-table_header>
                         <c-table_header sortable="false" class="text-right">
                             Max
@@ -73,7 +73,9 @@
                         <td class="text-right">{{ score.service_points|floatformat:0 }}</td>
                         {% if svc_rank %}
                             <td class="text-right">#{{ svc_rank.rank }} of {{ stats.team_count }}</td>
-                            <td class="text-right">{{ svc_rank.avg|floatformat:0 }}</td>
+                            <td class="text-right">
+                                <c-score_value value="{{ svc_rank.delta }}" format="signed" />
+                            </td>
                             <td class="text-right">{{ svc_rank.max|floatformat:0 }}</td>
                         {% else %}
                             <td class="text-right">—</td>
@@ -88,7 +90,9 @@
                         <td class="text-right">{{ score.inject_points|floatformat:0 }}</td>
                         {% if inj_rank %}
                             <td class="text-right">#{{ inj_rank.rank }} of {{ stats.team_count }}</td>
-                            <td class="text-right">{{ inj_rank.avg|floatformat:0 }}</td>
+                            <td class="text-right">
+                                <c-score_value value="{{ inj_rank.delta }}" format="signed" />
+                            </td>
                             <td class="text-right">{{ inj_rank.max|floatformat:0 }}</td>
                         {% else %}
                             <td class="text-right">—</td>
@@ -103,7 +107,9 @@
                         <td class="text-right">{{ score.orange_points|floatformat:0 }}</td>
                         {% if ora_rank %}
                             <td class="text-right">#{{ ora_rank.rank }} of {{ stats.team_count }}</td>
-                            <td class="text-right">{{ ora_rank.avg|floatformat:0 }}</td>
+                            <td class="text-right">
+                                <c-score_value value="{{ ora_rank.delta }}" format="signed" />
+                            </td>
                             <td class="text-right">{{ ora_rank.max|floatformat:0 }}</td>
                         {% else %}
                             <td class="text-right">—</td>
@@ -120,7 +126,9 @@
                         </td>
                         {% if red_rank %}
                             <td class="text-right">#{{ red_rank.rank }} of {{ stats.team_count }}</td>
-                            <td class="text-right">{{ red_rank.avg|floatformat:0 }}</td>
+                            <td class="text-right">
+                                <c-score_value value="{{ red_rank.delta }}" format="signed" />
+                            </td>
                             <td class="text-right">{{ red_rank.max|floatformat:0 }}</td>
                         {% else %}
                             <td class="text-right">—</td>
@@ -138,7 +146,9 @@
                             </td>
                             {% if sla_rank %}
                                 <td class="text-right">#{{ sla_rank.rank }} of {{ stats.team_count }}</td>
-                                <td class="text-right">{{ sla_rank.avg|floatformat:0 }}</td>
+                                <td class="text-right">
+                                    <c-score_value value="{{ sla_rank.delta }}" format="signed" />
+                                </td>
                                 <td class="text-right">{{ sla_rank.max|floatformat:0 }}</td>
                             {% else %}
                                 <td class="text-right">—</td>
@@ -157,7 +167,9 @@
                             </td>
                             {% if rec_rank %}
                                 <td class="text-right">#{{ rec_rank.rank }} of {{ stats.team_count }}</td>
-                                <td class="text-right">{{ rec_rank.avg|floatformat:0 }}</td>
+                                <td class="text-right">
+                                    <c-score_value value="{{ rec_rank.delta }}" format="signed" />
+                                </td>
                                 <td class="text-right">{{ rec_rank.max|floatformat:0 }}</td>
                             {% else %}
                                 <td class="text-right">—</td>
@@ -176,7 +188,9 @@
                             </td>
                             {% if adj_rank %}
                                 <td class="text-right">#{{ adj_rank.rank }} of {{ stats.team_count }}</td>
-                                <td class="text-right">{{ adj_rank.avg|floatformat:0 }}</td>
+                                <td class="text-right">
+                                    <c-score_value value="{{ adj_rank.delta }}" format="signed" />
+                                </td>
                                 <td class="text-right">{{ adj_rank.max|floatformat:0 }}</td>
                             {% else %}
                                 <td class="text-right">—</td>
@@ -193,12 +207,15 @@
                     <td class="text-right">
                         <strong>{{ score.total_score|floatformat:0 }}</strong>
                     </td>
-                    <td class="text-right"></td>
-                    <td class="text-right"></td>
+                    <td class="text-right">
+                        {% if score.rank %}<strong>#{{ score.rank }} of {{ stats.team_count }}</strong>{% endif %}
+                    </td>
+                    <td class="text-right">
+                        <c-score_value value="{{ stats.total_delta }}" format="signed" />
+                    </td>
                     <td class="text-right"></td>
                 </tr>
             </c-table>
-            <p class="text-muted text-xs">Red values shown as total deductions (lower is better).</p>
             {% if scaling %}
                 <p class="text-muted text-xs">
                     Scoring weights: Service {{ scaling.service_weight|floatformat:0 }}%, Inject {{ scaling.inject_weight|floatformat:0 }}%, Orange Checks {{ scaling.orange_weight|floatformat:0 }}%.
@@ -222,6 +239,9 @@
                                 Points
                             </c-table_header>
                             <c-table_header sortable="false" class="text-right">
+                                SLA Violations
+                            </c-table_header>
+                            <c-table_header sortable="false" class="text-right">
                                 vs Avg
                             </c-table_header>
                             <c-table_header sortable="false" class="text-right">
@@ -236,6 +256,7 @@
                                 {% if svc.below_avg %}<span class="visually-hidden">(below average)</span>{% endif %}
                             </td>
                             <td class="text-right">{{ svc.points|floatformat:0 }}</td>
+                            <td class="text-right">{{ svc.sla_violations }}</td>
                             <td class="text-right">
                                 <c-score_value value="{{ svc.delta }}" format="signed" />
                             </td>
@@ -248,6 +269,9 @@
                         </td>
                         <td class="text-right">
                             <strong>{{ service_total|floatformat:0 }}</strong>
+                        </td>
+                        <td class="text-right">
+                            <strong>{{ service_sla_total }}</strong>
                         </td>
                         <td class="text-right"></td>
                         <td class="text-right"></td>

@@ -69,11 +69,15 @@ class TestComputeScorecardStats:
         assert stats["category_ranks"]["injects"]["rank"] == 2
         assert stats["category_ranks"]["orange"]["rank"] == 2
 
-        # Red values stored as absolute (positive), max = most deductions
+        # Red values signed, max = least deductions (highest score)
         red = stats["category_ranks"]["red"]
-        assert red["value"] == Decimal("500")  # abs(-500)
-        assert red["max"] == Decimal("800")  # abs(min(-800)) = most deductions
-        assert red["min"] == Decimal("100")  # abs(max(-100)) = least deductions
+        assert red["value"] == Decimal("-500")
+        assert red["max"] == Decimal("-100")
+        assert red["min"] == Decimal("-800")
+        assert red["delta"] == -33
+        assert red["below_avg"] is True
+
+        assert stats["total_delta"] == 367
 
     def test_compute_inject_stats(self, teams, scores):
         from scoring.views import _compute_scorecard_stats
@@ -202,7 +206,12 @@ class TestComputeScorecardStats:
         from scoring.views import _compute_scorecard_stats
 
         for t, pts in [(teams[0], 400), (teams[1], 450), (teams[2], 300)]:
-            ServiceDetail.objects.create(team=t, service_name="tahoe-dns", points=Decimal(str(pts)))
+            ServiceDetail.objects.create(
+                team=t,
+                service_name="tahoe-dns",
+                points=Decimal(str(pts)),
+                sla_violations=3 if t == teams[0] else 0,
+            )
         for t, pts in [(teams[0], 200), (teams[1], 350), (teams[2], 250)]:
             ServiceDetail.objects.create(team=t, service_name="berryessa-ssh", points=Decimal(str(pts)))
 
@@ -212,10 +221,12 @@ class TestComputeScorecardStats:
         tahoe = next(s for s in stats["service_stats"] if s["name"] == "tahoe-dns")
         assert tahoe["points"] == Decimal("400")
         assert tahoe["rank"] == 2
+        assert tahoe["sla_violations"] == 3
         berry = next(s for s in stats["service_stats"] if s["name"] == "berryessa-ssh")
         assert berry["points"] == Decimal("200")
         assert berry["rank"] == 3
         assert berry["below_avg"] is True
+        assert berry["sla_violations"] == 0
 
     def test_service_stats_excludes_unranked_teams(self, teams, scores):
         from scoring.views import _compute_scorecard_stats
@@ -282,6 +293,55 @@ class TestScorecardView:
         url = reverse("leaderboard_scorecard", args=[99])
         response = client.get(url)
         assert response.status_code == 404
+
+    def test_scorecard_shows_service_sla_violations(self, gold_team_user, teams, scores):
+        ServiceDetail.objects.create(team=teams[0], service_name="tahoe-dns", points=Decimal("400"), sla_violations=5)
+        ServiceDetail.objects.create(
+            team=teams[0], service_name="berryessa-ssh", points=Decimal("200"), sla_violations=2
+        )
+
+        client = Client()
+        client.force_login(gold_team_user)
+        response = client.get(reverse("leaderboard_scorecard", args=[1]))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "SLA Violations" in content
+        assert "tahoe-dns" in content
+        assert response.context["service_sla_total"] == 7
+
+    def test_scorecard_category_breakdown_vs_avg(self, gold_team_user, teams, scores):
+        from scoring.models import AttackType, RedTeamScore
+
+        attack_type, _ = AttackType.objects.get_or_create(name="Default Credentials")
+        f1 = RedTeamScore.objects.create(
+            attack_type=attack_type,
+            points_per_team=Decimal("100"),
+            is_approved=True,
+        )
+        f1.affected_teams.add(teams[0])
+        f2 = RedTeamScore.objects.create(
+            attack_type=attack_type,
+            points_per_team=Decimal("40"),
+            is_approved=True,
+        )
+        f2.affected_teams.add(teams[1])
+        f3 = RedTeamScore.objects.create(
+            attack_type=attack_type,
+            points_per_team=Decimal("10"),
+            is_approved=True,
+        )
+        f3.affected_teams.add(teams[2])
+
+        client = Client()
+        client.force_login(gold_team_user)
+        url = reverse("leaderboard_scorecard", args=[1])
+        response = client.get(url)
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "vs Avg" in content
+        # team 1 has -100, team 2 has -40, team 3 has -10 -> avg -50 -> delta -50
+        assert "-50" in content
 
 
 class TestScorecardRedTeamDetail:
