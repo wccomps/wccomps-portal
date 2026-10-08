@@ -150,6 +150,29 @@ class TicketDashboardTest(TestCase):
         self.assertNotIn("Service", field_names)
         self.assertNotIn("IP Address", field_names)
 
+    def test_format_ticket_embed_never_includes_playbook_url(self) -> None:
+        """Team's Discord thread embed must never include the category playbook URL."""
+        cat = TicketCategory.objects.get(pk=2)
+        cat.playbook_url = "https://wiki.internal/playbooks/super-secret"
+        cat.save(update_fields=["playbook_url"])
+
+        ticket = Ticket.objects.create(
+            ticket_number="T001-101",
+            team=self.team,
+            category=cat,
+            title="Reset Request",
+            description="Please reset my box",
+            status="open",
+        )
+        embed = format_ticket_embed(ticket)
+        all_text = " ".join(
+            [embed.title or "", embed.description or ""]
+            + [f.name + " " + f.value for f in embed.fields]
+            + [embed.footer.text if embed.footer else ""]
+        )
+        self.assertNotIn("https://wiki.internal/playbooks/super-secret", all_text)
+        self.assertNotIn("Playbook", all_text)
+
 
 class TestTriggerDashboard:
     def test_triggers_the_unified_dashboard(self) -> None:

@@ -93,11 +93,11 @@ class TicketHistoryInline(admin.TabularInline[TicketHistory, Ticket]):
 @admin.register(TicketCategory)
 class TicketCategoryAdmin(admin.ModelAdmin[TicketCategory]):
     form = TicketCategoryForm
-    list_display = ["display_name", "points", "variable_points", "user_creatable", "sort_order"]
+    list_display = ["display_name", "points", "playbook_url", "variable_points", "user_creatable", "sort_order"]
     list_filter = ["variable_points", "user_creatable"]
     ordering = ["sort_order", "display_name"]
     fieldsets = (
-        (None, {"fields": ("display_name", "points", "sort_order")}),
+        (None, {"fields": ("display_name", "points", "playbook_url", "sort_order")}),
         (
             "Ticket Fields",
             {

@@ -15,6 +15,7 @@ class TicketCategory(models.Model):
     max_points = models.IntegerField(default=0)
     user_creatable = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
+    playbook_url = models.URLField(blank=True, default="")
 
     class Meta:
         ordering = ["sort_order", "display_name"]

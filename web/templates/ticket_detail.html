@@ -41,6 +41,25 @@
             font-size: 14px;
             line-height: 1.5;
         }
+
+        {% if is_ops %}
+            .playbook-link {
+                display: inline-flex;
+                align-items: center;
+                padding: 2px 8px;
+                font-size: 13px;
+                font-weight: 500;
+                color: var(--primary, #2563eb);
+                background: var(--primary-bg, #eff6ff);
+                border: 1px solid var(--primary-border, #bfdbfe);
+                border-radius: 4px;
+                text-decoration: none;
+            }
+
+            .playbook-link:hover {
+                text-decoration: underline;
+            }
+        {% endif %}
     </style>
 {% endblock extrastyle %}
 {% block content %}
@@ -79,6 +98,12 @@
                             </form>
                         {% else %}
                             <span>{{ category_name }}</span>
+                        {% endif %}
+                        {% if playbook_url %}
+                            <a href="{{ playbook_url }}"
+                               target="_blank"
+                               rel="noopener noreferrer"
+                               class="playbook-link">Playbook</a>
                         {% endif %}
                     {% else %}
                         <span>{{ category_name }}</span>

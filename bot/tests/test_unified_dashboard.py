@@ -409,6 +409,78 @@ class TestUnifiedDashboard:
         assert "T010-001" in field_values
         assert "Test Team" in field_values
 
+    async def test_update_dashboard_category_field_includes_playbook_url(self, box_reset_category) -> None:
+        """Category with playbook_url displays [Playbook](url) in the staff dashboard field."""
+        box_reset_category.playbook_url = "https://wiki.internal/playbooks/reset"
+        await box_reset_category.asave(update_fields=["playbook_url"])
+
+        bot = AsyncMock(spec=discord.Client)
+        dashboard = UnifiedDashboard(bot)
+        dashboard.dashboard_message_id = 1111
+        dashboard.dashboard_channel_id = 2222
+
+        team = await Team.objects.acreate(team_number=10, team_name="Test Team")
+        await Ticket.objects.acreate(
+            ticket_number="T010-002",
+            team=team,
+            category=box_reset_category,
+            title="Reset Request",
+            description="Reset please",
+            status="open",
+        )
+
+        mock_channel = MagicMock(spec=discord.TextChannel)
+        mock_channel.id = 2222
+        mock_channel.guild = Mock()
+        mock_channel.guild.id = 3333
+        mock_message = AsyncMock()
+        mock_message.edit = AsyncMock()
+        mock_channel.fetch_message = AsyncMock(return_value=mock_message)
+        bot.get_channel.return_value = mock_channel
+
+        await dashboard._update_dashboard()
+
+        call_kwargs = mock_message.edit.call_args[1]
+        embed = call_kwargs["embed"]
+        field_values = " ".join(f.value for f in embed.fields)
+        assert "[Playbook](https://wiki.internal/playbooks/reset)" in field_values
+
+    async def test_update_dashboard_category_field_omits_playbook_when_none(self, box_reset_category) -> None:
+        """Category without playbook_url omits playbook link in the staff dashboard field."""
+        box_reset_category.playbook_url = ""
+        await box_reset_category.asave(update_fields=["playbook_url"])
+
+        bot = AsyncMock(spec=discord.Client)
+        dashboard = UnifiedDashboard(bot)
+        dashboard.dashboard_message_id = 1111
+        dashboard.dashboard_channel_id = 2222
+
+        team = await Team.objects.acreate(team_number=10, team_name="Test Team")
+        await Ticket.objects.acreate(
+            ticket_number="T010-003",
+            team=team,
+            category=box_reset_category,
+            title="Reset Request",
+            description="Reset please",
+            status="open",
+        )
+
+        mock_channel = MagicMock(spec=discord.TextChannel)
+        mock_channel.id = 2222
+        mock_channel.guild = Mock()
+        mock_channel.guild.id = 3333
+        mock_message = AsyncMock()
+        mock_message.edit = AsyncMock()
+        mock_channel.fetch_message = AsyncMock(return_value=mock_message)
+        bot.get_channel.return_value = mock_channel
+
+        await dashboard._update_dashboard()
+
+        call_kwargs = mock_message.edit.call_args[1]
+        embed = call_kwargs["embed"]
+        field_values = " ".join(f.value for f in embed.fields)
+        assert "Playbook" not in field_values
+
     async def test_update_dashboard_sort_by_stale(self, box_reset_category) -> None:
         """Test _update_dashboard sorting by stale."""
         bot = AsyncMock(spec=discord.Client)
