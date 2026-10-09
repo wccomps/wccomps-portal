@@ -407,6 +407,33 @@ class TestLeaderboardAccess:
         # Action links styled as buttons should have role="button" so Django admin doesn't underline them
         assert 'role="button"' in content
 
+    def test_leaderboard_action_buttons_gated_to_endpoint_permissions(self, create_user_with_groups) -> None:
+        """Action buttons only show to roles whose endpoint admits them (no dead 403 buttons)."""
+        export_url = reverse("scoring:export_scorecards")
+        api_url = reverse("scoring:api_scores")
+        client = Client()
+
+        # Orange team can view the board but can neither bulk-export nor hit the JSON API.
+        orange = create_user_with_groups("orange_btn", ["WCComps_OrangeTeam"])
+        client.force_login(orange)
+        content = client.get(reverse("leaderboard_page")).content.decode()
+        assert export_url not in content
+        assert api_url not in content
+
+        # White team can use the JSON API (api_scores) but not the Gold-only bulk export.
+        white = create_user_with_groups("white_btn", ["WCComps_WhiteTeam"])
+        client.force_login(white)
+        content = client.get(reverse("leaderboard_page")).content.decode()
+        assert export_url not in content
+        assert api_url in content
+
+        # Gold team sees both.
+        gold = create_user_with_groups("gold_btn", ["WCComps_GoldTeam"])
+        client.force_login(gold)
+        content = client.get(reverse("leaderboard_page")).content.decode()
+        assert export_url in content
+        assert api_url in content
+
 
 class InjectScoreApprovalTests(TestCase):
     """Test approval tracking fields on InjectScore model."""
