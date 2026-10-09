@@ -403,6 +403,9 @@ class TestLeaderboardAccess:
         assert "Sync Service Scores" in content
         # Links and buttons should have the 'button default' class
         assert 'class="button default "' in content
+        assert 'class="button  default "' in content or 'class="button default "' in content
+        # Action links styled as buttons should have role="button" so Django admin doesn't underline them
+        assert 'role="button"' in content
 
     def test_leaderboard_action_buttons_gated_to_endpoint_permissions(self, create_user_with_groups) -> None:
         """Action buttons only show to roles whose endpoint admits them (no dead 403 buttons)."""
@@ -430,9 +433,6 @@ class TestLeaderboardAccess:
         content = client.get(reverse("leaderboard_page")).content.decode()
         assert export_url in content
         assert api_url in content
-        assert 'class="button  default "' in content or 'class="button default "' in content
-        # Action links styled as buttons should have role="button" so Django admin doesn't underline them
-        assert 'role="button"' in content
 
 
 class InjectScoreApprovalTests(TestCase):
