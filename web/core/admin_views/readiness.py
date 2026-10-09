@@ -187,6 +187,13 @@ def _check_packets_distributed() -> CheckResult:
     return ("pass", "All packets distributed to all teams", None)
 
 
+def _check_start_message() -> CheckResult:
+    """The start message (default VM credentials) goes to every team when the competition starts."""
+    if not CompetitionConfig.get_config().start_message.strip():
+        return ("warn", "No start message: teams get no message when the competition starts", None)
+    return ("pass", "Start message set", None)
+
+
 def _check_quotient_synced() -> CheckResult:
     """Check that Quotient metadata was synced recently."""
     from scoring.models import QuotientMetadataCache
@@ -324,6 +331,7 @@ ALL_CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
     ("Quotient API reachable", _check_quotient_api),
     ("Quotient metadata synced", _check_quotient_synced),
     ("Packets distributed", _check_packets_distributed),
+    ("Start message set", _check_start_message),
     # Phase 3: Clean slate
     ("No existing tickets", _check_no_tickets),
     ("No existing red team findings", _check_no_red_scores),

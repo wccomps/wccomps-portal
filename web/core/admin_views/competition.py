@@ -16,7 +16,7 @@ from core.admin_views.readiness import action_readiness_check, action_readiness_
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import reset_team_credentials
 from core.discord_tasks import CleanupCompetition, LogToChannel
-from core.forms import ActionForm, AppSlugForm, ResetPasswordsForm, SetMaxMembersForm, SetTimeForm
+from core.forms import ActionForm, AppSlugForm, ResetPasswordsForm, SetMaxMembersForm, SetTimeForm, StartMessageForm
 from core.models import AuditLog, CompetitionConfig, DiscordTask
 from core.services.competition import CompetitionRunResult, run_competition
 from core.utils import ndjson_progress as _progress
@@ -60,6 +60,28 @@ def _action_set_max_members(request: HttpRequest, config: CompetitionConfig, aut
     )
 
     return JsonResponse({"success": True, "message": f"Max members set to {max_members}"})
+
+
+def _action_set_start_message(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
+    form = StartMessageForm(request.POST)
+    if not form.is_valid():
+        return JsonResponse({"error": form.errors["start_message"][0]}, status=400)
+
+    message = form.cleaned_data["start_message"]
+    CompetitionConfig.objects.filter(pk=config.pk).update(start_message=message)
+
+    # The message usually carries credentials, so the audit entry records only its length.
+    AuditLog.objects.create(
+        action="competition_start_message_updated",
+        admin_user=authentik_username,
+        target_entity="competition_config",
+        target_id=config.pk,
+        details={"length": len(message)},
+    )
+
+    return JsonResponse(
+        {"success": True, "message": "Start message saved" if message.strip() else "Start message cleared"}
+    )
 
 
 def _edit_controlled_app(
@@ -385,6 +407,7 @@ def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authe
 
 _COMPETITION_ACTION_HANDLERS = {
     "set_max_members": _action_set_max_members,
+    "set_start_message": _action_set_start_message,
     "add_app": _action_add_app,
     "remove_app": _action_remove_app,
     "set_start_time": _action_set_start_time,
@@ -420,6 +443,7 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
         "linked_users": linked_users,
         "timezone_choices": TIMEZONE_CHOICES,
         "quotient_metadata": quotient_metadata,
+        "start_message_max_length": StartMessageForm.MAX_LENGTH,
         "show_ops_nav": True,
         "nav_active": "ops_admin",
     }

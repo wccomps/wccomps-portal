@@ -264,8 +264,9 @@ async def run_competition_cleanup(bot: discord.Client, guild: discord.Guild, act
         if helper_role_removals > 0:
             await log_to_ops_channel(bot, f"Removed helper/judge roles from {helper_role_removals} members")
 
+        # The start message holds this event's credentials; the next event gets its own.
         await CompetitionConfig.objects.filter(pk=config.pk).aupdate(
-            competition_start_time=None, competition_end_time=None
+            competition_start_time=None, competition_end_time=None, start_message=""
         )
         await QuotientMetadataCache.objects.all().adelete()
 

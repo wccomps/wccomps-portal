@@ -4,10 +4,15 @@ import logging
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 
-from core.models import AuditLog, CompetitionConfig
+from django.db import transaction
+
+from core.discord_tasks import BroadcastMessage
+from core.models import AuditLog, CompetitionConfig, DiscordTask
 from team.models import MAX_TEAMS, active_team_numbers, team_username
 
 logger = logging.getLogger(__name__)
+
+START_MESSAGE_SENDER = "Black Team"
 
 
 @dataclass(frozen=True)
@@ -32,6 +37,7 @@ class CompetitionRunResult:
     accounts_ok: int = 0
     accounts_failed: int = 0
     quotient_synced: bool | None = None
+    start_message_queued: bool = False
     error: str | None = None
 
     @property
@@ -57,6 +63,8 @@ class CompetitionRunResult:
         lines.append(accounts)
         if self.quotient_synced is not None:
             lines.append(f"Quotient metadata: {'synced' if self.quotient_synced else 'sync failed'}")
+        if self.start_message_queued:
+            lines.append("Start message queued for every active team")
         return "\n".join(lines)
 
 
@@ -66,6 +74,7 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
     Toggles each controlled application's BlueTeam binding and the team accounts (start enables the
     active teams' accounts; stop disables every team account), refreshes stored groups so permissions
     follow at once, syncs Quotient metadata on start, then records the new state and an audit entry.
+    A start that turns the competition on also queues the start message to every active team.
     Blocking (Authentik HTTP): async callers run it in a thread.
     """
     from scoring.quotient_sync import sync_quotient_metadata
@@ -131,7 +140,19 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
     # Only the fields this run owns: a schedule or app-list edit made meanwhile must survive.
     changes: dict[str, object] = {"applications_enabled": enable}
     changes["competition_start_time" if enable else "competition_end_time"] = None
-    CompetitionConfig.objects.filter(pk=config.pk).update(**changes)
+    with transaction.atomic():
+        # Locked so the timer's retries and a concurrent manual start send the start message once.
+        was_enabled, start_message = (
+            CompetitionConfig.objects.select_for_update()
+            .values_list("applications_enabled", "start_message")
+            .get(pk=config.pk)
+        )
+        CompetitionConfig.objects.filter(pk=config.pk).update(**changes)
+        if enable and not was_enabled and start_message.strip():
+            DiscordTask.enqueue(
+                BroadcastMessage(target="all-teams", message=start_message, sender=START_MESSAGE_SENDER)
+            )
+            result.start_message_queued = True
 
     AuditLog.objects.create(
         action="competition_started" if enable else "competition_stopped",
@@ -144,6 +165,7 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
             "accounts_ok": result.accounts_ok,
             "accounts_failed": result.accounts_failed,
             "quotient_synced": result.quotient_synced,
+            "start_message_queued": result.start_message_queued,
         },
     )
     return result
