@@ -98,7 +98,7 @@ class UnifiedDashboard:
             return
 
         embed = discord.Embed(
-            title="📋 Ticket Queue Dashboard",
+            title="Ticket Queue Dashboard",
             description="Loading tickets...",
             color=discord.Color.blue(),
         )
@@ -138,11 +138,11 @@ class UnifiedDashboard:
 
         time_since_claim = timezone.now() - ticket.assigned_at
         if time_since_claim > timedelta(hours=2):
-            return " ⛔"
+            return " (claimed >2h)"
         if time_since_claim > timedelta(hours=1):
-            return " 🚨"
+            return " (claimed >1h)"
         if time_since_claim > timedelta(minutes=30):
-            return " ⚠️"
+            return " (claimed >30m)"
         return ""
 
     def _get_time_ago(self, dt: datetime | None) -> str:
@@ -180,13 +180,6 @@ class UnifiedDashboard:
         """Build the (name, value) embed field for one ticket category."""
         lines = []
         for ticket in tickets:
-            if ticket.status == "open":
-                status_emoji = "🔴"
-            elif ticket.status == "claimed":
-                status_emoji = "🟡"
-            else:
-                status_emoji = "🔵"
-
             stale = self._get_stale_indicator(ticket)
 
             if ticket.discord_thread_id:
@@ -203,7 +196,7 @@ class UnifiedDashboard:
                 assignee = f" - {ticket.assigned_to.username}"
 
             lines.append(
-                f"{status_emoji} {ticket_display} {ticket.team.team_name}{assignee}{stale}\n"
+                f"`{ticket.status.upper()}` {ticket_display} {ticket.team.team_name}{assignee}{stale}\n"
                 f"   ↳ *{desc_preview}* ({time_str})"
             )
 
@@ -263,7 +256,7 @@ class UnifiedDashboard:
                 tickets.sort(key=lambda t: t.created_at)
 
             embed = discord.Embed(
-                title="📋 Ticket Queue Dashboard",
+                title="Ticket Queue Dashboard",
                 description=(
                     f"**{len(tickets)} active tickets** "
                     f"(Sort: {self.sort_by.title()} | Filter: {self.filter_status.replace('_', ' ').title()})"
@@ -274,9 +267,9 @@ class UnifiedDashboard:
 
             if not tickets:
                 resolved_today, avg_time = await get_stats()
-                embed.description = "✅ **No active tickets!**"
+                embed.description = "**No active tickets!**"
                 embed.add_field(
-                    name="📊 Today's Stats",
+                    name="Today's Stats",
                     value=f"**{resolved_today}** tickets resolved\n**{avg_time}** min avg resolution time",
                     inline=False,
                 )
@@ -291,8 +284,6 @@ class UnifiedDashboard:
                         cat_info["display_name"], cat_tickets, guild_id
                     )
                     embed.add_field(name=field_name, value=field_value, inline=False)
-
-            embed.set_footer(text="🔴 Open | 🟡 Claimed (Working) | ⚠️ >30min | 🚨 >1hr | ⛔ >2hr")
 
             view = DashboardControlView(self)
             await message.edit(embed=embed, view=view)
