@@ -128,7 +128,7 @@ class TicketCategoryAdmin(admin.ModelAdmin[TicketCategory]):
     @admin.display(description="Playbook")
     def get_steps_count(self, obj: TicketCategory) -> str:
         count = len(obj.steps)
-        return f"{count} step{'s' if count != 1 else ''}" if count else "—"
+        return f"{count} step{'s' if count != 1 else ''}" if count else "None"
 
 
 @admin.register(Ticket)

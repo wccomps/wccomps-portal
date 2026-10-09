@@ -54,7 +54,7 @@
                         {% if category.steps %}
                             <span>{{ category.steps|length }} step{{ category.steps|length|pluralize }}</span>
                         {% else %}
-                            <span class="text-muted">—</span>
+                            <span class="text-muted">None</span>
                         {% endif %}
                     </td>
                     <td class="field-required_fields">{{ category.required_fields|join:", " }}</td>
