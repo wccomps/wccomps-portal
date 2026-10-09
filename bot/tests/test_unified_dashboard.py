@@ -251,7 +251,7 @@ class TestUnifiedDashboard:
 
         result = dashboard._get_stale_indicator(ticket)
 
-        assert result == " ⚠️"
+        assert result == " (claimed >30m)"
 
     async def test_get_stale_indicator_over_1_hour(self, box_reset_category) -> None:
         """Test _get_stale_indicator returns alert for tickets >1hr."""
@@ -272,7 +272,7 @@ class TestUnifiedDashboard:
 
         result = dashboard._get_stale_indicator(ticket)
 
-        assert result == " 🚨"
+        assert result == " (claimed >1h)"
 
     async def test_get_stale_indicator_over_2_hours(self, box_reset_category) -> None:
         """Test _get_stale_indicator returns critical for tickets >2hr."""
@@ -293,7 +293,7 @@ class TestUnifiedDashboard:
 
         result = dashboard._get_stale_indicator(ticket)
 
-        assert result == " ⛔"
+        assert result == " (claimed >2h)"
 
     async def test_get_time_ago_just_now(self) -> None:
         """Test _get_time_ago returns 'just now' for <1min."""
@@ -408,6 +408,7 @@ class TestUnifiedDashboard:
         field_values = " ".join(f.value for f in embed.fields)
         assert "T010-001" in field_values
         assert "Test Team" in field_values
+        assert "`OPEN`" in field_values
 
     async def test_update_dashboard_sort_by_stale(self, box_reset_category) -> None:
         """Test _update_dashboard sorting by stale."""
