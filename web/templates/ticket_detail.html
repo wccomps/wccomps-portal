@@ -41,6 +41,21 @@
             font-size: 14px;
             line-height: 1.5;
         }
+
+        {% if is_ops %}
+            .playbook-steps {
+                margin: 0;
+                padding-left: 20px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .playbook-steps li {
+                line-height: 1.5;
+                font-size: 14px;
+            }
+        {% endif %}
     </style>
 {% endblock extrastyle %}
 {% block content %}
@@ -194,6 +209,15 @@
                     {% elif ticket.status == "resolved" or ticket.status == "cancelled" %}
                         <p class="help mt-5">Only the assignee changes; status and points stay as they are.</p>
                     {% endif %}
+                </c-fieldset>
+            {% endif %}
+            {% if is_ops and playbook_steps %}
+                <c-fieldset heading="Response Playbook">
+                    <ol class="playbook-steps">
+                        {% for step in playbook_steps %}
+                            <li>{{ step }}</li>
+                        {% endfor %}
+                    </ol>
                 </c-fieldset>
             {% endif %}
             <c-fieldset heading="Ticket Information">

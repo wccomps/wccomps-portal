@@ -50,6 +50,12 @@ class TicketCategoryForm(forms.ModelForm[TicketCategory]):
                     'ticket lead will manually adjust to 300 points"',
                 }
             ),
+            "playbook": forms.Textarea(
+                attrs={
+                    "rows": 4,
+                    "placeholder": "1. Verify service status\n2. Check credentials\n3. Restart daemon",
+                }
+            ),
         }
 
     def clean_required_fields(self) -> list[str]:
@@ -93,11 +99,11 @@ class TicketHistoryInline(admin.TabularInline[TicketHistory, Ticket]):
 @admin.register(TicketCategory)
 class TicketCategoryAdmin(admin.ModelAdmin[TicketCategory]):
     form = TicketCategoryForm
-    list_display = ["display_name", "points", "variable_points", "user_creatable", "sort_order"]
+    list_display = ["display_name", "points", "get_steps_count", "variable_points", "user_creatable", "sort_order"]
     list_filter = ["variable_points", "user_creatable"]
     ordering = ["sort_order", "display_name"]
     fieldsets = (
-        (None, {"fields": ("display_name", "points", "sort_order")}),
+        (None, {"fields": ("display_name", "points", "playbook", "sort_order")}),
         (
             "Ticket Fields",
             {
@@ -118,6 +124,11 @@ class TicketCategoryAdmin(admin.ModelAdmin[TicketCategory]):
         ),
         ("Visibility", {"fields": ("user_creatable",)}),
     )
+
+    @admin.display(description="Playbook")
+    def get_steps_count(self, obj: TicketCategory) -> str:
+        count = len(obj.steps)
+        return f"{count} step{'s' if count != 1 else ''}" if count else "None"
 
 
 @admin.register(Ticket)

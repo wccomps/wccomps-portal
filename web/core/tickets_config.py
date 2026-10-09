@@ -15,6 +15,8 @@ class TicketCategoryConfig(TypedDict, total=False):
     min_points: int
     max_points: int
     user_creatable: bool
+    playbook: str
+    playbook_steps: list[str]
 
 
 def _model_to_config(cat: TicketCategory) -> TicketCategoryConfig:
@@ -32,6 +34,9 @@ def _model_to_config(cat: TicketCategory) -> TicketCategoryConfig:
         config["min_points"] = cat.min_points
     if cat.max_points:
         config["max_points"] = cat.max_points
+    if cat.playbook:
+        config["playbook"] = cat.playbook
+        config["playbook_steps"] = cat.steps
     return config
 
 

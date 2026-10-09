@@ -102,6 +102,7 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
         context["variable_points"] = cat_info.get("variable_points", False)
         context["categories"] = get_all_categories()
         context["history"] = history
+        context["playbook_steps"] = cat_info.get("playbook_steps", [])
         if is_ticketing_support or is_ticketing_admin:
             context["staff_usernames"] = _ticketing_staff_usernames()
 

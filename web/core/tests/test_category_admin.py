@@ -146,6 +146,23 @@ class TestAdminCategoryCreate:
         assert response.status_code == 200
         assert b"Display name is required" in response.content
 
+    def test_post_creates_category_with_playbook(self, gold_team_user):
+        """POST with playbook saves steps."""
+        client = Client()
+        client.force_login(gold_team_user)
+        response = client.post(
+            reverse("admin_category_create"),
+            {
+                "display_name": "Playbook Category",
+                "points": "50",
+                "playbook": "1. Check host\n2. Restart service",
+            },
+        )
+        assert response.status_code == 302
+        cat = TicketCategory.objects.get(display_name="Playbook Category")
+        assert cat.playbook == "1. Check host\n2. Restart service"
+        assert cat.steps == ["Check host", "Restart service"]
+
     def test_requires_permission(self, blue_team_user):
         """Non-admin users get 403."""
         client = Client()
@@ -200,6 +217,43 @@ class TestAdminCategoryEdit:
         )
         assert response.status_code == 200
         assert b"Display name is required" in response.content
+
+    def test_post_updates_category_playbook(self, gold_team_user, category):
+        """POST updates playbook steps on category."""
+        client = Client()
+        client.force_login(gold_team_user)
+        response = client.post(
+            reverse("admin_category_edit", kwargs={"category_id": category.pk}),
+            {
+                "display_name": category.display_name,
+                "points": "50",
+                "playbook": "- Step one\n- Step two",
+            },
+        )
+        assert response.status_code == 302
+        category.refresh_from_db()
+        assert category.playbook == "- Step one\n- Step two"
+        assert category.steps == ["Step one", "Step two"]
+
+    def test_post_clears_playbook(self, gold_team_user, category):
+        """POST with empty playbook clears it."""
+        category.playbook = "1. To clear"
+        category.save(update_fields=["playbook"])
+
+        client = Client()
+        client.force_login(gold_team_user)
+        response = client.post(
+            reverse("admin_category_edit", kwargs={"category_id": category.pk}),
+            {
+                "display_name": category.display_name,
+                "points": "50",
+                "playbook": "",
+            },
+        )
+        assert response.status_code == 302
+        category.refresh_from_db()
+        assert category.playbook == ""
+        assert category.steps == []
 
     def test_nonexistent_category_returns_404(self, gold_team_user):
         """Editing nonexistent category returns 404."""

@@ -24,6 +24,9 @@
                         Points
                     </c-table_header>
                     <c-table_header sortable="false">
+                        Playbook
+                    </c-table_header>
+                    <c-table_header sortable="false">
                         Required Fields
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -47,6 +50,13 @@
                         <a href="{% url 'admin_category_edit' category.pk %}">{{ category.display_name }}</a>
                     </th>
                     <td class="field-points">{{ category.points }}</td>
+                    <td class="field-playbook">
+                        {% if category.steps %}
+                            <span>{{ category.steps|length }} step{{ category.steps|length|pluralize }}</span>
+                        {% else %}
+                            <span class="text-muted">None</span>
+                        {% endif %}
+                    </td>
                     <td class="field-required_fields">{{ category.required_fields|join:", " }}</td>
                     <td class="field-variable">
                         {% if category.variable_points %}
@@ -77,7 +87,7 @@
                 </tr>
             {% empty %}
                 <tr>
-                    <td colspan="8">
+                    <td colspan="9">
                         <c-empty_state title="No categories"
                                        description="Add a ticket category to get started.">
                             <c-link href="{% url 'admin_category_create' %}" variant="add">Add Category</c-link>

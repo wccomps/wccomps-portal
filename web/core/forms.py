@@ -44,6 +44,19 @@ class CategoryForm(forms.Form):
     max_points = forms.IntegerField(initial=0, required=False)
     user_creatable = forms.BooleanField(required=False)
     sort_order = forms.IntegerField(initial=0, required=False)
+    playbook = forms.CharField(required=False, widget=forms.Textarea)
+
+    def clean_min_points(self) -> int:
+        return self.cleaned_data.get("min_points") or 0
+
+    def clean_max_points(self) -> int:
+        return self.cleaned_data.get("max_points") or 0
+
+    def clean_sort_order(self) -> int:
+        return self.cleaned_data.get("sort_order") or 0
+
+    def clean_playbook(self) -> str:
+        return (self.cleaned_data.get("playbook") or "").strip()
 
 
 class SetMaxMembersForm(forms.Form):
