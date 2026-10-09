@@ -443,7 +443,7 @@ class TestUnifiedDashboard:
         call_kwargs = mock_message.edit.call_args[1]
         embed = call_kwargs["embed"]
         field_values = " ".join(f.value for f in embed.fields)
-        assert "📋 **Playbook:**" in field_values
+        assert "**Playbook:**" in field_values
         assert "1. First reset step" in field_values
         assert "2. Second reset step" in field_values
 

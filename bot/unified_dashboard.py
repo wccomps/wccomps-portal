@@ -186,7 +186,7 @@ class UnifiedDashboard:
         """Build the (name, value) embed field for one ticket category."""
         lines = []
         if playbook_steps:
-            lines.append("📋 **Playbook:**")
+            lines.append("**Playbook:**")
             for idx, step in enumerate(playbook_steps[:3], 1):
                 clean_step = step if len(step) <= 80 else f"{step[:77]}..."
                 lines.append(f"{idx}. {clean_step}")
