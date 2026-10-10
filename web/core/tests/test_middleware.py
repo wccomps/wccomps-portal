@@ -1,5 +1,7 @@
 """Tests for middleware (SubdomainRedirectMiddleware, AuthentikRequiredMiddleware)."""
 
+import json
+
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
@@ -276,6 +278,31 @@ class TestAuthentikRequiredMiddleware:
 
         assert response.status_code == 302
         assert "%2Fops%2Ftickets%2F" in response.url  # URL-encoded /ops/tickets/
+
+    def test_page_navigation_still_redirects_to_login(self, middleware):
+        request = RequestFactory().get("/tickets/", headers={"Sec-Fetch-Mode": "navigate"})
+        request.user = AnonymousUser()
+
+        assert middleware(request).status_code == 302
+
+    def test_expired_htmx_poll_reloads_the_page_instead_of_redirecting(self, middleware):
+        """Following the login redirect ends at Authentik, another origin: the poll sees a network error."""
+        request = RequestFactory().get("/tickets/", headers={"HX-Request": "true", "Sec-Fetch-Mode": "cors"})
+        request.user = AnonymousUser()
+
+        response = middleware(request)
+
+        assert response.status_code == 204
+        assert response.headers["HX-Refresh"] == "true"
+
+    def test_expired_fetch_gets_an_error_it_can_show(self, middleware):
+        request = RequestFactory().post("/ops/admin/competition/action/", headers={"Sec-Fetch-Mode": "cors"})
+        request.user = AnonymousUser()
+
+        response = middleware(request)
+
+        assert response.status_code == 401
+        assert json.loads(response.content) == {"error": "Your session expired. Reload the page to sign in again."}
 
     def test_auth_path_whitelisted(self, middleware):
         """Paths starting with /auth/ should be accessible without login."""
