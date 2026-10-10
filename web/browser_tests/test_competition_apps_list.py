@@ -80,3 +80,33 @@ def test_a_slug_missing_from_authentiks_app_list_can_be_typed_in(live_server, pw
             page.locator("button[aria-label='Remove app'][data-app=competitions]").wait_for()
     finally:
         context.close()
+
+
+def test_start_message_loads_and_saves(live_server, pw_browser):
+    """The stored message fills the box (newlines intact) and an edit saves through the page's action."""
+    from core.models import CompetitionConfig
+
+    config = CompetitionConfig.get_config()
+    config.start_message = "Default VM login\nadmin / old"
+    config.save()
+
+    user = _create_role_user("admin", None)
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    manager = MagicMock()
+    manager.list_applications.return_value = AVAILABLE
+
+    try:
+        with patch("core.admin_views.competition.AuthentikManager", return_value=manager):
+            page.goto(f"{live_server.url}/ops/admin/competition/")
+            box = page.locator("#start_message")
+            assert box.input_value() == "Default VM login\nadmin / old"
+
+            box.fill("Default VM login\nadmin / Changeme-2026!")
+            with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):
+                page.get_by_role("button", name="Save Start Message").click()
+
+            config.refresh_from_db()
+            assert config.start_message == "Default VM login\nadmin / Changeme-2026!"
+    finally:
+        context.close()

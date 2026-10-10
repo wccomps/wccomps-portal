@@ -35,7 +35,12 @@ def _guild(*category_names: str) -> MagicMock:
 @pytest.fixture
 async def competition(db: Any) -> Team:
     await CompetitionConfig.objects.aupdate_or_create(
-        pk=1, defaults={"applications_enabled": False, "competition_start_time": timezone.now()}
+        pk=1,
+        defaults={
+            "applications_enabled": False,
+            "competition_start_time": timezone.now(),
+            "start_message": "Default VM login",
+        },
     )
     team = await Team.objects.acreate(team_number=3, team_name="Team 03", discord_role_id=11, discord_category_id=22)
     member = await User.objects.acreate(username="member03")
@@ -72,7 +77,8 @@ async def test_tears_down_discord_and_database(competition: Team) -> None:
     assert await DiscordLink.objects.filter(discord_id=2, is_active=True).aexists()  # staff link kept
     await competition.arefresh_from_db()
     assert (competition.discord_role_id, competition.discord_category_id) == (None, None)
-    assert (await CompetitionConfig.objects.aget(pk=1)).competition_start_time is None
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert (config.competition_start_time, config.start_message) == (None, "")
     assert not await QuotientMetadataCache.objects.aexists()
     assert (await AuditLog.objects.aget(action="competition_cleanup")).admin_user == "web:admin"
 

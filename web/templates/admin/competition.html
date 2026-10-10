@@ -198,6 +198,30 @@
         </c-module>
         <c-module class="mt-20">
             <c-slot name="title">
+                Start Message
+            </c-slot>
+            <form @submit.prevent="setStartMessage">
+                <c-form_field label="Message"
+                              id="start_message"
+                              help_text="Posted to every active team's private chat channel when the competition starts, by schedule or by hand. Use it for the default VM credentials. Leave it empty to send nothing. Cleanup clears it.">
+                    <textarea name="start_message"
+                              id="start_message"
+                              :value="startMessage"
+                              @input="setField"
+                              data-field="startMessage"
+                              class="vTextField"
+                              rows="6"
+                              maxlength="{{ start_message_max_length }}"></textarea>
+                </c-form_field>
+                <c-button_row class="mt-10">
+                    <c-button type="submit" variant="default" ::disabled="loading">
+                        Save Start Message
+                    </c-button>
+                </c-button_row>
+            </form>
+        </c-module>
+        <c-module class="mt-20">
+            <c-slot name="title">
                 Quotient Integration
             </c-slot>
             {% if quotient_metadata %}
@@ -325,6 +349,7 @@
         </c-module>
         <c-toast />
     </div>
+    {{ config.start_message|json_script:"start-message-data" }}
     <script>
 document.addEventListener('alpine:init', () => {
     Alpine.data('formatTime', function() {
@@ -343,6 +368,7 @@ document.addEventListener('alpine:init', () => {
 
     Alpine.data('competitionAdmin', () => compose(streamMixin('{% url "admin_competition_action" %}'), {
         maxMembers: {{ config.max_team_members }},
+        startMessage: JSON.parse(document.getElementById('start-message-data').textContent),
         apps: [{% for app in config.controlled_applications %}'{{ app }}'{% if not forloop.last %}, {% endif %}{% endfor %}],
         newApp: '',
         availableApps: [],
@@ -417,6 +443,10 @@ document.addEventListener('alpine:init', () => {
 
         setMaxMembers() {
             this.doAction('set_max_members', { max_members: this.maxMembers });
+        },
+
+        setStartMessage() {
+            this.doAction('set_start_message', { start_message: this.startMessage });
         },
 
         setField(e) {

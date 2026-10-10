@@ -156,6 +156,10 @@ class CompetitionConfig(models.Model):
         default=list,
         help_text="List of Authentik application slugs to enable/disable (e.g., ['scoring', 'quotient2', 'semaphore'])",
     )
+    start_message = models.TextField(
+        blank=True,
+        help_text="Posted to every active team's chat channel when the competition starts, e.g. default VM credentials",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

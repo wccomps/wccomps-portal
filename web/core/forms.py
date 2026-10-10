@@ -63,6 +63,20 @@ class SetMaxMembersForm(forms.Form):
     max_members = forms.IntegerField(min_value=1, max_value=20)
 
 
+class StartMessageForm(forms.Form):
+    # Discord caps a message at 2000 characters; the broadcast adds an "Announcement from" header.
+    MAX_LENGTH = 1900
+
+    start_message = forms.CharField(required=False, strip=False)
+
+    def clean_start_message(self) -> str:
+        # Browsers submit textarea newlines as CRLF; the length is checked as the textarea counts it.
+        message: str = self.cleaned_data["start_message"].replace("\r\n", "\n")
+        if len(message) > self.MAX_LENGTH:
+            raise forms.ValidationError(f"The start message must be at most {self.MAX_LENGTH} characters")
+        return message
+
+
 class AppSlugForm(forms.Form):
     app_slug = forms.CharField(max_length=100)
 
