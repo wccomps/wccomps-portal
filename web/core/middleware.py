@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 from django.conf import settings
 from django.db import connection
-from django.http import HttpRequest, HttpResponse, HttpResponsePermanentRedirect
+from django.http import HttpRequest, HttpResponse, HttpResponsePermanentRedirect, JsonResponse
 from django.shortcuts import redirect
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -139,6 +139,13 @@ class AuthentikRequiredMiddleware:
                 return self.get_response(request)
 
         if not request.user.is_authenticated:
+            # The login redirect ends at Authentik, another origin, which a fetch or htmx request can't
+            # follow: the browser reports a network error. An htmx poll reloads the page instead, which
+            # navigates through login; any other background request gets an error it can show.
+            if request.headers.get("HX-Request") == "true":
+                return HttpResponse(status=204, headers={"HX-Refresh": "true"})
+            if request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate":
+                return JsonResponse({"error": "Your session expired. Reload the page to sign in again."}, status=401)
             # Validate and sanitize the next parameter to prevent open redirect
             next_url = request.path
             if not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):

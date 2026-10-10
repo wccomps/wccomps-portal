@@ -662,13 +662,18 @@
         }
     </style>
     <script>
+        // A poll has no triggering event. It retries on its own, so a failed one (a tab waking from sleep
+        // before the network is back) is logged instead of interrupting with a dialog every interval.
+        function htmxUserRequest(evt) {
+            return Boolean(evt.detail.requestConfig && evt.detail.requestConfig.triggeringEvent);
+        }
         document.addEventListener('htmx:responseError', function(evt) {
             console.error('htmx error:', evt.detail);
-            alert('Request failed. Please try again.');
+            if (htmxUserRequest(evt)) alert('Request failed. Please try again.');
         });
         document.addEventListener('htmx:sendError', function(evt) {
             console.error('htmx send error:', evt.detail);
-            alert('Network error. Please check your connection.');
+            if (htmxUserRequest(evt)) alert('Network error. Please check your connection.');
         });
     </script>
 {% endblock extrahead %}
