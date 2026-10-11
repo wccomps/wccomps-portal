@@ -9,6 +9,7 @@ django_stubs_ext.monkeypatch()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+# The random fallback lets tools and tests run without a key; portal/wsgi.py refuses to serve without one.
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", secrets.token_urlsafe(50))
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "False") == "True"
