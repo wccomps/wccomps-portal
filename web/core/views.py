@@ -290,17 +290,20 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
         secondary_email = form.cleaned_data.get("secondary_email", "")
         notes = form.cleaned_data.get("notes", "")
 
-        from registration.models import normalize_school_name
+        from registration.models import School, normalize_school_name
 
         from team.forms import active_event, assign_school_to_event
 
         # A team edited in by hand joins the active event like an imported one (the registration event page)
-        join_event = active_event()
-        if join_event and join_event.team_assignments.filter(team=team).exists():
-            join_event = None
+        event = active_event()
+        assignment = event.team_assignments.filter(team=team).select_related("school").first() if event else None
+        new_key = normalize_school_name(school_name)
+        join_event = event if event and assignment is None else None
+        moves_school = assignment is None or assignment.school.name_key != new_key
         if (
-            join_event
-            and join_event.team_assignments.filter(school__name_key=normalize_school_name(school_name)).exists()
+            event
+            and moves_school
+            and event.team_assignments.filter(school__name_key=new_key).exclude(team=team).exists()
         ):
             return render(
                 request,
@@ -308,7 +311,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
                 {
                     "team": team,
                     "school_info": school_info,
-                    "error": f"{school_name} already has a team in {join_event}.",
+                    "error": f"{school_name} already has a team in {event}.",
                 },
             )
 
@@ -331,6 +334,9 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
                 )
             if join_event:
                 assign_school_to_event(join_event, team, school_name)
+            elif assignment:
+                assignment.school = School.for_name(school_name)
+                assignment.save(update_fields=["school"])
 
         logger.info(f"School info updated for Team {team_number} by {authentik_username}")
 
@@ -348,16 +354,24 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
 
 
 def _import_event_problem(event_id: int | None) -> str:
-    """Why a list can't be imported for this event now (another event is still open), or ""."""
+    """Why a list can't be imported for this event now (another event is open, or the last one's scores remain)."""
+    from core.competition_utils import live_competition_data_exists
     from team.forms import active_event
 
     open_now = active_event()
     if open_now and open_now.pk != event_id:
         return f"{open_now} is still open. Finalize and clear it before importing a list for another event."
+    if open_now is None and live_competition_data_exists():
+        return (
+            "Scores from the last event are still in the portal. "
+            "Finalize and clear that event before importing a new school list."
+        )
     return ""
 
 
-def _parse_school_info_csv(csv_file: UploadedFile[bytes]) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
+def _parse_school_info_csv(
+    csv_file: UploadedFile[bytes], event_id: int | None = None
+) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
     """Parse and validate a school-info CSV into (preview data, session rows; empty on errors)."""
     from team.forms import parse_csv_file, validate_csv_data
 
@@ -370,7 +384,7 @@ def _parse_school_info_csv(csv_file: UploadedFile[bytes]) -> tuple[dict[str, obj
             "rows": [],
         }, []
 
-    validation_result = validate_csv_data(parse_result["rows"])
+    validation_result = validate_csv_data(parse_result["rows"], event_id)
 
     preview_data: dict[str, object] = {
         "errors": validation_result["errors"],
@@ -451,14 +465,15 @@ def _apply_school_info_import(
         if season is None or not isinstance(choice.get("new"), dict):
             return stale, None
         fields: dict[str, str] = choice["new"]
-        event = Event.objects.create(
-            season=season,
-            name=fields["name"],
-            date=date.fromisoformat(fields["date"]),
-            event_type=fields["event_type"],
-        )
-    result = apply_csv_import(teams_to_create, authentik_username, event)
-    return None, result
+        with transaction.atomic():
+            event = Event.objects.create(
+                season=season,
+                name=fields["name"],
+                date=date.fromisoformat(fields["date"]),
+                event_type=fields["event_type"],
+            )
+            return None, apply_csv_import(teams_to_create, authentik_username, event)
+    return None, apply_csv_import(teams_to_create, authentik_username, event)
 
 
 @require_permission("gold_team")
@@ -491,7 +506,7 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
                     error = problem
                 else:
                     csv_file = cast(UploadedFile[bytes], request.FILES["csv_file"])
-                    preview_data, session_rows = _parse_school_info_csv(csv_file)
+                    preview_data, session_rows = _parse_school_info_csv(csv_file, event_id)
                     if session_rows:
                         new_fields = event_form.new_event_fields()
                         request.session["csv_import_data"] = {

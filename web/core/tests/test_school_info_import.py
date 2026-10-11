@@ -128,3 +128,32 @@ def test_confirm_with_session_data_from_before_events_asks_to_upload_again(clien
     assert response.status_code == 200
     assert b"Upload it again" in response.content
     assert not SchoolInfo.objects.exists()
+
+
+def test_import_is_refused_while_the_last_events_scores_are_still_here(client):
+    from scoring.models import ServiceScore
+
+    team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    event = _season_and_event()
+    ServiceScore.objects.create(team=team, service_points=5)
+    csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
+
+    response = client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
+
+    assert b"Scores from the last event are still in the portal" in response.content
+    assert not SchoolInfo.objects.exists()
+
+
+def test_confirm_is_refused_when_scores_appeared_since_the_preview(client):
+    from scoring.models import ServiceScore
+
+    team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    event = _season_and_event()
+    csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
+    client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
+    ServiceScore.objects.create(team=team, service_points=5)
+
+    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+
+    assert b"Scores from the last event are still in the portal" in response.content
+    assert not SchoolInfo.objects.exists()

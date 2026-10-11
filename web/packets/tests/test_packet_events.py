@@ -160,3 +160,19 @@ def test_resending_to_one_team_for_an_earlier_event_is_refused(gold_team_user, c
 
     assert "earlier event" in response.content.decode()
     assert PacketDistribution.objects.get(packet=packet).email_status == "failed"
+
+
+def test_a_completed_packet_from_an_earlier_event_cannot_be_distributed(current_event):
+    earlier = Event.objects.create(
+        season=current_event.season, name="Earlier", event_type="invitational", date=date(2026, 9, 1)
+    )
+    packet = _packet(earlier, status="completed")
+
+    lines = list(PacketDistributionService().stream_distribute_packet(packet))
+
+    result = json.loads(lines[-1])
+    assert result["success"] is False
+    assert "draft" in result["message"]
+    packet.refresh_from_db()
+    assert packet.event == earlier
+    assert packet.status == "completed"

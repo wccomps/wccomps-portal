@@ -43,3 +43,9 @@ def wipe_competition_data() -> dict[str, int]:
         "BlueTeamDiscordLink": DiscordLink.objects.filter(team__isnull=False).delete()[0],
     }
     return counts
+
+
+def live_competition_data_exists() -> bool:
+    """Whether results from a past event are still in the portal (not yet finalized and cleared)."""
+    models = (Ticket, ServiceScore, ServiceDetail, InjectScore, OrangeTeamScore, RedTeamScore, IncidentReport)
+    return any(model.objects.exists() for model in models)

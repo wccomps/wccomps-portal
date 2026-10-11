@@ -241,6 +241,11 @@ class PacketDistributionService:
                     yield _progress(f"Failed Team {dist.team.team_number}: {error}", completed, total, ok=False)
 
     def stream_distribute_packet(self, packet: Packet) -> Iterator[str]:
+        if not packet.is_ready_for_distribution():
+            yield (
+                json.dumps({"done": True, "success": False, "message": "Only a draft packet can be distributed"}) + "\n"
+            )
+            return
         refusal = _stamp_open_event(packet)
         if refusal:
             yield json.dumps({"done": True, "success": False, "message": refusal}) + "\n"

@@ -8,6 +8,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import validate_email
 from django.db import transaction
+from django.db.models import Count, Q
 
 from team.models import SchoolInfo, Team, default_team_name
 
@@ -235,9 +236,9 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
     return {"rows": rows, "errors": errors, "warnings": warnings}
 
 
-def validate_csv_data(rows: list[CSVRowData]) -> CSVValidationResult:
+def validate_csv_data(rows: list[CSVRowData], event_id: int | None = None) -> CSVValidationResult:
     """Assign the rows to teams 1..N in random order; the import replaces all existing school info."""
-    from registration.models import School, normalize_school_name
+    from registration.models import Event, EventTeamAssignment, School, normalize_school_name
 
     teams_to_create: list[CSVRowData] = []
     errors: list[str] = []
@@ -273,6 +274,11 @@ def validate_csv_data(rows: list[CSVRowData]) -> CSVValidationResult:
     if renamed:
         warnings.append(f"Resets {len(renamed)} team name(s) from the last event ({', '.join(renamed)}).")
 
+    if event_id is not None:
+        replaced = EventTeamAssignment.objects.filter(event_id=event_id).count()
+        if replaced:
+            warnings.append(f"Replaces the {replaced} team assignment(s) for {Event.objects.get(pk=event_id)}.")
+
     random.shuffle(teams)
 
     for team, row in zip(teams, rows, strict=True):
@@ -280,10 +286,11 @@ def validate_csv_data(rows: list[CSVRowData]) -> CSVValidationResult:
         row["team_number"] = team.team_number
         teams_to_create.append(row)
 
-    known = {
-        school.name_key: school.assignments.count()
-        for school in School.objects.filter(name_key__in=[normalize_school_name(r["school_name"]) for r in rows])
-    }
+    # Past events only: the event being imported (a re-import) doesn't make its schools returning
+    past = School.objects.filter(name_key__in=[normalize_school_name(r["school_name"]) for r in rows]).annotate(
+        past=Count("assignments", filter=~Q(assignments__event_id=event_id) if event_id is not None else Q())
+    )
+    known = {school.name_key: school.past for school in past if school.past}
     for row in teams_to_create:
         row["returning_events"] = known.get(normalize_school_name(row["school_name"]))
 

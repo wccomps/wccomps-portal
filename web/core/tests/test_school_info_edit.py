@@ -44,17 +44,42 @@ def test_new_school_info_assigns_the_team_to_the_active_event(client, event):
     assert assignment.school.name == "Example University"
 
 
-def test_already_assigned_team_keeps_its_assignment(client, event):
+def test_renaming_an_assigned_teams_school_moves_its_assignment(client, event):
     team = Team.objects.create(team_number=4, team_name="Team 04")
     registration = TeamRegistration.objects.create(school_name="Example University", status="paid")
     EventTeamAssignment.objects.create(
         event=event, team=team, school=School.for_name("Example University"), registration=registration
     )
 
-    _edit(client, 4, "Example University (renamed)")
+    _edit(client, 4, "Other College")
 
-    assert EventTeamAssignment.objects.get(event=event).school.name == "Example University"
-    assert SchoolInfo.objects.get(team=team).school_name == "Example University (renamed)"
+    assert EventTeamAssignment.objects.get(event=event).school.name == "Other College"
+    assert SchoolInfo.objects.get(team=team).school_name == "Other College"
+
+
+def test_spelling_change_keeps_the_school_and_updates_its_name(client, event):
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    school = School.for_name("Example University")
+    EventTeamAssignment.objects.create(event=event, team=team, school=school)
+
+    _edit(client, 4, "example  university")
+
+    assignment = EventTeamAssignment.objects.get(event=event)
+    assert assignment.school_id == school.pk
+    assert assignment.school.name == "example university"
+
+
+def test_renaming_to_a_school_another_team_holds_is_refused(client, event):
+    other = Team.objects.create(team_number=2, team_name="Team 02")
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    EventTeamAssignment.objects.create(event=event, team=other, school=School.for_name("Other College"))
+    mine = EventTeamAssignment.objects.create(event=event, team=team, school=School.for_name("Example University"))
+
+    response = _edit(client, 4, "Other College")
+
+    assert b"already has a team" in response.content
+    mine.refresh_from_db()
+    assert mine.school.name == "Example University"
 
 
 def test_school_with_a_team_in_the_event_is_refused(client, event):

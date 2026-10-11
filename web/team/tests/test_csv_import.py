@@ -375,3 +375,49 @@ class TestImportOpensEvent:
 
         marks = {row["school_name"]: row["returning_events"] for row in result["teams_to_create"]}
         assert marks == {"university one": 1, "University Two": None}
+
+    def test_reimporting_for_the_same_event_marks_its_only_school_as_new(self, setup_teams, season):
+        from team.forms import assign_school_to_event
+
+        event = self._event(season, "Invitational", active=True)
+        assign_school_to_event(event, Team.objects.get(team_number=1), "University One")
+
+        result = validate_csv_data([_row("University One")], event.pk)
+
+        assert result["teams_to_create"][0]["returning_events"] is None
+
+    def test_a_school_with_a_different_past_event_is_returning_when_reimporting(self, setup_teams, season):
+        from team.forms import assign_school_to_event
+
+        past = self._event(season, "Past")
+        event = self._event(season, "Invitational", active=True)
+        assign_school_to_event(past, Team.objects.get(team_number=1), "University One")
+        assign_school_to_event(event, Team.objects.get(team_number=2), "University One")
+
+        result = validate_csv_data([_row("University One")], event.pk)
+
+        assert result["teams_to_create"][0]["returning_events"] == 1
+
+    def test_a_school_without_assignments_is_new(self, setup_teams):
+        from registration.models import School
+
+        School.for_name("University One")
+
+        result = validate_csv_data([_row("University One")])
+
+        assert result["teams_to_create"][0]["returning_events"] is None
+
+    def test_preview_warns_when_the_event_already_has_assignments(self, setup_teams, season):
+        from team.forms import assign_school_to_event
+
+        event = self._event(season, "Invitational", active=True)
+        assign_school_to_event(event, Team.objects.get(team_number=1), "University One")
+
+        result = validate_csv_data([_row("University Two")], event.pk)
+
+        assert f"Replaces the 1 team assignment(s) for {event}." in result["warnings"]
+
+    def test_preview_has_no_assignment_warning_for_a_new_event(self, setup_teams):
+        result = validate_csv_data([_row("University Two")])
+
+        assert not any("team assignment" in w for w in result["warnings"])
