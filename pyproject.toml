@@ -9,26 +9,15 @@ dependencies = [
     # Django web app
     "django>=5.1.14,<6.2",
     "django-cotton>=0.9",
-    "django-stubs>=5.1.1",
+    # settings.py calls django_stubs_ext.monkeypatch() so generic Django classes subscript at runtime
+    "django-stubs-ext>=5.1.1",
     "gunicorn>=21.2",
     "whitenoise>=6.6",
-    "pillow>=10.0.0",
     # Shared dependencies
     "psycopg2-binary>=2.9.9",
-    "aiohttp>=3.9",
     "xkcdpass>=1.19.9",
-    "django-smart-ratelimit>=0.8.11",
     "httpx>=0.28.1",
-    "openpyxl>=3.1.5",
     "weasyprint>=63.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.4",
-    "pytest-django>=4.7",
-    "pytest-asyncio>=0.21",
-    "ruff>=0.14.0",
 ]
 
 [build-system]
@@ -44,16 +33,11 @@ dev = [
     "pytest>=7.4",
     "pytest-django>=4.7",
     "pytest-asyncio>=0.21",
-    "pytest-playwright>=0.4.0",
     "playwright>=1.40.0",
     "hypothesis[django]>=6.100",
     "mypy>=1.13",
-    "pytest-cov>=7.0.0",
-    "vulture>=2.14",
-    "radon>=6.0.1",
-    "pyotp>=2.9.0",
+    "django-stubs>=5.1.1",
     "djlint>=1.36.4",
-    "types-openpyxl>=3.1.5.20250919",
     "pytest-xdist>=3.8.0",
 ]
 
@@ -106,21 +90,12 @@ module = "xkcdpass.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "allauth.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
 module = "psycopg2.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "*.migrations.*"
 ignore_errors = true
-
-[[tool.mypy.overrides]]
-module = "django_smart_ratelimit"
-follow_imports = "normal"
-no_implicit_reexport = false
 
 [[tool.mypy.overrides]]
 module = "weasyprint"
@@ -207,5 +182,5 @@ ignore = [
 "**/conftest.py" = ["S101", "S105", "S106", "S110", "S311"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["bot", "web", "core", "team", "person", "ticketing", "competition"]
+known-first-party = ["bot", "web", "core", "team", "ticketing"]
 
