@@ -17,6 +17,15 @@ class PacketDistributionServiceTestCase(TestCase):
         """Create test data."""
         self.service = PacketDistributionService()
 
+        from datetime import date
+
+        from registration.models import Event, Season
+
+        season = Season.objects.create(name="2026", year=2026, is_active=True)
+        Event.objects.create(
+            season=season, name="Inv", event_type="invitational", date=date(2026, 10, 3), is_active=True
+        )
+
         for i in range(1, 4):
             team = Team.objects.create(
                 team_number=i,

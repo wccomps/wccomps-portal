@@ -18,7 +18,7 @@ from team.models import Team
 
 from .forms import PacketActionForm, PacketResendForm, PacketUploadForm
 from .models import Packet, PacketDistribution
-from .services import PacketDistributionService
+from .services import EARLIER_EVENT_PACKET, PacketDistributionService, packet_is_from_open_event
 
 
 class PacketWithStats(TypedDict):
@@ -325,6 +325,10 @@ def packet_resend_team(request: HttpRequest, packet_id: int, team_id: int) -> Ht
 
     packet = get_object_or_404(Packet, id=packet_id)
     team = get_object_or_404(Team, id=team_id)
+
+    if not packet_is_from_open_event(packet):
+        messages.error(request, EARLIER_EVENT_PACKET)
+        return redirect("packet_detail", packet_id=packet_id)
 
     dist = PacketDistribution.objects.filter(packet=packet, team=team).first()
     if not dist:

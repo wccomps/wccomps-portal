@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db.models import Count, Q, QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.utils.html import format_html
@@ -163,7 +163,11 @@ class PacketAdmin(admin.ModelAdmin[Packet]):
         for packet in queryset:
             if packet.status == "draft":
                 service = PacketDistributionService()
-                service.distribute_packet(packet)
+                try:
+                    service.distribute_packet(packet)
+                except ValueError as e:
+                    self.message_user(request, f"{packet.title}: {e}", level=messages.ERROR)
+                    continue
                 count += 1
 
         self.message_user(

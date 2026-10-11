@@ -18,12 +18,40 @@ logger = logging.getLogger(__name__)
 
 from core.utils import ndjson_progress as _progress
 
+NO_OPEN_EVENT = "Import the school list for this event first"
+EARLIER_EVENT_PACKET = "This packet belongs to an earlier event; team numbers have been reassigned since"
+
+
+def _stamp_open_event(packet: Packet) -> str | None:
+    """Make the open event the packet's event; return a refusal message when no event is open."""
+    from team.forms import active_event
+
+    # A packet belongs to the event it was sent for; teams see only the open event's packets
+    event = active_event()
+    if event is None:
+        return NO_OPEN_EVENT
+    if packet.event_id != event.pk:
+        packet.event = event
+        packet.save(update_fields=["event", "updated_at"])
+    return None
+
+
+def packet_is_from_open_event(packet: Packet) -> bool:
+    """A resend is only safe within the packet's own event: team numbers are reshuffled between events."""
+    from team.forms import active_event
+
+    event = active_event()
+    return event is not None and packet.event_id == event.pk
+
 
 class PacketDistributionService:
     def distribute_packet(self, packet: Packet) -> dict[str, int]:
         """Distribute a packet to all teams."""
         if not packet.is_ready_for_distribution():
             raise ValueError(f"Packet {packet.id} is not ready for distribution")
+        refusal = _stamp_open_event(packet)
+        if refusal:
+            raise ValueError(refusal)
 
         packet.mark_as_distributing()
 
@@ -213,19 +241,10 @@ class PacketDistributionService:
                     yield _progress(f"Failed Team {dist.team.team_number}: {error}", completed, total, ok=False)
 
     def stream_distribute_packet(self, packet: Packet) -> Iterator[str]:
-        from team.forms import active_event
-
-        # A packet belongs to the event it was sent for; teams see only the open event's packets
-        event = active_event()
-        if event is None:
-            yield (
-                json.dumps({"done": True, "success": False, "message": "Import the school list for this event first"})
-                + "\n"
-            )
+        refusal = _stamp_open_event(packet)
+        if refusal:
+            yield json.dumps({"done": True, "success": False, "message": refusal}) + "\n"
             return
-        if packet.event_id != event.pk:
-            packet.event = event
-            packet.save(update_fields=["event", "updated_at"])
         packet.mark_as_distributing()
         self._create_distributions_for_teams(packet)
 
@@ -263,6 +282,9 @@ class PacketDistributionService:
 
     def _stream_resend(self, packet: Packet, status_filter: str, label: str) -> Iterator[str]:
         """Resend distributions matching a status filter, with parallel streaming progress."""
+        if not packet_is_from_open_event(packet):
+            yield json.dumps({"done": True, "success": False, "message": EARLIER_EVENT_PACKET}) + "\n"
+            return
         dists = list(
             PacketDistribution.objects.filter(packet=packet, email_status=status_filter).select_related("team")
         )
