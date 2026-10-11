@@ -6,8 +6,17 @@ def link_schools(apps, schema_editor):
     """Give every existing assignment (and its registration) the school of its registration's name."""
     School = apps.get_model("registration", "School")
     EventTeamAssignment = apps.get_model("registration", "EventTeamAssignment")
-    for assignment in EventTeamAssignment.objects.select_related("registration"):
+    claimed = {}
+    for assignment in EventTeamAssignment.objects.select_related("registration").order_by("pk"):
         name = " ".join(assignment.registration.school_name.split())
+        key = (assignment.event_id, name.casefold())
+        if key in claimed:
+            raise RuntimeError(
+                f"Event {assignment.event_id} has two assignments for the school {name!r} "
+                f"(registrations {claimed[key]} and {assignment.registration_id}). "
+                "Rename one registration first, then migrate again."
+            )
+        claimed[key] = assignment.registration_id
         school, _ = School.objects.get_or_create(name_key=name.casefold(), defaults={"name": name})
         assignment.school = school
         assignment.save(update_fields=["school"])
