@@ -39,9 +39,18 @@ services:
       - "${WEB_PORT:-8000}:8000"
     restart: unless-stopped
     healthcheck:
-      # Any HTTP answer means gunicorn is up (and migrations are done). Not -f: a Host header outside
-      # ALLOWED_HOSTS gets a 400, which is still an answer.
-      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:8000/livez/"]
+      # Any HTTP answer means gunicorn is up (and migrations are done): a Host header outside
+      # ALLOWED_HOSTS gets a 400 (HTTPError), which is still an answer. A refused connection fails.
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import urllib.error, urllib.request
+          try:
+              urllib.request.urlopen("http://localhost:8000/livez/", timeout=4)
+          except urllib.error.HTTPError:
+              pass
       interval: 10s
       timeout: 5s
       retries: 3
@@ -53,7 +62,7 @@ services:
     image: ghcr.io/wccomps/wccomps-portal:${PORTAL_TAG:-main}
     entrypoint: []
     working_dir: /app
-    command: ["uv", "run", "--no-sync", "main.py"]
+    command: ["python", "main.py"]
     env_file: .env
     environment:
       DB_HOST: postgres
