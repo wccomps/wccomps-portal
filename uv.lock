@@ -1555,7 +1555,7 @@ wheels = [
 [[package]]
 name = "wccomps-portal"
 version = "1.0.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "discord-py" },
     { name = "django" },
