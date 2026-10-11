@@ -237,13 +237,9 @@ def school_info_clear(request: HttpRequest) -> HttpResponse:
     count = SchoolInfo.objects.count()
 
     if request.method == "POST":
-        from registration.models import EventTeamAssignment, TeamRegistration
-
         deleted, _ = SchoolInfo.objects.all().delete()
-        EventTeamAssignment.objects.all().delete()
-        TeamRegistration.objects.all().delete()
-        logger.info(f"Cleared school info, registrations, and event assignments by {request.user.username}")
-        messages.success(request, f"Cleared {deleted} school info record(s), registrations, and event assignments.")
+        logger.info(f"Cleared school info by {request.user.username}")
+        messages.success(request, f"Cleared {deleted} school info record(s).")
         return redirect("school_info")
 
     return render(
