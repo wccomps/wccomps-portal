@@ -8,7 +8,7 @@ from typing import TypedDict, cast
 
 from django.contrib import messages
 from django.contrib.auth.models import User
-from django.http import HttpRequest, HttpResponse, HttpResponseBase, StreamingHttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBase, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
@@ -47,10 +47,16 @@ def team_packet(request: HttpRequest) -> HttpResponse:
         messages.error(request, "You are not assigned to a team.")
         return redirect("/")
 
+    from team.forms import active_event
+
+    # Only the open event's packets: team numbers are reshuffled, so an earlier event's packet went to another school
+    event = active_event()
     distributions = (
-        PacketDistribution.objects.filter(team=team, web_access_enabled=True)
+        PacketDistribution.objects.filter(team=team, web_access_enabled=True, packet__event=event)
         .select_related("packet")
         .order_by("-packet__created_at")
+        if event
+        else PacketDistribution.objects.none()
     )
 
     available_distributions = [
@@ -78,11 +84,17 @@ def download_packet(request: HttpRequest, packet_id: int) -> HttpResponse:
     if has_permission(user, "gold_team"):
         packet = get_object_or_404(Packet, id=packet_id, **available)
     else:
+        from team.forms import active_event
+
+        event = active_event()
+        if event is None:
+            raise Http404("No open event")
         distribution = get_object_or_404(
             PacketDistribution.objects.select_related("packet"),
             packet_id=packet_id,
             team=get_user_team(user),
             web_access_enabled=True,
+            packet__event=event,
             **{f"packet__{k}": v for k, v in available.items()},
         )
         distribution.record_download(user.username)

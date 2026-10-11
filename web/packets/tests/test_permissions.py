@@ -73,10 +73,11 @@ class TestPacketDownload:
     """A team downloads only packets distributed to it; gold_team downloads any web-enabled packet."""
 
     @pytest.fixture
-    def packet(self, db):
+    def packet(self, db, current_event):
         from packets.models import Packet
 
         return Packet.objects.create(
+            event=current_event,
             title="Rules",
             file_data=b"%PDF",
             filename="rules.pdf",

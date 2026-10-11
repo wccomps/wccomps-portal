@@ -3,12 +3,15 @@
 import os
 import socket
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
+
+if TYPE_CHECKING:
+    from registration.models import Event
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -197,3 +200,16 @@ def mock_quotient_client():
         instance.get_scores.return_value = []
         mock_client.return_value = instance
         yield instance
+
+
+@pytest.fixture
+def current_event(db: Any) -> Event:
+    """The event that is open: active, in the active season."""
+    from datetime import date
+
+    from registration.models import Event, Season
+
+    season = Season.objects.create(name="2026", year=2026, is_active=True)
+    return Event.objects.create(
+        season=season, name="Invitational", event_type="invitational", date=date(2026, 10, 3), is_active=True
+    )

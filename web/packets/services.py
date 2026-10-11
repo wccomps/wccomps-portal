@@ -213,6 +213,19 @@ class PacketDistributionService:
                     yield _progress(f"Failed Team {dist.team.team_number}: {error}", completed, total, ok=False)
 
     def stream_distribute_packet(self, packet: Packet) -> Iterator[str]:
+        from team.forms import active_event
+
+        # A packet belongs to the event it was sent for; teams see only the open event's packets
+        event = active_event()
+        if event is None:
+            yield (
+                json.dumps({"done": True, "success": False, "message": "Import the school list for this event first"})
+                + "\n"
+            )
+            return
+        if packet.event_id != event.pk:
+            packet.event = event
+            packet.save(update_fields=["event", "updated_at"])
         packet.mark_as_distributing()
         self._create_distributions_for_teams(packet)
 

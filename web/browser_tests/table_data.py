@@ -13,6 +13,7 @@ def seed_table_data(viewer: User) -> dict:
     from django.utils import timezone
     from orange_team.models import OrangeAssignment, OrangeCheckIn, OrangeFollowUp
     from packets.models import Packet, PacketDistribution
+    from registration.models import Event, Season
     from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeamIPPool, RedTeamScore
 
     from team.models import DiscordLink, SchoolInfo
@@ -74,6 +75,11 @@ def seed_table_data(viewer: User) -> dict:
     packet = data["packet"]
     packet.status = "distributing"
     packet.web_access_enabled = True
+    # Teams see only the open event's packets
+    season = Season.objects.create(name="2026", year=2026, is_active=True)
+    packet.event = Event.objects.create(
+        season=season, name="Invitational", event_type="invitational", date=timezone.now().date(), is_active=True
+    )
     packet.save()
     PacketDistribution.objects.create(packet=packet, team=team, web_access_enabled=True)
     Packet.objects.create(
