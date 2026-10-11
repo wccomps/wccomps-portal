@@ -82,3 +82,49 @@ def test_import_for_another_event_is_refused_while_one_is_open(client):
 
     assert b"is still open" in response.content
     assert not SchoolInfo.objects.exists()
+
+
+def test_confirm_refuses_an_event_finalized_since_the_preview(client):
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    event = _season_and_event()
+    csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
+    client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
+    event.is_finalized = True
+    event.save()
+
+    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+
+    assert b"finalized or removed" in response.content
+    event.refresh_from_db()
+    assert not event.is_active
+    assert not SchoolInfo.objects.exists()
+
+
+def test_confirm_refuses_an_event_removed_since_the_preview(client):
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    event = _season_and_event()
+    csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
+    client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
+    event.delete()
+
+    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+
+    assert response.status_code == 200
+    assert b"finalized or removed" in response.content
+
+
+def test_confirm_with_session_data_from_before_events_asks_to_upload_again(client):
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    session = client.session
+    session["csv_import_data"] = {
+        "teams_to_create": [
+            {"team_number": 1, "school_name": "Example University", "contact_email": "coach@example.edu"}
+        ]
+    }
+    session.save()
+
+    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+
+    assert response.status_code == 200
+    assert b"Upload it again" in response.content
+    assert not SchoolInfo.objects.exists()

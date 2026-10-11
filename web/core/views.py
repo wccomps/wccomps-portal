@@ -406,7 +406,8 @@ def _apply_school_info_import(
     """Verify teams still exist and apply the CSV import: (preview_data, None) on errors, else (None, counts)."""
     from team.forms import CSVRowData, apply_csv_import
 
-    teams_to_create: list[CSVRowData] = import_data["teams_to_create"]  # type: ignore[assignment]
+    # Copies: the rows gain a Team object, which must not leak into the JSON session
+    teams_to_create: list[CSVRowData] = [cast(CSVRowData, dict(row)) for row in import_data["teams_to_create"]]  # type: ignore[attr-defined]
 
     team_numbers = [row["team_number"] for row in teams_to_create]
     teams_by_number: dict[int, Team] = {t.team_number: t for t in Team.objects.filter(team_number__in=team_numbers)}
@@ -430,16 +431,32 @@ def _apply_school_info_import(
 
     from registration.models import Event, Season
 
-    choice: dict[str, object] = import_data["event"]  # type: ignore[assignment]
+    stale = {
+        "errors": ["That event was finalized or removed since the preview. Upload the file again."],
+        "warnings": [],
+        "can_import": False,
+    }
+    choice = import_data.get("event")
+    if not isinstance(choice, dict):
+        return {
+            "errors": ["The uploaded file is no longer available. Upload it again to import."],
+            "warnings": [],
+            "can_import": False,
+        }, None
+    season = Season.objects.filter(is_active=True).first()
     event_id = choice.get("id")
     if problem := _import_event_problem(event_id if isinstance(event_id, int) else None):
         return {"errors": [problem], "warnings": [], "can_import": False}, None
     if isinstance(event_id, int):
-        event = Event.objects.get(pk=event_id)
+        event = season.events.filter(pk=event_id, is_finalized=False).first() if season else None
+        if event is None:
+            return stale, None
     else:
-        fields: dict[str, str] = choice["new"]  # type: ignore[assignment]
+        if season is None or not isinstance(choice.get("new"), dict):
+            return stale, None
+        fields: dict[str, str] = choice["new"]
         event = Event.objects.create(
-            season=Season.objects.get(is_active=True),
+            season=season,
             name=fields["name"],
             date=date.fromisoformat(fields["date"]),
             event_type=fields["event_type"],
