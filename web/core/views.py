@@ -351,6 +351,16 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
     )
 
 
+def _import_event_problem(event_id: int | None) -> str:
+    """Why a list can't be imported for this event now (another event is still open), or ""."""
+    from team.forms import active_event
+
+    open_now = active_event()
+    if open_now and open_now.pk != event_id:
+        return f"{open_now} is still open. Finalize and clear it before importing a list for another event."
+    return ""
+
+
 def _parse_school_info_csv(csv_file: UploadedFile[bytes]) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
     """Parse and validate a school-info CSV into (preview data, session rows; empty on errors)."""
     from team.forms import parse_csv_file, validate_csv_data
@@ -382,6 +392,7 @@ def _parse_school_info_csv(csv_file: UploadedFile[bytes]) -> tuple[dict[str, obj
                 "contact_email": row["contact_email"],
                 "secondary_email": row.get("secondary_email", ""),
                 "notes": row.get("notes", ""),
+                "returning_events": row.get("returning_events"),
             }
             for row in validation_result["teams_to_create"]
         ]
@@ -415,13 +426,33 @@ def _apply_school_info_import(
             "can_import": False,
         }, None
 
-    result = apply_csv_import(teams_to_create, authentik_username)
+    from datetime import date
+
+    from registration.models import Event, Season
+
+    choice: dict[str, object] = import_data["event"]  # type: ignore[assignment]
+    event_id = choice.get("id")
+    if problem := _import_event_problem(event_id if isinstance(event_id, int) else None):
+        return {"errors": [problem], "warnings": [], "can_import": False}, None
+    if isinstance(event_id, int):
+        event = Event.objects.get(pk=event_id)
+    else:
+        fields: dict[str, str] = choice["new"]  # type: ignore[assignment]
+        event = Event.objects.create(
+            season=Season.objects.get(is_active=True),
+            name=fields["name"],
+            date=date.fromisoformat(fields["date"]),
+            event_type=fields["event_type"],
+        )
+    result = apply_csv_import(teams_to_create, authentik_username, event)
     return None, result
 
 
 @require_permission("gold_team")
 def school_info_import(request: HttpRequest) -> HttpResponse:
-    from team.forms import CSVUploadForm
+    from registration.models import Season
+
+    from team.forms import CSVUploadForm, ImportEventForm
 
     user = cast(User, request.user)
     authentik_username = user.username
@@ -432,14 +463,36 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
     import_results: dict[str, int] | None = None
     error = ""
 
+    season = Season.objects.filter(is_active=True).first()
+    if season is None:
+        error = "Activate a season first (Registration, Seasons): imported schools join an event of the active season."
+    event_form = ImportEventForm(season=season) if season else None
+
     if request.method == "POST":
         if "upload" in request.POST:
             form = CSVUploadForm(request.POST, request.FILES)
-            if form.is_valid():
-                csv_file = cast(UploadedFile[bytes], request.FILES["csv_file"])
-                preview_data, session_rows = _parse_school_info_csv(csv_file)
-                if session_rows:
-                    request.session["csv_import_data"] = {"teams_to_create": session_rows}
+            event_form = ImportEventForm(request.POST, season=season) if season else None
+            if form.is_valid() and event_form is not None and event_form.is_valid():
+                event_id = event_form.chosen_event_id()
+                if problem := _import_event_problem(event_id):
+                    error = problem
+                else:
+                    csv_file = cast(UploadedFile[bytes], request.FILES["csv_file"])
+                    preview_data, session_rows = _parse_school_info_csv(csv_file)
+                    if session_rows:
+                        new_fields = event_form.new_event_fields()
+                        request.session["csv_import_data"] = {
+                            "teams_to_create": session_rows,
+                            "event": {"id": event_id} if event_id is not None else {"new": new_fields},
+                        }
+                        if preview_data is not None:
+                            preview_data["event_label"] = (
+                                str(event_form.season.events.get(pk=event_id))
+                                if event_id is not None
+                                else f"New: {event_form.cleaned_data['new_name']}"
+                            )
+            elif event_form is not None and not event_form.is_valid():
+                error = " ".join(str(e) for e in event_form.non_field_errors())
 
         elif "confirm" in request.POST:
             import_data = request.session.get("csv_import_data")
@@ -458,6 +511,8 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
         {
             "authentik_username": authentik_username,
             "form": form,
+            "event_form": event_form,
+            "open_events": season.events.filter(is_finalized=False) if season else [],
             "preview_data": preview_data,
             "import_results": import_results,
             "error": error,
