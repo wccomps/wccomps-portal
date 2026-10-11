@@ -260,7 +260,7 @@ class TestCSVImport:
     def test_apply_replaces_school_info_activates_teams_and_reassigns_the_event(self) -> None:
         from datetime import date
 
-        from registration.models import Event, EventTeamAssignment, Season, TeamRegistration
+        from registration.models import Event, EventTeamAssignment, School, Season
 
         teams = [Team.objects.create(team_name=f"Team {i}", team_number=i, is_active=i == 1) for i in (1, 2, 3)]
         SchoolInfo.objects.create(team=teams[2], school_name="Old", contact_email="o@x.edu")
@@ -269,9 +269,7 @@ class TestCSVImport:
             season=season, name="Invitational", event_type="invitational", date=date(2026, 10, 3), is_active=True
         )
         # Last import put this school on team 3; this one moves it to team 1
-        EventTeamAssignment.objects.create(
-            event=event, team=teams[2], registration=TeamRegistration.objects.create(school_name="University One")
-        )
+        EventTeamAssignment.objects.create(event=event, team=teams[2], school=School.for_name("University One"))
 
         result = apply_csv_import(
             [{**_row("University One"), "_team": teams[0]}, {**_row("University Two"), "_team": teams[1]}], "gold"
@@ -281,9 +279,7 @@ class TestCSVImport:
         assert sorted(SchoolInfo.objects.values_list("school_name", flat=True)) == ["University One", "University Two"]
         assert sorted(Team.objects.filter(is_active=True).values_list("team_number", flat=True)) == [1, 2]
         assert sorted(
-            EventTeamAssignment.objects.filter(event=event).values_list(
-                "team__team_number", "registration__school_name"
-            )
+            EventTeamAssignment.objects.filter(event=event).values_list("team__team_number", "school__name")
         ) == [(1, "University One"), (2, "University Two")]
 
 

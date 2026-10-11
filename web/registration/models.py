@@ -10,6 +10,35 @@ def generate_edit_token() -> str:
     return secrets.token_urlsafe(48)
 
 
+def normalize_school_name(name: str) -> str:
+    """The key a school is matched on: case and runs of whitespace don't matter."""
+    return " ".join(name.split()).casefold()
+
+
+class School(models.Model):
+    """A school across events. Season history attaches here, never to a team number (they're reshuffled)."""
+
+    name = models.CharField(max_length=255)
+    name_key = models.CharField(max_length=255, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+    @classmethod
+    def for_name(cls, name: str) -> School:
+        """The school with this name (ignoring case and spacing), created if new; keeps the latest spelling."""
+        name = " ".join(name.split())
+        school, created = cls.objects.get_or_create(name_key=normalize_school_name(name), defaults={"name": name})
+        if not created and school.name != name:
+            school.name = name
+            school.save(update_fields=["name"])
+        return school
+
+
 class TeamRegistration(models.Model):
     STATUS_CHOICES = [
         ("pending", "Pending Review"),
@@ -46,6 +75,8 @@ class TeamRegistration(models.Model):
 
     rejection_reason = models.TextField(blank=True)
     approved_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+    # A revived registration form attaches applications to the school without mixing them into its history
+    school = models.ForeignKey(School, null=True, blank=True, on_delete=models.SET_NULL, related_name="registrations")
 
     class Meta:
         ordering = ["-submitted_at"]
@@ -186,7 +217,11 @@ class EventTeamAssignment(models.Model):
     """Per-event random team number assignment."""
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="team_assignments")
-    registration = models.ForeignKey(TeamRegistration, on_delete=models.CASCADE, related_name="team_assignments")
+    school = models.ForeignKey(School, on_delete=models.PROTECT, related_name="assignments")
+    # Only for teams assigned through the registration pages; imported schools have none
+    registration = models.ForeignKey(
+        TeamRegistration, null=True, blank=True, on_delete=models.SET_NULL, related_name="team_assignments"
+    )
     team = models.ForeignKey("team.Team", on_delete=models.CASCADE, related_name="event_assignments")
     assigned_at = models.DateTimeField(auto_now_add=True)
     credentials_sent_at = models.DateTimeField(null=True, blank=True)
@@ -194,18 +229,12 @@ class EventTeamAssignment(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(
-                fields=["event", "registration"],
-                name="unique_assignment_per_registration",
-            ),
-            models.UniqueConstraint(
-                fields=["event", "team"],
-                name="unique_team_per_event",
-            ),
+            models.UniqueConstraint(fields=["event", "school"], name="unique_assignment_per_school"),
+            models.UniqueConstraint(fields=["event", "team"], name="unique_team_per_event"),
         ]
 
     def __str__(self) -> str:
-        return f"{self.registration.school_name} → Team {self.team.team_number:02d} ({self.event.name})"
+        return f"{self.school.name} → Team {self.team.team_number:02d} ({self.event.name})"
 
 
 class RegistrationRateLimit(models.Model):

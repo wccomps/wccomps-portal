@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 from django.test import Client
 from django.urls import reverse
-from registration.models import Event, EventTeamAssignment, Season, TeamRegistration
+from registration.models import Event, EventTeamAssignment, School, Season, TeamRegistration
 
 from team.models import SchoolInfo, Team
 
@@ -41,24 +41,28 @@ def test_new_school_info_assigns_the_team_to_the_active_event(client, event):
 
     assignment = EventTeamAssignment.objects.get(event=event)
     assert assignment.team == team
-    assert assignment.registration.school_name == "Example University"
+    assert assignment.school.name == "Example University"
 
 
 def test_already_assigned_team_keeps_its_assignment(client, event):
     team = Team.objects.create(team_number=4, team_name="Team 04")
     registration = TeamRegistration.objects.create(school_name="Example University", status="paid")
-    EventTeamAssignment.objects.create(event=event, team=team, registration=registration)
+    EventTeamAssignment.objects.create(
+        event=event, team=team, school=School.for_name("Example University"), registration=registration
+    )
 
     _edit(client, 4, "Example University (renamed)")
 
-    assert EventTeamAssignment.objects.get(event=event).registration == registration
+    assert EventTeamAssignment.objects.get(event=event).school.name == "Example University"
     assert SchoolInfo.objects.get(team=team).school_name == "Example University (renamed)"
 
 
 def test_school_with_a_team_in_the_event_is_refused(client, event):
     other = Team.objects.create(team_number=2, team_name="Team 02")
     registration = TeamRegistration.objects.create(school_name="Example University", status="paid")
-    EventTeamAssignment.objects.create(event=event, team=other, registration=registration)
+    EventTeamAssignment.objects.create(
+        event=event, team=other, school=School.for_name("Example University"), registration=registration
+    )
     Team.objects.create(team_number=4, team_name="Team 04")
 
     response = _edit(client, 4, "Example University")

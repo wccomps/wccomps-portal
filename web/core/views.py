@@ -294,13 +294,18 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
         secondary_email = form.cleaned_data.get("secondary_email", "")
         notes = form.cleaned_data.get("notes", "")
 
+        from registration.models import normalize_school_name
+
         from team.forms import active_event, assign_school_to_event
 
         # A team edited in by hand joins the active event like an imported one (the registration event page)
         join_event = active_event()
         if join_event and join_event.team_assignments.filter(team=team).exists():
             join_event = None
-        if join_event and join_event.team_assignments.filter(registration__school_name=school_name).exists():
+        if (
+            join_event
+            and join_event.team_assignments.filter(school__name_key=normalize_school_name(school_name)).exists()
+        ):
             return render(
                 request,
                 "school_info_edit.html",

@@ -346,13 +346,11 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
 
     random.shuffle(available_teams)
 
+    from team.forms import assign_school_to_event
+
     with transaction.atomic():
         for i, registration in enumerate(registrations_to_assign):
-            EventTeamAssignment.objects.create(
-                event=event,
-                registration=registration,
-                team=available_teams[i],
-            )
+            assign_school_to_event(event, available_teams[i], registration.school_name, registration)
 
     messages.success(request, f"Assigned {len(registrations_to_assign)} teams successfully.")
     return redirect("registration_event_detail", event_id=event_id)
@@ -370,7 +368,7 @@ def unassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
         messages.error(request, "Cannot unassign a team after credentials have been sent.")
         return redirect("registration_event_detail", event_id=event_id)
 
-    school_name = assignment.registration.school_name
+    school_name = assignment.school.name
     assignment.delete()
     messages.success(request, f"Team assignment for {school_name} removed.")
 

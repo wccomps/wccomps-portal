@@ -13,7 +13,7 @@ from django.db import transaction
 from team.models import SchoolInfo, Team, default_team_name
 
 if TYPE_CHECKING:
-    from registration.models import Event
+    from registration.models import Event, EventTeamAssignment, TeamRegistration
 
 
 def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str] | None:
@@ -248,12 +248,17 @@ def validate_csv_data(rows: list[CSVRowData]) -> CSVValidationResult:
     }
 
 
-def assign_school_to_event(event: Event, team: Team, school_name: str) -> None:
-    """Assign the team to the event under the school's registration, creating an approved one if it has none."""
-    from registration.models import EventTeamAssignment, TeamRegistration
+def assign_school_to_event(
+    event: Event, team: Team, school_name: str, registration: TeamRegistration | None = None
+) -> EventTeamAssignment:
+    """Record that the school holds this team number at the event: the link the season history follows."""
+    from registration.models import EventTeamAssignment, School
 
-    registration, _ = TeamRegistration.objects.get_or_create(school_name=school_name, defaults={"status": "approved"})
-    EventTeamAssignment.objects.create(event=event, team=team, registration=registration)
+    school = School.for_name(school_name)
+    if registration is not None and registration.school_id != school.pk:
+        registration.school = school
+        registration.save(update_fields=["school"])
+    return EventTeamAssignment.objects.create(event=event, team=team, school=school, registration=registration)
 
 
 def active_event() -> Event | None:
