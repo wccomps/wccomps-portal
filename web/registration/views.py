@@ -359,7 +359,7 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
     registrations_to_assign: list[tuple[TeamRegistration, str]] = []
     skipped = []
     no_contact = []
-    team_taken = []
+    team_taken: list[str] = []
     for enrollment in enrolled_registrations:
         registration = enrollment.registration
         key = normalize_school_name(registration.school_name)
