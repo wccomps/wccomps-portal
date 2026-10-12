@@ -96,6 +96,7 @@
                         {% csrf_token %}
                         {# The step travels in a field: the button is disabled on submit, so its name isn't sent #}
                         <input type="hidden" name="confirm" value="true">
+                        <input type="hidden" name="preview" value="{{ preview_data.token }}">
                         <c-button_row class="mt-20 justify-end">
                             <c-link href="{% url 'school_info_import' %}">Cancel</c-link>
                             <c-button type="submit" variant="primary" ::disabled="submitting">

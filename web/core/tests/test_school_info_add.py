@@ -1,5 +1,6 @@
 """The import's Add mode: late schools join the open event on free teams; the list's schools keep their teams."""
 
+import re
 from datetime import date
 
 import pytest
@@ -48,6 +49,15 @@ def _upload(client, event_id, *names, mode="add"):
     )
 
 
+def _preview_token(page):
+    return re.search(r'name="preview" value="([^"]+)"', page.content.decode()).group(1)
+
+
+def _confirm(client, page):
+    """Confirm the preview on this page."""
+    return client.post(reverse("school_info_import"), {"confirm": "true", "preview": _preview_token(page)})
+
+
 def _holders():
     return dict(SchoolInfo.objects.values_list("team__team_number", "school__name"))
 
@@ -56,8 +66,9 @@ def test_add_keeps_the_list_and_gives_new_schools_free_teams(client, event, team
     set_team_school(teams[0], "School One", contact_email="c@example.edu")
     set_team_school(teams[2], "School Three", contact_email="c@example.edu")
 
-    preview = _upload(client, event.pk, "School One", "School Two").content.decode()
-    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+    page = _upload(client, event.pk, "School One", "School Two")
+    preview = page.content.decode()
+    response = _confirm(client, page)
 
     assert "Already on the list, skipped: School One" in preview
     assert "Adds 1 school(s) to Invitational (2026); the 2 school(s) already on the list keep their team numbers." in (
@@ -76,8 +87,7 @@ def test_add_keeps_the_list_and_gives_new_schools_free_teams(client, event, team
 def test_add_takes_the_lowest_free_teams(client, event, teams):
     set_team_school(teams[0], "School One", contact_email="c@example.edu")
 
-    _upload(client, event.pk, "School Two", "School Three")
-    client.post(reverse("school_info_import"), {"confirm": "true"})
+    _confirm(client, _upload(client, event.pk, "School Two", "School Three"))
 
     assert set(_holders()) == {1, 2, 3}
 
@@ -97,8 +107,7 @@ def test_add_works_after_a_packet_went_out(client, event, teams):
         uploaded_by="gold",
     )
 
-    _upload(client, event.pk, "School Two")
-    client.post(reverse("school_info_import"), {"confirm": "true"})
+    _confirm(client, _upload(client, event.pk, "School Two"))
 
     assert _holders() == {1: "School One", 2: "School Two"}
 
@@ -109,7 +118,7 @@ def test_add_with_too_few_free_teams_is_an_error(client, event, teams):
     content = _upload(client, event.pk, "A School", "B School", "C School", "D School").content.decode()
 
     assert "Adding 4 school(s) needs 4 free team(s), but only 3 are free." in content
-    assert "csv_import_data" not in client.session
+    assert "school_list_previews" not in client.session
 
 
 def test_add_with_only_schools_already_on_the_list_is_an_error(client, event, teams):
@@ -150,11 +159,12 @@ def test_add_needs_the_open_event(client, event, teams):
 
 
 def test_a_team_given_a_school_between_preview_and_confirm_refuses_the_add(client, event, teams):
-    _upload(client, event.pk, "School Two", "School Three")
-    taken = Team.objects.get(team_number=client.session["csv_import_data"]["teams_to_create"][1]["team_number"])
+    page = _upload(client, event.pk, "School Two", "School Three")
+    stored = client.session["school_list_previews"][_preview_token(page)]
+    taken = Team.objects.get(team_number=stored["teams_to_create"][1]["team_number"])
     set_team_school(taken, "School One", contact_email="c@example.edu")
 
-    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+    response = _confirm(client, page)
 
     assert f"Team {taken.team_number} was given a school since the preview" in response.content.decode()
     assert _holders() == {taken.team_number: "School One"}
@@ -187,3 +197,25 @@ def test_the_mode_label_names_no_single_radio(client, event):
     assert content.count('id="id_mode_replace"') == 1
     assert 'for="id_mode_replace"' not in content
     assert "Add schools to Invitational (2026)" in content
+
+
+def test_confirm_runs_the_preview_on_its_page_not_the_latest_one(client, event, teams):
+    set_team_school(teams[0], "School One", contact_email="c@example.edu")
+    add_page = _upload(client, event.pk, "School Two")
+    _upload(client, event.pk, "School Three", "School Four", mode="replace")
+
+    response = _confirm(client, add_page)
+
+    assert "Added 1 school(s) to Invitational (2026)." in response.content.decode()
+    holders = _holders()
+    assert holders[1] == "School One"
+    assert sorted(holders.values()) == ["School One", "School Two"]
+
+
+def test_confirm_with_an_unknown_preview_asks_for_the_upload_again(client, event, teams):
+    _upload(client, event.pk, "School Two")
+
+    response = client.post(reverse("school_info_import"), {"confirm": "true", "preview": "unknown"})
+
+    assert "The uploaded file is no longer available." in response.content.decode()
+    assert not SchoolInfo.objects.exists()

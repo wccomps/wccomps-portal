@@ -159,6 +159,12 @@ class ImportEventForm(forms.Form):
         return data
 
 
+class ImportConfirmForm(forms.Form):
+    """The confirm of an import preview: the token its preview was stored under in the session."""
+
+    preview = forms.CharField(max_length=64)
+
+
 def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
     """Parse CSV file and validate contents."""
     rows: list[CSVRowData] = []

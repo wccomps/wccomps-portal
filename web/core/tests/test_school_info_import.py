@@ -17,6 +17,13 @@ def client(gold_team_user):
     return client
 
 
+def _confirm(client):
+    """Confirm the latest preview, posting its token as the preview page does."""
+    previews = client.session.get("school_list_previews", {})
+    token = list(previews)[-1] if previews else ""
+    return client.post(reverse("school_info_import"), {"confirm": "true", "preview": token})
+
+
 def _season_and_event(name="Invitational", active=False):
     from datetime import date
 
@@ -36,12 +43,12 @@ def test_upload_then_confirm_imports(client):
     preview = client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
     assert b"Example University" in preview.content
 
-    client.post(reverse("school_info_import"), {"confirm": "true"})
+    _confirm(client)
     assert SchoolInfo.objects.filter(school__name="Example University").exists()
 
 
 def test_confirm_after_the_upload_expired_says_so(client):
-    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+    response = _confirm(client)
     assert b"no longer available" in response.content
 
 
@@ -55,10 +62,10 @@ def test_confirm_after_the_upload_expired_says_so(client):
 )
 def test_confirm_with_a_malformed_stored_upload_asks_for_it_again(client, stored):
     session = client.session
-    session["csv_import_data"] = stored
+    session["school_list_previews"] = {"token": stored}
     session.save()
 
-    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+    response = _confirm(client)
 
     assert b"The uploaded file is no longer available." in response.content
     assert b"Upload the file again." in response.content
@@ -72,7 +79,7 @@ def test_import_for_an_existing_event_opens_it(client):
     csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
 
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
-    client.post(reverse("school_info_import"), {"confirm": "true"})
+    _confirm(client)
 
     assert Event.objects.get(pk=event.pk).is_active
 
@@ -86,7 +93,7 @@ def test_import_can_create_the_event(client):
     fields = {"event": "new", "new_name": "Invitational 2", "new_date": "2026-11-07", "new_type": "invitational"}
 
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields})
-    client.post(reverse("school_info_import"), {"confirm": "true"})
+    _confirm(client)
 
     assert Event.objects.get(is_active=True).name == "Invitational 2"
 
@@ -111,7 +118,7 @@ def test_confirm_refuses_an_event_finalized_since_the_preview(client):
     event.is_finalized = True
     event.save()
 
-    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+    response = _confirm(client)
 
     assert b"finalized or removed" in response.content
     event.refresh_from_db()
@@ -126,7 +133,7 @@ def test_confirm_refuses_an_event_removed_since_the_preview(client):
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
     event.delete()
 
-    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+    response = _confirm(client)
 
     assert response.status_code == 200
     assert b"finalized or removed" in response.content
@@ -135,14 +142,16 @@ def test_confirm_refuses_an_event_removed_since_the_preview(client):
 def test_confirm_with_session_data_from_before_events_asks_to_upload_again(client):
     Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     session = client.session
-    session["csv_import_data"] = {
-        "teams_to_create": [
-            {"team_number": 1, "school_name": "Example University", "contact_email": "coach@example.edu"}
-        ]
+    session["school_list_previews"] = {
+        "token": {
+            "teams_to_create": [
+                {"team_number": 1, "school_name": "Example University", "contact_email": "coach@example.edu"}
+            ]
+        }
     }
     session.save()
 
-    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+    response = _confirm(client)
 
     assert response.status_code == 200
     assert b"Upload the file again" in response.content
@@ -172,7 +181,7 @@ def test_confirm_is_refused_when_scores_appeared_since_the_preview(client):
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
     ServiceScore.objects.create(team=team, service_points=5)
 
-    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+    response = _confirm(client)
 
     assert b"Scores from the last event are still in the portal" in response.content
     assert not SchoolInfo.objects.exists()
@@ -191,8 +200,8 @@ def test_the_second_of_two_confirms_is_refused_instead_of_closing_the_first(gold
         staff.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
         clients.append(staff)
 
-    clients[0].post(reverse("school_info_import"), {"confirm": "true"})
-    response = clients[1].post(reverse("school_info_import"), {"confirm": "true"})
+    _confirm(clients[0])
+    response = _confirm(clients[1])
 
     assert b"Invitational (2026) is still open" in response.content
     assert list(Event.objects.filter(is_active=True)) == [first]
@@ -242,7 +251,7 @@ def test_a_draft_packet_does_not_block_reimporting_the_open_event(client):
     csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
 
-    client.post(reverse("school_info_import"), {"confirm": "true"})
+    _confirm(client)
 
     assert SchoolInfo.objects.exists()
 
@@ -265,7 +274,7 @@ def test_a_new_event_from_the_import_is_closed_to_registration(client):
         },
     )
 
-    client.post(reverse("school_info_import"), {"confirm": "true"})
+    _confirm(client)
 
     new = Event.objects.get(name="Qualifier")
     assert new.is_active
@@ -298,7 +307,7 @@ def test_confirming_a_reimport_of_the_open_event_is_refused_once_scores_appear(c
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
     ServiceScore.objects.create(team=team, service_points=5)
 
-    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+    response = _confirm(client)
 
     assert f"Teams have already started using their team numbers for {event}".encode() in response.content
     assert not SchoolInfo.objects.exists()
@@ -312,7 +321,8 @@ def test_the_session_keeps_the_raw_event_fields(client):
 
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields})
 
-    assert client.session["csv_import_data"]["event"] == {**fields, "mode": ""}
+    (stored,) = client.session["school_list_previews"].values()
+    assert stored["event"] == {**fields, "mode": ""}
 
 
 def test_confirm_rechecks_a_new_events_fields(client):
@@ -324,10 +334,11 @@ def test_confirm_rechecks_a_new_events_fields(client):
     fields = {"event": "new", "new_name": "Invitational 2", "new_date": "2026-11-07", "new_type": "invitational"}
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields})
     session = client.session
-    session["csv_import_data"]["event"]["new_type"] = "bogus"
+    (stored,) = session["school_list_previews"].values()
+    stored["event"]["new_type"] = "bogus"
     session.save()
 
-    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+    response = _confirm(client)
 
     assert b"Upload the file again" in response.content
     assert not Event.objects.filter(name="Invitational 2").exists()

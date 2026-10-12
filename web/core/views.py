@@ -1,4 +1,5 @@
 import logging
+import secrets
 from contextlib import suppress
 from dataclasses import asdict
 from typing import cast
@@ -32,6 +33,7 @@ from core.services.linking import (
 from team.forms import (
     IMPORT_MODES,
     CSVUploadForm,
+    ImportConfirmForm,
     ImportEventForm,
     ImportMode,
     parse_csv_file,
@@ -407,6 +409,21 @@ def _parse_school_info_csv(
     return preview_data, session_rows
 
 
+# The session's import previews by token, so a confirm runs the preview on its page and not another tab's
+PREVIEWS_KEY = "school_list_previews"
+PREVIEWS_KEPT = 5
+
+
+def _store_preview(request: HttpRequest, import_data: dict[str, object]) -> str:
+    """Keep the preview's rows and event fields for its confirm, dropping the oldest beyond PREVIEWS_KEPT; its token."""
+    token = secrets.token_urlsafe(16)
+    previews = request.session.get(PREVIEWS_KEY)
+    previews = dict(previews) if isinstance(previews, dict) else {}
+    previews[token] = import_data
+    request.session[PREVIEWS_KEY] = dict(list(previews.items())[-PREVIEWS_KEPT:])
+    return token
+
+
 def _import_error(*errors: str) -> dict[str, object]:
     return {"errors": list(errors), "warnings": [], "can_import": False}
 
@@ -474,19 +491,27 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
                     csv_file = cast(UploadedFile[bytes], request.FILES["csv_file"])
                     preview_data, session_rows = _parse_school_info_csv(csv_file, event, mode)
                     if preview_data is not None and session_rows:
-                        request.session["csv_import_data"] = {
-                            "teams_to_create": session_rows,
-                            "event": {name: event_form.data.get(name, "") for name in event_form.fields},
-                        }
+                        preview_data["token"] = _store_preview(
+                            request,
+                            {
+                                "teams_to_create": session_rows,
+                                "event": {name: event_form.data.get(name, "") for name in event_form.fields},
+                            },
+                        )
                         preview_data["event_label"] = str(event) if event.pk else f"New: {event.name}"
                         preview_data["mode_label"] = mode.label.format(event=event)
 
         elif "confirm" in request.POST:
-            import_data = request.session.get("csv_import_data")
-            if import_data:
+            stored = request.session.get(PREVIEWS_KEY)
+            previews: dict[str, object] = stored if isinstance(stored, dict) else {}
+            confirm_form = ImportConfirmForm(request.POST)
+            token = confirm_form.cleaned_data["preview"] if confirm_form.is_valid() else ""
+            import_data = previews.get(token)
+            if isinstance(import_data, dict):
                 preview_data, import_results = _apply_school_info_import(import_data, authentik_username)
                 if import_results is not None:
-                    del request.session["csv_import_data"]
+                    del previews[token]
+                    request.session.modified = True
             else:
                 error = "The uploaded file is no longer available. Upload it again to import."
         else:
