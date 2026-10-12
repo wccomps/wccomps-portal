@@ -1,6 +1,5 @@
 import csv
 import io
-import json
 import mimetypes
 import re
 from collections.abc import Iterator
@@ -13,7 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from core.auth_utils import get_user_team, require_permission
-from core.utils import run_detached
+from core.utils import ndjson_done, run_detached
 from team.models import Team
 
 from .forms import PacketActionForm, PacketResendForm, PacketUploadForm
@@ -233,7 +232,7 @@ def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
     if not form.is_valid():
         error_msg = "; ".join(str(e) for errors in form.errors.values() for e in errors)
         return StreamingHttpResponse(
-            iter([json.dumps({"done": True, "success": False, "message": error_msg}) + "\n"]),
+            iter([ndjson_done(error_msg, success=False)]),
             content_type="application/x-ndjson",
         )
 
@@ -262,7 +261,7 @@ def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
         packet.status = "cancelled"
         packet.save(update_fields=["status", "updated_at"])
         return StreamingHttpResponse(
-            iter([json.dumps({"done": True, "success": True, "message": "Packet cancelled"}) + "\n"]),
+            iter([ndjson_done("Packet cancelled")]),
             content_type="application/x-ndjson",
         )
 
@@ -279,9 +278,9 @@ def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
                 service.send_test_packet_email(packet, team, email)
                 yield ndjson_progress("Sent", 1, 1)
                 msg = f"Test email sent to {email} as Team {team.team_number}"
-                yield json.dumps({"done": True, "success": True, "message": msg}) + "\n"
+                yield ndjson_done(msg)
             except Exception as e:
-                yield json.dumps({"done": True, "success": False, "message": str(e)}) + "\n"
+                yield ndjson_done(str(e), success=False)
 
         return StreamingHttpResponse(_stream_test(), content_type="application/x-ndjson")
 

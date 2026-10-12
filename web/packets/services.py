@@ -11,14 +11,13 @@ from registration.models import Event
 from registration.services import school_list_lock
 
 from core.authentik_utils import reset_team_password
+from core.utils import ndjson_done
+from core.utils import ndjson_progress as _progress
 from team.models import SchoolInfo, Team, team_username
 
 from .models import Packet, PacketDistribution
 
 logger = logging.getLogger(__name__)
-
-
-from core.utils import ndjson_progress as _progress
 
 NOT_A_DRAFT = "Only a draft packet can be distributed"
 NO_OPEN_EVENT = "Import the school list for this event first"
@@ -279,7 +278,7 @@ class PacketDistributionService:
         try:
             begin_distribution(packet)
         except ValueError as e:
-            yield json.dumps({"done": True, "success": False, "message": str(e)}) + "\n"
+            yield ndjson_done(str(e), success=False)
             return
         self._create_distributions_for_teams(packet)
 
@@ -290,7 +289,7 @@ class PacketDistributionService:
 
         if total == 0:
             packet.mark_as_completed()
-            yield json.dumps({"done": True, "success": True, "message": "No teams to distribute to"}) + "\n"
+            yield ndjson_done("No teams to distribute to")
             return
 
         sent = 0
@@ -304,21 +303,12 @@ class PacketDistributionService:
             else:
                 failed += 1
 
-        yield (
-            json.dumps(
-                {
-                    "done": True,
-                    "success": failed == 0,
-                    "message": f"Sent {sent}, failed {failed}" if failed else f"Distributed to {sent} teams",
-                }
-            )
-            + "\n"
-        )
+        yield ndjson_done(f"Sent {sent}, failed {failed}" if failed else f"Distributed to {sent} teams", failed == 0)
 
     def _stream_resend(self, packet: Packet, status_filter: str, label: str) -> Iterator[str]:
         """Resend distributions matching a status filter, with parallel streaming progress."""
         if refusal := check_resendable(packet):
-            yield json.dumps({"done": True, "success": False, "message": refusal}) + "\n"
+            yield ndjson_done(refusal, success=False)
             return
         dists = list(
             PacketDistribution.objects.filter(packet=packet, email_status=status_filter).select_related("team")
@@ -326,7 +316,7 @@ class PacketDistributionService:
         total = len(dists)
 
         if total == 0:
-            yield json.dumps({"done": True, "success": True, "message": f"No {label} distributions to resend"}) + "\n"
+            yield ndjson_done(f"No {label} distributions to resend")
             return
 
         PacketDistribution.objects.filter(packet=packet, email_status=status_filter).update(
@@ -345,15 +335,8 @@ class PacketDistributionService:
             else:
                 still_failed += 1
 
-        yield (
-            json.dumps(
-                {
-                    "done": True,
-                    "success": still_failed == 0,
-                    "message": f"Resent {sent}, failed {still_failed}" if still_failed else f"Resent to {sent} teams",
-                }
-            )
-            + "\n"
+        yield ndjson_done(
+            f"Resent {sent}, failed {still_failed}" if still_failed else f"Resent to {sent} teams", still_failed == 0
         )
 
     def stream_resend_failed(self, packet: Packet) -> Iterator[str]:
