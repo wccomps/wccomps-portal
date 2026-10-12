@@ -77,6 +77,19 @@ def remove_team_school(team: Team) -> None:
         event.team_assignments.filter(team=team).delete()
 
 
+@transaction.atomic
+def clear_school_list() -> int:
+    """Empty the school list and the open event's assignments with it; earlier events keep theirs.
+
+    Returns how many school info records were deleted.
+    """
+    deleted, _ = SchoolInfo.objects.all().delete()
+    event = Event.objects.open()
+    if event is not None:
+        event.team_assignments.all().delete()
+    return deleted
+
+
 class ImportBlockedError(Exception):
     """Why a school list can't be imported for the event now."""
 

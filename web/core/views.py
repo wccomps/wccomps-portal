@@ -10,6 +10,7 @@ from registration.models import Season
 from registration.services import (
     ImportBlockedError,
     SchoolTakenError,
+    clear_school_list,
     import_problem,
     import_school_list,
     set_team_school,
@@ -245,7 +246,7 @@ def school_info_clear(request: HttpRequest) -> HttpResponse:
     count = SchoolInfo.objects.count()
 
     if request.method == "POST":
-        deleted, _ = SchoolInfo.objects.all().delete()
+        deleted = clear_school_list()
         logger.info(f"Cleared school info by {request.user.username}")
         messages.success(request, f"Cleared {deleted} school info record(s).")
         return redirect("school_info")

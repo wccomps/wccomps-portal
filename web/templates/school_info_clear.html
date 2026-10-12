@@ -9,7 +9,7 @@
                    parent_label="School Information" />
     <c-module>
         <c-alert variant="warning">
-            Are you sure you want to clear all school information? This deletes {{ count }} school info record(s). Schools and their event history are kept. This cannot be undone.
+            Are you sure you want to clear all school information? This deletes {{ count }} school info record(s). Schools and their past-event history are kept; the open event's team assignments are removed with the list. This cannot be undone.
         </c-alert>
         <form method="post">
             {% csrf_token %}
