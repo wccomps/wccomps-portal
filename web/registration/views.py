@@ -1,10 +1,11 @@
 import random
 
 from django.contrib import messages
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from packets.models import Packet
 
 from core.auth_utils import require_permission
 from core.utils import client_ip
@@ -20,7 +21,7 @@ from .models import (
     TeamRegistration,
     normalize_school_name,
 )
-from .services import remove_team_school, set_team_school
+from .services import PacketsSentError, SchoolTakenError, remove_team_school, set_team_school
 
 
 def register(request: HttpRequest) -> HttpResponse:
@@ -311,6 +312,8 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         "total_enrolled": enrollments.count(),
         "total_assigned": len(assignments),
         "assignable_count": sum(1 for e in enrollment_data if e["can_assign"]),
+        # Sent packets reached these teams under their schools, so they can't be unassigned
+        "packets_sent": Packet.objects.sent().filter(event=event).exists(),
         "subnav_active": "seasons",
     }
 
@@ -356,12 +359,15 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         else:
             taken.add(key)
             registrations_to_assign.append((registration, contact_email))
-    if skipped:
-        messages.warning(request, f"Skipped {', '.join(skipped)}: that school already has a team.")
-    if no_contact:
-        messages.warning(request, f"Skipped {', '.join(no_contact)}: no contact email on the registration.")
+
+    def warn_skipped() -> None:
+        if skipped:
+            messages.warning(request, f"Skipped {', '.join(skipped)}: that school already has a team.")
+        if no_contact:
+            messages.warning(request, f"Skipped {', '.join(no_contact)}: no contact email on the registration.")
 
     if not registrations_to_assign:
+        warn_skipped()
         messages.warning(request, "No eligible registrations to assign.")
         return redirect("registration_event_detail", event_id=event_id)
 
@@ -371,6 +377,7 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
     )
 
     if len(registrations_to_assign) > len(available_teams):
+        warn_skipped()
         messages.error(
             request,
             f"Not enough teams available. Need {len(registrations_to_assign)}, have {len(available_teams)}.",
@@ -379,17 +386,31 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
 
     random.shuffle(available_teams)
 
+    assigned = 0
     with transaction.atomic():
         for team, (registration, contact_email) in zip(available_teams, registrations_to_assign, strict=False):
-            set_team_school(
-                team,
-                registration.school_name,
-                contact_email=contact_email,
-                updated_by=request.user.get_username(),
-                registration=registration,
-            )
+            # Each in its own savepoint: a school claimed meanwhile (another tab, an edit) skips just this one
+            try:
+                with transaction.atomic():
+                    set_team_school(
+                        team,
+                        registration.school_name,
+                        contact_email=contact_email,
+                        updated_by=request.user.get_username(),
+                        registration=registration,
+                    )
+                    # As the import does: only active teams show on School Info, get packets and count in standings
+                    if not team.is_active:
+                        team.is_active = True
+                        team.save(update_fields=["is_active"])
+            except SchoolTakenError, IntegrityError:
+                skipped.append(registration.school_name)
+            else:
+                assigned += 1
 
-    messages.success(request, f"Assigned {len(registrations_to_assign)} teams successfully.")
+    warn_skipped()
+    if assigned:
+        messages.success(request, f"Assigned {assigned} teams successfully.")
     return redirect("registration_event_detail", event_id=event_id)
 
 
@@ -407,16 +428,16 @@ def unassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
     assignment = get_object_or_404(EventTeamAssignment, id=assignment_id)
     event_id = assignment.event_id
 
-    if assignment.credentials_sent_at:
-        messages.error(request, "Cannot unassign a team after credentials have been sent.")
-        return redirect("registration_event_detail", event_id=event_id)
-
     if assignment.event != Event.objects.open():
         messages.error(request, "Only the open event's teams can be unassigned; earlier events are history.")
         return redirect("registration_event_detail", event_id=event_id)
 
     school_name = assignment.school.name
-    remove_team_school(assignment.team)
+    try:
+        remove_team_school(assignment.team)
+    except PacketsSentError as sent:
+        messages.error(request, str(sent))
+        return redirect("registration_event_detail", event_id=event_id)
     messages.success(request, f"Team assignment for {school_name} removed.")
 
     return redirect("registration_event_detail", event_id=event_id)

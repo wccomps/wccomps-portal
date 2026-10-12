@@ -110,9 +110,9 @@
                             <td>
                                 {% if item.assignment %}
                                     <strong>Team {{ item.assignment.team.team_number|stringformat:"02d" }}</strong>
-                                    {% if item.assignment.credentials_sent_at %}
+                                    {% if packets_sent %}
                                         <br>
-                                        <small class="text-success">Credentials sent</small>
+                                        <small class="text-success">Packets sent</small>
                                     {% endif %}
                                 {% elif item.can_assign %}
                                     <span class="text-muted">Ready to assign</span>
@@ -121,7 +121,7 @@
                                 {% endif %}
                             </td>
                             <td>
-                                {% if item.assignment and not item.assignment.credentials_sent_at %}
+                                {% if item.assignment and not packets_sent %}
                                     <form method="post"
                                           action="{% url 'registration_unassign_team' assignment_id=item.assignment.id %}"
                                           class="d-inline">

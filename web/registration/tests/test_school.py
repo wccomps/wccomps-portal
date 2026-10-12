@@ -6,6 +6,7 @@ import pytest
 from django.db import IntegrityError
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from registration.models import (
     Event,
@@ -213,3 +214,124 @@ def test_unassigning_an_earlier_events_team_is_refused(gold_team_user, event):
 
     assert EventTeamAssignment.objects.filter(pk=history.pk).exists()
     assert SchoolInfo.objects.filter(team=team).exists()
+
+
+def _client(user):
+    client = Client()
+    client.force_login(user)
+    return client
+
+
+def _sent_packet(event):
+    from packets.models import Packet
+
+    return Packet.objects.create(
+        title="Packet",
+        file_data=b"x",
+        filename="p.pdf",
+        mime_type="application/pdf",
+        file_size=1,
+        uploaded_by="gold",
+        status="completed",
+        event=event,
+    )
+
+
+def test_assign_teams_activates_the_team_it_picks(gold_team_user, event):
+    team = Team.objects.create(team_number=4, team_name="Team 04", is_active=False)
+    _enrolled(event, "Example University")
+
+    _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]))
+
+    team.refresh_from_db()
+    assert team.is_active
+    assert SchoolInfo.objects.get().team == team
+
+
+def test_assign_teams_picks_only_teams_with_no_school_in_the_list(gold_team_user, event):
+    event.is_active = False
+    event.save()
+    held = Team.objects.create(team_number=4, team_name="Team 04")
+    set_team_school(held, "Other College", contact_email="o@example.edu")
+    event.open()
+    free = Team.objects.create(team_number=5, team_name="Team 05")
+    _enrolled(event, "Example University")
+
+    _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]))
+
+    assert EventTeamAssignment.objects.get(event=event, school__name="Example University").team == free
+
+
+@pytest.mark.parametrize("failure", ["taken", "integrity"])
+def test_assign_teams_skips_a_registration_that_fails_and_assigns_the_rest(gold_team_user, event, monkeypatch, failure):
+    from registration import views
+    from registration.services import SchoolTakenError
+
+    Team.objects.create(team_number=4, team_name="Team 04")
+    Team.objects.create(team_number=5, team_name="Team 05")
+    _enrolled(event, "Example University")
+    _enrolled(event, "Other College")
+    real = views.set_team_school
+
+    def flaky(team, school_name, **kwargs):
+        if school_name == "Example University":
+            set_team_school(team, school_name, **kwargs)
+            raise SchoolTakenError("taken") if failure == "taken" else IntegrityError("clash")
+        return real(team, school_name, **kwargs)
+
+    monkeypatch.setattr(views, "set_team_school", flaky)
+
+    response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+
+    assert response.status_code == 200
+    assert list(SchoolInfo.objects.values_list("school__name", flat=True)) == ["Other College"]
+    assert list(EventTeamAssignment.objects.values_list("school__name", flat=True)) == ["Other College"]
+    content = response.content.decode()
+    assert "Assigned 1 team" in content
+    assert "Skipped Example University: that school already has a team." in content
+
+
+def test_unassign_is_refused_once_a_packet_went_out_for_the_open_event(gold_team_user, event):
+    set_team_school(
+        Team.objects.create(team_number=4, team_name="Team 04"), "Example University", contact_email="c@example.edu"
+    )
+    _sent_packet(event)
+
+    response = _client(gold_team_user).post(
+        reverse("registration_unassign_team", args=[EventTeamAssignment.objects.get().pk]), follow=True
+    )
+
+    assert f"Packets have already been sent for {event}" in response.content.decode()
+    assert EventTeamAssignment.objects.exists()
+    assert SchoolInfo.objects.exists()
+
+
+def test_unassign_goes_ahead_when_only_an_earlier_events_packet_went_out(gold_team_user, event):
+    past = Event.objects.create(season=event.season, name="Qualifier", event_type="qualifier", date=date(2026, 1, 3))
+    _sent_packet(past)
+    set_team_school(
+        Team.objects.create(team_number=4, team_name="Team 04"), "Example University", contact_email="c@example.edu"
+    )
+    EventTeamAssignment.objects.filter(event=event).update(credentials_sent_at=timezone.now())
+
+    _client(gold_team_user).post(reverse("registration_unassign_team", args=[EventTeamAssignment.objects.get().pk]))
+
+    assert not EventTeamAssignment.objects.exists()
+    assert not SchoolInfo.objects.exists()
+
+
+def test_event_detail_offers_no_unassign_once_packets_went_out(gold_team_user, event):
+    set_team_school(
+        Team.objects.create(team_number=4, team_name="Team 04"), "Example University", contact_email="c@example.edu"
+    )
+    _enrolled(event, "Example University")
+    url = reverse("registration_event_detail", args=[event.pk])
+    client = _client(gold_team_user)
+    before = client.get(url).content.decode()
+    _sent_packet(event)
+
+    after = client.get(url).content.decode()
+
+    assert ">Unassign<" in before
+    assert ">Unassign<" not in after
+    assert "Packets sent" in after

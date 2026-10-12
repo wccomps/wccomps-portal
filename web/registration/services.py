@@ -88,12 +88,23 @@ def set_team_school(
     return info
 
 
+def _packets_sent(event: Event | None) -> bool:
+    return event is not None and Packet.objects.sent().filter(event=event).exists()
+
+
 @transaction.atomic
 def remove_team_school(team: Team) -> None:
-    """Take the team out of the school list and out of the open event; earlier events keep their assignments."""
+    """Take the team out of the school list and out of the open event; earlier events keep their assignments.
+
+    PacketsSentError when packets went out for the open event: they reached the team under this school.
+    """
     school_list_lock()
-    SchoolInfo.objects.filter(team=team).delete()
     event = Event.objects.open()
+    if _packets_sent(event):
+        raise PacketsSentError(
+            f"Packets have already been sent for {event}. Change the team's school on its School Info page instead."
+        )
+    SchoolInfo.objects.filter(team=team).delete()
     if event is not None:
         event.team_assignments.filter(team=team).delete()
 
@@ -106,7 +117,7 @@ def clear_school_list() -> int:
     """
     school_list_lock()
     event = Event.objects.open()
-    if event is not None and Packet.objects.sent().filter(event=event).exists():
+    if _packets_sent(event):
         raise PacketsSentError(
             f"Packets have already been sent for {event}. Clear the event's results instead (Finalize and clear), "
             "or change single schools on their School Info pages."
@@ -126,7 +137,7 @@ def import_problem(event: Event) -> str:
     open_now = Event.objects.open()
     if open_now and open_now != event:
         return f"{open_now} is still open. Finalize and clear it before importing a list for another event."
-    if open_now and Packet.objects.sent().filter(event=open_now).exists():
+    if _packets_sent(open_now):
         return (
             f"Packets have already been sent for {open_now}. Re-importing reassigns team numbers, so sent credentials "
             "would reach the wrong school. Change a single school on its School Info page instead."
