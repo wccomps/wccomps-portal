@@ -7,8 +7,8 @@ from django.core.files.uploadedfile import UploadedFile
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
-from registration.models import Event, School, Season, normalize_school_name
-from registration.services import assign_school_to_event
+from registration.models import Event, Season
+from registration.services import set_team_school
 
 from core.services.linking import (
     LinkResult,
@@ -293,49 +293,29 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
         secondary_email = form.cleaned_data.get("secondary_email", "")
         notes = form.cleaned_data.get("notes", "")
 
-        # A team edited in by hand joins the active event like an imported one (the registration event page)
-        event = Event.objects.open()
-        assignment = event.team_assignments.filter(team=team).select_related("school").first() if event else None
-        new_key = normalize_school_name(school_name)
-        join_event = event if event and assignment is None else None
-        moves_school = assignment is None or assignment.school.name_key != new_key
-        if (
-            event
-            and moves_school
-            and event.team_assignments.filter(school__name_key=new_key).exclude(team=team).exists()
-        ):
-            return render(
-                request,
-                "school_info_edit.html",
-                {
-                    "team": team,
-                    "school_info": school_info,
-                    "error": f"{school_name} already has a team in {event}.",
-                },
-            )
-
         with transaction.atomic():
-            if school_info:
-                school_info.school_name = school_name
-                school_info.contact_email = contact_email
-                school_info.secondary_email = secondary_email
-                school_info.notes = notes
-                school_info.updated_by = authentik_username
-                school_info.save()
-            else:
-                school_info = SchoolInfo.objects.create(
-                    team=team,
-                    school_name=school_name,
-                    contact_email=contact_email,
-                    secondary_email=secondary_email,
-                    notes=notes,
-                    updated_by=authentik_username,
-                )
-            if join_event:
-                assign_school_to_event(join_event, team, school_name)
-            elif assignment:
-                assignment.school = School.for_name(school_name)
-                assignment.save(update_fields=["school"])
+            # A team edited in by hand joins the open event like an imported one (the registration event page)
+            event = Event.objects.open()
+            error = set_team_school(event, team, school_name) if event else None
+            if error is None:
+                if school_info:
+                    school_info.school_name = school_name
+                    school_info.contact_email = contact_email
+                    school_info.secondary_email = secondary_email
+                    school_info.notes = notes
+                    school_info.updated_by = authentik_username
+                    school_info.save()
+                else:
+                    school_info = SchoolInfo.objects.create(
+                        team=team,
+                        school_name=school_name,
+                        contact_email=contact_email,
+                        secondary_email=secondary_email,
+                        notes=notes,
+                        updated_by=authentik_username,
+                    )
+        if error:
+            return render(request, "school_info_edit.html", {"team": team, "school_info": school_info, "error": error})
 
         logger.info(f"School info updated for Team {team_number} by {authentik_username}")
 

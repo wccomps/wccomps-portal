@@ -57,6 +57,18 @@ def test_renaming_an_assigned_teams_school_moves_its_assignment(client, event):
     assert SchoolInfo.objects.get(team=team).school_name == "Other College"
 
 
+def test_renaming_an_assigned_teams_school_moves_its_registration_too(client, event):
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    school = School.for_name("Example University")
+    registration = TeamRegistration.objects.create(school_name="Example University", status="paid", school=school)
+    EventTeamAssignment.objects.create(event=event, team=team, school=school, registration=registration)
+
+    _edit(client, 4, "Other College")
+
+    registration.refresh_from_db()
+    assert registration.school.name == "Other College"
+
+
 def test_spelling_change_keeps_the_school_and_updates_its_name(client, event):
     team = Team.objects.create(team_number=4, team_name="Team 04")
     school = School.for_name("Example University")
