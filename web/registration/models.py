@@ -20,7 +20,7 @@ def normalize_school_name(name: str) -> str:
 
 
 class School(models.Model):
-    """A school across events. Season history attaches here, never to a team number (they're reshuffled)."""
+    """A school across events; assignments and registrations point here, never at a team number."""
 
     name = models.CharField(max_length=255)
     name_key = models.CharField(max_length=255, unique=True)
@@ -140,7 +140,7 @@ class EventManager(models.Manager["Event"]):
         return self.get_queryset().annotate_enrollment_count()
 
     def open(self) -> Event | None:
-        """The active event (the database allows one); packets sent now belong to it."""
+        """The active event (the database allows one)."""
         return self.filter(is_active=True).first()
 
 

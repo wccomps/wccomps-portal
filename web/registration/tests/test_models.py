@@ -326,7 +326,6 @@ class TestEventTeamAssignment:
         assert assignment.credentials_sent_at is None
 
     def test_unique_school_per_event(self, school, event, team):
-        """Test only one team per school per event."""
         from team.models import Team
 
         team2 = Team.objects.create(team_number=2, team_name="Team 02")

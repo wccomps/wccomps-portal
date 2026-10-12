@@ -279,8 +279,8 @@ class SchoolInfo(models.Model):
     """School information for teams (GoldTeam only)."""
 
     team = models.OneToOneField(Team, on_delete=models.CASCADE, related_name="school_info")
-    # The team's school in the live school list; the open event's assignment follows it, both set by
-    # registration.services.set_team_school
+    # The team's school in the live school list; set through registration.services (set_team_school,
+    # remove_team_school, clear_school_list, import_school_list)
     school = models.ForeignKey("registration.School", on_delete=models.PROTECT, related_name="school_infos")
     contact_email = models.EmailField()
     secondary_email = models.EmailField(blank=True)

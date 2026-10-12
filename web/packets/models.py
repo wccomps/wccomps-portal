@@ -108,8 +108,7 @@ class Packet(models.Model):
 
 class PacketDistributionQuerySet(models.QuerySet["PacketDistribution"]):
     def visible_to(self, team: Team | None) -> PacketDistributionQuerySet:
-        """The team's web-enabled packets sent for the open event: team numbers are reshuffled between events, so an
-        earlier event's packet went to another school."""
+        """The team's web-enabled packets sent for the open event (team numbers are reshuffled between events)."""
         event = Event.objects.open()
         if event is None:
             return self.none()
