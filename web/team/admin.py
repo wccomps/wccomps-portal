@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.db.models import QuerySet
+from django.forms import ModelForm
 from django.http import HttpRequest, HttpResponse
 from django.template.loader import render_to_string
 from django.utils.html import format_html
@@ -34,6 +35,10 @@ class TeamAdmin(admin.ModelAdmin[Team]):
     search_fields = ["team_name", "authentik_group"]
     ordering = ["team_number"]
     readonly_fields = ["created_at", "updated_at", "ticket_counter", "password_reset"]
+
+    def has_delete_permission(self, request: HttpRequest, obj: Team | None = None) -> bool:
+        # Teams are fixed slots from init_teams; deleting one would take its season history with it
+        return False
 
     @admin.display(description="Password")
     def password_reset(self, obj: Team) -> str:
@@ -117,7 +122,7 @@ class SchoolInfoAdmin(admin.ModelAdmin[SchoolInfo]):
     # only this copy, so it's set solely by reset_team_password. The school, and whether a team has one, is set
     # through registration.services (set_team_school, remove_team_school, clear_school_list, import_school_list).
     exclude = ["password"]
-    readonly_fields = ["school", "created_at", "updated_at", "updated_by", "password_with_reset"]
+    readonly_fields = ["team", "school", "created_at", "updated_at", "updated_by", "password_with_reset"]
     ordering = ["team__team_number"]
     actions = ["export_as_csv", "import_from_csv"]
 
@@ -126,6 +131,10 @@ class SchoolInfoAdmin(admin.ModelAdmin[SchoolInfo]):
 
     def has_delete_permission(self, request: HttpRequest, obj: SchoolInfo | None = None) -> bool:
         return False
+
+    def save_model(self, request: HttpRequest, obj: SchoolInfo, form: ModelForm[SchoolInfo], change: bool) -> None:
+        # Only what this page edits: a full save could write back a password or school changed since it loaded
+        obj.save(update_fields=["contact_email", "secondary_email", "notes", "updated_at"])
 
     @admin.display(description="School name", ordering="school__name")
     def school_display(self, obj: SchoolInfo) -> str:

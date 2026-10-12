@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.forms import ModelForm
 from django.http import HttpRequest
 
 from .models import (
@@ -78,6 +79,13 @@ class EventAdmin(admin.ModelAdmin[Event]):
     inlines = [EventTeamAssignmentInline]
     # Opening an event here would skip recording the school list at it; the school list import opens events
     readonly_fields = ["is_active"]
+
+    def save_model(self, request: HttpRequest, obj: Event, form: ModelForm[Event], change: bool) -> None:
+        if not change:
+            super().save_model(request, obj, form, change)
+            return
+        # A full save would write back the is_active read with the page, undoing an import that opened it since
+        obj.save(update_fields=[f.name for f in Event._meta.concrete_fields if f.name not in ("id", "is_active")])
 
 
 @admin.register(RegistrationContact)

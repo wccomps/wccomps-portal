@@ -92,17 +92,17 @@ class TeamRegistration(models.Model):
         self.status = "approved"
         self.approved_at = timezone.now()
         self.approved_by = user
-        self.save()
+        self.save(update_fields=["status", "approved_at", "approved_by"])
 
     def reject(self, reason: str) -> None:
         self.status = "rejected"
         self.rejection_reason = reason
-        self.save()
+        self.save(update_fields=["status", "rejection_reason"])
 
     def mark_as_paid(self) -> None:
         self.status = "paid"
         self.paid_at = timezone.now()
-        self.save()
+        self.save(update_fields=["status", "paid_at"])
 
 
 class SeasonManager(models.Manager["Season"]):

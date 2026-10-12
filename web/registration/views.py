@@ -250,7 +250,8 @@ def event_edit(request: HttpRequest, event_id: int) -> HttpResponse:
     if request.method == "POST":
         form = EventForm(request.POST, instance=event)
         if form.is_valid():
-            form.save()
+            # Only the form's fields: is_active is written by Event.open() alone
+            form.save(commit=False).save(update_fields=[*EventForm.Meta.fields, "updated_at"])
             messages.success(request, f"Event '{event.name}' updated successfully.")
             return redirect("registration_event_list", season_id=event.season_id)
     else:

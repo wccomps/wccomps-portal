@@ -120,3 +120,52 @@ def test_admin_cannot_delete_school_info():
     assert delete_page.status_code == 403
     assert 'value="delete_selected"' not in changelist
     assert SchoolInfo.objects.filter(pk=info.pk).exists()
+
+
+def test_admin_cannot_move_school_info_to_another_team():
+    team = Team.objects.create(team_number=7, team_name="Team 07")
+    other = Team.objects.create(team_number=8, team_name="Team 08")
+    info = SchoolInfo.objects.create(team=team, school=School.for_name("Example University"), contact_email="c@e.com")
+    client = _admin_client()
+    url = reverse("admin:team_schoolinfo_change", args=[info.pk])
+
+    page = client.get(url).content.decode()
+    response = client.post(url, {"team": other.pk, "contact_email": "c@e.com", "secondary_email": "", "notes": ""})
+
+    assert 'name="team"' not in page
+    assert response.status_code == 302
+    info.refresh_from_db()
+    assert info.team == team
+
+
+def test_admin_save_writes_only_the_contact_fields():
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    team = Team.objects.create(team_number=7, team_name="Team 07")
+    info = SchoolInfo.objects.create(team=team, school=School.for_name("Example University"), contact_email="c@e.com")
+    client = _admin_client()
+    url = reverse("admin:team_schoolinfo_change", args=[info.pk])
+
+    with CaptureQueriesContext(connection) as queries:
+        client.post(url, {"contact_email": "new@e.com", "secondary_email": "", "notes": "late"})
+
+    updates = [q["sql"] for q in queries.captured_queries if q["sql"].startswith('UPDATE "team_schoolinfo"')]
+    assert len(updates) == 1
+    for column in ('"password"', '"school_id"', '"team_id"'):
+        assert column not in updates[0]
+    info.refresh_from_db()
+    assert (info.contact_email, info.notes) == ("new@e.com", "late")
+
+
+def test_admin_cannot_delete_a_team():
+    """Teams are fixed slots from init_teams; deleting one would take its season history with it."""
+    team = Team.objects.create(team_number=7, team_name="Team 07")
+    client = _admin_client()
+
+    delete_page = client.get(reverse("admin:team_team_delete", args=[team.pk]))
+    changelist = client.get(reverse("admin:team_team_changelist")).content.decode()
+
+    assert delete_page.status_code == 403
+    assert 'value="delete_selected"' not in changelist
+    assert Team.objects.filter(pk=team.pk).exists()

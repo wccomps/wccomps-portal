@@ -58,13 +58,21 @@ def set_team_school(
     if holder is not None:
         raise SchoolTakenError(f"{school.name} already has a team: Team {holder.team.team_number}.")
 
-    info = SchoolInfo.objects.filter(team=team).first() or SchoolInfo(team=team)
-    info.school = school
-    info.contact_email = contact_email
-    info.secondary_email = secondary_email
-    info.notes = notes
-    info.updated_by = updated_by
-    info.save()
+    fields = {
+        "school": school,
+        "contact_email": contact_email,
+        "secondary_email": secondary_email,
+        "notes": notes,
+        "updated_by": updated_by,
+    }
+    info = SchoolInfo.objects.filter(team=team).first()
+    if info is None:
+        info = SchoolInfo.objects.create(team=team, **fields)
+    else:
+        # Never the password: a packet send or password reset may have set it since this row was read
+        for name, value in fields.items():
+            setattr(info, name, value)
+        info.save(update_fields=[*fields, "updated_at"])
 
     if event is not None:
         assignment = event.team_assignments.filter(team=team).select_related("registration").first()
