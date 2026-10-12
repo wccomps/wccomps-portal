@@ -6,7 +6,7 @@ from datetime import date
 import pytest
 
 from registration.models import Event, Season
-from registration.services import ImportBlockedError, import_school_list
+from registration.services import ImportBlockedError, SchoolListRow, import_school_list
 from team.models import SchoolInfo, Team
 
 pytestmark = pytest.mark.django_db
@@ -24,8 +24,8 @@ def _event(season, name, active=False):
 
 
 def _rows():
-    team = Team.objects.create(team_number=1, team_name="Team 01")
-    return [{"_team": team, "school_name": "Example University", "contact_email": "c@example.edu"}]
+    Team.objects.create(team_number=1, team_name="Team 01")
+    return [SchoolListRow(team_number=1, school_name="Example University", contact_email="c@example.edu")]
 
 
 def test_the_import_refuses_under_the_lock_when_another_event_opened_first(season):
@@ -58,3 +58,25 @@ def test_a_new_event_is_created_and_opened(season):
 
     assert counts["created"] == 1
     assert Event.objects.get(is_active=True).name == "New"
+
+
+def test_a_row_for_a_team_that_no_longer_exists_blocks_the_import(season):
+    event = _event(season, "Invitational")
+
+    with pytest.raises(ImportBlockedError, match="These teams no longer exist: 9. Upload the file again."):
+        import_school_list(event, [SchoolListRow(9, "Example University", "c@example.edu")], "gold")
+
+    assert not event.is_active
+    assert not SchoolInfo.objects.exists()
+
+
+def test_importing_into_an_event_that_is_not_open_replaces_the_assignments_it_already_has(season):
+    from registration.models import EventTeamAssignment, School
+
+    event = _event(season, "Invitational")
+    stale_team = Team.objects.create(team_number=9, team_name="Team 09")
+    EventTeamAssignment.objects.create(event=event, team=stale_team, school=School.for_name("Example University"))
+
+    import_school_list(event, _rows(), "gold")
+
+    assert list(event.team_assignments.values_list("team__team_number", "school__name")) == [(1, "Example University")]

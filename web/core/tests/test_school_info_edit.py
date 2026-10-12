@@ -190,7 +190,7 @@ def test_two_teams_cannot_share_a_school_with_no_open_event(client):
 
 
 def test_an_edit_with_no_open_event_then_an_import_leaves_the_list_and_the_event_in_step(client):
-    from registration.services import import_school_list
+    from registration.services import SchoolListRow, import_school_list
 
     team = Team.objects.create(team_number=4, team_name="Team 04")
     other = Team.objects.create(team_number=5, team_name="Team 05")
@@ -199,7 +199,7 @@ def test_an_edit_with_no_open_event_then_an_import_leaves_the_list_and_the_event
     event = Event.objects.create(season=season, name="Inv", event_type="invitational", date=date(2026, 10, 3))
 
     import_school_list(
-        event, [{"_team": other, "school_name": "Other College", "contact_email": "o@example.edu"}], "gold"
+        event, [SchoolListRow(team_number=5, school_name="Other College", contact_email="o@example.edu")], "gold"
     )
 
     live = set(SchoolInfo.objects.values_list("team", "school"))

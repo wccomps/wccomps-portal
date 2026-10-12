@@ -4,7 +4,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from registration.models import EventTeamAssignment, School
-from registration.services import import_school_list
+from registration.services import SchoolListRow, import_school_list
 
 from team.forms import parse_csv_file, validate_csv_data
 from team.models import SchoolInfo, Team
@@ -192,7 +192,6 @@ class TestCSVValidation:
         assert len(result["teams_to_create"]) == 2
         # Each row should have a team assigned
         for row in result["teams_to_create"]:
-            assert "_team" in row
             assert "team_number" in row
 
     def test_validate_uses_teams_one_to_n_and_reports_what_it_replaces(self) -> None:
@@ -225,6 +224,10 @@ def _row(school_name: str) -> dict[str, str]:
     return {"school_name": school_name, "contact_email": "contact@example.edu", "secondary_email": "", "notes": ""}
 
 
+def _list_row(school_name: str, team: Team) -> SchoolListRow:
+    return SchoolListRow(team_number=team.team_number, school_name=school_name, contact_email="contact@example.edu")
+
+
 def _assign(event, team_number, school_name):
     """A school's assignment at an event, as history: not through the school list."""
     return EventTeamAssignment.objects.create(
@@ -249,22 +252,14 @@ class TestCSVImport:
     def test_import_creates_school_info(self, setup_teams: list[Team], setup_user: User) -> None:
         """Test applying CSV import to create new school info."""
         teams_to_create = [
-            {
-                "_team": setup_teams[0],
-                "team_number": 1,
-                "school_name": "University One",
-                "contact_email": "contact1@example.edu",
-                "secondary_email": "alt1@example.edu",
-                "notes": "Test note",
-            },
-            {
-                "_team": setup_teams[1],
-                "team_number": 2,
-                "school_name": "University Two",
-                "contact_email": "contact2@example.edu",
-                "secondary_email": "",
-                "notes": "",
-            },
+            SchoolListRow(
+                team_number=1,
+                school_name="University One",
+                contact_email="contact1@example.edu",
+                secondary_email="alt1@example.edu",
+                notes="Test note",
+            ),
+            SchoolListRow(team_number=2, school_name="University Two", contact_email="contact2@example.edu"),
         ]
 
         event = _open_event()
@@ -297,7 +292,7 @@ class TestCSVImport:
 
         result = import_school_list(
             event,
-            [{**_row("University One"), "_team": teams[0]}, {**_row("University Two"), "_team": teams[1]}],
+            [_list_row("University One", teams[0]), _list_row("University Two", teams[1])],
             "gold",
         )
 
@@ -316,7 +311,7 @@ class TestTeamNamesReset:
         renamed = Team.objects.create(team_name="Old Shortname", team_number=1)
         untouched_slot = Team.objects.create(team_name="Old Shortname", team_number=2)
 
-        import_school_list(_open_event(), [{**_row("Example University"), "_team": renamed}], "gold")
+        import_school_list(_open_event(), [_list_row("Example University", renamed)], "gold")
 
         renamed.refresh_from_db()
         untouched_slot.refresh_from_db()
@@ -354,7 +349,7 @@ class TestImportOpensEvent:
         new = self._event(season, "New")
         teams = list(Team.objects.order_by("team_number"))
 
-        import_school_list(new, [{**_row("University One"), "_team": teams[0]}], "gold")
+        import_school_list(new, [_list_row("University One", teams[0])], "gold")
 
         assert list(Event.objects.filter(is_active=True)) == [new]
         assert EventTeamAssignment.objects.get(event=new).school.name == "University One"
@@ -364,9 +359,9 @@ class TestImportOpensEvent:
 
         event = self._event(season, "Invitational", active=True)
         teams = list(Team.objects.order_by("team_number"))
-        import_school_list(event, [{**_row("University One"), "_team": teams[0]}], "gold")
+        import_school_list(event, [_list_row("University One", teams[0])], "gold")
 
-        import_school_list(event, [{**_row("University One"), "_team": teams[1]}], "gold")
+        import_school_list(event, [_list_row("University One", teams[1])], "gold")
 
         assignment = EventTeamAssignment.objects.get(event=event)
         assert assignment.team == teams[1]
@@ -389,7 +384,7 @@ class TestImportOpensEvent:
         event = self._event(season, "Invitational", active=True)
         _assign(event, 1, "University One")
 
-        result = validate_csv_data([_row("University One")], event.pk)
+        result = validate_csv_data([_row("University One")], event)
 
         assert result["teams_to_create"][0]["returning_events"] is None
 
@@ -399,7 +394,7 @@ class TestImportOpensEvent:
         _assign(past, 1, "University One")
         _assign(event, 2, "University One")
 
-        result = validate_csv_data([_row("University One")], event.pk)
+        result = validate_csv_data([_row("University One")], event)
 
         assert result["teams_to_create"][0]["returning_events"] == 1
 
@@ -415,7 +410,7 @@ class TestImportOpensEvent:
         event = self._event(season, "Invitational", active=True)
         _assign(event, 1, "University One")
 
-        result = validate_csv_data([_row("University Two")], event.pk)
+        result = validate_csv_data([_row("University Two")], event)
 
         assert f"Replaces the 1 team assignment(s) for {event}." in result["warnings"]
 

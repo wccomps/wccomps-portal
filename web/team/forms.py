@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import validate_email
 from django.db.models import Count, Q
-from registration.models import Event, EventTeamAssignment, School, Season, normalize_school_name
+from registration.models import Event, School, Season, normalize_school_name
 
 from team.models import SchoolInfo, Team, default_team_name
 
@@ -64,7 +64,6 @@ class CSVRowData(TypedDict, total=False):
     notes: str
     team_number: int
     returning_events: int | None
-    _team: Team
 
 
 class CSVParseResult(TypedDict):
@@ -234,8 +233,12 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
     return {"rows": rows, "errors": errors, "warnings": warnings}
 
 
-def validate_csv_data(rows: list[CSVRowData], event_id: int | None = None) -> CSVValidationResult:
-    """Assign the rows to teams 1..N in random order; the import replaces all existing school info."""
+def validate_csv_data(rows: list[CSVRowData], event: Event | None = None) -> CSVValidationResult:
+    """Assign the rows to teams 1..N in random order; the import replaces all existing school info.
+
+    The event is the one imported into; None, or an unsaved event, is a new one.
+    """
+    event_id = event.pk if event is not None else None
     teams_to_create: list[CSVRowData] = []
     errors: list[str] = []
     warnings: list[str] = []
@@ -270,15 +273,14 @@ def validate_csv_data(rows: list[CSVRowData], event_id: int | None = None) -> CS
     if renamed:
         warnings.append(f"Resets {len(renamed)} team name(s) from the last event ({', '.join(renamed)}).")
 
-    if event_id is not None:
-        replaced = EventTeamAssignment.objects.filter(event_id=event_id).count()
+    if event is not None and event_id is not None:
+        replaced = event.team_assignments.count()
         if replaced:
-            warnings.append(f"Replaces the {replaced} team assignment(s) for {Event.objects.get(pk=event_id)}.")
+            warnings.append(f"Replaces the {replaced} team assignment(s) for {event}.")
 
     random.shuffle(teams)
 
     for team, row in zip(teams, rows, strict=True):
-        row["_team"] = team
         row["team_number"] = team.team_number
         teams_to_create.append(row)
 

@@ -10,6 +10,7 @@ from packets.services import begin_distribution
 
 from registration.models import Event, Season
 from registration.services import (
+    SchoolListRow,
     clear_school_list,
     import_school_list,
     remove_team_school,
@@ -73,7 +74,7 @@ def test_the_import_takes_the_lock_before_checking_the_event(team):
 
     with CaptureQueriesContext(connection) as queries:
         import_school_list(
-            event, [{"_team": team, "school_name": "Example University", "contact_email": "c@example.edu"}], "gold"
+            event, [SchoolListRow(team_number=1, school_name="Example University", contact_email="c@e.edu")], "gold"
         )
 
     _assert_locks_before_reading_the_open_event(queries)

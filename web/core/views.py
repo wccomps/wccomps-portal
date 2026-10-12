@@ -1,4 +1,5 @@
 import logging
+from dataclasses import asdict
 from typing import cast
 
 from django.contrib import messages
@@ -6,10 +7,11 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from registration.models import Season
+from registration.models import Event, Season
 from registration.services import (
     ImportBlockedError,
     PacketsSentError,
+    SchoolListRow,
     SchoolTakenError,
     clear_school_list,
     import_problem,
@@ -26,7 +28,7 @@ from core.services.linking import (
     store_discord_id_in_authentik,
     validate_link_token,
 )
-from team.forms import CSVRowData, CSVUploadForm, ImportEventForm, parse_csv_file, validate_csv_data
+from team.forms import CSVUploadForm, ImportEventForm, parse_csv_file, validate_csv_data
 from team.models import LinkToken, SchoolInfo, Team
 
 from .auth_utils import (
@@ -357,7 +359,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
 
 
 def _parse_school_info_csv(
-    csv_file: UploadedFile[bytes], event_id: int | None = None
+    csv_file: UploadedFile[bytes], event: Event
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
     """Parse and validate a school-info CSV into (preview data, session rows; empty on errors)."""
     parse_result = parse_csv_file(csv_file)
@@ -369,7 +371,7 @@ def _parse_school_info_csv(
             "rows": [],
         }, []
 
-    validation_result = validate_csv_data(parse_result["rows"], event_id)
+    validation_result = validate_csv_data(parse_result["rows"], event)
 
     preview_data: dict[str, object] = {
         "errors": validation_result["errors"],
@@ -381,14 +383,15 @@ def _parse_school_info_csv(
     session_rows: list[dict[str, object]] = []
     if preview_data["can_import"]:
         session_rows = [
-            {
-                "team_number": row["team_number"],
-                "school_name": row["school_name"],
-                "contact_email": row["contact_email"],
-                "secondary_email": row.get("secondary_email", ""),
-                "notes": row.get("notes", ""),
-                "returning_events": row.get("returning_events"),
-            }
+            asdict(
+                SchoolListRow(
+                    team_number=row["team_number"],
+                    school_name=row["school_name"],
+                    contact_email=row["contact_email"],
+                    secondary_email=row.get("secondary_email", ""),
+                    notes=row.get("notes", ""),
+                )
+            )
             for row in validation_result["teams_to_create"]
         ]
 
@@ -406,26 +409,16 @@ def _upload_again(*problems: str) -> tuple[dict[str, object], None]:
 def _apply_school_info_import(
     import_data: dict[str, object], authentik_username: str
 ) -> tuple[dict[str, object] | None, dict[str, int] | None]:
-    """Re-check the teams and the event fields, then import the list (which re-checks the event under its lock):
+    """Re-check the event fields, then import the list (which re-checks the event and the teams under its lock):
     (preview_data, None) on errors, else (None, counts)."""
-    # Copies: the rows gain a Team object, which must not leak into the JSON session
-    teams_to_create: list[CSVRowData] = [cast(CSVRowData, dict(row)) for row in import_data["teams_to_create"]]  # type: ignore[attr-defined]
-
-    team_numbers = [row["team_number"] for row in teams_to_create]
-    teams_by_number: dict[int, Team] = {t.team_number: t for t in Team.objects.filter(team_number__in=team_numbers)}
-
-    missing = [
-        f"Team {row['team_number']} no longer exists"
-        for row in teams_to_create
-        if row["team_number"] not in teams_by_number
-    ]
-    if missing:
-        return _upload_again(*missing)
-    for row in teams_to_create:
-        row["_team"] = teams_by_number[row["team_number"]]
-
+    stored_rows = import_data.get("teams_to_create")
     event_fields = import_data.get("event")
-    if not isinstance(event_fields, dict):
+    if not isinstance(stored_rows, list) or not isinstance(event_fields, dict):
+        return _upload_again("The uploaded file is no longer available.")
+    try:
+        rows = [SchoolListRow(**row) for row in stored_rows]
+    except TypeError:
+        # A preview stored by an earlier version of the page
         return _upload_again("The uploaded file is no longer available.")
     season = Season.objects.active()
     if season is None:
@@ -434,7 +427,7 @@ def _apply_school_info_import(
     if not event_form.is_valid():
         return _upload_again(*(str(e) for e in event_form.non_field_errors()))
     try:
-        counts = import_school_list(event_form.event_to_import, teams_to_create, authentik_username)
+        counts = import_school_list(event_form.event_to_import, rows, authentik_username)
     except ImportBlockedError as blocked:
         return _import_error(str(blocked)), None
     return None, counts
@@ -459,21 +452,22 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
         if "upload" in request.POST:
             form = CSVUploadForm(request.POST, request.FILES)
             event_form = ImportEventForm(request.POST, season=season) if season else None
-            if form.is_valid() and event_form is not None and event_form.is_valid():
+            event_valid = event_form is not None and event_form.is_valid()
+            if event_form is not None and not event_valid:
+                error = " ".join(str(e) for e in event_form.non_field_errors())
+            elif form.is_valid() and event_form is not None:
                 event = event_form.event_to_import
                 if problem := import_problem(event):
                     error = problem
                 else:
                     csv_file = cast(UploadedFile[bytes], request.FILES["csv_file"])
-                    preview_data, session_rows = _parse_school_info_csv(csv_file, event.pk)
+                    preview_data, session_rows = _parse_school_info_csv(csv_file, event)
                     if preview_data is not None and session_rows:
                         request.session["csv_import_data"] = {
                             "teams_to_create": session_rows,
                             "event": {name: event_form.data.get(name, "") for name in event_form.fields},
                         }
                         preview_data["event_label"] = str(event) if event.pk else f"New: {event.name}"
-            elif event_form is not None and not event_form.is_valid():
-                error = " ".join(str(e) for e in event_form.non_field_errors())
 
         elif "confirm" in request.POST:
             import_data = request.session.get("csv_import_data")

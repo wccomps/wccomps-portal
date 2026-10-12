@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
 
 from django.db import connection, transaction
 from packets.models import Packet
@@ -7,10 +7,6 @@ from core.competition_utils import live_competition_data_exists
 from team.models import SchoolInfo, Team, default_team_name
 
 from .models import Event, EventTeamAssignment, School, TeamRegistration
-
-if TYPE_CHECKING:
-    from team.forms import CSVRowData
-
 
 # Arbitrary, but fixed (and not prepare_database's): every school-list writer asks for the same lock.
 SCHOOL_LIST_LOCK_ID = 7_261_640_002
@@ -155,8 +151,19 @@ def import_problem(event: Event) -> str:
     )
 
 
+@dataclass(frozen=True)
+class SchoolListRow:
+    """One line of an imported school list: the school that holds the team, and its contacts."""
+
+    team_number: int
+    school_name: str
+    contact_email: str
+    secondary_email: str = ""
+    notes: str = ""
+
+
 @transaction.atomic
-def import_school_list(event: Event, rows: list[CSVRowData], updated_by: str) -> dict[str, int]:
+def import_school_list(event: Event, rows: list[SchoolListRow], updated_by: str) -> dict[str, int]:
     """Replace the school list with the rows and open the event (saving it first when new), replacing its
     assignments: each row's school holds the row's team. Resets every team name and activates the rows' teams.
 
@@ -166,26 +173,29 @@ def import_school_list(event: Event, rows: list[CSVRowData], updated_by: str) ->
     school_list_lock()
     if problem := import_problem(event):
         raise ImportBlockedError(problem)
+    teams = Team.objects.in_bulk([row.team_number for row in rows], field_name="team_number")
+    if missing := [str(row.team_number) for row in rows if row.team_number not in teams]:
+        raise ImportBlockedError(f"These teams no longer exist: {', '.join(missing)}. Upload the file again.")
     if event._state.adding:
         event.save()
 
-    SchoolInfo.objects.all().delete()
-    # Names like a school's shortname belong to the last event's assignment, not the team slot
-    teams = list(Team.objects.all())
-    for team in teams:
-        team.team_name = default_team_name(team.team_number)
-    Team.objects.bulk_update(teams, ["team_name"])
-    EventTeamAssignment.objects.filter(event=event).delete()
-    activated = Team.objects.filter(pk__in=[row["_team"].pk for row in rows], is_active=False).update(is_active=True)
+    # Opened before the clear, so the clear also replaces assignments the event had while it wasn't open
     event.open()
+    clear_school_list()
+    # Names like a school's shortname belong to the last event's assignment, not the team slot
+    all_teams = list(Team.objects.all())
+    for team in all_teams:
+        team.team_name = default_team_name(team.team_number)
+    Team.objects.bulk_update(all_teams, ["team_name"])
+    activated = Team.objects.filter(pk__in=[team.pk for team in teams.values()], is_active=False).update(is_active=True)
 
     for row in rows:
         set_team_school(
-            row["_team"],
-            row["school_name"],
-            contact_email=row["contact_email"],
-            secondary_email=row.get("secondary_email", ""),
-            notes=row.get("notes", ""),
+            teams[row.team_number],
+            row.school_name,
+            contact_email=row.contact_email,
+            secondary_email=row.secondary_email,
+            notes=row.notes,
             updated_by=updated_by,
         )
     return {"created": len(rows), "activated": activated}
