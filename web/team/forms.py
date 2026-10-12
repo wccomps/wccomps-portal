@@ -318,14 +318,14 @@ def apply_csv_import(teams_to_create: list[CSVRowData], updated_by: str, event: 
 
     for row in teams_to_create:
         team = row["_team"]
+        assignment = assign_school_to_event(event, team, row["school_name"])
         SchoolInfo.objects.create(
             team=team,
-            school_name=row["school_name"],
+            school=assignment.school,
             contact_email=row["contact_email"],
             secondary_email=row.get("secondary_email", ""),
             notes=row.get("notes", ""),
             updated_by=updated_by,
         )
-        assign_school_to_event(event, team, row["school_name"])
 
     return {"created": len(teams_to_create), "activated": activated}

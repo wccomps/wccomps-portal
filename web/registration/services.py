@@ -14,17 +14,20 @@ def assign_school_to_event(
     return EventTeamAssignment.objects.create(event=event, team=team, school=school, registration=registration)
 
 
-def set_team_school(event: Event, team: Team, school_name: str) -> str | None:
+class SchoolTakenError(Exception):
+    """Another team in the event already holds the school; the message says which."""
+
+
+def set_team_school(event: Event, team: Team, school_name: str) -> School:
     """Make the school the one holding this team at the event, keeping its registration on the same school.
 
-    Returns why not when another team in the event already holds that school, else None.
+    Returns that School; raises SchoolTakenError when another team in the event already holds it.
     """
     assignment = event.team_assignments.filter(team=team).select_related("school", "registration").first()
     if event.team_assignments.filter(school__name_key=normalize_school_name(school_name)).exclude(team=team).exists():
-        return f"{school_name} already has a team in {event}."
+        raise SchoolTakenError(f"{school_name} already has a team in {event}.")
     if assignment is None:
-        assign_school_to_event(event, team, school_name)
-        return None
+        return assign_school_to_event(event, team, school_name).school
     school = School.for_name(school_name)
     if assignment.school_id != school.pk:
         assignment.school = school
@@ -33,4 +36,4 @@ def set_team_school(event: Event, team: Team, school_name: str) -> str | None:
     if registration is not None and registration.school_id != school.pk:
         registration.school = school
         registration.save(update_fields=["school"])
-    return None
+    return school

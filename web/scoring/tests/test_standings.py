@@ -61,10 +61,12 @@ def test_inactive_and_idle_teams_are_not_ranked(unit_modifiers):
 
 @pytest.mark.django_db
 def test_standing_school_name(unit_modifiers):
+    from registration.models import School
+
     from team.models import SchoolInfo
 
     team1 = _team(1, "100")
-    SchoolInfo.objects.create(team=team1, school_name="University of Testing", contact_email="u@test.edu")
+    SchoolInfo.objects.create(team=team1, school=School.for_name("University of Testing"), contact_email="u@test.edu")
     _team(2, "50")
 
     standings = compute_standings()

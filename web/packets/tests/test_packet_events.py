@@ -198,3 +198,22 @@ def test_admin_retry_for_an_earlier_events_packet_is_refused(current_event, team
     send.assert_not_called()
     assert message_user.call_args_list[0].kwargs["level"] == messages.ERROR
     assert "earlier event" in message_user.call_args_list[0].args[1]
+
+
+def test_resending_to_a_team_with_no_school_on_file_is_refused(gold_team_user, current_event, team_1):
+    from team.models import SchoolInfo
+
+    packet = _packet(current_event)
+    PacketDistribution.objects.create(packet=packet, team=team_1, email_status="failed")
+    client = Client()
+    client.force_login(gold_team_user)
+
+    with patch.object(PacketDistributionService, "send_packet_email") as send:
+        response = client.post(
+            reverse("packet_resend_team", args=[packet.id, team_1.id]), {"primary_email": "a@example.edu"}, follow=True
+        )
+
+    assert "Team 1 has no school on file. Add it on the School Info page first." in response.content.decode()
+    send.assert_not_called()
+    assert not SchoolInfo.objects.filter(team=team_1).exists()
+    assert PacketDistribution.objects.get(packet=packet).email_status == "failed"

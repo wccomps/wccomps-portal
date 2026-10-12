@@ -34,7 +34,7 @@ def test_upload_shows_preview_and_confirm_imports(live_server, pw_browser, tmp_p
 
         page.get_by_role("button", name="Confirm and Import").click()
         page.wait_for_load_state("networkidle")
-        assert SchoolInfo.objects.filter(school_name="Example University").exists()
+        assert SchoolInfo.objects.filter(school__name="Example University").exists()
         assert Event.objects.get(pk=event.pk).is_active
     finally:
         context.close()

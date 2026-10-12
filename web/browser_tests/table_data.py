@@ -13,7 +13,7 @@ def seed_table_data(viewer: User) -> dict:
     from django.utils import timezone
     from orange_team.models import OrangeAssignment, OrangeCheckIn, OrangeFollowUp
     from packets.models import Packet, PacketDistribution
-    from registration.models import Event, Season
+    from registration.models import Event, School, Season
     from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeamIPPool, RedTeamScore
 
     from team.models import DiscordLink, SchoolInfo
@@ -25,7 +25,7 @@ def seed_table_data(viewer: User) -> dict:
     now = timezone.now()
 
     DiscordLink.objects.create(user=member, discord_id=8800001, discord_username="member", team=team)
-    SchoolInfo.objects.create(team=team, school_name="Example U", contact_email="c@example.edu")
+    SchoolInfo.objects.create(team=team, school=School.for_name("Example U"), contact_email="c@example.edu")
     TicketHistory.objects.create(ticket=ticket, action="created", actor=member, details={})
     Ticket.objects.create(
         ticket_number="TEAM01-002",

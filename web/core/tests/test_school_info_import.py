@@ -37,7 +37,7 @@ def test_upload_then_confirm_imports(client):
     assert b"Example University" in preview.content
 
     client.post(reverse("school_info_import"), {"confirm": "true"})
-    assert SchoolInfo.objects.filter(school_name="Example University").exists()
+    assert SchoolInfo.objects.filter(school__name="Example University").exists()
 
 
 def test_confirm_after_the_upload_expired_says_so(client):

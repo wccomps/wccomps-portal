@@ -3,6 +3,7 @@
 import pytest
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+from registration.models import School
 
 from team.forms import apply_csv_import, parse_csv_file, validate_csv_data
 from team.models import SchoolInfo, Team
@@ -197,7 +198,9 @@ class TestCSVValidation:
         """The CSV is the whole school list: teams 1..N regardless of state, existing info replaced."""
         for i in range(1, 5):
             Team.objects.create(team_name=f"Team {i}", team_number=i, is_active=i == 1)
-        SchoolInfo.objects.create(team=Team.objects.get(team_number=1), school_name="Old", contact_email="o@x.edu")
+        SchoolInfo.objects.create(
+            team=Team.objects.get(team_number=1), school=School.for_name("Old"), contact_email="o@x.edu"
+        )
 
         result = validate_csv_data([_row("University One"), _row("University Two"), _row("University Three")])
 
@@ -256,13 +259,15 @@ class TestCSVImport:
             },
         ]
 
-        result = apply_csv_import(teams_to_create, "testuser", _open_event())
+        event = _open_event()
+        result = apply_csv_import(teams_to_create, "testuser", event)
 
         assert result["created"] == 2
 
         # Verify database
         school_info1 = SchoolInfo.objects.get(team=setup_teams[0])
         assert school_info1.school_name == "University One"
+        assert school_info1.school == event.team_assignments.get(team=setup_teams[0]).school
         assert school_info1.contact_email == "contact1@example.edu"
         assert school_info1.secondary_email == "alt1@example.edu"
         assert school_info1.notes == "Test note"
@@ -271,10 +276,10 @@ class TestCSVImport:
     def test_apply_replaces_school_info_activates_teams_and_reassigns_the_event(self) -> None:
         from datetime import date
 
-        from registration.models import Event, EventTeamAssignment, School, Season
+        from registration.models import Event, EventTeamAssignment, Season
 
         teams = [Team.objects.create(team_name=f"Team {i}", team_number=i, is_active=i == 1) for i in (1, 2, 3)]
-        SchoolInfo.objects.create(team=teams[2], school_name="Old", contact_email="o@x.edu")
+        SchoolInfo.objects.create(team=teams[2], school=School.for_name("Old"), contact_email="o@x.edu")
         season = Season.objects.create(name="2026", year=2026, is_active=True)
         event = Event.objects.create(
             season=season, name="Invitational", event_type="invitational", date=date(2026, 10, 3), is_active=True
@@ -289,7 +294,7 @@ class TestCSVImport:
         )
 
         assert result == {"created": 2, "activated": 1}
-        assert sorted(SchoolInfo.objects.values_list("school_name", flat=True)) == ["University One", "University Two"]
+        assert sorted(SchoolInfo.objects.values_list("school__name", flat=True)) == ["University One", "University Two"]
         assert sorted(Team.objects.filter(is_active=True).values_list("team_number", flat=True)) == [1, 2]
         assert sorted(
             EventTeamAssignment.objects.filter(event=event).values_list("team__team_number", "school__name")
@@ -399,7 +404,6 @@ class TestImportOpensEvent:
         assert result["teams_to_create"][0]["returning_events"] == 1
 
     def test_a_school_without_assignments_is_new(self, setup_teams):
-        from registration.models import School
 
         School.for_name("University One")
 

@@ -121,9 +121,57 @@ def test_no_active_event_saves_school_info_only(client):
 def test_school_list_shows_the_secondary_email(client):
     team = Team.objects.create(team_number=9, team_name="Team 09")
     SchoolInfo.objects.create(
-        team=team, school_name="Example U", contact_email="captain@example.edu", secondary_email="coach@example.edu"
+        team=team,
+        school=School.for_name("Example U"),
+        contact_email="captain@example.edu",
+        secondary_email="coach@example.edu",
     )
 
     response = client.get(reverse("school_info"))
 
     assert b"coach@example.edu" in response.content
+
+
+def test_editing_a_school_moves_the_live_name_and_the_assignment_together(client, event):
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    school = School.for_name("Example University")
+    EventTeamAssignment.objects.create(event=event, team=team, school=school)
+    SchoolInfo.objects.create(team=team, school=school, contact_email="coach@example.edu")
+
+    _edit(client, 4, "Other College")
+
+    info = SchoolInfo.objects.get(team=team)
+    assert info.school == EventTeamAssignment.objects.get(event=event).school
+    assert info.school_name == "Other College"
+
+
+def test_a_refused_rename_leaves_the_live_name_alone(client, event):
+    other = Team.objects.create(team_number=2, team_name="Team 02")
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    EventTeamAssignment.objects.create(event=event, team=other, school=School.for_name("Other College"))
+    school = School.for_name("Example University")
+    EventTeamAssignment.objects.create(event=event, team=team, school=school)
+    SchoolInfo.objects.create(team=team, school=school, contact_email="coach@example.edu")
+
+    response = _edit(client, 4, "Other College")
+
+    assert b"already has a team" in response.content
+    assert b"Example University" in response.content
+    assert SchoolInfo.objects.get(team=team).school_name == "Example University"
+
+
+def test_no_open_event_files_the_school_info_under_the_named_school(client):
+    Team.objects.create(team_number=4, team_name="Team 04")
+
+    _edit(client, 4, "  Example   University ")
+
+    assert SchoolInfo.objects.get(team__team_number=4).school == School.objects.get(name_key="example university")
+
+
+def test_the_export_shows_the_school_name(client):
+    team = Team.objects.create(team_number=9, team_name="Team 09")
+    SchoolInfo.objects.create(team=team, school=School.for_name("Example U"), contact_email="captain@example.edu")
+
+    response = client.get(reverse("school_info_export"))
+
+    assert "9,Team 09,Example U,captain@example.edu" in response.content.decode()

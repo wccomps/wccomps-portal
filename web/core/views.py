@@ -7,8 +7,8 @@ from django.core.files.uploadedfile import UploadedFile
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
-from registration.models import Event, Season
-from registration.services import set_team_school
+from registration.models import Event, School, Season
+from registration.services import SchoolTakenError, set_team_school
 
 from core.services.linking import (
     LinkResult,
@@ -187,7 +187,7 @@ def link_callback(request: HttpRequest) -> HttpResponse:
 
 @require_permission("gold_team")
 def school_info(request: HttpRequest) -> HttpResponse:
-    teams = Team.objects.filter(is_active=True).order_by("team_number")
+    teams = Team.objects.filter(is_active=True).select_related("school_info__school").order_by("team_number")
 
     teams_with_info = []
     for team in teams:
@@ -212,7 +212,7 @@ def school_info(request: HttpRequest) -> HttpResponse:
 def school_info_export(request: HttpRequest) -> HttpResponse:
     import csv
 
-    records = SchoolInfo.objects.select_related("team").order_by("team__team_number")
+    records = SchoolInfo.objects.select_related("team", "school").order_by("team__team_number")
 
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="school_info.csv"'
@@ -293,13 +293,13 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
         secondary_email = form.cleaned_data.get("secondary_email", "")
         notes = form.cleaned_data.get("notes", "")
 
-        with transaction.atomic():
-            # A team edited in by hand joins the open event like an imported one (the registration event page)
-            event = Event.objects.open()
-            error = set_team_school(event, team, school_name) if event else None
-            if error is None:
+        try:
+            with transaction.atomic():
+                # A team edited in by hand joins the open event like an imported one (the registration event page)
+                event = Event.objects.open()
+                school = set_team_school(event, team, school_name) if event else School.for_name(school_name)
                 if school_info:
-                    school_info.school_name = school_name
+                    school_info.school = school
                     school_info.contact_email = contact_email
                     school_info.secondary_email = secondary_email
                     school_info.notes = notes
@@ -308,14 +308,16 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
                 else:
                     school_info = SchoolInfo.objects.create(
                         team=team,
-                        school_name=school_name,
+                        school=school,
                         contact_email=contact_email,
                         secondary_email=secondary_email,
                         notes=notes,
                         updated_by=authentik_username,
                     )
-        if error:
-            return render(request, "school_info_edit.html", {"team": team, "school_info": school_info, "error": error})
+        except SchoolTakenError as taken:
+            return render(
+                request, "school_info_edit.html", {"team": team, "school_info": school_info, "error": str(taken)}
+            )
 
         logger.info(f"School info updated for Team {team_number} by {authentik_username}")
 

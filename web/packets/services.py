@@ -172,7 +172,8 @@ class PacketDistributionService:
     def resend_to_team(self, packet: Packet, team: Team, primary_email: str, secondary_email: str = "") -> str | None:
         """Send the packet to one team again at these addresses, saving them as the team's contacts.
 
-        Returns why not when the packet can't be resent or the team has no distribution; send failures raise.
+        Returns why not when the packet can't be resent or the team has no distribution or school on file;
+        send failures raise.
         """
         if refusal := check_resendable(packet):
             return refusal
@@ -180,9 +181,9 @@ class PacketDistributionService:
         if dist is None:
             return f"No distribution record for Team {team.team_number}."
 
-        school_info, _ = SchoolInfo.objects.get_or_create(
-            team=team, defaults={"school_name": f"Team {team.team_number}", "contact_email": primary_email}
-        )
+        school_info = SchoolInfo.objects.filter(team=team).first()
+        if school_info is None:
+            return f"Team {team.team_number} has no school on file. Add it on the School Info page first."
         school_info.contact_email = primary_email
         school_info.secondary_email = secondary_email
         school_info.save(update_fields=["contact_email", "secondary_email"])

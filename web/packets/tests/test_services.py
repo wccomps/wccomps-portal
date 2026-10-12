@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
+from registration.models import School
 
 from team.models import SchoolInfo, Team
 
@@ -35,7 +36,7 @@ class PacketDistributionServiceTestCase(TestCase):
             )
             SchoolInfo.objects.create(
                 team=team,
-                school_name=f"School {i}",
+                school=School.for_name(f"School {i}"),
                 contact_email=f"team{i}@example.com",
                 password=f"TestPass{i}!",
             )
@@ -189,7 +190,9 @@ class PacketCompletesItselfTestCase(TestCase):
         self.dists = []
         for i in (1, 2):
             team = Team.objects.create(team_number=i, team_name=f"Team {i}", is_active=True)
-            SchoolInfo.objects.create(team=team, school_name=f"S{i}", contact_email=f"t{i}@example.com", password="pw")
+            SchoolInfo.objects.create(
+                team=team, school=School.for_name(f"S{i}"), contact_email=f"t{i}@example.com", password="pw"
+            )
             self.dists.append(PacketDistribution.objects.create(packet=self.packet, team=team))
 
     @patch("packets.services.EmailMultiAlternatives")

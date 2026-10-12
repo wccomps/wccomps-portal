@@ -4,6 +4,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
+from registration.models import School
 
 from core.models import UserGroups
 from team.models import SchoolInfo, Team
@@ -14,7 +15,7 @@ pytestmark = pytest.mark.django_db
 def test_admin_save_leaves_the_stored_password_alone():
     team = Team.objects.create(team_number=7, team_name="Team 07")
     info = SchoolInfo.objects.create(
-        team=team, school_name="Example University", contact_email="c@example.com", password="Real-Pass-1!"
+        team=team, school=School.for_name("Example University"), contact_email="c@example.com", password="Real-Pass-1!"
     )
     admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
@@ -27,7 +28,6 @@ def test_admin_save_leaves_the_stored_password_alone():
         url,
         {
             "team": team.pk,
-            "school_name": "Example University",
             "contact_email": "c@example.com",
             "secondary_email": "",
             "notes": "",
@@ -41,8 +41,61 @@ def test_admin_save_leaves_the_stored_password_alone():
     assert info.password == "Real-Pass-1!"
 
 
+def _admin_client(username="admin"):
+    admin = User.objects.create(username=username, is_staff=True, is_superuser=True)
+    UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
+    client = Client()
+    client.force_login(admin)
+    return client
+
+
+def test_admin_cannot_change_the_school():
+    team = Team.objects.create(team_number=7, team_name="Team 07")
+    school = School.for_name("Example University")
+    other = School.for_name("Other College")
+    info = SchoolInfo.objects.create(team=team, school=school, contact_email="c@example.com")
+    client = _admin_client()
+    url = reverse("admin:team_schoolinfo_change", args=[info.pk])
+
+    page = client.get(url).content.decode()
+    response = client.post(
+        url,
+        {
+            "team": team.pk,
+            "school": other.pk,
+            "school_name": "Renamed College",
+            "contact_email": "new@example.com",
+            "secondary_email": "",
+            "notes": "",
+        },
+    )
+
+    assert 'name="school"' not in page
+    assert 'name="school_name"' not in page
+    assert "Example University" in page
+    assert response.status_code == 302
+    info.refresh_from_db()
+    assert info.school == school
+    assert info.school_name == "Example University"
+    assert info.contact_email == "new@example.com"
+
+
+def test_admin_searches_by_school_name():
+    team = Team.objects.create(team_number=7, team_name="Team 07")
+    SchoolInfo.objects.create(team=team, school=School.for_name("Example University"), contact_email="c@example.com")
+
+    page = _admin_client().get(reverse("admin:team_schoolinfo_changelist"), {"q": "example univ"}).content.decode()
+
+    assert "Example University" in page
+
+
+def test_admin_cannot_add_school_info():
+    """A team's school is set on the School Info page or by the import, which keep the event's record with it."""
+    assert _admin_client().get("/admin/team/schoolinfo/add/").status_code == 403
+
+
 @pytest.mark.django_db
-@pytest.mark.parametrize("path", ["/admin/team/team/add/", "/admin/team/schoolinfo/add/"])
+@pytest.mark.parametrize("path", ["/admin/team/team/add/"])
 def test_add_pages_render_without_a_reset_button(path):
     admin = User.objects.create(username="adminadd", is_staff=True, is_superuser=True)
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})

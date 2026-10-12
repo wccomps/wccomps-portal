@@ -6,6 +6,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
+from registration.models import School
 
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import reset_team_credentials, reset_team_password
@@ -18,7 +19,9 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def school_info() -> SchoolInfo:
     team = Team.objects.create(team_number=7, team_name="Team 07")
-    return SchoolInfo.objects.create(team=team, school_name="School", contact_email="c@example.com", password="old")
+    return SchoolInfo.objects.create(
+        team=team, school=School.for_name("School"), contact_email="c@example.com", password="old"
+    )
 
 
 def test_reset_records_the_new_password_on_the_school_info(school_info):

@@ -279,7 +279,8 @@ class SchoolInfo(models.Model):
     """School information for teams (GoldTeam only)."""
 
     team = models.OneToOneField(Team, on_delete=models.CASCADE, related_name="school_info")
-    school_name = models.CharField(max_length=255)
+    # The one source of the school's name; the open event's assignment points at the same School
+    school = models.ForeignKey("registration.School", on_delete=models.PROTECT, related_name="school_infos")
     contact_email = models.EmailField()
     secondary_email = models.EmailField(blank=True)
     notes = models.TextField(blank=True)
@@ -305,6 +306,10 @@ class SchoolInfo(models.Model):
 
     def __str__(self) -> str:
         return f"{self.school_name} (Team {self.team.team_number})"
+
+    @property
+    def school_name(self) -> str:
+        return self.school.name
 
     @property
     def emails(self) -> list[str]:

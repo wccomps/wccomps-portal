@@ -20,6 +20,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.urls import reverse
+from registration.models import School
 
 from core.models import UserGroups
 from scoring.calculator import (
@@ -325,7 +326,9 @@ class TestLeaderboardAccess:
     def test_discord_admin_can_toggle_school_names(self, create_user_with_groups) -> None:
         """Discord admin sees the school names toggle button and school name markup."""
         team = Team.objects.create(team_number=1, team_name="Team 1")
-        SchoolInfo.objects.create(team=team, school_name="Test University", contact_email="test@example.edu")
+        SchoolInfo.objects.create(
+            team=team, school=School.for_name("Test University"), contact_email="test@example.edu"
+        )
         ServiceScore.objects.create(team=team, service_points=100)
 
         admin_user = create_user_with_groups("admin_user", ["WCComps_Discord_Admin"])
@@ -354,7 +357,9 @@ class TestLeaderboardAccess:
     def test_non_admin_cannot_toggle_school_names(self, create_user_with_groups) -> None:
         """Non-admin roles should not see the toggle button or school names."""
         team = Team.objects.create(team_number=1, team_name="Team 1")
-        SchoolInfo.objects.create(team=team, school_name="Test University", contact_email="test@example.edu")
+        SchoolInfo.objects.create(
+            team=team, school=School.for_name("Test University"), contact_email="test@example.edu"
+        )
         ServiceScore.objects.create(team=team, service_points=100)
 
         gold_user = create_user_with_groups("gold_user", ["WCComps_GoldTeam"])

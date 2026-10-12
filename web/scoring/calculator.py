@@ -236,7 +236,7 @@ def compute_standings() -> list[Standing]:
 
     Teams with scoring activity that are not excluded are ranked 1..n; the rest have rank None.
     """
-    teams = list(Team.objects.filter(is_active=True).select_related("school_info").order_by("team_number"))
+    teams = list(Team.objects.filter(is_active=True).select_related("school_info__school").order_by("team_number"))
     raw = _raw_scores(teams)
     template = _template()
     excluded_team_ids = set(ScoringExclusion.objects.values_list("team_id", flat=True))
