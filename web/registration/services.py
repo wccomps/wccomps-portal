@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from django.db import transaction
+from django.db.models import QuerySet
 from packets.models import Packet
 
 from core.competition_utils import live_competition_data_exists
@@ -220,4 +221,59 @@ def import_school_list(event: Event, rows: list[SchoolListRow], updated_by: str)
             notes=row.notes,
             updated_by=updated_by,
         )
+    return {"created": len(rows), "activated": activated}
+
+
+ADD_NEEDS_OPEN_EVENT = "Add schools needs the open event. Use Replace for an event's first school list."
+
+
+def free_teams(event: Event | None) -> QuerySet[Team]:
+    """Teams no school holds: not on the school list, and not assigned at the event (the open one)."""
+    teams = Team.objects.filter(school_info__isnull=True)
+    if event is not None:
+        teams = teams.exclude(event_assignments__event=event)
+    return teams
+
+
+@transaction.atomic
+def add_to_school_list(event: Event, rows: list[SchoolListRow], updated_by: str) -> dict[str, int]:
+    """Add the rows' schools to the open event's school list, each holding the row's team, which must be free.
+
+    Moves nobody: existing schools keep their teams, assignments and team names, so it is allowed after packets
+    went out or teams started using their numbers. Resets the new teams' names and activates them. Under the
+    school list lock; ImportBlockedError, writing nothing, when the event is no longer open, a team was given a
+    school or a school was put on the list since the preview.
+    """
+    school_list_lock()
+    if event.pk is None or Event.objects.open() != event:
+        raise ImportBlockedError(ADD_NEEDS_OPEN_EVENT)
+    teams = Team.objects.in_bulk([row.team_number for row in rows], field_name="team_number")
+    if missing := [str(row.team_number) for row in rows if row.team_number not in teams]:
+        raise ImportBlockedError(f"These teams no longer exist: {', '.join(missing)}. Upload the file again.")
+    free = set(free_teams(event).filter(pk__in=[team.pk for team in teams.values()]).values_list("pk", flat=True))
+    if taken := [row.team_number for row in rows if teams[row.team_number].pk not in free]:
+        raise ImportBlockedError(f"Team {taken[0]} was given a school since the preview. Upload the file again.")
+
+    new_teams = list(teams.values())
+    for team in new_teams:
+        team.team_name = default_team_name(team.team_number)
+    Team.objects.bulk_update(new_teams, ["team_name"])
+    activated = activate_teams(new_teams)
+    for row in rows:
+        try:
+            set_team_school(
+                teams[row.team_number],
+                row.school_name,
+                contact_email=row.contact_email,
+                secondary_email=row.secondary_email,
+                notes=row.notes,
+                updated_by=updated_by,
+                expect_free=True,
+            )
+        except TeamTakenError:
+            raise ImportBlockedError(
+                f"Team {row.team_number} was given a school since the preview. Upload the file again."
+            ) from None
+        except SchoolTakenError:
+            raise ImportBlockedError(f"{row.school_name} is already on the list. Upload the file again.") from None
     return {"created": len(rows), "activated": activated}
