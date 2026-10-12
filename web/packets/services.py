@@ -22,6 +22,8 @@ from core.utils import ndjson_progress as _progress
 NOT_A_DRAFT = "Only a draft packet can be distributed"
 NO_OPEN_EVENT = "Import the school list for this event first"
 EARLIER_EVENT_PACKET = "This packet belongs to an earlier event; team numbers have been reassigned since"
+NO_EVENT_OPEN = "No event is open."
+UNRECORDED_EVENT_PACKET = "This packet was sent before events were recorded; team numbers may have changed since"
 
 
 def begin_distribution(packet: Packet) -> None:
@@ -38,10 +40,15 @@ def begin_distribution(packet: Packet) -> None:
 
 
 def check_resendable(packet: Packet) -> str | None:
-    """Why the packet can't be sent again, or None: a resend is only safe within the packet's own event, since
-    team numbers are reshuffled between events."""
+    """Why the packet can't be sent again, or None. Team numbers are reshuffled between events, so a resend is only
+    safe while the packet's own event is open: refused when no event is open, when the packet has no event, or when
+    its event is an earlier one."""
     event = Event.objects.open()
-    if event is None or packet.event_id != event.pk:
+    if event is None:
+        return NO_EVENT_OPEN
+    if packet.event_id is None:
+        return UNRECORDED_EVENT_PACKET
+    if packet.event_id != event.pk:
         return EARLIER_EVENT_PACKET
     return None
 

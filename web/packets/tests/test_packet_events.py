@@ -217,3 +217,23 @@ def test_resending_to_a_team_with_no_school_on_file_is_refused(gold_team_user, c
     send.assert_not_called()
     assert not SchoolInfo.objects.filter(team=team_1).exists()
     assert PacketDistribution.objects.get(packet=packet).email_status == "failed"
+
+
+def test_resending_with_no_open_event_says_no_event_is_open(current_event):
+    from packets.services import check_resendable
+
+    packet = _packet(current_event)
+    current_event.is_active = False
+    current_event.save()
+
+    assert check_resendable(packet) == "No event is open."
+
+
+def test_resending_a_packet_sent_before_events_were_recorded_is_refused(current_event):
+    from packets.services import check_resendable
+
+    refusal = check_resendable(_packet(None))
+
+    assert refusal is not None
+    assert "earlier event" not in refusal
+    assert "before events were recorded" in refusal
