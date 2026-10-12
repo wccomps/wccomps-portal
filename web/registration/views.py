@@ -21,7 +21,14 @@ from .models import (
     TeamRegistration,
     normalize_school_name,
 )
-from .services import PacketsSentError, SchoolTakenError, remove_team_school, set_team_school
+from .services import (
+    PacketsSentError,
+    SchoolChangedError,
+    SchoolTakenError,
+    TeamTakenError,
+    remove_team_school,
+    set_team_school,
+)
 
 
 def register(request: HttpRequest) -> HttpResponse:
@@ -349,6 +356,7 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
     registrations_to_assign: list[tuple[TeamRegistration, str]] = []
     skipped = []
     no_contact = []
+    team_taken = []
     for enrollment in enrolled_registrations:
         registration = enrollment.registration
         key = normalize_school_name(registration.school_name)
@@ -366,6 +374,11 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
             messages.warning(request, f"Skipped {', '.join(skipped)}: that school already has a team.")
         if no_contact:
             messages.warning(request, f"Skipped {', '.join(no_contact)}: no contact email on the registration.")
+        if team_taken:
+            messages.warning(
+                request,
+                f"Skipped {', '.join(team_taken)}: the team picked for it got a school meanwhile. Assign again.",
+            )
 
     if not registrations_to_assign:
         warn_skipped()
@@ -399,6 +412,7 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
                         contact_email=contact_email,
                         updated_by=request.user.get_username(),
                         registration=registration,
+                        expect_free=True,
                     )
                     # As the import does: only active teams show on School Info, get packets and count in standings
                     if not team.is_active:
@@ -406,6 +420,8 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
                         team.save(update_fields=["is_active"])
             except SchoolTakenError, IntegrityError:
                 skipped.append(registration.school_name)
+            except TeamTakenError:
+                team_taken.append(registration.school_name)
             else:
                 assigned += 1
 
@@ -434,10 +450,12 @@ def unassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
         return redirect("registration_event_detail", event_id=event_id)
 
     school_name = assignment.school.name
+    shown = request.POST.get("school", "")
     try:
-        remove_team_school(assignment.team)
-    except PacketsSentError as sent:
-        messages.error(request, str(sent))
+        # 0 matches no school, so a form without the school it showed is refused as a change
+        remove_team_school(assignment.team, expected_school_id=int(shown) if shown.isdecimal() else 0)
+    except (PacketsSentError, SchoolChangedError) as refused:
+        messages.error(request, str(refused))
         return redirect("registration_event_detail", event_id=event_id)
     messages.success(request, f"Team assignment for {school_name} removed.")
 

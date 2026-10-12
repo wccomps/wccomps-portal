@@ -63,11 +63,16 @@ def test_unassigning_an_imported_school_without_a_registration(gold_team_user, e
     client = Client()
     client.force_login(gold_team_user)
 
-    response = client.post(reverse("registration_unassign_team", args=[EventTeamAssignment.objects.get().pk]))
+    response = client.post(reverse("registration_unassign_team", args=[EventTeamAssignment.objects.get().pk]), _shown())
 
     assert response.status_code == 302
     assert not EventTeamAssignment.objects.exists()
     assert not SchoolInfo.objects.exists()
+
+
+def _shown():
+    """The school the event page showed for the one assignment, posted back with the Unassign form."""
+    return {"school": EventTeamAssignment.objects.get().school_id}
 
 
 def _enrolled(event, school_name, *contacts):
@@ -210,7 +215,7 @@ def test_unassigning_an_earlier_events_team_is_refused(gold_team_user, event):
     client = Client()
     client.force_login(gold_team_user)
 
-    client.post(reverse("registration_unassign_team", args=[history.pk]))
+    client.post(reverse("registration_unassign_team", args=[history.pk]), {"school": history.school_id})
 
     assert EventTeamAssignment.objects.filter(pk=history.pk).exists()
     assert SchoolInfo.objects.filter(team=team).exists()
@@ -298,7 +303,7 @@ def test_unassign_is_refused_once_a_packet_went_out_for_the_open_event(gold_team
     _sent_packet(event)
 
     response = _client(gold_team_user).post(
-        reverse("registration_unassign_team", args=[EventTeamAssignment.objects.get().pk]), follow=True
+        reverse("registration_unassign_team", args=[EventTeamAssignment.objects.get().pk]), _shown(), follow=True
     )
 
     assert f"Packets have already been sent for {event}" in response.content.decode()
@@ -314,7 +319,9 @@ def test_unassign_goes_ahead_when_only_an_earlier_events_packet_went_out(gold_te
     )
     EventTeamAssignment.objects.filter(event=event).update(credentials_sent_at=timezone.now())
 
-    _client(gold_team_user).post(reverse("registration_unassign_team", args=[EventTeamAssignment.objects.get().pk]))
+    _client(gold_team_user).post(
+        reverse("registration_unassign_team", args=[EventTeamAssignment.objects.get().pk]), _shown()
+    )
 
     assert not EventTeamAssignment.objects.exists()
     assert not SchoolInfo.objects.exists()
@@ -335,3 +342,41 @@ def test_event_detail_offers_no_unassign_once_packets_went_out(gold_team_user, e
     assert ">Unassign<" in before
     assert ">Unassign<" not in after
     assert "Packets sent" in after
+
+
+def test_unassign_is_refused_when_the_school_changed_since_the_page_was_opened(gold_team_user, event):
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+    _enrolled(event, "Example University")
+    client = _client(gold_team_user)
+    page = client.get(reverse("registration_event_detail", args=[event.pk])).content.decode()
+    shown = _shown()
+    set_team_school(team, "Other College", contact_email="o@example.edu")
+
+    response = client.post(
+        reverse("registration_unassign_team", args=[EventTeamAssignment.objects.get().pk]), shown, follow=True
+    )
+
+    assert f'name="school" value="{shown["school"]}"' in page
+    assert "Team 4&#x27;s school changed since you opened this page; reload." in response.content.decode()
+    assert SchoolInfo.objects.get().school_name == "Other College"
+    assert EventTeamAssignment.objects.get().school.name == "Other College"
+
+
+def test_assign_teams_skips_a_team_that_got_a_school_after_it_was_picked(gold_team_user, event, monkeypatch):
+    from registration import views
+
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    _enrolled(event, "Example University")
+
+    def school_set_meanwhile(teams):
+        # Between the pick and the assignment: another tab gives the picked team a school
+        set_team_school(team, "Other College", contact_email="o@example.edu")
+
+    monkeypatch.setattr(views.random, "shuffle", school_set_meanwhile)
+
+    response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+
+    assert SchoolInfo.objects.get(team=team).school_name == "Other College"
+    assert list(EventTeamAssignment.objects.values_list("school__name", flat=True)) == ["Other College"]
+    assert "Skipped Example University: the team picked for it got a school meanwhile" in response.content.decode()

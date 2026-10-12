@@ -36,6 +36,11 @@ def _team_with_school():
     return team
 
 
+def _shown():
+    """The school the confirm page showed, posted back with the form."""
+    return {"school": SchoolInfo.objects.get().school_id}
+
+
 def test_the_edit_page_links_to_remove(client):
     _team_with_school()
 
@@ -48,7 +53,7 @@ def test_removing_with_no_open_event_drops_only_the_school_info(client):
     _team_with_school()
 
     confirm = client.get(reverse("school_info_remove", args=[4]))
-    response = client.post(reverse("school_info_remove", args=[4]))
+    response = client.post(reverse("school_info_remove", args=[4]), _shown())
 
     assert "Example University" in confirm.content.decode()
     assert response.status_code == 302
@@ -59,7 +64,7 @@ def test_removing_with_no_open_event_drops_only_the_school_info(client):
 def test_removing_drops_the_open_events_assignment(client, event):
     _team_with_school()
 
-    client.post(reverse("school_info_remove", args=[4]))
+    client.post(reverse("school_info_remove", args=[4]), _shown())
 
     assert not SchoolInfo.objects.exists()
     assert not EventTeamAssignment.objects.exists()
@@ -78,7 +83,7 @@ def test_removing_is_refused_once_packets_went_out_for_the_open_event(client, ev
         event=event,
     )
 
-    response = client.post(reverse("school_info_remove", args=[4]))
+    response = client.post(reverse("school_info_remove", args=[4]), _shown())
 
     assert (
         f"Packets have already been sent for {event}. Change the team's school on its School Info page instead."
@@ -94,3 +99,17 @@ def test_a_team_with_no_school_has_nothing_to_remove(client):
     response = client.get(reverse("school_info_remove", args=[4]))
 
     assert response.status_code == 404
+
+
+def test_removing_is_refused_when_the_school_changed_since_the_page_was_opened(client, event):
+    team = _team_with_school()
+    page = client.get(reverse("school_info_remove", args=[4])).content.decode()
+    shown = _shown()
+    set_team_school(team, "Other College", contact_email="o@example.edu")
+
+    response = client.post(reverse("school_info_remove", args=[4]), shown)
+
+    assert f'name="school" value="{shown["school"]}"' in page
+    assert "Team 4&#x27;s school changed since you opened this page; reload." in response.content.decode()
+    assert SchoolInfo.objects.get().school_name == "Other College"
+    assert EventTeamAssignment.objects.get().school.name == "Other College"

@@ -14,6 +14,7 @@
         </c-alert>
         <form method="post">
             {% csrf_token %}
+            <input type="hidden" name="school" value="{{ school_info.school_id }}">
             <c-button_row class="mt-20 justify-end">
                 <c-link href="{% url 'school_info_edit' school_info.team.team_number %}" variant="cancel">Cancel</c-link>
                 <c-button type="submit" variant="danger">

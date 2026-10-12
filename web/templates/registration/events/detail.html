@@ -126,6 +126,7 @@
                                           action="{% url 'registration_unassign_team' assignment_id=item.assignment.id %}"
                                           class="d-inline">
                                         {% csrf_token %}
+                                        <input type="hidden" name="school" value="{{ item.assignment.school_id }}">
                                         <button type="submit"
                                                 class="btn btn-sm btn-danger"
                                                 onclick="return confirm('Remove team assignment?')">Unassign</button>

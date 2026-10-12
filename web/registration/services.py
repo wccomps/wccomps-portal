@@ -18,6 +18,14 @@ class SchoolTakenError(Exception):
     """Another team already holds the school; the message names the school and that team."""
 
 
+class TeamTakenError(Exception):
+    """The team was expected to be free but holds another school; the message names the team and the school."""
+
+
+class SchoolChangedError(Exception):
+    """The team's school is no longer the one the page showed."""
+
+
 @transaction.atomic
 def set_team_school(
     team: Team,
@@ -28,12 +36,13 @@ def set_team_school(
     notes: str = "",
     updated_by: str = "",
     registration: TeamRegistration | None = None,
+    expect_free: bool = False,
 ) -> SchoolInfo:
     """Make the school the one holding this team in the school list, and at the open event if there is one.
 
     The only writer of a team's school: the open event's assignment follows the school list, linked to the
     registration given or, while the school stays the same, the one already linked. Raises SchoolTakenError when
-    another team holds the school.
+    another team holds the school, and with expect_free, TeamTakenError when this team holds another school.
     """
     school_list_lock()
     school = School.for_name(school_name)
@@ -53,7 +62,9 @@ def set_team_school(
         "notes": notes,
         "updated_by": updated_by,
     }
-    info = SchoolInfo.objects.filter(team=team).first()
+    info = SchoolInfo.objects.filter(team=team).select_related("school").first()
+    if expect_free and info is not None and info.school_id != school.pk:
+        raise TeamTakenError(f"Team {team.team_number} already has a school: {info.school_name}.")
     if info is None:
         info = SchoolInfo.objects.create(team=team, **fields)
     else:
@@ -85,13 +96,20 @@ def _packets_sent(event: Event | None) -> bool:
 
 
 @transaction.atomic
-def remove_team_school(team: Team) -> None:
+def remove_team_school(team: Team, expected_school_id: int | None = None) -> None:
     """Take the team out of the school list and out of the open event; earlier events keep their assignments.
 
     PacketsSentError when packets went out for the open event: they reached the team under this school.
+    SchoolChangedError when expected_school_id (the school the page showed) is no longer the team's school.
     """
     school_list_lock()
     event = Event.objects.open()
+    if expected_school_id is not None:
+        current = SchoolInfo.objects.filter(team=team).values_list("school_id", flat=True).first()
+        if current is None and event is not None:
+            current = event.team_assignments.filter(team=team).values_list("school_id", flat=True).first()
+        if current != expected_school_id:
+            raise SchoolChangedError(f"Team {team.team_number}'s school changed since you opened this page; reload.")
     if _packets_sent(event):
         raise PacketsSentError(
             f"Packets have already been sent for {event}. Change the team's school on its School Info page instead."

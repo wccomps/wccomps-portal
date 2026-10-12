@@ -131,3 +131,30 @@ def test_removing_a_teams_school_drops_the_open_events_assignment_and_keeps_hist
 
     assert not SchoolInfo.objects.exists()
     assert list(EventTeamAssignment.objects.values_list("event", flat=True)) == [past.pk]
+
+
+def test_expecting_a_free_team_refuses_one_that_has_a_school(event):
+    from registration.services import TeamTakenError
+
+    team = _team(4)
+    set_team_school(team, "Other College", contact_email="o@example.edu")
+
+    with pytest.raises(TeamTakenError, match="Team 4 already has a school: Other College"):
+        set_team_school(team, "Example University", contact_email="c@example.edu", expect_free=True)
+
+    assert SchoolInfo.objects.get(team=team).school_name == "Other College"
+    assert EventTeamAssignment.objects.get(event=event).school.name == "Other College"
+
+
+def test_removing_with_the_school_expected_refuses_after_a_change(event):
+    from registration.services import SchoolChangedError
+
+    team = _team(4)
+    shown = set_team_school(team, "Example University", contact_email="c@example.edu").school
+    set_team_school(team, "Other College", contact_email="o@example.edu")
+
+    with pytest.raises(SchoolChangedError, match="Team 4's school changed since you opened this page; reload."):
+        remove_team_school(team, expected_school_id=shown.pk)
+
+    assert SchoolInfo.objects.get(team=team).school_name == "Other College"
+    assert EventTeamAssignment.objects.get(event=event).school.name == "Other College"

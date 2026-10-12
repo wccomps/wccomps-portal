@@ -11,6 +11,7 @@ from registration.models import Event, Season
 from registration.services import (
     ImportBlockedError,
     PacketsSentError,
+    SchoolChangedError,
     SchoolListRow,
     SchoolTakenError,
     clear_school_list,
@@ -272,10 +273,12 @@ def school_info_remove(request: HttpRequest, team_number: int) -> HttpResponse:
     school_info = get_object_or_404(SchoolInfo.objects.select_related("team", "school"), team__team_number=team_number)
     error = ""
     if request.method == "POST":
+        shown = request.POST.get("school", "")
         try:
-            remove_team_school(school_info.team)
-        except PacketsSentError as sent:
-            error = str(sent)
+            # 0 matches no school, so a form without the school it showed is refused as a change
+            remove_team_school(school_info.team, expected_school_id=int(shown) if shown.isdecimal() else 0)
+        except (PacketsSentError, SchoolChangedError) as refused:
+            error = str(refused)
         else:
             logger.info(f"Removed Team {team_number}'s school info by {request.user.username}")
             messages.success(request, f"Removed {school_info.school_name} from Team {team_number}.")
