@@ -8,6 +8,7 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from registration.forms import ShownSchoolForm
 from registration.models import Event, Season
 from registration.services import (
     ImportBlockedError,
@@ -274,10 +275,9 @@ def school_info_remove(request: HttpRequest, team_number: int) -> HttpResponse:
     school_info = get_object_or_404(SchoolInfo.objects.select_related("team", "school"), team__team_number=team_number)
     error = ""
     if request.method == "POST":
-        shown = request.POST.get("school", "")
+        shown = ShownSchoolForm(request.POST)
         try:
-            # 0 matches no school, so a form without the school it showed is refused as a change
-            remove_team_school(school_info.team, expected_school_id=int(shown) if shown.isdecimal() else 0)
+            remove_team_school(school_info.team, expected_school_id=shown.expected_school_id())
         except (PacketsSentError, SchoolChangedError) as refused:
             error = str(refused)
         else:

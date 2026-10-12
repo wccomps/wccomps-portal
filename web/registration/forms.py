@@ -141,3 +141,13 @@ class EventForm(forms.ModelForm[Event]):
 
 class RejectRegistrationForm(forms.Form):
     reason = forms.CharField()
+
+
+class ShownSchoolForm(forms.Form):
+    """The school a Remove or Unassign page showed, posted back so the removal can check it is still the team's."""
+
+    school = forms.IntegerField(min_value=1)
+
+    def expected_school_id(self) -> int:
+        """The posted school, or 0 (no school) when missing, so the removal is refused as a change."""
+        return self.cleaned_data["school"] if self.is_valid() else 0

@@ -10,7 +10,7 @@ from core.auth_utils import require_permission
 from core.utils import client_ip
 from team.models import SchoolInfo, Team
 
-from .forms import EventForm, RegistrationForm, RejectRegistrationForm, SeasonForm
+from .forms import EventForm, RegistrationForm, RejectRegistrationForm, SeasonForm, ShownSchoolForm
 from .models import (
     Event,
     EventTeamAssignment,
@@ -450,10 +450,9 @@ def unassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
         return redirect("registration_event_detail", event_id=event_id)
 
     school_name = assignment.school.name
-    shown = request.POST.get("school", "")
+    shown = ShownSchoolForm(request.POST)
     try:
-        # 0 matches no school, so a form without the school it showed is refused as a change
-        remove_team_school(assignment.team, expected_school_id=int(shown) if shown.isdecimal() else 0)
+        remove_team_school(assignment.team, expected_school_id=shown.expected_school_id())
     except (PacketsSentError, SchoolChangedError) as refused:
         messages.error(request, str(refused))
         return redirect("registration_event_detail", event_id=event_id)
