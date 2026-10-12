@@ -475,7 +475,7 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
                     if preview_data is not None and session_rows:
                         request.session["csv_import_data"] = {
                             "teams_to_create": session_rows,
-                            "event": {name: request.POST.get(name, "") for name in ImportEventForm.base_fields},
+                            "event": {name: event_form.data.get(name, "") for name in event_form.fields},
                         }
                         preview_data["event_label"] = (
                             str(event) if event else f"New: {event_form.cleaned_data['new_name']}"

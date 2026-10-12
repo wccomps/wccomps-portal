@@ -14,8 +14,21 @@ def _latest():
 
 
 def _before():
-    """Every app at its latest migration except registration, which is just before the school one."""
-    return [t for t in _latest() if t[0] != "registration"] + [("registration", "0004_registration_rate_limit")]
+    """Registration just before the school migration; every other app at its latest migration that doesn't need it."""
+    graph = MigrationExecutor(connection).loader.graph
+    needs_school, todo = set(), [graph.node_map[("registration", "0005_school")]]
+    while todo:
+        migration = todo.pop()
+        needs_school.add(migration.key)
+        todo.extend(migration.children)
+    targets = [("registration", "0004_registration_rate_limit")]
+    for node in _latest():
+        if node[0] == "registration":
+            continue
+        while node in needs_school:
+            node = next(parent for parent in graph.node_map[node].parents if parent[0] == node[0])
+        targets.append(node)
+    return targets
 
 
 def _migrate(targets):
