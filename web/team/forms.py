@@ -107,7 +107,7 @@ class CSVUploadForm(forms.Form):
 class ImportEventForm(forms.Form):
     """The event a school list is for: an unfinalized event of the active season, or a new one."""
 
-    event = forms.CharField(required=False)  # an event id, or "new"
+    event = forms.CharField(required=False)
     new_name = forms.CharField(max_length=255, required=False)
     new_date = forms.DateField(required=False)
     new_type = forms.CharField(required=False)
@@ -115,6 +115,7 @@ class ImportEventForm(forms.Form):
     def __init__(self, *args: object, season: Season, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         self.season = season
+        self._chosen: Event | None = None
 
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}
@@ -124,22 +125,25 @@ class ImportEventForm(forms.Form):
                 raise ValidationError("Give the new event a name and a date.")
             if data.get("new_type") not in dict(Event.EVENT_TYPE_CHOICES):
                 raise ValidationError("Pick the new event's type.")
-        elif not choice.isdigit() or not self.season.events.filter(pk=int(choice), is_finalized=False).exists():
+        elif not choice.isdigit():
             raise ValidationError("Pick the event this school list is for.")
+        else:
+            self._chosen = self.season.events.filter(pk=int(choice), is_finalized=False).first()
+            if self._chosen is None:
+                raise ValidationError("That event was finalized or removed.")
         return data
 
-    def chosen_event_id(self) -> int | None:
-        choice = str(self.cleaned_data["event"])
-        return None if choice == "new" else int(choice)
+    def chosen_event(self) -> Event | None:
+        """The existing event picked, or None when the list is for a new event."""
+        return self._chosen
 
-    def new_event_fields(self) -> dict[str, object] | None:
-        if self.chosen_event_id() is not None:
-            return None
-        return {
-            "name": self.cleaned_data["new_name"],
-            "date": self.cleaned_data["new_date"].isoformat(),
-            "event_type": self.cleaned_data["new_type"],
-        }
+    def create_new_event(self) -> Event:
+        return Event.objects.create(
+            season=self.season,
+            name=self.cleaned_data["new_name"],
+            date=self.cleaned_data["new_date"],
+            event_type=self.cleaned_data["new_type"],
+        )
 
 
 def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:

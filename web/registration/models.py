@@ -176,6 +176,7 @@ class Event(models.Model):
                 fields=["season", "event_type", "event_number"],
                 name="unique_event_per_season",
             ),
+            models.UniqueConstraint(fields=["is_active"], condition=models.Q(is_active=True), name="one_open_event"),
         ]
 
     def __str__(self) -> str:

@@ -4,7 +4,7 @@ from typing import cast
 from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from registration.models import Event, School, Season, normalize_school_name
@@ -352,19 +352,25 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
     )
 
 
-def _import_event_problem(event_id: int | None) -> str:
-    """Why a list can't be imported for this event now (another event is open, or the last one's scores remain)."""
+def _import_event_problem(event: Event | None) -> str:
+    """Why a list can't be imported for this event (None: a new one) now: another event is open, the last
+    event's scores remain, or this open event's scores are already recorded."""
     from core.competition_utils import live_competition_data_exists
 
     open_now = Event.objects.open()
-    if open_now and open_now.pk != event_id:
+    if open_now and open_now != event:
         return f"{open_now} is still open. Finalize and clear it before importing a list for another event."
-    if open_now is None and live_competition_data_exists():
+    if not live_competition_data_exists():
+        return ""
+    if open_now is None:
         return (
             "Scores from the last event are still in the portal. "
             "Finalize and clear that event before importing a new school list."
         )
-    return ""
+    return (
+        f"Scores are already recorded for {open_now}. Re-importing reassigns team numbers under them. "
+        "Change a single school on its School Info page instead."
+    )
 
 
 def _parse_school_info_csv(
@@ -406,66 +412,58 @@ def _parse_school_info_csv(
     return preview_data, session_rows
 
 
+def _import_error(*errors: str) -> dict[str, object]:
+    return {"errors": list(errors), "warnings": [], "can_import": False}
+
+
+def _upload_again(*problems: str) -> tuple[dict[str, object], None]:
+    return _import_error(*problems, "Upload the file again."), None
+
+
 def _apply_school_info_import(
     import_data: dict[str, object], authentik_username: str
 ) -> tuple[dict[str, object] | None, dict[str, int] | None]:
-    """Verify teams still exist and apply the CSV import: (preview_data, None) on errors, else (None, counts)."""
+    """Re-check the teams and the chosen event, then apply the CSV import, creating the event first when the list
+    is for a new one: (preview_data, None) on errors, else (None, counts)."""
     # Copies: the rows gain a Team object, which must not leak into the JSON session
     teams_to_create: list[CSVRowData] = [cast(CSVRowData, dict(row)) for row in import_data["teams_to_create"]]  # type: ignore[attr-defined]
 
     team_numbers = [row["team_number"] for row in teams_to_create]
     teams_by_number: dict[int, Team] = {t.team_number: t for t in Team.objects.filter(team_number__in=team_numbers)}
 
-    errors = []
+    missing = [
+        f"Team {row['team_number']} no longer exists"
+        for row in teams_to_create
+        if row["team_number"] not in teams_by_number
+    ]
+    if missing:
+        return _upload_again(*missing)
     for row in teams_to_create:
-        team_number = row["team_number"]
-        if team_number not in teams_by_number:
-            errors.append(f"Team {team_number} no longer exists")
-        else:
-            row["_team"] = teams_by_number[team_number]
+        row["_team"] = teams_by_number[row["team_number"]]
 
-    if errors:
-        return {
-            "errors": errors,
-            "warnings": ["Please re-upload the CSV file."],
-            "can_import": False,
-        }, None
-
-    from datetime import date
-
-    stale = {
-        "errors": ["That event was finalized or removed since the preview. Upload the file again."],
-        "warnings": [],
-        "can_import": False,
-    }
-    choice = import_data.get("event")
-    if not isinstance(choice, dict):
-        return {
-            "errors": ["The uploaded file is no longer available. Upload it again to import."],
-            "warnings": [],
-            "can_import": False,
-        }, None
+    event_fields = import_data.get("event")
+    if not isinstance(event_fields, dict):
+        return _upload_again("The uploaded file is no longer available.")
     season = Season.objects.active()
-    event_id = choice.get("id")
-    if problem := _import_event_problem(event_id if isinstance(event_id, int) else None):
-        return {"errors": [problem], "warnings": [], "can_import": False}, None
-    if isinstance(event_id, int):
-        event = season.events.filter(pk=event_id, is_finalized=False).first() if season else None
-        if event is None:
-            return stale, None
-    else:
-        if season is None or not isinstance(choice.get("new"), dict):
-            return stale, None
-        fields: dict[str, str] = choice["new"]
+    if season is None:
+        return _upload_again("No season is active.")
+    event_form = ImportEventForm(event_fields, season=season)
+    if not event_form.is_valid():
+        return _upload_again(*(str(e) for e in event_form.non_field_errors()))
+    event = event_form.chosen_event()
+    if problem := _import_event_problem(event):
+        return _import_error(problem), None
+
+    try:
         with transaction.atomic():
-            event = Event.objects.create(
-                season=season,
-                name=fields["name"],
-                date=date.fromisoformat(fields["date"]),
-                event_type=fields["event_type"],
-            )
-            return None, apply_csv_import(teams_to_create, authentik_username, event)
-    return None, apply_csv_import(teams_to_create, authentik_username, event)
+            counts = apply_csv_import(teams_to_create, authentik_username, event or event_form.create_new_event())
+    except IntegrityError as e:
+        if "one_open_event" not in str(e):
+            raise
+        return _import_error(
+            "Another import opened an event at the same time. Reload the page and check which event is open."
+        ), None
+    return None, counts
 
 
 @require_permission("gold_team")
@@ -482,31 +480,26 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
     season = Season.objects.active()
     if season is None:
         error = "Activate a season first (Registration, Seasons): imported schools join an event of the active season."
-    event_form = ImportEventForm(season=season) if season else None
 
     if request.method == "POST":
         if "upload" in request.POST:
             form = CSVUploadForm(request.POST, request.FILES)
             event_form = ImportEventForm(request.POST, season=season) if season else None
             if form.is_valid() and event_form is not None and event_form.is_valid():
-                event_id = event_form.chosen_event_id()
-                if problem := _import_event_problem(event_id):
+                event = event_form.chosen_event()
+                if problem := _import_event_problem(event):
                     error = problem
                 else:
                     csv_file = cast(UploadedFile[bytes], request.FILES["csv_file"])
-                    preview_data, session_rows = _parse_school_info_csv(csv_file, event_id)
-                    if session_rows:
-                        new_fields = event_form.new_event_fields()
+                    preview_data, session_rows = _parse_school_info_csv(csv_file, event.pk if event else None)
+                    if preview_data is not None and session_rows:
                         request.session["csv_import_data"] = {
                             "teams_to_create": session_rows,
-                            "event": {"id": event_id} if event_id is not None else {"new": new_fields},
+                            "event": {name: request.POST.get(name, "") for name in ImportEventForm.base_fields},
                         }
-                        if preview_data is not None:
-                            preview_data["event_label"] = (
-                                str(event_form.season.events.get(pk=event_id))
-                                if event_id is not None
-                                else f"New: {event_form.cleaned_data['new_name']}"
-                            )
+                        preview_data["event_label"] = (
+                            str(event) if event else f"New: {event_form.cleaned_data['new_name']}"
+                        )
             elif event_form is not None and not event_form.is_valid():
                 error = " ".join(str(e) for e in event_form.non_field_errors())
 
@@ -527,7 +520,6 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
         {
             "authentik_username": authentik_username,
             "form": form,
-            "event_form": event_form,
             "open_events": season.events.filter(is_finalized=False) if season else [],
             "preview_data": preview_data,
             "import_results": import_results,
