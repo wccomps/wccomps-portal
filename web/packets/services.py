@@ -1,6 +1,6 @@
 import json
 import logging
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.conf import settings
@@ -24,6 +24,8 @@ NO_OPEN_EVENT = "Import the school list for this event first"
 EARLIER_EVENT_PACKET = "This packet belongs to an earlier event; team numbers have been reassigned since"
 NO_EVENT_OPEN = "No event is open."
 UNRECORDED_EVENT_PACKET = "This packet was sent before events were recorded; team numbers may have changed since"
+NOT_SENT_YET = "Only a sent packet can be sent to teams that haven't received it; distribute this one."
+EVERY_TEAM_HAS_IT = "Every team on the list already has this packet."
 
 
 @transaction.atomic
@@ -282,6 +284,18 @@ class PacketDistributionService:
                 else:
                     yield _progress(f"Failed Team {dist.team.team_number}: {error}", completed, total, ok=False)
 
+    def _stream_counted_send(self, distributions: list[PacketDistribution]) -> Generator[str, None, tuple[int, int]]:
+        """_stream_parallel_send's lines, then (sent, failed)."""
+        sent = 0
+        failed = 0
+        for line in self._stream_parallel_send(distributions):
+            yield line
+            if json.loads(line).get("ok", True):
+                sent += 1
+            else:
+                failed += 1
+        return sent, failed
+
     def stream_distribute_packet(self, packet: Packet) -> Iterator[str]:
         try:
             begin_distribution(packet)
@@ -300,17 +314,7 @@ class PacketDistributionService:
             yield ndjson_done("No teams to distribute to")
             return
 
-        sent = 0
-        failed = 0
-        for line in self._stream_parallel_send(distributions):
-            yield line
-            # Parse back to track counts
-            data = json.loads(line)
-            if data.get("ok", True):
-                sent += 1
-            else:
-                failed += 1
-
+        sent, failed = yield from self._stream_counted_send(distributions)
         yield ndjson_done(f"Sent {sent}, failed {failed}" if failed else f"Distributed to {sent} teams", failed == 0)
 
     def _stream_resend(self, packet: Packet, status_filter: str, label: str) -> Iterator[str]:
@@ -333,16 +337,7 @@ class PacketDistributionService:
         for dist in dists:
             dist.refresh_from_db()
 
-        sent = 0
-        still_failed = 0
-        for line in self._stream_parallel_send(dists):
-            yield line
-            data = json.loads(line)
-            if data.get("ok", True):
-                sent += 1
-            else:
-                still_failed += 1
-
+        sent, still_failed = yield from self._stream_counted_send(dists)
         yield ndjson_done(
             f"Resent {sent}, failed {still_failed}" if still_failed else f"Resent to {sent} teams", still_failed == 0
         )
@@ -353,3 +348,34 @@ class PacketDistributionService:
     def stream_retry_pending(self, packet: Packet) -> Iterator[str]:
         """Retry pending distributions (from interrupted sends) with streaming progress."""
         yield from self._stream_resend(packet, "pending", "pending")
+
+    @transaction.atomic
+    def _distributions_for_new_teams(self, packet: Packet) -> list[PacketDistribution]:
+        """Create the packet's distributions for teams on the school list without one, and return them.
+
+        ValueError says why not: the packet wasn't sent yet, or check_resendable's refusal. Under the school list
+        lock, so the list can't change between the check and the new distributions."""
+        packet.refresh_from_db(fields=["status"])
+        if packet.status not in ("distributing", "completed"):
+            raise ValueError(NOT_SENT_YET)
+        if refusal := check_resendable(packet):
+            raise ValueError(refusal)
+        had_it = set(PacketDistribution.objects.filter(packet=packet).values_list("team_id", flat=True))
+        self._create_distributions_for_teams(packet)
+        return list(PacketDistribution.objects.filter(packet=packet).exclude(team_id__in=had_it).select_related("team"))
+
+    def stream_send_to_new_teams(self, packet: Packet) -> Iterator[str]:
+        """Send a sent packet to the teams added to the school list since, which have no distribution of it.
+
+        Its event must still be the open one. The emails go out after the school list lock is released; the
+        packet's status stays as it is."""
+        try:
+            distributions = self._distributions_for_new_teams(packet)
+        except ValueError as refused:
+            yield ndjson_done(str(refused), success=False)
+            return
+        if not distributions:
+            yield ndjson_done(EVERY_TEAM_HAS_IT)
+            return
+        sent, failed = yield from self._stream_counted_send(distributions)
+        yield ndjson_done(f"Sent {sent}, failed {failed}" if failed else f"Sent to {sent} new team(s)", failed == 0)

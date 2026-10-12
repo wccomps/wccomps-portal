@@ -1,5 +1,5 @@
-"""The school list lock is taken by the registration services' writes, Event.open, the start of a first packet send
-and the resend checks, each before it reads the open event."""
+"""The school list lock is taken by the registration services' writes, Event.open, the start of a first packet send,
+the resend checks and the send to new teams, each before it reads the open event."""
 
 from datetime import date
 from unittest.mock import patch
@@ -17,6 +17,7 @@ from core.models import UserGroups
 from registration.models import Event, Season
 from registration.services import (
     SchoolListRow,
+    add_to_school_list,
     clear_school_list,
     import_school_list,
     remove_team_school,
@@ -165,3 +166,29 @@ def test_the_admin_retry_takes_the_lock(_send, team):
 
     _assert_locks_before_reading_the_open_event(queries)
     assert _send.called
+
+
+def test_adding_schools_takes_the_lock(team):
+    event = _event()
+
+    with CaptureQueriesContext(connection) as queries:
+        add_to_school_list(event, [SchoolListRow(1, "Example University", "c@example.edu")], "gold")
+
+    _assert_locks_before_reading_the_open_event(queries)
+
+
+@patch.object(PacketDistributionService, "send_packet_email")
+def test_sending_to_new_teams_creates_their_distributions_under_the_lock(_send, team):
+    packet = _sent_packet(team)
+    set_team_school(
+        Team.objects.create(team_number=2, team_name="Team 02"), "School Two", contact_email="c@example.edu"
+    )
+
+    with CaptureQueriesContext(connection) as queries:
+        list(PacketDistributionService().stream_send_to_new_teams(packet))
+
+    _assert_locks_before_reading_the_open_event(queries)
+    sql = [query["sql"] for query in queries.captured_queries]
+    lock = next(i for i, q in enumerate(sql) if "pg_advisory_xact_lock" in q)
+    create = next(i for i, q in enumerate(sql) if q.startswith('INSERT INTO "packets_packetdistribution"'))
+    assert lock < create

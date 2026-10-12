@@ -47,6 +47,11 @@
                             Resend Failed
                         </c-button>
                     {% endif %}
+                    {% if packet.status == "distributing" or packet.status == "completed" %}
+                        <c-button variant="default" @click="sendNewTeams" ::disabled="loading">
+                            Send to Teams Without It
+                        </c-button>
+                    {% endif %}
                     {% if packet.status == "draft" %}
                         <c-button variant="danger" @click="cancelPacket" ::disabled="loading">
                             Cancel
@@ -188,6 +193,9 @@
             },
             retryPending() {
                 if (confirm('Retry all pending distributions?')) this.doStreamAction('resend_pending');
+            },
+            sendNewTeams() {
+                if (confirm('Email this packet only to teams on the school list that have not received it?')) this.doStreamAction('send_new_teams');
             },
             cancelPacket() {
                 if (confirm('Cancel this packet distribution?')) this.doStreamAction('cancel');

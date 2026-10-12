@@ -221,7 +221,7 @@ def packet_detail(request: HttpRequest, packet_id: int) -> HttpResponse:
 
 @require_POST
 def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
-    """Dispatch packet actions (distribute, resend_failed, cancel, test_email)."""
+    """Dispatch packet actions (distribute, resend_failed, resend_pending, send_new_teams, cancel, test_email)."""
     from core.auth_utils import has_permission
 
     if not has_permission(cast(User, request.user), "gold_team"):
@@ -255,6 +255,12 @@ def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
     if action == "resend_pending":
         return StreamingHttpResponse(
             run_detached(service.stream_retry_pending(packet)),
+            content_type="application/x-ndjson",
+        )
+
+    if action == "send_new_teams":
+        return StreamingHttpResponse(
+            run_detached(service.stream_send_to_new_teams(packet)),
             content_type="application/x-ndjson",
         )
 
