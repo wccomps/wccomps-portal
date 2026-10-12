@@ -107,3 +107,16 @@ def test_add_pages_render_without_a_reset_button(path):
     assert response.status_code == 200
     assert b"Reset Password" not in response.content
     assert b'name="password"' not in response.content
+
+
+def test_admin_cannot_delete_school_info():
+    team = Team.objects.create(team_number=7, team_name="Team 07")
+    info = SchoolInfo.objects.create(team=team, school=School.for_name("Example University"), contact_email="c@e.com")
+    client = _admin_client()
+
+    delete_page = client.get(reverse("admin:team_schoolinfo_delete", args=[info.pk]))
+    changelist = client.get(reverse("admin:team_schoolinfo_changelist")).content.decode()
+
+    assert delete_page.status_code == 403
+    assert 'value="delete_selected"' not in changelist
+    assert SchoolInfo.objects.filter(pk=info.pk).exists()

@@ -8,7 +8,7 @@ from django.test import Client
 from django.urls import reverse
 
 from core.models import UserGroups
-from registration.models import Event, EventTeamAssignment, School, Season
+from registration.models import Event, EventTeamAssignment, School, Season, TeamRegistration
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
@@ -47,3 +47,24 @@ def test_the_event_page_cannot_open_an_event(admin_client):
     page = admin_client.get(reverse("admin:registration_event_change", args=[event.pk])).content.decode()
 
     assert 'name="is_active"' not in page
+
+
+def test_the_registration_page_cannot_change_the_school(admin_client):
+    school = School.for_name("Example University")
+    other = School.for_name("Other College")
+    registration = TeamRegistration.objects.create(school_name="Example University", status="paid", school=school)
+    url = reverse("admin:registration_teamregistration_change", args=[registration.pk])
+
+    page = admin_client.get(url).content.decode()
+
+    assert 'name="school"' not in page
+    form = admin_client.get(url).context["adminform"].form
+    data = {name: form[name].value() or "" for name in form.fields}
+    data |= {"school": other.pk}
+    for prefix in ("contacts", "event_enrollments"):
+        data |= {f"{prefix}-TOTAL_FORMS": "0", f"{prefix}-INITIAL_FORMS": "0"}
+    response = admin_client.post(url, data)
+
+    assert response.status_code == 302, response.context["adminform"].form.errors if response.context else ""
+    registration.refresh_from_db()
+    assert registration.school == school

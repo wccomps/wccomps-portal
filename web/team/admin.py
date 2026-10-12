@@ -114,14 +114,17 @@ class SchoolInfoAdmin(admin.ModelAdmin[SchoolInfo]):
     list_select_related = ["school", "team"]
     search_fields = ["school__name", "contact_email", "team__team_name"]
     # password mirrors the team account's Authentik password for packet emails; editing it here would change
-    # only this copy, so it's set solely by reset_team_password. The school is set on the School Info page
-    # (registration.services.set_team_school), which the open event's assignment follows.
+    # only this copy, so it's set solely by reset_team_password. The school, and whether a team has one, is set
+    # through registration.services (set_team_school, remove_team_school, clear_school_list, import_school_list).
     exclude = ["password"]
     readonly_fields = ["school", "created_at", "updated_at", "updated_by", "password_with_reset"]
     ordering = ["team__team_number"]
     actions = ["export_as_csv", "import_from_csv"]
 
     def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: SchoolInfo | None = None) -> bool:
         return False
 
     @admin.display(description="School name", ordering="school__name")
