@@ -45,6 +45,25 @@ def test_confirm_after_the_upload_expired_says_so(client):
     assert b"no longer available" in response.content
 
 
+@pytest.mark.parametrize(
+    "stored",
+    [
+        {"teams_to_create": "rows", "event": {}},
+        {"teams_to_create": [{"team": 1}], "event": {}},
+        {"teams_to_create": [], "event": "event"},
+    ],
+)
+def test_confirm_with_a_malformed_stored_upload_asks_for_it_again(client, stored):
+    session = client.session
+    session["csv_import_data"] = stored
+    session.save()
+
+    response = client.post(reverse("school_info_import"), {"confirm": "true"})
+
+    assert b"The uploaded file is no longer available." in response.content
+    assert b"Upload the file again." in response.content
+
+
 def test_import_for_an_existing_event_opens_it(client):
     from registration.models import Event
 

@@ -1,4 +1,5 @@
 import logging
+from contextlib import suppress
 from dataclasses import asdict
 from typing import cast
 
@@ -416,12 +417,11 @@ def _apply_school_info_import(
     (preview_data, None) on errors, else (None, counts)."""
     stored_rows = import_data.get("teams_to_create")
     event_fields = import_data.get("event")
-    if not isinstance(stored_rows, list) or not isinstance(event_fields, dict):
-        return _upload_again("The uploaded file is no longer available.")
-    try:
-        rows = [SchoolListRow(**row) for row in stored_rows]
-    except TypeError:
-        # A preview stored by an earlier version of the page
+    rows = None
+    if isinstance(stored_rows, list):
+        with suppress(TypeError):
+            rows = [SchoolListRow(**row) for row in stored_rows]
+    if rows is None or not isinstance(event_fields, dict):
         return _upload_again("The uploaded file is no longer available.")
     season = Season.objects.active()
     if season is None:

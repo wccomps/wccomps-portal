@@ -22,7 +22,7 @@ def normalize_school_name(name: str) -> str:
 
 
 class School(models.Model):
-    """A school across events; assignments and registrations point here, never at a team number."""
+    """A school across events, matched by name_key."""
 
     name = models.CharField(max_length=255)
     name_key = models.CharField(max_length=255, unique=True)
@@ -81,7 +81,7 @@ class TeamRegistration(models.Model):
 
     rejection_reason = models.TextField(blank=True)
     approved_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
-    # Set when the registration's school is assigned a team at an event
+    # Set when the registration is assigned a team through registration.services
     school = models.ForeignKey(School, null=True, blank=True, on_delete=models.SET_NULL, related_name="registrations")
 
     class Meta:
@@ -241,7 +241,7 @@ class RegistrationEventEnrollment(models.Model):
 
 
 class EventTeamAssignment(models.Model):
-    """Per-event random team number assignment."""
+    """Which team number a school held at an event; imported schools have no registration."""
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="team_assignments")
     school = models.ForeignKey(School, on_delete=models.PROTECT, related_name="assignments")
