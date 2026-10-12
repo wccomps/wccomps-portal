@@ -8,7 +8,7 @@ from registration.models import School
 from team.models import SchoolInfo, Team
 
 from ..models import Packet, PacketDistribution
-from ..services import PacketDistributionService
+from ..services import PacketDistributionService, _create_distributions_for_teams
 
 
 class PacketDistributionServiceTestCase(TestCase):
@@ -55,9 +55,9 @@ class PacketDistributionServiceTestCase(TestCase):
 
     def test_create_distributions_for_teams(self):
         """Test creating distributions for all teams."""
-        created = self.service._create_distributions_for_teams(self.packet)
+        created = _create_distributions_for_teams(self.packet)
 
-        self.assertEqual(created, 3)
+        self.assertEqual(len(created), 3)
         self.assertEqual(PacketDistribution.objects.count(), 3)
 
         # Verify distributions created for all teams

@@ -67,7 +67,14 @@ def test_a_failed_team_is_left_to_resend_failed(current_event):
 
     result = _done(list(PacketDistributionService().stream_send_to_new_teams(packet)))
 
-    assert result == {"done": True, "success": True, "message": "Every team on the list already has this packet."}
+    assert result == {
+        "done": True,
+        "success": True,
+        "message": (
+            "No team on the list is without a copy of this packet; teams whose send failed or is pending are not "
+            "included (use Resend Failed / Retry Pending)."
+        ),
+    }
     assert not mail.outbox
     assert PacketDistribution.objects.get(packet=packet).email_status == "failed"
 
@@ -96,7 +103,7 @@ def test_a_draft_packet_is_distributed_instead(current_event):
     assert result == {
         "done": True,
         "success": False,
-        "message": "Only a sent packet can be sent to teams that haven't received it; distribute this one.",
+        "message": "Only a sent packet can be sent to new teams.",
     }
     assert not PacketDistribution.objects.exists()
 
@@ -136,3 +143,49 @@ def test_the_button_shows_for_sent_packets(current_event, gold_team_user, status
     content = client.get(reverse("packet_detail", args=[packet.id])).content.decode()
 
     assert ("Send to Teams Without It" in content) is shown
+
+
+def test_the_done_line_names_new_teams_without_per_team_extras(current_event):
+    _team_with_school(41), _team_with_school(42), _team_with_school(43)
+    packet = _packet(current_event)
+    packet.team_extras = {"43": {"api_key": "k"}}
+    packet.save()
+
+    result = _done(list(PacketDistributionService().stream_send_to_new_teams(packet)))
+
+    assert result == {
+        "done": True,
+        "success": True,
+        "message": "Sent to 3 new team(s). No per-team extras for Team 41, Team 42.",
+    }
+
+
+def test_without_per_team_extras_the_done_line_does_not_mention_them(current_event):
+    _team_with_school(41)
+
+    result = _done(list(PacketDistributionService().stream_send_to_new_teams(_packet(current_event))))
+
+    assert result["message"] == "Sent to 1 new team(s)"
+
+
+@pytest.mark.parametrize(("status", "shown"), [("distributing", True), ("completed", True)])
+def test_retry_pending_shows_for_sent_packets_with_pending_teams(current_event, gold_team_user, status, shown):
+    packet = _packet(current_event, status=status)
+    PacketDistribution.objects.create(packet=packet, team=_team_with_school(1), email_status="pending")
+    client = Client()
+    client.force_login(gold_team_user)
+
+    content = client.get(reverse("packet_detail", args=[packet.id])).content.decode()
+
+    assert ("Retry Pending" in content) is shown
+    assert "1 pending" in content
+
+
+def test_retry_pending_sends_a_completed_packets_pending_teams(current_event):
+    packet = _packet(current_event)
+    PacketDistribution.objects.create(packet=packet, team=_team_with_school(1), email_status="pending")
+
+    result = _done(list(PacketDistributionService().stream_retry_pending(packet)))
+
+    assert result["success"] is True
+    assert [message.to for message in mail.outbox] == [["team1@example.edu"]]

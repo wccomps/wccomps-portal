@@ -10,10 +10,14 @@ if TYPE_CHECKING:
     from team.models import Team
 
 
+# A packet whose distribution has started went out to teams
+SENT_STATUSES = ("distributing", "completed")
+
+
 class PacketQuerySet(models.QuerySet["Packet"]):
     def sent(self) -> PacketQuerySet:
         """Packets whose distribution has started."""
-        return self.filter(status__in=["distributing", "completed"])
+        return self.filter(status__in=SENT_STATUSES)
 
     def downloadable(self) -> PacketQuerySet:
         """Sent packets that teams may download from the portal."""
@@ -86,6 +90,11 @@ class Packet(models.Model):
 
     def is_ready_for_distribution(self) -> bool:
         return self.status == "draft"
+
+    @property
+    def is_sent(self) -> bool:
+        """Whether its distribution has started."""
+        return self.status in SENT_STATUSES
 
     def mark_as_distributing(self) -> None:
         self.status = "distributing"

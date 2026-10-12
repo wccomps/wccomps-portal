@@ -100,6 +100,25 @@ def test_starting_a_packet_send_takes_the_lock():
     _assert_locks_before_reading_the_open_event(queries)
 
 
+def test_starting_a_packet_send_creates_its_distributions_under_the_lock(team):
+    _event()
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+    Team.objects.filter(pk=team.pk).update(is_active=True)
+    packet = Packet.objects.create(
+        title="Packet", file_data=b"x", filename="p.pdf", mime_type="application/pdf", file_size=1, uploaded_by="gold"
+    )
+
+    with CaptureQueriesContext(connection) as queries:
+        distributions = begin_distribution(packet)
+
+    assert [dist.team for dist in distributions] == [team]
+    assert list(PacketDistribution.objects.values_list("pk", flat=True)) == [distributions[0].pk]
+    sql = [query["sql"] for query in queries.captured_queries]
+    lock = next(i for i, q in enumerate(sql) if "pg_advisory_xact_lock" in q)
+    create = next(i for i, q in enumerate(sql) if q.startswith('INSERT INTO "packets_packetdistribution"'))
+    assert lock < create
+
+
 def test_opening_an_event_takes_the_lock():
     event = _event(open_=False)
 
