@@ -328,4 +328,4 @@ def apply_csv_import(teams_to_create: list[CSVRowData], updated_by: str, event: 
         )
         assign_school_to_event(event, team, row["school_name"])
 
-    return {"created": len(teams_to_create), "assigned": len(teams_to_create), "activated": activated}
+    return {"created": len(teams_to_create), "activated": activated}

@@ -20,10 +20,6 @@
                         <br>
                         Activated: {{ import_results.activated }} team(s)
                     {% endif %}
-                    {% if import_results.assigned %}
-                        <br>
-                        Assigned: {{ import_results.assigned }} team(s) to active event
-                    {% endif %}
                 </c-alert>
                 <c-button_row class="justify-end">
                     <c-link href="{% url 'school_info_import' %}">Import Another File</c-link>

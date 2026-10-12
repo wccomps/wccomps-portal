@@ -288,7 +288,7 @@ class TestCSVImport:
             event,
         )
 
-        assert result == {"created": 2, "assigned": 2, "activated": 1}
+        assert result == {"created": 2, "activated": 1}
         assert sorted(SchoolInfo.objects.values_list("school_name", flat=True)) == ["University One", "University Two"]
         assert sorted(Team.objects.filter(is_active=True).values_list("team_number", flat=True)) == [1, 2]
         assert sorted(

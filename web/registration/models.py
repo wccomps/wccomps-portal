@@ -10,9 +10,13 @@ def generate_edit_token() -> str:
     return secrets.token_urlsafe(48)
 
 
+def collapse_whitespace(name: str) -> str:
+    return " ".join(name.split())
+
+
 def normalize_school_name(name: str) -> str:
     """The key a school is matched on: case and runs of whitespace don't matter."""
-    return " ".join(name.split()).casefold()
+    return collapse_whitespace(name).casefold()
 
 
 class School(models.Model):
@@ -31,7 +35,7 @@ class School(models.Model):
     @classmethod
     def for_name(cls, name: str) -> School:
         """The school with this name (ignoring case and spacing), created if new; keeps the latest spelling."""
-        name = " ".join(name.split())
+        name = collapse_whitespace(name)
         school, created = cls.objects.get_or_create(name_key=normalize_school_name(name), defaults={"name": name})
         if not created and school.name != name:
             school.name = name
