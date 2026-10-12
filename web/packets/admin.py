@@ -53,7 +53,10 @@ class PacketAdmin(admin.ModelAdmin[Packet]):
     ]
     list_filter = ["status", "send_via_email", "web_access_enabled", "created_at"]
     search_fields = ["title", "filename", "uploaded_by", "notes"]
+    # Sending a packet sets its event and status; set here, they'd skip the open event's checks
     readonly_fields = [
+        "event",
+        "status",
         "actual_distribution_time",
         "created_at",
         "updated_at",
@@ -177,8 +180,21 @@ class PacketAdmin(admin.ModelAdmin[Packet]):
 
     @admin.action(description="Mark selected packets as completed")
     def mark_as_completed(self, request: HttpRequest, queryset: QuerySet[Packet]) -> None:
-        count = queryset.update(status="completed")
+        skipped = []
+        count = 0
+        for packet in queryset:
+            if packet.status == "distributing":
+                packet.mark_as_completed()
+                count += 1
+            else:
+                skipped.append(packet.title)
         self.message_user(request, f"Marked {count} packet(s) as completed.")
+        if skipped:
+            self.message_user(
+                request,
+                f"Skipped {', '.join(skipped)}: only a packet being sent can be marked completed.",
+                level=messages.WARNING,
+            )
 
     @admin.action(description="Export distribution report to CSV")
     def export_distribution_report(self, request: HttpRequest, queryset: QuerySet[Packet]) -> HttpResponse:
