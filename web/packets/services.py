@@ -122,9 +122,13 @@ class PacketDistributionService:
 
         return {"sent": sent_count, "failed": failed_count}
 
+    @transaction.atomic
     def _team_password(self, team: Team) -> str:
-        """The team account's password for this competition, setting a new one in Authentik on first use."""
-        school_info = SchoolInfo.objects.filter(team=team).first()
+        """The team account's password for this competition, setting a new one in Authentik on first use.
+
+        The team's school info row stays locked until the new password is stored on it, so concurrent sends set it
+        once and all carry it."""
+        school_info = SchoolInfo.objects.select_for_update().filter(team=team).first()
         if school_info is None:
             raise ValueError(f"Team {team.team_number} has no school info; import the school list first")
         if school_info.password:
