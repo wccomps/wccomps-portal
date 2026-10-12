@@ -36,9 +36,7 @@ def team_packet(request: HttpRequest) -> HttpResponse:
     is_gold = has_permission(user, "gold_team")
 
     if is_gold:
-        packets = Packet.objects.filter(status__in=["distributing", "completed"], web_access_enabled=True).order_by(
-            "-created_at"
-        )
+        packets = Packet.objects.downloadable().order_by("-created_at")
         context: dict[str, object] = {"packets": packets, "is_gold_view": True}
         return render(request, "packets/team_packet.html", context)
 
@@ -65,9 +63,7 @@ def download_packet(request: HttpRequest, packet_id: int) -> HttpResponse:
 
     user = cast(User, request.user)
     if has_permission(user, "gold_team"):
-        packet = get_object_or_404(
-            Packet, id=packet_id, status__in=["distributing", "completed"], web_access_enabled=True
-        )
+        packet = get_object_or_404(Packet.objects.downloadable(), id=packet_id)
     else:
         distribution = get_object_or_404(
             PacketDistribution.objects.visible_to(get_user_team(user)).select_related("packet"), packet_id=packet_id

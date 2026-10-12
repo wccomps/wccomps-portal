@@ -39,16 +39,16 @@ def test_opening_an_event_closes_the_open_one(season):
     assert not first.is_active
 
 
-def test_open_event_is_the_active_event_of_the_active_season(season):
+def test_open_event_is_the_active_event(season):
     event = _event(season, "First", active=True)
 
     assert Event.objects.open() == event
 
 
-def test_no_open_event_without_an_active_season(season):
-    _event(season, "First", active=True)
+def test_the_active_event_stays_open_when_its_season_is_not_active(season):
+    event = _event(season, "First", active=True)
     season.is_active = False
     season.save()
 
-    assert Event.objects.open() is None
+    assert Event.objects.open() == event
     assert Season.objects.active() is None

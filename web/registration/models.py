@@ -140,9 +140,8 @@ class EventManager(models.Manager["Event"]):
         return self.get_queryset().annotate_enrollment_count()
 
     def open(self) -> Event | None:
-        """The active event of the active season."""
-        season = Season.objects.active()
-        return self.filter(is_active=True, season=season).first() if season else None
+        """The active event (the database allows one); packets sent now belong to it."""
+        return self.filter(is_active=True).first()
 
 
 class Event(models.Model):
@@ -188,7 +187,7 @@ class Event(models.Model):
 
     @transaction.atomic
     def open(self) -> None:
-        """Make this the only active event; packets sent from now on belong to it."""
+        """Make this the only active event."""
         Event.objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
         if not self.is_active:
             self.is_active = True

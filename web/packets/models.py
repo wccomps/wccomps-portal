@@ -10,8 +10,20 @@ if TYPE_CHECKING:
     from team.models import Team
 
 
+class PacketQuerySet(models.QuerySet["Packet"]):
+    def sent(self) -> PacketQuerySet:
+        """Packets whose distribution has started."""
+        return self.filter(status__in=["distributing", "completed"])
+
+    def downloadable(self) -> PacketQuerySet:
+        """Sent packets that teams may download from the portal."""
+        return self.sent().filter(web_access_enabled=True)
+
+
 class Packet(models.Model):
     """Pre-competition information packet to be distributed to all teams."""
+
+    objects = PacketQuerySet.as_manager()
 
     STATUS_CHOICES = [
         ("draft", "Draft"),
@@ -102,11 +114,7 @@ class PacketDistributionQuerySet(models.QuerySet["PacketDistribution"]):
         if event is None:
             return self.none()
         return self.filter(
-            team=team,
-            web_access_enabled=True,
-            packet__event=event,
-            packet__web_access_enabled=True,
-            packet__status__in=["distributing", "completed"],
+            team=team, web_access_enabled=True, packet__in=Packet.objects.downloadable().filter(event=event)
         )
 
 

@@ -159,29 +159,98 @@ def test_confirm_is_refused_when_scores_appeared_since_the_preview(client):
     assert not SchoolInfo.objects.exists()
 
 
-def test_confirm_that_loses_the_race_to_open_an_event_says_so(client):
-    from unittest.mock import patch
-
+def test_the_second_of_two_confirms_is_refused_instead_of_closing_the_first(gold_team_user):
     from registration.models import Event
 
     Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
-    event = _season_and_event()
+    first, second = _season_and_event(), _season_and_event(name="Other")
+    clients = []
+    for event in (first, second):
+        staff = Client()
+        staff.force_login(gold_team_user)
+        csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
+        staff.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
+        clients.append(staff)
+
+    clients[0].post(reverse("school_info_import"), {"confirm": "true"})
+    response = clients[1].post(reverse("school_info_import"), {"confirm": "true"})
+
+    assert b"Invitational (2026) is still open" in response.content
+    assert list(Event.objects.filter(is_active=True)) == [first]
+
+
+def test_reimporting_the_open_event_is_refused_once_its_packets_were_sent(client):
+    from packets.models import Packet
+
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    event = _season_and_event(active=True)
+    Packet.objects.create(
+        event=event,
+        title="Packet",
+        file_data=b"x",
+        filename="p.pdf",
+        mime_type="application/pdf",
+        file_size=1,
+        status="completed",
+        uploaded_by="gold",
+    )
+    csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
+
+    response = client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
+
+    assert (
+        b"Packets have already been sent for Invitational (2026). Re-importing reassigns team numbers, so sent "
+        b"credentials would reach the wrong school. Change a single school on its School Info page instead."
+    ) in response.content
+    assert not SchoolInfo.objects.exists()
+
+
+def test_a_draft_packet_does_not_block_reimporting_the_open_event(client):
+    from packets.models import Packet
+
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    event = _season_and_event(active=True)
+    Packet.objects.create(
+        event=event,
+        title="Packet",
+        file_data=b"x",
+        filename="p.pdf",
+        mime_type="application/pdf",
+        file_size=1,
+        status="draft",
+        uploaded_by="gold",
+    )
     csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
-    other = _season_and_event(name="Other")
 
-    def another_import_opened_first(self):
-        # The other confirm committed its event between our checks and our open
-        Event.objects.filter(pk=other.pk).update(is_active=True)
-        Event.objects.filter(pk=self.pk).update(is_active=True)
+    client.post(reverse("school_info_import"), {"confirm": "true"})
 
-    with patch.object(Event, "open", another_import_opened_first):
-        response = client.post(reverse("school_info_import"), {"confirm": "true"})
+    assert SchoolInfo.objects.exists()
 
-    assert response.status_code == 200
-    assert b"Another import opened an event at the same time" in response.content
-    assert not SchoolInfo.objects.exists()
-    assert list(Event.objects.filter(is_active=True)) == []
+
+def test_a_new_event_from_the_import_is_closed_to_registration(client):
+    from registration.models import Event
+
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    _season_and_event()
+    csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
+    client.post(
+        reverse("school_info_import"),
+        {
+            "upload": "true",
+            "csv_file": csv,
+            "event": "new",
+            "new_name": "Qualifier",
+            "new_date": "2026-11-07",
+            "new_type": "qualifier",
+        },
+    )
+
+    client.post(reverse("school_info_import"), {"confirm": "true"})
+
+    new = Event.objects.get(name="Qualifier")
+    assert new.is_active
+    assert not new.registration_open
 
 
 def test_reimporting_the_open_event_is_refused_while_its_scores_are_live(client):

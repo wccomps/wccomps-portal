@@ -7,10 +7,8 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import validate_email
-from django.db import transaction
 from django.db.models import Count, Q
 from registration.models import Event, EventTeamAssignment, School, Season, normalize_school_name
-from registration.services import set_team_school
 
 from team.models import SchoolInfo, Team, default_team_name
 
@@ -112,10 +110,12 @@ class ImportEventForm(forms.Form):
     new_date = forms.DateField(required=False)
     new_type = forms.CharField(required=False)
 
+    # After validation: the chosen event, or an unsaved new one the import saves
+    event_to_import: Event
+
     def __init__(self, *args: object, season: Season, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         self.season = season
-        self._chosen: Event | None = None
 
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}
@@ -125,25 +125,22 @@ class ImportEventForm(forms.Form):
                 raise ValidationError("Give the new event a name and a date.")
             if data.get("new_type") not in dict(Event.EVENT_TYPE_CHOICES):
                 raise ValidationError("Pick the new event's type.")
+            # Schools come from the list, so the public registration form doesn't offer it
+            self.event_to_import = Event(
+                season=self.season,
+                name=data["new_name"],
+                date=data["new_date"],
+                event_type=data["new_type"],
+                registration_open=False,
+            )
         elif not choice.isdigit():
             raise ValidationError("Pick the event this school list is for.")
         else:
-            self._chosen = self.season.events.filter(pk=int(choice), is_finalized=False).first()
-            if self._chosen is None:
+            chosen = self.season.events.filter(pk=int(choice), is_finalized=False).first()
+            if chosen is None:
                 raise ValidationError("That event was finalized or removed.")
+            self.event_to_import = chosen
         return data
-
-    def chosen_event(self) -> Event | None:
-        """The existing event picked, or None when the list is for a new event."""
-        return self._chosen
-
-    def create_new_event(self) -> Event:
-        return Event.objects.create(
-            season=self.season,
-            name=self.cleaned_data["new_name"],
-            date=self.cleaned_data["new_date"],
-            event_type=self.cleaned_data["new_type"],
-        )
 
 
 def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
@@ -285,7 +282,7 @@ def validate_csv_data(rows: list[CSVRowData], event_id: int | None = None) -> CS
         row["team_number"] = team.team_number
         teams_to_create.append(row)
 
-    # Past events only: the event being imported (a re-import) doesn't make its schools returning
+    # Other events only: the event being imported (a re-import) doesn't make its schools returning
     past = School.objects.filter(name_key__in=[normalize_school_name(r["school_name"]) for r in rows]).annotate(
         past=Count("assignments", filter=~Q(assignments__event_id=event_id) if event_id is not None else Q())
     )
@@ -298,32 +295,3 @@ def validate_csv_data(rows: list[CSVRowData], event_id: int | None = None) -> CS
         "errors": errors,
         "warnings": warnings,
     }
-
-
-@transaction.atomic
-def apply_csv_import(teams_to_create: list[CSVRowData], updated_by: str, event: Event) -> dict[str, int]:
-    """Replace all school info with the rows, reset every team name, activate the rows' teams, open the event,
-    and record each school's team number at it."""
-    SchoolInfo.objects.all().delete()
-    # Names like a school's shortname belong to the last event's assignment, not the team slot
-    teams = list(Team.objects.all())
-    for team in teams:
-        team.team_name = default_team_name(team.team_number)
-    Team.objects.bulk_update(teams, ["team_name"])
-    EventTeamAssignment.objects.filter(event=event).delete()
-    activated = Team.objects.filter(pk__in=[row["_team"].pk for row in teams_to_create], is_active=False).update(
-        is_active=True
-    )
-    event.open()
-
-    for row in teams_to_create:
-        set_team_school(
-            row["_team"],
-            row["school_name"],
-            contact_email=row["contact_email"],
-            secondary_email=row.get("secondary_email", ""),
-            notes=row.get("notes", ""),
-            updated_by=updated_by,
-        )
-
-    return {"created": len(teams_to_create), "activated": activated}

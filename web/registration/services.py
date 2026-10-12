@@ -1,8 +1,15 @@
+from typing import TYPE_CHECKING
+
 from django.db import transaction
+from packets.models import Packet
 
-from team.models import SchoolInfo, Team
+from core.competition_utils import live_competition_data_exists
+from team.models import SchoolInfo, Team, default_team_name
 
-from .models import Event, EventTeamAssignment, School, TeamRegistration
+from .models import Event, EventTeamAssignment, School, Season, TeamRegistration
+
+if TYPE_CHECKING:
+    from team.forms import CSVRowData
 
 
 class SchoolTakenError(Exception):
@@ -68,3 +75,66 @@ def remove_team_school(team: Team) -> None:
     event = Event.objects.open()
     if event is not None:
         event.team_assignments.filter(team=team).delete()
+
+
+class ImportBlockedError(Exception):
+    """Why a school list can't be imported for the event now."""
+
+
+def import_problem(event: Event) -> str:
+    """Why this event can't be imported into now, or ''. An unsaved event is a new one."""
+    open_now = Event.objects.open()
+    if open_now and open_now != event:
+        return f"{open_now} is still open. Finalize and clear it before importing a list for another event."
+    if open_now and Packet.objects.sent().filter(event=open_now).exists():
+        return (
+            f"Packets have already been sent for {open_now}. Re-importing reassigns team numbers, so sent credentials "
+            "would reach the wrong school. Change a single school on its School Info page instead."
+        )
+    if not live_competition_data_exists():
+        return ""
+    if open_now is None:
+        return (
+            "Scores from the last event are still in the portal. "
+            "Finalize and clear that event before importing a new school list."
+        )
+    return (
+        f"Teams have already started using their team numbers for {open_now} (scores, tickets or Discord links). "
+        "Re-importing reassigns team numbers under them. Change a single school on its School Info page instead."
+    )
+
+
+@transaction.atomic
+def import_school_list(event: Event, rows: list[CSVRowData], updated_by: str) -> dict[str, int]:
+    """Replace the school list with the rows and open the event (saving it first when new), replacing its
+    assignments: each row's school holds the row's team. Resets every team name and activates the rows' teams.
+
+    Imports run one at a time (the active season's row is locked) and the event is checked again under that lock;
+    ImportBlockedError says why the import can't go ahead.
+    """
+    Season.objects.select_for_update().get(pk=event.season_id)
+    if problem := import_problem(event):
+        raise ImportBlockedError(problem)
+    if event._state.adding:
+        event.save()
+
+    SchoolInfo.objects.all().delete()
+    # Names like a school's shortname belong to the last event's assignment, not the team slot
+    teams = list(Team.objects.all())
+    for team in teams:
+        team.team_name = default_team_name(team.team_number)
+    Team.objects.bulk_update(teams, ["team_name"])
+    EventTeamAssignment.objects.filter(event=event).delete()
+    activated = Team.objects.filter(pk__in=[row["_team"].pk for row in rows], is_active=False).update(is_active=True)
+    event.open()
+
+    for row in rows:
+        set_team_school(
+            row["_team"],
+            row["school_name"],
+            contact_email=row["contact_email"],
+            secondary_email=row.get("secondary_email", ""),
+            notes=row.get("notes", ""),
+            updated_by=updated_by,
+        )
+    return {"created": len(rows), "activated": activated}

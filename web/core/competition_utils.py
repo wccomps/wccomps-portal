@@ -26,7 +26,8 @@ def _reset_ticket_counters(teams: QuerySet[Model]) -> int:
     return teams.update(ticket_counter=0)
 
 
-# What the wipe clears, in order: (count label, the rows, how they are cleared)
+# What the wipe clears, in order: (count label, the rows, how they are cleared). While any of it remains, a school
+# list import is blocked (registration.services.import_problem).
 COMPETITION_DATA: tuple[tuple[str, Callable[[], QuerySet[Model]], Callable[[QuerySet[Model]], int]], ...] = (
     ("TicketAttachment", TicketAttachment.objects.all, _delete),
     ("TicketComment", TicketComment.objects.all, _delete),
@@ -60,6 +61,5 @@ def wipe_competition_data() -> dict[str, int]:
 
 
 def live_competition_data_exists() -> bool:
-    """Whether any of the data the competition wipe deletes is still here (tickets, scores, incidents, orange team
-    assignments and check-ins, team Discord links)."""
+    """Whether any row the competition wipe clears still exists."""
     return any(rows().exists() for _, rows, _ in COMPETITION_DATA)
