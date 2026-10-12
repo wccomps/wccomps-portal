@@ -8,7 +8,7 @@ from django.test import Client
 from django.urls import reverse
 
 from registration.models import Event, EventTeamAssignment, School, Season, TeamRegistration, normalize_school_name
-from team.forms import assign_school_to_event
+from registration.services import assign_school_to_event
 from team.models import Team
 
 pytestmark = pytest.mark.django_db

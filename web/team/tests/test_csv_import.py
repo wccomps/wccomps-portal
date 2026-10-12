@@ -366,7 +366,7 @@ class TestImportOpensEvent:
         assert result["errors"] and "repeated" in result["errors"][0]
 
     def test_preview_marks_returning_and_new_schools(self, setup_teams, season):
-        from team.forms import assign_school_to_event
+        from registration.services import assign_school_to_event
 
         past = self._event(season, "Past")
         assign_school_to_event(past, Team.objects.get(team_number=1), "University One")
@@ -377,7 +377,7 @@ class TestImportOpensEvent:
         assert marks == {"university one": 1, "University Two": None}
 
     def test_reimporting_for_the_same_event_marks_its_only_school_as_new(self, setup_teams, season):
-        from team.forms import assign_school_to_event
+        from registration.services import assign_school_to_event
 
         event = self._event(season, "Invitational", active=True)
         assign_school_to_event(event, Team.objects.get(team_number=1), "University One")
@@ -387,7 +387,7 @@ class TestImportOpensEvent:
         assert result["teams_to_create"][0]["returning_events"] is None
 
     def test_a_school_with_a_different_past_event_is_returning_when_reimporting(self, setup_teams, season):
-        from team.forms import assign_school_to_event
+        from registration.services import assign_school_to_event
 
         past = self._event(season, "Past")
         event = self._event(season, "Invitational", active=True)
@@ -408,7 +408,7 @@ class TestImportOpensEvent:
         assert result["teams_to_create"][0]["returning_events"] is None
 
     def test_preview_warns_when_the_event_already_has_assignments(self, setup_teams, season):
-        from team.forms import assign_school_to_event
+        from registration.services import assign_school_to_event
 
         event = self._event(season, "Invitational", active=True)
         assign_school_to_event(event, Team.objects.get(team_number=1), "University One")

@@ -2,7 +2,7 @@ import secrets
 from datetime import timedelta
 
 from django.contrib.auth.models import User
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 
@@ -101,8 +101,15 @@ class TeamRegistration(models.Model):
         self.save()
 
 
+class SeasonManager(models.Manager["Season"]):
+    def active(self) -> Season | None:
+        return self.filter(is_active=True).first()
+
+
 class Season(models.Model):
     """Competition season (e.g., 2026 Season)."""
+
+    objects = SeasonManager()
 
     name = models.CharField(max_length=100)
     year = models.IntegerField(unique=True)
@@ -127,6 +134,11 @@ class EventManager(models.Manager["Event"]):
 
     def annotate_enrollment_count(self) -> EventQuerySet:
         return self.get_queryset().annotate_enrollment_count()
+
+    def open(self) -> Event | None:
+        """The active event of the active season."""
+        season = Season.objects.active()
+        return self.filter(is_active=True, season=season).first() if season else None
 
 
 class Event(models.Model):
@@ -168,6 +180,14 @@ class Event(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.season.name})"
+
+    @transaction.atomic
+    def open(self) -> None:
+        """Make this the only active event; packets sent from now on belong to it."""
+        Event.objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
+        if not self.is_active:
+            self.is_active = True
+            self.save(update_fields=["is_active", "updated_at"])
 
 
 class RegistrationContact(models.Model):

@@ -19,6 +19,7 @@ from .models import (
     Season,
     TeamRegistration,
 )
+from .services import assign_school_to_event
 
 
 def register(request: HttpRequest) -> HttpResponse:
@@ -345,8 +346,6 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         return redirect("registration_event_detail", event_id=event_id)
 
     random.shuffle(available_teams)
-
-    from team.forms import assign_school_to_event
 
     with transaction.atomic():
         for i, registration in enumerate(registrations_to_assign):

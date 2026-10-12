@@ -7,6 +7,7 @@ from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db import close_old_connections
 from django.template.loader import render_to_string
+from registration.models import Event
 
 from core.authentik_utils import reset_team_password
 from team.models import SchoolInfo, Team, team_username
@@ -24,10 +25,8 @@ EARLIER_EVENT_PACKET = "This packet belongs to an earlier event; team numbers ha
 
 def _stamp_open_event(packet: Packet) -> str | None:
     """Make the open event the packet's event; return a refusal message when no event is open."""
-    from team.forms import active_event
-
     # A packet belongs to the event it was sent for; teams see only the open event's packets
-    event = active_event()
+    event = Event.objects.open()
     if event is None:
         return NO_OPEN_EVENT
     if packet.event_id != event.pk:
@@ -38,9 +37,7 @@ def _stamp_open_event(packet: Packet) -> str | None:
 
 def packet_is_from_open_event(packet: Packet) -> bool:
     """A resend is only safe within the packet's own event: team numbers are reshuffled between events."""
-    from team.forms import active_event
-
-    event = active_event()
+    event = Event.objects.open()
     return event is not None and packet.event_id == event.pk
 
 

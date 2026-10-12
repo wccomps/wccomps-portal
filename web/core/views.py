@@ -7,6 +7,8 @@ from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
+from registration.models import Event, School, Season, normalize_school_name
+from registration.services import assign_school_to_event
 
 from core.services.linking import (
     LinkResult,
@@ -16,6 +18,7 @@ from core.services.linking import (
     store_discord_id_in_authentik,
     validate_link_token,
 )
+from team.forms import CSVRowData, CSVUploadForm, ImportEventForm, apply_csv_import, parse_csv_file, validate_csv_data
 from team.models import LinkToken, SchoolInfo, Team
 
 from .auth_utils import (
@@ -290,12 +293,8 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
         secondary_email = form.cleaned_data.get("secondary_email", "")
         notes = form.cleaned_data.get("notes", "")
 
-        from registration.models import School, normalize_school_name
-
-        from team.forms import active_event, assign_school_to_event
-
         # A team edited in by hand joins the active event like an imported one (the registration event page)
-        event = active_event()
+        event = Event.objects.open()
         assignment = event.team_assignments.filter(team=team).select_related("school").first() if event else None
         new_key = normalize_school_name(school_name)
         join_event = event if event and assignment is None else None
@@ -356,9 +355,8 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
 def _import_event_problem(event_id: int | None) -> str:
     """Why a list can't be imported for this event now (another event is open, or the last one's scores remain)."""
     from core.competition_utils import live_competition_data_exists
-    from team.forms import active_event
 
-    open_now = active_event()
+    open_now = Event.objects.open()
     if open_now and open_now.pk != event_id:
         return f"{open_now} is still open. Finalize and clear it before importing a list for another event."
     if open_now is None and live_competition_data_exists():
@@ -373,8 +371,6 @@ def _parse_school_info_csv(
     csv_file: UploadedFile[bytes], event_id: int | None = None
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
     """Parse and validate a school-info CSV into (preview data, session rows; empty on errors)."""
-    from team.forms import parse_csv_file, validate_csv_data
-
     parse_result = parse_csv_file(csv_file)
 
     if parse_result["errors"]:
@@ -414,8 +410,6 @@ def _apply_school_info_import(
     import_data: dict[str, object], authentik_username: str
 ) -> tuple[dict[str, object] | None, dict[str, int] | None]:
     """Verify teams still exist and apply the CSV import: (preview_data, None) on errors, else (None, counts)."""
-    from team.forms import CSVRowData, apply_csv_import
-
     # Copies: the rows gain a Team object, which must not leak into the JSON session
     teams_to_create: list[CSVRowData] = [cast(CSVRowData, dict(row)) for row in import_data["teams_to_create"]]  # type: ignore[attr-defined]
 
@@ -439,8 +433,6 @@ def _apply_school_info_import(
 
     from datetime import date
 
-    from registration.models import Event, Season
-
     stale = {
         "errors": ["That event was finalized or removed since the preview. Upload the file again."],
         "warnings": [],
@@ -453,7 +445,7 @@ def _apply_school_info_import(
             "warnings": [],
             "can_import": False,
         }, None
-    season = Season.objects.filter(is_active=True).first()
+    season = Season.objects.active()
     event_id = choice.get("id")
     if problem := _import_event_problem(event_id if isinstance(event_id, int) else None):
         return {"errors": [problem], "warnings": [], "can_import": False}, None
@@ -478,10 +470,6 @@ def _apply_school_info_import(
 
 @require_permission("gold_team")
 def school_info_import(request: HttpRequest) -> HttpResponse:
-    from registration.models import Season
-
-    from team.forms import CSVUploadForm, ImportEventForm
-
     user = cast(User, request.user)
     authentik_username = user.username
 
@@ -491,7 +479,7 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
     import_results: dict[str, int] | None = None
     error = ""
 
-    season = Season.objects.filter(is_active=True).first()
+    season = Season.objects.active()
     if season is None:
         error = "Activate a season first (Registration, Seasons): imported schools join an event of the active season."
     event_form = ImportEventForm(season=season) if season else None
