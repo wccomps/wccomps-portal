@@ -16,6 +16,7 @@ from registration.services import (
     SchoolChangedError,
     SchoolListRow,
     SchoolTakenError,
+    add_to_school_list,
     clear_school_list,
     import_problem,
     import_school_list,
@@ -31,7 +32,14 @@ from core.services.linking import (
     store_discord_id_in_authentik,
     validate_link_token,
 )
-from team.forms import CSVUploadForm, ImportEventForm, parse_csv_file, validate_csv_data
+from team.forms import (
+    IMPORT_MODES,
+    CSVUploadForm,
+    ImportEventForm,
+    parse_csv_file,
+    validate_csv_additions,
+    validate_csv_data,
+)
 from team.models import LinkToken, SchoolInfo, Team
 
 from .auth_utils import (
@@ -363,9 +371,9 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
 
 
 def _parse_school_info_csv(
-    csv_file: UploadedFile[bytes], event: Event
+    csv_file: UploadedFile[bytes], event: Event, mode: str
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
-    """Parse and validate a school-info CSV into (preview data, session rows; empty on errors)."""
+    """Parse and validate a school-info CSV for the import mode into (preview data, session rows; empty on errors)."""
     parse_result = parse_csv_file(csv_file)
 
     if parse_result["errors"]:
@@ -375,9 +383,13 @@ def _parse_school_info_csv(
             "rows": [],
         }, []
 
-    validation_result = validate_csv_data(parse_result["rows"], event)
+    if mode == "add":
+        validation_result = validate_csv_additions(parse_result["rows"], event)
+    else:
+        validation_result = validate_csv_data(parse_result["rows"], event)
 
     preview_data: dict[str, object] = {
+        "summary": validation_result.get("summary", ""),
         "errors": validation_result["errors"],
         "warnings": parse_result["warnings"] + validation_result["warnings"],
         "teams_to_create": validation_result["teams_to_create"],
@@ -412,9 +424,9 @@ def _upload_again(*problems: str) -> tuple[dict[str, object], None]:
 
 def _apply_school_info_import(
     import_data: dict[str, object], authentik_username: str
-) -> tuple[dict[str, object] | None, dict[str, int] | None]:
-    """Re-check the event fields, then import the list (which re-checks the event and the teams under its lock):
-    (preview_data, None) on errors, else (None, counts)."""
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Re-check the event fields, then replace the list or add to it as the stored mode says (the services re-check
+    the event and the teams under the school list lock): (preview_data, None) on errors, else (None, results)."""
     stored_rows = import_data.get("teams_to_create")
     event_fields = import_data.get("event")
     rows = None
@@ -429,11 +441,17 @@ def _apply_school_info_import(
     event_form = ImportEventForm(event_fields, season=season)
     if not event_form.is_valid():
         return _upload_again(*(str(e) for e in event_form.non_field_errors()))
+    event = event_form.event_to_import
     try:
-        counts = import_school_list(event_form.event_to_import, rows, authentik_username)
+        if event_form.import_mode == "add":
+            counts = add_to_school_list(event, rows, authentik_username)
+            message = f"Added {counts['created']} school(s) to {event}."
+        else:
+            counts = import_school_list(event, rows, authentik_username)
+            message = "Import completed successfully!"
     except ImportBlockedError as blocked:
         return _import_error(str(blocked)), None
-    return None, counts
+    return None, {"message": message, "mode": event_form.import_mode, **counts}
 
 
 @require_permission("gold_team")
@@ -444,7 +462,7 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
     permissions = get_permissions_context(user)
     form = CSVUploadForm()
     preview_data: dict[str, object] | None = None
-    import_results: dict[str, int] | None = None
+    import_results: dict[str, object] | None = None
     error = ""
 
     season = Season.objects.active()
@@ -460,17 +478,22 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
                 error = " ".join(str(e) for e in event_form.non_field_errors())
             elif form.is_valid() and event_form is not None:
                 event = event_form.event_to_import
-                if problem := import_problem(event):
+                mode = event_form.import_mode
+                # Adding moves nobody, so only Replace is held back by sent packets or live data
+                if mode == "replace" and (problem := import_problem(event)):
                     error = problem
                 else:
                     csv_file = cast(UploadedFile[bytes], request.FILES["csv_file"])
-                    preview_data, session_rows = _parse_school_info_csv(csv_file, event)
+                    preview_data, session_rows = _parse_school_info_csv(csv_file, event, mode)
                     if preview_data is not None and session_rows:
                         request.session["csv_import_data"] = {
                             "teams_to_create": session_rows,
                             "event": {name: event_form.data.get(name, "") for name in event_form.fields},
                         }
                         preview_data["event_label"] = str(event) if event.pk else f"New: {event.name}"
+                        preview_data["mode_label"] = (
+                            f"Add schools to {event}" if mode == "add" else IMPORT_MODES["replace"]
+                        )
 
         elif "confirm" in request.POST:
             import_data = request.session.get("csv_import_data")
@@ -490,6 +513,7 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
             "authentik_username": authentik_username,
             "form": form,
             "open_events": season.events.filter(is_finalized=False) if season else [],
+            "open_event": Event.objects.open(),
             "preview_data": preview_data,
             "import_results": import_results,
             "error": error,

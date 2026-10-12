@@ -312,7 +312,7 @@ def test_the_session_keeps_the_raw_event_fields(client):
 
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields})
 
-    assert client.session["csv_import_data"]["event"] == fields
+    assert client.session["csv_import_data"]["event"] == {**fields, "mode": ""}
 
 
 def test_confirm_rechecks_a_new_events_fields(client):

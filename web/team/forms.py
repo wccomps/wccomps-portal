@@ -1,7 +1,8 @@
 import csv
 import io
 import random
-from typing import TypedDict, cast
+from collections.abc import Iterable
+from typing import NotRequired, TypedDict, cast
 
 from django import forms
 from django.core.exceptions import ValidationError
@@ -9,6 +10,7 @@ from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import validate_email
 from django.db.models import Count, Q
 from registration.models import Event, School, Season, normalize_school_name
+from registration.services import ADD_NEEDS_OPEN_EVENT, free_teams
 
 from team.models import SchoolInfo, Team, default_team_name
 
@@ -76,6 +78,7 @@ class CSVValidationResult(TypedDict):
     teams_to_create: list[CSVRowData]
     errors: list[str]
     warnings: list[str]
+    summary: NotRequired[str]
 
 
 class CSVUploadForm(forms.Form):
@@ -101,16 +104,22 @@ class CSVUploadForm(forms.Form):
         return csv_file
 
 
+IMPORT_MODES = {"replace": "Replace the school list", "add": "Add schools"}
+
+
 class ImportEventForm(forms.Form):
-    """The event a school list is for: an unfinalized event of the active season, or a new one."""
+    """The event a school list is for: an unfinalized event of the active season, or a new one; and whether the
+    list replaces the school list or adds schools to the open event's."""
 
     event = forms.CharField(required=False)
+    mode = forms.CharField(required=False)
     new_name = forms.CharField(max_length=255, required=False)
     new_date = forms.DateField(required=False)
     new_type = forms.CharField(required=False)
 
-    # After validation: the chosen event, or an unsaved new one the import saves
+    # After validation: the chosen event, or an unsaved new one the import saves; and "replace" or "add"
     event_to_import: Event
+    import_mode: str
 
     def __init__(self, *args: object, season: Season, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
@@ -139,6 +148,13 @@ class ImportEventForm(forms.Form):
             if chosen is None:
                 raise ValidationError("That event was finalized or removed.")
             self.event_to_import = chosen
+        self.import_mode = str(data.get("mode") or "replace")
+        if self.import_mode not in IMPORT_MODES:
+            raise ValidationError("Pick Replace or Add.")
+        if self.import_mode == "add" and (
+            self.event_to_import.pk is None or Event.objects.open() != self.event_to_import
+        ):
+            raise ValidationError(ADD_NEEDS_OPEN_EVENT)
         return data
 
 
@@ -233,23 +249,49 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
     return {"rows": rows, "errors": errors, "warnings": warnings}
 
 
+def _repeated_schools(rows: list[CSVRowData]) -> list[str]:
+    """Schools named by more than one row; schools are matched by normalized name, and hold one team per event."""
+    by_key: dict[str, list[str]] = {}
+    for row in rows:
+        by_key.setdefault(normalize_school_name(row["school_name"]), []).append(row["school_name"])
+    repeated = [" / ".join(names) for names in by_key.values() if len(names) > 1]
+    return [f"Each school can appear only once; repeated: {', '.join(repeated)}"] if repeated else []
+
+
+def _assign(rows: list[CSVRowData], teams: list[Team], event_id: int | None) -> list[CSVRowData]:
+    """Give the rows the teams in random order and mark returning schools.
+
+    Other events only: the event being imported (a re-import) doesn't make its schools returning."""
+    random.shuffle(teams)
+    for team, row in zip(teams, rows, strict=True):
+        row["team_number"] = team.team_number
+    past = School.objects.filter(name_key__in=[normalize_school_name(r["school_name"]) for r in rows]).annotate(
+        past=Count("assignments", filter=~Q(assignments__event_id=event_id) if event_id is not None else Q())
+    )
+    known = {school.name_key: school.past for school in past if school.past}
+    for row in rows:
+        row["returning_events"] = known.get(normalize_school_name(row["school_name"]))
+    return rows
+
+
+def _team_warnings(teams: list[Team], renamed_teams: Iterable[Team]) -> list[str]:
+    """The import activates the rows' teams and resets the names of renamed_teams."""
+    warnings = []
+    if inactive := [t.team_number for t in teams if not t.is_active]:
+        warnings.append(f"Activates team(s) {', '.join(map(str, inactive))}.")
+    if renamed := [t.team_name for t in renamed_teams if t.team_name != default_team_name(t.team_number)]:
+        warnings.append(f"Resets {len(renamed)} team name(s) from the last event ({', '.join(renamed)}).")
+    return warnings
+
+
 def validate_csv_data(rows: list[CSVRowData], event: Event | None = None) -> CSVValidationResult:
     """Assign the rows to teams 1..N in random order; the import replaces all existing school info.
 
     The event is the one imported into; None, or an unsaved event, is a new one.
     """
     event_id = event.pk if event is not None else None
-    teams_to_create: list[CSVRowData] = []
-    errors: list[str] = []
+    errors = _repeated_schools(rows)
     warnings: list[str] = []
-
-    # Schools are matched by normalized name, and a school holds one team per event
-    by_key: dict[str, list[str]] = {}
-    for row in rows:
-        by_key.setdefault(normalize_school_name(row["school_name"]), []).append(row["school_name"])
-    repeated = [" / ".join(names) for names in by_key.values() if len(names) > 1]
-    if repeated:
-        errors.append(f"Each school can appear only once; repeated: {', '.join(repeated)}")
 
     num_rows = len(rows)
     teams = list(Team.objects.order_by("team_number")[:num_rows])
@@ -257,43 +299,54 @@ def validate_csv_data(rows: list[CSVRowData], event: Event | None = None) -> CSV
     if len(teams) < num_rows:
         errors.append(f"The CSV has {num_rows} schools but only {len(teams)} teams exist.")
     if errors:
-        return {
-            "teams_to_create": teams_to_create,
-            "errors": errors,
-            "warnings": warnings,
-        }
+        return {"teams_to_create": [], "errors": errors, "warnings": warnings}
 
     existing = SchoolInfo.objects.count()
     if existing:
         warnings.append(f"Replaces the {existing} existing school record(s).")
-    inactive = [t.team_number for t in teams if not t.is_active]
-    if inactive:
-        warnings.append(f"Activates team(s) {', '.join(map(str, inactive))}.")
-    renamed = [t.team_name for t in Team.objects.all() if t.team_name != default_team_name(t.team_number)]
-    if renamed:
-        warnings.append(f"Resets {len(renamed)} team name(s) from the last event ({', '.join(renamed)}).")
+    # Every team name is reset, not only the rows' teams
+    warnings.extend(_team_warnings(teams, Team.objects.all()))
 
     if event is not None and event_id is not None:
         replaced = event.team_assignments.count()
         if replaced:
             warnings.append(f"Replaces the {replaced} team assignment(s) for {event}.")
 
-    random.shuffle(teams)
+    return {"teams_to_create": _assign(rows, teams, event_id), "errors": errors, "warnings": warnings}
 
-    for team, row in zip(teams, rows, strict=True):
-        row["team_number"] = team.team_number
-        teams_to_create.append(row)
 
-    # Other events only: the event being imported (a re-import) doesn't make its schools returning
-    past = School.objects.filter(name_key__in=[normalize_school_name(r["school_name"]) for r in rows]).annotate(
-        past=Count("assignments", filter=~Q(assignments__event_id=event_id) if event_id is not None else Q())
-    )
-    known = {school.name_key: school.past for school in past if school.past}
-    for row in teams_to_create:
-        row["returning_events"] = known.get(normalize_school_name(row["school_name"]))
+def validate_csv_additions(rows: list[CSVRowData], event: Event) -> CSVValidationResult:
+    """Give the rows' schools free teams, the lowest numbers in random order, at the open event.
 
+    Schools already on the list (or at the event) keep their teams and are skipped, so nobody moves."""
+    errors = _repeated_schools(rows)
+    warnings: list[str] = []
+
+    keys = [normalize_school_name(row["school_name"]) for row in rows]
+    on_list = set(SchoolInfo.objects.filter(school__name_key__in=keys).values_list("school__name_key", flat=True))
+    on_list |= set(event.team_assignments.filter(school__name_key__in=keys).values_list("school__name_key", flat=True))
+    new_rows = [row for row, key in zip(rows, keys, strict=True) if key not in on_list]
+    if skipped := [row["school_name"] for row, key in zip(rows, keys, strict=True) if key in on_list]:
+        warnings.append(f"Already on the list, skipped: {', '.join(skipped)}")
+    if not new_rows:
+        errors.append("Every school in the file is already on the list.")
+
+    free = free_teams(event).order_by("team_number")
+    teams = list(free[: len(new_rows)])
+    if len(teams) < len(new_rows):
+        errors.append(
+            f"Adding {len(new_rows)} school(s) needs {len(new_rows)} free team(s), but only {free.count()} are free."
+        )
+    if errors:
+        return {"teams_to_create": [], "errors": errors, "warnings": warnings}
+
+    warnings.extend(_team_warnings(teams, teams))
     return {
-        "teams_to_create": teams_to_create,
+        "teams_to_create": _assign(new_rows, teams, event.pk),
         "errors": errors,
         "warnings": warnings,
+        "summary": (
+            f"Adds {len(new_rows)} school(s) to {event}; the {SchoolInfo.objects.count()} school(s) already on the "
+            "list keep their team numbers."
+        ),
     }
