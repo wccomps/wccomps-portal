@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.http import HttpRequest
 
 from .models import (
     Event,
@@ -44,9 +45,19 @@ class SeasonAdmin(admin.ModelAdmin[Season]):
 
 
 class EventTeamAssignmentInline(admin.TabularInline[EventTeamAssignment, Event]):
+    """Shown only: assignments follow the school list (the School Info and registration pages set them)."""
+
     model = EventTeamAssignment
     extra = 0
-    readonly_fields = ["assigned_at", "credentials_sent_at"]
+
+    def has_add_permission(self, request: HttpRequest, obj: Event | None = None) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: Event | None = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: Event | None = None) -> bool:
+        return False
 
 
 @admin.register(Event)
@@ -63,6 +74,8 @@ class EventAdmin(admin.ModelAdmin[Event]):
     list_filter = ["season", "event_type", "registration_open", "is_active", "is_finalized"]
     ordering = ["season", "date"]
     inlines = [EventTeamAssignmentInline]
+    # Opening an event here would skip recording the school list at it; the school list import opens events
+    readonly_fields = ["is_active"]
 
 
 @admin.register(RegistrationContact)

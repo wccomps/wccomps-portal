@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from core.auth_utils import require_permission
 from core.utils import client_ip
-from team.models import Team
+from team.models import SchoolInfo, Team
 
 from .forms import EventForm, RegistrationForm, RejectRegistrationForm, SeasonForm
 from .models import (
@@ -20,7 +20,7 @@ from .models import (
     TeamRegistration,
     normalize_school_name,
 )
-from .services import assign_school_to_event
+from .services import remove_team_school, set_team_school
 
 
 def register(request: HttpRequest) -> HttpResponse:
@@ -324,6 +324,9 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         return redirect("registration_event_detail", event_id=event_id)
 
     event = get_object_or_404(Event, id=event_id)
+    if event != Event.objects.open():
+        messages.error(request, "Teams can only be assigned for the open event: import its school list first.")
+        return redirect("registration_event_detail", event_id=event_id)
 
     enrolled_registrations = (
         RegistrationEventEnrollment.objects.filter(
@@ -332,29 +335,40 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         )
         .exclude(registration__team_assignments__event=event)
         .select_related("registration")
+        .prefetch_related("registration__contacts")
         .order_by("enrolled_at", "pk")
     )
 
-    # A school holds one team per event, whether it was imported or assigned here
-    taken = set(EventTeamAssignment.objects.filter(event=event).values_list("school__name_key", flat=True))
-    registrations_to_assign = []
+    # A school holds one team, whether it was imported or assigned here
+    taken = set(SchoolInfo.objects.values_list("school__name_key", flat=True))
+    taken |= set(EventTeamAssignment.objects.filter(event=event).values_list("school__name_key", flat=True))
+    registrations_to_assign: list[tuple[TeamRegistration, str]] = []
     skipped = []
+    no_contact = []
     for enrollment in enrolled_registrations:
-        key = normalize_school_name(enrollment.registration.school_name)
+        registration = enrollment.registration
+        key = normalize_school_name(registration.school_name)
+        contact_email = _primary_contact_email(registration)
         if key in taken:
-            skipped.append(enrollment.registration.school_name)
+            skipped.append(registration.school_name)
+        elif not contact_email:
+            no_contact.append(registration.school_name)
         else:
             taken.add(key)
-            registrations_to_assign.append(enrollment.registration)
+            registrations_to_assign.append((registration, contact_email))
     if skipped:
-        messages.warning(request, f"Skipped {', '.join(skipped)}: that school already has a team in this event.")
+        messages.warning(request, f"Skipped {', '.join(skipped)}: that school already has a team.")
+    if no_contact:
+        messages.warning(request, f"Skipped {', '.join(no_contact)}: no contact email on the registration.")
 
     if not registrations_to_assign:
         messages.warning(request, "No eligible registrations to assign.")
         return redirect("registration_event_detail", event_id=event_id)
 
     assigned_team_ids = EventTeamAssignment.objects.filter(event=event).values_list("team_id", flat=True)
-    available_teams = list(Team.objects.exclude(id__in=assigned_team_ids).order_by("team_number"))
+    available_teams = list(
+        Team.objects.exclude(id__in=assigned_team_ids).filter(school_info__isnull=True).order_by("team_number")
+    )
 
     if len(registrations_to_assign) > len(available_teams):
         messages.error(
@@ -366,11 +380,23 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
     random.shuffle(available_teams)
 
     with transaction.atomic():
-        for i, registration in enumerate(registrations_to_assign):
-            assign_school_to_event(event, available_teams[i], registration.school_name, registration)
+        for team, (registration, contact_email) in zip(available_teams, registrations_to_assign, strict=False):
+            set_team_school(
+                team,
+                registration.school_name,
+                contact_email=contact_email,
+                updated_by=request.user.get_username(),
+                registration=registration,
+            )
 
     messages.success(request, f"Assigned {len(registrations_to_assign)} teams successfully.")
     return redirect("registration_event_detail", event_id=event_id)
+
+
+def _primary_contact_email(registration: TeamRegistration) -> str:
+    """The captain's email, else the first contact's; empty when the registration has none."""
+    contacts = sorted(registration.contacts.all(), key=lambda contact: (contact.role != "captain", contact.pk))
+    return contacts[0].email if contacts else ""
 
 
 @require_permission("gold_team")
@@ -385,8 +411,12 @@ def unassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
         messages.error(request, "Cannot unassign a team after credentials have been sent.")
         return redirect("registration_event_detail", event_id=event_id)
 
+    if assignment.event != Event.objects.open():
+        messages.error(request, "Only the open event's teams can be unassigned; earlier events are history.")
+        return redirect("registration_event_detail", event_id=event_id)
+
     school_name = assignment.school.name
-    assignment.delete()
+    remove_team_school(assignment.team)
     messages.success(request, f"Team assignment for {school_name} removed.")
 
     return redirect("registration_event_detail", event_id=event_id)

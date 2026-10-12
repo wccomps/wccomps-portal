@@ -1,39 +1,70 @@
-from team.models import Team
+from django.db import transaction
 
-from .models import Event, EventTeamAssignment, School, TeamRegistration, normalize_school_name
+from team.models import SchoolInfo, Team
 
-
-def assign_school_to_event(
-    event: Event, team: Team, school_name: str, registration: TeamRegistration | None = None
-) -> EventTeamAssignment:
-    """Record that the school holds this team number at the event: the link the season history follows."""
-    school = School.for_name(school_name)
-    if registration is not None and registration.school_id != school.pk:
-        registration.school = school
-        registration.save(update_fields=["school"])
-    return EventTeamAssignment.objects.create(event=event, team=team, school=school, registration=registration)
+from .models import Event, EventTeamAssignment, School, TeamRegistration
 
 
 class SchoolTakenError(Exception):
-    """Another team in the event already holds the school; the message says which."""
+    """Another team already holds the school; the message names the school and that team."""
 
 
-def set_team_school(event: Event, team: Team, school_name: str) -> School:
-    """Make the school the one holding this team at the event, keeping its registration on the same school.
+@transaction.atomic
+def set_team_school(
+    team: Team,
+    school_name: str,
+    *,
+    contact_email: str,
+    secondary_email: str = "",
+    notes: str = "",
+    updated_by: str = "",
+    registration: TeamRegistration | None = None,
+) -> SchoolInfo:
+    """Make the school the one holding this team in the school list, and at the open event if there is one.
 
-    Returns that School; raises SchoolTakenError when another team in the event already holds it.
+    The only writer of a team's school: the open event's assignment, and the registration given or already linked
+    to it, follow the school list. Raises SchoolTakenError when another team holds the school.
     """
-    assignment = event.team_assignments.filter(team=team).select_related("school", "registration").first()
-    if event.team_assignments.filter(school__name_key=normalize_school_name(school_name)).exclude(team=team).exists():
-        raise SchoolTakenError(f"{school_name} already has a team in {event}.")
-    if assignment is None:
-        return assign_school_to_event(event, team, school_name).school
-    school = School.for_name(school_name)
-    if assignment.school_id != school.pk:
-        assignment.school = school
-        assignment.save(update_fields=["school"])
-    registration = assignment.registration
+    # Locked so two teams claiming one school at the same time can't both pass the check
+    school = School.objects.select_for_update().get(pk=School.for_name(school_name).pk)
+    event = Event.objects.open()
+    holder: SchoolInfo | EventTeamAssignment | None = (
+        SchoolInfo.objects.filter(school=school).exclude(team=team).select_related("team").first()
+    )
+    if holder is None and event is not None:
+        holder = event.team_assignments.filter(school=school).exclude(team=team).select_related("team").first()
+    if holder is not None:
+        raise SchoolTakenError(f"{school.name} already has a team: Team {holder.team.team_number}.")
+
+    info = SchoolInfo.objects.filter(team=team).first() or SchoolInfo(team=team)
+    info.school = school
+    info.contact_email = contact_email
+    info.secondary_email = secondary_email
+    info.notes = notes
+    info.updated_by = updated_by
+    info.save()
+
+    if event is not None:
+        assignment = event.team_assignments.filter(team=team).select_related("registration").first()
+        if assignment is None:
+            assignment = EventTeamAssignment.objects.create(
+                event=event, team=team, school=school, registration=registration
+            )
+        elif assignment.school_id != school.pk or (registration and assignment.registration_id != registration.pk):
+            assignment.school = school
+            assignment.registration = registration or assignment.registration
+            assignment.save(update_fields=["school", "registration"])
+        registration = assignment.registration
     if registration is not None and registration.school_id != school.pk:
         registration.school = school
         registration.save(update_fields=["school"])
-    return school
+    return info
+
+
+@transaction.atomic
+def remove_team_school(team: Team) -> None:
+    """Take the team out of the school list and out of the open event; earlier events keep their assignments."""
+    SchoolInfo.objects.filter(team=team).delete()
+    event = Event.objects.open()
+    if event is not None:
+        event.team_assignments.filter(team=team).delete()

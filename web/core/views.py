@@ -7,7 +7,7 @@ from django.core.files.uploadedfile import UploadedFile
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
-from registration.models import Event, School, Season
+from registration.models import Event, Season
 from registration.services import SchoolTakenError, set_team_school
 
 from core.services.linking import (
@@ -294,26 +294,14 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
         notes = form.cleaned_data.get("notes", "")
 
         try:
-            with transaction.atomic():
-                # A team edited in by hand joins the open event like an imported one (the registration event page)
-                event = Event.objects.open()
-                school = set_team_school(event, team, school_name) if event else School.for_name(school_name)
-                if school_info:
-                    school_info.school = school
-                    school_info.contact_email = contact_email
-                    school_info.secondary_email = secondary_email
-                    school_info.notes = notes
-                    school_info.updated_by = authentik_username
-                    school_info.save()
-                else:
-                    school_info = SchoolInfo.objects.create(
-                        team=team,
-                        school=school,
-                        contact_email=contact_email,
-                        secondary_email=secondary_email,
-                        notes=notes,
-                        updated_by=authentik_username,
-                    )
+            school_info = set_team_school(
+                team,
+                school_name,
+                contact_email=contact_email,
+                secondary_email=secondary_email,
+                notes=notes,
+                updated_by=authentik_username,
+            )
         except SchoolTakenError as taken:
             return render(
                 request, "school_info_edit.html", {"team": team, "school_info": school_info, "error": str(taken)}

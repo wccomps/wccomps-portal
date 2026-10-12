@@ -10,7 +10,7 @@ from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import Count, Q
 from registration.models import Event, EventTeamAssignment, School, Season, normalize_school_name
-from registration.services import assign_school_to_event
+from registration.services import set_team_school
 
 from team.models import SchoolInfo, Team, default_team_name
 
@@ -317,11 +317,9 @@ def apply_csv_import(teams_to_create: list[CSVRowData], updated_by: str, event: 
     event.open()
 
     for row in teams_to_create:
-        team = row["_team"]
-        assignment = assign_school_to_event(event, team, row["school_name"])
-        SchoolInfo.objects.create(
-            team=team,
-            school=assignment.school,
+        set_team_school(
+            row["_team"],
+            row["school_name"],
             contact_email=row["contact_email"],
             secondary_email=row.get("secondary_email", ""),
             notes=row.get("notes", ""),

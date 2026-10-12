@@ -3,7 +3,7 @@
 import pytest
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from registration.models import School
+from registration.models import EventTeamAssignment, School
 
 from team.forms import apply_csv_import, parse_csv_file, validate_csv_data
 from team.models import SchoolInfo, Team
@@ -224,6 +224,13 @@ def _row(school_name: str) -> dict[str, str]:
     return {"school_name": school_name, "contact_email": "contact@example.edu", "secondary_email": "", "notes": ""}
 
 
+def _assign(event, team_number, school_name):
+    """A school's assignment at an event, as history: not through the school list."""
+    return EventTeamAssignment.objects.create(
+        event=event, team=Team.objects.get(team_number=team_number), school=School.for_name(school_name)
+    )
+
+
 def _open_event():
     from datetime import date
 
@@ -371,10 +378,8 @@ class TestImportOpensEvent:
         assert result["errors"] and "repeated" in result["errors"][0]
 
     def test_preview_marks_returning_and_new_schools(self, setup_teams, season):
-        from registration.services import assign_school_to_event
-
         past = self._event(season, "Past")
-        assign_school_to_event(past, Team.objects.get(team_number=1), "University One")
+        _assign(past, 1, "University One")
 
         result = validate_csv_data([_row("university one"), _row("University Two")])
 
@@ -382,22 +387,18 @@ class TestImportOpensEvent:
         assert marks == {"university one": 1, "University Two": None}
 
     def test_reimporting_for_the_same_event_marks_its_only_school_as_new(self, setup_teams, season):
-        from registration.services import assign_school_to_event
-
         event = self._event(season, "Invitational", active=True)
-        assign_school_to_event(event, Team.objects.get(team_number=1), "University One")
+        _assign(event, 1, "University One")
 
         result = validate_csv_data([_row("University One")], event.pk)
 
         assert result["teams_to_create"][0]["returning_events"] is None
 
     def test_a_school_with_a_different_past_event_is_returning_when_reimporting(self, setup_teams, season):
-        from registration.services import assign_school_to_event
-
         past = self._event(season, "Past")
         event = self._event(season, "Invitational", active=True)
-        assign_school_to_event(past, Team.objects.get(team_number=1), "University One")
-        assign_school_to_event(event, Team.objects.get(team_number=2), "University One")
+        _assign(past, 1, "University One")
+        _assign(event, 2, "University One")
 
         result = validate_csv_data([_row("University One")], event.pk)
 
@@ -412,10 +413,8 @@ class TestImportOpensEvent:
         assert result["teams_to_create"][0]["returning_events"] is None
 
     def test_preview_warns_when_the_event_already_has_assignments(self, setup_teams, season):
-        from registration.services import assign_school_to_event
-
         event = self._event(season, "Invitational", active=True)
-        assign_school_to_event(event, Team.objects.get(team_number=1), "University One")
+        _assign(event, 1, "University One")
 
         result = validate_csv_data([_row("University Two")], event.pk)
 

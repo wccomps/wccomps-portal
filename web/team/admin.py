@@ -114,8 +114,8 @@ class SchoolInfoAdmin(admin.ModelAdmin[SchoolInfo]):
     list_select_related = ["school", "team"]
     search_fields = ["school__name", "contact_email", "team__team_name"]
     # password mirrors the team account's Authentik password for packet emails; editing it here would change
-    # only this copy, so it's set solely by reset_team_password. The school is set on the School Info page,
-    # which keeps the open event's assignment on the same School.
+    # only this copy, so it's set solely by reset_team_password. The school is set on the School Info page
+    # (registration.services.set_team_school), which the open event's assignment follows.
     exclude = ["password"]
     readonly_fields = ["school", "created_at", "updated_at", "updated_by", "password_with_reset"]
     ordering = ["team__team_number"]

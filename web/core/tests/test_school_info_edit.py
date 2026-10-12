@@ -175,3 +175,33 @@ def test_the_export_shows_the_school_name(client):
     response = client.get(reverse("school_info_export"))
 
     assert "9,Team 09,Example U,captain@example.edu" in response.content.decode()
+
+
+def test_two_teams_cannot_share_a_school_with_no_open_event(client):
+    Team.objects.create(team_number=2, team_name="Team 02")
+    Team.objects.create(team_number=4, team_name="Team 04")
+    _edit(client, 2, "Example University")
+
+    response = _edit(client, 4, "example university")
+
+    assert b"already has a team: Team 2" in response.content
+    assert not SchoolInfo.objects.filter(team__team_number=4).exists()
+
+
+def test_an_edit_with_no_open_event_then_an_import_leaves_the_list_and_the_event_in_step(client):
+    from team.forms import apply_csv_import
+
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    other = Team.objects.create(team_number=5, team_name="Team 05")
+    _edit(client, 4, "Example University")
+    season = Season.objects.create(name="2026", year=2026, is_active=True)
+    event = Event.objects.create(season=season, name="Inv", event_type="invitational", date=date(2026, 10, 3))
+
+    apply_csv_import(
+        [{"_team": other, "school_name": "Other College", "contact_email": "o@example.edu"}], "gold", event
+    )
+
+    live = set(SchoolInfo.objects.values_list("team", "school"))
+    assert live == set(EventTeamAssignment.objects.filter(event=event).values_list("team", "school"))
+    assert live == {(other.pk, School.objects.get(name="Other College").pk)}
+    assert team.pk not in {pk for pk, _ in live}
