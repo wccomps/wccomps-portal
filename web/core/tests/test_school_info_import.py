@@ -194,8 +194,10 @@ def test_reimporting_the_open_event_is_refused_while_its_scores_are_live(client)
 
     response = client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
 
-    assert f"Scores are already recorded for {event}".encode() in response.content
-    assert b"Re-importing reassigns team numbers under them" in response.content
+    assert (
+        f"Teams have already started using their team numbers for {event} (scores, tickets or Discord links). "
+        "Re-importing reassigns team numbers under them. Change a single school on its School Info page instead."
+    ).encode() in response.content
     assert not SchoolInfo.objects.exists()
 
 
@@ -210,7 +212,7 @@ def test_confirming_a_reimport_of_the_open_event_is_refused_once_scores_appear(c
 
     response = client.post(reverse("school_info_import"), {"confirm": "true"})
 
-    assert f"Scores are already recorded for {event}".encode() in response.content
+    assert f"Teams have already started using their team numbers for {event}".encode() in response.content
     assert not SchoolInfo.objects.exists()
 
 

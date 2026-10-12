@@ -336,7 +336,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
 
 def _import_event_problem(event: Event | None) -> str:
     """Why a list can't be imported for this event (None: a new one) now: another event is open, the last
-    event's scores remain, or this open event's scores are already recorded."""
+    event's data remains, or teams have already started using their numbers in this open event."""
     from core.competition_utils import live_competition_data_exists
 
     open_now = Event.objects.open()
@@ -350,8 +350,8 @@ def _import_event_problem(event: Event | None) -> str:
             "Finalize and clear that event before importing a new school list."
         )
     return (
-        f"Scores are already recorded for {open_now}. Re-importing reassigns team numbers under them. "
-        "Change a single school on its School Info page instead."
+        f"Teams have already started using their team numbers for {open_now} (scores, tickets or Discord links). "
+        "Re-importing reassigns team numbers under them. Change a single school on its School Info page instead."
     )
 
 
