@@ -1,8 +1,9 @@
 import csv
 import io
 import random
-from collections.abc import Iterable
-from typing import NotRequired, TypedDict, cast
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from typing import TypedDict, cast
 
 from django import forms
 from django.core.exceptions import ValidationError
@@ -10,7 +11,15 @@ from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import validate_email
 from django.db.models import Count, Q
 from registration.models import Event, School, Season, normalize_school_name
-from registration.services import add_problem, free_teams, held_schools
+from registration.services import (
+    SchoolListRow,
+    add_problem,
+    add_to_school_list,
+    free_teams,
+    held_schools,
+    import_problem,
+    import_school_list,
+)
 
 from team.models import SchoolInfo, Team, default_team_name
 
@@ -78,7 +87,6 @@ class CSVValidationResult(TypedDict):
     teams_to_create: list[CSVRowData]
     errors: list[str]
     warnings: list[str]
-    summary: NotRequired[str]
 
 
 class CSVUploadForm(forms.Form):
@@ -104,12 +112,9 @@ class CSVUploadForm(forms.Form):
         return csv_file
 
 
-IMPORT_MODES = {"replace": "Replace the school list", "add": "Add schools"}
-
-
 class ImportEventForm(forms.Form):
-    """The event a school list is for: an unfinalized event of the active season, or a new one; and whether the
-    list replaces the school list or adds schools to the open event's."""
+    """The event a school list is for: an unfinalized event of the active season, or a new one; and the import mode's
+    key (IMPORT_MODES), Replace when not given."""
 
     event = forms.CharField(required=False)
     mode = forms.CharField(required=False)
@@ -117,7 +122,7 @@ class ImportEventForm(forms.Form):
     new_date = forms.DateField(required=False)
     new_type = forms.CharField(required=False)
 
-    # After validation: the chosen event, or an unsaved new one the import saves; and "replace" or "add"
+    # After validation: the chosen event, or an unsaved new one the import saves; and the mode's key
     event_to_import: Event
     import_mode: str
 
@@ -151,8 +156,6 @@ class ImportEventForm(forms.Form):
         self.import_mode = str(data.get("mode") or "replace")
         if self.import_mode not in IMPORT_MODES:
             raise ValidationError("Pick Replace or Add.")
-        if self.import_mode == "add" and (problem := add_problem(self.event_to_import)):
-            raise ValidationError(problem)
         return data
 
 
@@ -338,12 +341,42 @@ def validate_csv_additions(rows: list[CSVRowData], event: Event) -> CSVValidatio
         return {"teams_to_create": [], "errors": errors, "warnings": warnings}
 
     warnings.extend(_team_warnings(teams, teams))
-    return {
-        "teams_to_create": _assign(new_rows, teams, event.pk),
-        "errors": errors,
-        "warnings": warnings,
-        "summary": (
-            f"Adds {len(new_rows)} school(s) to {event}; the {SchoolInfo.objects.count()} school(s) already on the "
-            "list keep their team numbers."
+    return {"teams_to_create": _assign(new_rows, teams, event.pk), "errors": errors, "warnings": warnings}
+
+
+@dataclass(frozen=True)
+class ImportMode:
+    """One way to import a school list. Its services re-check the event and the teams under the school list lock."""
+
+    label: str  # What the page calls it; {event} is the event imported into
+    problem: Callable[[Event], str]  # Why the event can't take the import now, or ''
+    validate: Callable[[list[CSVRowData], Event], CSVValidationResult]
+    preview: Callable[[Event, list[CSVRowData]], str]  # A sentence on what the import keeps, or ''
+    apply: Callable[[Event, list[SchoolListRow], str], dict[str, int]]
+    result: Callable[[Event, dict[str, int]], list[str]]  # The lines saying what it did
+
+
+IMPORT_MODES = {
+    "replace": ImportMode(
+        label="Replace the school list",
+        problem=import_problem,
+        validate=validate_csv_data,
+        preview=lambda event, rows: "",
+        apply=import_school_list,
+        result=lambda event, counts: [
+            "Import completed successfully!",
+            f"Created: {counts['created']} school info record(s)",
+        ],
+    ),
+    "add": ImportMode(
+        label="Add schools to {event}",
+        problem=add_problem,
+        validate=validate_csv_additions,
+        preview=lambda event, rows: (
+            f"Adds {len(rows)} school(s) to {event}; the {SchoolInfo.objects.count()} school(s) already on the list "
+            "keep their team numbers."
         ),
-    }
+        apply=add_to_school_list,
+        result=lambda event, counts: [f"Added {counts['created']} school(s) to {event}."],
+    ),
+}

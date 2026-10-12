@@ -179,3 +179,11 @@ def test_a_replace_preview_says_so(client, event, teams):
 
     assert "Replace the school list" in content
     assert "Mode:" in content
+
+
+def test_the_mode_label_names_no_single_radio(client, event):
+    content = client.get(reverse("school_info_import")).content.decode()
+
+    assert content.count('id="id_mode_replace"') == 1
+    assert 'for="id_mode_replace"' not in content
+    assert "Add schools to Invitational (2026)" in content

@@ -16,10 +16,7 @@ from registration.services import (
     SchoolChangedError,
     SchoolListRow,
     SchoolTakenError,
-    add_to_school_list,
     clear_school_list,
-    import_problem,
-    import_school_list,
     remove_team_school,
     set_team_school,
 )
@@ -36,9 +33,8 @@ from team.forms import (
     IMPORT_MODES,
     CSVUploadForm,
     ImportEventForm,
+    ImportMode,
     parse_csv_file,
-    validate_csv_additions,
-    validate_csv_data,
 )
 from team.models import LinkToken, SchoolInfo, Team
 
@@ -371,7 +367,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
 
 
 def _parse_school_info_csv(
-    csv_file: UploadedFile[bytes], event: Event, mode: str
+    csv_file: UploadedFile[bytes], event: Event, mode: ImportMode
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
     """Parse and validate a school-info CSV for the import mode into (preview data, session rows; empty on errors)."""
     parse_result = parse_csv_file(csv_file)
@@ -383,13 +379,10 @@ def _parse_school_info_csv(
             "rows": [],
         }, []
 
-    if mode == "add":
-        validation_result = validate_csv_additions(parse_result["rows"], event)
-    else:
-        validation_result = validate_csv_data(parse_result["rows"], event)
+    validation_result = mode.validate(parse_result["rows"], event)
 
     preview_data: dict[str, object] = {
-        "summary": validation_result.get("summary", ""),
+        "summary": "" if validation_result["errors"] else mode.preview(event, validation_result["teams_to_create"]),
         "errors": validation_result["errors"],
         "warnings": parse_result["warnings"] + validation_result["warnings"],
         "teams_to_create": validation_result["teams_to_create"],
@@ -425,8 +418,8 @@ def _upload_again(*problems: str) -> tuple[dict[str, object], None]:
 def _apply_school_info_import(
     import_data: dict[str, object], authentik_username: str
 ) -> tuple[dict[str, object] | None, dict[str, object] | None]:
-    """Re-check the event fields, then replace the list or add to it as the stored mode says (the services re-check
-    the event and the teams under the school list lock): (preview_data, None) on errors, else (None, results)."""
+    """Re-check the event fields, then apply the stored mode (its service re-checks the event and the teams under the
+    school list lock): (preview_data, None) on errors, else (None, results)."""
     stored_rows = import_data.get("teams_to_create")
     event_fields = import_data.get("event")
     rows = None
@@ -442,16 +435,12 @@ def _apply_school_info_import(
     if not event_form.is_valid():
         return _upload_again(*(str(e) for e in event_form.non_field_errors()))
     event = event_form.event_to_import
+    mode = IMPORT_MODES[event_form.import_mode]
     try:
-        if event_form.import_mode == "add":
-            counts = add_to_school_list(event, rows, authentik_username)
-            message = f"Added {counts['created']} school(s) to {event}."
-        else:
-            counts = import_school_list(event, rows, authentik_username)
-            message = "Import completed successfully!"
+        counts = mode.apply(event, rows, authentik_username)
     except ImportBlockedError as blocked:
         return _import_error(str(blocked)), None
-    return None, {"message": message, "mode": event_form.import_mode, **counts}
+    return None, {"lines": mode.result(event, counts), **counts}
 
 
 @require_permission("gold_team")
@@ -478,9 +467,8 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
                 error = " ".join(str(e) for e in event_form.non_field_errors())
             elif form.is_valid() and event_form is not None:
                 event = event_form.event_to_import
-                mode = event_form.import_mode
-                # Adding moves nobody, so only Replace is held back by sent packets or live data
-                if mode == "replace" and (problem := import_problem(event)):
+                mode = IMPORT_MODES[event_form.import_mode]
+                if problem := mode.problem(event):
                     error = problem
                 else:
                     csv_file = cast(UploadedFile[bytes], request.FILES["csv_file"])
@@ -491,9 +479,7 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
                             "event": {name: event_form.data.get(name, "") for name in event_form.fields},
                         }
                         preview_data["event_label"] = str(event) if event.pk else f"New: {event.name}"
-                        preview_data["mode_label"] = (
-                            f"Add schools to {event}" if mode == "add" else IMPORT_MODES["replace"]
-                        )
+                        preview_data["mode_label"] = mode.label.format(event=event)
 
         elif "confirm" in request.POST:
             import_data = request.session.get("csv_import_data")
@@ -506,6 +492,7 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
         else:
             error = "The form was submitted without an action. Upload the file again."
 
+    open_event = Event.objects.open() or "the open event"
     return render(
         request,
         "school_info_import.html",
@@ -513,7 +500,7 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
             "authentik_username": authentik_username,
             "form": form,
             "open_events": season.events.filter(is_finalized=False) if season else [],
-            "open_event": Event.objects.open(),
+            "import_modes": [(key, mode.label.format(event=open_event)) for key, mode in IMPORT_MODES.items()],
             "preview_data": preview_data,
             "import_results": import_results,
             "error": error,

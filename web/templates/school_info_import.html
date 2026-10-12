@@ -13,11 +13,14 @@
             {% if import_results %}
                 {# Step 3: Show success message #}
                 <c-alert variant="success">
-                    <strong>{{ import_results.message }}</strong>
-                    {% if import_results.mode == "replace" %}
-                        <br>
-                        Created: {{ import_results.created }} school info record(s)
-                    {% endif %}
+                    {% for line in import_results.lines %}
+                        {% if forloop.first %}
+                            <strong>{{ line }}</strong>
+                        {% else %}
+                            <br>
+                            {{ line }}
+                        {% endif %}
+                    {% endfor %}
                     {% if import_results.activated %}
                         <br>
                         Activated: {{ import_results.activated }} team(s)
@@ -162,20 +165,15 @@ Tech Institute,admin@techinst.edu,,</pre>
                                 </select>
                             </c-form_field>
                             <c-form_field label="Mode"
-                                          id="id_mode_replace"
                                           help_text="Replace for an event's first school list; Add for schools that registered after it.">
-                                <div>
-                                    <label>
-                                        <input type="radio" name="mode" value="replace" id="id_mode_replace" checked>
-                                        Replace the school list
-                                    </label>
-                                </div>
-                                <div>
-                                    <label>
-                                        <input type="radio" name="mode" value="add" id="id_mode_add">
-                                        Add schools to {% if open_event %}{{ open_event }}{% else %}the open event{% endif %}
-                                    </label>
-                                </div>
+                                {% for key, label in import_modes %}
+                                    <div>
+                                        <label>
+                                            <input type="radio" name="mode" value="{{ key }}" id="id_mode_{{ key }}" {% if forloop.first %}checked{% endif %}>
+                                            {{ label }}
+                                        </label>
+                                    </div>
+                                {% endfor %}
                             </c-form_field>
                             <c-form_field label="New event name" id="id_new_name" help_text="Only for a new event.">
                                 <input type="text" name="new_name" id="id_new_name" class="vTextField">
