@@ -87,3 +87,20 @@ def test_two_registrations_of_one_school_in_an_event_stop_the_migration_with_a_c
 
     # The fixture migrates forward again afterwards, which needs the clash gone
     old_apps.get_model("registration", "EventTeamAssignment").objects.filter(team__team_number=2).delete()
+
+
+def test_reversing_with_imported_assignments_stops_with_a_clear_error():
+    _migrate(_latest())
+    from registration.models import EventTeamAssignment, School, Season
+    from team.models import Team
+
+    season = Season.objects.create(name="2026", year=2026, is_active=False)
+    event = season.events.create(name="Invitational", event_type="invitational", date=date(2026, 10, 3))
+    team = Team.objects.create(team_number=1, team_name="Team 01")
+    EventTeamAssignment.objects.create(event=event, team=team, school=School.for_name("Example University"))
+
+    try:
+        with pytest.raises(RuntimeError, match=r"Imported assignments have no registration; reverse 0005 only after"):
+            _migrate(_before())
+    finally:
+        _migrate(_latest())

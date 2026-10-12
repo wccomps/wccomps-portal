@@ -24,6 +24,15 @@ def link_schools(apps, schema_editor):
         assignment.registration.save(update_fields=["school"])
 
 
+def refuse_reverse_with_imported_assignments(apps, schema_editor):
+    """Before 0005 every assignment needed a registration; stop clearly rather than fail on the NOT NULL column."""
+    EventTeamAssignment = apps.get_model("registration", "EventTeamAssignment")
+    if EventTeamAssignment.objects.filter(registration__isnull=True).exists():
+        raise RuntimeError(
+            "Imported assignments have no registration; reverse 0005 only after deleting them, or roll forward."
+        )
+
+
 class Migration(migrations.Migration):
     dependencies = [("registration", "0004_registration_rate_limit")]
 
@@ -83,4 +92,6 @@ class Migration(migrations.Migration):
                 to="registration.teamregistration",
             ),
         ),
+        # Last, so that reversing runs it first: before the registration column becomes required again
+        migrations.RunPython(migrations.RunPython.noop, refuse_reverse_with_imported_assignments),
     ]
