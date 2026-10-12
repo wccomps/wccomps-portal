@@ -5,7 +5,7 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from registration.models import Season
 from registration.services import (
     ImportBlockedError,
@@ -14,6 +14,7 @@ from registration.services import (
     clear_school_list,
     import_problem,
     import_school_list,
+    remove_team_school,
     set_team_school,
 )
 
@@ -261,6 +262,27 @@ def school_info_clear(request: HttpRequest) -> HttpResponse:
         request,
         "school_info_clear.html",
         {"count": count, "error": error, "show_ops_nav": True},
+    )
+
+
+@require_permission("gold_team")
+def school_info_remove(request: HttpRequest, team_number: int) -> HttpResponse:
+    school_info = get_object_or_404(SchoolInfo.objects.select_related("team", "school"), team__team_number=team_number)
+    error = ""
+    if request.method == "POST":
+        try:
+            remove_team_school(school_info.team)
+        except PacketsSentError as sent:
+            error = str(sent)
+        else:
+            logger.info(f"Removed Team {team_number}'s school info by {request.user.username}")
+            messages.success(request, f"Removed {school_info.school_name} from Team {team_number}.")
+            return redirect("school_info")
+
+    return render(
+        request,
+        "school_info_remove.html",
+        {"school_info": school_info, "error": error, "show_ops_nav": True},
     )
 
 

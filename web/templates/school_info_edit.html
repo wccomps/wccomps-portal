@@ -49,6 +49,9 @@
                     </c-form_field>
                 </c-fieldset>
                 <c-button_row class="justify-end">
+                    {% if school_info %}
+                        <c-link href="{% url 'school_info_remove' team.team_number %}" variant="danger">Remove</c-link>
+                    {% endif %}
                     <c-link href="{% url 'school_info' %}">Cancel</c-link>
                     <c-button type="submit" variant="primary" ::disabled="submitting">
                         Save School Information

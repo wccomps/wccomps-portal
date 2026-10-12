@@ -31,6 +31,7 @@ urlpatterns = [
         views.school_info_edit,
         name="school_info_edit",
     ),
+    path("ops/school-info/<int:team_number>/remove/", views.school_info_remove, name="school_info_remove"),
     # Leaderboard (standalone primary nav section)
     path("leaderboard/", leaderboard, name="leaderboard_page"),
     path("leaderboard/team/<int:team_number>/", scorecard, name="leaderboard_scorecard"),
