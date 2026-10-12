@@ -1,12 +1,11 @@
-"""Importing a school list is one operation: imports are serialized and the event is re-checked under the lock."""
+"""The import re-checks the event before writing: a refused import writes nothing, and a new event is saved and
+opened only when the import goes ahead."""
 
 from datetime import date
 
 import pytest
-from django.db import connection
-from django.test.utils import CaptureQueriesContext
 
-from registration.models import Event, EventTeamAssignment, Season
+from registration.models import Event, Season
 from registration.services import ImportBlockedError, import_school_list
 from team.models import SchoolInfo, Team
 
@@ -27,20 +26,6 @@ def _event(season, name, active=False):
 def _rows():
     team = Team.objects.create(team_number=1, team_name="Team 01")
     return [{"_team": team, "school_name": "Example University", "contact_email": "c@example.edu"}]
-
-
-def test_the_import_locks_the_season_before_checking_the_event(season):
-    event = _event(season, "Invitational")
-    rows = _rows()
-
-    with CaptureQueriesContext(connection) as queries:
-        import_school_list(event, rows, "gold")
-
-    sql = [query["sql"] for query in queries.captured_queries]
-    lock = next(i for i, q in enumerate(sql) if "FOR UPDATE" in q and "registration_season" in q)
-    check = next(i for i, q in enumerate(sql) if '"registration_event"."is_active"' in q)
-    assert lock < check
-    assert SchoolInfo.objects.get().school == EventTeamAssignment.objects.get(event=event).school
 
 
 def test_the_import_refuses_under_the_lock_when_another_event_opened_first(season):

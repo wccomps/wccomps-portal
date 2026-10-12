@@ -5,9 +5,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
-from django.db import close_old_connections
+from django.db import close_old_connections, transaction
 from django.template.loader import render_to_string
 from registration.models import Event
+from registration.services import school_list_lock
 
 from core.authentik_utils import reset_team_password
 from team.models import SchoolInfo, Team, team_username
@@ -26,8 +27,14 @@ NO_EVENT_OPEN = "No event is open."
 UNRECORDED_EVENT_PACKET = "This packet was sent before events were recorded; team numbers may have changed since"
 
 
+@transaction.atomic
 def begin_distribution(packet: Packet) -> None:
-    """Start sending a draft packet, making the open event its event; ValueError says why it can't start."""
+    """Start sending a draft packet, making the open event its event; ValueError says why it can't start.
+
+    Under the school-list lock, so a send can't start while the school list or the open event is changing.
+    """
+    school_list_lock()
+    packet.refresh_from_db(fields=["status"])
     if not packet.is_ready_for_distribution():
         raise ValueError(NOT_A_DRAFT)
     event = Event.objects.open()

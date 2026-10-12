@@ -1,15 +1,29 @@
 from typing import TYPE_CHECKING
 
-from django.db import transaction
+from django.db import connection, transaction
 from packets.models import Packet
 
 from core.competition_utils import live_competition_data_exists
 from team.models import SchoolInfo, Team, default_team_name
 
-from .models import Event, EventTeamAssignment, School, Season, TeamRegistration
+from .models import Event, EventTeamAssignment, School, TeamRegistration
 
 if TYPE_CHECKING:
     from team.forms import CSVRowData
+
+
+# Arbitrary, but fixed (and not prepare_database's): every school-list writer asks for the same lock.
+SCHOOL_LIST_LOCK_ID = 7_261_640_002
+
+
+def school_list_lock() -> None:
+    """Wait for the school list, then hold it until the transaction ends.
+
+    Every write to the school list or the open event's assignments, and every packet send, takes it first and reads
+    the open event after it. Re-entrant within one transaction, so an import can call set_team_school.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [SCHOOL_LIST_LOCK_ID])
 
 
 class SchoolTakenError(Exception):
@@ -32,8 +46,8 @@ def set_team_school(
     The only writer of a team's school: the open event's assignment, and the registration given or already linked
     to it, follow the school list. Raises SchoolTakenError when another team holds the school.
     """
-    # Locked so two teams claiming one school at the same time can't both pass the check
-    school = School.objects.select_for_update().get(pk=School.for_name(school_name).pk)
+    school_list_lock()
+    school = School.for_name(school_name)
     event = Event.objects.open()
     holder: SchoolInfo | EventTeamAssignment | None = (
         SchoolInfo.objects.filter(school=school).exclude(team=team).select_related("team").first()
@@ -71,6 +85,7 @@ def set_team_school(
 @transaction.atomic
 def remove_team_school(team: Team) -> None:
     """Take the team out of the school list and out of the open event; earlier events keep their assignments."""
+    school_list_lock()
     SchoolInfo.objects.filter(team=team).delete()
     event = Event.objects.open()
     if event is not None:
@@ -83,6 +98,7 @@ def clear_school_list() -> int:
 
     Returns how many school info records were deleted.
     """
+    school_list_lock()
     deleted, _ = SchoolInfo.objects.all().delete()
     event = Event.objects.open()
     if event is not None:
@@ -122,10 +138,10 @@ def import_school_list(event: Event, rows: list[CSVRowData], updated_by: str) ->
     """Replace the school list with the rows and open the event (saving it first when new), replacing its
     assignments: each row's school holds the row's team. Resets every team name and activates the rows' teams.
 
-    Imports run one at a time (the active season's row is locked) and the event is checked again under that lock;
+    Every school-list write and packet send takes the same lock; the event is re-checked under it, and
     ImportBlockedError says why the import can't go ahead.
     """
-    Season.objects.select_for_update().get(pk=event.season_id)
+    school_list_lock()
     if problem := import_problem(event):
         raise ImportBlockedError(problem)
     if event._state.adding:
