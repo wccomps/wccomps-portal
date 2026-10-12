@@ -26,6 +26,10 @@ def school_list_lock() -> None:
         cursor.execute("SELECT pg_advisory_xact_lock(%s)", [SCHOOL_LIST_LOCK_ID])
 
 
+class PacketsSentError(Exception):
+    """Packets went out for the open event, so its teams' schools can only be changed, not removed."""
+
+
 class SchoolTakenError(Exception):
     """Another team already holds the school; the message names the school and that team."""
 
@@ -43,8 +47,9 @@ def set_team_school(
 ) -> SchoolInfo:
     """Make the school the one holding this team in the school list, and at the open event if there is one.
 
-    The only writer of a team's school: the open event's assignment, and the registration given or already linked
-    to it, follow the school list. Raises SchoolTakenError when another team holds the school.
+    The only writer of a team's school: the open event's assignment follows the school list, linked to the
+    registration given or, while the school stays the same, the one already linked. Raises SchoolTakenError when
+    another team holds the school.
     """
     school_list_lock()
     school = School.for_name(school_name)
@@ -72,8 +77,9 @@ def set_team_school(
                 event=event, team=team, school=school, registration=registration
             )
         elif assignment.school_id != school.pk or (registration and assignment.registration_id != registration.pk):
+            # Another school's registration doesn't follow the team to its new school
             assignment.school = school
-            assignment.registration = registration or assignment.registration
+            assignment.registration = registration
             assignment.save(update_fields=["school", "registration"])
         registration = assignment.registration
     if registration is not None and registration.school_id != school.pk:
@@ -96,11 +102,16 @@ def remove_team_school(team: Team) -> None:
 def clear_school_list() -> int:
     """Empty the school list and the open event's assignments with it; earlier events keep theirs.
 
-    Returns how many school info records were deleted.
+    Returns how many school info records were deleted; PacketsSentError when packets went out for the open event.
     """
     school_list_lock()
-    deleted, _ = SchoolInfo.objects.all().delete()
     event = Event.objects.open()
+    if event is not None and Packet.objects.sent().filter(event=event).exists():
+        raise PacketsSentError(
+            f"Packets have already been sent for {event}. Clear the event's results instead (Finalize and clear), "
+            "or change single schools on their School Info pages."
+        )
+    deleted, _ = SchoolInfo.objects.all().delete()
     if event is not None:
         event.team_assignments.all().delete()
     return deleted

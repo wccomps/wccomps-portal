@@ -133,7 +133,7 @@ class ImportEventForm(forms.Form):
                 event_type=data["new_type"],
                 registration_open=False,
             )
-        elif not choice.isdigit():
+        elif not choice.isdecimal():
             raise ValidationError("Pick the event this school list is for.")
         else:
             chosen = self.season.events.filter(pk=int(choice), is_finalized=False).first()

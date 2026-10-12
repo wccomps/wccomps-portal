@@ -438,3 +438,16 @@ def test_a_new_event_from_the_import_form_is_unsaved_and_closed_to_registration(
     assert form.is_valid()
     assert form.event_to_import._state.adding
     assert form.event_to_import.registration_open is False
+
+
+@pytest.mark.parametrize("choice", ["²", "abc", "-1", ""])
+def test_an_event_choice_that_is_not_a_number_is_a_form_error(choice):
+    from registration.models import Season
+
+    from team.forms import ImportEventForm
+
+    season = Season.objects.create(name="2026", year=2026, is_active=True)
+    form = ImportEventForm({"event": choice}, season=season)
+
+    assert not form.is_valid()
+    assert form.non_field_errors() == ["Pick the event this school list is for."]

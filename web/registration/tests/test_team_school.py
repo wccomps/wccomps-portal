@@ -49,20 +49,42 @@ def test_with_an_open_event_its_assignment_follows_the_school_list(event):
     assert assignment.school == info.school
 
 
-def test_changing_the_school_moves_the_assignment_and_its_registration(event):
+def test_changing_the_school_moves_the_assignment_and_leaves_the_old_registration(event):
     team = _team(4)
     registration = TeamRegistration.objects.create(school_name="Example University", status="paid")
-    set_team_school(team, "Example University", contact_email="c@example.edu", registration=registration)
+    old = set_team_school(team, "Example University", contact_email="c@example.edu", registration=registration).school
 
     info = set_team_school(team, "Other College", contact_email="c@example.edu", secondary_email="b@example.edu")
 
     assignment = EventTeamAssignment.objects.get(event=event)
     assert assignment.school == info.school
-    assert assignment.registration == registration
+    assert assignment.registration is None
     registration.refresh_from_db()
-    assert registration.school == info.school
+    assert registration.school == old
     assert info.secondary_email == "b@example.edu"
     assert SchoolInfo.objects.count() == 1
+
+
+def test_respelling_the_school_keeps_its_registration(event):
+    team = _team(4)
+    registration = TeamRegistration.objects.create(school_name="Example University", status="paid")
+    set_team_school(team, "Example University", contact_email="c@example.edu", registration=registration)
+
+    set_team_school(team, "example  UNIVERSITY", contact_email="c@example.edu")
+
+    assert EventTeamAssignment.objects.get(event=event).registration == registration
+
+
+def test_changing_the_school_links_the_registration_given(event):
+    team = _team(4)
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+    registration = TeamRegistration.objects.create(school_name="Other College", status="paid")
+
+    info = set_team_school(team, "Other College", contact_email="c@example.edu", registration=registration)
+
+    assert EventTeamAssignment.objects.get(event=event).registration == registration
+    registration.refresh_from_db()
+    assert registration.school == info.school
 
 
 def test_a_given_registration_is_linked_to_the_assignment_and_the_school(event):

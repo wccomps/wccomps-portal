@@ -1,5 +1,6 @@
 """Clearing school info empties the list and the open event's assignments; schools and past events stay."""
 
+import html
 from datetime import date
 
 import pytest
@@ -59,3 +60,28 @@ def test_the_confirm_page_says_what_is_kept_and_removed(client):
     assert (
         "Schools and their past-event history are kept; the open event's team assignments are removed with the list."
     ) in content
+
+
+def test_clear_is_refused_once_packets_went_out_for_the_open_event(client):
+    from packets.models import Packet
+
+    _, event = _setup(open_event=True)
+    Packet.objects.create(
+        title="Packet",
+        file_data=b"x",
+        filename="p.pdf",
+        mime_type="application/pdf",
+        file_size=1,
+        uploaded_by="gold",
+        status="distributing",
+        event=event,
+    )
+
+    response = client.post(reverse("school_info_clear"))
+
+    assert (
+        f"Packets have already been sent for {event}. Clear the event's results instead (Finalize and clear), "
+        "or change single schools on their School Info pages."
+    ) in html.unescape(response.content.decode())
+    assert SchoolInfo.objects.count() == 1
+    assert EventTeamAssignment.objects.count() == 2
