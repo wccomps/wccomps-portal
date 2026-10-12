@@ -1,7 +1,6 @@
 from collections.abc import Callable
-from typing import Any
 
-from django.db.models import QuerySet
+from django.db.models import Model, QuerySet
 from orange_team.models import OrangeAssignment, OrangeCheckIn
 from scoring.models import (
     IncidentReport,
@@ -19,16 +18,16 @@ from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
 
-def _delete(rows: QuerySet[Any]) -> int:
+def _delete(rows: QuerySet[Model]) -> int:
     return rows.delete()[0]
 
 
-def _reset_ticket_counters(teams: QuerySet[Any]) -> int:
+def _reset_ticket_counters(teams: QuerySet[Model]) -> int:
     return teams.update(ticket_counter=0)
 
 
 # What the wipe clears, in order: (count label, the rows, how they are cleared)
-COMPETITION_DATA: tuple[tuple[str, Callable[[], QuerySet[Any]], Callable[[QuerySet[Any]], int]], ...] = (
+COMPETITION_DATA: tuple[tuple[str, Callable[[], QuerySet[Model]], Callable[[QuerySet[Model]], int]], ...] = (
     ("TicketAttachment", TicketAttachment.objects.all, _delete),
     ("TicketComment", TicketComment.objects.all, _delete),
     ("TicketHistory", TicketHistory.objects.all, _delete),
