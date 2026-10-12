@@ -19,38 +19,37 @@ logger = logging.getLogger(__name__)
 
 from core.utils import ndjson_progress as _progress
 
+NOT_A_DRAFT = "Only a draft packet can be distributed"
 NO_OPEN_EVENT = "Import the school list for this event first"
 EARLIER_EVENT_PACKET = "This packet belongs to an earlier event; team numbers have been reassigned since"
 
 
-def _stamp_open_event(packet: Packet) -> str | None:
-    """Make the open event the packet's event; return a refusal message when no event is open."""
-    # A packet belongs to the event it was sent for; teams see only the open event's packets
+def begin_distribution(packet: Packet) -> None:
+    """Start sending a draft packet, making the open event its event; ValueError says why it can't start."""
+    if not packet.is_ready_for_distribution():
+        raise ValueError(NOT_A_DRAFT)
     event = Event.objects.open()
     if event is None:
-        return NO_OPEN_EVENT
+        raise ValueError(NO_OPEN_EVENT)
     if packet.event_id != event.pk:
         packet.event = event
         packet.save(update_fields=["event", "updated_at"])
-    return None
+    packet.mark_as_distributing()
 
 
-def packet_is_from_open_event(packet: Packet) -> bool:
-    """A resend is only safe within the packet's own event: team numbers are reshuffled between events."""
+def check_resendable(packet: Packet) -> str | None:
+    """Why the packet can't be sent again, or None: a resend is only safe within the packet's own event, since
+    team numbers are reshuffled between events."""
     event = Event.objects.open()
-    return event is not None and packet.event_id == event.pk
+    if event is None or packet.event_id != event.pk:
+        return EARLIER_EVENT_PACKET
+    return None
 
 
 class PacketDistributionService:
     def distribute_packet(self, packet: Packet) -> dict[str, int]:
         """Distribute a packet to all teams."""
-        if not packet.is_ready_for_distribution():
-            raise ValueError(f"Packet {packet.id} is not ready for distribution")
-        refusal = _stamp_open_event(packet)
-        if refusal:
-            raise ValueError(refusal)
-
-        packet.mark_as_distributing()
+        begin_distribution(packet)
 
         distributions_created = self._create_distributions_for_teams(packet)
 
@@ -170,6 +169,30 @@ class PacketDistributionService:
         packet.complete_if_done()
         logger.info(f"Sent packet {packet.id} to team {team.team_number} at {sent_to}")
 
+    def resend_to_team(self, packet: Packet, team: Team, primary_email: str, secondary_email: str = "") -> str | None:
+        """Send the packet to one team again at these addresses, saving them as the team's contacts.
+
+        Returns why not when the packet can't be resent or the team has no distribution; send failures raise.
+        """
+        if refusal := check_resendable(packet):
+            return refusal
+        dist = PacketDistribution.objects.filter(packet=packet, team=team).first()
+        if dist is None:
+            return f"No distribution record for Team {team.team_number}."
+
+        school_info, _ = SchoolInfo.objects.get_or_create(
+            team=team, defaults={"school_name": f"Team {team.team_number}", "contact_email": primary_email}
+        )
+        school_info.contact_email = primary_email
+        school_info.secondary_email = secondary_email
+        school_info.save(update_fields=["contact_email", "secondary_email"])
+
+        dist.email_status = "pending"
+        dist.email_error_message = ""
+        dist.save(update_fields=["email_status", "email_error_message"])
+        self.send_packet_email(dist, override_emails=[e for e in (primary_email, secondary_email) if e])
+        return None
+
     def send_test_packet_email(self, packet: Packet, team: Team, email: str) -> None:
         """Send a test packet email to a specific address without creating distribution records."""
         password = self._team_password(team)
@@ -238,16 +261,11 @@ class PacketDistributionService:
                     yield _progress(f"Failed Team {dist.team.team_number}: {error}", completed, total, ok=False)
 
     def stream_distribute_packet(self, packet: Packet) -> Iterator[str]:
-        if not packet.is_ready_for_distribution():
-            yield (
-                json.dumps({"done": True, "success": False, "message": "Only a draft packet can be distributed"}) + "\n"
-            )
+        try:
+            begin_distribution(packet)
+        except ValueError as e:
+            yield json.dumps({"done": True, "success": False, "message": str(e)}) + "\n"
             return
-        refusal = _stamp_open_event(packet)
-        if refusal:
-            yield json.dumps({"done": True, "success": False, "message": refusal}) + "\n"
-            return
-        packet.mark_as_distributing()
         self._create_distributions_for_teams(packet)
 
         distributions = list(
@@ -284,8 +302,8 @@ class PacketDistributionService:
 
     def _stream_resend(self, packet: Packet, status_filter: str, label: str) -> Iterator[str]:
         """Resend distributions matching a status filter, with parallel streaming progress."""
-        if not packet_is_from_open_event(packet):
-            yield json.dumps({"done": True, "success": False, "message": EARLIER_EVENT_PACKET}) + "\n"
+        if refusal := check_resendable(packet):
+            yield json.dumps({"done": True, "success": False, "message": refusal}) + "\n"
             return
         dists = list(
             PacketDistribution.objects.filter(packet=packet, email_status=status_filter).select_related("team")

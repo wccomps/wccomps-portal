@@ -1,7 +1,13 @@
+from typing import TYPE_CHECKING
+
 from django.db import models
 from django.db.models import F, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from registration.models import Event
+
+if TYPE_CHECKING:
+    from team.models import Team
 
 
 class Packet(models.Model):
@@ -88,6 +94,22 @@ class Packet(models.Model):
         Packet.objects.filter(pk=self.pk, status="distributing").update(status="completed", updated_at=timezone.now())
 
 
+class PacketDistributionQuerySet(models.QuerySet["PacketDistribution"]):
+    def visible_to(self, team: Team | None) -> PacketDistributionQuerySet:
+        """The team's web-enabled packets sent for the open event: team numbers are reshuffled between events, so an
+        earlier event's packet went to another school."""
+        event = Event.objects.open()
+        if event is None:
+            return self.none()
+        return self.filter(
+            team=team,
+            web_access_enabled=True,
+            packet__event=event,
+            packet__web_access_enabled=True,
+            packet__status__in=["distributing", "completed"],
+        )
+
+
 class PacketDistribution(models.Model):
     STATUS_CHOICES = [
         ("pending", "Pending"),
@@ -100,6 +122,8 @@ class PacketDistribution(models.Model):
 
     packet = models.ForeignKey(Packet, on_delete=models.CASCADE, related_name="distributions")
     team = models.ForeignKey("team.Team", on_delete=models.CASCADE)
+
+    objects = PacketDistributionQuerySet.as_manager()
 
     email_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending", db_index=True)
     email_sent_to = models.EmailField(blank=True, help_text="Email address where packet was sent")

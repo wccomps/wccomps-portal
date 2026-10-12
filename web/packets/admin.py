@@ -309,7 +309,7 @@ class PacketDistributionAdmin(admin.ModelAdmin[PacketDistribution]):
     def retry_failed_emails(self, request: HttpRequest, queryset: QuerySet[PacketDistribution]) -> None:
         import logging
 
-        from .services import PacketDistributionService
+        from .services import PacketDistributionService, check_resendable
 
         logger = logging.getLogger(__name__)
         service = PacketDistributionService()
@@ -317,6 +317,9 @@ class PacketDistributionAdmin(admin.ModelAdmin[PacketDistribution]):
         count = 0
 
         for dist in failed_dists:
+            if refusal := check_resendable(dist.packet):
+                self.message_user(request, f"Team {dist.team.team_number}: {refusal}", level=messages.ERROR)
+                continue
             try:
                 service.send_packet_email(dist)
                 count += 1

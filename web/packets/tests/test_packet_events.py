@@ -176,3 +176,25 @@ def test_a_completed_packet_from_an_earlier_event_cannot_be_distributed(current_
     packet.refresh_from_db()
     assert packet.event == earlier
     assert packet.status == "completed"
+
+
+def test_admin_retry_for_an_earlier_events_packet_is_refused(current_event, team_1):
+    from django.contrib import admin, messages
+
+    from packets.admin import PacketDistributionAdmin
+
+    earlier = Event.objects.create(
+        season=current_event.season, name="Earlier", event_type="invitational", date=date(2026, 9, 1)
+    )
+    dist = PacketDistribution.objects.create(packet=_packet(earlier), team=team_1, email_status="failed")
+    model_admin = PacketDistributionAdmin(PacketDistribution, admin.site)
+
+    with (
+        patch.object(model_admin, "message_user") as message_user,
+        patch.object(PacketDistributionService, "send_packet_email") as send,
+    ):
+        model_admin.retry_failed_emails(MagicMock(), PacketDistribution.objects.filter(pk=dist.pk))
+
+    send.assert_not_called()
+    assert message_user.call_args_list[0].kwargs["level"] == messages.ERROR
+    assert "earlier event" in message_user.call_args_list[0].args[1]
