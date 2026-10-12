@@ -10,7 +10,7 @@ from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import validate_email
 from django.db.models import Count, Q
 from registration.models import Event, School, Season, normalize_school_name
-from registration.services import ADD_NEEDS_OPEN_EVENT, free_teams
+from registration.services import add_problem, free_teams, held_schools
 
 from team.models import SchoolInfo, Team, default_team_name
 
@@ -151,10 +151,8 @@ class ImportEventForm(forms.Form):
         self.import_mode = str(data.get("mode") or "replace")
         if self.import_mode not in IMPORT_MODES:
             raise ValidationError("Pick Replace or Add.")
-        if self.import_mode == "add" and (
-            self.event_to_import.pk is None or Event.objects.open() != self.event_to_import
-        ):
-            raise ValidationError(ADD_NEEDS_OPEN_EVENT)
+        if self.import_mode == "add" and (problem := add_problem(self.event_to_import)):
+            raise ValidationError(problem)
         return data
 
 
@@ -323,8 +321,7 @@ def validate_csv_additions(rows: list[CSVRowData], event: Event) -> CSVValidatio
     warnings: list[str] = []
 
     keys = [normalize_school_name(row["school_name"]) for row in rows]
-    on_list = set(SchoolInfo.objects.filter(school__name_key__in=keys).values_list("school__name_key", flat=True))
-    on_list |= set(event.team_assignments.filter(school__name_key__in=keys).values_list("school__name_key", flat=True))
+    on_list = held_schools(keys, event)
     new_rows = [row for row, key in zip(rows, keys, strict=True) if key not in on_list]
     if skipped := [row["school_name"] for row, key in zip(rows, keys, strict=True) if key in on_list]:
         warnings.append(f"Already on the list, skipped: {', '.join(skipped)}")

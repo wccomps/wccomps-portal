@@ -10,6 +10,7 @@ from registration.services import (
     SchoolListRow,
     add_to_school_list,
     free_teams,
+    held_schools,
     set_team_school,
 )
 from team.models import SchoolInfo, Team, default_team_name
@@ -147,3 +148,30 @@ def test_free_teams_are_those_no_school_holds(event, teams):
     _school_on(teams[0], "School One")
 
     assert list(free_teams(event).order_by("team_number").values_list("team_number", flat=True)) == [2, 3, 4]
+
+
+@pytest.mark.parametrize("leftover", ["discord_link", "ticket", "ticket_counter"])
+def test_a_team_still_carrying_per_team_data_is_not_free(event, teams, leftover):
+    from django.contrib.auth.models import User
+
+    from team.models import DiscordLink
+    from ticketing.models import Ticket
+
+    if leftover == "discord_link":
+        user = User.objects.create(username="member")
+        DiscordLink.objects.create(discord_id=1, discord_username="member", user=user, team=teams[1], is_active=False)
+    elif leftover == "ticket":
+        Ticket.objects.create(ticket_number="T002-001", team=teams[1], title="Help")
+    else:
+        Team.objects.filter(pk=teams[1].pk).update(ticket_counter=1)
+
+    assert 2 not in set(free_teams(event).values_list("team_number", flat=True))
+    with pytest.raises(ImportBlockedError, match="Team 2 was given a school since the preview"):
+        add_to_school_list(event, [_row(2, "School Two")], "gold")
+
+
+def test_held_schools_are_those_on_the_list_or_at_the_event(event, teams):
+    _school_on(teams[0], "School One")
+    EventTeamAssignment.objects.create(event=event, team=teams[1], school=School.for_name("School Two"))
+
+    assert held_schools(["school one", "school two", "school three"], event) == {"school one", "school two"}

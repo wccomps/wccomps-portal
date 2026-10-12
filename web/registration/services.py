@@ -1,14 +1,16 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from django.db import transaction
-from django.db.models import QuerySet
+from django.db.models import Exists, OuterRef, QuerySet
 from packets.models import Packet
 
 from core.competition_utils import live_competition_data_exists
-from team.models import SchoolInfo, Team, default_team_name
+from team.models import DiscordLink, SchoolInfo, Team, default_team_name
+from ticketing.models import Ticket
 
 from .locks import school_list_lock
-from .models import Event, EventTeamAssignment, School, TeamRegistration
+from .models import Event, EventTeamAssignment, School, TeamRegistration, normalize_school_name
 
 
 class PacketsSentError(Exception):
@@ -227,12 +229,29 @@ def import_school_list(event: Event, rows: list[SchoolListRow], updated_by: str)
 ADD_NEEDS_OPEN_EVENT = "Add schools needs the open event. Use Replace for an event's first school list."
 
 
-def free_teams(event: Event | None) -> QuerySet[Team]:
-    """Teams no school holds: not on the school list, and not assigned at the event (the open one)."""
-    teams = Team.objects.filter(school_info__isnull=True)
-    if event is not None:
-        teams = teams.exclude(event_assignments__event=event)
-    return teams
+def add_problem(event: Event) -> str:
+    """Why schools can't be added to this event now, or ''. Only the open event's list can grow."""
+    return "" if Event.objects.open() == event else ADD_NEEDS_OPEN_EVENT
+
+
+def free_teams(event: Event) -> QuerySet[Team]:
+    """Teams no school holds and nobody used: not on the school list, not assigned at the event (the open one), and
+    carrying no per-team data a school left behind (blue team Discord links, tickets, a ticket counter)."""
+    return Team.objects.filter(
+        ~Exists(SchoolInfo.objects.filter(team=OuterRef("pk"))),
+        ~Exists(event.team_assignments.filter(team=OuterRef("pk"))),
+        ~Exists(DiscordLink.objects.filter(team=OuterRef("pk"))),
+        ~Exists(Ticket.objects.filter(team=OuterRef("pk"))),
+        ticket_counter=0,
+    )
+
+
+def held_schools(name_keys: Iterable[str], event: Event) -> set[str]:
+    """The name keys of these schools that already hold a team: on the school list, or at the event."""
+    keys = list(name_keys)
+    on_list = SchoolInfo.objects.filter(school__name_key__in=keys).values_list("school__name_key", flat=True)
+    at_event = event.team_assignments.filter(school__name_key__in=keys).values_list("school__name_key", flat=True)
+    return set(on_list) | set(at_event)
 
 
 @transaction.atomic
@@ -245,14 +264,17 @@ def add_to_school_list(event: Event, rows: list[SchoolListRow], updated_by: str)
     school or a school was put on the list since the preview.
     """
     school_list_lock()
-    if event.pk is None or Event.objects.open() != event:
-        raise ImportBlockedError(ADD_NEEDS_OPEN_EVENT)
+    if problem := add_problem(event):
+        raise ImportBlockedError(problem)
     teams = Team.objects.in_bulk([row.team_number for row in rows], field_name="team_number")
     if missing := [str(row.team_number) for row in rows if row.team_number not in teams]:
         raise ImportBlockedError(f"These teams no longer exist: {', '.join(missing)}. Upload the file again.")
     free = set(free_teams(event).filter(pk__in=[team.pk for team in teams.values()]).values_list("pk", flat=True))
     if taken := [row.team_number for row in rows if teams[row.team_number].pk not in free]:
         raise ImportBlockedError(f"Team {taken[0]} was given a school since the preview. Upload the file again.")
+    held = held_schools((normalize_school_name(row.school_name) for row in rows), event)
+    if listed := [row.school_name for row in rows if normalize_school_name(row.school_name) in held]:
+        raise ImportBlockedError(f"{listed[0]} is already on the list. Upload the file again.")
 
     new_teams = list(teams.values())
     for team in new_teams:
@@ -268,12 +290,8 @@ def add_to_school_list(event: Event, rows: list[SchoolListRow], updated_by: str)
                 secondary_email=row.secondary_email,
                 notes=row.notes,
                 updated_by=updated_by,
-                expect_free=True,
             )
-        except TeamTakenError:
-            raise ImportBlockedError(
-                f"Team {row.team_number} was given a school since the preview. Upload the file again."
-            ) from None
         except SchoolTakenError:
+            # Only when two rows name one school, which the preview refuses
             raise ImportBlockedError(f"{row.school_name} is already on the list. Upload the file again.") from None
     return {"created": len(rows), "activated": activated}
