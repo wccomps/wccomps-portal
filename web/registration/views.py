@@ -18,6 +18,7 @@ from .models import (
     RegistrationRateLimit,
     Season,
     TeamRegistration,
+    normalize_school_name,
 )
 from .services import assign_school_to_event
 
@@ -284,13 +285,17 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         .select_related("registration")
         .prefetch_related("registration__contacts")
     )
-    assignments = EventTeamAssignment.objects.filter(event=event).select_related("registration", "team")
+    assignments = list(EventTeamAssignment.objects.filter(event=event).select_related("registration", "team", "school"))
 
-    assignment_map = {a.registration_id: a for a in assignments}
+    # Imported schools have no registration: match those by school
+    by_registration = {a.registration_id: a for a in assignments if a.registration_id}
+    by_school = {a.school.name_key: a for a in assignments}
 
     enrollment_data = []
     for enrollment in enrollments:
-        assignment = assignment_map.get(enrollment.registration_id)
+        assignment = by_registration.get(enrollment.registration_id) or by_school.get(
+            normalize_school_name(enrollment.registration.school_name)
+        )
         enrollment_data.append(
             {
                 "enrollment": enrollment,
@@ -304,7 +309,7 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         "event": event,
         "enrollment_data": enrollment_data,
         "total_enrolled": enrollments.count(),
-        "total_assigned": assignments.count(),
+        "total_assigned": len(assignments),
         "assignable_count": sum(1 for e in enrollment_data if e["can_assign"]),
         "subnav_active": "seasons",
     }
@@ -327,16 +332,29 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         )
         .exclude(registration__team_assignments__event=event)
         .select_related("registration")
+        .order_by("enrolled_at", "pk")
     )
 
-    if not enrolled_registrations.exists():
+    # A school holds one team per event, whether it was imported or assigned here
+    taken = set(EventTeamAssignment.objects.filter(event=event).values_list("school__name_key", flat=True))
+    registrations_to_assign = []
+    skipped = []
+    for enrollment in enrolled_registrations:
+        key = normalize_school_name(enrollment.registration.school_name)
+        if key in taken:
+            skipped.append(enrollment.registration.school_name)
+        else:
+            taken.add(key)
+            registrations_to_assign.append(enrollment.registration)
+    if skipped:
+        messages.warning(request, f"Skipped {', '.join(skipped)}: that school already has a team in this event.")
+
+    if not registrations_to_assign:
         messages.warning(request, "No eligible registrations to assign.")
         return redirect("registration_event_detail", event_id=event_id)
 
     assigned_team_ids = EventTeamAssignment.objects.filter(event=event).values_list("team_id", flat=True)
     available_teams = list(Team.objects.exclude(id__in=assigned_team_ids).order_by("team_number"))
-
-    registrations_to_assign = [e.registration for e in enrolled_registrations]
 
     if len(registrations_to_assign) > len(available_teams):
         messages.error(

@@ -68,3 +68,56 @@ def test_unassigning_an_imported_school_without_a_registration(gold_team_user, e
 
     assert response.status_code == 302
     assert not EventTeamAssignment.objects.exists()
+
+
+def _enrolled(event, school_name):
+    from registration.models import RegistrationEventEnrollment
+
+    registration = TeamRegistration.objects.create(school_name=school_name, status="paid")
+    RegistrationEventEnrollment.objects.create(registration=registration, event=event)
+    return registration
+
+
+def test_event_detail_shows_an_imported_assignment_for_an_enrolled_school(gold_team_user, event):
+    imported = assign_school_to_event(
+        event, Team.objects.create(team_number=4, team_name="Team 04"), "Example University"
+    )
+    _enrolled(event, "example university")
+    client = Client()
+    client.force_login(gold_team_user)
+
+    response = client.get(reverse("registration_event_detail", args=[event.pk]))
+
+    [item] = response.context["enrollment_data"]
+    assert item["assignment"] == imported
+    assert item["can_assign"] is False
+    assert b"Team 04" in response.content
+
+
+def test_assign_teams_skips_a_school_that_already_has_a_team(gold_team_user, event):
+    assign_school_to_event(event, Team.objects.create(team_number=4, team_name="Team 04"), "Example University")
+    Team.objects.create(team_number=5, team_name="Team 05")
+    _enrolled(event, "example university")
+    client = Client()
+    client.force_login(gold_team_user)
+
+    response = client.post(reverse("registration_assign_teams", args=[event.pk]))
+
+    assert response.status_code == 302
+    assert EventTeamAssignment.objects.filter(event=event).count() == 1
+
+
+def test_assign_teams_gives_one_team_to_registrations_of_the_same_school(gold_team_user, event):
+    Team.objects.create(team_number=4, team_name="Team 04")
+    Team.objects.create(team_number=5, team_name="Team 05")
+    _enrolled(event, "Example University")
+    _enrolled(event, "example  university")
+    client = Client()
+    client.force_login(gold_team_user)
+
+    response = client.post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+
+    assert EventTeamAssignment.objects.filter(event=event).count() == 1
+    content = response.content.decode()
+    assert "Assigned 1 team" in content
+    assert "already has a team" in content
