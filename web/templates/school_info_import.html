@@ -143,7 +143,7 @@ Tech Institute,admin@techinst.edu,,</pre>
                             <c-form_field label="Event"
                                           required="true"
                                           id="id_event"
-                                          help_text="The event this school list is for. Importing opens it; scores and packets until it is cleared belong to it.">
+                                          help_text="The event this school list is for. Importing opens it; packets sent from then on belong to it.">
                                 <select name="event" id="id_event" class="vTextField">
                                     <option value="">Choose an event</option>
                                     {% for ev in open_events %}<option value="{{ ev.pk }}">{{ ev.name }} ({{ ev.date }})</option>{% endfor %}

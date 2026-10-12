@@ -243,7 +243,7 @@ def validate_csv_data(rows: list[CSVRowData], event_id: int | None = None) -> CS
     errors: list[str] = []
     warnings: list[str] = []
 
-    # Each school gets one registration, and a registration can hold one team per event
+    # Schools are matched by normalized name, and a school holds one team per event
     by_key: dict[str, list[str]] = {}
     for row in rows:
         by_key.setdefault(normalize_school_name(row["school_name"]), []).append(row["school_name"])

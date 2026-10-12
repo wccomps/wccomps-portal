@@ -79,7 +79,7 @@ class TeamRegistration(models.Model):
 
     rejection_reason = models.TextField(blank=True)
     approved_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
-    # A revived registration form attaches applications to the school without mixing them into its history
+    # Set when the registration's school is assigned a team at an event
     school = models.ForeignKey(School, null=True, blank=True, on_delete=models.SET_NULL, related_name="registrations")
 
     class Meta:

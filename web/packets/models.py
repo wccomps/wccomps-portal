@@ -26,7 +26,7 @@ class Packet(models.Model):
         null=True,
         blank=True,
         related_name="packets",
-        help_text="Optionally associate packet with a specific event",
+        help_text="Set to the open event when the packet is sent",
     )
     title = models.CharField(max_length=255, help_text="Packet title/description")
     file_data = models.BinaryField(help_text="Packet file stored as binary data")
