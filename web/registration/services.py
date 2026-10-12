@@ -1,25 +1,13 @@
 from dataclasses import dataclass
 
-from django.db import connection, transaction
+from django.db import transaction
 from packets.models import Packet
 
 from core.competition_utils import live_competition_data_exists
 from team.models import SchoolInfo, Team, default_team_name
 
+from .locks import school_list_lock
 from .models import Event, EventTeamAssignment, School, TeamRegistration
-
-# Arbitrary, but fixed (and not prepare_database's): every school-list writer asks for the same lock.
-SCHOOL_LIST_LOCK_ID = 7_261_640_002
-
-
-def school_list_lock() -> None:
-    """Wait for the school list, then hold it until the transaction ends.
-
-    Every write to the school list or the open event's assignments, and every packet send, takes it first and reads
-    the open event after it. Re-entrant within one transaction, so an import can call set_team_school.
-    """
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [SCHOOL_LIST_LOCK_ID])
 
 
 class PacketsSentError(Exception):
@@ -175,8 +163,8 @@ def import_school_list(event: Event, rows: list[SchoolListRow], updated_by: str)
     """Replace the school list with the rows and open the event (saving it first when new), replacing its
     assignments: each row's school holds the row's team. Resets every team name and activates the rows' teams.
 
-    Every school-list write and packet send takes the same lock; the event is re-checked under it, and
-    ImportBlockedError says why the import can't go ahead.
+    Under the school list lock; the event is re-checked under it, and ImportBlockedError says why the import can't
+    go ahead.
     """
     school_list_lock()
     if problem := import_problem(event):

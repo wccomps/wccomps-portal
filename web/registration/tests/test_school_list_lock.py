@@ -1,13 +1,19 @@
-"""Every school-list write and packet send takes the same lock, then reads the open event."""
+"""The school list lock is taken by the registration services' writes, Event.open, the start of a first packet send
+and the resend checks, each before it reads the open event."""
 
 from datetime import date
+from unittest.mock import patch
 
 import pytest
+from django.contrib.auth.models import User
 from django.db import connection
+from django.test import Client
 from django.test.utils import CaptureQueriesContext
-from packets.models import Packet
-from packets.services import begin_distribution
+from django.urls import reverse
+from packets.models import Packet, PacketDistribution
+from packets.services import PacketDistributionService, begin_distribution
 
+from core.models import UserGroups
 from registration.models import Event, Season
 from registration.services import (
     SchoolListRow,
@@ -91,3 +97,71 @@ def test_starting_a_packet_send_takes_the_lock():
         begin_distribution(packet)
 
     _assert_locks_before_reading_the_open_event(queries)
+
+
+def test_opening_an_event_takes_the_lock():
+    event = _event(open_=False)
+
+    with CaptureQueriesContext(connection) as queries:
+        event.open()
+
+    _assert_locks_before_reading_the_open_event(queries)
+
+
+def _sent_packet(team):
+    event = _event()
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+    packet = Packet.objects.create(
+        title="Packet",
+        file_data=b"x",
+        filename="p.pdf",
+        mime_type="application/pdf",
+        file_size=1,
+        uploaded_by="gold",
+        status="completed",
+        event=event,
+    )
+    PacketDistribution.objects.create(packet=packet, team=team, email_status="failed")
+    return packet
+
+
+@patch.object(PacketDistributionService, "send_packet_email")
+def test_resending_to_a_team_takes_the_lock_before_its_check_and_contact_write(_send, team):
+    packet = _sent_packet(team)
+
+    with CaptureQueriesContext(connection) as queries:
+        PacketDistributionService().resend_to_team(packet, team, "new@example.edu")
+
+    _assert_locks_before_reading_the_open_event(queries)
+    sql = [query["sql"] for query in queries.captured_queries]
+    lock = next(i for i, q in enumerate(sql) if "pg_advisory_xact_lock" in q)
+    contact_write = next(i for i, q in enumerate(sql) if q.startswith('UPDATE "team_schoolinfo"'))
+    assert lock < contact_write
+
+
+@patch.object(PacketDistributionService, "send_packet_email")
+def test_resending_failed_emails_takes_the_lock(_send, team):
+    packet = _sent_packet(team)
+
+    with CaptureQueriesContext(connection) as queries:
+        list(PacketDistributionService().stream_resend_failed(packet))
+
+    _assert_locks_before_reading_the_open_event(queries)
+
+
+@patch.object(PacketDistributionService, "send_packet_email")
+def test_the_admin_retry_takes_the_lock(_send, team):
+    packet = _sent_packet(team)
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
+    client = Client()
+    client.force_login(admin)
+
+    with CaptureQueriesContext(connection) as queries:
+        client.post(
+            reverse("admin:packets_packetdistribution_changelist"),
+            {"action": "retry_failed_emails", "_selected_action": [packet.distributions.get().pk]},
+        )
+
+    _assert_locks_before_reading_the_open_event(queries)
+    assert _send.called

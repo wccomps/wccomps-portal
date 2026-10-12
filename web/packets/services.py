@@ -7,8 +7,8 @@ from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db import close_old_connections, transaction
 from django.template.loader import render_to_string
+from registration.locks import school_list_lock
 from registration.models import Event
-from registration.services import school_list_lock
 
 from core.authentik_utils import reset_team_password
 from core.utils import ndjson_done
@@ -30,7 +30,8 @@ UNRECORDED_EVENT_PACKET = "This packet was sent before events were recorded; tea
 def begin_distribution(packet: Packet) -> None:
     """Start sending a draft packet, making the open event its event; ValueError says why it can't start.
 
-    Under the school-list lock, so a send can't start while the school list or the open event is changing.
+    Under the school list lock, released when this returns and before any email goes out, so a send can't start
+    while the school list or the open event is changing.
     """
     school_list_lock()
     packet.refresh_from_db(fields=["status"])
@@ -45,10 +46,15 @@ def begin_distribution(packet: Packet) -> None:
     packet.mark_as_distributing()
 
 
+@transaction.atomic
 def check_resendable(packet: Packet) -> str | None:
     """Why the packet can't be sent again, or None. Team numbers are reshuffled between events, so a resend is only
     safe while the packet's own event is open: refused when no event is open, when the packet has no event, or when
-    its event is an earlier one."""
+    its event is an earlier one.
+
+    Checked under the school list lock, so it doesn't read an event an import is opening. The lock goes with the
+    caller's transaction: callers send their emails after it, outside the lock."""
+    school_list_lock()
     event = Event.objects.open()
     if event is None:
         return NO_EVENT_OPEN
@@ -188,22 +194,24 @@ class PacketDistributionService:
         Returns why not when the packet can't be resent or the team has no distribution or school on file;
         send failures raise.
         """
-        if refusal := check_resendable(packet):
-            return refusal
-        dist = PacketDistribution.objects.filter(packet=packet, team=team).first()
-        if dist is None:
-            return f"No distribution record for Team {team.team_number}."
+        # The check and the contact write under the school list lock; the email goes out after it is released
+        with transaction.atomic():
+            if refusal := check_resendable(packet):
+                return refusal
+            dist = PacketDistribution.objects.filter(packet=packet, team=team).first()
+            if dist is None:
+                return f"No distribution record for Team {team.team_number}."
 
-        school_info = SchoolInfo.objects.filter(team=team).first()
-        if school_info is None:
-            return f"Team {team.team_number} has no school on file. Add it on the School Info page first."
-        school_info.contact_email = primary_email
-        school_info.secondary_email = secondary_email
-        school_info.save(update_fields=["contact_email", "secondary_email"])
+            school_info = SchoolInfo.objects.filter(team=team).first()
+            if school_info is None:
+                return f"Team {team.team_number} has no school on file. Add it on the School Info page first."
+            school_info.contact_email = primary_email
+            school_info.secondary_email = secondary_email
+            school_info.save(update_fields=["contact_email", "secondary_email"])
 
-        dist.email_status = "pending"
-        dist.email_error_message = ""
-        dist.save(update_fields=["email_status", "email_error_message"])
+            dist.email_status = "pending"
+            dist.email_error_message = ""
+            dist.save(update_fields=["email_status", "email_error_message"])
         self.send_packet_email(dist, override_emails=[e for e in (primary_email, secondary_email) if e])
         return None
 

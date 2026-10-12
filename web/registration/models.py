@@ -5,6 +5,8 @@ from django.contrib.auth.models import User
 from django.db import models, transaction
 from django.utils import timezone
 
+from .locks import school_list_lock
+
 
 def generate_edit_token() -> str:
     return secrets.token_urlsafe(48)
@@ -187,7 +189,8 @@ class Event(models.Model):
 
     @transaction.atomic
     def open(self) -> None:
-        """Make this the only active event."""
+        """Make this the only active event, under the school list lock."""
+        school_list_lock()
         Event.objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
         if not self.is_active:
             self.is_active = True
