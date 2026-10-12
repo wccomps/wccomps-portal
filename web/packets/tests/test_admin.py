@@ -87,3 +87,19 @@ def test_marking_completed_completes_only_packets_being_sent(staff_client):
     content = response.content.decode()
     assert "Marked 1 packet(s) as completed." in content
     assert "Skipped Draft: only a packet being sent can be marked completed." in content
+
+
+def test_a_sent_packet_cannot_be_deleted(staff_client):
+    sent = _packet("Sent", status="completed")
+    draft = _packet("Draft")
+
+    sent_page = staff_client.get(reverse("admin:packets_packet_delete", args=[sent.pk]))
+    draft_page = staff_client.get(reverse("admin:packets_packet_delete", args=[draft.pk]))
+    staff_client.post(
+        reverse("admin:packets_packet_changelist"),
+        {"action": "delete_selected", "_selected_action": [sent.pk, draft.pk], "post": "yes"},
+    )
+
+    assert sent_page.status_code == 403
+    assert draft_page.status_code == 200
+    assert Packet.objects.filter(pk=sent.pk).exists()

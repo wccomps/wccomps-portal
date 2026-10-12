@@ -107,6 +107,10 @@ class PacketAdmin(admin.ModelAdmin[Packet]):
     inlines = [PacketDistributionInline]
     actions = ["distribute_now", "mark_as_completed", "export_distribution_report"]
 
+    def has_delete_permission(self, request: HttpRequest, obj: Packet | None = None) -> bool:
+        """Only drafts: a sent packet reached the teams, and the school list guards count it as sent."""
+        return super().has_delete_permission(request, obj) and (obj is None or obj.status == "draft")
+
     def get_queryset(self, request: HttpRequest) -> QuerySet[Packet]:
         qs = super().get_queryset(request)
         qs = qs.annotate(

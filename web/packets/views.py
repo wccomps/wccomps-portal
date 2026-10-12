@@ -9,6 +9,7 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from core.auth_utils import get_user_team, require_permission
@@ -258,12 +259,16 @@ def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
         )
 
     if action == "cancel":
-        packet.status = "cancelled"
-        packet.save(update_fields=["status", "updated_at"])
-        return StreamingHttpResponse(
-            iter([ndjson_done("Packet cancelled")]),
-            content_type="application/x-ndjson",
+        # A sent packet reached the teams; cancelling it would let the school list be cleared under it
+        cancelled = Packet.objects.filter(pk=packet.pk, status="draft").update(
+            status="cancelled", updated_at=timezone.now()
         )
+        line = (
+            ndjson_done("Packet cancelled")
+            if cancelled
+            else ndjson_done("Only a draft packet can be cancelled; this one has already been sent.", success=False)
+        )
+        return StreamingHttpResponse(iter([line]), content_type="application/x-ndjson")
 
     if action == "test_email":
         from core.utils import ndjson_progress

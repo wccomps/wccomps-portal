@@ -47,7 +47,7 @@
                             Resend Failed
                         </c-button>
                     {% endif %}
-                    {% if packet.status not in "cancelled" %}
+                    {% if packet.status == "draft" %}
                         <c-button variant="danger" @click="cancelPacket" ::disabled="loading">
                             Cancel
                         </c-button>
