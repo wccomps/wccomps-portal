@@ -150,7 +150,7 @@ def clear_school_list() -> int:
 
 
 class ImportBlockedError(Exception):
-    """Why a school list can't be imported for the event now."""
+    """Why a school list can't be imported into or added to the event now."""
 
 
 def import_problem(event: Event) -> str:
@@ -161,7 +161,8 @@ def import_problem(event: Event) -> str:
     if packets_sent(open_now):
         return (
             f"Packets have already been sent for {open_now}. Re-importing reassigns team numbers, so sent credentials "
-            "would reach the wrong school. Change a single school on its School Info page instead."
+            "would reach the wrong school. Change a single school on its School Info page instead. "
+            "To add late schools, use Add schools."
         )
     if not live_competition_data_exists():
         return ""
@@ -172,7 +173,8 @@ def import_problem(event: Event) -> str:
         )
     return (
         f"Teams have already started using their team numbers for {open_now} (scores, tickets or Discord links). "
-        "Re-importing reassigns team numbers under them. Change a single school on its School Info page instead."
+        "Re-importing reassigns team numbers under them. Change a single school on its School Info page instead. "
+        "To add late schools, use Add schools."
     )
 
 

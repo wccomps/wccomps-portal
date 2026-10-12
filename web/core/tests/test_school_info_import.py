@@ -228,7 +228,8 @@ def test_reimporting_the_open_event_is_refused_once_its_packets_were_sent(client
 
     assert (
         b"Packets have already been sent for Invitational (2026). Re-importing reassigns team numbers, so sent "
-        b"credentials would reach the wrong school. Change a single school on its School Info page instead."
+        b"credentials would reach the wrong school. Change a single school on its School Info page instead. "
+        b"To add late schools, use Add schools."
     ) in response.content
     assert not SchoolInfo.objects.exists()
 
@@ -293,7 +294,8 @@ def test_reimporting_the_open_event_is_refused_while_its_scores_are_live(client)
 
     assert (
         f"Teams have already started using their team numbers for {event} (scores, tickets or Discord links). "
-        "Re-importing reassigns team numbers under them. Change a single school on its School Info page instead."
+        "Re-importing reassigns team numbers under them. Change a single school on its School Info page instead. "
+        "To add late schools, use Add schools."
     ).encode() in response.content
     assert not SchoolInfo.objects.exists()
 

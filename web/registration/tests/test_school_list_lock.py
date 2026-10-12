@@ -1,5 +1,5 @@
-"""The school list lock is taken by the registration services' writes, Event.open, the start of a first packet send,
-the resend checks and the send to new teams, each before it reads the open event."""
+"""The school list lock is taken by the registration services' writes, Event.open, the start of a first packet send
+and the resend checks, each before it reads the open event."""
 
 from datetime import date
 from unittest.mock import patch
@@ -209,5 +209,7 @@ def test_sending_to_new_teams_creates_their_distributions_under_the_lock(_send, 
     _assert_locks_before_reading_the_open_event(queries)
     sql = [query["sql"] for query in queries.captured_queries]
     lock = next(i for i, q in enumerate(sql) if "pg_advisory_xact_lock" in q)
+    status_read = 'SELECT "packets_packet"."id", "packets_packet"."status"'
+    status = next(i for i, q in enumerate(sql) if q.startswith(status_read))
     create = next(i for i, q in enumerate(sql) if q.startswith('INSERT INTO "packets_packetdistribution"'))
-    assert lock < create
+    assert lock < status < create

@@ -340,11 +340,11 @@ class PacketDistributionService:
         ValueError says why not: the packet wasn't sent yet, or check_resendable's refusal. The status is read under
         the school list lock, so a first send of the packet has created its distributions by then, and the list can't
         change between the checks and the new distributions."""
-        school_list_lock()
+        refusal = check_resendable(packet)  # Takes the lock, before the status is read
         packet.refresh_from_db(fields=["status"])
         if not packet.is_sent:
             raise ValueError(NOT_SENT_YET)
-        if refusal := check_resendable(packet):
+        if refusal:
             raise ValueError(refusal)
         return _create_distributions_for_teams(packet)
 
