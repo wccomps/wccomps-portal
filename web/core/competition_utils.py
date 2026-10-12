@@ -1,3 +1,7 @@
+from collections.abc import Callable
+from typing import Any
+
+from django.db.models import QuerySet
 from orange_team.models import OrangeAssignment, OrangeCheckIn
 from scoring.models import (
     IncidentReport,
@@ -15,6 +19,37 @@ from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
 
+def _delete(rows: QuerySet[Any]) -> int:
+    return rows.delete()[0]
+
+
+def _reset_ticket_counters(teams: QuerySet[Any]) -> int:
+    return teams.update(ticket_counter=0)
+
+
+# What the wipe clears, in order: (count label, the rows, how they are cleared)
+COMPETITION_DATA: tuple[tuple[str, Callable[[], QuerySet[Any]], Callable[[QuerySet[Any]], int]], ...] = (
+    ("TicketAttachment", TicketAttachment.objects.all, _delete),
+    ("TicketComment", TicketComment.objects.all, _delete),
+    ("TicketHistory", TicketHistory.objects.all, _delete),
+    ("Ticket", Ticket.objects.all, _delete),
+    ("TeamTicketCounter", lambda: Team.objects.filter(ticket_counter__gt=0), _reset_ticket_counters),
+    ("RedTeamScreenshot", RedTeamScreenshot.objects.all, _delete),
+    ("IncidentScreenshot", IncidentScreenshot.objects.all, _delete),
+    ("IncidentReport", IncidentReport.objects.all, _delete),
+    ("RedTeamScore", RedTeamScore.objects.all, _delete),
+    ("InjectScore", InjectScore.objects.all, _delete),
+    ("OrangeTeamScore", OrangeTeamScore.objects.all, _delete),
+    ("ServiceDetail", ServiceDetail.objects.all, _delete),
+    ("ServiceScore", ServiceScore.objects.all, _delete),
+    ("ScoringExclusion", ScoringExclusion.objects.all, _delete),
+    ("OrangeAssignment", OrangeAssignment.objects.all, _delete),
+    ("OrangeCheckIn", OrangeCheckIn.objects.all, _delete),
+    # Blue team Discord links only (staff/volunteer links preserved)
+    ("BlueTeamDiscordLink", lambda: DiscordLink.objects.filter(team__isnull=False), _delete),
+)
+
+
 def wipe_competition_data() -> dict[str, int]:
     """Wipe competition data for a fresh start, returning deleted counts by model plus TeamTicketCounter, the
     number of team ticket counters reset.
@@ -22,30 +57,10 @@ def wipe_competition_data() -> dict[str, int]:
     Preserves teams, orange checks (reusable rubrics), AuditLog, BotState, DiscordTask and LinkToken/LinkAttempt.
     Each team's ticket counter is reset with its tickets, so the next event's numbering starts at T0NN-001.
     """
-    counts = {
-        "TicketAttachment": TicketAttachment.objects.all().delete()[0],
-        "TicketComment": TicketComment.objects.all().delete()[0],
-        "TicketHistory": TicketHistory.objects.all().delete()[0],
-        "Ticket": Ticket.objects.all().delete()[0],
-        "TeamTicketCounter": Team.objects.filter(ticket_counter__gt=0).update(ticket_counter=0),
-        "RedTeamScreenshot": RedTeamScreenshot.objects.all().delete()[0],
-        "IncidentScreenshot": IncidentScreenshot.objects.all().delete()[0],
-        "IncidentReport": IncidentReport.objects.all().delete()[0],
-        "RedTeamScore": RedTeamScore.objects.all().delete()[0],
-        "InjectScore": InjectScore.objects.all().delete()[0],
-        "OrangeTeamScore": OrangeTeamScore.objects.all().delete()[0],
-        "ServiceDetail": ServiceDetail.objects.all().delete()[0],
-        "ServiceScore": ServiceScore.objects.all().delete()[0],
-        "ScoringExclusion": ScoringExclusion.objects.all().delete()[0],
-        "OrangeAssignment": OrangeAssignment.objects.all().delete()[0],
-        "OrangeCheckIn": OrangeCheckIn.objects.all().delete()[0],
-        # Blue team Discord links only (staff/volunteer links preserved)
-        "BlueTeamDiscordLink": DiscordLink.objects.filter(team__isnull=False).delete()[0],
-    }
-    return counts
+    return {label: clear(rows()) for label, rows, clear in COMPETITION_DATA}
 
 
 def live_competition_data_exists() -> bool:
-    """Whether results from a past event are still in the portal (not yet finalized and cleared)."""
-    models = (Ticket, ServiceScore, ServiceDetail, InjectScore, OrangeTeamScore, RedTeamScore, IncidentReport)
-    return any(model.objects.exists() for model in models)
+    """Whether any of the data the competition wipe deletes is still here (tickets, scores, incidents, orange team
+    assignments and check-ins, team Discord links)."""
+    return any(rows().exists() for _, rows, _ in COMPETITION_DATA)
