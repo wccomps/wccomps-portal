@@ -91,8 +91,16 @@ def set_team_school(
     return info
 
 
-def _packets_sent(event: Event | None) -> bool:
+def packets_sent(event: Event | None) -> bool:
+    """Whether any packet went out for the event; sent packets reached its teams under their schools."""
     return event is not None and Packet.objects.sent().filter(event=event).exists()
+
+
+def activate_teams(teams: list[Team]) -> int:
+    """Activate the teams given a school: only active teams show on School Info, get packets and count in standings.
+
+    Returns how many were inactive."""
+    return Team.objects.filter(pk__in=[team.pk for team in teams], is_active=False).update(is_active=True)
 
 
 @transaction.atomic
@@ -110,7 +118,7 @@ def remove_team_school(team: Team, expected_school_id: int | None = None) -> Non
             current = event.team_assignments.filter(team=team).values_list("school_id", flat=True).first()
         if current != expected_school_id:
             raise SchoolChangedError(f"Team {team.team_number}'s school changed since you opened this page; reload.")
-    if _packets_sent(event):
+    if packets_sent(event):
         raise PacketsSentError(
             f"Packets have already been sent for {event}. Change the team's school on its School Info page instead."
         )
@@ -127,7 +135,7 @@ def clear_school_list() -> int:
     """
     school_list_lock()
     event = Event.objects.open()
-    if _packets_sent(event):
+    if packets_sent(event):
         raise PacketsSentError(
             f"Packets have already been sent for {event}. Clear the event's results instead (Finalize and clear), "
             "or change single schools on their School Info pages."
@@ -147,7 +155,7 @@ def import_problem(event: Event) -> str:
     open_now = Event.objects.open()
     if open_now and open_now != event:
         return f"{open_now} is still open. Finalize and clear it before importing a list for another event."
-    if _packets_sent(open_now):
+    if packets_sent(open_now):
         return (
             f"Packets have already been sent for {open_now}. Re-importing reassigns team numbers, so sent credentials "
             "would reach the wrong school. Change a single school on its School Info page instead."
@@ -201,7 +209,7 @@ def import_school_list(event: Event, rows: list[SchoolListRow], updated_by: str)
     for team in all_teams:
         team.team_name = default_team_name(team.team_number)
     Team.objects.bulk_update(all_teams, ["team_name"])
-    activated = Team.objects.filter(pk__in=[team.pk for team in teams.values()], is_active=False).update(is_active=True)
+    activated = activate_teams(list(teams.values()))
 
     for row in rows:
         set_team_school(

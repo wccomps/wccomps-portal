@@ -380,3 +380,30 @@ def test_assign_teams_skips_a_team_that_got_a_school_after_it_was_picked(gold_te
     assert SchoolInfo.objects.get(team=team).school_name == "Other College"
     assert list(EventTeamAssignment.objects.values_list("school__name", flat=True)) == ["Other College"]
     assert "Skipped Example University: the team picked for it got a school meanwhile" in response.content.decode()
+
+
+def test_event_detail_notes_sent_packets_once_for_the_event(gold_team_user, event):
+    for number, name in [(4, "Example University"), (5, "Other College")]:
+        set_team_school(
+            Team.objects.create(team_number=number, team_name=f"Team {number:02d}"), name, contact_email="c@e.edu"
+        )
+        _enrolled(event, name)
+    _sent_packet(event)
+
+    content = _client(gold_team_user).get(reverse("registration_event_detail", args=[event.pk])).content.decode()
+
+    assert content.count("Packets sent") == 1
+
+
+def test_event_detail_offers_no_unassign_for_an_earlier_event(gold_team_user, event):
+    past = Event.objects.create(season=event.season, name="Qualifier", event_type="qualifier", date=date(2026, 1, 3))
+    registration = _enrolled(past, "Example University")
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    EventTeamAssignment.objects.create(
+        event=past, team=team, school=School.for_name("Example University"), registration=registration
+    )
+
+    content = _client(gold_team_user).get(reverse("registration_event_detail", args=[past.pk])).content.decode()
+
+    assert "Team 04" in content
+    assert ">Unassign<" not in content

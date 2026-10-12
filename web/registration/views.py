@@ -5,7 +5,6 @@ from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from packets.models import Packet
 
 from core.auth_utils import require_permission
 from core.utils import client_ip
@@ -26,6 +25,8 @@ from .services import (
     SchoolChangedError,
     SchoolTakenError,
     TeamTakenError,
+    activate_teams,
+    packets_sent,
     remove_team_school,
     set_team_school,
 )
@@ -314,14 +315,16 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
             }
         )
 
+    sent = packets_sent(event)
     context = {
         "event": event,
         "enrollment_data": enrollment_data,
         "total_enrolled": enrollments.count(),
         "total_assigned": len(assignments),
         "assignable_count": sum(1 for e in enrollment_data if e["can_assign"]),
-        # Sent packets reached these teams under their schools, so they can't be unassigned
-        "packets_sent": Packet.objects.sent().filter(event=event).exists(),
+        "packets_sent": sent,
+        # Only the open event's teams can be unassigned, and only until packets go out
+        "can_unassign": event.is_active and not sent,
         "subnav_active": "seasons",
     }
 
@@ -414,10 +417,7 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
                         registration=registration,
                         expect_free=True,
                     )
-                    # As the import does: only active teams show on School Info, get packets and count in standings
-                    if not team.is_active:
-                        team.is_active = True
-                        team.save(update_fields=["is_active"])
+                    activate_teams([team])
             except SchoolTakenError, IntegrityError:
                 skipped.append(registration.school_name)
             except TeamTakenError:
