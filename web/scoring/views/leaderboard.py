@@ -286,7 +286,12 @@ def _scorecard_context(team_number: int) -> dict[str, object]:
 )
 def scorecard(request: HttpRequest, team_number: int) -> HttpResponse:
     """Detailed scorecard for a single team."""
+    from django.urls import reverse
+
     context = _scorecard_context(team_number)
+    context["pdf_url"] = reverse("leaderboard_scorecard_pdf", args=[team_number])
+    if has_permission(request.user, "gold_team") or has_permission(request.user, "admin"):
+        context["email_url"] = reverse("scoring:email_scorecard", args=[team_number])
     return render(request, "scoring/scorecard.html", context)
 
 
