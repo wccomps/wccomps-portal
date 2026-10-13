@@ -228,8 +228,20 @@
                 <p>
                     Open event: <strong>{{ open_event.name }}</strong> ({{ open_event.date }}){% if open_event.is_finalized %}, finalized{% endif %}.
                 </p>
+            {% elif not live_scores %}
+                <p>No event is open and there are no live scores. Import the next school list to open an event.</p>
             {% else %}
-                <p>No event is open. Finalizing creates one for the current school list.</p>
+                <p>
+                    No event is open. For an event that ran without a school list import, Finalizing creates it for the
+                    current school list.
+                </p>
+                {% if active_season %}
+                    <p>
+                        New event in season <strong>{{ active_season.name }}</strong>.
+                    </p>
+                {% else %}
+                    <p>No season is active: activate one before finalizing.</p>
+                {% endif %}
                 <c-form_field label="Event name" id="finalize_name">
                     <input type="text"
                            id="finalize_name"
@@ -258,14 +270,17 @@
                     </select>
                 </c-form_field>
             {% endif %}
-            <p class="help-text">
-                Freezes every school's scorecard and the export archive. Run it again after correcting a score.
-            </p>
-            <c-button_row>
-                <c-button variant="primary" @click="finalizeEvent" ::disabled="loading">
-                    Finalize Results
-                </c-button>
-            </c-button_row>
+            {% if open_event or live_scores %}
+                <p class="help-text">
+                    Freezes the scorecard of every school on the list, and the export archive. It refuses while a
+                    listed team is inactive or a team with scores has no school. Run it again after correcting a score.
+                </p>
+                <c-button_row>
+                    <c-button variant="primary" @click="finalizeEvent" ::disabled="loading">
+                        Finalize Results
+                    </c-button>
+                </c-button_row>
+            {% endif %}
         </c-module>
         <c-module class="mt-20">
             <c-slot name="title">
@@ -488,7 +503,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         finalizeEvent() {
-            if (confirm('Finalize results?\n\nThis freezes every school\'s scorecard as its result for this event.')) {
+            if (confirm('Finalize results?\n\nThis freezes the scorecard of every school on the list as its result for this event.')) {
                 this.doStreamAction('finalize_event', {
                     event_name: this.finalizeName,
                     event_date: this.finalizeDate,

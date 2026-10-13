@@ -127,11 +127,15 @@ def _open_event():
     )
 
 
-def _finalized_event():
-    from registration.services import finalize_event
+def _finalized_event(team_number=1):
+    from registration.services import finalize_open_event, set_team_school
+
+    from team.models import Team
 
     event = _open_event()
-    finalize_event(event, "admin")
+    team, _ = Team.objects.get_or_create(team_number=team_number, defaults={"team_name": f"Team {team_number}"})
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+    finalize_open_event(None, "admin")
     return event
 
 
@@ -161,7 +165,7 @@ def test_clear_refused_while_running(admin_client):
 
     team = Team.objects.create(team_number=9, team_name="Team 9")
     ServiceScore.objects.create(team=team, service_points=100)
-    event = _finalized_event()
+    event = _finalized_event(team_number=9)
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
 
     response = _post(admin_client, "clear_event")
@@ -217,6 +221,24 @@ def test_a_refused_clear_keeps_the_competition_times(admin_client):
     assert _post(admin_client, "clear_event").status_code == 400
 
     assert CompetitionConfig.get_config().competition_start_time == now
+
+
+def test_clear_needs_admin_or_gold_access(client, create_user_with_groups):
+    from scoring.models import ServiceScore
+
+    from team.models import Team
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
+    event = _finalized_event()
+    ServiceScore.objects.create(team=Team.objects.get(team_number=1), service_points=0)
+    client.force_login(create_user_with_groups("nobody", []))
+
+    response = client.post(reverse("admin_competition_action"), {"action": "clear_event"})
+
+    assert response.status_code == 403
+    assert ServiceScore.objects.exists()
+    event.refresh_from_db()
+    assert event.is_active
 
 
 def test_the_wipe_action_is_gone(admin_client):

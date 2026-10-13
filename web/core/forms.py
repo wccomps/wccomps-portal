@@ -1,5 +1,7 @@
 from django import forms
+from django.http import QueryDict
 from registration.models import Event
+from registration.services import NewEvent
 
 from core.authentik_utils import parse_team_range
 
@@ -65,11 +67,34 @@ class SetMaxMembersForm(forms.Form):
 
 
 class FinalizeEventForm(forms.Form):
-    """The new event's fields for finalizing with no event open; a missing or invalid one comes back empty."""
+    """The event Finalize creates for the current school list when none is open; with one open it takes nothing."""
 
-    event_name = forms.CharField(required=False)
-    event_date = forms.DateField(required=False)
-    event_type = forms.ChoiceField(required=False, choices=Event.EVENT_TYPE_CHOICES)
+    MISSING = "No event is open: give the event a name, a date and a valid type to finalize the current list."
+
+    event_name = forms.CharField(
+        max_length=255,
+        error_messages={"required": MISSING, "max_length": "The event name must be at most 255 characters."},
+    )
+    event_date = forms.DateField(error_messages={"required": MISSING, "invalid": MISSING})
+    event_type = forms.ChoiceField(
+        choices=Event.EVENT_TYPE_CHOICES,
+        error_messages={"required": MISSING, "invalid_choice": "Choose a valid event type."},
+    )
+
+    def __init__(self, data: QueryDict, *, event_open: bool) -> None:
+        super().__init__(data)
+        if event_open:
+            self.fields = {}
+
+    def new_event(self) -> NewEvent | None:
+        """The validated new event, or None when an event is open. Call once is_valid() is True."""
+        if not self.fields:
+            return None
+        data = self.cleaned_data
+        return NewEvent(name=data["event_name"], date=data["event_date"], event_type=data["event_type"])
+
+    def first_error(self) -> str:
+        return str(next(iter(self.errors.values()))[0])
 
 
 class StartMessageForm(forms.Form):

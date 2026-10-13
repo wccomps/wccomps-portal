@@ -12,17 +12,18 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from packets.models import Packet, PacketDistribution
 from packets.services import PacketDistributionService, begin_distribution
+from scoring.models import ServiceScore
 
 from core.models import UserGroups
 from registration.models import Event, Season
 from registration.services import (
+    NewEvent,
     SchoolListRow,
     add_to_school_list,
     clear_event,
     clear_school_list,
-    finalize_event,
+    finalize_open_event,
     import_school_list,
-    open_event_for_current_schools,
     remove_team_school,
     set_team_school,
 )
@@ -146,11 +147,11 @@ def test_closing_an_event_takes_the_lock():
 
 
 def test_finalizing_takes_the_lock_before_reading_the_open_event(team):
-    event = _event()
+    _event()
     set_team_school(team, "Example University", contact_email="c@example.edu")
 
     with CaptureQueriesContext(connection) as queries:
-        finalize_event(event, "gold")
+        finalize_open_event(None, "gold")
 
     _assert_locks_before_reading_the_open_event(queries)
 
@@ -158,7 +159,7 @@ def test_finalizing_takes_the_lock_before_reading_the_open_event(team):
 def test_clearing_takes_the_lock_before_reading_the_open_event(team):
     event = _event()
     set_team_school(team, "Example University", contact_email="c@example.edu")
-    finalize_event(event, "gold")
+    finalize_open_event(None, "gold")
 
     with CaptureQueriesContext(connection) as queries:
         clear_event(event, "gold")
@@ -170,8 +171,10 @@ def test_opening_an_event_for_the_current_schools_takes_the_lock(team):
     Season.objects.create(name="2026", year=2026, is_active=True)
     set_team_school(team, "Example University", contact_email="c@example.edu")
 
+    ServiceScore.objects.create(team=team, service_points=1)
+
     with CaptureQueriesContext(connection) as queries:
-        open_event_for_current_schools("Invitational", date(2026, 10, 3), "invitational")
+        finalize_open_event(NewEvent("Invitational", date(2026, 10, 3), "invitational"), "gold")
 
     _assert_locks_before_reading_the_open_event(queries)
 

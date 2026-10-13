@@ -13,7 +13,9 @@ from django.urls import reverse
 from registration.models import Event, EventResult, Season
 from registration.services import (
     FinalizeError,
-    open_event_for_current_schools,
+    NewEvent,
+    clear_event,
+    finalize_open_event,
     set_team_school,
 )
 from scoring.calculator import compute_standings
@@ -53,7 +55,15 @@ def _season():
     return Season.objects.create(name="2026", year=2026, is_active=True)
 
 
+def _open_event():
+    return Event.objects.create(
+        season=_season(), name="Inv", event_type="invitational", date=date(2026, 10, 3), is_active=True
+    )
+
+
 def test_refused_while_the_competition_runs(client):
+    _open_event()
+    _team_with_school()
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
 
     assert _finalize(client) == {"done": True, "success": False, "message": "Stop the competition before finalizing."}
@@ -64,7 +74,21 @@ def test_no_open_event_needs_a_name(client):
 
     result = _finalize(client)
 
-    assert not result["success"] and "name" in result["message"]
+    assert result == {
+        "done": True,
+        "success": False,
+        "message": "No event is open: give the event a name, a date and a valid type to finalize the current list.",
+    }
+
+
+def test_an_event_name_over_255_characters_is_refused(client):
+    _season()
+    _team_with_school()
+
+    result = _finalize(client, event_name="x" * 256, event_date="2026-10-03", event_type="invitational")
+
+    assert result == {"done": True, "success": False, "message": "The event name must be at most 255 characters."}
+    assert not Event.objects.exists()
 
 
 def test_no_open_event_builds_it_from_the_current_list(client):
@@ -73,7 +97,7 @@ def test_no_open_event_builds_it_from_the_current_list(client):
 
     result = _finalize(client, event_name="Invitational 1", event_date="2026-10-03", event_type="invitational")
 
-    assert result["success"]
+    assert result == {"done": True, "success": True, "message": "Finalized Invitational 1: 1 school result(s)."}
     assert EventResult.objects.get().event.name == "Invitational 1"
 
 
@@ -101,16 +125,15 @@ def test_name_already_used_in_the_season_is_refused(client):
 def test_service_turns_a_duplicate_name_into_finalize_error():
     season = _season()
     Event.objects.create(season=season, name="Invitational 1", event_type="qualifier", date=date(2026, 9, 1))
+    _team_with_school()
 
     with pytest.raises(FinalizeError, match="already has an event named"):
-        open_event_for_current_schools("Invitational 1", date(2026, 10, 3), "invitational")
+        finalize_open_event(NewEvent("Invitational 1", date(2026, 10, 3), "invitational"), "gold")
     assert Event.objects.open() is None
 
 
 def test_finalizes_the_open_event(client):
-    event = Event.objects.create(
-        season=_season(), name="Inv", event_type="invitational", date=date(2026, 10, 3), is_active=True
-    )
+    event = _open_event()
     _team_with_school()
 
     assert _finalize(client)["success"]
@@ -166,3 +189,26 @@ def test_finalize_needs_admin_or_gold_access(create_user_with_groups):
 
     assert response.status_code == 403
     assert not Event.objects.exists() and not EventResult.objects.exists()
+
+
+def _page(client):
+    return client.get(reverse("admin_competition")).content.decode()
+
+
+def test_the_page_names_the_season_the_new_event_goes_into(client):
+    _season()
+    _team_with_school()
+
+    assert "New event in season <strong>2026</strong>" in _page(client)
+
+
+def test_after_clearing_the_page_points_at_the_next_import_not_finalize(client):
+    event = _open_event()
+    _team_with_school()
+    finalize_open_event(None, "gold")
+    clear_event(event, "gold")
+
+    page = _page(client)
+
+    assert "Import the next school list to open an event." in page
+    assert "Finalize Results" not in page

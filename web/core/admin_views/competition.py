@@ -3,13 +3,13 @@ import io
 import json
 import logging
 from collections.abc import Iterator
-from datetime import date
 from typing import cast
 
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
+from registration.services import NewEvent
 from scoring.models import QuotientMetadataCache
 from scoring.quotient_sync import sync_quotient_metadata
 
@@ -28,8 +28,8 @@ from core.forms import (
 )
 from core.models import AuditLog, CompetitionConfig, DiscordTask
 from core.services.competition import CompetitionRunResult, run_competition
+from core.utils import ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
-from core.utils import run_detached
 from team.models import active_team_numbers, team_username
 
 from ..auth_utils import has_permission, require_permission
@@ -304,8 +304,6 @@ def _action_clear_event(request: HttpRequest, config: CompetitionConfig, authent
     from registration.models import Event
     from registration.services import FinalizeError, clear_event
 
-    if config.applications_enabled:
-        return JsonResponse({"error": "Competition must be stopped before clearing"}, status=400)
     event = Event.objects.open()
     if event is None:
         return JsonResponse({"error": "No event is open. Finalize the event first."}, status=400)
@@ -313,10 +311,6 @@ def _action_clear_event(request: HttpRequest, config: CompetitionConfig, authent
         wiped = clear_event(event, authentik_username)
     except FinalizeError as e:
         return JsonResponse({"error": str(e)}, status=400)
-
-    config.competition_start_time = None
-    config.competition_end_time = None
-    config.save(update_fields=["competition_start_time", "competition_end_time", "updated_at"])
 
     summary = ", ".join(f"{v} {k}" for k, v in wiped.deleted.items() if v > 0) or "No data to delete"
     if wiped.ticket_counters_reset:
@@ -396,60 +390,31 @@ def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authe
         return JsonResponse({"error": f"Sync failed: {e}"}, status=500)
 
 
-def _stream_finalize(
-    config: CompetitionConfig,
-    authentik_username: str,
-    name: str,
-    event_date: date | None,
-    event_type: str,
-    type_invalid: bool,
-) -> Iterator[str]:
-    from registration.models import Event
-    from registration.services import FinalizeError, finalize_event, open_event_for_current_schools
+def _stream_finalize(new_event: NewEvent | None, authentik_username: str) -> Iterator[str]:
+    from registration.services import FinalizeError, finalize_open_event
 
-    def done(success: bool, message: str) -> str:
-        return json.dumps({"done": True, "success": success, "message": message}) + "\n"
-
-    if config.applications_enabled:
-        yield done(False, "Stop the competition before finalizing.")
-        return
+    yield _progress("Freezing every listed school's scorecard and the export archive", 1, 2)
     try:
-        event = Event.objects.open()
-        if event is None:
-            if type_invalid:
-                yield done(False, "Choose a valid event type.")
-                return
-            if not name or event_date is None or not event_type:
-                yield done(
-                    False,
-                    "No event is open: give the event a name, a date and a valid type to finalize the current list.",
-                )
-                return
-            yield _progress(f"Creating {name} for the current school list", 1, 3)
-            event = open_event_for_current_schools(name, event_date, event_type)
-        yield _progress(f"Freezing every school's scorecard for {event.name}", 2, 3)
-        count = finalize_event(event, authentik_username)
+        outcome = finalize_open_event(new_event, authentik_username)
     except FinalizeError as e:
-        yield done(False, str(e))
+        yield ndjson_done(str(e), success=False)
         return
-    yield _progress("Saved the export archive", 3, 3)
-    yield done(True, f"Finalized {event.name}: {count} school result(s). Teams can now see it in Past Events.")
+    yield _progress("Saved the results and the export archive", 2, 2)
+    yield ndjson_done(f"Finalized {outcome.event.name}: {outcome.results} school result(s).")
 
 
 def _action_finalize_event(
     request: HttpRequest, config: CompetitionConfig, authentik_username: str
 ) -> StreamingHttpResponse:
-    # Read the form here: the stream runs in its own thread
-    form = FinalizeEventForm(request.POST)
-    form.is_valid()
-    data = form.cleaned_data
-    name = data.get("event_name", "").strip()
-    event_date = data.get("event_date")
-    event_type = data.get("event_type", "")
-    type_invalid = "event_type" in form.errors
+    from registration.models import Event
+
+    form = FinalizeEventForm(request.POST, event_open=Event.objects.open() is not None)
+    if not form.is_valid():
+        return StreamingHttpResponse(
+            iter([ndjson_done(form.first_error(), success=False)]), content_type="application/x-ndjson"
+        )
     return StreamingHttpResponse(
-        run_detached(_stream_finalize(config, authentik_username, name, event_date, event_type, type_invalid)),
-        content_type="application/x-ndjson",
+        run_detached(_stream_finalize(form.new_event(), authentik_username)), content_type="application/x-ndjson"
     )
 
 
@@ -475,11 +440,13 @@ _COMPETITION_ACTION_HANDLERS = {
 
 @require_permission("admin", "gold_team")
 def admin_competition(request: HttpRequest) -> HttpResponse:
-    from registration.models import Event
+    from registration.models import Event, Season
 
+    from core.competition_utils import live_competition_data_exists
     from team.models import DiscordLink, Team
 
     config = CompetitionConfig.get_config()
+    open_event = Event.objects.open()
 
     active_teams = Team.objects.filter(is_active=True).count()
     total_teams = Team.objects.count()
@@ -488,7 +455,9 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
     quotient_metadata = QuotientMetadataCache.objects.first()
 
     context = {
-        "open_event": Event.objects.open(),
+        "open_event": open_event,
+        "live_scores": open_event is None and live_competition_data_exists(),
+        "active_season": Season.objects.active(),
         "event_type_choices": Event.EVENT_TYPE_CHOICES,
         "config": config,
         "active_teams": active_teams,
