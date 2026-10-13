@@ -9,20 +9,21 @@
                        parent_url="{% url 'school_info' %}"
                        parent_label="Schools" />
         <c-module>
-            {% if error %}<c-alert variant="error">{{ error }}</c-alert>{% endif %}
+            {% if page_error %}<c-alert variant="error">{{ page_error }}</c-alert>{% endif %}
             {% if import_results %}
                 {# Step 3: Show success message #}
                 <c-alert variant="success">
-                    <strong>Import completed successfully!</strong>
-                    <br>
-                    Created: {{ import_results.created }} school info record(s)
+                    {% for line in import_results.lines %}
+                        {% if forloop.first %}
+                            <strong>{{ line }}</strong>
+                        {% else %}
+                            <br>
+                            {{ line }}
+                        {% endif %}
+                    {% endfor %}
                     {% if import_results.activated %}
                         <br>
                         Activated: {{ import_results.activated }} team(s)
-                    {% endif %}
-                    {% if import_results.assigned %}
-                        <br>
-                        Assigned: {{ import_results.assigned }} team(s) to active event
                     {% endif %}
                 </c-alert>
                 <c-button_row class="justify-end">
@@ -49,6 +50,11 @@
                 {% endif %}
                 {% if preview_data.can_import %}
                     <h2>Preview Changes</h2>
+                    <p>For event: <strong>{{ preview_data.event_label }}</strong></p>
+                    <p>
+                        Mode: <strong>{{ preview_data.mode_label }}</strong>
+                    </p>
+                    {% if preview_data.summary %}<p>{{ preview_data.summary }}</p>{% endif %}
                     {% if preview_data.teams_to_create %}
                         <h3 class="mt-20">New School Information ({{ preview_data.teams_to_create|length }})</h3>
                         <c-table id="result_list" aria_label="New school information to import">
@@ -59,6 +65,9 @@
                                     </c-table_header>
                                     <c-table_header sortable="false">
                                         School Name
+                                    </c-table_header>
+                                    <c-table_header sortable="false">
+                                        School Record
                                     </c-table_header>
                                     <c-table_header sortable="false">
                                         Contact Email
@@ -75,6 +84,7 @@
                                 <tr class="{% cycle 'row1' 'row2' %}">
                                     <td>Team {{ row.team_number }}</td>
                                     <td>{{ row.school_name }}</td>
+                                    <td>{% if row.returning_events is None %}New{% else %}Returning ({{ row.returning_events }} past event{{ row.returning_events|pluralize }}){% endif %}</td>
                                     <td>{{ row.contact_email }}</td>
                                     <td>{{ row.secondary_email|default:"—" }}</td>
                                     <td>{{ row.notes|default:"—" }}</td>
@@ -86,6 +96,7 @@
                         {% csrf_token %}
                         {# The step travels in a field: the button is disabled on submit, so its name isn't sent #}
                         <input type="hidden" name="confirm" value="true">
+                        <input type="hidden" name="preview" value="{{ preview_data.token }}">
                         <c-button_row class="mt-20 justify-end">
                             <c-link href="{% url 'school_info_import' %}">Cancel</c-link>
                             <c-button type="submit" variant="primary" ::disabled="submitting">
@@ -102,8 +113,13 @@
                 {# Step 1: Upload form #}
                 <div class="max-w-800">
                     <p>
-                        Upload a CSV file with one row per school. The import replaces all existing school information,
-                        assigns the schools to teams 1 through N in random order, and activates those teams.
+                        Upload a CSV file with one row per school. Replace the school list replaces all existing school information,
+                        assigns the schools to teams 1 through N in random order, activates those teams, and opens the chosen event.
+                    </p>
+                    <p>
+                        Add schools keeps the open event's school list as it is and gives the file's new schools free teams
+                        (the lowest free team numbers, in random order), activating them. Schools already on the list keep their
+                        team numbers and are skipped, so it works after packets went out and teams started using their numbers.
                     </p>
                     <h3 class="mt-20">CSV Format Requirements</h3>
                     <p>Your CSV file must include the following columns:</p>
@@ -138,6 +154,41 @@ Tech Institute,admin@techinst.edu,,</pre>
                 {% for error in form.csv_file.errors %}{{ error }}{% endfor %}
                 ">
                                 {{ form.csv_file }}
+                            </c-form_field>
+                            <c-form_field label="Event"
+                                          required="true"
+                                          id="id_event"
+                                          help_text="The event this school list is for. Importing opens it; packets sent from then on belong to it.">
+                                <select name="event" id="id_event" class="vTextField">
+                                    <option value="">Choose an event</option>
+                                    {% for ev in open_events %}<option value="{{ ev.pk }}">{{ ev.name }} ({{ ev.date }})</option>{% endfor %}
+                                    <option value="new">New event</option>
+                                </select>
+                            </c-form_field>
+                            <c-form_field label="Mode"
+                                          help_text="Replace for an event's first school list; Add for schools that registered after it.">
+                                {% for key, label in import_modes %}
+                                    <div>
+                                        <label>
+                                            <input type="radio" name="mode" value="{{ key }}" id="id_mode_{{ key }}" {% if forloop.first %}checked{% endif %}>
+                                            {{ label }}
+                                        </label>
+                                    </div>
+                                {% endfor %}
+                            </c-form_field>
+                            <c-form_field label="New event name" id="id_new_name" help_text="Only for a new event.">
+                                <input type="text" name="new_name" id="id_new_name" class="vTextField">
+                            </c-form_field>
+                            <c-form_field label="New event date" id="id_new_date">
+                                <input type="date" name="new_date" id="id_new_date" class="vTextField">
+                            </c-form_field>
+                            <c-form_field label="New event type" id="id_new_type">
+                                <select name="new_type" id="id_new_type" class="vTextField">
+                                    <option value="invitational">Invitational</option>
+                                    <option value="qualifier">Qualifier</option>
+                                    <option value="regional">Regional</option>
+                                    <option value="state">State</option>
+                                </select>
                             </c-form_field>
                         </c-fieldset>
                         <c-button_row class="justify-end">

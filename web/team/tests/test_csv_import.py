@@ -3,8 +3,10 @@
 import pytest
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+from registration.models import EventTeamAssignment, School
+from registration.services import SchoolListRow, import_school_list
 
-from team.forms import apply_csv_import, parse_csv_file, validate_csv_data
+from team.forms import parse_csv_file, validate_csv_data
 from team.models import SchoolInfo, Team
 
 pytestmark = pytest.mark.django_db
@@ -190,14 +192,15 @@ class TestCSVValidation:
         assert len(result["teams_to_create"]) == 2
         # Each row should have a team assigned
         for row in result["teams_to_create"]:
-            assert "_team" in row
             assert "team_number" in row
 
     def test_validate_uses_teams_one_to_n_and_reports_what_it_replaces(self) -> None:
         """The CSV is the whole school list: teams 1..N regardless of state, existing info replaced."""
         for i in range(1, 5):
             Team.objects.create(team_name=f"Team {i}", team_number=i, is_active=i == 1)
-        SchoolInfo.objects.create(team=Team.objects.get(team_number=1), school_name="Old", contact_email="o@x.edu")
+        SchoolInfo.objects.create(
+            team=Team.objects.get(team_number=1), school=School.for_name("Old"), contact_email="o@x.edu"
+        )
 
         result = validate_csv_data([_row("University One"), _row("University Two"), _row("University Three")])
 
@@ -214,44 +217,60 @@ class TestCSVValidation:
     def test_validate_rejects_a_repeated_school(self, setup_teams: list[Team]) -> None:
         result = validate_csv_data([_row("University One"), _row("University One")])
 
-        assert result["errors"] == ["Each school can appear only once; repeated: University One"]
+        assert result["errors"] == ["Each school can appear only once; repeated: University One / University One"]
 
 
 def _row(school_name: str) -> dict[str, str]:
     return {"school_name": school_name, "contact_email": "contact@example.edu", "secondary_email": "", "notes": ""}
 
 
+def _list_row(school_name: str, team: Team) -> SchoolListRow:
+    return SchoolListRow(team_number=team.team_number, school_name=school_name, contact_email="contact@example.edu")
+
+
+def _assign(event, team_number, school_name):
+    """A school's assignment at an event, as history: not through the school list."""
+    return EventTeamAssignment.objects.create(
+        event=event, team=Team.objects.get(team_number=team_number), school=School.for_name(school_name)
+    )
+
+
+def _open_event():
+    from datetime import date
+
+    from registration.models import Event, Season
+
+    season, _ = Season.objects.get_or_create(year=2026, defaults={"name": "2026", "is_active": True})
+    return Event.objects.create(
+        season=season, name="Invitational", event_type="invitational", date=date(2026, 10, 3), is_active=True
+    )
+
+
 class TestCSVImport:
     """Test CSV import application."""
 
-    def test_apply_csv_import_create(self, setup_teams: list[Team], setup_user: User) -> None:
+    def test_import_creates_school_info(self, setup_teams: list[Team], setup_user: User) -> None:
         """Test applying CSV import to create new school info."""
         teams_to_create = [
-            {
-                "_team": setup_teams[0],
-                "team_number": 1,
-                "school_name": "University One",
-                "contact_email": "contact1@example.edu",
-                "secondary_email": "alt1@example.edu",
-                "notes": "Test note",
-            },
-            {
-                "_team": setup_teams[1],
-                "team_number": 2,
-                "school_name": "University Two",
-                "contact_email": "contact2@example.edu",
-                "secondary_email": "",
-                "notes": "",
-            },
+            SchoolListRow(
+                team_number=1,
+                school_name="University One",
+                contact_email="contact1@example.edu",
+                secondary_email="alt1@example.edu",
+                notes="Test note",
+            ),
+            SchoolListRow(team_number=2, school_name="University Two", contact_email="contact2@example.edu"),
         ]
 
-        result = apply_csv_import(teams_to_create, "testuser")
+        event = _open_event()
+        result = import_school_list(event, teams_to_create, "testuser")
 
         assert result["created"] == 2
 
         # Verify database
         school_info1 = SchoolInfo.objects.get(team=setup_teams[0])
         assert school_info1.school_name == "University One"
+        assert school_info1.school == event.team_assignments.get(team=setup_teams[0]).school
         assert school_info1.contact_email == "contact1@example.edu"
         assert school_info1.secondary_email == "alt1@example.edu"
         assert school_info1.notes == "Test note"
@@ -260,30 +279,28 @@ class TestCSVImport:
     def test_apply_replaces_school_info_activates_teams_and_reassigns_the_event(self) -> None:
         from datetime import date
 
-        from registration.models import Event, EventTeamAssignment, Season, TeamRegistration
+        from registration.models import Event, EventTeamAssignment, Season
 
         teams = [Team.objects.create(team_name=f"Team {i}", team_number=i, is_active=i == 1) for i in (1, 2, 3)]
-        SchoolInfo.objects.create(team=teams[2], school_name="Old", contact_email="o@x.edu")
+        SchoolInfo.objects.create(team=teams[2], school=School.for_name("Old"), contact_email="o@x.edu")
         season = Season.objects.create(name="2026", year=2026, is_active=True)
         event = Event.objects.create(
             season=season, name="Invitational", event_type="invitational", date=date(2026, 10, 3), is_active=True
         )
         # Last import put this school on team 3; this one moves it to team 1
-        EventTeamAssignment.objects.create(
-            event=event, team=teams[2], registration=TeamRegistration.objects.create(school_name="University One")
+        EventTeamAssignment.objects.create(event=event, team=teams[2], school=School.for_name("University One"))
+
+        result = import_school_list(
+            event,
+            [_list_row("University One", teams[0]), _list_row("University Two", teams[1])],
+            "gold",
         )
 
-        result = apply_csv_import(
-            [{**_row("University One"), "_team": teams[0]}, {**_row("University Two"), "_team": teams[1]}], "gold"
-        )
-
-        assert result == {"created": 2, "assigned": 2, "activated": 1}
-        assert sorted(SchoolInfo.objects.values_list("school_name", flat=True)) == ["University One", "University Two"]
+        assert result == {"created": 2, "activated": 1}
+        assert sorted(SchoolInfo.objects.values_list("school__name", flat=True)) == ["University One", "University Two"]
         assert sorted(Team.objects.filter(is_active=True).values_list("team_number", flat=True)) == [1, 2]
         assert sorted(
-            EventTeamAssignment.objects.filter(event=event).values_list(
-                "team__team_number", "registration__school_name"
-            )
+            EventTeamAssignment.objects.filter(event=event).values_list("team__team_number", "school__name")
         ) == [(1, "University One"), (2, "University Two")]
 
 
@@ -294,7 +311,7 @@ class TestTeamNamesReset:
         renamed = Team.objects.create(team_name="Old Shortname", team_number=1)
         untouched_slot = Team.objects.create(team_name="Old Shortname", team_number=2)
 
-        apply_csv_import([{**_row("Example University"), "_team": renamed}], "gold")
+        import_school_list(_open_event(), [_list_row("Example University", renamed)], "gold")
 
         renamed.refresh_from_db()
         untouched_slot.refresh_from_db()
@@ -307,3 +324,125 @@ class TestTeamNamesReset:
         result = validate_csv_data([_row("Example University")])
 
         assert "Resets 1 team name(s) from the last event (Old Shortname)." in result["warnings"]
+
+
+class TestImportOpensEvent:
+    @pytest.fixture
+    def season(self):
+        from registration.models import Season
+
+        return Season.objects.create(name="2026", year=2026, is_active=True)
+
+    def _event(self, season, name, active=False):
+        from datetime import date
+
+        from registration.models import Event
+
+        return Event.objects.create(
+            season=season, name=name, event_type="invitational", date=date(2026, 10, 3), is_active=active
+        )
+
+    def test_apply_opens_the_event(self, setup_teams, season):
+        from registration.models import Event, EventTeamAssignment
+
+        self._event(season, "Old")
+        new = self._event(season, "New")
+        teams = list(Team.objects.order_by("team_number"))
+
+        import_school_list(new, [_list_row("University One", teams[0])], "gold")
+
+        assert list(Event.objects.filter(is_active=True)) == [new]
+        assert EventTeamAssignment.objects.get(event=new).school.name == "University One"
+
+    def test_reimport_for_the_open_event_replaces_its_assignments(self, setup_teams, season):
+        from registration.models import EventTeamAssignment
+
+        event = self._event(season, "Invitational", active=True)
+        teams = list(Team.objects.order_by("team_number"))
+        import_school_list(event, [_list_row("University One", teams[0])], "gold")
+
+        import_school_list(event, [_list_row("University One", teams[1])], "gold")
+
+        assignment = EventTeamAssignment.objects.get(event=event)
+        assert assignment.team == teams[1]
+
+    def test_validate_rejects_names_that_differ_only_by_case_or_spacing(self, setup_teams):
+        result = validate_csv_data([_row("Example University"), _row("example  university")])
+
+        assert result["errors"] and "repeated" in result["errors"][0]
+
+    def test_preview_marks_returning_and_new_schools(self, setup_teams, season):
+        past = self._event(season, "Past")
+        _assign(past, 1, "University One")
+
+        result = validate_csv_data([_row("university one"), _row("University Two")])
+
+        marks = {row["school_name"]: row["returning_events"] for row in result["teams_to_create"]}
+        assert marks == {"university one": 1, "University Two": None}
+
+    def test_reimporting_for_the_same_event_marks_its_only_school_as_new(self, setup_teams, season):
+        event = self._event(season, "Invitational", active=True)
+        _assign(event, 1, "University One")
+
+        result = validate_csv_data([_row("University One")], event)
+
+        assert result["teams_to_create"][0]["returning_events"] is None
+
+    def test_a_school_with_a_different_past_event_is_returning_when_reimporting(self, setup_teams, season):
+        past = self._event(season, "Past")
+        event = self._event(season, "Invitational", active=True)
+        _assign(past, 1, "University One")
+        _assign(event, 2, "University One")
+
+        result = validate_csv_data([_row("University One")], event)
+
+        assert result["teams_to_create"][0]["returning_events"] == 1
+
+    def test_a_school_without_assignments_is_new(self, setup_teams):
+
+        School.for_name("University One")
+
+        result = validate_csv_data([_row("University One")])
+
+        assert result["teams_to_create"][0]["returning_events"] is None
+
+    def test_preview_warns_when_the_event_already_has_assignments(self, setup_teams, season):
+        event = self._event(season, "Invitational", active=True)
+        _assign(event, 1, "University One")
+
+        result = validate_csv_data([_row("University Two")], event)
+
+        assert f"Replaces the 1 team assignment(s) for {event}." in result["warnings"]
+
+    def test_preview_has_no_assignment_warning_for_a_new_event(self, setup_teams):
+        result = validate_csv_data([_row("University Two")])
+
+        assert not any("team assignment" in w for w in result["warnings"])
+
+
+def test_a_new_event_from_the_import_form_is_unsaved_and_closed_to_registration():
+    from registration.models import Season
+
+    from team.forms import ImportEventForm
+
+    season = Season.objects.create(name="2026", year=2026, is_active=True)
+    form = ImportEventForm(
+        {"event": "new", "new_name": "Qualifier", "new_date": "2026-11-07", "new_type": "qualifier"}, season=season
+    )
+
+    assert form.is_valid()
+    assert form.event_to_import._state.adding
+    assert form.event_to_import.registration_open is False
+
+
+@pytest.mark.parametrize("choice", ["²", "abc", "-1", ""])
+def test_an_event_choice_that_is_not_a_number_is_a_form_error(choice):
+    from registration.models import Season
+
+    from team.forms import ImportEventForm
+
+    season = Season.objects.create(name="2026", year=2026, is_active=True)
+    form = ImportEventForm({"event": choice}, season=season)
+
+    assert not form.is_valid()
+    assert form.non_field_errors() == ["Pick the event this school list is for."]

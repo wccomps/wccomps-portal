@@ -3,11 +3,12 @@
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
+from registration.models import School
 
 from team.models import SchoolInfo, Team
 
 from ..models import Packet, PacketDistribution
-from ..services import PacketDistributionService
+from ..services import PacketDistributionService, _create_distributions_for_teams
 
 
 class PacketDistributionServiceTestCase(TestCase):
@@ -16,6 +17,15 @@ class PacketDistributionServiceTestCase(TestCase):
     def setUp(self):
         """Create test data."""
         self.service = PacketDistributionService()
+
+        from datetime import date
+
+        from registration.models import Event, Season
+
+        season = Season.objects.create(name="2026", year=2026, is_active=True)
+        Event.objects.create(
+            season=season, name="Inv", event_type="invitational", date=date(2026, 10, 3), is_active=True
+        )
 
         for i in range(1, 4):
             team = Team.objects.create(
@@ -26,7 +36,7 @@ class PacketDistributionServiceTestCase(TestCase):
             )
             SchoolInfo.objects.create(
                 team=team,
-                school_name=f"School {i}",
+                school=School.for_name(f"School {i}"),
                 contact_email=f"team{i}@example.com",
                 password=f"TestPass{i}!",
             )
@@ -45,9 +55,9 @@ class PacketDistributionServiceTestCase(TestCase):
 
     def test_create_distributions_for_teams(self):
         """Test creating distributions for all teams."""
-        created = self.service._create_distributions_for_teams(self.packet)
+        created = _create_distributions_for_teams(self.packet)
 
-        self.assertEqual(created, 3)
+        self.assertEqual(len(created), 3)
         self.assertEqual(PacketDistribution.objects.count(), 3)
 
         # Verify distributions created for all teams
@@ -180,7 +190,9 @@ class PacketCompletesItselfTestCase(TestCase):
         self.dists = []
         for i in (1, 2):
             team = Team.objects.create(team_number=i, team_name=f"Team {i}", is_active=True)
-            SchoolInfo.objects.create(team=team, school_name=f"S{i}", contact_email=f"t{i}@example.com", password="pw")
+            SchoolInfo.objects.create(
+                team=team, school=School.for_name(f"S{i}"), contact_email=f"t{i}@example.com", password="pw"
+            )
             self.dists.append(PacketDistribution.objects.create(packet=self.packet, team=team))
 
     @patch("packets.services.EmailMultiAlternatives")

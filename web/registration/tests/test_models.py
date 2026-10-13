@@ -304,60 +304,51 @@ class TestEventTeamAssignment:
 
         return Team.objects.create(team_number=1, team_name="Team 01")
 
-    def test_assignment_creation(self, registration, event, team):
+    @pytest.fixture
+    def school(self, db):
+        from registration.models import School
+
+        return School.for_name("Example University")
+
+    def test_assignment_creation(self, registration, school, event, team):
         """Test assignment can be created."""
         assignment = EventTeamAssignment.objects.create(
             event=event,
+            school=school,
             registration=registration,
             team=team,
         )
         assert assignment.event == event
+        assert assignment.school == school
         assert assignment.registration == registration
         assert assignment.team == team
         assert assignment.assigned_at is not None
         assert assignment.credentials_sent_at is None
 
-    def test_unique_registration_per_event(self, registration, event, team):
-        """Test only one team per registration per event."""
+    def test_unique_school_per_event(self, school, event, team):
         from team.models import Team
 
         team2 = Team.objects.create(team_number=2, team_name="Team 02")
 
-        EventTeamAssignment.objects.create(
-            event=event,
-            registration=registration,
-            team=team,
-        )
+        EventTeamAssignment.objects.create(event=event, school=school, team=team)
         with pytest.raises(IntegrityError):
-            EventTeamAssignment.objects.create(
-                event=event,
-                registration=registration,
-                team=team2,
-            )
+            EventTeamAssignment.objects.create(event=event, school=school, team=team2)
 
     def test_unique_team_per_event(self, event, team):
         """Test each team can only be assigned once per event."""
-        reg1 = TeamRegistration.objects.create(school_name="School 1")
-        reg2 = TeamRegistration.objects.create(school_name="School 2")
+        from registration.models import School
 
-        EventTeamAssignment.objects.create(
-            event=event,
-            registration=reg1,
-            team=team,
-        )
+        EventTeamAssignment.objects.create(event=event, school=School.for_name("School 1"), team=team)
         with pytest.raises(IntegrityError):
-            EventTeamAssignment.objects.create(
-                event=event,
-                registration=reg2,
-                team=team,
-            )
+            EventTeamAssignment.objects.create(event=event, school=School.for_name("School 2"), team=team)
 
-    def test_string_representation(self, registration, event, team):
+    def test_string_representation(self, registration, school, event, team):
         """Test string representation."""
         assignment = EventTeamAssignment.objects.create(
             event=event,
+            school=school,
             registration=registration,
             team=team,
         )
-        assert registration.school_name in str(assignment)
+        assert school.name in str(assignment)
         assert "Team 01" in str(assignment)

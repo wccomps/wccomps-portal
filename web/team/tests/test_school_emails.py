@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 import pytest
+from registration.models import School
 from scoring.calculator import Standing
 from scoring.forms import ScorecardEmailForm
 
@@ -15,7 +16,7 @@ def test_school_info_emails_both():
     team = Team.objects.create(team_number=1, team_name="Team 01")
     info = SchoolInfo.objects.create(
         team=team,
-        school_name="Example University",
+        school=School.for_name("Example University"),
         contact_email="primary@example.edu",
         secondary_email="secondary@example.edu",
     )
@@ -27,7 +28,7 @@ def test_school_info_emails_primary_only():
     team = Team.objects.create(team_number=2, team_name="Team 02")
     info = SchoolInfo.objects.create(
         team=team,
-        school_name="Example University",
+        school=School.for_name("Example University"),
         contact_email="primary@example.edu",
         secondary_email="",
     )
@@ -44,7 +45,7 @@ def test_standing_school_emails():
     team = Team.objects.create(team_number=4, team_name="Team 04")
     SchoolInfo.objects.create(
         team=team,
-        school_name="Example College",
+        school=School.for_name("Example College"),
         contact_email="coach@example.edu",
     )
     standing = Standing(

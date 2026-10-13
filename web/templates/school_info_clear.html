@@ -8,8 +8,9 @@
                    parent_url="{% url 'school_info' %}"
                    parent_label="School Information" />
     <c-module>
+        {% if error %}<c-alert variant="error">{{ error }}</c-alert>{% endif %}
         <c-alert variant="warning">
-            Are you sure you want to clear all school information? This will delete {{ count }} school info record(s) and remove all team registrations and event assignments. This cannot be undone.
+            Are you sure you want to clear all school information? This deletes {{ count }} school info record(s). Schools and their past-event history are kept; the open event's team assignments are removed with the list. This cannot be undone.
         </c-alert>
         <form method="post">
             {% csrf_token %}

@@ -1,6 +1,5 @@
 import csv
 import io
-import json
 import mimetypes
 import re
 from collections.abc import Iterator
@@ -10,10 +9,11 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from core.auth_utils import get_user_team, require_permission
-from core.utils import run_detached
+from core.utils import ndjson_done, run_detached
 from team.models import Team
 
 from .forms import PacketActionForm, PacketResendForm, PacketUploadForm
@@ -36,9 +36,7 @@ def team_packet(request: HttpRequest) -> HttpResponse:
     is_gold = has_permission(user, "gold_team")
 
     if is_gold:
-        packets = Packet.objects.filter(status__in=["distributing", "completed"], web_access_enabled=True).order_by(
-            "-created_at"
-        )
+        packets = Packet.objects.downloadable().order_by("-created_at")
         context: dict[str, object] = {"packets": packets, "is_gold_view": True}
         return render(request, "packets/team_packet.html", context)
 
@@ -47,20 +45,10 @@ def team_packet(request: HttpRequest) -> HttpResponse:
         messages.error(request, "You are not assigned to a team.")
         return redirect("/")
 
-    distributions = (
-        PacketDistribution.objects.filter(team=team, web_access_enabled=True)
-        .select_related("packet")
-        .order_by("-packet__created_at")
-    )
-
-    available_distributions = [
-        dist
-        for dist in distributions
-        if dist.packet.status in ["distributing", "completed"] and dist.packet.web_access_enabled
-    ]
-
     context = {
-        "distributions": available_distributions,
+        "distributions": PacketDistribution.objects.visible_to(team)
+        .select_related("packet")
+        .order_by("-packet__created_at"),
         "team": team,
     }
 
@@ -74,16 +62,11 @@ def download_packet(request: HttpRequest, packet_id: int) -> HttpResponse:
     from core.auth_utils import has_permission
 
     user = cast(User, request.user)
-    available = {"status__in": ["distributing", "completed"], "web_access_enabled": True}
     if has_permission(user, "gold_team"):
-        packet = get_object_or_404(Packet, id=packet_id, **available)
+        packet = get_object_or_404(Packet.objects.downloadable(), id=packet_id)
     else:
         distribution = get_object_or_404(
-            PacketDistribution.objects.select_related("packet"),
-            packet_id=packet_id,
-            team=get_user_team(user),
-            web_access_enabled=True,
-            **{f"packet__{k}": v for k, v in available.items()},
+            PacketDistribution.objects.visible_to(get_user_team(user)).select_related("packet"), packet_id=packet_id
         )
         distribution.record_download(user.username)
         packet = distribution.packet
@@ -238,7 +221,7 @@ def packet_detail(request: HttpRequest, packet_id: int) -> HttpResponse:
 
 @require_POST
 def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
-    """Dispatch packet actions (distribute, resend_failed, cancel, test_email)."""
+    """Dispatch packet actions (distribute, resend_failed, resend_pending, send_new_teams, cancel, test_email)."""
     from core.auth_utils import has_permission
 
     if not has_permission(cast(User, request.user), "gold_team"):
@@ -250,7 +233,7 @@ def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
     if not form.is_valid():
         error_msg = "; ".join(str(e) for errors in form.errors.values() for e in errors)
         return StreamingHttpResponse(
-            iter([json.dumps({"done": True, "success": False, "message": error_msg}) + "\n"]),
+            iter([ndjson_done(error_msg, success=False)]),
             content_type="application/x-ndjson",
         )
 
@@ -275,13 +258,23 @@ def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
             content_type="application/x-ndjson",
         )
 
-    if action == "cancel":
-        packet.status = "cancelled"
-        packet.save(update_fields=["status", "updated_at"])
+    if action == "send_new_teams":
         return StreamingHttpResponse(
-            iter([json.dumps({"done": True, "success": True, "message": "Packet cancelled"}) + "\n"]),
+            run_detached(service.stream_send_to_new_teams(packet)),
             content_type="application/x-ndjson",
         )
+
+    if action == "cancel":
+        # A sent packet reached the teams; cancelling it would let the school list be cleared under it
+        cancelled = Packet.objects.filter(pk=packet.pk, status="draft").update(
+            status="cancelled", updated_at=timezone.now()
+        )
+        line = (
+            ndjson_done("Packet cancelled")
+            if cancelled
+            else ndjson_done("Only a draft packet can be cancelled; this one has already been sent.", success=False)
+        )
+        return StreamingHttpResponse(iter([line]), content_type="application/x-ndjson")
 
     if action == "test_email":
         from core.utils import ndjson_progress
@@ -296,9 +289,9 @@ def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
                 service.send_test_packet_email(packet, team, email)
                 yield ndjson_progress("Sent", 1, 1)
                 msg = f"Test email sent to {email} as Team {team.team_number}"
-                yield json.dumps({"done": True, "success": True, "message": msg}) + "\n"
+                yield ndjson_done(msg)
             except Exception as e:
-                yield json.dumps({"done": True, "success": False, "message": str(e)}) + "\n"
+                yield ndjson_done(str(e), success=False)
 
         return StreamingHttpResponse(_stream_test(), content_type="application/x-ndjson")
 
@@ -309,15 +302,8 @@ def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
 @require_permission("gold_team")
 def packet_resend_team(request: HttpRequest, packet_id: int, team_id: int) -> HttpResponse:
     """Resend a packet email to a specific team, saving any email changes."""
-    from team.models import SchoolInfo
-
     packet = get_object_or_404(Packet, id=packet_id)
     team = get_object_or_404(Team, id=team_id)
-
-    dist = PacketDistribution.objects.filter(packet=packet, team=team).first()
-    if not dist:
-        messages.error(request, f"No distribution record for Team {team.team_number}.")
-        return redirect("packet_detail", packet_id=packet_id)
 
     form = PacketResendForm(request.POST)
     if not form.is_valid():
@@ -327,25 +313,12 @@ def packet_resend_team(request: HttpRequest, packet_id: int, team_id: int) -> Ht
     primary_email = form.cleaned_data["primary_email"]
     secondary_email = form.cleaned_data.get("secondary_email", "")
 
-    school_info, _ = SchoolInfo.objects.get_or_create(
-        team=team, defaults={"school_name": f"Team {team.team_number}", "contact_email": primary_email}
-    )
-    school_info.contact_email = primary_email
-    school_info.secondary_email = secondary_email
-    school_info.save(update_fields=["contact_email", "secondary_email"])
-
-    recipients = [primary_email]
-    if secondary_email:
-        recipients.append(secondary_email)
-
+    recipients = ", ".join(filter(None, [primary_email, secondary_email]))
     try:
-        dist.email_status = "pending"
-        dist.email_error_message = ""
-        dist.save(update_fields=["email_status", "email_error_message"])
-
-        service = PacketDistributionService()
-        service.send_packet_email(dist, override_emails=recipients)
-        messages.success(request, f"Email resent to Team {team.team_number} ({', '.join(recipients)}).")
+        if refusal := PacketDistributionService().resend_to_team(packet, team, primary_email, secondary_email):
+            messages.error(request, refusal)
+        else:
+            messages.success(request, f"Email resent to Team {team.team_number} ({recipients}).")
     except Exception as e:
         messages.error(request, f"Failed to resend to Team {team.team_number}: {e}")
 

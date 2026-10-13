@@ -1,12 +1,26 @@
 import logging
+import secrets
+from contextlib import suppress
+from dataclasses import asdict
 from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
-from django.db import transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
+from registration.forms import ShownSchoolForm
+from registration.models import Event, Season
+from registration.services import (
+    ImportBlockedError,
+    PacketsSentError,
+    SchoolChangedError,
+    SchoolListRow,
+    SchoolTakenError,
+    clear_school_list,
+    remove_team_school,
+    set_team_school,
+)
 
 from core.services.linking import (
     LinkResult,
@@ -15,6 +29,14 @@ from core.services.linking import (
     finalize_link,
     store_discord_id_in_authentik,
     validate_link_token,
+)
+from team.forms import (
+    IMPORT_MODES,
+    CSVUploadForm,
+    ImportConfirmForm,
+    ImportEventForm,
+    ImportMode,
+    parse_csv_file,
 )
 from team.models import LinkToken, SchoolInfo, Team
 
@@ -184,7 +206,7 @@ def link_callback(request: HttpRequest) -> HttpResponse:
 
 @require_permission("gold_team")
 def school_info(request: HttpRequest) -> HttpResponse:
-    teams = Team.objects.filter(is_active=True).order_by("team_number")
+    teams = Team.objects.filter(is_active=True).select_related("school_info__school").order_by("team_number")
 
     teams_with_info = []
     for team in teams:
@@ -209,7 +231,7 @@ def school_info(request: HttpRequest) -> HttpResponse:
 def school_info_export(request: HttpRequest) -> HttpResponse:
     import csv
 
-    records = SchoolInfo.objects.select_related("team").order_by("team__team_number")
+    records = SchoolInfo.objects.select_related("team", "school").order_by("team__team_number")
 
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="school_info.csv"'
@@ -236,20 +258,43 @@ def school_info_export(request: HttpRequest) -> HttpResponse:
 def school_info_clear(request: HttpRequest) -> HttpResponse:
     count = SchoolInfo.objects.count()
 
+    error = ""
     if request.method == "POST":
-        from registration.models import EventTeamAssignment, TeamRegistration
-
-        deleted, _ = SchoolInfo.objects.all().delete()
-        EventTeamAssignment.objects.all().delete()
-        TeamRegistration.objects.all().delete()
-        logger.info(f"Cleared school info, registrations, and event assignments by {request.user.username}")
-        messages.success(request, f"Cleared {deleted} school info record(s), registrations, and event assignments.")
-        return redirect("school_info")
+        try:
+            deleted = clear_school_list()
+        except PacketsSentError as sent:
+            error = str(sent)
+        else:
+            logger.info(f"Cleared school info by {request.user.username}")
+            messages.success(request, f"Cleared {deleted} school info record(s).")
+            return redirect("school_info")
 
     return render(
         request,
         "school_info_clear.html",
-        {"count": count, "show_ops_nav": True},
+        {"count": count, "error": error, "show_ops_nav": True},
+    )
+
+
+@require_permission("gold_team")
+def school_info_remove(request: HttpRequest, team_number: int) -> HttpResponse:
+    school_info = get_object_or_404(SchoolInfo.objects.select_related("team", "school"), team__team_number=team_number)
+    error = ""
+    if request.method == "POST":
+        shown = ShownSchoolForm(request.POST)
+        try:
+            remove_team_school(school_info.team, expected_school_id=shown.expected_school_id())
+        except (PacketsSentError, SchoolChangedError) as refused:
+            error = str(refused)
+        else:
+            logger.info(f"Removed Team {team_number}'s school info by {request.user.username}")
+            messages.success(request, f"Removed {school_info.school_name} from Team {team_number}.")
+            return redirect("school_info")
+
+    return render(
+        request,
+        "school_info_remove.html",
+        {"school_info": school_info, "error": error, "show_ops_nav": True},
     )
 
 
@@ -285,7 +330,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
                 {
                     "team": team,
                     "school_info": school_info,
-                    "error": error_msg,
+                    "page_error": error_msg,
                 },
             )
 
@@ -294,42 +339,19 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
         secondary_email = form.cleaned_data.get("secondary_email", "")
         notes = form.cleaned_data.get("notes", "")
 
-        from team.forms import active_event, assign_school_to_event
-
-        # A team edited in by hand joins the active event like an imported one (the registration event page)
-        join_event = active_event()
-        if join_event and join_event.team_assignments.filter(team=team).exists():
-            join_event = None
-        if join_event and join_event.team_assignments.filter(registration__school_name=school_name).exists():
-            return render(
-                request,
-                "school_info_edit.html",
-                {
-                    "team": team,
-                    "school_info": school_info,
-                    "error": f"{school_name} already has a team in {join_event}.",
-                },
+        try:
+            school_info = set_team_school(
+                team,
+                school_name,
+                contact_email=contact_email,
+                secondary_email=secondary_email,
+                notes=notes,
+                updated_by=authentik_username,
             )
-
-        with transaction.atomic():
-            if school_info:
-                school_info.school_name = school_name
-                school_info.contact_email = contact_email
-                school_info.secondary_email = secondary_email
-                school_info.notes = notes
-                school_info.updated_by = authentik_username
-                school_info.save()
-            else:
-                school_info = SchoolInfo.objects.create(
-                    team=team,
-                    school_name=school_name,
-                    contact_email=contact_email,
-                    secondary_email=secondary_email,
-                    notes=notes,
-                    updated_by=authentik_username,
-                )
-            if join_event:
-                assign_school_to_event(join_event, team, school_name)
+        except SchoolTakenError as taken:
+            return render(
+                request, "school_info_edit.html", {"team": team, "school_info": school_info, "page_error": str(taken)}
+            )
 
         logger.info(f"School info updated for Team {team_number} by {authentik_username}")
 
@@ -346,10 +368,10 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
     )
 
 
-def _parse_school_info_csv(csv_file: UploadedFile[bytes]) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
-    """Parse and validate a school-info CSV into (preview data, session rows; empty on errors)."""
-    from team.forms import parse_csv_file, validate_csv_data
-
+def _parse_school_info_csv(
+    csv_file: UploadedFile[bytes], event: Event, mode: ImportMode
+) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
+    """Parse and validate a school-info CSV for the import mode into (preview data, session rows; empty on errors)."""
     parse_result = parse_csv_file(csv_file)
 
     if parse_result["errors"]:
@@ -359,9 +381,10 @@ def _parse_school_info_csv(csv_file: UploadedFile[bytes]) -> tuple[dict[str, obj
             "rows": [],
         }, []
 
-    validation_result = validate_csv_data(parse_result["rows"])
+    validation_result = mode.validate(parse_result["rows"], event)
 
     preview_data: dict[str, object] = {
+        "summary": "" if validation_result["errors"] else mode.preview(event, validation_result["teams_to_create"]),
         "errors": validation_result["errors"],
         "warnings": parse_result["warnings"] + validation_result["warnings"],
         "teams_to_create": validation_result["teams_to_create"],
@@ -371,91 +394,141 @@ def _parse_school_info_csv(csv_file: UploadedFile[bytes]) -> tuple[dict[str, obj
     session_rows: list[dict[str, object]] = []
     if preview_data["can_import"]:
         session_rows = [
-            {
-                "team_number": row["team_number"],
-                "school_name": row["school_name"],
-                "contact_email": row["contact_email"],
-                "secondary_email": row.get("secondary_email", ""),
-                "notes": row.get("notes", ""),
-            }
+            asdict(
+                SchoolListRow(
+                    team_number=row["team_number"],
+                    school_name=row["school_name"],
+                    contact_email=row["contact_email"],
+                    secondary_email=row.get("secondary_email", ""),
+                    notes=row.get("notes", ""),
+                )
+            )
             for row in validation_result["teams_to_create"]
         ]
 
     return preview_data, session_rows
 
 
+# The session's import previews by token, so a confirm runs the preview on its page and not another tab's
+PREVIEWS_KEY = "school_list_previews"
+PREVIEWS_KEPT = 5
+
+
+def _store_preview(request: HttpRequest, import_data: dict[str, object]) -> str:
+    """Keep the preview's rows and event fields for its confirm, dropping the oldest beyond PREVIEWS_KEPT; its token."""
+    token = secrets.token_urlsafe(16)
+    previews = request.session.get(PREVIEWS_KEY)
+    previews = dict(previews) if isinstance(previews, dict) else {}
+    previews[token] = import_data
+    request.session[PREVIEWS_KEY] = dict(list(previews.items())[-PREVIEWS_KEPT:])
+    return token
+
+
+def _import_error(*errors: str) -> dict[str, object]:
+    return {"errors": list(errors), "warnings": [], "can_import": False}
+
+
+def _upload_again(*problems: str) -> tuple[dict[str, object], None]:
+    return _import_error(*problems, "Upload the file again."), None
+
+
 def _apply_school_info_import(
     import_data: dict[str, object], authentik_username: str
-) -> tuple[dict[str, object] | None, dict[str, int] | None]:
-    """Verify teams still exist and apply the CSV import: (preview_data, None) on errors, else (None, counts)."""
-    from team.forms import CSVRowData, apply_csv_import
-
-    teams_to_create: list[CSVRowData] = import_data["teams_to_create"]  # type: ignore[assignment]
-
-    team_numbers = [row["team_number"] for row in teams_to_create]
-    teams_by_number: dict[int, Team] = {t.team_number: t for t in Team.objects.filter(team_number__in=team_numbers)}
-
-    errors = []
-    for row in teams_to_create:
-        team_number = row["team_number"]
-        if team_number not in teams_by_number:
-            errors.append(f"Team {team_number} no longer exists")
-        else:
-            row["_team"] = teams_by_number[team_number]
-
-    if errors:
-        return {
-            "errors": errors,
-            "warnings": ["Please re-upload the CSV file."],
-            "can_import": False,
-        }, None
-
-    result = apply_csv_import(teams_to_create, authentik_username)
-    return None, result
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Re-check the event fields, then apply the stored mode (its service re-checks the event and the teams under the
+    school list lock): (preview_data, None) on errors, else (None, results)."""
+    stored_rows = import_data.get("teams_to_create")
+    event_fields = import_data.get("event")
+    rows = None
+    if isinstance(stored_rows, list):
+        with suppress(TypeError):
+            rows = [SchoolListRow(**row) for row in stored_rows]
+    if rows is None or not isinstance(event_fields, dict):
+        return _upload_again("The uploaded file is no longer available.")
+    season = Season.objects.active()
+    if season is None:
+        return _upload_again("No season is active.")
+    event_form = ImportEventForm(event_fields, season=season)
+    if not event_form.is_valid():
+        return _upload_again(*(str(e) for e in event_form.non_field_errors()))
+    event = event_form.event_to_import
+    mode = IMPORT_MODES[event_form.import_mode]
+    try:
+        counts = mode.apply(event, rows, authentik_username)
+    except ImportBlockedError as blocked:
+        return _import_error(str(blocked)), None
+    return None, {"lines": mode.result(event, counts), **counts}
 
 
 @require_permission("gold_team")
 def school_info_import(request: HttpRequest) -> HttpResponse:
-    from team.forms import CSVUploadForm
-
     user = cast(User, request.user)
     authentik_username = user.username
 
     permissions = get_permissions_context(user)
     form = CSVUploadForm()
     preview_data: dict[str, object] | None = None
-    import_results: dict[str, int] | None = None
+    import_results: dict[str, object] | None = None
     error = ""
+
+    season = Season.objects.active()
+    if season is None:
+        error = "Activate a season first (Registration, Seasons): imported schools join an event of the active season."
 
     if request.method == "POST":
         if "upload" in request.POST:
             form = CSVUploadForm(request.POST, request.FILES)
-            if form.is_valid():
-                csv_file = cast(UploadedFile[bytes], request.FILES["csv_file"])
-                preview_data, session_rows = _parse_school_info_csv(csv_file)
-                if session_rows:
-                    request.session["csv_import_data"] = {"teams_to_create": session_rows}
+            event_form = ImportEventForm(request.POST, season=season) if season else None
+            event_valid = event_form is not None and event_form.is_valid()
+            if event_form is not None and not event_valid:
+                error = " ".join(str(e) for e in event_form.non_field_errors())
+            elif form.is_valid() and event_form is not None:
+                event = event_form.event_to_import
+                mode = IMPORT_MODES[event_form.import_mode]
+                if problem := mode.problem(event):
+                    error = problem
+                else:
+                    csv_file = cast(UploadedFile[bytes], request.FILES["csv_file"])
+                    preview_data, session_rows = _parse_school_info_csv(csv_file, event, mode)
+                    if preview_data is not None and session_rows:
+                        preview_data["token"] = _store_preview(
+                            request,
+                            {
+                                "teams_to_create": session_rows,
+                                "event": {name: event_form.data.get(name, "") for name in event_form.fields},
+                            },
+                        )
+                        preview_data["event_label"] = str(event) if event.pk else f"New: {event.name}"
+                        preview_data["mode_label"] = mode.label.format(event=event)
 
         elif "confirm" in request.POST:
-            import_data = request.session.get("csv_import_data")
-            if import_data:
+            stored = request.session.get(PREVIEWS_KEY)
+            previews: dict[str, object] = stored if isinstance(stored, dict) else {}
+            confirm_form = ImportConfirmForm(request.POST)
+            token = confirm_form.cleaned_data["preview"] if confirm_form.is_valid() else ""
+            import_data = previews.get(token)
+            if isinstance(import_data, dict):
                 preview_data, import_results = _apply_school_info_import(import_data, authentik_username)
                 if import_results is not None:
-                    del request.session["csv_import_data"]
+                    del previews[token]
+                    request.session.modified = True
             else:
                 error = "The uploaded file is no longer available. Upload it again to import."
         else:
             error = "The form was submitted without an action. Upload the file again."
 
+    open_event = Event.objects.open() or "the open event"
     return render(
         request,
         "school_info_import.html",
         {
             "authentik_username": authentik_username,
             "form": form,
+            "open_events": season.events.filter(is_finalized=False) if season else [],
+            "import_modes": [(key, mode.label.format(event=open_event)) for key, mode in IMPORT_MODES.items()],
             "preview_data": preview_data,
             "import_results": import_results,
-            "error": error,
+            "page_error": error,
             "show_ops_nav": True,
             **permissions,
         },

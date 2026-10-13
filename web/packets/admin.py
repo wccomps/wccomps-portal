@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db.models import Count, Q, QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.utils.html import format_html
@@ -53,7 +53,10 @@ class PacketAdmin(admin.ModelAdmin[Packet]):
     ]
     list_filter = ["status", "send_via_email", "web_access_enabled", "created_at"]
     search_fields = ["title", "filename", "uploaded_by", "notes"]
+    # Sending a packet sets its event and status; set here, they'd skip the open event's checks
     readonly_fields = [
+        "event",
+        "status",
         "actual_distribution_time",
         "created_at",
         "updated_at",
@@ -103,6 +106,10 @@ class PacketAdmin(admin.ModelAdmin[Packet]):
     ]
     inlines = [PacketDistributionInline]
     actions = ["distribute_now", "mark_as_completed", "export_distribution_report"]
+
+    def has_delete_permission(self, request: HttpRequest, obj: Packet | None = None) -> bool:
+        """Only drafts: a sent packet reached the teams, and the school list guards count it as sent."""
+        return super().has_delete_permission(request, obj) and (obj is None or obj.status == "draft")
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Packet]:
         qs = super().get_queryset(request)
@@ -163,7 +170,11 @@ class PacketAdmin(admin.ModelAdmin[Packet]):
         for packet in queryset:
             if packet.status == "draft":
                 service = PacketDistributionService()
-                service.distribute_packet(packet)
+                try:
+                    service.distribute_packet(packet)
+                except ValueError as e:
+                    self.message_user(request, f"{packet.title}: {e}", level=messages.ERROR)
+                    continue
                 count += 1
 
         self.message_user(
@@ -173,8 +184,21 @@ class PacketAdmin(admin.ModelAdmin[Packet]):
 
     @admin.action(description="Mark selected packets as completed")
     def mark_as_completed(self, request: HttpRequest, queryset: QuerySet[Packet]) -> None:
-        count = queryset.update(status="completed")
+        skipped = []
+        count = 0
+        for packet in queryset:
+            if packet.status == "distributing":
+                packet.mark_as_completed()
+                count += 1
+            else:
+                skipped.append(packet.title)
         self.message_user(request, f"Marked {count} packet(s) as completed.")
+        if skipped:
+            self.message_user(
+                request,
+                f"Skipped {', '.join(skipped)}: only a packet being sent can be marked completed.",
+                level=messages.WARNING,
+            )
 
     @admin.action(description="Export distribution report to CSV")
     def export_distribution_report(self, request: HttpRequest, queryset: QuerySet[Packet]) -> HttpResponse:
@@ -305,7 +329,7 @@ class PacketDistributionAdmin(admin.ModelAdmin[PacketDistribution]):
     def retry_failed_emails(self, request: HttpRequest, queryset: QuerySet[PacketDistribution]) -> None:
         import logging
 
-        from .services import PacketDistributionService
+        from .services import PacketDistributionService, check_resendable
 
         logger = logging.getLogger(__name__)
         service = PacketDistributionService()
@@ -313,6 +337,9 @@ class PacketDistributionAdmin(admin.ModelAdmin[PacketDistribution]):
         count = 0
 
         for dist in failed_dists:
+            if refusal := check_resendable(dist.packet):
+                self.message_user(request, f"Team {dist.team.team_number}: {refusal}", level=messages.ERROR)
+                continue
             try:
                 service.send_packet_email(dist)
                 count += 1

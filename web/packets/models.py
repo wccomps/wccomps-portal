@@ -1,11 +1,33 @@
+from typing import TYPE_CHECKING
+
 from django.db import models
 from django.db.models import F, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from registration.models import Event
+
+if TYPE_CHECKING:
+    from team.models import Team
+
+
+# A packet whose distribution has started went out to teams
+SENT_STATUSES = ("distributing", "completed")
+
+
+class PacketQuerySet(models.QuerySet["Packet"]):
+    def sent(self) -> PacketQuerySet:
+        """Packets whose distribution has started."""
+        return self.filter(status__in=SENT_STATUSES)
+
+    def downloadable(self) -> PacketQuerySet:
+        """Sent packets that teams may download from the portal."""
+        return self.sent().filter(web_access_enabled=True)
 
 
 class Packet(models.Model):
     """Pre-competition information packet to be distributed to all teams."""
+
+    objects = PacketQuerySet.as_manager()
 
     STATUS_CHOICES = [
         ("draft", "Draft"),
@@ -20,7 +42,7 @@ class Packet(models.Model):
         null=True,
         blank=True,
         related_name="packets",
-        help_text="Optionally associate packet with a specific event",
+        help_text="Set to the open event when the packet is sent",
     )
     title = models.CharField(max_length=255, help_text="Packet title/description")
     file_data = models.BinaryField(help_text="Packet file stored as binary data")
@@ -69,6 +91,11 @@ class Packet(models.Model):
     def is_ready_for_distribution(self) -> bool:
         return self.status == "draft"
 
+    @property
+    def is_sent(self) -> bool:
+        """Whether its distribution has started."""
+        return self.status in SENT_STATUSES
+
     def mark_as_distributing(self) -> None:
         self.status = "distributing"
         self.actual_distribution_time = timezone.now()
@@ -88,6 +115,17 @@ class Packet(models.Model):
         Packet.objects.filter(pk=self.pk, status="distributing").update(status="completed", updated_at=timezone.now())
 
 
+class PacketDistributionQuerySet(models.QuerySet["PacketDistribution"]):
+    def visible_to(self, team: Team | None) -> PacketDistributionQuerySet:
+        """The team's web-enabled packets sent for the open event (team numbers are reshuffled between events)."""
+        event = Event.objects.open()
+        if event is None:
+            return self.none()
+        return self.filter(
+            team=team, web_access_enabled=True, packet__in=Packet.objects.downloadable().filter(event=event)
+        )
+
+
 class PacketDistribution(models.Model):
     STATUS_CHOICES = [
         ("pending", "Pending"),
@@ -100,6 +138,8 @@ class PacketDistribution(models.Model):
 
     packet = models.ForeignKey(Packet, on_delete=models.CASCADE, related_name="distributions")
     team = models.ForeignKey("team.Team", on_delete=models.CASCADE)
+
+    objects = PacketDistributionQuerySet.as_manager()
 
     email_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending", db_index=True)
     email_sent_to = models.EmailField(blank=True, help_text="Email address where packet was sent")

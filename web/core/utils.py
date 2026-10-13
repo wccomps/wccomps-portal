@@ -53,6 +53,11 @@ def ndjson_progress(step: str, current: int, total: int, ok: bool = True) -> str
     return json.dumps({"step": step, "current": current, "total": total, "ok": ok}) + "\n"
 
 
+def ndjson_done(message: str, success: bool = True) -> str:
+    """Encode the final line of a streamed operation, which the page shows as the outcome."""
+    return json.dumps({"done": True, "success": success, "message": message}) + "\n"
+
+
 def run_detached(lines: Iterator[str]) -> Iterator[str]:
     """Run a streamed operation to the end in its own thread, relaying its lines while the client listens.
 
@@ -67,7 +72,7 @@ def run_detached(lines: Iterator[str]) -> Iterator[str]:
                 relay.put(line)
         except Exception as e:
             logger.exception("Streamed operation failed")
-            relay.put(json.dumps({"done": True, "success": False, "message": f"Failed: {e}"}) + "\n")
+            relay.put(ndjson_done(f"Failed: {e}", success=False))
         finally:
             # This thread's own DB connection; nothing else would close it
             connection.close()

@@ -8,6 +8,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
+from registration.models import School
 
 from core.models import UserGroups
 from scoring.models import ScoringTemplate, ServiceScore
@@ -43,13 +44,13 @@ def school_infos(teams):
     return [
         SchoolInfo.objects.create(
             team=teams[0],
-            school_name="Alpha High",
+            school=School.for_name("Alpha High"),
             contact_email="alpha@example.edu",
             secondary_email="alpha2@example.edu",
         ),
         SchoolInfo.objects.create(
             team=teams[1],
-            school_name="Beta Academy",
+            school=School.for_name("Beta Academy"),
             contact_email="beta@example.edu",
         ),
     ]

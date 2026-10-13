@@ -20,7 +20,7 @@
                     <span>{{ stats.total }} teams</span>
                     <span class="text-muted">|</span>
                     <span>{{ stats.sent }} sent</span>
-                    {% if stats.pending and packet.status == "distributing" %}
+                    {% if stats.pending and packet.is_sent %}
                         <span class="text-muted">|</span>
                         <span class="text-warning">{{ stats.pending }} pending</span>
                     {% endif %}
@@ -37,7 +37,7 @@
                             Distribute
                         </c-button>
                     {% endif %}
-                    {% if stats.pending > 0 and packet.status == "distributing" %}
+                    {% if stats.pending > 0 and packet.is_sent %}
                         <c-button variant="warning" @click="retryPending" ::disabled="loading">
                             Retry Pending
                         </c-button>
@@ -47,7 +47,15 @@
                             Resend Failed
                         </c-button>
                     {% endif %}
-                    {% if packet.status not in "cancelled" %}
+                    {% if packet.is_sent %}
+                        <c-button variant="default"
+                                  @click="sendNewTeams"
+                                  ::disabled="loading"
+                                  title="Email teams with no copy of this packet yet; teams whose send failed or is pending are not included (use Resend Failed / Retry Pending)">
+                            Send to Teams Without It
+                        </c-button>
+                    {% endif %}
+                    {% if packet.status == "draft" %}
                         <c-button variant="danger" @click="cancelPacket" ::disabled="loading">
                             Cancel
                         </c-button>
@@ -188,6 +196,9 @@
             },
             retryPending() {
                 if (confirm('Retry all pending distributions?')) this.doStreamAction('resend_pending');
+            },
+            sendNewTeams() {
+                if (confirm('Email this packet to teams with no copy of it yet? Teams whose send failed or is pending are not included (use Resend Failed / Retry Pending).')) this.doStreamAction('send_new_teams');
             },
             cancelPacket() {
                 if (confirm('Cancel this packet distribution?')) this.doStreamAction('cancel');

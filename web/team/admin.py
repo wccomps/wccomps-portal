@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.db.models import QuerySet
+from django.forms import ModelForm
 from django.http import HttpRequest, HttpResponse
 from django.template.loader import render_to_string
 from django.utils.html import format_html
@@ -34,6 +35,10 @@ class TeamAdmin(admin.ModelAdmin[Team]):
     search_fields = ["team_name", "authentik_group"]
     ordering = ["team_number"]
     readonly_fields = ["created_at", "updated_at", "ticket_counter", "password_reset"]
+
+    def has_delete_permission(self, request: HttpRequest, obj: Team | None = None) -> bool:
+        # Teams are fixed slots from init_teams; deleting one would take its season history with it
+        return False
 
     @admin.display(description="Password")
     def password_reset(self, obj: Team) -> str:
@@ -105,19 +110,35 @@ class LinkRateLimitAdmin(admin.ModelAdmin[LinkRateLimit]):
 @admin.register(SchoolInfo)
 class SchoolInfoAdmin(admin.ModelAdmin[SchoolInfo]):
     list_display = [
-        "school_name",
+        "school_display",
         "team",
         "contact_email",
         "secondary_email",
         "updated_at",
     ]
-    search_fields = ["school_name", "contact_email", "team__team_name"]
+    list_select_related = ["school", "team"]
+    search_fields = ["school__name", "contact_email", "team__team_name"]
     # password mirrors the team account's Authentik password for packet emails; editing it here would change
-    # only this copy, so it's set solely by reset_team_password
+    # only this copy, so it's set solely by reset_team_password. The school, and whether a team has one, is set
+    # through registration.services (set_team_school, remove_team_school, clear_school_list, import_school_list).
     exclude = ["password"]
-    readonly_fields = ["created_at", "updated_at", "updated_by", "password_with_reset"]
+    readonly_fields = ["team", "school", "created_at", "updated_at", "updated_by", "password_with_reset"]
     ordering = ["team__team_number"]
     actions = ["export_as_csv", "import_from_csv"]
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: SchoolInfo | None = None) -> bool:
+        return False
+
+    def save_model(self, request: HttpRequest, obj: SchoolInfo, form: ModelForm[SchoolInfo], change: bool) -> None:
+        # Only what this page edits: a full save could write back a password or school changed since it loaded
+        obj.save(update_fields=["contact_email", "secondary_email", "notes", "updated_at"])
+
+    @admin.display(description="School name", ordering="school__name")
+    def school_display(self, obj: SchoolInfo) -> str:
+        return obj.school_name
 
     @admin.display(description="Password")
     def password_with_reset(self, obj: SchoolInfo) -> str:
@@ -144,7 +165,7 @@ class SchoolInfoAdmin(admin.ModelAdmin[SchoolInfo]):
             ]
         )
 
-        for school_info in queryset.select_related("team"):
+        for school_info in queryset.select_related("team", "school"):
             writer.writerow(
                 [
                     school_info.team.team_number,

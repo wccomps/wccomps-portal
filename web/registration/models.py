@@ -2,12 +2,47 @@ import secrets
 from datetime import timedelta
 
 from django.contrib.auth.models import User
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
+
+from .locks import school_list_lock
 
 
 def generate_edit_token() -> str:
     return secrets.token_urlsafe(48)
+
+
+def collapse_whitespace(name: str) -> str:
+    return " ".join(name.split())
+
+
+def normalize_school_name(name: str) -> str:
+    """The key a school is matched on: case and runs of whitespace don't matter."""
+    return collapse_whitespace(name).casefold()
+
+
+class School(models.Model):
+    """A school across events, matched by name_key."""
+
+    name = models.CharField(max_length=255)
+    name_key = models.CharField(max_length=255, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+    @classmethod
+    def for_name(cls, name: str) -> School:
+        """The school with this name (ignoring case and spacing), created if new; keeps the latest spelling."""
+        name = collapse_whitespace(name)
+        school, created = cls.objects.get_or_create(name_key=normalize_school_name(name), defaults={"name": name})
+        if not created and school.name != name:
+            school.name = name
+            school.save(update_fields=["name"])
+        return school
 
 
 class TeamRegistration(models.Model):
@@ -46,6 +81,8 @@ class TeamRegistration(models.Model):
 
     rejection_reason = models.TextField(blank=True)
     approved_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+    # Set when the registration is assigned a team through registration.services
+    school = models.ForeignKey(School, null=True, blank=True, on_delete=models.SET_NULL, related_name="registrations")
 
     class Meta:
         ordering = ["-submitted_at"]
@@ -57,21 +94,28 @@ class TeamRegistration(models.Model):
         self.status = "approved"
         self.approved_at = timezone.now()
         self.approved_by = user
-        self.save()
+        self.save(update_fields=["status", "approved_at", "approved_by"])
 
     def reject(self, reason: str) -> None:
         self.status = "rejected"
         self.rejection_reason = reason
-        self.save()
+        self.save(update_fields=["status", "rejection_reason"])
 
     def mark_as_paid(self) -> None:
         self.status = "paid"
         self.paid_at = timezone.now()
-        self.save()
+        self.save(update_fields=["status", "paid_at"])
+
+
+class SeasonManager(models.Manager["Season"]):
+    def active(self) -> Season | None:
+        return self.filter(is_active=True).first()
 
 
 class Season(models.Model):
     """Competition season (e.g., 2026 Season)."""
+
+    objects = SeasonManager()
 
     name = models.CharField(max_length=100)
     year = models.IntegerField(unique=True)
@@ -96,6 +140,10 @@ class EventManager(models.Manager["Event"]):
 
     def annotate_enrollment_count(self) -> EventQuerySet:
         return self.get_queryset().annotate_enrollment_count()
+
+    def open(self) -> Event | None:
+        """The active event (the database allows one)."""
+        return self.filter(is_active=True).first()
 
 
 class Event(models.Model):
@@ -133,10 +181,20 @@ class Event(models.Model):
                 fields=["season", "event_type", "event_number"],
                 name="unique_event_per_season",
             ),
+            models.UniqueConstraint(fields=["is_active"], condition=models.Q(is_active=True), name="one_open_event"),
         ]
 
     def __str__(self) -> str:
         return f"{self.name} ({self.season.name})"
+
+    @transaction.atomic
+    def open(self) -> None:
+        """Make this the only active event, under the school list lock."""
+        school_list_lock()
+        Event.objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
+        if not self.is_active:
+            self.is_active = True
+            self.save(update_fields=["is_active", "updated_at"])
 
 
 class RegistrationContact(models.Model):
@@ -183,10 +241,14 @@ class RegistrationEventEnrollment(models.Model):
 
 
 class EventTeamAssignment(models.Model):
-    """Per-event random team number assignment."""
+    """Which team number a school held at an event; imported schools have no registration."""
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="team_assignments")
-    registration = models.ForeignKey(TeamRegistration, on_delete=models.CASCADE, related_name="team_assignments")
+    school = models.ForeignKey(School, on_delete=models.PROTECT, related_name="assignments")
+    # Only for teams assigned through the registration pages; imported schools have none
+    registration = models.ForeignKey(
+        TeamRegistration, null=True, blank=True, on_delete=models.SET_NULL, related_name="team_assignments"
+    )
     team = models.ForeignKey("team.Team", on_delete=models.CASCADE, related_name="event_assignments")
     assigned_at = models.DateTimeField(auto_now_add=True)
     credentials_sent_at = models.DateTimeField(null=True, blank=True)
@@ -194,18 +256,12 @@ class EventTeamAssignment(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(
-                fields=["event", "registration"],
-                name="unique_assignment_per_registration",
-            ),
-            models.UniqueConstraint(
-                fields=["event", "team"],
-                name="unique_team_per_event",
-            ),
+            models.UniqueConstraint(fields=["event", "school"], name="unique_assignment_per_school"),
+            models.UniqueConstraint(fields=["event", "team"], name="unique_team_per_event"),
         ]
 
     def __str__(self) -> str:
-        return f"{self.registration.school_name} → Team {self.team.team_number:02d} ({self.event.name})"
+        return f"{self.school.name} → Team {self.team.team_number:02d} ({self.event.name})"
 
 
 class RegistrationRateLimit(models.Model):

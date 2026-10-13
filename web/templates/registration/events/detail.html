@@ -51,6 +51,9 @@
                 <strong>{{ total_assigned }}</strong> teams assigned,
                 <strong>{{ assignable_count }}</strong> ready to assign
             </p>
+            {% if packets_sent %}
+                <p class="text-success">Packets sent for this event, so its teams can no longer be unassigned here.</p>
+            {% endif %}
             {% if assignable_count > 0 %}
                 <form method="post"
                       action="{% url 'registration_assign_teams' event_id=event.id %}"
@@ -110,10 +113,6 @@
                             <td>
                                 {% if item.assignment %}
                                     <strong>Team {{ item.assignment.team.team_number|stringformat:"02d" }}</strong>
-                                    {% if item.assignment.credentials_sent_at %}
-                                        <br>
-                                        <small class="text-success">Credentials sent</small>
-                                    {% endif %}
                                 {% elif item.can_assign %}
                                     <span class="text-muted">Ready to assign</span>
                                 {% else %}
@@ -121,11 +120,12 @@
                                 {% endif %}
                             </td>
                             <td>
-                                {% if item.assignment and not item.assignment.credentials_sent_at %}
+                                {% if item.assignment and can_unassign %}
                                     <form method="post"
                                           action="{% url 'registration_unassign_team' assignment_id=item.assignment.id %}"
                                           class="d-inline">
                                         {% csrf_token %}
+                                        <input type="hidden" name="school" value="{{ item.assignment.school_id }}">
                                         <button type="submit"
                                                 class="btn btn-sm btn-danger"
                                                 onclick="return confirm('Remove team assignment?')">Unassign</button>
