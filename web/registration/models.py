@@ -264,6 +264,35 @@ class EventTeamAssignment(models.Model):
         return f"{self.school.name} → Team {self.team.team_number:02d} ({self.event.name})"
 
 
+class EventResult(models.Model):
+    """A school's result at a finalized event: its scorecard frozen as JSON (scoring.snapshot)."""
+
+    event = models.ForeignKey(Event, on_delete=models.PROTECT, related_name="results")
+    school = models.ForeignKey(School, on_delete=models.PROTECT, related_name="results")
+    team_number = models.PositiveSmallIntegerField()
+    rank = models.PositiveSmallIntegerField(null=True, blank=True)  # None: excluded or no scoring activity
+    total_score = models.DecimalField(max_digits=12, decimal_places=2)
+    scorecard = models.JSONField()
+    version = models.PositiveSmallIntegerField(default=1)
+
+    class Meta:
+        ordering = [models.F("rank").asc(nulls_last=True), "team_number"]
+        constraints = [
+            models.UniqueConstraint(fields=["event", "school"], name="one_result_per_school_per_event"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.school.name} at {self.event.name}: #{self.rank or '-'}"
+
+
+class EventArchive(models.Model):
+    """The event's full export zip, kept at Finalize for whatever the scorecard didn't keep."""
+
+    event = models.OneToOneField(Event, on_delete=models.PROTECT, related_name="archive")
+    data = models.BinaryField()
+    created_at = models.DateTimeField(auto_now=True)
+
+
 class RegistrationRateLimit(models.Model):
     """One successful public registration submission, for per-client rate limiting.
 
