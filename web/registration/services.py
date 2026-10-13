@@ -2,6 +2,7 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
+from enum import StrEnum
 
 from django.db import transaction
 from django.db.models import Exists, OuterRef, QuerySet
@@ -170,6 +171,21 @@ class ImportBlockedError(Exception):
     """Why a school list can't be imported into or added to the event now."""
 
 
+class LiveData(StrEnum):
+    """Whose live competition data is in the portal while no event is open."""
+
+    NONE = "none"  # an event is open (the data is its), or there is none
+    LEFTOVERS = "leftovers"  # an event was finalized and cleared, so this arrived after the last Clear
+    UNFINALIZED = "unfinalized"  # no event was ever finalized: an event that ran without an import
+
+
+def live_data_state() -> LiveData:
+    """What the live data is with no event open; Finalize, Clear leftover data, the import and the pages agree on it."""
+    if Event.objects.open() is not None or not live_competition_data_exists():
+        return LiveData.NONE
+    return LiveData.LEFTOVERS if Event.objects.filter(is_finalized=True).exists() else LiveData.UNFINALIZED
+
+
 def import_problem(event: Event) -> str:
     """Why this event can't be imported into now, or ''. An unsaved event is a new one."""
     open_now = Event.objects.open()
@@ -184,9 +200,15 @@ def import_problem(event: Event) -> str:
     if not live_competition_data_exists():
         return ""
     if open_now is None:
+        if live_data_state() == LiveData.LEFTOVERS:
+            return (
+                "Live data arrived after the last Clear. Remove it with Clear leftover data on the competition "
+                "Danger Zone page, then import the school list."
+            )
         return (
             "Scores from the last event are still in the portal. "
-            "Finalize and clear that event before importing a new school list."
+            "Finalize and clear that event (Finalize Results on the Competition page) before importing a new school "
+            "list."
         )
     return (
         f"Teams have already started using their team numbers for {open_now} (scores, tickets or Discord links). "
@@ -369,7 +391,12 @@ def finalize_open_event(new_event: NewEvent | None, actor: str) -> FinalizeOutco
 def _open_event_for_current_schools(new_event: NewEvent) -> Event:
     """Create and open new_event in the active season for the school list as it stands: each school on the list is
     assigned its team at it, and packets sent while no event was open are stamped with it."""
-    if not live_competition_data_exists():
+    state = live_data_state()
+    if state == LiveData.LEFTOVERS:
+        raise FinalizeError(
+            "Live data after the last Clear is leftovers: clear it on the Clear page, then import the next school list."
+        )
+    if state == LiveData.NONE:
         raise FinalizeError("Nothing to finalize: no live scores. Import the next school list to open an event.")
     season = Season.objects.active()
     if season is None:
@@ -544,6 +571,37 @@ def clear_event(event: Event, actor: str) -> WipedData:
         target_id=event.pk,
         details={
             "event": event.name,
+            "deleted_counts": {k: v for k, v in wiped.deleted.items() if v},
+            "total_deleted": sum(wiped.deleted.values()),
+            "ticket_counters_reset": wiped.ticket_counters_reset,
+        },
+    )
+    return wiped
+
+
+@transaction.atomic
+def clear_leftover_data(actor: str) -> WipedData:
+    """Delete live data that arrived after the last Clear, with no event open, and reset the competition's start and
+    end times. Under the school list lock and the competition config lock; FinalizeError unless it is leftovers."""
+    school_list_lock()
+    config = _refuse_while_running("Competition must be stopped before clearing")
+    state = live_data_state()
+    if state == LiveData.UNFINALIZED:
+        raise FinalizeError("Finalize the event first.")
+    if state == LiveData.NONE:
+        if open_now := Event.objects.open():
+            raise FinalizeError(f"{open_now} is open: its data goes with Clear Event once it is finalized.")
+        raise FinalizeError("There is no leftover data to clear.")
+    wiped = wipe_competition_data()
+    config.competition_start_time = None
+    config.competition_end_time = None
+    config.save(update_fields=["competition_start_time", "competition_end_time", "updated_at"])
+    AuditLog.objects.create(
+        action="leftover_data_cleared",
+        admin_user=actor,
+        target_entity="competition_config",
+        target_id=config.pk,
+        details={
             "deleted_counts": {k: v for k, v in wiped.deleted.items() if v},
             "total_deleted": sum(wiped.deleted.values()),
             "ticket_counters_reset": wiped.ticket_counters_reset,

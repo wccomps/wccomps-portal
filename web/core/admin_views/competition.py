@@ -9,13 +9,22 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
-from registration.services import FinalizeError, NewEvent, clear_event, finalize_open_event
+from registration.services import (
+    FinalizeError,
+    LiveData,
+    NewEvent,
+    clear_event,
+    clear_leftover_data,
+    finalize_open_event,
+    live_data_state,
+)
 from scoring.models import QuotientMetadataCache
 from scoring.quotient_sync import sync_quotient_metadata
 
 from core.admin_views.readiness import action_readiness_check, action_readiness_fix
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import reset_team_credentials
+from core.competition_utils import WipedData, competition_data_counts
 from core.discord_tasks import CleanupCompetition, LogToChannel
 from core.forms import (
     ActionForm,
@@ -311,10 +320,24 @@ def _action_clear_event(request: HttpRequest, config: CompetitionConfig, authent
     except FinalizeError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
+    return JsonResponse({"success": True, "message": f"{event.name} cleared. Deleted: {_wiped_summary(wiped)}"})
+
+
+def _action_clear_leftover_data(
+    request: HttpRequest, config: CompetitionConfig, authentik_username: str
+) -> JsonResponse:
+    try:
+        wiped = clear_leftover_data(authentik_username)
+    except FinalizeError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    return JsonResponse({"success": True, "message": f"Leftover data cleared. Deleted: {_wiped_summary(wiped)}"})
+
+
+def _wiped_summary(wiped: WipedData) -> str:
     summary = ", ".join(f"{v} {k}" for k, v in wiped.deleted.items() if v > 0) or "No data to delete"
     if wiped.ticket_counters_reset:
         summary += f"; {wiped.ticket_counters_reset} team ticket counters reset"
-    return JsonResponse({"success": True, "message": f"{event.name} cleared. Deleted: {summary}"})
+    return summary
 
 
 def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
@@ -428,6 +451,7 @@ _COMPETITION_ACTION_HANDLERS = {
     "stop_competition": _action_stop_competition,
     "cleanup_competition": _action_cleanup_competition,
     "clear_event": _action_clear_event,
+    "clear_leftover_data": _action_clear_leftover_data,
     "reset_passwords": _action_reset_passwords,
     "sync_quotient": _action_sync_quotient,
     "readiness_check": action_readiness_check,
@@ -439,7 +463,6 @@ _COMPETITION_ACTION_HANDLERS = {
 def admin_competition(request: HttpRequest) -> HttpResponse:
     from registration.models import Event, Season
 
-    from core.competition_utils import live_competition_data_exists
     from team.models import DiscordLink, Team
 
     config = CompetitionConfig.get_config()
@@ -453,7 +476,7 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
 
     context = {
         "open_event": open_event,
-        "live_scores": open_event is None and live_competition_data_exists(),
+        "live_data": live_data_state().value,
         "active_season": Season.objects.active(),
         "event_type_choices": Event.EVENT_TYPE_CHOICES,
         "config": config,
@@ -506,11 +529,13 @@ def admin_competition_action(request: HttpRequest) -> HttpResponseBase:
 def admin_competition_danger(request: HttpRequest) -> HttpResponse:
     """Danger zone page for destructive competition operations."""
     config = CompetitionConfig.get_config()
+    leftovers = live_data_state() == LiveData.LEFTOVERS
     return render(
         request,
         "admin/competition_danger.html",
         {
             "config": config,
+            "leftovers": _wiped_summary(competition_data_counts()) if leftovers else "",
             "show_ops_nav": True,
             "nav_active": "ops_admin",
         },

@@ -273,3 +273,88 @@ def test_a_partial_start_is_reported_incomplete_not_success(admin_client):
     assert "✗ scoring: HTTP 502" in done["message"]
     log = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
     assert log.startswith("**Competition Started (incomplete)**")
+
+
+def _leftovers():
+    """A finalized and cleared event, then a score that arrived after the Clear."""
+    from registration.models import Event
+    from registration.services import clear_event
+    from scoring.models import ServiceScore
+
+    from team.models import Team
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
+    event = _finalized_event()
+    clear_event(event, "admin")
+    ServiceScore.objects.create(team=Team.objects.get(team_number=1), service_points=3)
+    return Event.objects.get(pk=event.pk)
+
+
+def test_the_danger_page_offers_leftovers_with_their_counts(admin_client):
+    _leftovers()
+
+    page = admin_client.get(reverse("admin_competition_danger")).content.decode()
+
+    assert "Clear Leftover Data" in page
+    assert "1 ServiceScore" in page
+
+
+def test_clearing_leftovers_deletes_them(admin_client):
+    from scoring.models import ServiceScore
+
+    _leftovers()
+
+    response = _post(admin_client, "clear_leftover_data")
+
+    assert response.json() == {"success": True, "message": "Leftover data cleared. Deleted: 1 ServiceScore"}
+    assert not ServiceScore.objects.exists()
+
+
+def test_without_a_finalized_event_leftovers_are_hidden_and_refused(admin_client):
+    from scoring.models import ServiceScore
+
+    from team.models import Team
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
+    ServiceScore.objects.create(team=Team.objects.create(team_number=1, team_name="Team 1"), service_points=3)
+
+    page = admin_client.get(reverse("admin_competition_danger")).content.decode()
+    response = _post(admin_client, "clear_leftover_data")
+
+    assert "Clear Leftover Data" not in page
+    assert response.status_code == 400
+    assert response.json()["error"] == "Finalize the event first."
+    assert ServiceScore.objects.exists()
+
+
+def test_clearing_leftovers_needs_admin_or_gold_access(client, create_user_with_groups):
+    from scoring.models import ServiceScore
+
+    _leftovers()
+    client.force_login(create_user_with_groups("nobody", []))
+
+    response = client.post(reverse("admin_competition_action"), {"action": "clear_leftover_data"})
+
+    assert response.status_code == 403
+    assert ServiceScore.objects.exists()
+
+
+def test_clearing_leftovers_is_refused_while_running(admin_client):
+    from scoring.models import ServiceScore
+
+    _leftovers()
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
+
+    response = _post(admin_client, "clear_leftover_data")
+
+    assert response.json()["error"] == "Competition must be stopped before clearing"
+    assert ServiceScore.objects.exists()
+
+
+def test_with_leftovers_the_competition_page_points_at_the_danger_page(admin_client):
+    _leftovers()
+
+    page = admin_client.get(reverse("admin_competition")).content.decode()
+
+    assert "Live data arrived after the last Clear" in page
+    assert "Finalize Results" not in page

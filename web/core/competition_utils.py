@@ -63,6 +63,14 @@ def wipe_competition_data() -> WipedData:
     return WipedData(deleted=deleted, ticket_counters_reset=_used_ticket_counters().update(ticket_counter=0))
 
 
+def competition_data_counts() -> WipedData:
+    """What wipe_competition_data would delete and reset now."""
+    return WipedData(
+        deleted={label: rows().count() for label, rows in COMPETITION_DATA},
+        ticket_counters_reset=_used_ticket_counters().count(),
+    )
+
+
 def live_competition_data_exists() -> bool:
     """Whether any row the competition wipe deletes still exists, or a ticket counter it resets is in use."""
     return _used_ticket_counters().exists() or any(rows().exists() for _, rows in COMPETITION_DATA)

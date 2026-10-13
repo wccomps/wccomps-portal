@@ -35,6 +35,21 @@
                 <span x-show="loading" x-cloak>Processing...</span>
             </c-link>
         </c-action_box>
+        {% if leftovers %}
+            <c-action_box variant="warning" heading="Clear Leftover Data" class="mt-20">
+                <p class="mb-15">
+                    No event is open, but live data arrived after the last Clear. Clearing it deletes: {{ leftovers }}.
+                    Finalized results are not touched.
+                </p>
+                <c-link href="#"
+                        variant="danger"
+                        @click.prevent="guardedClearLeftovers"
+                        ::class="disabledClass">
+                    <span x-show="notLoading">Clear Leftover Data</span>
+                    <span x-show="loading" x-cloak>Processing...</span>
+                </c-link>
+            </c-action_box>
+        {% endif %}
         <c-toast />
     </div>
     <script>
@@ -46,6 +61,7 @@
 
             guardedCleanup() { if (!this.loading) this.cleanupCompetition(); },
             guardedClear() { if (!this.loading) this.clearEvent(); },
+            guardedClearLeftovers() { if (!this.loading) this.clearLeftovers(); },
 
             async doAction(action) {
                 this.loading = true;
@@ -71,6 +87,12 @@
             cleanupCompetition() {
                 if (confirm('Cleanup the competition?\n\nThis will:\n\u2022 Deactivate team members\' Discord links\n\u2022 Delete every team\'s Discord category and channels\n\u2022 Remove synced roles from members no longer linked\n\u2022 Remove student-helper and Room Judge roles\n\u2022 Clear the schedule, the Quotient box list and queued announcements\n\nCompetition must be stopped first.')) {
                     this.doAction('cleanup_competition');
+                }
+            },
+
+            clearLeftovers() {
+                if (confirm('Clear leftover data?\n\nThis deletes the live data that arrived after the last Clear, as listed on the page.\nFinalized results are kept.')) {
+                    this.doAction('clear_leftover_data');
                 }
             },
 

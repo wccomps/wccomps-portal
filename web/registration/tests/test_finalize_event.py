@@ -20,13 +20,16 @@ from core.models import AuditLog, CompetitionConfig
 from registration.models import Event, EventArchive, EventResult, School, Season
 from registration.services import (
     FinalizeError,
+    LiveData,
     NewEvent,
     SchoolListRow,
     changed_teams,
     clear_event,
+    clear_leftover_data,
     finalize_open_event,
     import_problem,
     import_school_list,
+    live_data_state,
     set_team_school,
 )
 from team.models import SchoolInfo, Team
@@ -409,3 +412,78 @@ def test_two_finalizes_at_once_both_succeed(event):
 
     assert errors == []
     assert EventResult.objects.filter(event=event).count() == 2
+
+
+def _cleared_with_a_late_score(event):
+    finalize_open_event(None, "gold")
+    clear_event(event, "gold")
+    ServiceScore.objects.create(team=Team.objects.get(team_number=1), service_points=Decimal(7))
+
+
+def test_live_data_after_a_clear_is_leftovers_and_clearing_it_lets_the_next_import_through(event):
+    _cleared_with_a_late_score(event)
+    Team.objects.filter(team_number=2).update(ticket_counter=4)
+    now = timezone.now()
+    CompetitionConfig.objects.update_or_create(
+        pk=1, defaults={"competition_start_time": now, "competition_end_time": now}
+    )
+    new = Event(
+        season=event.season, name="Qual", event_type="qualifier", date=date(2026, 11, 7), registration_open=False
+    )
+    assert live_data_state() == LiveData.LEFTOVERS
+    assert "Clear leftover data" in import_problem(new)
+
+    wiped = clear_leftover_data("gold")
+
+    assert wiped.deleted["ServiceScore"] == 1
+    assert wiped.ticket_counters_reset == 1
+    assert live_data_state() == LiveData.NONE
+    config = CompetitionConfig.get_config()
+    assert (config.competition_start_time, config.competition_end_time) == (None, None)
+    details = AuditLog.objects.get(action="leftover_data_cleared").details
+    assert details["deleted_counts"] == {"ServiceScore": 1}
+    assert details["ticket_counters_reset"] == 1
+    assert EventResult.objects.filter(event=event).count() == 2
+    rows = [SchoolListRow(team_number=2, school_name="Example University", contact_email="c@example.edu")]
+    import_school_list(new, rows, "gold")
+    assert Event.objects.open() == new
+
+
+def test_finalize_does_not_make_an_event_from_leftovers(event):
+    _cleared_with_a_late_score(event)
+
+    with pytest.raises(FinalizeError, match="Live data after the last Clear is leftovers"):
+        finalize_open_event(NewEvent("Invitational 2", date(2026, 11, 3), "invitational"), "gold")
+    assert list(Event.objects.all()) == [event]
+
+
+def test_without_a_finalized_event_live_data_is_not_leftovers(event):
+    Event.objects.filter(pk=event.pk).update(is_active=False)
+    blocked = Event(
+        season=event.season, name="Qual", event_type="qualifier", date=date(2026, 11, 7), registration_open=False
+    )
+
+    assert live_data_state() == LiveData.UNFINALIZED
+    assert "Finalize" in import_problem(blocked)
+    with pytest.raises(FinalizeError, match="Finalize the event first"):
+        clear_leftover_data("gold")
+    assert ServiceScore.objects.count() == 2
+    assert not AuditLog.objects.filter(action="leftover_data_cleared").exists()
+
+
+def test_with_an_event_open_live_data_is_the_events(event):
+    finalize_open_event(None, "gold")
+
+    assert live_data_state() == LiveData.NONE
+    with pytest.raises(FinalizeError, match="Clear Event"):
+        clear_leftover_data("gold")
+    assert ServiceScore.objects.count() == 2
+
+
+def test_clearing_leftovers_is_refused_while_the_competition_runs(event):
+    _cleared_with_a_late_score(event)
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
+
+    with pytest.raises(FinalizeError, match="Competition must be stopped before clearing"):
+        clear_leftover_data("gold")
+    assert ServiceScore.objects.count() == 1

@@ -228,7 +228,12 @@
                 <p>
                     Open event: <strong>{{ open_event.name }}</strong> ({{ open_event.date }}){% if open_event.is_finalized %}, finalized{% endif %}.
                 </p>
-            {% elif not live_scores %}
+            {% elif live_data == "leftovers" %}
+                <p>
+                    No event is open. Live data arrived after the last Clear: remove it with Clear leftover data on the
+                    <a href="{% url 'admin_competition_danger' %}">Danger Zone</a> page, then import the next school list.
+                </p>
+            {% elif live_data == "none" %}
                 <p>No event is open and there are no live scores. Import the next school list to open an event.</p>
             {% else %}
                 <p>
@@ -270,7 +275,7 @@
                     </select>
                 </c-form_field>
             {% endif %}
-            {% if open_event or live_scores %}
+            {% if open_event or live_data == "unfinalized" %}
                 <p class="help-text">
                     Freezes the scorecard of every school on the list, and the export archive. It refuses while a
                     listed team is inactive or a team with scores has no school. Run it again after correcting a score.
