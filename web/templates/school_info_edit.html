@@ -11,7 +11,7 @@
         <c-form>
             {% csrf_token %}
             <c-module>
-                {% if error %}<c-alert variant="error">{{ error }}</c-alert>{% endif %}
+                {% if page_error %}<c-alert variant="error">{{ page_error }}</c-alert>{% endif %}
                 <c-fieldset aligned="true">
                     <c-form_field label="School Name" required="true" id="school_name">
                         <input type="text"

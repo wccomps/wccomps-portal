@@ -206,3 +206,13 @@ def test_an_edit_with_no_open_event_then_an_import_leaves_the_list_and_the_event
     assert live == set(EventTeamAssignment.objects.filter(event=event).values_list("team", "school"))
     assert live == {(other.pk, School.objects.get(name="Other College").pk)}
     assert team.pk not in {pk for pk, _ in live}
+
+
+def test_page_error_shows_once_not_under_each_form_field(client, event):
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+
+    response = client.post(reverse("school_info_edit", args=[1]), {"school_name": "", "contact_email": "bad"})
+
+    content = response.content.decode()
+    assert "This field is required" in content
+    assert content.count("This field is required") == 1

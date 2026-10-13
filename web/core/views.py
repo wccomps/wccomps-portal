@@ -330,7 +330,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
                 {
                     "team": team,
                     "school_info": school_info,
-                    "error": error_msg,
+                    "page_error": error_msg,
                 },
             )
 
@@ -350,7 +350,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
             )
         except SchoolTakenError as taken:
             return render(
-                request, "school_info_edit.html", {"team": team, "school_info": school_info, "error": str(taken)}
+                request, "school_info_edit.html", {"team": team, "school_info": school_info, "page_error": str(taken)}
             )
 
         logger.info(f"School info updated for Team {team_number} by {authentik_username}")
@@ -528,7 +528,7 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
             "import_modes": [(key, mode.label.format(event=open_event)) for key, mode in IMPORT_MODES.items()],
             "preview_data": preview_data,
             "import_results": import_results,
-            "error": error,
+            "page_error": error,
             "show_ops_nav": True,
             **permissions,
         },

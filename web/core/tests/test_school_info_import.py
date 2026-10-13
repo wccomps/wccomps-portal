@@ -345,3 +345,10 @@ def test_confirm_rechecks_a_new_events_fields(client):
     assert b"Upload the file again" in response.content
     assert not Event.objects.filter(name="Invitational 2").exists()
     assert not SchoolInfo.objects.exists()
+
+
+def test_page_error_shows_once_not_under_each_form_field(client):
+    response = client.get(reverse("school_info_import"))
+
+    message = "Activate a season first"
+    assert response.content.decode().count(message) == 1

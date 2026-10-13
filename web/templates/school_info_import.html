@@ -9,7 +9,7 @@
                        parent_url="{% url 'school_info' %}"
                        parent_label="Schools" />
         <c-module>
-            {% if error %}<c-alert variant="error">{{ error }}</c-alert>{% endif %}
+            {% if page_error %}<c-alert variant="error">{{ page_error }}</c-alert>{% endif %}
             {% if import_results %}
                 {# Step 3: Show success message #}
                 <c-alert variant="success">
