@@ -85,7 +85,8 @@ def test_the_event_edit_page_never_writes_is_active(gold_team_user, event):
     assert event.name == "Renamed"
 
 
-def test_the_event_admin_never_writes_is_active(event):
+def _post_event_admin(event, **changes):
+    """Save the event's admin change page with the given fields changed; returns the event UPDATEs."""
     admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     client = Client()
@@ -104,7 +105,7 @@ def test_the_event_admin_never_writes_is_active(event):
         "team_assignments-TOTAL_FORMS": "0",
         "team_assignments-INITIAL_FORMS": "0",
     }
-    data = {k: v for k, v in data.items() if v is not None and v is not False}
+    data = {k: v for k, v in data.items() if v is not None and v is not False} | changes
 
     with CaptureQueriesContext(connection) as queries:
         response = client.post(url, data)
@@ -112,6 +113,20 @@ def test_the_event_admin_never_writes_is_active(event):
     assert response.status_code == 302, response.context["adminform"].form.errors if response.context else ""
     updates = _updates(queries, "registration_event")
     assert updates
-    assert all('"is_active"' not in sql for sql in updates)
     event.refresh_from_db()
     assert event.name == "Renamed"
+    return updates
+
+
+def test_the_event_admin_never_writes_is_active(event):
+    updates = _post_event_admin(event)
+
+    assert all('"is_active"' not in sql for sql in updates)
+
+
+def test_the_event_admin_never_writes_is_finalized(event):
+    """Only Finalize writes it, under the school list lock; a ticked box or a stale page must not."""
+    updates = _post_event_admin(event, is_finalized="on")
+
+    assert all('"is_finalized"' not in sql for sql in updates)
+    assert not event.is_finalized
