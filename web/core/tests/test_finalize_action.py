@@ -19,7 +19,7 @@ from registration.services import (
 )
 from scoring.calculator import compute_standings
 from scoring.models import InjectScore, OrangeTeamScore, ServiceScore
-from scoring.views.leaderboard import build_scorecard_context
+from scoring.scorecard import build_scorecard_context
 
 from core.models import CompetitionConfig
 from team.models import Team

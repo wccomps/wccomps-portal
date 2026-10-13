@@ -10,8 +10,8 @@ from django.db.models import Exists, OuterRef, QuerySet
 from packets.models import Packet
 from scoring.calculator import compute_standings
 from scoring.export import export_all_zip_bytes
+from scoring.scorecard import build_scorecard_context
 from scoring.snapshot import SNAPSHOT_VERSION, context_from_snapshot, serialize_scorecard
-from scoring.views.leaderboard import build_scorecard_context
 
 from core.competition_utils import live_competition_data_exists, wipe_competition_data
 from core.models import AuditLog
