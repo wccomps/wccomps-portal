@@ -3,11 +3,13 @@
 import threading
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 from django.db import connection
 from packets.models import Packet
-from scoring.models import ServiceScore
+from scoring.models import ServiceDetail, ServiceScore
+from scoring.scorecard import build_scorecard_context
 
 from core.models import AuditLog
 from registration.models import Event, EventArchive, EventResult, School, Season
@@ -83,6 +85,31 @@ def test_the_snapshot_matches_live_right_after_finalizing(event):
     finalize_event(event, "gold")
 
     assert snapshot_matches_live(event)
+
+
+def test_the_snapshot_matches_live_with_averaged_decimals(event):
+    """Averages over three teams give Decimals with many places; they must compare equal after storing."""
+    third = Team.objects.create(team_number=3, team_name="Team 03", is_active=True)
+    set_team_school(third, "School 3", contact_email="c3@example.edu")
+    for team, points in zip(Team.objects.order_by("team_number"), ("100.00", "200.00", "200.01"), strict=True):
+        ServiceDetail.objects.create(team=team, service_name="web", points=Decimal(points))
+    finalize_event(event, "gold")
+
+    assert snapshot_matches_live(event)
+
+
+def test_the_snapshot_matches_live_with_an_int_keyed_dict(event):
+    """JSON stores dict keys as strings, so a scorecard value keyed by numbers must still compare equal."""
+
+    def with_int_keys(score, standings):
+        context = build_scorecard_context(score, standings)
+        context["stats"] = {**context["stats"], "by_team": {score.team.team_number: Decimal("0.5")}}
+        return context
+
+    with patch("registration.services.build_scorecard_context", with_int_keys):
+        finalize_event(event, "gold")
+
+        assert snapshot_matches_live(event)
 
 
 def test_clear_refuses_after_a_change_since_finalizing(event):

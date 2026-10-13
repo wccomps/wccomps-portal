@@ -4,10 +4,9 @@ import json
 import threading
 from datetime import date
 from decimal import Decimal
-from unittest.mock import patch
 
 import pytest
-from django.db import IntegrityError, connection
+from django.db import connection
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
@@ -105,15 +104,6 @@ def test_service_turns_a_duplicate_name_into_finalize_error():
 
     with pytest.raises(FinalizeError, match="already has an event named"):
         open_event_for_current_schools("Invitational 1", date(2026, 10, 3), "invitational")
-    assert Event.objects.open() is None
-
-
-def test_service_turns_a_numbering_clash_into_finalize_error():
-    season = _season()
-    Event.objects.create(season=season, name="Inv A", event_type="invitational", event_number=1, date=date(2026, 9, 1))
-    Event.objects.update(event_number=None)
-    with pytest.raises(FinalizeError), patch.object(Event.objects, "create", side_effect=IntegrityError):
-        open_event_for_current_schools("Inv B", date(2026, 10, 3), "invitational")
     assert Event.objects.open() is None
 
 

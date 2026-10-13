@@ -2,16 +2,14 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
-from typing import cast
 
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import Exists, OuterRef, QuerySet
 from packets.models import Packet
-from scoring.calculator import compute_standings
+from scoring.calculator import Standing, compute_standings
 from scoring.export import export_all_zip_bytes
 from scoring.scorecard import build_scorecard_context
-from scoring.snapshot import SNAPSHOT_VERSION, context_from_snapshot, serialize_scorecard
+from scoring.snapshot import SNAPSHOT_VERSION, serialize_scorecard
 
 from core.competition_utils import WipedData, live_competition_data_exists, wipe_competition_data
 from core.models import AuditLog
@@ -337,13 +335,9 @@ def open_event_for_current_schools(name: str, event_date: date, event_type: str)
     # Schools come from the list, so the public registration form doesn't offer it
     if Event.objects.filter(season=season, name=name).exists():
         raise FinalizeError(f"The {season} season already has an event named {name}. Choose another name.")
-    try:
-        with transaction.atomic():
-            event = Event.objects.create(
-                season=season, name=name, date=event_date, event_type=event_type, registration_open=False
-            )
-    except IntegrityError:
-        raise FinalizeError(f"The {season} season cannot hold another {event_type} event numbered the same.") from None
+    event = Event.objects.create(
+        season=season, name=name, date=event_date, event_type=event_type, registration_open=False
+    )
     event.open()
     _assign_school_list(event)
     Packet.objects.sent().filter(event=None).update(event=event)
@@ -358,12 +352,22 @@ def _assign_school_list(event: Event) -> None:
     )
 
 
-def current_snapshots(event: Event) -> dict[int, dict[str, object]]:
-    """Each school assigned at the event, by id, with its scorecard as Finalize would freeze it now."""
+@dataclass(frozen=True)
+class SchoolSnapshot:
+    """A school's live standing and its scorecard as Finalize would freeze it."""
+
+    standing: Standing
+    scorecard: dict[str, object]
+
+
+def current_snapshots(event: Event) -> dict[int, SchoolSnapshot]:
+    """Each school assigned at the event, by id, with its standing and scorecard now."""
     school_by_team = dict(event.team_assignments.values_list("team_id", "school_id"))
     standings = compute_standings()
     return {
-        school_by_team[standing.team.pk]: serialize_scorecard(build_scorecard_context(standing, standings))
+        school_by_team[standing.team.pk]: SchoolSnapshot(
+            standing, serialize_scorecard(build_scorecard_context(standing, standings))
+        )
         for standing in standings
         if standing.team.pk in school_by_team
     }
@@ -386,10 +390,18 @@ def finalize_event(event: Event, actor: str) -> int:
     school_list_lock()
     event = _lock_open_event(event)
     snapshots = current_snapshots(event)
-    team_numbers = dict(event.team_assignments.values_list("school_id", "team__team_number"))
     EventResult.objects.filter(event=event).delete()
     EventResult.objects.bulk_create(
-        _result(event, school_id, team_numbers[school_id], scorecard) for school_id, scorecard in snapshots.items()
+        EventResult(
+            event=event,
+            school_id=school_id,
+            team_number=snapshot.standing.team.team_number,
+            rank=snapshot.standing.rank,
+            total_score=snapshot.standing.total_score,
+            scorecard=snapshot.scorecard,
+            version=SNAPSHOT_VERSION,
+        )
+        for school_id, snapshot in snapshots.items()
     )
     EventArchive.objects.update_or_create(event=event, defaults={"data": export_all_zip_bytes()})
     event.is_finalized = True
@@ -404,24 +416,15 @@ def finalize_event(event: Event, actor: str) -> int:
     return len(snapshots)
 
 
-def _result(event: Event, school_id: int, team_number: int, scorecard: dict[str, object]) -> EventResult:
-    score = cast(dict[str, object], context_from_snapshot(scorecard)["score"])
-    return EventResult(
-        event=event,
-        school_id=school_id,
-        team_number=team_number,
-        rank=cast(int | None, score["rank"]),
-        total_score=cast(Decimal, score["total_score"]),
-        scorecard=scorecard,
-        version=SNAPSHOT_VERSION,
-    )
-
-
 def snapshot_matches_live(event: Event) -> bool:
     """Whether the stored results say exactly what the live scores say now."""
     stored = {result.school_id: result.scorecard for result in EventResult.objects.filter(event=event)}
-    # Each scorecard through JSON, as the stored ones went (tuples become lists); the school ids stay ints
-    live = {school_id: json.loads(json.dumps(scorecard)) for school_id, scorecard in current_snapshots(event).items()}
+    # Each scorecard through JSON as the stored ones went, which turns int dict keys into strings (the encoding
+    # already made tuples lists and Decimals {"$d": ...}); the school ids stay ints
+    live = {
+        school_id: json.loads(json.dumps(snapshot.scorecard))
+        for school_id, snapshot in current_snapshots(event).items()
+    }
     return stored == live
 
 
