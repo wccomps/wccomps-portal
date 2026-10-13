@@ -1,4 +1,4 @@
-"""The records history reads: a school's frozen result per event, and the event's export zip."""
+"""The records Finalize writes: a school's frozen result per event, and the event's export zip."""
 
 import zipfile
 from datetime import date

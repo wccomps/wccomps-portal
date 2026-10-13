@@ -1,5 +1,6 @@
-"""The school list lock is taken by the registration services' writes, Event.open and Event.close, the start of a
-first packet send and the resend checks, each before it reads the open event."""
+"""The school list lock is taken by the registration services' writes (Finalize, Clear and event and season deletes
+among them), Event.open and Event.close, the start of a first packet send and the resend checks, each before it
+reads the open event."""
 
 from datetime import date
 from unittest.mock import patch

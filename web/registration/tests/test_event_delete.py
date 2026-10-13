@@ -1,5 +1,6 @@
 """An event that is open, finalized, or holds assignments or results is season history: it can't be deleted, nor can
-its season. The refusal comes with a reason, before the database's PROTECT would raise."""
+its season. Only this check guards open and assigned events; for finalized ones it explains what the PROTECT on
+results and archives would refuse."""
 
 from datetime import date
 
