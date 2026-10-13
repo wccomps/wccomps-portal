@@ -1,6 +1,8 @@
 """Finalize freezes every school's scorecard; Clear only runs while that snapshot still matches."""
 
+import io
 import threading
+import zipfile
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
@@ -10,6 +12,7 @@ from django.contrib.auth.models import User
 from django.db import connection
 from django.utils import timezone
 from packets.models import Packet
+from scoring.export import DATASETS
 from scoring.models import InjectScore, RedTeamScore, ServiceDetail, ServiceScore
 from scoring.scorecard import build_scorecard_context
 
@@ -247,6 +250,19 @@ def test_clear_resets_the_competition_times(event):
 
     config = CompetitionConfig.get_config()
     assert (config.competition_start_time, config.competition_end_time) == (None, None)
+
+
+def test_clear_rebuilds_the_archive(event):
+    finalize_open_event(None, "gold")
+    finalized_at = EventArchive.objects.get(event=event).updated_at
+
+    clear_event(event, "gold")
+
+    archive = EventArchive.objects.get(event=event)
+    assert archive.updated_at > finalized_at
+    with zipfile.ZipFile(io.BytesIO(archive.data)) as zipped:
+        names = set(zipped.namelist())
+    assert names == {f"{d.filename}.{ext}" for d in DATASETS.values() for ext in ("csv", "json")}
 
 
 def test_a_cleared_event_cannot_be_cleared_again(event):

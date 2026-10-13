@@ -293,11 +293,11 @@ class EventResult(models.Model):
 
 
 class EventArchive(models.Model):
-    """The event's full export zip, kept at Finalize for whatever the scorecard didn't keep."""
+    """The event's full export zip, for whatever the scorecard didn't keep; rewritten at Finalize and at Clear."""
 
     event = models.OneToOneField(Event, on_delete=models.PROTECT, related_name="archive")
     data = models.BinaryField()
-    created_at = models.DateTimeField(auto_now=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class RegistrationRateLimit(models.Model):

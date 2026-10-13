@@ -16,7 +16,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('data', models.BinaryField()),
-                ('created_at', models.DateTimeField(auto_now=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
                 ('event', models.OneToOneField(on_delete=django.db.models.deletion.PROTECT, related_name='archive', to='registration.event')),
             ],
         ),
