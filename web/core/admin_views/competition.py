@@ -300,46 +300,29 @@ def _action_cleanup_competition(
     return JsonResponse({"success": True, "message": "Cleanup queued. The bot reports progress in the ops channel."})
 
 
-def _action_wipe_competition(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
-    from core.competition_utils import wipe_competition_data
+def _action_clear_event(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
+    from registration.models import Event
+    from registration.services import FinalizeError, clear_event
 
     if config.applications_enabled:
-        return JsonResponse({"error": "Competition must be stopped before wiping"}, status=400)
-
-    counts = wipe_competition_data()
+        return JsonResponse({"error": "Competition must be stopped before clearing"}, status=400)
+    event = Event.objects.open()
+    if event is None:
+        return JsonResponse({"error": "No event is open. Finalize the event first."}, status=400)
+    try:
+        counts = clear_event(event, authentik_username)
+    except FinalizeError as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
     config.competition_start_time = None
     config.competition_end_time = None
-    config.save()
+    config.save(update_fields=["competition_start_time", "competition_end_time", "updated_at"])
 
     counters_reset = counts.pop("TeamTicketCounter")
-    deleted_items = {k: v for k, v in counts.items() if v > 0}
-    total_deleted = sum(counts.values())
-
-    # The wipe keeps AuditLog, so the wipe itself is recorded alongside the history
-    AuditLog.objects.create(
-        action="competition_wiped",
-        admin_user=authentik_username,
-        target_entity="competition",
-        target_id=0,
-        details={
-            "deleted_counts": deleted_items,
-            "total_deleted": total_deleted,
-            "ticket_counters_reset": counters_reset,
-        },
-    )
-
-    summary_parts = [f"{v} {k}" for k, v in deleted_items.items()]
-    summary = ", ".join(summary_parts) if summary_parts else "No data to delete"
+    summary = ", ".join(f"{v} {k}" for k, v in counts.items() if v > 0) or "No data to delete"
     if counters_reset:
         summary += f"; {counters_reset} team ticket counters reset"
-
-    return JsonResponse(
-        {
-            "success": True,
-            "message": f"Competition wiped! Deleted: {summary}",
-        }
-    )
+    return JsonResponse({"success": True, "message": f"{event.name} cleared. Deleted: {summary}"})
 
 
 def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
@@ -483,7 +466,7 @@ _COMPETITION_ACTION_HANDLERS = {
     "start_competition": _action_start_competition,
     "stop_competition": _action_stop_competition,
     "cleanup_competition": _action_cleanup_competition,
-    "wipe_competition": _action_wipe_competition,
+    "clear_event": _action_clear_event,
     "reset_passwords": _action_reset_passwords,
     "sync_quotient": _action_sync_quotient,
     "readiness_check": action_readiness_check,

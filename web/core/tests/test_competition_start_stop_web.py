@@ -116,16 +116,116 @@ def test_start_finishes_after_the_browser_disconnects(admin_client):
     assert CompetitionConfig.get_config().applications_enabled
 
 
-def test_wipe_resets_ticket_counters_and_says_so(admin_client):
+def _open_event():
+    from datetime import date
+
+    from registration.models import Event, Season
+
+    season = Season.objects.create(name="2026", year=2026, is_active=True)
+    return Event.objects.create(
+        season=season, name="Inv", event_type="invitational", date=date(2026, 10, 3), is_active=True
+    )
+
+
+def _finalized_event():
+    from registration.services import finalize_event
+
+    event = _open_event()
+    finalize_event(event, "admin")
+    return event
+
+
+def test_clear_needs_a_finalized_event(admin_client):
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
+    _open_event()
+
+    response = _post(admin_client, "clear_event")
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "Finalize this event first."
+
+
+def test_clear_needs_an_open_event(admin_client):
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
+
+    response = _post(admin_client, "clear_event")
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "No event is open. Finalize the event first."
+
+
+def test_clear_refused_while_running(admin_client):
+    from scoring.models import ServiceScore
+
+    from team.models import Team
+
+    team = Team.objects.create(team_number=9, team_name="Team 9")
+    ServiceScore.objects.create(team=team, service_points=100)
+    event = _finalized_event()
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
+
+    response = _post(admin_client, "clear_event")
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "Competition must be stopped before clearing"
+    assert ServiceScore.objects.exists()
+    event.refresh_from_db()
+    assert event.is_active
+
+
+def test_clear_resets_ticket_counters_and_says_so(admin_client):
     from team.models import Team
 
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     Team.objects.create(team_number=9, team_name="Team 9", ticket_counter=85)
+    _finalized_event()
+
+    response = _post(admin_client, "clear_event")
+
+    assert response.json()["message"].startswith("Inv cleared. Deleted: ")
+    assert response.json()["message"].endswith("; 1 team ticket counters reset")
+    assert Team.objects.get(team_number=9).ticket_counter == 0
+
+
+def test_clear_resets_the_competition_times(admin_client):
+    from django.utils import timezone
+
+    now = timezone.now()
+    CompetitionConfig.objects.update_or_create(
+        pk=1,
+        defaults={"applications_enabled": False, "competition_start_time": now, "competition_end_time": now},
+    )
+    _finalized_event()
+
+    assert _post(admin_client, "clear_event").json()["success"]
+
+    config = CompetitionConfig.get_config()
+    assert config.competition_start_time is None
+    assert config.competition_end_time is None
+
+
+def test_a_refused_clear_keeps_the_competition_times(admin_client):
+    from django.utils import timezone
+
+    now = timezone.now()
+    CompetitionConfig.objects.update_or_create(
+        pk=1,
+        defaults={"applications_enabled": False, "competition_start_time": now, "competition_end_time": now},
+    )
+    _open_event()
+
+    assert _post(admin_client, "clear_event").status_code == 400
+
+    assert CompetitionConfig.get_config().competition_start_time == now
+
+
+def test_the_wipe_action_is_gone(admin_client):
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
 
     response = _post(admin_client, "wipe_competition")
 
-    assert response.json()["message"].endswith("; 1 team ticket counters reset")
-    assert Team.objects.get(team_number=9).ticket_counter == 0
+    assert response.status_code == 400
+    assert "Unknown action" in response.json()["error"]
 
 
 def test_a_partial_start_is_reported_incomplete_not_success(admin_client):

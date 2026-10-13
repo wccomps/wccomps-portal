@@ -13,8 +13,11 @@ from core.models import AuditLog
 from registration.models import Event, EventArchive, EventResult, School, Season
 from registration.services import (
     FinalizeError,
+    SchoolListRow,
     clear_event,
     finalize_event,
+    import_problem,
+    import_school_list,
     open_event_for_current_schools,
     set_team_school,
     snapshot_matches_live,
@@ -135,6 +138,40 @@ def test_a_cleared_event_cannot_be_cleared_again(event):
 
     with pytest.raises(FinalizeError, match="not open"):
         clear_event(event, "gold")
+
+
+def test_clear_records_the_ticket_counter_reset_apart_from_the_deletions(event):
+    Team.objects.filter(team_number=1).update(ticket_counter=85)
+    finalize_event(event, "gold")
+
+    clear_event(event, "gold")
+
+    details = AuditLog.objects.get(action="event_cleared").details
+    assert details["ticket_counters_reset"] == 1
+    assert "TeamTicketCounter" not in details["deleted_counts"]
+    assert details["total_deleted"] == 2
+
+
+def test_after_clearing_a_replace_import_opens_the_next_event(event):
+    finalize_event(event, "gold")
+    blocked = Event(
+        season=event.season, name="Qual", event_type="qualifier", date=date(2026, 11, 7), registration_open=False
+    )
+    assert "still open" in import_problem(blocked)
+    clear_event(event, "gold")
+    new = Event(
+        season=event.season, name="Qual", event_type="qualifier", date=date(2026, 11, 7), registration_open=False
+    )
+    rows = [SchoolListRow(team_number=2, school_name="Example University", contact_email="c@example.edu")]
+
+    assert import_problem(new) == ""
+    import_school_list(new, rows, "gold")
+
+    assert Event.objects.open() == new
+    assert list(SchoolInfo.objects.values_list("team__team_number", "school__name")) == [(2, "Example University")]
+    assert list(new.team_assignments.values_list("school__name", flat=True)) == ["Example University"]
+    assert EventResult.objects.filter(event=event).count() == 2
+    assert event.team_assignments.count() == 2
 
 
 def _sent_packet(**fields):

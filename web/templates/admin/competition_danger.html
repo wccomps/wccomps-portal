@@ -22,13 +22,16 @@
                 <span x-show="loading" x-cloak>Processing...</span>
             </c-link>
         </c-fieldset>
-        <c-action_box variant="warning" heading="Wipe All Data">
-            <p class="mb-15">Permanently delete all competition data (scores, tickets, links). This cannot be undone.</p>
+        <c-action_box variant="warning" heading="Clear Event">
+            <p class="mb-15">
+                Delete the live scores, tickets and blue team links once the open event's results are finalized. The
+                frozen results and export archive are kept.
+            </p>
             <c-link href="#"
                     variant="danger"
-                    @click.prevent="guardedWipe"
+                    @click.prevent="guardedClear"
                     ::class="disabledClass">
-                <span x-show="notLoading">Wipe All Data</span>
+                <span x-show="notLoading">Clear Event</span>
                 <span x-show="loading" x-cloak>Processing...</span>
             </c-link>
         </c-action_box>
@@ -42,7 +45,7 @@
             get notLoading() { return !this.loading; },
 
             guardedCleanup() { if (!this.loading) this.cleanupCompetition(); },
-            guardedWipe() { if (!this.loading) this.wipeCompetition(); },
+            guardedClear() { if (!this.loading) this.clearEvent(); },
 
             async doAction(action) {
                 this.loading = true;
@@ -71,20 +74,15 @@
                 }
             },
 
-            wipeCompetition() {
-                const message = 'WIPE ALL COMPETITION DATA?\n\n' +
-                    'This will PERMANENTLY DELETE:\n\n' +
-                    'SCORING: Red Team Findings, Incident Reports, Inject Grades, Service Scores, Scoring Exclusions\n' +
-                    'TICKETING: All Tickets, Comments, History (ticket numbering restarts at 001)\n' +
-                    'DISCORD: Blue Team Discord Links\n\n' +
-                    'PRESERVED: Teams, Staff Links, Audit Logs\n\n' +
-                    'Competition must be stopped first.\n' +
-                    'This CANNOT be undone!\n\n' +
+            clearEvent() {
+                const message = 'CLEAR THE OPEN EVENT?\n\n' +
+                    'This deletes the live scores, tickets and blue team Discord links.\n' +
+                    'The finalized results and export archive are kept.\n\n' +
+                    'It is refused if scores changed since you finalized.\n\n' +
                     'Type "yolo" to confirm:';
-
                 const response = prompt(message);
                 if (response && response.toLowerCase() === 'yolo') {
-                    this.doAction('wipe_competition');
+                    this.doAction('clear_event');
                 }
             }
         }));

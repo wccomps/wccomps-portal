@@ -443,11 +443,17 @@ def clear_event(event: Event, actor: str) -> dict[str, int]:
     EventArchive.objects.update_or_create(event=event, defaults={"data": export_all_zip_bytes()})
     counts = wipe_competition_data()
     event.close()
+    deleted = {k: v for k, v in counts.items() if k != "TeamTicketCounter"}
     AuditLog.objects.create(
         action="event_cleared",
         admin_user=actor,
         target_entity="event",
         target_id=event.pk,
-        details={"event": event.name, "deleted_counts": {k: v for k, v in counts.items() if v}},
+        details={
+            "event": event.name,
+            "deleted_counts": {k: v for k, v in deleted.items() if v},
+            "total_deleted": sum(deleted.values()),
+            "ticket_counters_reset": counts["TeamTicketCounter"],
+        },
     )
     return counts
