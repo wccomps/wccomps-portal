@@ -18,7 +18,7 @@ from registration.services import (
     set_team_school,
 )
 from scoring.calculator import compute_standings
-from scoring.models import InjectScore, OrangeTeamScore, ServiceScore
+from scoring.models import InjectScore, OrangeTeamScore, ServiceDetail, ServiceScore
 from scoring.scorecard import build_scorecard_context
 
 from core.models import CompetitionConfig
@@ -149,6 +149,18 @@ def test_inject_scorecard_list_breaks_ties_by_pk():
 
     listing = next(q["sql"] for q in queries if q["sql"].startswith('SELECT "inject_grade"."id"'))
     assert listing.endswith('ORDER BY "inject_grade"."inject_name" ASC, "inject_grade"."id" ASC')
+
+
+def test_service_scorecard_list_breaks_ties_by_pk():
+    team = _team_with_school()
+    ServiceDetail.objects.create(team=team, service_name="Same", points=Decimal(5))
+    standings = compute_standings()
+
+    with CaptureQueriesContext(connection) as queries:
+        build_scorecard_context(standings[0], standings)
+
+    listing = next(q["sql"] for q in queries if q["sql"].startswith('SELECT "service_detail"."id"'))
+    assert listing.endswith('ORDER BY "service_detail"."service_name" ASC, "service_detail"."id" ASC')
 
 
 def test_finalize_needs_admin_or_gold_access(create_user_with_groups):

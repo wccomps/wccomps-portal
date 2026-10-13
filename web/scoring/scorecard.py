@@ -131,7 +131,7 @@ def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _Sco
         )
 
     service_stats: list[_ServiceStat] = []
-    team_services = ServiceDetail.objects.filter(team=team).order_by("service_name")
+    team_services = ServiceDetail.objects.filter(team=team).order_by("service_name", "pk")
 
     for svc in team_services:
         all_svc = ServiceDetail.objects.filter(service_name=svc.service_name, team_id__in=ranked_team_ids)
