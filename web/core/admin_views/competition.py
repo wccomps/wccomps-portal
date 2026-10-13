@@ -3,6 +3,7 @@ import io
 import json
 import logging
 from collections.abc import Iterator
+from datetime import date
 from typing import cast
 
 from django.contrib.auth.models import User
@@ -16,7 +17,15 @@ from core.admin_views.readiness import action_readiness_check, action_readiness_
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import reset_team_credentials
 from core.discord_tasks import CleanupCompetition, LogToChannel
-from core.forms import ActionForm, AppSlugForm, ResetPasswordsForm, SetMaxMembersForm, SetTimeForm, StartMessageForm
+from core.forms import (
+    ActionForm,
+    AppSlugForm,
+    FinalizeEventForm,
+    ResetPasswordsForm,
+    SetMaxMembersForm,
+    SetTimeForm,
+    StartMessageForm,
+)
 from core.models import AuditLog, CompetitionConfig, DiscordTask
 from core.services.competition import CompetitionRunResult, run_competition
 from core.utils import ndjson_progress as _progress
@@ -405,7 +414,56 @@ def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authe
         return JsonResponse({"error": f"Sync failed: {e}"}, status=500)
 
 
+def _stream_finalize(
+    config: CompetitionConfig, authentik_username: str, name: str, event_date: date | None, event_type: str
+) -> Iterator[str]:
+    from registration.models import Event
+    from registration.services import FinalizeError, finalize_event, open_event_for_current_schools
+
+    def done(success: bool, message: str) -> str:
+        return json.dumps({"done": True, "success": success, "message": message}) + "\n"
+
+    if config.applications_enabled:
+        yield done(False, "Stop the competition before finalizing.")
+        return
+    try:
+        event = Event.objects.open()
+        if event is None:
+            if not name or event_date is None or not event_type:
+                yield done(
+                    False,
+                    "No event is open: give the event a name, a date and a valid type to finalize the current list.",
+                )
+                return
+            yield _progress(f"Creating {name} for the current school list", 1, 3)
+            event = open_event_for_current_schools(name, event_date, event_type)
+        yield _progress(f"Freezing every school's scorecard for {event.name}", 2, 3)
+        count = finalize_event(event, authentik_username)
+    except FinalizeError as e:
+        yield done(False, str(e))
+        return
+    yield _progress("Saved the export archive", 3, 3)
+    yield done(True, f"Finalized {event.name}: {count} school result(s). Teams can now see it in Past Events.")
+
+
+def _action_finalize_event(
+    request: HttpRequest, config: CompetitionConfig, authentik_username: str
+) -> StreamingHttpResponse:
+    # Read the form here: the stream runs in its own thread
+    form = FinalizeEventForm(request.POST)
+    form.is_valid()
+    data = form.cleaned_data
+    name = data.get("event_name", "").strip()
+    event_date = data.get("event_date")
+    event_type = data.get("event_type", "")
+    return StreamingHttpResponse(
+        run_detached(_stream_finalize(config, authentik_username, name, event_date, event_type)),
+        content_type="application/x-ndjson",
+    )
+
+
 _COMPETITION_ACTION_HANDLERS = {
+    "finalize_event": _action_finalize_event,
     "set_max_members": _action_set_max_members,
     "set_start_message": _action_set_start_message,
     "add_app": _action_add_app,
@@ -426,6 +484,8 @@ _COMPETITION_ACTION_HANDLERS = {
 
 @require_permission("admin", "gold_team")
 def admin_competition(request: HttpRequest) -> HttpResponse:
+    from registration.models import Event
+
     from team.models import DiscordLink, Team
 
     config = CompetitionConfig.get_config()
@@ -437,6 +497,7 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
     quotient_metadata = QuotientMetadataCache.objects.first()
 
     context = {
+        "open_event": Event.objects.open(),
         "config": config,
         "active_teams": active_teams,
         "total_teams": total_teams,

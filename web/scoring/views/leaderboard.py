@@ -135,7 +135,7 @@ def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _Sco
     team_injects = (
         InjectScore.objects.filter(team=team, is_approved=True)
         .exclude(inject_id="qualifier-total")
-        .order_by("inject_name")
+        .order_by("inject_name", "pk")
     )
 
     for inj in team_injects:
@@ -243,7 +243,7 @@ def build_scorecard_context(score: Standing, standings: list[Standing]) -> dict[
     stats = _compute_scorecard_stats(score, standings)
     detailed = calculate_team_score_detailed(team)
 
-    orange_scores = OrangeTeamScore.objects.filter(team=team, is_approved=True).order_by("description")
+    orange_scores = OrangeTeamScore.objects.filter(team=team, is_approved=True).order_by("description", "pk")
 
     return {
         "team": team,

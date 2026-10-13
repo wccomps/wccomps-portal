@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from typing import cast
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, QuerySet
 from packets.models import Packet
 from scoring.calculator import compute_standings
@@ -335,9 +335,15 @@ def open_event_for_current_schools(name: str, event_date: date, event_type: str)
     if season is None:
         raise FinalizeError("There is no active season to hold the event. Activate a season first.")
     # Schools come from the list, so the public registration form doesn't offer it
-    event = Event.objects.create(
-        season=season, name=name, date=event_date, event_type=event_type, registration_open=False
-    )
+    if Event.objects.filter(season=season, name=name).exists():
+        raise FinalizeError(f"The {season} season already has an event named {name}. Choose another name.")
+    try:
+        with transaction.atomic():
+            event = Event.objects.create(
+                season=season, name=name, date=event_date, event_type=event_type, registration_open=False
+            )
+    except IntegrityError:
+        raise FinalizeError(f"The {season} season cannot hold another {event_type} event numbered the same.") from None
     event.open()
     _assign_school_list(event)
     Packet.objects.sent().filter(event=None).update(event=event)

@@ -1,4 +1,5 @@
 from django import forms
+from registration.models import Event
 
 from core.authentik_utils import parse_team_range
 
@@ -61,6 +62,14 @@ class CategoryForm(forms.Form):
 
 class SetMaxMembersForm(forms.Form):
     max_members = forms.IntegerField(min_value=1, max_value=20)
+
+
+class FinalizeEventForm(forms.Form):
+    """The new event's fields for finalizing with no event open; a missing or invalid one comes back empty."""
+
+    event_name = forms.CharField(required=False)
+    event_date = forms.DateField(required=False)
+    event_type = forms.ChoiceField(required=False, choices=Event.EVENT_TYPE_CHOICES)
 
 
 class StartMessageForm(forms.Form):
