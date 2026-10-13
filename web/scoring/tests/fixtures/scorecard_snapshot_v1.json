@@ -1,0 +1,280 @@
+{
+  "team": {
+    "team_number": 37
+  },
+  "score": {
+    "service_points": {
+      "$d": "3101.00"
+    },
+    "inject_points": {
+      "$d": "3202.00"
+    },
+    "orange_points": {
+      "$d": "3303.00"
+    },
+    "red_deductions": {
+      "$d": "-3404.00"
+    },
+    "sla_penalties": {
+      "$d": "-3505.00"
+    },
+    "point_adjustments": {
+      "$d": "-3606.00"
+    },
+    "incident_recovery_points": {
+      "$d": "3707.00"
+    },
+    "total_score": {
+      "$d": "3808.00"
+    },
+    "rank": 2
+  },
+  "stats": {
+    "team_count": 9,
+    "category_ranks": {
+      "services": {
+        "rank": 1,
+        "avg": {
+          "$d": "6101.00"
+        },
+        "min": {
+          "$d": "6102.00"
+        },
+        "max": {
+          "$d": "6103.00"
+        },
+        "value": {
+          "$d": "6104.00"
+        },
+        "delta": 4101,
+        "below_avg": false
+      },
+      "injects": {
+        "rank": 3,
+        "avg": {
+          "$d": "6201.00"
+        },
+        "min": {
+          "$d": "6202.00"
+        },
+        "max": {
+          "$d": "6203.00"
+        },
+        "value": {
+          "$d": "6204.00"
+        },
+        "delta": 4202,
+        "below_avg": false
+      },
+      "orange": {
+        "rank": 4,
+        "avg": {
+          "$d": "6301.00"
+        },
+        "min": {
+          "$d": "6302.00"
+        },
+        "max": {
+          "$d": "6303.00"
+        },
+        "value": {
+          "$d": "6304.00"
+        },
+        "delta": 4303,
+        "below_avg": false
+      },
+      "red": {
+        "rank": 5,
+        "avg": {
+          "$d": "-6401.00"
+        },
+        "min": {
+          "$d": "-6402.00"
+        },
+        "max": {
+          "$d": "-6403.00"
+        },
+        "value": {
+          "$d": "-6404.00"
+        },
+        "delta": -4404,
+        "below_avg": true
+      },
+      "sla": {
+        "rank": 6,
+        "avg": {
+          "$d": "-6501.00"
+        },
+        "min": {
+          "$d": "-6502.00"
+        },
+        "max": {
+          "$d": "-6503.00"
+        },
+        "value": {
+          "$d": "-6504.00"
+        },
+        "delta": -4505,
+        "below_avg": true
+      },
+      "recovery": {
+        "rank": 7,
+        "avg": {
+          "$d": "6601.00"
+        },
+        "min": {
+          "$d": "6602.00"
+        },
+        "max": {
+          "$d": "6603.00"
+        },
+        "value": {
+          "$d": "6604.00"
+        },
+        "delta": 4606,
+        "below_avg": false
+      },
+      "adjustments": {
+        "rank": 8,
+        "avg": {
+          "$d": "-6701.00"
+        },
+        "min": {
+          "$d": "-6702.00"
+        },
+        "max": {
+          "$d": "-6703.00"
+        },
+        "value": {
+          "$d": "-6704.00"
+        },
+        "delta": -4707,
+        "below_avg": true
+      }
+    },
+    "service_stats": [
+      {
+        "name": "web-http",
+        "points": {
+          "$d": "5101.00"
+        },
+        "rank": 3,
+        "avg": {
+          "$d": "6801.0000000000000000"
+        },
+        "delta": 5102,
+        "below_avg": false,
+        "sla_violations": 5103
+      }
+    ],
+    "inject_stats": [
+      {
+        "name": "Memo",
+        "points": {
+          "$d": "5201.00"
+        },
+        "rank": 4,
+        "avg": {
+          "$d": "6901.5000000000000000"
+        },
+        "max": {
+          "$d": "5202.00"
+        },
+        "delta": 5203,
+        "below_avg": false,
+        "feedback": "Clear and complete."
+      }
+    ],
+    "neighbors": [
+      {
+        "rank": 1,
+        "total_score": {
+          "$d": "5301.00"
+        },
+        "gap": {
+          "$d": "5302.00"
+        }
+      },
+      {
+        "rank": 3,
+        "total_score": {
+          "$d": "5303.00"
+        },
+        "gap": {
+          "$d": "-5304.00"
+        }
+      }
+    ],
+    "insights": [
+      "Strongest category: Services (rank #1 of 9)"
+    ],
+    "total_delta": 5401
+  },
+  "red_scores": [
+    {
+      "attack_type": {
+        "name": "Default Credentials"
+      },
+      "attack_vector": "ssh",
+      "affected_boxes_display": "web01, db01",
+      "affected_service": "smtp-relay",
+      "outcomes_display": [
+        "Root Access (-100)",
+        "Credentials (-50)"
+      ],
+      "points_per_team": {
+        "$d": "5501.00"
+      }
+    }
+  ],
+  "orange_scores": [
+    {
+      "description": "Phone check (max 10 pts)",
+      "points_awarded": {
+        "$d": "5601.00"
+      }
+    }
+  ],
+  "red_total": {
+    "$d": "5701.00"
+  },
+  "inject_total": {
+    "$d": "5702.00"
+  },
+  "orange_total": {
+    "$d": "5703.00"
+  },
+  "service_total": {
+    "$d": "5704.00"
+  },
+  "service_sla_total": 5705,
+  "scaling": {
+    "service_raw": {
+      "$d": "5801"
+    },
+    "inject_raw": {
+      "$d": "5802"
+    },
+    "orange_raw": {
+      "$d": "5803"
+    },
+    "service_modifier": {
+      "$d": "1.11"
+    },
+    "inject_modifier": {
+      "$d": "2.22"
+    },
+    "orange_modifier": {
+      "$d": "3.33"
+    },
+    "service_weight": {
+      "$d": "41"
+    },
+    "inject_weight": {
+      "$d": "42"
+    },
+    "orange_weight": {
+      "$d": "17"
+    }
+  }
+}
