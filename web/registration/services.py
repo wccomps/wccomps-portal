@@ -1,16 +1,34 @@
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
+from typing import cast
 
 from django.db import transaction
 from django.db.models import Exists, OuterRef, QuerySet
 from packets.models import Packet
+from scoring.calculator import compute_standings
+from scoring.export import export_all_zip_bytes
+from scoring.snapshot import SNAPSHOT_VERSION, context_from_snapshot, serialize_scorecard
+from scoring.views.leaderboard import build_scorecard_context
 
-from core.competition_utils import live_competition_data_exists
+from core.competition_utils import live_competition_data_exists, wipe_competition_data
+from core.models import AuditLog
 from team.models import DiscordLink, SchoolInfo, Team, default_team_name
 from ticketing.models import Ticket
 
 from .locks import school_list_lock
-from .models import Event, EventTeamAssignment, School, TeamRegistration, normalize_school_name
+from .models import (
+    Event,
+    EventArchive,
+    EventResult,
+    EventTeamAssignment,
+    School,
+    Season,
+    TeamRegistration,
+    normalize_school_name,
+)
 
 
 class PacketsSentError(Exception):
@@ -297,3 +315,133 @@ def add_to_school_list(event: Event, rows: list[SchoolListRow], updated_by: str)
             # Only when two rows name one school, which the preview refuses
             raise ImportBlockedError(f"{row.school_name} is already on the list. Upload the file again.") from None
     return {"created": len(rows), "activated": activated}
+
+
+class FinalizeError(Exception):
+    """Finalize, Clear or opening an event for the current schools refused; the message says why."""
+
+
+@transaction.atomic
+def open_event_for_current_schools(name: str, event_date: date, event_type: str) -> Event:
+    """Create the event in the active season and open it for the school list as it stands, for an event that runs
+    without an import: each school on the list is assigned its team at the event, and the packets sent while no
+    event was open are stamped with it. Under the school list lock; FinalizeError while an event is open or with no
+    active season.
+    """
+    school_list_lock()
+    if open_now := Event.objects.open():
+        raise FinalizeError(f"{open_now} is already open. Finalize and clear it first.")
+    season = Season.objects.active()
+    if season is None:
+        raise FinalizeError("There is no active season to hold the event. Activate a season first.")
+    # Schools come from the list, so the public registration form doesn't offer it
+    event = Event.objects.create(
+        season=season, name=name, date=event_date, event_type=event_type, registration_open=False
+    )
+    event.open()
+    _assign_school_list(event)
+    Packet.objects.sent().filter(event=None).update(event=event)
+    return event
+
+
+def _assign_school_list(event: Event) -> None:
+    """Record each school on the list as holding its team at the new event; the list itself stays as it is."""
+    EventTeamAssignment.objects.bulk_create(
+        EventTeamAssignment(event=event, school_id=school_id, team_id=team_id)
+        for school_id, team_id in SchoolInfo.objects.values_list("school_id", "team_id")
+    )
+
+
+def current_snapshots(event: Event) -> dict[int, dict[str, object]]:
+    """Each school assigned at the event, by id, with its scorecard as Finalize would freeze it now."""
+    school_by_team = dict(event.team_assignments.values_list("team_id", "school_id"))
+    standings = compute_standings()
+    return {
+        school_by_team[standing.team.pk]: serialize_scorecard(build_scorecard_context(standing, standings))
+        for standing in standings
+        if standing.team.pk in school_by_team
+    }
+
+
+def _lock_open_event(event: Event) -> Event:
+    """The event re-read with its row locked, once it is confirmed to be the open one. Call under the school list
+    lock; FinalizeError when the event isn't open, since the live scores belong only to the open event."""
+    if Event.objects.open() != event:
+        raise FinalizeError(f"{event} is not open; only the open event's live scores can be finalized or cleared.")
+    return Event.objects.select_for_update().get(pk=event.pk)
+
+
+@transaction.atomic
+def finalize_event(event: Event, actor: str) -> int:
+    """Freeze each assigned school's scorecard and the export zip for the open event; finalizing again replaces both.
+
+    Returns how many results were written. Under the school list lock, so the schools can't change underneath.
+    """
+    school_list_lock()
+    event = _lock_open_event(event)
+    snapshots = current_snapshots(event)
+    team_numbers = dict(event.team_assignments.values_list("school_id", "team__team_number"))
+    EventResult.objects.filter(event=event).delete()
+    EventResult.objects.bulk_create(
+        _result(event, school_id, team_numbers[school_id], scorecard) for school_id, scorecard in snapshots.items()
+    )
+    EventArchive.objects.update_or_create(event=event, defaults={"data": export_all_zip_bytes()})
+    event.is_finalized = True
+    event.save(update_fields=["is_finalized", "updated_at"])
+    AuditLog.objects.create(
+        action="event_finalized",
+        admin_user=actor,
+        target_entity="event",
+        target_id=event.pk,
+        details={"event": event.name, "results": len(snapshots)},
+    )
+    return len(snapshots)
+
+
+def _result(event: Event, school_id: int, team_number: int, scorecard: dict[str, object]) -> EventResult:
+    score = cast(dict[str, object], context_from_snapshot(scorecard)["score"])
+    return EventResult(
+        event=event,
+        school_id=school_id,
+        team_number=team_number,
+        rank=cast(int | None, score["rank"]),
+        total_score=cast(Decimal, score["total_score"]),
+        scorecard=scorecard,
+        version=SNAPSHOT_VERSION,
+    )
+
+
+def snapshot_matches_live(event: Event) -> bool:
+    """Whether the stored results say exactly what the live scores say now."""
+    stored = {result.school_id: result.scorecard for result in EventResult.objects.filter(event=event)}
+    # Each scorecard through JSON, as the stored ones went (tuples become lists); the school ids stay ints
+    live = {school_id: json.loads(json.dumps(scorecard)) for school_id, scorecard in current_snapshots(event).items()}
+    return stored == live
+
+
+@transaction.atomic
+def clear_event(event: Event, actor: str) -> dict[str, int]:
+    """Delete the live competition data once the open event's results are frozen and still match it, then close
+    the event. The school list stays until the next import replaces it.
+
+    Returns the deleted counts (wipe_competition_data). Under the school list lock; FinalizeError when the event
+    isn't open, isn't finalized, or its scores changed since finalizing.
+    """
+    school_list_lock()
+    event = _lock_open_event(event)
+    if not event.is_finalized:
+        raise FinalizeError("Finalize this event first.")
+    if not snapshot_matches_live(event):
+        raise FinalizeError("Results changed since finalizing; finalize again before clearing.")
+    # Late changes the scorecard doesn't show (a ticket comment, an incident note) go into the archive
+    EventArchive.objects.update_or_create(event=event, defaults={"data": export_all_zip_bytes()})
+    counts = wipe_competition_data()
+    event.close()
+    AuditLog.objects.create(
+        action="event_cleared",
+        admin_user=actor,
+        target_entity="event",
+        target_id=event.pk,
+        details={"event": event.name, "deleted_counts": {k: v for k, v in counts.items() if v}},
+    )
+    return counts

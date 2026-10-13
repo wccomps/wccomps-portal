@@ -189,12 +189,19 @@ class Event(models.Model):
 
     @transaction.atomic
     def open(self) -> None:
-        """Make this the only active event, under the school list lock."""
+        """Make this the only active event, under the school list lock. With close, the only writer of is_active."""
         school_list_lock()
         Event.objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
         if not self.is_active:
             self.is_active = True
             self.save(update_fields=["is_active", "updated_at"])
+
+    @transaction.atomic
+    def close(self) -> None:
+        """Make this event inactive, under the school list lock."""
+        school_list_lock()
+        self.is_active = False
+        self.save(update_fields=["is_active", "updated_at"])
 
 
 class RegistrationContact(models.Model):
