@@ -310,7 +310,7 @@ def _action_clear_event(request: HttpRequest, config: CompetitionConfig, authent
     if event is None:
         return JsonResponse({"error": "No event is open. Finalize the event first."}, status=400)
     try:
-        counts = clear_event(event, authentik_username)
+        wiped = clear_event(event, authentik_username)
     except FinalizeError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -318,10 +318,9 @@ def _action_clear_event(request: HttpRequest, config: CompetitionConfig, authent
     config.competition_end_time = None
     config.save(update_fields=["competition_start_time", "competition_end_time", "updated_at"])
 
-    counters_reset = counts.pop("TeamTicketCounter")
-    summary = ", ".join(f"{v} {k}" for k, v in counts.items() if v > 0) or "No data to delete"
-    if counters_reset:
-        summary += f"; {counters_reset} team ticket counters reset"
+    summary = ", ".join(f"{v} {k}" for k, v in wiped.deleted.items() if v > 0) or "No data to delete"
+    if wiped.ticket_counters_reset:
+        summary += f"; {wiped.ticket_counters_reset} team ticket counters reset"
     return JsonResponse({"success": True, "message": f"{event.name} cleared. Deleted: {summary}"})
 
 

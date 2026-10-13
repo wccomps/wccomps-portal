@@ -73,7 +73,7 @@ class TestInitTeamsCommand:
 
 
 class TestWipeCompetitionData:
-    """wipe_competition_data, behind the ops page's wipe action."""
+    """wipe_competition_data, behind the ops page's Clear Event."""
 
     @pytest.fixture
     def populated_database(self):
@@ -146,5 +146,15 @@ class TestWipeCompetitionData:
         assert not OrangeCheckIn.objects.exists()
         assert OrangeCheck.objects.filter(pk=check.pk).exists()  # rubrics are reusable setup
 
+    def test_reports_the_ticket_counter_reset_apart_from_the_deletions(self, populated_database):
+        wiped = wipe_competition_data()
+
+        assert wiped.deleted["Ticket"] == 1
+        assert "TeamTicketCounter" not in wiped.deleted
+        assert wiped.ticket_counters_reset == 1
+
     def test_handles_empty_database(self):
-        assert wipe_competition_data()["Ticket"] == 0
+        wiped = wipe_competition_data()
+
+        assert wiped.deleted["Ticket"] == 0
+        assert wiped.ticket_counters_reset == 0

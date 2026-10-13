@@ -13,7 +13,7 @@ from scoring.export import export_all_zip_bytes
 from scoring.scorecard import build_scorecard_context
 from scoring.snapshot import SNAPSHOT_VERSION, context_from_snapshot, serialize_scorecard
 
-from core.competition_utils import live_competition_data_exists, wipe_competition_data
+from core.competition_utils import WipedData, live_competition_data_exists, wipe_competition_data
 from core.models import AuditLog
 from team.models import DiscordLink, SchoolInfo, Team, default_team_name
 from ticketing.models import Ticket
@@ -426,11 +426,11 @@ def snapshot_matches_live(event: Event) -> bool:
 
 
 @transaction.atomic
-def clear_event(event: Event, actor: str) -> dict[str, int]:
+def clear_event(event: Event, actor: str) -> WipedData:
     """Delete the live competition data once the open event's results are frozen and still match it, then close
     the event. The school list stays until the next import replaces it.
 
-    Returns the deleted counts (wipe_competition_data). Under the school list lock; FinalizeError when the event
+    Returns what the wipe deleted and reset. Under the school list lock; FinalizeError when the event
     isn't open, isn't finalized, or its scores changed since finalizing.
     """
     school_list_lock()
@@ -441,9 +441,8 @@ def clear_event(event: Event, actor: str) -> dict[str, int]:
         raise FinalizeError("Results changed since finalizing; finalize again before clearing.")
     # Late changes the scorecard doesn't show (a ticket comment, an incident note) go into the archive
     EventArchive.objects.update_or_create(event=event, defaults={"data": export_all_zip_bytes()})
-    counts = wipe_competition_data()
+    wiped = wipe_competition_data()
     event.close()
-    deleted = {k: v for k, v in counts.items() if k != "TeamTicketCounter"}
     AuditLog.objects.create(
         action="event_cleared",
         admin_user=actor,
@@ -451,12 +450,12 @@ def clear_event(event: Event, actor: str) -> dict[str, int]:
         target_id=event.pk,
         details={
             "event": event.name,
-            "deleted_counts": {k: v for k, v in deleted.items() if v},
-            "total_deleted": sum(deleted.values()),
-            "ticket_counters_reset": counts["TeamTicketCounter"],
+            "deleted_counts": {k: v for k, v in wiped.deleted.items() if v},
+            "total_deleted": sum(wiped.deleted.values()),
+            "ticket_counters_reset": wiped.ticket_counters_reset,
         },
     )
-    return counts
+    return wiped
 
 
 class EventKeptError(Exception):

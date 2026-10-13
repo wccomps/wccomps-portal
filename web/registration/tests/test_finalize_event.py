@@ -116,9 +116,9 @@ def test_clear_refuses_when_finalized_in_another_session(event):
 def test_clear_deletes_live_data_keeps_results_and_the_school_list_and_closes_the_event(event):
     finalize_event(event, "gold")
 
-    counts = clear_event(event, "gold")
+    wiped = clear_event(event, "gold")
 
-    assert counts["ServiceScore"] == 2
+    assert wiped.deleted["ServiceScore"] == 2
     assert not ServiceScore.objects.exists()
     assert EventResult.objects.filter(event=event).count() == 2
     assert EventArchive.objects.get(event=event).data

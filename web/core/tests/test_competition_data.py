@@ -38,3 +38,11 @@ def test_an_orange_check_in_is_live_data():
     OrangeCheckIn.objects.create(user=User.objects.create_user(username="orange"))
 
     assert live_competition_data_exists()
+
+
+def test_a_used_ticket_counter_is_live_data_until_the_wipe():
+    Team.objects.create(team_number=1, team_name="Team 01", ticket_counter=3)
+
+    assert live_competition_data_exists()
+    wipe_competition_data()
+    assert not live_competition_data_exists()
