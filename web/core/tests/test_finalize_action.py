@@ -7,18 +7,19 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from registration.models import Event, EventResult, Season
 from registration.services import (
     FinalizeError,
-    finalize_event,
     open_event_for_current_schools,
     set_team_school,
-    snapshot_matches_live,
 )
-from scoring.models import OrangeTeamScore, ServiceScore
+from scoring.calculator import compute_standings
+from scoring.models import InjectScore, OrangeTeamScore, ServiceScore
+from scoring.views.leaderboard import build_scorecard_context
 
 from core.models import CompetitionConfig
 from team.models import Team
@@ -83,7 +84,7 @@ def test_unknown_event_type_is_refused(client):
 
     result = _finalize(client, event_name="Invitational 1", event_date="2026-10-03", event_type="bogus")
 
-    assert not result["success"] and "type" in result["message"]
+    assert result == {"done": True, "success": False, "message": "Choose a valid event type."}
     assert not Event.objects.exists()
 
 
@@ -126,14 +127,40 @@ def test_finalizes_the_open_event(client):
     assert EventResult.objects.filter(event=event).count() == 1
 
 
-def test_same_description_orange_rows_keep_the_snapshot_matching():
-    event = Event.objects.create(
-        season=_season(), name="Inv", event_type="invitational", date=date(2026, 10, 3), is_active=True
-    )
+def test_orange_scorecard_list_breaks_ties_by_pk():
     team = _team_with_school()
-    for points in (5, 7, 3, 9):
-        OrangeTeamScore.objects.create(team=team, description="Same", points_awarded=Decimal(points), is_approved=True)
+    OrangeTeamScore.objects.create(team=team, description="Same", points_awarded=Decimal(5), is_approved=True)
+    standings = compute_standings()
 
-    finalize_event(event, "tester")
+    context = build_scorecard_context(standings[0], standings)
 
-    assert snapshot_matches_live(event)
+    assert context["orange_scores"].query.order_by == ("description", "pk")
+
+
+def test_inject_scorecard_list_breaks_ties_by_pk():
+    team = _team_with_school()
+    InjectScore.objects.create(
+        team=team, inject_id="a", inject_name="Same", points_awarded=Decimal(5), is_approved=True
+    )
+    standings = compute_standings()
+
+    with CaptureQueriesContext(connection) as queries:
+        build_scorecard_context(standings[0], standings)
+
+    listing = next(q["sql"] for q in queries if q["sql"].startswith('SELECT "inject_grade"."id"'))
+    assert listing.endswith('ORDER BY "inject_grade"."inject_name" ASC, "inject_grade"."id" ASC')
+
+
+def test_finalize_needs_admin_or_gold_access(create_user_with_groups):
+    _season()
+    _team_with_school()
+    client = Client()
+    client.force_login(create_user_with_groups("nobody", []))
+
+    response = client.post(
+        reverse("admin_competition_action"),
+        {"action": "finalize_event", "event_name": "Inv", "event_date": "2026-10-03", "event_type": "invitational"},
+    )
+
+    assert response.status_code == 403
+    assert not Event.objects.exists() and not EventResult.objects.exists()

@@ -415,7 +415,12 @@ def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authe
 
 
 def _stream_finalize(
-    config: CompetitionConfig, authentik_username: str, name: str, event_date: date | None, event_type: str
+    config: CompetitionConfig,
+    authentik_username: str,
+    name: str,
+    event_date: date | None,
+    event_type: str,
+    type_invalid: bool,
 ) -> Iterator[str]:
     from registration.models import Event
     from registration.services import FinalizeError, finalize_event, open_event_for_current_schools
@@ -429,6 +434,9 @@ def _stream_finalize(
     try:
         event = Event.objects.open()
         if event is None:
+            if type_invalid:
+                yield done(False, "Choose a valid event type.")
+                return
             if not name or event_date is None or not event_type:
                 yield done(
                     False,
@@ -456,8 +464,9 @@ def _action_finalize_event(
     name = data.get("event_name", "").strip()
     event_date = data.get("event_date")
     event_type = data.get("event_type", "")
+    type_invalid = "event_type" in form.errors
     return StreamingHttpResponse(
-        run_detached(_stream_finalize(config, authentik_username, name, event_date, event_type)),
+        run_detached(_stream_finalize(config, authentik_username, name, event_date, event_type, type_invalid)),
         content_type="application/x-ndjson",
     )
 
@@ -498,6 +507,7 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
 
     context = {
         "open_event": Event.objects.open(),
+        "event_type_choices": Event.EVENT_TYPE_CHOICES,
         "config": config,
         "active_teams": active_teams,
         "total_teams": total_teams,
