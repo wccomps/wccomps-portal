@@ -457,3 +457,47 @@ def clear_event(event: Event, actor: str) -> dict[str, int]:
         },
     )
     return counts
+
+
+class EventKeptError(Exception):
+    """The event, or an event in the season, is part of the season's history; the message says why."""
+
+
+def event_delete_problem(event: Event) -> str:
+    """Why the event can't be deleted, or ''. Open, finalized and assigned events are kept as season history."""
+    if event.is_active:
+        return f"{event} is open: the live scores and school list belong to it."
+    if event.is_finalized or EventResult.objects.filter(event=event).exists():
+        return f"{event} has finalized results, which are kept."
+    if event.team_assignments.exists():
+        return f"{event} has schools assigned to teams, which are kept as the season's history."
+    return ""
+
+
+def season_delete_problem(season: Season) -> str:
+    """Why the season can't be deleted (the first event it must keep), or ''."""
+    for event in season.events.all():
+        if problem := event_delete_problem(event):
+            return f"The {season} season holds an event that is kept: {problem}"
+    return ""
+
+
+@transaction.atomic
+def delete_event(event: Event) -> None:
+    """Delete an event no history depends on. Under the school list lock, so it can't be opened or assigned
+    schools meanwhile; EventKeptError says why it is kept."""
+    school_list_lock()
+    event = Event.objects.select_for_update().get(pk=event.pk)
+    if problem := event_delete_problem(event):
+        raise EventKeptError(problem)
+    event.delete()
+
+
+@transaction.atomic
+def delete_season(season: Season) -> None:
+    """Delete a season and its events when none of them is kept. Under the school list lock, like delete_event."""
+    school_list_lock()
+    season = Season.objects.select_for_update().get(pk=season.pk)
+    if problem := season_delete_problem(season):
+        raise EventKeptError(problem)
+    season.delete()

@@ -21,13 +21,18 @@ from .models import (
     normalize_school_name,
 )
 from .services import (
+    EventKeptError,
     PacketsSentError,
     SchoolChangedError,
     SchoolTakenError,
     TeamTakenError,
     activate_teams,
+    delete_event,
+    delete_season,
+    event_delete_problem,
     packets_sent,
     remove_team_school,
+    season_delete_problem,
     set_team_school,
 )
 
@@ -212,11 +217,19 @@ def season_delete(request: HttpRequest, season_id: int) -> HttpResponse:
 
     if request.method == "POST":
         name = season.name
-        season.delete()
-        messages.success(request, f"Season '{name}' deleted.")
+        try:
+            delete_season(season)
+        except EventKeptError as e:
+            messages.error(request, str(e))
+        else:
+            messages.success(request, f"Season '{name}' deleted.")
         return redirect("registration_season_list")
 
-    return render(request, "registration/seasons/delete_confirm.html", {"season": season, "subnav_active": "seasons"})
+    return render(
+        request,
+        "registration/seasons/delete_confirm.html",
+        {"season": season, "problem": season_delete_problem(season), "subnav_active": "seasons"},
+    )
 
 
 @require_permission("gold_team")
@@ -279,11 +292,19 @@ def event_delete(request: HttpRequest, event_id: int) -> HttpResponse:
 
     if request.method == "POST":
         name = event.name
-        event.delete()
-        messages.success(request, f"Event '{name}' deleted.")
+        try:
+            delete_event(event)
+        except EventKeptError as e:
+            messages.error(request, str(e))
+        else:
+            messages.success(request, f"Event '{name}' deleted.")
         return redirect("registration_event_list", season_id=season_id)
 
-    return render(request, "registration/events/delete_confirm.html", {"event": event, "subnav_active": "seasons"})
+    return render(
+        request,
+        "registration/events/delete_confirm.html",
+        {"event": event, "problem": event_delete_problem(event), "subnav_active": "seasons"},
+    )
 
 
 @require_permission("gold_team")
