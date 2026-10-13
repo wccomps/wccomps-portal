@@ -416,16 +416,27 @@ def finalize_event(event: Event, actor: str) -> int:
     return len(snapshots)
 
 
-def snapshot_matches_live(event: Event) -> bool:
-    """Whether the stored results say exactly what the live scores say now."""
-    stored = {result.school_id: result.scorecard for result in EventResult.objects.filter(event=event)}
+def changed_teams(event: Event) -> list[int]:
+    """The team numbers whose stored result no longer says exactly what the live scores say, in order."""
+    stored = {
+        result.school_id: (result.team_number, result.scorecard) for result in EventResult.objects.filter(event=event)
+    }
     # Each scorecard through JSON as the stored ones went, which turns int dict keys into strings (the encoding
-    # already made tuples lists and Decimals {"$d": ...}); the school ids stay ints
+    # already made tuples lists and Decimals {"$d": ...})
     live = {
-        school_id: json.loads(json.dumps(snapshot.scorecard))
+        school_id: (snapshot.standing.team.team_number, json.loads(json.dumps(snapshot.scorecard)))
         for school_id, snapshot in current_snapshots(event).items()
     }
-    return stored == live
+    return sorted(
+        (live.get(school_id) or stored[school_id])[0]
+        for school_id in stored.keys() | live.keys()
+        if stored.get(school_id) != live.get(school_id)
+    )
+
+
+def _team_list(numbers: list[int], shown: int = 3) -> str:
+    named = ", ".join(f"Team {number}" for number in numbers[:shown])
+    return f"{named} and {len(numbers) - shown} more" if len(numbers) > shown else named
 
 
 @transaction.atomic
@@ -440,8 +451,10 @@ def clear_event(event: Event, actor: str) -> WipedData:
     event = _lock_open_event(event)
     if not event.is_finalized:
         raise FinalizeError("Finalize this event first.")
-    if not snapshot_matches_live(event):
-        raise FinalizeError("Results changed since finalizing; finalize again before clearing.")
+    if changed := changed_teams(event):
+        raise FinalizeError(
+            f"Results changed since finalizing for {_team_list(changed)}; finalize again before clearing."
+        )
     # Late changes the scorecard doesn't show (a ticket comment, an incident note) go into the archive
     EventArchive.objects.update_or_create(event=event, defaults={"data": export_all_zip_bytes()})
     wiped = wipe_competition_data()

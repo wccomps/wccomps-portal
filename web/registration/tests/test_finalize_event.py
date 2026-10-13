@@ -16,13 +16,13 @@ from registration.models import Event, EventArchive, EventResult, School, Season
 from registration.services import (
     FinalizeError,
     SchoolListRow,
+    changed_teams,
     clear_event,
     finalize_event,
     import_problem,
     import_school_list,
     open_event_for_current_schools,
     set_team_school,
-    snapshot_matches_live,
 )
 from team.models import SchoolInfo, Team
 
@@ -81,13 +81,13 @@ def test_a_closed_event_cannot_be_finalized(event):
     assert not EventResult.objects.exists()
 
 
-def test_the_snapshot_matches_live_right_after_finalizing(event):
+def test_no_team_changed_right_after_finalizing(event):
     finalize_event(event, "gold")
 
-    assert snapshot_matches_live(event)
+    assert changed_teams(event) == []
 
 
-def test_the_snapshot_matches_live_with_averaged_decimals(event):
+def test_no_team_changed_with_averaged_decimals(event):
     """Averages over three teams give Decimals with many places; they must compare equal after storing."""
     third = Team.objects.create(team_number=3, team_name="Team 03", is_active=True)
     set_team_school(third, "School 3", contact_email="c3@example.edu")
@@ -95,10 +95,10 @@ def test_the_snapshot_matches_live_with_averaged_decimals(event):
         ServiceDetail.objects.create(team=team, service_name="web", points=Decimal(points))
     finalize_event(event, "gold")
 
-    assert snapshot_matches_live(event)
+    assert changed_teams(event) == []
 
 
-def test_the_snapshot_matches_live_with_an_int_keyed_dict(event):
+def test_no_team_changed_with_an_int_keyed_dict(event):
     """JSON stores dict keys as strings, so a scorecard value keyed by numbers must still compare equal."""
 
     def with_int_keys(score, standings):
@@ -109,19 +109,32 @@ def test_the_snapshot_matches_live_with_an_int_keyed_dict(event):
     with patch("registration.services.build_scorecard_context", with_int_keys):
         finalize_event(event, "gold")
 
-        assert snapshot_matches_live(event)
+        assert changed_teams(event) == []
 
 
 def test_clear_refuses_after_a_change_since_finalizing(event):
     finalize_event(event, "gold")
     ServiceScore.objects.filter(team__team_number=2).update(service_points=Decimal(400))
 
-    assert not snapshot_matches_live(event)
-    with pytest.raises(FinalizeError, match="finalize again"):
+    # Team 1's scorecard compares it with the others, so it changed too
+    assert changed_teams(event) == [1, 2]
+    with pytest.raises(FinalizeError, match="changed since finalizing for Team 1, Team 2; finalize again"):
         clear_event(event, "gold")
     assert ServiceScore.objects.count() == 2
     event.refresh_from_db()
     assert event.is_active
+
+
+def test_clear_names_a_few_changed_teams_and_counts_the_rest(event):
+    for number in range(3, 8):
+        team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
+        ServiceScore.objects.create(team=team, service_points=Decimal(10 * number))
+        set_team_school(team, f"School {number}", contact_email=f"c{number}@example.edu")
+    finalize_event(event, "gold")
+    ServiceScore.objects.filter(team__team_number__gte=3).update(service_points=Decimal(5))
+
+    with pytest.raises(FinalizeError, match="for Team 1, Team 2, Team 3 and 4 more; finalize again"):
+        clear_event(event, "gold")
 
 
 def test_clear_refuses_an_unfinalized_event(event):
