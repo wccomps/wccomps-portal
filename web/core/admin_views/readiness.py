@@ -155,14 +155,16 @@ def _check_no_tickets() -> CheckResult:
 
 
 def _check_packets_distributed() -> CheckResult:
-    """Check that all completed packets were distributed to all active teams."""
+    """Check that this event's completed packets reached every active team: the open event's, or before one is open,
+    those not yet stamped with an event. Earlier events' packets went to their own teams."""
     from packets.models import Packet, PacketDistribution
+    from registration.models import Event
 
     active_teams = Team.objects.filter(is_active=True)
     if not active_teams.exists():
         return ("warn", "No active teams", None)
 
-    completed_packets = Packet.objects.filter(status="completed")
+    completed_packets = Packet.objects.filter(status="completed", event=Event.objects.open())
     if not completed_packets.exists():
         return ("pass", "No completed packets to check", None)
 
