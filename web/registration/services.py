@@ -394,7 +394,7 @@ def _open_event_for_current_schools(new_event: NewEvent) -> Event:
     state = live_data_state()
     if state == LiveData.LEFTOVERS:
         raise FinalizeError(
-            "Live data after the last Clear is leftovers: clear it on the Clear page, then import the next school list."
+            "Live data after the last Clear is leftovers: use Clear leftover data on the Danger Zone page, then import the next school list."
         )
     if state == LiveData.NONE:
         raise FinalizeError("Nothing to finalize: no live scores. Import the next school list to open an event.")
