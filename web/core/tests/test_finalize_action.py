@@ -62,11 +62,15 @@ def _open_event():
 
 
 def test_refused_while_the_competition_runs(client):
-    _open_event()
+    event = _open_event()
     _team_with_school()
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
 
-    assert _finalize(client) == {"done": True, "success": False, "message": "Stop the competition before finalizing."}
+    assert _finalize(client, open_event=event.pk) == {
+        "done": True,
+        "success": False,
+        "message": "Stop the competition before finalizing.",
+    }
 
 
 def test_no_open_event_needs_a_name(client):
@@ -122,6 +126,32 @@ def test_name_already_used_in_the_season_is_refused(client):
     assert Event.objects.count() == 1
 
 
+def test_a_new_event_is_refused_when_an_event_opened_since_the_page_loaded(client):
+    """The page showed the new event's fields; the open event decides under the lock, not at the request."""
+    _team_with_school()
+    _open_event()
+
+    result = _finalize(client, event_name="Invitational 1", event_date="2026-10-03", event_type="invitational")
+
+    assert result == {
+        "done": True,
+        "success": False,
+        "message": "Inv (2026) was opened since the page loaded. Reload the page to finalize it.",
+    }
+    assert not EventResult.objects.exists()
+
+
+def test_the_open_event_shown_by_the_page_must_still_be_open(client):
+    event = _open_event()
+    _team_with_school()
+    Event.objects.filter(pk=event.pk).update(is_active=False)
+
+    result = _finalize(client, open_event=event.pk)
+
+    assert result == {"done": True, "success": False, "message": "Inv (2026) is no longer open. Reload the page."}
+    assert not EventResult.objects.exists()
+
+
 def test_service_turns_a_duplicate_name_into_finalize_error():
     season = _season()
     Event.objects.create(season=season, name="Invitational 1", event_type="qualifier", date=date(2026, 9, 1))
@@ -136,7 +166,7 @@ def test_finalizes_the_open_event(client):
     event = _open_event()
     _team_with_school()
 
-    assert _finalize(client)["success"]
+    assert _finalize(client, open_event=event.pk)["success"]
     assert EventResult.objects.filter(event=event).count() == 1
 
 
@@ -205,8 +235,8 @@ def test_the_page_names_the_season_the_new_event_goes_into(client):
 def test_after_clearing_the_page_points_at_the_next_import_not_finalize(client):
     event = _open_event()
     _team_with_school()
-    finalize_open_event(None, "gold")
-    clear_event(event, "gold")
+    finalize_open_event(event, "gold")
+    clear_event("gold")
 
     page = _page(client)
 

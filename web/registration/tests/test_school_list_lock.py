@@ -1,6 +1,6 @@
-"""The school list lock is taken by the registration services' writes (Finalize, Clear and event and season deletes
-among them), Event.open and Event.close, the start of a first packet send and the resend checks, each before it
-reads the open event."""
+"""The school list lock is taken by the registration services' writes (Finalize, Clear, Clear leftover data and the
+event and season deletes among them), Event.open and Event.close, the start of a first packet send and the resend
+checks, each before it reads the open event."""
 
 from datetime import date
 from unittest.mock import patch
@@ -148,11 +148,11 @@ def test_closing_an_event_takes_the_lock():
 
 
 def test_finalizing_takes_the_lock_before_reading_the_open_event(team):
-    _event()
+    event = _event()
     set_team_school(team, "Example University", contact_email="c@example.edu")
 
     with CaptureQueriesContext(connection) as queries:
-        finalize_open_event(None, "gold")
+        finalize_open_event(event, "gold")
 
     _assert_locks_before_reading_the_open_event(queries)
 
@@ -160,10 +160,10 @@ def test_finalizing_takes_the_lock_before_reading_the_open_event(team):
 def test_clearing_takes_the_lock_before_reading_the_open_event(team):
     event = _event()
     set_team_school(team, "Example University", contact_email="c@example.edu")
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
 
     with CaptureQueriesContext(connection) as queries:
-        clear_event(event, "gold")
+        clear_event("gold")
 
     _assert_locks_before_reading_the_open_event(queries)
 

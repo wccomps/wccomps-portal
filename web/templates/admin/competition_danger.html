@@ -38,9 +38,10 @@
         {% if leftovers %}
             <c-action_box variant="warning" heading="Clear Leftover Data" class="mt-20">
                 <p class="mb-15">
-                    No event is open, but live data arrived after the last Clear. Clearing it deletes: {{ leftovers }}.
-                    Finalized results are not touched.
+                    No event is open, but live data arrived after the last Clear. It belongs to no event and is not
+                    archived: clearing it deletes it for good. Finalized results are not touched.
                 </p>
+                <p class="mb-15">As of loading this page: {{ leftovers }}.</p>
                 <c-link href="#"
                         variant="danger"
                         @click.prevent="guardedClearLeftovers"
@@ -63,11 +64,11 @@
             guardedClear() { if (!this.loading) this.clearEvent(); },
             guardedClearLeftovers() { if (!this.loading) this.clearLeftovers(); },
 
-            async doAction(action) {
+            async doAction(action, data = {}) {
                 this.loading = true;
                 this.message = '';
                 try {
-                    const result = await wcPost('{% url "admin_competition_action" %}', { action });
+                    const result = await wcPost('{% url "admin_competition_action" %}', { action, ...data });
                     if (result.success) {
                         this.message = result.message;
                         this.messageType = 'success';
@@ -91,8 +92,14 @@
             },
 
             clearLeftovers() {
-                if (confirm('Clear leftover data?\n\nThis deletes the live data that arrived after the last Clear, as listed on the page.\nFinalized results are kept.')) {
-                    this.doAction('clear_leftover_data');
+                const message = 'CLEAR LEFTOVER DATA?\n\n' +
+                    'This deletes all live data that arrived after the last Clear, including any added since this page loaded.\n' +
+                    'It belongs to no event and is NOT archived.\n' +
+                    'Finalized results are kept.\n\n' +
+                    'Type "yolo" to confirm:';
+                const response = prompt(message);
+                if (response && response.toLowerCase() === 'yolo') {
+                    this.doAction('clear_leftover_data', { confirm: response });
                 }
             },
 
@@ -104,7 +111,7 @@
                     'Type "yolo" to confirm:';
                 const response = prompt(message);
                 if (response && response.toLowerCase() === 'yolo') {
-                    this.doAction('clear_event');
+                    this.doAction('clear_event', { confirm: response });
                 }
             }
         }));

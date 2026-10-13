@@ -447,6 +447,7 @@ document.addEventListener('alpine:init', () => {
         finalizeName: '',
         finalizeDate: '',
         finalizeType: 'invitational',
+        finalizeOpenEvent: '{{ open_event.pk|default_if_none:"" }}',
         csvContent: '',
         readinessResults: [],
         readinessLoading: false,
@@ -510,6 +511,7 @@ document.addEventListener('alpine:init', () => {
         finalizeEvent() {
             if (confirm('Finalize results?\n\nThis freezes the scorecard of every school on the list as its result for this event.')) {
                 this.doStreamAction('finalize_event', {
+                    open_event: this.finalizeOpenEvent,
                     event_name: this.finalizeName,
                     event_date: this.finalizeDate,
                     event_type: this.finalizeType,

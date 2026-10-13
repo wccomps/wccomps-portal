@@ -9,6 +9,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
+from registration.models import Event, Season
 from registration.services import (
     FinalizeError,
     LiveData,
@@ -34,6 +35,7 @@ from core.forms import (
     SetMaxMembersForm,
     SetTimeForm,
     StartMessageForm,
+    TypedConfirmForm,
 )
 from core.models import AuditLog, CompetitionConfig, DiscordTask
 from core.services.competition import CompetitionRunResult, run_competition
@@ -310,27 +312,33 @@ def _action_cleanup_competition(
 
 
 def _action_clear_event(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
-    from registration.models import Event
-
-    event = Event.objects.open()
-    if event is None:
-        return JsonResponse({"error": "No event is open. Finalize the event first."}, status=400)
+    if error := _typed_confirmation_error(request):
+        return error
     try:
-        wiped = clear_event(event, authentik_username)
+        cleared = clear_event(authentik_username)
     except FinalizeError as e:
         return JsonResponse({"error": str(e)}, status=400)
-
-    return JsonResponse({"success": True, "message": f"{event.name} cleared. Deleted: {_wiped_summary(wiped)}"})
+    message = f"{cleared.event.name} cleared. Deleted: {_wiped_summary(cleared.wiped)}"
+    return JsonResponse({"success": True, "message": message})
 
 
 def _action_clear_leftover_data(
     request: HttpRequest, config: CompetitionConfig, authentik_username: str
 ) -> JsonResponse:
+    if error := _typed_confirmation_error(request):
+        return error
     try:
         wiped = clear_leftover_data(authentik_username)
     except FinalizeError as e:
         return JsonResponse({"error": str(e)}, status=400)
     return JsonResponse({"success": True, "message": f"Leftover data cleared. Deleted: {_wiped_summary(wiped)}"})
+
+
+def _typed_confirmation_error(request: HttpRequest) -> JsonResponse | None:
+    form = TypedConfirmForm(request.POST)
+    if form.is_valid():
+        return None
+    return JsonResponse({"error": form.errors["confirm"][0]}, status=400)
 
 
 def _wiped_summary(wiped: WipedData) -> str:
@@ -412,10 +420,10 @@ def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authe
         return JsonResponse({"error": f"Sync failed: {e}"}, status=500)
 
 
-def _stream_finalize(new_event: NewEvent | None, authentik_username: str) -> Iterator[str]:
+def _stream_finalize(target: Event | NewEvent, authentik_username: str) -> Iterator[str]:
     yield _progress("Freezing every listed school's scorecard and the export archive", 1, 2)
     try:
-        outcome = finalize_open_event(new_event, authentik_username)
+        outcome = finalize_open_event(target, authentik_username)
     except FinalizeError as e:
         yield ndjson_done(str(e), success=False)
         return
@@ -426,15 +434,13 @@ def _stream_finalize(new_event: NewEvent | None, authentik_username: str) -> Ite
 def _action_finalize_event(
     request: HttpRequest, config: CompetitionConfig, authentik_username: str
 ) -> StreamingHttpResponse:
-    from registration.models import Event
-
-    form = FinalizeEventForm(request.POST, event_open=Event.objects.open() is not None)
+    form = FinalizeEventForm(request.POST)
     if not form.is_valid():
         return StreamingHttpResponse(
             iter([ndjson_done(form.first_error(), success=False)]), content_type="application/x-ndjson"
         )
     return StreamingHttpResponse(
-        run_detached(_stream_finalize(form.new_event(), authentik_username)), content_type="application/x-ndjson"
+        run_detached(_stream_finalize(form.target(), authentik_username)), content_type="application/x-ndjson"
     )
 
 
@@ -461,7 +467,6 @@ _COMPETITION_ACTION_HANDLERS = {
 
 @require_permission("admin", "gold_team")
 def admin_competition(request: HttpRequest) -> HttpResponse:
-    from registration.models import Event, Season
 
     from team.models import DiscordLink, Team
 

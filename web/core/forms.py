@@ -67,10 +67,14 @@ class SetMaxMembersForm(forms.Form):
 
 
 class FinalizeEventForm(forms.Form):
-    """The event Finalize creates for the current school list when none is open; with one open it takes nothing."""
+    """What the page showed: the open event (its id), or with none open the event Finalize creates for the current
+    school list."""
 
     MISSING = "No event is open: give the event a name, a date and a valid type to finalize the current list."
 
+    open_event = forms.ModelChoiceField(
+        queryset=Event.objects.all(), error_messages={"invalid_choice": "That event no longer exists. Reload the page."}
+    )
     event_name = forms.CharField(
         max_length=255,
         error_messages={"required": MISSING, "max_length": "The event name must be at most 255 characters."},
@@ -81,20 +85,35 @@ class FinalizeEventForm(forms.Form):
         error_messages={"required": MISSING, "invalid_choice": "Choose a valid event type."},
     )
 
-    def __init__(self, data: QueryDict, *, event_open: bool) -> None:
+    def __init__(self, data: QueryDict) -> None:
         super().__init__(data)
-        if event_open:
-            self.fields = {}
+        if self.data.get("open_event"):
+            self.fields = {"open_event": self.fields["open_event"]}
+        else:
+            del self.fields["open_event"]
 
-    def new_event(self) -> NewEvent | None:
-        """The validated new event, or None when an event is open. Call once is_valid() is True."""
-        if not self.fields:
-            return None
+    def target(self) -> Event | NewEvent:
+        """The page's open event, or the new event to create. Call once is_valid() is True."""
         data = self.cleaned_data
+        if "open_event" in data:
+            event: Event = data["open_event"]
+            return event
         return NewEvent(name=data["event_name"], date=data["event_date"], event_type=data["event_type"])
 
     def first_error(self) -> str:
         return str(next(iter(self.errors.values()))[0])
+
+
+class TypedConfirmForm(forms.Form):
+    """The word typed into a destructive action's prompt; the server checks it too."""
+
+    confirm = forms.CharField(required=False)
+
+    def clean_confirm(self) -> str:
+        typed: str = self.cleaned_data["confirm"]
+        if typed.strip().lower() != "yolo":
+            raise forms.ValidationError('Type "yolo" to confirm.')
+        return typed
 
 
 class StartMessageForm(forms.Form):

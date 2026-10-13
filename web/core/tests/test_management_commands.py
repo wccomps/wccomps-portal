@@ -73,7 +73,7 @@ class TestInitTeamsCommand:
 
 
 class TestWipeCompetitionData:
-    """wipe_competition_data, behind the ops page's Clear Event."""
+    """wipe_competition_data, behind the ops page's Clear Event and Clear leftover data."""
 
     @pytest.fixture
     def populated_database(self):

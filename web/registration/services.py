@@ -352,6 +352,14 @@ class NewEvent:
 
 
 @dataclass(frozen=True)
+class ClearOutcome:
+    """The event Clear closed and what the wipe deleted and reset."""
+
+    event: Event
+    wiped: WipedData
+
+
+@dataclass(frozen=True)
 class FinalizeOutcome:
     """The event Finalize froze and how many school results it wrote."""
 
@@ -369,21 +377,24 @@ def _refuse_while_running(message: str) -> CompetitionConfig:
 
 
 @transaction.atomic
-def finalize_open_event(new_event: NewEvent | None, actor: str) -> FinalizeOutcome:
-    """Freeze the open event's results; with no event open, first create new_event for the current school list.
-    All of it commits together or not at all.
+def finalize_open_event(target: Event | NewEvent, actor: str) -> FinalizeOutcome:
+    """Freeze the open event's results. target is what the page showed: the open event, or, with none open, the
+    new event to create for the current school list. All of it commits together or not at all.
 
-    Under the school list lock and the competition config lock; FinalizeError says why it refused.
+    Under the school list lock and the competition config lock; FinalizeError says why it refused, including when
+    the open event is no longer what the page showed.
     """
     school_list_lock()
     _refuse_while_running("Stop the competition before finalizing.")
-    event = Event.objects.open()
-    if event is not None and new_event is not None:
-        raise FinalizeError(f"{event} was opened since the page loaded. Reload the page to finalize it.")
-    if event is None:
-        if new_event is None:
-            raise FinalizeError("No event is open: give the event a name, a date and a type to finalize the list.")
-        event = _open_event_for_current_schools(new_event)
+    open_now = Event.objects.open()
+    if isinstance(target, NewEvent):
+        if open_now is not None:
+            raise FinalizeError(f"{open_now} was opened since the page loaded. Reload the page to finalize it.")
+        event = _open_event_for_current_schools(target)
+    elif open_now != target:
+        raise FinalizeError(f"{target} is no longer open. Reload the page.")
+    else:
+        event = open_now
     event = Event.objects.select_for_update().get(pk=event.pk)
     return FinalizeOutcome(event, _freeze_results(event, actor))
 
@@ -394,7 +405,8 @@ def _open_event_for_current_schools(new_event: NewEvent) -> Event:
     state = live_data_state()
     if state == LiveData.LEFTOVERS:
         raise FinalizeError(
-            "Live data after the last Clear is leftovers: use Clear leftover data on the Danger Zone page, then import the next school list."
+            "Live data after the last Clear is leftovers: use Clear leftover data on the Danger Zone page, "
+            "then import the next school list."
         )
     if state == LiveData.NONE:
         raise FinalizeError("Nothing to finalize: no live scores. Import the next school list to open an event.")
@@ -536,20 +548,28 @@ def _team_list(numbers: list[int], shown: int = 3) -> str:
     return f"{named} and {len(numbers) - shown} more" if len(numbers) > shown else named
 
 
+_NO_EVENT_TO_CLEAR = {
+    LiveData.LEFTOVERS: "No event is open. The live data arrived after the last Clear: use Clear leftover data.",
+    LiveData.NONE: "No event is open and there is no live data to clear.",
+    LiveData.UNFINALIZED: "Finalize the event first.",
+}
+
+
 @transaction.atomic
-def clear_event(event: Event, actor: str) -> WipedData:
+def clear_event(actor: str) -> ClearOutcome:
     """Delete the live competition data once the open event's results are frozen and still match it, close the
     event and reset the competition's start and end times. The school list stays until the next import replaces it.
 
-    Returns what the wipe deleted and reset. Under the school list lock and the competition config lock;
-    FinalizeError when the competition runs, the event isn't open, isn't finalized, or its scores changed since
-    finalizing.
+    Returns the event and what the wipe deleted and reset. Under the school list lock and the competition config
+    lock; FinalizeError when the competition runs, no event is open (saying what to do with the live data instead), the
+    event isn't finalized, or its scores changed since finalizing.
     """
     school_list_lock()
     config = _refuse_while_running("Competition must be stopped before clearing")
-    if Event.objects.open() != event:
-        raise FinalizeError(f"{event} is not open; only the open event's live data can be cleared.")
-    event = Event.objects.select_for_update().get(pk=event.pk)
+    open_now = Event.objects.open()
+    if open_now is None:
+        raise FinalizeError(_NO_EVENT_TO_CLEAR[live_data_state()])
+    event = Event.objects.select_for_update().get(pk=open_now.pk)
     if not event.is_finalized:
         raise FinalizeError("Finalize this event first.")
     if changed := changed_teams(event):
@@ -576,13 +596,14 @@ def clear_event(event: Event, actor: str) -> WipedData:
             "ticket_counters_reset": wiped.ticket_counters_reset,
         },
     )
-    return wiped
+    return ClearOutcome(event, wiped)
 
 
 @transaction.atomic
 def clear_leftover_data(actor: str) -> WipedData:
-    """Delete live data that arrived after the last Clear, with no event open, and reset the competition's start and
-    end times. Under the school list lock and the competition config lock; FinalizeError unless it is leftovers."""
+    """Delete live data that arrived after the last Clear, with no event open. The schedule stays: a start may
+    already be set for the next event. Under the school list lock and the competition config lock; FinalizeError
+    unless it is leftovers."""
     school_list_lock()
     config = _refuse_while_running("Competition must be stopped before clearing")
     state = live_data_state()
@@ -593,9 +614,6 @@ def clear_leftover_data(actor: str) -> WipedData:
             raise FinalizeError(f"{open_now} is open: its data goes with Clear Event once it is finalized.")
         raise FinalizeError("There is no leftover data to clear.")
     wiped = wipe_competition_data()
-    config.competition_start_time = None
-    config.competition_end_time = None
-    config.save(update_fields=["competition_start_time", "competition_end_time", "updated_at"])
     AuditLog.objects.create(
         action="leftover_data_cleared",
         admin_user=actor,

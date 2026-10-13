@@ -51,7 +51,7 @@ def event():
 
 
 def test_finalize_writes_one_result_per_school_and_the_archive(event):
-    assert finalize_open_event(None, "gold").results == 2
+    assert finalize_open_event(event, "gold").results == 2
 
     results = list(EventResult.objects.filter(event=event))
     assert [(r.school.name, r.team_number, r.rank) for r in results] == [("School 1", 1, 1), ("School 2", 2, 2)]
@@ -64,10 +64,10 @@ def test_finalize_writes_one_result_per_school_and_the_archive(event):
 
 
 def test_finalize_again_replaces_the_snapshot(event):
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
     ServiceScore.objects.filter(team__team_number=2).update(service_points=Decimal(400))
 
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
 
     assert EventResult.objects.get(event=event, rank=1).school.name == "School 2"
     assert EventResult.objects.filter(event=event).count() == 2
@@ -76,16 +76,16 @@ def test_finalize_again_replaces_the_snapshot(event):
 def test_results_follow_the_school_list(event):
     set_team_school(Team.objects.get(team_number=2), "Example University", contact_email="c@example.edu")
 
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
 
     assert EventResult.objects.get(event=event, team_number=2).school.name == "Example University"
 
 
-def test_with_no_event_open_finalize_needs_the_new_event(event):
+def test_an_event_closed_since_the_page_loaded_is_refused(event):
     Event.objects.filter(pk=event.pk).update(is_active=False)
 
-    with pytest.raises(FinalizeError, match="No event is open"):
-        finalize_open_event(None, "gold")
+    with pytest.raises(FinalizeError, match="is no longer open. Reload the page"):
+        finalize_open_event(event, "gold")
     assert not EventResult.objects.exists()
 
 
@@ -101,7 +101,7 @@ def test_finalize_refuses_while_the_competition_runs(event):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
 
     with pytest.raises(FinalizeError, match="Stop the competition before finalizing"):
-        finalize_open_event(None, "gold")
+        finalize_open_event(event, "gold")
     assert not EventResult.objects.exists()
 
 
@@ -109,7 +109,7 @@ def test_finalize_refuses_an_inactive_team_holding_a_school(event):
     Team.objects.filter(team_number=2).update(is_active=False)
 
     with pytest.raises(FinalizeError, match="Reactivate Team 2 or remove its school first"):
-        finalize_open_event(None, "gold")
+        finalize_open_event(event, "gold")
     assert not EventResult.objects.exists()
 
 
@@ -118,7 +118,7 @@ def test_finalize_refuses_a_scored_team_with_no_school(event):
     InjectScore.objects.create(team=unlisted, inject_id="1", inject_name="Memo", points_awarded=Decimal(5))
 
     with pytest.raises(FinalizeError, match="Team 3 has scores but no school"):
-        finalize_open_event(None, "gold")
+        finalize_open_event(event, "gold")
     assert not EventResult.objects.exists()
 
 
@@ -130,20 +130,22 @@ def test_finalize_refuses_a_red_finding_against_a_team_with_no_school(event):
     finding.affected_teams.add(unlisted)
 
     with pytest.raises(FinalizeError, match="Team 3 has scores but no school"):
-        finalize_open_event(None, "gold")
+        finalize_open_event(event, "gold")
 
 
 def test_finalize_refuses_an_event_with_no_schools():
     season = Season.objects.create(name="2026", year=2026, is_active=True)
-    Event.objects.create(season=season, name="Inv", event_type="invitational", date=date(2026, 10, 3), is_active=True)
+    event = Event.objects.create(
+        season=season, name="Inv", event_type="invitational", date=date(2026, 10, 3), is_active=True
+    )
 
     with pytest.raises(FinalizeError, match="no schools"):
-        finalize_open_event(None, "gold")
+        finalize_open_event(event, "gold")
     assert not EventResult.objects.exists()
 
 
 def test_no_team_changed_right_after_finalizing(event):
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
 
     assert changed_teams(event) == []
 
@@ -154,7 +156,7 @@ def test_no_team_changed_with_averaged_decimals(event):
     set_team_school(third, "School 3", contact_email="c3@example.edu")
     for team, points in zip(Team.objects.order_by("team_number"), ("100.00", "200.00", "200.01"), strict=True):
         ServiceDetail.objects.create(team=team, service_name="web", points=Decimal(points))
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
 
     assert changed_teams(event) == []
 
@@ -168,19 +170,19 @@ def test_no_team_changed_with_an_int_keyed_dict(event):
         return context
 
     with patch("registration.services.build_scorecard_context", with_int_keys):
-        finalize_open_event(None, "gold")
+        finalize_open_event(event, "gold")
 
         assert changed_teams(event) == []
 
 
 def test_clear_refuses_after_a_change_since_finalizing(event):
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
     ServiceScore.objects.filter(team__team_number=2).update(service_points=Decimal(400))
 
     # Team 1's scorecard compares it with the others, so it changed too
     assert changed_teams(event) == [1, 2]
     with pytest.raises(FinalizeError, match="changed since finalizing for Team 1, Team 2; finalize again"):
-        clear_event(event, "gold")
+        clear_event("gold")
     assert ServiceScore.objects.count() == 2
     event.refresh_from_db()
     assert event.is_active
@@ -191,33 +193,30 @@ def test_clear_names_a_few_changed_teams_and_counts_the_rest(event):
         team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
         ServiceScore.objects.create(team=team, service_points=Decimal(10 * number))
         set_team_school(team, f"School {number}", contact_email=f"c{number}@example.edu")
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
     ServiceScore.objects.filter(team__team_number__gte=3).update(service_points=Decimal(5))
 
     with pytest.raises(FinalizeError, match="for Team 1, Team 2, Team 3 and 4 more; finalize again"):
-        clear_event(event, "gold")
+        clear_event("gold")
 
 
 def test_clear_refuses_an_unfinalized_event(event):
     with pytest.raises(FinalizeError, match="Finalize this event first"):
-        clear_event(event, "gold")
+        clear_event("gold")
 
 
-def test_clear_reads_the_finalized_flag_under_the_lock_not_from_a_stale_copy(event):
-    """The flag is read under the lock, not from the caller's copy of the event."""
-    stale = Event.objects.get(pk=event.pk)
-    finalize_open_event(None, "gold")
+def test_clear_reads_the_finalized_flag_under_the_lock(event):
+    finalize_open_event(event, "gold")
     Event.objects.filter(pk=event.pk).update(is_finalized=False)
-    stale.is_finalized = True
 
     with pytest.raises(FinalizeError, match="Finalize this event first"):
-        clear_event(stale, "gold")
+        clear_event("gold")
 
 
 def test_clear_deletes_live_data_keeps_results_and_the_school_list_and_closes_the_event(event):
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
 
-    wiped = clear_event(event, "gold")
+    wiped = clear_event("gold").wiped
 
     assert wiped.deleted["ServiceScore"] == 2
     assert not ServiceScore.objects.exists()
@@ -234,11 +233,11 @@ def test_clear_deletes_live_data_keeps_results_and_the_school_list_and_closes_th
 
 
 def test_clear_refuses_while_the_competition_runs(event):
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
 
     with pytest.raises(FinalizeError, match="Competition must be stopped before clearing"):
-        clear_event(event, "gold")
+        clear_event("gold")
     assert ServiceScore.objects.count() == 2
 
 
@@ -247,19 +246,19 @@ def test_clear_resets_the_competition_times(event):
     CompetitionConfig.objects.update_or_create(
         pk=1, defaults={"competition_start_time": now, "competition_end_time": now}
     )
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
 
-    clear_event(event, "gold")
+    clear_event("gold")
 
     config = CompetitionConfig.get_config()
     assert (config.competition_start_time, config.competition_end_time) == (None, None)
 
 
 def test_clear_rebuilds_the_archive(event):
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
     finalized_at = EventArchive.objects.get(event=event).updated_at
 
-    clear_event(event, "gold")
+    clear_event("gold")
 
     archive = EventArchive.objects.get(event=event)
     assert archive.updated_at > finalized_at
@@ -269,18 +268,18 @@ def test_clear_rebuilds_the_archive(event):
 
 
 def test_a_cleared_event_cannot_be_cleared_again(event):
-    finalize_open_event(None, "gold")
-    clear_event(event, "gold")
+    finalize_open_event(event, "gold")
+    clear_event("gold")
 
-    with pytest.raises(FinalizeError, match="not open"):
-        clear_event(event, "gold")
+    with pytest.raises(FinalizeError, match="No event is open and there is no live data to clear"):
+        clear_event("gold")
 
 
 def test_clear_records_the_ticket_counter_reset_apart_from_the_deletions(event):
     Team.objects.filter(team_number=1).update(ticket_counter=85)
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
 
-    clear_event(event, "gold")
+    clear_event("gold")
 
     details = AuditLog.objects.get(action="event_cleared").details
     assert details["ticket_counters_reset"] == 1
@@ -289,12 +288,12 @@ def test_clear_records_the_ticket_counter_reset_apart_from_the_deletions(event):
 
 
 def test_after_clearing_a_replace_import_opens_the_next_event(event):
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
     blocked = Event(
         season=event.season, name="Qual", event_type="qualifier", date=date(2026, 11, 7), registration_open=False
     )
     assert "still open" in import_problem(blocked)
-    clear_event(event, "gold")
+    clear_event("gold")
     new = Event(
         season=event.season, name="Qual", event_type="qualifier", date=date(2026, 11, 7), registration_open=False
     )
@@ -383,8 +382,8 @@ def test_a_failure_while_finalizing_a_new_event_writes_nothing():
 
 
 def test_after_clearing_finalize_does_not_make_an_event_for_the_old_list(event):
-    finalize_open_event(None, "gold")
-    clear_event(event, "gold")
+    finalize_open_event(event, "gold")
+    clear_event("gold")
 
     with pytest.raises(FinalizeError, match="Nothing to finalize: no live scores"):
         finalize_open_event(NewEvent("Invitational 2", date(2026, 11, 3), "invitational"), "gold")
@@ -398,7 +397,7 @@ def test_two_finalizes_at_once_both_succeed(event):
 
     def run():
         try:
-            finalize_open_event(None, "gold")
+            finalize_open_event(event, "gold")
         except Exception as e:  # noqa: BLE001
             errors.append(e)
         finally:
@@ -415,8 +414,8 @@ def test_two_finalizes_at_once_both_succeed(event):
 
 
 def _cleared_with_a_late_score(event):
-    finalize_open_event(None, "gold")
-    clear_event(event, "gold")
+    finalize_open_event(event, "gold")
+    clear_event("gold")
     ServiceScore.objects.create(team=Team.objects.get(team_number=1), service_points=Decimal(7))
 
 
@@ -438,8 +437,9 @@ def test_live_data_after_a_clear_is_leftovers_and_clearing_it_lets_the_next_impo
     assert wiped.deleted["ServiceScore"] == 1
     assert wiped.ticket_counters_reset == 1
     assert live_data_state() == LiveData.NONE
+    # A start may already be scheduled for the next event; only Clear Event resets the times
     config = CompetitionConfig.get_config()
-    assert (config.competition_start_time, config.competition_end_time) == (None, None)
+    assert (config.competition_start_time, config.competition_end_time) == (now, now)
     details = AuditLog.objects.get(action="leftover_data_cleared").details
     assert details["deleted_counts"] == {"ServiceScore": 1}
     assert details["ticket_counters_reset"] == 1
@@ -472,7 +472,7 @@ def test_without_a_finalized_event_live_data_is_not_leftovers(event):
 
 
 def test_with_an_event_open_live_data_is_the_events(event):
-    finalize_open_event(None, "gold")
+    finalize_open_event(event, "gold")
 
     assert live_data_state() == LiveData.NONE
     with pytest.raises(FinalizeError, match="Clear Event"):
@@ -487,3 +487,19 @@ def test_clearing_leftovers_is_refused_while_the_competition_runs(event):
     with pytest.raises(FinalizeError, match="Competition must be stopped before clearing"):
         clear_leftover_data("gold")
     assert ServiceScore.objects.count() == 1
+
+
+def test_clear_with_leftovers_points_at_clear_leftover_data(event):
+    _cleared_with_a_late_score(event)
+
+    with pytest.raises(FinalizeError, match="use Clear leftover data"):
+        clear_event("gold")
+    assert ServiceScore.objects.count() == 1
+
+
+def test_clear_with_an_unfinalized_events_data_asks_for_finalize(event):
+    Event.objects.filter(pk=event.pk).update(is_active=False)
+
+    with pytest.raises(FinalizeError, match="^Finalize the event first.$"):
+        clear_event("gold")
+    assert ServiceScore.objects.count() == 2

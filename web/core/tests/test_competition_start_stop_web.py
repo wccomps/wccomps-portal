@@ -135,7 +135,7 @@ def _finalized_event(team_number=1):
     event = _open_event()
     team, _ = Team.objects.get_or_create(team_number=team_number, defaults={"team_name": f"Team {team_number}"})
     set_team_school(team, "Example University", contact_email="c@example.edu")
-    finalize_open_event(None, "admin")
+    finalize_open_event(event, "admin")
     return event
 
 
@@ -143,7 +143,7 @@ def test_clear_needs_a_finalized_event(admin_client):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     _open_event()
 
-    response = _post(admin_client, "clear_event")
+    response = _post(admin_client, "clear_event", confirm="yolo")
 
     assert response.status_code == 400
     assert response.json()["error"] == "Finalize this event first."
@@ -152,10 +152,10 @@ def test_clear_needs_a_finalized_event(admin_client):
 def test_clear_needs_an_open_event(admin_client):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
 
-    response = _post(admin_client, "clear_event")
+    response = _post(admin_client, "clear_event", confirm="yolo")
 
     assert response.status_code == 400
-    assert response.json()["error"] == "No event is open. Finalize the event first."
+    assert response.json()["error"] == "No event is open and there is no live data to clear."
 
 
 def test_clear_refused_while_running(admin_client):
@@ -168,7 +168,7 @@ def test_clear_refused_while_running(admin_client):
     event = _finalized_event(team_number=9)
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
 
-    response = _post(admin_client, "clear_event")
+    response = _post(admin_client, "clear_event", confirm="yolo")
 
     assert response.status_code == 400
     assert response.json()["error"] == "Competition must be stopped before clearing"
@@ -184,7 +184,7 @@ def test_clear_resets_ticket_counters_and_says_so(admin_client):
     Team.objects.create(team_number=9, team_name="Team 9", ticket_counter=85)
     _finalized_event()
 
-    response = _post(admin_client, "clear_event")
+    response = _post(admin_client, "clear_event", confirm="yolo")
 
     assert response.json()["message"].startswith("Inv cleared. Deleted: ")
     assert response.json()["message"].endswith("; 1 team ticket counters reset")
@@ -201,7 +201,7 @@ def test_clear_resets_the_competition_times(admin_client):
     )
     _finalized_event()
 
-    assert _post(admin_client, "clear_event").json()["success"]
+    assert _post(admin_client, "clear_event", confirm="yolo").json()["success"]
 
     config = CompetitionConfig.get_config()
     assert config.competition_start_time is None
@@ -218,7 +218,7 @@ def test_a_refused_clear_keeps_the_competition_times(admin_client):
     )
     _open_event()
 
-    assert _post(admin_client, "clear_event").status_code == 400
+    assert _post(admin_client, "clear_event", confirm="yolo").status_code == 400
 
     assert CompetitionConfig.get_config().competition_start_time == now
 
@@ -233,7 +233,7 @@ def test_clear_needs_admin_or_gold_access(client, create_user_with_groups):
     ServiceScore.objects.create(team=Team.objects.get(team_number=1), service_points=0)
     client.force_login(create_user_with_groups("nobody", []))
 
-    response = client.post(reverse("admin_competition_action"), {"action": "clear_event"})
+    response = client.post(reverse("admin_competition_action"), {"action": "clear_event", "confirm": "yolo"})
 
     assert response.status_code == 403
     assert ServiceScore.objects.exists()
@@ -285,7 +285,7 @@ def _leftovers():
 
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     event = _finalized_event()
-    clear_event(event, "admin")
+    clear_event("admin")
     ServiceScore.objects.create(team=Team.objects.get(team_number=1), service_points=3)
     return Event.objects.get(pk=event.pk)
 
@@ -293,10 +293,11 @@ def _leftovers():
 def test_the_danger_page_offers_leftovers_with_their_counts(admin_client):
     _leftovers()
 
-    page = admin_client.get(reverse("admin_competition_danger")).content.decode()
+    page = " ".join(admin_client.get(reverse("admin_competition_danger")).content.decode().split())
 
     assert "Clear Leftover Data" in page
     assert "1 ServiceScore" in page
+    assert "belongs to no event and is not archived" in page
 
 
 def test_clearing_leftovers_deletes_them(admin_client):
@@ -304,7 +305,7 @@ def test_clearing_leftovers_deletes_them(admin_client):
 
     _leftovers()
 
-    response = _post(admin_client, "clear_leftover_data")
+    response = _post(admin_client, "clear_leftover_data", confirm="YOLO")
 
     assert response.json() == {"success": True, "message": "Leftover data cleared. Deleted: 1 ServiceScore"}
     assert not ServiceScore.objects.exists()
@@ -319,7 +320,7 @@ def test_without_a_finalized_event_leftovers_are_hidden_and_refused(admin_client
     ServiceScore.objects.create(team=Team.objects.create(team_number=1, team_name="Team 1"), service_points=3)
 
     page = admin_client.get(reverse("admin_competition_danger")).content.decode()
-    response = _post(admin_client, "clear_leftover_data")
+    response = _post(admin_client, "clear_leftover_data", confirm="YOLO")
 
     assert "Clear Leftover Data" not in page
     assert response.status_code == 400
@@ -333,7 +334,7 @@ def test_clearing_leftovers_needs_admin_or_gold_access(client, create_user_with_
     _leftovers()
     client.force_login(create_user_with_groups("nobody", []))
 
-    response = client.post(reverse("admin_competition_action"), {"action": "clear_leftover_data"})
+    response = client.post(reverse("admin_competition_action"), {"action": "clear_leftover_data", "confirm": "yolo"})
 
     assert response.status_code == 403
     assert ServiceScore.objects.exists()
@@ -345,7 +346,7 @@ def test_clearing_leftovers_is_refused_while_running(admin_client):
     _leftovers()
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
 
-    response = _post(admin_client, "clear_leftover_data")
+    response = _post(admin_client, "clear_leftover_data", confirm="YOLO")
 
     assert response.json()["error"] == "Competition must be stopped before clearing"
     assert ServiceScore.objects.exists()
@@ -358,3 +359,43 @@ def test_with_leftovers_the_competition_page_points_at_the_danger_page(admin_cli
 
     assert "Live data arrived after the last Clear" in page
     assert "Finalize Results" not in page
+
+
+@pytest.mark.parametrize("typed", [None, "", "no"])
+def test_clear_event_needs_the_typed_confirmation(admin_client, typed):
+    from registration.models import Event
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
+    event = _finalized_event()
+
+    response = _post(admin_client, "clear_event", **({} if typed is None else {"confirm": typed}))
+
+    assert response.status_code == 400
+    assert response.json()["error"] == 'Type "yolo" to confirm.'
+    assert Event.objects.open() == event
+
+
+@pytest.mark.parametrize("typed", [None, "", "no"])
+def test_clearing_leftovers_needs_the_typed_confirmation(admin_client, typed):
+    from scoring.models import ServiceScore
+
+    _leftovers()
+
+    response = _post(admin_client, "clear_leftover_data", **({} if typed is None else {"confirm": typed}))
+
+    assert response.status_code == 400
+    assert response.json()["error"] == 'Type "yolo" to confirm.'
+    assert ServiceScore.objects.exists()
+
+
+def test_clearing_leftovers_keeps_the_schedule(admin_client):
+    from django.utils import timezone
+
+    _leftovers()
+    now = timezone.now()
+    CompetitionConfig.objects.filter(pk=1).update(competition_start_time=now, competition_end_time=now)
+
+    assert _post(admin_client, "clear_leftover_data", confirm="yolo").json()["success"]
+
+    config = CompetitionConfig.get_config()
+    assert (config.competition_start_time, config.competition_end_time) == (now, now)
