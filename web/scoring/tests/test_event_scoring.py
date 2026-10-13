@@ -59,7 +59,7 @@ class TestComputeScorecardStats:
     """Tests for _compute_scorecard_stats function."""
 
     def test_compute_category_ranks(self, teams, scores):
-        from scoring.views import _compute_scorecard_stats
+        from scoring.scorecard import _compute_scorecard_stats
 
         stats = _compute_scorecard_stats(scores[0], scores)
 
@@ -80,7 +80,7 @@ class TestComputeScorecardStats:
         assert stats["total_delta"] == 367
 
     def test_compute_inject_stats(self, teams, scores):
-        from scoring.views import _compute_scorecard_stats
+        from scoring.scorecard import _compute_scorecard_stats
 
         # Create per-inject grades for all teams
         for t, pts in [(teams[0], 80), (teams[1], 100), (teams[2], 60)]:
@@ -121,7 +121,7 @@ class TestComputeScorecardStats:
 
     def test_inject_stats_excludes_unranked_teams(self, teams, scores):
         """Unranked teams (rank=None) should not affect inject detail stats."""
-        from scoring.views import _compute_scorecard_stats
+        from scoring.scorecard import _compute_scorecard_stats
 
         unranked_team = Team.objects.create(team_number=50, team_name="Unranked", is_active=True)
         scores.append(_standing(unranked_team, None, "0", "0", "0", "0", "0", "0"))
@@ -152,7 +152,7 @@ class TestComputeScorecardStats:
         assert inj1["rank"] == 2
 
     def test_inject_stats_excludes_excluded_teams(self, teams, scores):
-        from scoring.views import _compute_scorecard_stats
+        from scoring.scorecard import _compute_scorecard_stats
 
         for t, pts in [(teams[0], 80), (teams[1], 100), (teams[2], 60)]:
             InjectScore.objects.create(
@@ -172,7 +172,7 @@ class TestComputeScorecardStats:
         assert inj1["rank"] == 2
 
     def test_compute_neighbors(self, teams, scores):
-        from scoring.views import _compute_scorecard_stats
+        from scoring.scorecard import _compute_scorecard_stats
 
         # teams[0] is rank 2 (middle), should have neighbors above and below
         stats = _compute_scorecard_stats(scores[0], scores)
@@ -186,7 +186,7 @@ class TestComputeScorecardStats:
         assert below["gap"] == Decimal("-5600")
 
     def test_neighbors_at_top(self, teams, scores):
-        from scoring.views import _compute_scorecard_stats
+        from scoring.scorecard import _compute_scorecard_stats
 
         # teams[1] is rank 1, should only have one neighbor below
         stats = _compute_scorecard_stats(scores[1], scores)
@@ -195,7 +195,7 @@ class TestComputeScorecardStats:
         assert stats["neighbors"][0]["rank"] == 2
 
     def test_compute_insights(self, teams, scores):
-        from scoring.views import _compute_scorecard_stats
+        from scoring.scorecard import _compute_scorecard_stats
 
         stats = _compute_scorecard_stats(scores[0], scores)
 
@@ -203,7 +203,7 @@ class TestComputeScorecardStats:
         assert all(isinstance(i, str) for i in stats["insights"])
 
     def test_compute_service_stats(self, teams, scores):
-        from scoring.views import _compute_scorecard_stats
+        from scoring.scorecard import _compute_scorecard_stats
 
         for t, pts in [(teams[0], 400), (teams[1], 450), (teams[2], 300)]:
             ServiceDetail.objects.create(
@@ -229,7 +229,7 @@ class TestComputeScorecardStats:
         assert berry["sla_violations"] == 0
 
     def test_service_stats_excludes_unranked_teams(self, teams, scores):
-        from scoring.views import _compute_scorecard_stats
+        from scoring.scorecard import _compute_scorecard_stats
 
         unranked_team = Team.objects.create(team_number=50, team_name="Unranked", is_active=True)
         scores.append(_standing(unranked_team, None, "0", "0", "0", "0", "0", "0"))
@@ -246,7 +246,7 @@ class TestComputeScorecardStats:
         assert tahoe["rank"] == 2
 
     def test_excluded_team_not_in_stats(self, teams, scores):
-        from scoring.views import _compute_scorecard_stats
+        from scoring.scorecard import _compute_scorecard_stats
 
         _exclude_third(scores)
 

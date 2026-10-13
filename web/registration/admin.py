@@ -10,6 +10,7 @@ from .models import (
     Season,
     TeamRegistration,
 )
+from .services import event_delete_problem, season_delete_problem
 
 
 class RegistrationContactInline(admin.TabularInline[RegistrationContact, TeamRegistration]):
@@ -45,10 +46,16 @@ class SeasonAdmin(admin.ModelAdmin[Season]):
     list_filter = ["is_active"]
     ordering = ["-year"]
 
+    def has_delete_permission(self, request: HttpRequest, obj: Season | None = None) -> bool:
+        # The admin also asks per selected object in a bulk delete; the registration pages say why
+        if obj is not None and season_delete_problem(obj):
+            return False
+        return super().has_delete_permission(request, obj)
+
 
 class EventTeamAssignmentInline(admin.TabularInline[EventTeamAssignment, Event]):
     """Shown only: assignments are set through registration.services (set_team_school, remove_team_school,
-    clear_school_list, import_school_list)."""
+    clear_school_list, import_school_list, add_to_school_list, and Finalize's _assign_school_list)."""
 
     model = EventTeamAssignment
     extra = 0
@@ -77,15 +84,23 @@ class EventAdmin(admin.ModelAdmin[Event]):
     list_filter = ["season", "event_type", "registration_open", "is_active", "is_finalized"]
     ordering = ["season", "date"]
     inlines = [EventTeamAssignmentInline]
-    # Opening an event here would skip recording the school list at it; the school list import opens events
-    readonly_fields = ["is_active"]
+    # Opening an event here would skip recording the school list at it; the school list import and Finalize open
+    # events. Only Finalize writes is_finalized, under the school list lock, after freezing the results.
+    readonly_fields = ["is_active", "is_finalized"]
+
+    def has_delete_permission(self, request: HttpRequest, obj: Event | None = None) -> bool:
+        # The admin also asks per selected object in a bulk delete; the registration pages say why
+        if obj is not None and event_delete_problem(obj):
+            return False
+        return super().has_delete_permission(request, obj)
 
     def save_model(self, request: HttpRequest, obj: Event, form: ModelForm[Event], change: bool) -> None:
         if not change:
             super().save_model(request, obj, form, change)
             return
-        # A full save would write back the is_active read with the page, undoing an import that opened it since
-        obj.save(update_fields=[f.name for f in Event._meta.concrete_fields if f.name not in ("id", "is_active")])
+        # A full save would write back the flags read with the page, undoing an open, close or finalize made since
+        kept = ("id", "is_active", "is_finalized")
+        obj.save(update_fields=[f.name for f in Event._meta.concrete_fields if f.name not in kept])
 
 
 @admin.register(RegistrationContact)

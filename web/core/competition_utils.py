@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from django.db.models import Model, QuerySet
 from orange_team.models import OrangeAssignment, OrangeCheckIn
@@ -17,49 +18,59 @@ from scoring.models import (
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
-
-def _delete(rows: QuerySet[Model]) -> int:
-    return rows.delete()[0]
-
-
-def _reset_ticket_counters(teams: QuerySet[Model]) -> int:
-    return teams.update(ticket_counter=0)
-
-
-# What the wipe clears, in order: (count label, the rows, how they are cleared). While any of it remains, a school
-# list import is blocked (registration.services.import_problem).
-COMPETITION_DATA: tuple[tuple[str, Callable[[], QuerySet[Model]], Callable[[QuerySet[Model]], int]], ...] = (
-    ("TicketAttachment", TicketAttachment.objects.all, _delete),
-    ("TicketComment", TicketComment.objects.all, _delete),
-    ("TicketHistory", TicketHistory.objects.all, _delete),
-    ("Ticket", Ticket.objects.all, _delete),
-    ("TeamTicketCounter", lambda: Team.objects.filter(ticket_counter__gt=0), _reset_ticket_counters),
-    ("RedTeamScreenshot", RedTeamScreenshot.objects.all, _delete),
-    ("IncidentScreenshot", IncidentScreenshot.objects.all, _delete),
-    ("IncidentReport", IncidentReport.objects.all, _delete),
-    ("RedTeamScore", RedTeamScore.objects.all, _delete),
-    ("InjectScore", InjectScore.objects.all, _delete),
-    ("OrangeTeamScore", OrangeTeamScore.objects.all, _delete),
-    ("ServiceDetail", ServiceDetail.objects.all, _delete),
-    ("ServiceScore", ServiceScore.objects.all, _delete),
-    ("ScoringExclusion", ScoringExclusion.objects.all, _delete),
-    ("OrangeAssignment", OrangeAssignment.objects.all, _delete),
-    ("OrangeCheckIn", OrangeCheckIn.objects.all, _delete),
+# What the wipe deletes, in order: (count label, the rows). While any of it remains, or a team's ticket counter has
+# been used, a school list import is blocked (registration.services.import_problem).
+COMPETITION_DATA: tuple[tuple[str, Callable[[], QuerySet[Model]]], ...] = (
+    ("TicketAttachment", TicketAttachment.objects.all),
+    ("TicketComment", TicketComment.objects.all),
+    ("TicketHistory", TicketHistory.objects.all),
+    ("Ticket", Ticket.objects.all),
+    ("RedTeamScreenshot", RedTeamScreenshot.objects.all),
+    ("IncidentScreenshot", IncidentScreenshot.objects.all),
+    ("IncidentReport", IncidentReport.objects.all),
+    ("RedTeamScore", RedTeamScore.objects.all),
+    ("InjectScore", InjectScore.objects.all),
+    ("OrangeTeamScore", OrangeTeamScore.objects.all),
+    ("ServiceDetail", ServiceDetail.objects.all),
+    ("ServiceScore", ServiceScore.objects.all),
+    ("ScoringExclusion", ScoringExclusion.objects.all),
+    ("OrangeAssignment", OrangeAssignment.objects.all),
+    ("OrangeCheckIn", OrangeCheckIn.objects.all),
     # Blue team Discord links only (staff/volunteer links preserved)
-    ("BlueTeamDiscordLink", lambda: DiscordLink.objects.filter(team__isnull=False), _delete),
+    ("BlueTeamDiscordLink", lambda: DiscordLink.objects.filter(team__isnull=False)),
 )
 
 
-def wipe_competition_data() -> dict[str, int]:
-    """Wipe competition data for a fresh start, returning deleted counts by model plus TeamTicketCounter, the
-    number of team ticket counters reset.
+def _used_ticket_counters() -> QuerySet[Team]:
+    return Team.objects.filter(ticket_counter__gt=0)
+
+
+@dataclass(frozen=True)
+class WipedData:
+    """What wipe_competition_data did: deleted rows by label, and how many team ticket counters it reset."""
+
+    deleted: dict[str, int]
+    ticket_counters_reset: int
+
+
+def wipe_competition_data() -> WipedData:
+    """Wipe competition data for a fresh start.
 
     Preserves teams, orange checks (reusable rubrics), AuditLog, BotState, DiscordTask and LinkToken/LinkAttempt.
     Each team's ticket counter is reset with its tickets, so the next event's numbering starts at T0NN-001.
     """
-    return {label: clear(rows()) for label, rows, clear in COMPETITION_DATA}
+    deleted = {label: rows().delete()[0] for label, rows in COMPETITION_DATA}
+    return WipedData(deleted=deleted, ticket_counters_reset=_used_ticket_counters().update(ticket_counter=0))
+
+
+def competition_data_counts() -> WipedData:
+    """What wipe_competition_data would delete and reset now."""
+    return WipedData(
+        deleted={label: rows().count() for label, rows in COMPETITION_DATA},
+        ticket_counters_reset=_used_ticket_counters().count(),
+    )
 
 
 def live_competition_data_exists() -> bool:
-    """Whether any row the competition wipe clears still exists."""
-    return any(rows().exists() for _, rows, _ in COMPETITION_DATA)
+    """Whether any row the competition wipe deletes still exists, or a ticket counter it resets is in use."""
+    return _used_ticket_counters().exists() or any(rows().exists() for _, rows in COMPETITION_DATA)

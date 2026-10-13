@@ -1,5 +1,6 @@
-"""The school list lock is taken by the registration services' writes, Event.open, the start of a first packet send
-and the resend checks, each before it reads the open event."""
+"""The school list lock is taken by the registration services' writes (Finalize, Clear, Clear leftover data and the
+event and season deletes among them), Event.open and Event.close, the start of a first packet send and the resend
+checks, each before it reads the open event."""
 
 from datetime import date
 from unittest.mock import patch
@@ -12,13 +13,17 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from packets.models import Packet, PacketDistribution
 from packets.services import PacketDistributionService, begin_distribution
+from scoring.models import ServiceScore
 
 from core.models import UserGroups
 from registration.models import Event, Season
 from registration.services import (
+    NewEvent,
     SchoolListRow,
     add_to_school_list,
+    clear_event,
     clear_school_list,
+    finalize_open_event,
     import_school_list,
     remove_team_school,
     set_team_school,
@@ -124,6 +129,53 @@ def test_opening_an_event_takes_the_lock():
 
     with CaptureQueriesContext(connection) as queries:
         event.open()
+
+    _assert_locks_before_reading_the_open_event(queries)
+
+
+def test_closing_an_event_takes_the_lock():
+    event = _event()
+
+    with CaptureQueriesContext(connection) as queries:
+        event.close()
+
+    sql = [query["sql"] for query in queries.captured_queries]
+    lock = next(i for i, q in enumerate(sql) if "pg_advisory_xact_lock" in q)
+    write = next(i for i, q in enumerate(sql) if q.startswith('UPDATE "registration_event"'))
+    assert lock < write
+    event.refresh_from_db()
+    assert not event.is_active
+
+
+def test_finalizing_takes_the_lock_before_reading_the_open_event(team):
+    event = _event()
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+
+    with CaptureQueriesContext(connection) as queries:
+        finalize_open_event(event, "gold")
+
+    _assert_locks_before_reading_the_open_event(queries)
+
+
+def test_clearing_takes_the_lock_before_reading_the_open_event(team):
+    event = _event()
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+    finalize_open_event(event, "gold")
+
+    with CaptureQueriesContext(connection) as queries:
+        clear_event("gold")
+
+    _assert_locks_before_reading_the_open_event(queries)
+
+
+def test_opening_an_event_for_the_current_schools_takes_the_lock(team):
+    Season.objects.create(name="2026", year=2026, is_active=True)
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+
+    ServiceScore.objects.create(team=team, service_points=1)
+
+    with CaptureQueriesContext(connection) as queries:
+        finalize_open_event(NewEvent("Invitational", date(2026, 10, 3), "invitational"), "gold")
 
     _assert_locks_before_reading_the_open_event(queries)
 

@@ -20,7 +20,7 @@ from core.utils import ndjson_progress, run_detached
 from .. import export
 from ..calculator import Standing, compute_standings, get_leaderboard, get_standing
 from ..forms import ScorecardEmailForm
-from .leaderboard import build_scorecard_context
+from ..scorecard import build_scorecard_context
 
 logger = logging.getLogger(__name__)
 

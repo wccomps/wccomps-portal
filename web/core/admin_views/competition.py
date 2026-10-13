@@ -9,18 +9,38 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
+from registration.models import Event, Season
+from registration.services import (
+    FinalizeError,
+    LiveData,
+    NewEvent,
+    clear_event,
+    clear_leftover_data,
+    finalize_open_event,
+    live_data_state,
+)
 from scoring.models import QuotientMetadataCache
 from scoring.quotient_sync import sync_quotient_metadata
 
 from core.admin_views.readiness import action_readiness_check, action_readiness_fix
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import reset_team_credentials
+from core.competition_utils import WipedData, competition_data_counts
 from core.discord_tasks import CleanupCompetition, LogToChannel
-from core.forms import ActionForm, AppSlugForm, ResetPasswordsForm, SetMaxMembersForm, SetTimeForm, StartMessageForm
+from core.forms import (
+    ActionForm,
+    AppSlugForm,
+    FinalizeEventForm,
+    ResetPasswordsForm,
+    SetMaxMembersForm,
+    SetTimeForm,
+    StartMessageForm,
+    TypedConfirmForm,
+)
 from core.models import AuditLog, CompetitionConfig, DiscordTask
 from core.services.competition import CompetitionRunResult, run_competition
+from core.utils import ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
-from core.utils import run_detached
 from team.models import active_team_numbers, team_username
 
 from ..auth_utils import has_permission, require_permission
@@ -291,46 +311,41 @@ def _action_cleanup_competition(
     return JsonResponse({"success": True, "message": "Cleanup queued. The bot reports progress in the ops channel."})
 
 
-def _action_wipe_competition(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
-    from core.competition_utils import wipe_competition_data
+def _action_clear_event(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
+    if error := _typed_confirmation_error(request):
+        return error
+    try:
+        cleared = clear_event(authentik_username)
+    except FinalizeError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    message = f"{cleared.event.name} cleared. Deleted: {_wiped_summary(cleared.wiped)}"
+    return JsonResponse({"success": True, "message": message})
 
-    if config.applications_enabled:
-        return JsonResponse({"error": "Competition must be stopped before wiping"}, status=400)
 
-    counts = wipe_competition_data()
+def _action_clear_leftover_data(
+    request: HttpRequest, config: CompetitionConfig, authentik_username: str
+) -> JsonResponse:
+    if error := _typed_confirmation_error(request):
+        return error
+    try:
+        wiped = clear_leftover_data(authentik_username)
+    except FinalizeError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    return JsonResponse({"success": True, "message": f"Leftover data cleared. Deleted: {_wiped_summary(wiped)}"})
 
-    config.competition_start_time = None
-    config.competition_end_time = None
-    config.save()
 
-    counters_reset = counts.pop("TeamTicketCounter")
-    deleted_items = {k: v for k, v in counts.items() if v > 0}
-    total_deleted = sum(counts.values())
+def _typed_confirmation_error(request: HttpRequest) -> JsonResponse | None:
+    form = TypedConfirmForm(request.POST)
+    if form.is_valid():
+        return None
+    return JsonResponse({"error": form.errors["confirm"][0]}, status=400)
 
-    # The wipe keeps AuditLog, so the wipe itself is recorded alongside the history
-    AuditLog.objects.create(
-        action="competition_wiped",
-        admin_user=authentik_username,
-        target_entity="competition",
-        target_id=0,
-        details={
-            "deleted_counts": deleted_items,
-            "total_deleted": total_deleted,
-            "ticket_counters_reset": counters_reset,
-        },
-    )
 
-    summary_parts = [f"{v} {k}" for k, v in deleted_items.items()]
-    summary = ", ".join(summary_parts) if summary_parts else "No data to delete"
-    if counters_reset:
-        summary += f"; {counters_reset} team ticket counters reset"
-
-    return JsonResponse(
-        {
-            "success": True,
-            "message": f"Competition wiped! Deleted: {summary}",
-        }
-    )
+def _wiped_summary(wiped: WipedData) -> str:
+    summary = ", ".join(f"{v} {k}" for k, v in wiped.deleted.items() if v > 0) or "No data to delete"
+    if wiped.ticket_counters_reset:
+        summary += f"; {wiped.ticket_counters_reset} team ticket counters reset"
+    return summary
 
 
 def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
@@ -405,7 +420,32 @@ def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authe
         return JsonResponse({"error": f"Sync failed: {e}"}, status=500)
 
 
+def _stream_finalize(target: Event | NewEvent, authentik_username: str) -> Iterator[str]:
+    yield _progress("Freezing every listed school's scorecard and the export archive", 1, 2)
+    try:
+        outcome = finalize_open_event(target, authentik_username)
+    except FinalizeError as e:
+        yield ndjson_done(str(e), success=False)
+        return
+    yield _progress("Saved the results and the export archive", 2, 2)
+    yield ndjson_done(f"Finalized {outcome.event.name}: {outcome.results} school result(s).")
+
+
+def _action_finalize_event(
+    request: HttpRequest, config: CompetitionConfig, authentik_username: str
+) -> StreamingHttpResponse:
+    form = FinalizeEventForm(request.POST)
+    if not form.is_valid():
+        return StreamingHttpResponse(
+            iter([ndjson_done(form.first_error(), success=False)]), content_type="application/x-ndjson"
+        )
+    return StreamingHttpResponse(
+        run_detached(_stream_finalize(form.target(), authentik_username)), content_type="application/x-ndjson"
+    )
+
+
 _COMPETITION_ACTION_HANDLERS = {
+    "finalize_event": _action_finalize_event,
     "set_max_members": _action_set_max_members,
     "set_start_message": _action_set_start_message,
     "add_app": _action_add_app,
@@ -416,7 +456,8 @@ _COMPETITION_ACTION_HANDLERS = {
     "start_competition": _action_start_competition,
     "stop_competition": _action_stop_competition,
     "cleanup_competition": _action_cleanup_competition,
-    "wipe_competition": _action_wipe_competition,
+    "clear_event": _action_clear_event,
+    "clear_leftover_data": _action_clear_leftover_data,
     "reset_passwords": _action_reset_passwords,
     "sync_quotient": _action_sync_quotient,
     "readiness_check": action_readiness_check,
@@ -426,9 +467,11 @@ _COMPETITION_ACTION_HANDLERS = {
 
 @require_permission("admin", "gold_team")
 def admin_competition(request: HttpRequest) -> HttpResponse:
+
     from team.models import DiscordLink, Team
 
     config = CompetitionConfig.get_config()
+    open_event = Event.objects.open()
 
     active_teams = Team.objects.filter(is_active=True).count()
     total_teams = Team.objects.count()
@@ -437,6 +480,10 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
     quotient_metadata = QuotientMetadataCache.objects.first()
 
     context = {
+        "open_event": open_event,
+        "live_data": live_data_state().value,
+        "active_season": Season.objects.active(),
+        "event_type_choices": Event.EVENT_TYPE_CHOICES,
         "config": config,
         "active_teams": active_teams,
         "total_teams": total_teams,
@@ -487,11 +534,13 @@ def admin_competition_action(request: HttpRequest) -> HttpResponseBase:
 def admin_competition_danger(request: HttpRequest) -> HttpResponse:
     """Danger zone page for destructive competition operations."""
     config = CompetitionConfig.get_config()
+    leftovers = live_data_state() == LiveData.LEFTOVERS
     return render(
         request,
         "admin/competition_danger.html",
         {
             "config": config,
+            "leftovers": _wiped_summary(competition_data_counts()) if leftovers else "",
             "show_ops_nav": True,
             "nav_active": "ops_admin",
         },

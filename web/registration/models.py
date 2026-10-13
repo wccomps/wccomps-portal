@@ -189,12 +189,19 @@ class Event(models.Model):
 
     @transaction.atomic
     def open(self) -> None:
-        """Make this the only active event, under the school list lock."""
+        """Make this the only active event, under the school list lock. With close, the only writer of is_active."""
         school_list_lock()
         Event.objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
         if not self.is_active:
             self.is_active = True
             self.save(update_fields=["is_active", "updated_at"])
+
+    @transaction.atomic
+    def close(self) -> None:
+        """Make this event inactive, under the school list lock."""
+        school_list_lock()
+        self.is_active = False
+        self.save(update_fields=["is_active", "updated_at"])
 
 
 class RegistrationContact(models.Model):
@@ -262,6 +269,35 @@ class EventTeamAssignment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.school.name} → Team {self.team.team_number:02d} ({self.event.name})"
+
+
+class EventResult(models.Model):
+    """A school's result at a finalized event: its scorecard frozen as JSON (scoring.snapshot)."""
+
+    event = models.ForeignKey(Event, on_delete=models.PROTECT, related_name="results")
+    school = models.ForeignKey(School, on_delete=models.PROTECT, related_name="results")
+    team_number = models.PositiveSmallIntegerField()
+    rank = models.PositiveSmallIntegerField(null=True, blank=True)  # None: excluded or no scoring activity
+    total_score = models.DecimalField(max_digits=12, decimal_places=2)
+    scorecard = models.JSONField()
+    version = models.PositiveSmallIntegerField(default=1)
+
+    class Meta:
+        ordering = [models.F("rank").asc(nulls_last=True), "team_number"]
+        constraints = [
+            models.UniqueConstraint(fields=["event", "school"], name="one_result_per_school_per_event"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.school.name} at {self.event.name}: #{self.rank or '-'}"
+
+
+class EventArchive(models.Model):
+    """The event's full export zip, for whatever the scorecard didn't keep; rewritten at Finalize and at Clear."""
+
+    event = models.OneToOneField(Event, on_delete=models.PROTECT, related_name="archive")
+    data = models.BinaryField()
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class RegistrationRateLimit(models.Model):

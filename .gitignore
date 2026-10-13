@@ -68,6 +68,7 @@ backups/
 *.json
 !package.json
 !package-lock.json
+!web/scoring/tests/fixtures/*.json
 .superpowers/
 docs/superpowers/
 approve_red_team.py

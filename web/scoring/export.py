@@ -479,17 +479,19 @@ def export_dataset(name: str, export_format: str) -> HttpResponse:
     return response
 
 
-def export_all_zip() -> HttpResponse:
-    """Export all scoring data as a zip file containing CSV and JSON files."""
+def export_all_zip_bytes() -> bytes:
+    """Every dataset, as CSV and JSON, in one zip."""
     zip_buffer = BytesIO()
-
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for dataset in DATASETS.values():
             zip_file.writestr(f"{dataset.filename}.csv", dataset.to_csv())
             zip_file.writestr(f"{dataset.filename}.json", dataset.to_json())
+    return zip_buffer.getvalue()
 
-    zip_buffer.seek(0)
+
+def export_all_zip() -> HttpResponse:
+    """Export all scoring data as a zip file containing CSV and JSON files."""
     timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
-    response = HttpResponse(zip_buffer.getvalue(), content_type="application/zip")
+    response = HttpResponse(export_all_zip_bytes(), content_type="application/zip")
     response["Content-Disposition"] = f'attachment; filename="wccomps_export_{timestamp}.zip"'
     return response
