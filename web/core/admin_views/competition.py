@@ -9,7 +9,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
-from registration.services import NewEvent
+from registration.services import FinalizeError, NewEvent, clear_event, finalize_open_event
 from scoring.models import QuotientMetadataCache
 from scoring.quotient_sync import sync_quotient_metadata
 
@@ -302,7 +302,6 @@ def _action_cleanup_competition(
 
 def _action_clear_event(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
     from registration.models import Event
-    from registration.services import FinalizeError, clear_event
 
     event = Event.objects.open()
     if event is None:
@@ -391,8 +390,6 @@ def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authe
 
 
 def _stream_finalize(new_event: NewEvent | None, authentik_username: str) -> Iterator[str]:
-    from registration.services import FinalizeError, finalize_open_event
-
     yield _progress("Freezing every listed school's scorecard and the export archive", 1, 2)
     try:
         outcome = finalize_open_event(new_event, authentik_username)

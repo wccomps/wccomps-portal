@@ -331,6 +331,8 @@ class NewEvent:
 
 @dataclass(frozen=True)
 class FinalizeOutcome:
+    """The event Finalize froze and how many school results it wrote."""
+
     event: Event
     results: int
 
