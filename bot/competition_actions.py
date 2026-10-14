@@ -129,7 +129,7 @@ def _build_status_embed(config: CompetitionConfig) -> discord.Embed:
 async def run_competition_cleanup(bot: discord.Client, guild: discord.Guild, actor: str) -> None:
     """Tear down the competition in Discord and the database; progress goes to the ops channel.
 
-    The one implementation behind /competition cleanup-competition and the ops page's cleanup
+    The one implementation behind /competition cleanup-competition and the ops page's Close Out Event
     (queued as a cleanup_competition task). Never raises: failures are reported to ops.
     """
     config = await sync_to_async(CompetitionConfig.get_config)()

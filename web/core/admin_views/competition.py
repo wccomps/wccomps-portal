@@ -11,12 +11,11 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonRespons
 from django.shortcuts import render
 from registration.models import Event, Season
 from registration.services import (
-    FinalizeError,
+    CloseOutError,
     LiveData,
     NewEvent,
-    clear_event,
     clear_leftover_data,
-    finalize_open_event,
+    close_out_event,
     live_data_state,
 )
 from scoring.models import QuotientMetadataCache
@@ -26,11 +25,11 @@ from core.admin_views.readiness import action_readiness_check, action_readiness_
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import reset_team_credentials
 from core.competition_utils import WipedData, competition_data_counts
-from core.discord_tasks import CleanupCompetition, LogToChannel
+from core.discord_tasks import LogToChannel
 from core.forms import (
     ActionForm,
     AppSlugForm,
-    FinalizeEventForm,
+    CloseOutForm,
     ResetPasswordsForm,
     SetMaxMembersForm,
     SetTimeForm,
@@ -300,28 +299,6 @@ def _action_stop_competition(
     )
 
 
-def _action_cleanup_competition(
-    request: HttpRequest, config: CompetitionConfig, authentik_username: str
-) -> JsonResponse:
-    """Queue the competition cleanup for the bot, which also removes the Discord side."""
-    if config.applications_enabled:
-        return JsonResponse({"error": "Competition must be stopped before cleanup"}, status=400)
-
-    DiscordTask.enqueue(CleanupCompetition(requested_by=authentik_username))
-    return JsonResponse({"success": True, "message": "Cleanup queued. The bot reports progress in the ops channel."})
-
-
-def _action_clear_event(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
-    if error := _typed_confirmation_error(request):
-        return error
-    try:
-        cleared = clear_event(authentik_username)
-    except FinalizeError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-    message = f"{cleared.event.name} cleared. Deleted: {_wiped_summary(cleared.wiped)}"
-    return JsonResponse({"success": True, "message": message})
-
-
 def _action_clear_leftover_data(
     request: HttpRequest, config: CompetitionConfig, authentik_username: str
 ) -> JsonResponse:
@@ -329,7 +306,7 @@ def _action_clear_leftover_data(
         return error
     try:
         wiped = clear_leftover_data(authentik_username)
-    except FinalizeError as e:
+    except CloseOutError as e:
         return JsonResponse({"error": str(e)}, status=400)
     return JsonResponse({"success": True, "message": f"Leftover data cleared. Deleted: {_wiped_summary(wiped)}"})
 
@@ -420,32 +397,35 @@ def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authe
         return JsonResponse({"error": f"Sync failed: {e}"}, status=500)
 
 
-def _stream_finalize(target: Event | NewEvent, authentik_username: str) -> Iterator[str]:
-    yield _progress("Freezing every listed school's scorecard and the export archive", 1, 2)
+def _stream_close_out(target: Event | NewEvent, authentik_username: str) -> Iterator[str]:
+    # One transaction: each step below is reported once all of them committed together
+    yield _progress("Checking, freezing the results, clearing the live data and closing the event", 1, 4)
     try:
-        outcome = finalize_open_event(target, authentik_username)
-    except FinalizeError as e:
+        outcome = close_out_event(target, authentik_username)
+    except CloseOutError as e:
         yield ndjson_done(str(e), success=False)
         return
-    yield _progress("Saved the results and the export archive", 2, 2)
-    yield ndjson_done(f"Finalized {outcome.event.name}: {outcome.results} school result(s).")
+    yield _progress(f"Froze {outcome.results} school result(s) and the export archive", 2, 4)
+    yield _progress(f"Cleared the live data. Deleted: {_wiped_summary(outcome.wiped)}", 3, 4)
+    yield _progress("Queued the Discord cleanup; the bot reports its progress in the ops channel", 4, 4)
+    yield ndjson_done(f"Closed out {outcome.event.name}.")
 
 
-def _action_finalize_event(
+def _action_close_out_event(
     request: HttpRequest, config: CompetitionConfig, authentik_username: str
 ) -> StreamingHttpResponse:
-    form = FinalizeEventForm(request.POST)
+    form = CloseOutForm(request.POST)
     if not form.is_valid():
         return StreamingHttpResponse(
             iter([ndjson_done(form.first_error(), success=False)]), content_type="application/x-ndjson"
         )
     return StreamingHttpResponse(
-        run_detached(_stream_finalize(form.target(), authentik_username)), content_type="application/x-ndjson"
+        run_detached(_stream_close_out(form.target(), authentik_username)), content_type="application/x-ndjson"
     )
 
 
 _COMPETITION_ACTION_HANDLERS = {
-    "finalize_event": _action_finalize_event,
+    "close_out_event": _action_close_out_event,
     "set_max_members": _action_set_max_members,
     "set_start_message": _action_set_start_message,
     "add_app": _action_add_app,
@@ -455,8 +435,6 @@ _COMPETITION_ACTION_HANDLERS = {
     "set_schedule": _action_set_schedule,
     "start_competition": _action_start_competition,
     "stop_competition": _action_stop_competition,
-    "cleanup_competition": _action_cleanup_competition,
-    "clear_event": _action_clear_event,
     "clear_leftover_data": _action_clear_leftover_data,
     "reset_passwords": _action_reset_passwords,
     "sync_quotient": _action_sync_quotient,
@@ -479,9 +457,12 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
 
     quotient_metadata = QuotientMetadataCache.objects.first()
 
+    live_data = live_data_state()
     context = {
         "open_event": open_event,
-        "live_data": live_data_state().value,
+        "live_data": live_data.value,
+        "can_close_out": not config.applications_enabled
+        and (open_event is not None or live_data == LiveData.UNFINALIZED),
         "active_season": Season.objects.active(),
         "event_type_choices": Event.EVENT_TYPE_CHOICES,
         "config": config,

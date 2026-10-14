@@ -1,4 +1,4 @@
-"""The school list lock is taken by the registration services' writes (Finalize, Clear, Clear leftover data and the
+"""The school list lock is taken by the registration services' writes (Close Out, Clear leftover data and the
 event and season deletes among them), Event.open and Event.close, the start of a first packet send and the resend
 checks, each before it reads the open event."""
 
@@ -21,9 +21,8 @@ from registration.services import (
     NewEvent,
     SchoolListRow,
     add_to_school_list,
-    clear_event,
     clear_school_list,
-    finalize_open_event,
+    close_out_event,
     import_school_list,
     remove_team_school,
     set_team_school,
@@ -147,23 +146,12 @@ def test_closing_an_event_takes_the_lock():
     assert not event.is_active
 
 
-def test_finalizing_takes_the_lock_before_reading_the_open_event(team):
+def test_closing_out_takes_the_lock_before_reading_the_open_event(team):
     event = _event()
     set_team_school(team, "Example University", contact_email="c@example.edu")
 
     with CaptureQueriesContext(connection) as queries:
-        finalize_open_event(event, "gold")
-
-    _assert_locks_before_reading_the_open_event(queries)
-
-
-def test_clearing_takes_the_lock_before_reading_the_open_event(team):
-    event = _event()
-    set_team_school(team, "Example University", contact_email="c@example.edu")
-    finalize_open_event(event, "gold")
-
-    with CaptureQueriesContext(connection) as queries:
-        clear_event("gold")
+        close_out_event(event, "gold")
 
     _assert_locks_before_reading_the_open_event(queries)
 
@@ -175,7 +163,7 @@ def test_opening_an_event_for_the_current_schools_takes_the_lock(team):
     ServiceScore.objects.create(team=team, service_points=1)
 
     with CaptureQueriesContext(connection) as queries:
-        finalize_open_event(NewEvent("Invitational", date(2026, 10, 3), "invitational"), "gold")
+        close_out_event(NewEvent("Invitational", date(2026, 10, 3), "invitational"), "gold")
 
     _assert_locks_before_reading_the_open_event(queries)
 

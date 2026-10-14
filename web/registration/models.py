@@ -293,7 +293,7 @@ class EventResult(models.Model):
 
 
 class EventArchive(models.Model):
-    """The event's full export zip, for whatever the scorecard didn't keep; rewritten at Finalize and at Clear."""
+    """The event's full export zip, for whatever the scorecard didn't keep; written at Close Out."""
 
     event = models.OneToOneField(Event, on_delete=models.PROTECT, related_name="archive")
     data = models.BinaryField()

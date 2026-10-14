@@ -66,11 +66,23 @@ class SetMaxMembersForm(forms.Form):
     max_members = forms.IntegerField(min_value=1, max_value=20)
 
 
-class FinalizeEventForm(forms.Form):
-    """What the page showed: the open event (its id), or with none open the event Finalize creates for the current
-    school list."""
+class TypedConfirmForm(forms.Form):
+    """The word typed into a destructive action's prompt; the server checks it too."""
 
-    MISSING = "No event is open: give the event a name, a date and a valid type to finalize the current list."
+    confirm = forms.CharField(required=False)
+
+    def clean_confirm(self) -> str:
+        typed: str = self.cleaned_data["confirm"]
+        if typed.strip().lower() != "yolo":
+            raise forms.ValidationError('Type "yolo" to confirm.')
+        return typed
+
+
+class CloseOutForm(TypedConfirmForm):
+    """What the page showed: the open event (its id), or with none open the event Close Out creates for the current
+    school list; and the typed confirmation."""
+
+    MISSING = "No event is open: give the event a name, a date and a valid type to close out the current list."
 
     open_event = forms.ModelChoiceField(
         queryset=Event.objects.all(), error_messages={"invalid_choice": "That event no longer exists. Reload the page."}
@@ -88,7 +100,8 @@ class FinalizeEventForm(forms.Form):
     def __init__(self, data: QueryDict) -> None:
         super().__init__(data)
         if self.data.get("open_event"):
-            self.fields = {"open_event": self.fields["open_event"]}
+            for name in ("event_name", "event_date", "event_type"):
+                del self.fields[name]
         else:
             del self.fields["open_event"]
 
@@ -102,18 +115,6 @@ class FinalizeEventForm(forms.Form):
 
     def first_error(self) -> str:
         return str(next(iter(self.errors.values()))[0])
-
-
-class TypedConfirmForm(forms.Form):
-    """The word typed into a destructive action's prompt; the server checks it too."""
-
-    confirm = forms.CharField(required=False)
-
-    def clean_confirm(self) -> str:
-        typed: str = self.cleaned_data["confirm"]
-        if typed.strip().lower() != "yolo":
-            raise forms.ValidationError('Type "yolo" to confirm.')
-        return typed
 
 
 class StartMessageForm(forms.Form):

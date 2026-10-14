@@ -1,6 +1,6 @@
-"""A team's scorecard context, shared by the scorecard views, the PDFs and Finalize's frozen results.
+"""A team's scorecard context, shared by the scorecard views, the PDFs and Close Out's frozen results.
 
-Kept apart from the views so Finalize (and anything importing it at startup) doesn't load WeasyPrint.
+Kept apart from the views so Close Out (and anything importing it at startup) doesn't load WeasyPrint.
 """
 
 from decimal import Decimal

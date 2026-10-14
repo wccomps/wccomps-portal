@@ -8,38 +8,11 @@
         <c-page_header title="Competition Danger Zone"
                        parent_url="{% url 'admin_competition' %}"
                        parent_label="Competition" />
-        <c-fieldset heading="Cleanup" class="mb-20">
-            <p class="help-text mb-10">
-                Deactivates team members' Discord links, deletes every team's Discord category and channels, removes
-                synced roles from members no longer linked, removes student-helper and Room Judge roles, and clears the
-                schedule, the Quotient box list and queued announcements. Competition must be stopped first.
-            </p>
-            <c-link href="#"
-                    variant="danger"
-                    @click.prevent="guardedCleanup"
-                    ::class="disabledClass">
-                <span x-show="notLoading">Cleanup Competition</span>
-                <span x-show="loading" x-cloak>Processing...</span>
-            </c-link>
-        </c-fieldset>
-        <c-action_box variant="warning" heading="Clear Event">
-            <p class="mb-15">
-                Delete the live scores, tickets and blue team links once the open event's results are finalized. The
-                frozen results and export archive are kept.
-            </p>
-            <c-link href="#"
-                    variant="danger"
-                    @click.prevent="guardedClear"
-                    ::class="disabledClass">
-                <span x-show="notLoading">Clear Event</span>
-                <span x-show="loading" x-cloak>Processing...</span>
-            </c-link>
-        </c-action_box>
         {% if leftovers %}
-            <c-action_box variant="warning" heading="Clear Leftover Data" class="mt-20">
+            <c-action_box variant="warning" heading="Clear Leftover Data">
                 <p class="mb-15">
-                    No event is open, but live data arrived after the last Clear. It belongs to no event and is not
-                    archived: clearing it deletes it for good. Finalized results are not touched.
+                    No event is open, but live data arrived after the last event was closed out. It belongs to no event
+                    and is not archived: clearing it deletes it for good. Closed out events' results are not touched.
                 </p>
                 <p class="mb-15">As of loading this page: {{ leftovers }}.</p>
                 <c-link href="#"
@@ -50,6 +23,11 @@
                     <span x-show="loading" x-cloak>Processing...</span>
                 </c-link>
             </c-action_box>
+        {% else %}
+            <p>
+                Nothing to clear. To close out an event (freeze its results, then delete its live data), use Close Out
+                Event on the <a href="{% url 'admin_competition' %}">Competition</a> page.
+            </p>
         {% endif %}
         <c-toast />
     </div>
@@ -60,8 +38,6 @@
             get disabledClass() { return this.loading ? 'disabled' : ''; },
             get notLoading() { return !this.loading; },
 
-            guardedCleanup() { if (!this.loading) this.cleanupCompetition(); },
-            guardedClear() { if (!this.loading) this.clearEvent(); },
             guardedClearLeftovers() { if (!this.loading) this.clearLeftovers(); },
 
             async doAction(action, data = {}) {
@@ -85,33 +61,15 @@
                 setTimeout(() => this.message = '', 5000);
             },
 
-            cleanupCompetition() {
-                if (confirm('Cleanup the competition?\n\nThis will:\n\u2022 Deactivate team members\' Discord links\n\u2022 Delete every team\'s Discord category and channels\n\u2022 Remove synced roles from members no longer linked\n\u2022 Remove student-helper and Room Judge roles\n\u2022 Clear the schedule, the Quotient box list and queued announcements\n\nCompetition must be stopped first.')) {
-                    this.doAction('cleanup_competition');
-                }
-            },
-
             clearLeftovers() {
                 const message = 'CLEAR LEFTOVER DATA?\n\n' +
-                    'This deletes all live data that arrived after the last Clear, including any added since this page loaded.\n' +
+                    'This deletes all live data that arrived after the last close-out, including any added since this page loaded.\n' +
                     'It belongs to no event and is NOT archived.\n' +
-                    'Finalized results are kept.\n\n' +
+                    'Closed out events\' results are kept.\n\n' +
                     'Type "yolo" to confirm:';
                 const response = prompt(message);
                 if (response && response.toLowerCase() === 'yolo') {
                     this.doAction('clear_leftover_data', { confirm: response });
-                }
-            },
-
-            clearEvent() {
-                const message = 'CLEAR THE OPEN EVENT?\n\n' +
-                    'This deletes the live scores, tickets and blue team Discord links.\n' +
-                    'The finalized results and export archive are kept.\n\n' +
-                    'It is refused if scores changed since you finalized.\n\n' +
-                    'Type "yolo" to confirm:';
-                const response = prompt(message);
-                if (response && response.toLowerCase() === 'yolo') {
-                    this.doAction('clear_event', { confirm: response });
                 }
             }
         }));
