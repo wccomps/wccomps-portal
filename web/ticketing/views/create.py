@@ -124,9 +124,6 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
         if errors:
             return form_page(" ".join(errors))
 
-        if cat_info.get("display_name", "").lower() == "box reset" and hostname:
-            description = hostname
-
         if not team:
             return render(
                 request,
