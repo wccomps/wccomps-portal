@@ -4,7 +4,8 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
     """Forget DiscordLink.helper_activated_at, helper_deactivated_at and helper_removal_reason, which were only
     ever written. The columns stay for pods still on the previous release during a rolling deploy, the NOT NULL
-    one with a database default so new code can insert links without it. A later release drops them."""
+    one with a database default so new code can insert links without it. test_rollout_leftovers_dropped.py lists
+    them until they are dropped."""
 
     dependencies = [
         ("team", "0013_school_info_one_team_per_school"),
