@@ -8,6 +8,7 @@
                {% if required == "true" %}class="required"{% endif %}>{{ label }}:</label>
         {{ slot }}
         {% if help_text %}<p class="help-text">{{ help_text }}</p>{% endif %}
-        {% if error %}<p class="errornote">{{ error }}</p>{% endif %}
+        {# Callers pass loops that djlint wraps across lines: an error of only whitespace is no error #}
+        {% if error.strip %}<p class="errornote">{{ error.strip }}</p>{% endif %}
     </div>
 </div>
