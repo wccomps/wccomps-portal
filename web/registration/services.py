@@ -395,8 +395,9 @@ class CloseOutError(Exception):
 def _refuse_while_running(message: str) -> CompetitionConfig:
     """The competition config, its row locked until commit. CloseOutError with the message while the competition
     runs. A start writes applications_enabled under the same row lock, so it can't mark the competition running
-    until this commits; a start already under way may have turned Authentik on before it waits, and the queued
-    Discord cleanup then skips."""
+    until this commits. A start already under way may have turned Authentik on before it waits, and the queued
+    Discord cleanup checks for a running competition only when the bot picks it up, so it can still run as such a
+    start lands."""
     config = CompetitionConfig.objects.select_for_update().get(pk=CompetitionConfig.get_config().pk)
     if config.applications_enabled:
         raise CloseOutError(message)
@@ -451,15 +452,16 @@ class CloseOutOutcome:
     wiped: WipedData
 
 
-# PostgreSQL's could-not-serialize error, raised in a REPEATABLE READ transaction that would overwrite a newer row
+# PostgreSQL's could-not-serialize error: a REPEATABLE READ transaction would change a row another one changed
+# since its snapshot (a score, the config row, a ticket counter, ...)
 SERIALIZATION_FAILURE = "40001"
-SCORES_CHANGED = "Scores changed while closing out, so nothing was changed. Try again."
+CHANGED_WHILE_CLOSING_OUT = "Something changed while closing out; nothing was changed. Try again."
 
 
 def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
     """Close out the event (see _close_out). As the outermost transaction it runs at REPEATABLE READ, so the results
     it freezes, the archive and the rows it deletes are one snapshot: a score changed meanwhile makes it refuse with
-    SCORES_CHANGED, writing nothing, and rows created after its snapshot stay as live data. Inside a caller's
+    CHANGED_WHILE_CLOSING_OUT, writing nothing, and rows created after its snapshot stay as live data. Inside a caller's
     transaction, that transaction's isolation applies.
     """
     try:
@@ -472,7 +474,7 @@ def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
             return _close_out(target, actor)
     except OperationalError as e:
         if getattr(e.__cause__, "pgcode", None) == SERIALIZATION_FAILURE:
-            raise CloseOutError(SCORES_CHANGED) from e
+            raise CloseOutError(CHANGED_WHILE_CLOSING_OUT) from e
         raise
 
 

@@ -466,7 +466,7 @@ def test_a_score_changed_while_closing_out_refuses_and_writes_nothing(event):
     """At READ COMMITTED the wipe would delete the new points without their being frozen."""
     with (
         _while_closing_out(lambda: ServiceScore.objects.filter(team__team_number=2).update(service_points=400)),
-        pytest.raises(CloseOutError, match="^Scores changed while closing out, so nothing was changed. Try again.$"),
+        pytest.raises(CloseOutError, match="^Something changed while closing out; nothing was changed. Try again.$"),
     ):
         close_out_event(event, "gold")
 
@@ -497,7 +497,7 @@ def test_a_serialization_failure_inside_a_callers_transaction_is_a_refusal(event
 
     with (
         patch("registration.services.wipe_competition_data", side_effect=failure),
-        pytest.raises(CloseOutError, match="Scores changed while closing out"),
+        pytest.raises(CloseOutError, match="Something changed while closing out"),
     ):
         close_out_event(event, "gold")
     _assert_nothing_written(event)
