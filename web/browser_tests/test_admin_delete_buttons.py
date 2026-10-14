@@ -30,9 +30,9 @@ def test_delete_confirmation_buttons_match(live_server, pw_browser):
 
 def test_changelist_action_go_button_fits_its_label(live_server, pw_browser):
     from django.contrib.auth.models import User
+    from registration.models import Season
 
     from core.models import UserGroups
-    from registration.models import Season
 
     admin = User.objects.create(username="admingo", is_staff=True, is_superuser=True)
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
