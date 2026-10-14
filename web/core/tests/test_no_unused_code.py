@@ -261,6 +261,7 @@ CODE_EXCEPTIONS = {
     "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",
     "*/management/commands/*:Command": "manage.py runs a command by its file name",
     "*/management/commands/*:handle": "manage.py calls Command.handle",
+    "*/management/commands/*:help": "manage.py help prints a command's help text",
     "*:clean_*": "Django form validation calls clean_<field>",
     "*:has_*_permission": "Django admin calls its permission hooks",
     "*:label_from_instance": "Django model choice fields call it for each option",
