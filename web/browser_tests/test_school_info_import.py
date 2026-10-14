@@ -78,3 +78,34 @@ def test_add_mode_adds_a_late_school_and_keeps_the_list(live_server, pw_browser,
         }
     finally:
         context.close()
+
+
+def test_with_no_active_season_the_import_creates_one(live_server, pw_browser, tmp_path):
+    from registration.models import Event, Season
+
+    from team.models import Team
+
+    Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01", "is_active": True})
+    csv_file = tmp_path / "schools.csv"
+    csv_file.write_text(CSV)
+    user = _create_role_user("gold_team", None)
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    try:
+        page.goto(f"{live_server.url}/ops/school-info/import/")
+        page.select_option("select[name=event]", "new")
+        page.fill("#id_new_name", "Invitational 1")
+        page.fill("#id_new_date", "2026-10-03")
+        page.fill("#id_new_season_name", "2026-2027")
+        page.fill("#id_new_season_year", "2027")
+        page.set_input_files("#id_csv_file", str(csv_file))
+        page.get_by_role("button", name="Upload and Preview").click()
+        page.wait_for_load_state("networkidle")
+        page.get_by_role("button", name="Confirm and Import").click()
+        page.wait_for_load_state("networkidle")
+
+        assert page.get_by_text("Created the 2026-2027 season and made it the active one.").is_visible()
+        assert Season.objects.active().year == 2027
+        assert Event.objects.open().name == "Invitational 1"
+    finally:
+        context.close()

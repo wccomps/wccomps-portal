@@ -11,7 +11,7 @@ from scoring.models import QuotientMetadataCache
 
 from bot.competition_actions import run_competition_cleanup
 from bot.discord_queue import DiscordQueueProcessor
-from core.models import AuditLog, CompetitionConfig, DiscordTask
+from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnouncement
 from team.models import DiscordLink, Team
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
@@ -92,12 +92,71 @@ async def test_refuses_while_the_competition_runs(competition: Team) -> None:
     assert await DiscordLink.objects.filter(discord_id=1, is_active=True).aexists()
 
 
-async def test_queued_cleanup_runs_the_shared_function() -> None:
-    task = await DiscordTask.objects.acreate(task_type="cleanup_competition", payload={"requested_by": "web:admin"})
+@pytest.mark.parametrize(
+    ("payload", "closed_out"),
+    [({"requested_by": "web:admin", "closed_out_event_id": 5}, 5), ({"requested_by": "web:admin"}, None)],
+    ids=["close-out", "queued-before-the-field"],
+)
+async def test_queued_cleanup_runs_the_shared_function(payload: dict[str, object], closed_out: int | None) -> None:
+    """A row queued before closed_out_event_id existed still parses, and runs the full cleanup as it did then."""
+    task = await DiscordTask.objects.acreate(task_type="cleanup_competition", payload=payload)
     processor = DiscordQueueProcessor(MagicMock())
     guild = MagicMock()
     processor._guild = MagicMock(return_value=guild)
     with patch("bot.competition_actions.run_competition_cleanup", new_callable=AsyncMock) as cleanup:
         await processor._handle_cleanup_competition(task.typed_payload())
 
-    cleanup.assert_awaited_once_with(processor.bot, guild, "web:admin")
+    cleanup.assert_awaited_once_with(processor.bot, guild, "web:admin", closed_out_event_id=closed_out)
+
+
+def _sync_removing(count: int) -> AsyncMock:
+    return AsyncMock(return_value={"roles_added": 0, "roles_removed": count, "errors": 0, "changes": []})
+
+
+async def test_after_a_close_out_it_does_only_the_discord_side(competition: Team) -> None:
+    """The close-out reset the database; a schedule and start message set since belong to the next event."""
+    from registration.models import Event, Season
+
+    season = await Season.objects.acreate(name="2026", year=2026)
+    event = await Event.objects.acreate(season=season, name="Inv", event_type="invitational", date="2026-10-03")
+    await QueuedAnnouncement.objects.acreate(team=competition, message="Next event", sender_name="gold")
+    guild = _guild("Team 03")
+
+    with (
+        patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
+        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
+        patch("bot.role_sync.sync_roles", _sync_removing(4)),
+    ):
+        await run_competition_cleanup(MagicMock(), guild, "web:admin", closed_out_event_id=event.pk)
+
+    guild.categories[0].delete.assert_awaited_once()
+    await competition.arefresh_from_db()
+    assert (competition.discord_role_id, competition.discord_category_id) == (None, None)
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert config.competition_start_time is not None
+    assert config.start_message == "Default VM login"
+    assert await QuotientMetadataCache.objects.aexists()
+    assert await QueuedAnnouncement.objects.aexists()
+    assert not await AuditLog.objects.filter(action="user_unlinked").aexists()
+    messages = [call.args[1] for call in ops.await_args_list]
+    assert not any("Deactivated" in message for message in messages)
+
+
+async def test_after_a_close_out_it_skips_once_another_event_opened(competition: Team) -> None:
+    from registration.models import Event, Season
+
+    season = await Season.objects.acreate(name="2026", year=2026)
+    closed = await Event.objects.acreate(season=season, name="Inv", event_type="invitational", date="2026-10-03")
+    await Event.objects.acreate(season=season, name="Qual", event_type="qualifier", date="2026-11-07", is_active=True)
+    guild = _guild("Team 03")
+
+    with (
+        patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
+        patch("bot.role_sync.sync_roles", _sync_removing(0)) as sync,
+    ):
+        await run_competition_cleanup(MagicMock(), guild, "web:admin", closed_out_event_id=closed.pk)
+
+    assert "skipped: Qual (2026) was opened since" in ops.await_args.args[1]
+    guild.categories[0].delete.assert_not_awaited()
+    sync.assert_not_awaited()
+    assert (await Team.objects.aget(pk=competition.pk)).discord_role_id == 11

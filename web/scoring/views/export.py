@@ -13,6 +13,8 @@ from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+from registration.close_out_checks import record_scorecards_emailed, scorecards_fingerprint
+from registration.models import Event
 
 from core.auth_utils import require_permission
 from core.utils import ndjson_progress, run_detached
@@ -119,6 +121,10 @@ def _stream_email_scorecards(request: HttpRequest, custom_message: str = "") -> 
     total_teams = len(scores)
 
     sendable = [(score.team, score, score.school_emails) for score in scores if score.school_emails]
+    # What these scorecards say, from the standings the emails are built from, so Close Out Event can tell
+    # whether the scores changed since
+    event = Event.objects.open()
+    fingerprint = scorecards_fingerprint(event, standings)
 
     total = len(sendable)
     if total == 0:
@@ -140,6 +146,8 @@ def _stream_email_scorecards(request: HttpRequest, custom_message: str = "") -> 
             logger.error("Failed to email scorecard to Team %d", team.team_number)
             yield ndjson_progress(f"Failed Team {team.team_number}", i, total, ok=False)
 
+    if sent:
+        record_scorecards_emailed(event, fingerprint, sent, failed, request.user.get_username())
     message = f"Sent {sent}, failed {failed}" if failed else f"Emailed scorecards to {sent} teams"
     yield json.dumps({"done": True, "success": failed == 0, "message": message}) + "\n"
 

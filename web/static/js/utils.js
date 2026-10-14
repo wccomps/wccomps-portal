@@ -118,7 +118,10 @@ function streamMixin(url) {
         get notLoading() { return !this.loading; },
         get disabledClass() { return this.loading ? 'disabled' : ''; },
 
+        streamAction: '',
+
         async doStreamAction(action, extraData = {}) {
+            this.streamAction = action;
             this.loading = true;
             this.message = '';
             this.progressStep = 'Starting...';

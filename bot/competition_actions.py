@@ -126,49 +126,69 @@ def _build_status_embed(config: CompetitionConfig) -> discord.Embed:
     return embed
 
 
-async def run_competition_cleanup(bot: discord.Client, guild: discord.Guild, actor: str) -> None:
+async def _deactivate_team_links(actor: str) -> int:
+    """Deactivate team member links only (admin and support links stay), auditing each."""
+    links_to_deactivate = [
+        link
+        async for link in DiscordLink.objects.filter(is_active=True, team__isnull=False).select_related("team", "user")
+    ]
+
+    deactivated = 0
+    for link in links_to_deactivate:
+        link.is_active = False
+        link.unlinked_at = timezone.now()
+        await link.asave()
+        deactivated += 1
+
+        await AuditLog.objects.acreate(
+            action="user_unlinked",
+            admin_user=actor,
+            target_entity="discord_link",
+            target_id=link.discord_id,
+            details={
+                "discord_id": link.discord_id,
+                "team_name": link.team.team_name if link.team else "Unknown",
+                "authentik_username": link.user.username,
+                "reason": "competition_cleanup",
+            },
+        )
+    return deactivated
+
+
+async def run_competition_cleanup(
+    bot: discord.Client, guild: discord.Guild, actor: str, closed_out_event_id: int | None = None
+) -> None:
     """Tear down the competition in Discord and the database; progress goes to the ops channel.
 
-    The one implementation behind /competition cleanup-competition and the ops page's cleanup
-    (queued as a cleanup_competition task). Never raises: failures are reported to ops.
+    The one implementation behind /competition cleanup-competition (the full cleanup) and Close Out Event (queued as
+    a cleanup_competition task with closed_out_event_id). The close-out already deleted the team links and reset the
+    database in its transaction, so for it this does only the Discord side, and skips if an event was opened or the
+    competition started since. Never raises: failures are reported to ops.
     """
     config = await sync_to_async(CompetitionConfig.get_config)()
     if config.applications_enabled:
         await log_to_ops_channel(bot, "Cleanup refused: the competition is still running")
         return
+    close_out = closed_out_event_id is not None
+    if close_out:
+        from registration.models import Event
+
+        opened = await Event.objects.select_related("season").filter(is_active=True).afirst()
+        if opened is not None:
+            await log_to_ops_channel(
+                bot,
+                f"Discord cleanup after the close-out skipped: {opened} was opened since. Run "
+                "/competition cleanup-competition if the old team channels and roles still need removing.",
+            )
+            return
 
     try:
         await log_to_ops_channel(bot, f"Competition Cleanup Started by {actor}")
 
-        # Deactivate team member links only (preserve admin/support links)
-        links_to_deactivate = [
-            link
-            async for link in DiscordLink.objects.filter(is_active=True, team__isnull=False).select_related(
-                "team", "user"
-            )
-        ]
-
         deactivated = 0
-        for link in links_to_deactivate:
-            link.is_active = False
-            link.unlinked_at = timezone.now()
-            await link.asave()
-            deactivated += 1
-
-            await AuditLog.objects.acreate(
-                action="user_unlinked",
-                admin_user=actor,
-                target_entity="discord_link",
-                target_id=link.discord_id,
-                details={
-                    "discord_id": link.discord_id,
-                    "team_name": link.team.team_name if link.team else "Unknown",
-                    "authentik_username": link.user.username,
-                    "reason": "competition_cleanup",
-                },
-            )
-
-        await log_to_ops_channel(bot, f"Deactivated {deactivated} team member links")
+        if not close_out:
+            deactivated = await _deactivate_team_links(actor)
+            await log_to_ops_channel(bot, f"Deactivated {deactivated} team member links")
 
         deleted_count = 0
         for category in guild.categories:
@@ -264,15 +284,16 @@ async def run_competition_cleanup(bot: discord.Client, guild: discord.Guild, act
         if helper_role_removals > 0:
             await log_to_ops_channel(bot, f"Removed helper/judge roles from {helper_role_removals} members")
 
-        # The start message holds this event's credentials; the next event gets its own.
-        await CompetitionConfig.objects.filter(pk=config.pk).aupdate(
-            competition_start_time=None, competition_end_time=None, start_message=""
-        )
-        await QuotientMetadataCache.objects.all().adelete()
+        if not close_out:
+            # The start message holds this event's credentials; the next event gets its own.
+            await CompetitionConfig.objects.filter(pk=config.pk).aupdate(
+                competition_start_time=None, competition_end_time=None, start_message=""
+            )
+            await QuotientMetadataCache.objects.all().adelete()
 
-        deleted_announcements = await QueuedAnnouncement.objects.all().adelete()
-        if deleted_announcements[0] > 0:
-            await log_to_ops_channel(bot, f"Cleared {deleted_announcements[0]} queued announcements")
+            deleted_announcements = await QueuedAnnouncement.objects.all().adelete()
+            if deleted_announcements[0] > 0:
+                await log_to_ops_channel(bot, f"Cleared {deleted_announcements[0]} queued announcements")
 
         await AuditLog.objects.acreate(
             action="competition_cleanup",
@@ -284,13 +305,16 @@ async def run_competition_cleanup(bot: discord.Client, guild: discord.Guild, act
                 "deleted_categories": deleted_count,
                 "removed_roles": stats["roles_removed"],
                 "helpers_removed": helpers_removed,
+                "closed_out_event": closed_out_event_id,
             },
         )
 
+        # After a close-out the links were deleted with the event's live data, so there is no count to report
+        links_line = "" if close_out else f"- Deactivated {deactivated} team links\n"
         await log_to_ops_channel(
             bot,
             f"Competition Cleanup Complete\n"
-            f"- Deactivated {deactivated} team links\n"
+            f"{links_line}"
             f"- Deleted {deleted_count} team categories\n"
             f"- Removed {stats['roles_removed']} roles",
         )

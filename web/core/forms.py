@@ -1,5 +1,5 @@
 from django import forms
-from django.http import QueryDict
+from registration.forms import NewEventFields
 from registration.models import Event
 from registration.services import NewEvent
 
@@ -66,44 +66,6 @@ class SetMaxMembersForm(forms.Form):
     max_members = forms.IntegerField(min_value=1, max_value=20)
 
 
-class FinalizeEventForm(forms.Form):
-    """What the page showed: the open event (its id), or with none open the event Finalize creates for the current
-    school list."""
-
-    MISSING = "No event is open: give the event a name, a date and a valid type to finalize the current list."
-
-    open_event = forms.ModelChoiceField(
-        queryset=Event.objects.all(), error_messages={"invalid_choice": "That event no longer exists. Reload the page."}
-    )
-    event_name = forms.CharField(
-        max_length=255,
-        error_messages={"required": MISSING, "max_length": "The event name must be at most 255 characters."},
-    )
-    event_date = forms.DateField(error_messages={"required": MISSING, "invalid": MISSING})
-    event_type = forms.ChoiceField(
-        choices=Event.EVENT_TYPE_CHOICES,
-        error_messages={"required": MISSING, "invalid_choice": "Choose a valid event type."},
-    )
-
-    def __init__(self, data: QueryDict) -> None:
-        super().__init__(data)
-        if self.data.get("open_event"):
-            self.fields = {"open_event": self.fields["open_event"]}
-        else:
-            del self.fields["open_event"]
-
-    def target(self) -> Event | NewEvent:
-        """The page's open event, or the new event to create. Call once is_valid() is True."""
-        data = self.cleaned_data
-        if "open_event" in data:
-            event: Event = data["open_event"]
-            return event
-        return NewEvent(name=data["event_name"], date=data["event_date"], event_type=data["event_type"])
-
-    def first_error(self) -> str:
-        return str(next(iter(self.errors.values()))[0])
-
-
 class TypedConfirmForm(forms.Form):
     """The word typed into a destructive action's prompt; the server checks it too."""
 
@@ -114,6 +76,46 @@ class TypedConfirmForm(forms.Form):
         if typed.strip().lower() != "yolo":
             raise forms.ValidationError('Type "yolo" to confirm.')
         return typed
+
+
+class CancelEventForm(TypedConfirmForm):
+    """The open event the page showed, and the typed confirmation."""
+
+    open_event = forms.ModelChoiceField(
+        queryset=Event.objects.all(),
+        error_messages={
+            "required": "No event was shown. Reload the page.",
+            "invalid_choice": "That event no longer exists. Reload the page.",
+        },
+    )
+
+    def first_error(self) -> str:
+        return str(next(iter(self.errors.values()))[0])
+
+
+class CloseOutForm(TypedConfirmForm, NewEventFields):
+    """What the page showed: the open event (its id), or with none open the event Close Out records the scores at
+    (and its new season when none is active); and the typed confirmation."""
+
+    open_event = forms.ModelChoiceField(
+        queryset=Event.objects.all(),
+        required=False,
+        error_messages={"invalid_choice": "That event no longer exists. Reload the page."},
+    )
+
+    def clean(self) -> dict[str, object]:
+        data = super().clean() or {}
+        if not self.errors and not data.get("open_event"):
+            self.new_event_to_create = self.new_event()
+        return data
+
+    def target(self) -> Event | NewEvent:
+        """The page's open event, or the new event to create. Call once is_valid() is True."""
+        event: Event | None = self.cleaned_data.get("open_event")
+        return event if event is not None else self.new_event_to_create
+
+    def first_error(self) -> str:
+        return str(next(iter(self.errors.values()))[0])
 
 
 class StartMessageForm(forms.Form):

@@ -10,7 +10,7 @@ from django.test import Client
 from django.urls import reverse
 from registration.models import School
 
-from core.models import UserGroups
+from core.models import AuditLog, UserGroups
 from scoring.models import ScoringTemplate, ServiceScore
 from team.models import SchoolInfo, Team
 
@@ -217,6 +217,48 @@ class TestStreamEmailScorecards:
         assert done_msg["success"] is False
         assert "failed" in done_msg["message"].lower()
 
+    @patch("scoring.views.export._send_scorecard_email", return_value=True)
+    def test_a_send_records_the_scorecards_it_sent(self, mock_send, gold_user, final_scores, school_infos):
+        """Close Out Event warns when the scorecards weren't emailed, or changed after the last send."""
+        from datetime import date
+
+        from registration.close_out_checks import scorecards_fingerprint
+        from registration.models import Event, Season
+
+        season = Season.objects.create(name="2026", year=2026, is_active=True)
+        event = Event.objects.create(
+            season=season, name="Inv", event_type="invitational", date=date(2026, 10, 3), is_active=True
+        )
+        for info in school_infos:
+            event.team_assignments.create(team=info.team, school=info.school)
+        client = Client()
+        client.force_login(gold_user)
+
+        emailed = scorecards_fingerprint(event)
+
+        def a_grade_lands_while_sending(*args):
+            ServiceScore.objects.filter(team__team_number=2).update(service_points=Decimal("450"))
+            return True
+
+        mock_send.side_effect = a_grade_lands_while_sending
+        self._parse_ndjson(client.post(reverse("scoring:stream_email_scorecards")))
+
+        log = AuditLog.objects.get(action="scorecards_emailed")
+        assert log.admin_user == "gold"
+        assert log.target_id == event.pk
+        # The hash is of the scorecards the emails carried, not of the scores after them
+        assert log.details == {"event": event.pk, "teams": 2, "failed": 0, "scorecards_hash": emailed}
+        assert emailed != scorecards_fingerprint(event)
+
+    @patch("scoring.views.export._send_scorecard_email", return_value=False)
+    def test_a_send_that_reached_nobody_records_nothing(self, mock_send, gold_user, final_scores, school_infos):
+        client = Client()
+        client.force_login(gold_user)
+
+        self._parse_ndjson(client.post(reverse("scoring:stream_email_scorecards")))
+
+        assert not AuditLog.objects.filter(action="scorecards_emailed").exists()
+
     def test_non_gold_user_cannot_stream(self, red_user, final_scores):
         client = Client()
         client.force_login(red_user)
@@ -316,6 +358,16 @@ class TestSingleEmailScorecardPOST:
         call_args = mock_send.call_args[0]
         assert call_args[0] == ["alpha@example.edu", "alpha2@example.edu"]
         assert call_args[2] == 1  # team_number
+
+    @patch("scoring.views.export._send_scorecard_email", return_value=True)
+    def test_one_teams_scorecard_email_is_not_a_scorecards_send(self, mock_send, gold_user, final_scores, school_infos):
+        client = Client()
+        client.force_login(gold_user)
+
+        client.post(reverse("scoring:email_scorecard", args=[1]))
+
+        assert mock_send.call_count == 1
+        assert not AuditLog.objects.filter(action="scorecards_emailed").exists()
 
     @patch("scoring.views.export._send_scorecard_email", return_value=True)
     def test_sends_email_with_custom_message(self, mock_send, gold_user, final_scores, school_infos):

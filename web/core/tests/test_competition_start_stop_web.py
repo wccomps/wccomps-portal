@@ -56,23 +56,6 @@ def test_setting_a_start_time_mid_competition_keeps_it_running(admin_client):
     assert config.competition_start_time is not None
 
 
-def test_cleanup_is_queued_for_the_bot(admin_client):
-    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
-
-    response = _post(admin_client, "cleanup_competition")
-
-    assert response.json()["success"]
-    task = DiscordTask.objects.get(task_type="cleanup_competition")
-    assert task.payload["requested_by"]
-
-
-def test_cleanup_refused_while_running(admin_client):
-    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
-
-    assert _post(admin_client, "cleanup_competition").status_code == 400
-    assert not DiscordTask.objects.filter(task_type="cleanup_competition").exists()
-
-
 def _join_detached_runs() -> None:
     import threading
 
@@ -127,127 +110,27 @@ def _open_event():
     )
 
 
-def _finalized_event(team_number=1):
-    from registration.services import finalize_open_event, set_team_school
+def _team_with_school(team_number=1):
+    from registration.services import set_team_school
 
     from team.models import Team
 
-    event = _open_event()
     team, _ = Team.objects.get_or_create(team_number=team_number, defaults={"team_name": f"Team {team_number}"})
     set_team_school(team, "Example University", contact_email="c@example.edu")
-    finalize_open_event(event, "admin")
-    return event
+    return team
 
 
-def test_clear_needs_a_finalized_event(admin_client):
+@pytest.mark.parametrize("action", ["wipe_competition", "finalize_event", "clear_event", "cleanup_competition"])
+def test_the_replaced_actions_are_gone(admin_client, action):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     _open_event()
+    _team_with_school()
 
-    response = _post(admin_client, "clear_event", confirm="yolo")
-
-    assert response.status_code == 400
-    assert response.json()["error"] == "Finalize this event first."
-
-
-def test_clear_needs_an_open_event(admin_client):
-    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
-
-    response = _post(admin_client, "clear_event", confirm="yolo")
-
-    assert response.status_code == 400
-    assert response.json()["error"] == "No event is open and there is no live data to clear."
-
-
-def test_clear_refused_while_running(admin_client):
-    from scoring.models import ServiceScore
-
-    from team.models import Team
-
-    team = Team.objects.create(team_number=9, team_name="Team 9")
-    ServiceScore.objects.create(team=team, service_points=100)
-    event = _finalized_event(team_number=9)
-    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
-
-    response = _post(admin_client, "clear_event", confirm="yolo")
-
-    assert response.status_code == 400
-    assert response.json()["error"] == "Competition must be stopped before clearing"
-    assert ServiceScore.objects.exists()
-    event.refresh_from_db()
-    assert event.is_active
-
-
-def test_clear_resets_ticket_counters_and_says_so(admin_client):
-    from team.models import Team
-
-    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
-    Team.objects.create(team_number=9, team_name="Team 9", ticket_counter=85)
-    _finalized_event()
-
-    response = _post(admin_client, "clear_event", confirm="yolo")
-
-    assert response.json()["message"].startswith("Inv cleared. Deleted: ")
-    assert response.json()["message"].endswith("; 1 team ticket counters reset")
-    assert Team.objects.get(team_number=9).ticket_counter == 0
-
-
-def test_clear_resets_the_competition_times(admin_client):
-    from django.utils import timezone
-
-    now = timezone.now()
-    CompetitionConfig.objects.update_or_create(
-        pk=1,
-        defaults={"applications_enabled": False, "competition_start_time": now, "competition_end_time": now},
-    )
-    _finalized_event()
-
-    assert _post(admin_client, "clear_event", confirm="yolo").json()["success"]
-
-    config = CompetitionConfig.get_config()
-    assert config.competition_start_time is None
-    assert config.competition_end_time is None
-
-
-def test_a_refused_clear_keeps_the_competition_times(admin_client):
-    from django.utils import timezone
-
-    now = timezone.now()
-    CompetitionConfig.objects.update_or_create(
-        pk=1,
-        defaults={"applications_enabled": False, "competition_start_time": now, "competition_end_time": now},
-    )
-    _open_event()
-
-    assert _post(admin_client, "clear_event", confirm="yolo").status_code == 400
-
-    assert CompetitionConfig.get_config().competition_start_time == now
-
-
-def test_clear_needs_admin_or_gold_access(client, create_user_with_groups):
-    from scoring.models import ServiceScore
-
-    from team.models import Team
-
-    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
-    event = _finalized_event()
-    ServiceScore.objects.create(team=Team.objects.get(team_number=1), service_points=0)
-    client.force_login(create_user_with_groups("nobody", []))
-
-    response = client.post(reverse("admin_competition_action"), {"action": "clear_event", "confirm": "yolo"})
-
-    assert response.status_code == 403
-    assert ServiceScore.objects.exists()
-    event.refresh_from_db()
-    assert event.is_active
-
-
-def test_the_wipe_action_is_gone(admin_client):
-    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
-
-    response = _post(admin_client, "wipe_competition")
+    response = _post(admin_client, action, confirm="yolo")
 
     assert response.status_code == 400
     assert "Unknown action" in response.json()["error"]
+    assert not DiscordTask.objects.exists()
 
 
 def test_a_partial_start_is_reported_incomplete_not_success(admin_client):
@@ -276,17 +159,17 @@ def test_a_partial_start_is_reported_incomplete_not_success(admin_client):
 
 
 def _leftovers():
-    """A finalized and cleared event, then a score that arrived after the Clear."""
+    """A closed out event, then a score that arrived after the close-out."""
     from registration.models import Event
-    from registration.services import clear_event
+    from registration.services import close_out_event
     from scoring.models import ServiceScore
 
-    from team.models import Team
-
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
-    event = _finalized_event()
-    clear_event("admin")
-    ServiceScore.objects.create(team=Team.objects.get(team_number=1), service_points=3)
+    event = _open_event()
+    team = _team_with_school()
+    ServiceScore.objects.create(team=team, service_points=5)
+    close_out_event(event, "admin")
+    ServiceScore.objects.create(team=team, service_points=3)
     return Event.objects.get(pk=event.pk)
 
 
@@ -297,7 +180,8 @@ def test_the_danger_page_offers_leftovers_with_their_counts(admin_client):
 
     assert "Clear Leftover Data" in page
     assert "1 ServiceScore" in page
-    assert "belongs to no event and is not archived" in page
+    assert "not recorded at any event yet" in page
+    assert "It is not archived" in page
 
 
 def test_clearing_leftovers_deletes_them(admin_client):
@@ -324,7 +208,10 @@ def test_without_a_finalized_event_leftovers_are_hidden_and_refused(admin_client
 
     assert "Clear Leftover Data" not in page
     assert response.status_code == 400
-    assert response.json()["error"] == "Finalize the event first."
+    assert response.json()["error"] == (
+        "These scores are not recorded at any event yet and no event was ever closed out: record them with "
+        "Close Out Event."
+    )
     assert ServiceScore.objects.exists()
 
 
@@ -352,27 +239,27 @@ def test_clearing_leftovers_is_refused_while_running(admin_client):
     assert ServiceScore.objects.exists()
 
 
-def test_with_leftovers_the_competition_page_points_at_the_danger_page(admin_client):
+def test_scores_after_a_close_out_can_still_be_recorded_with_close_out(admin_client):
+    """An event that ran without an import after the first close-out is not leftovers to delete unrecorded."""
     _leftovers()
 
     page = admin_client.get(reverse("admin_competition")).content.decode()
 
-    assert "Live data arrived after the last Clear" in page
-    assert "Finalize Results" not in page
+    assert "not recorded at any event yet" in page
+    assert '@click="closeOutEvent"' in page
 
 
-@pytest.mark.parametrize("typed", [None, "", "no"])
-def test_clear_event_needs_the_typed_confirmation(admin_client, typed):
-    from registration.models import Event
+def test_live_data_without_scores_points_at_the_danger_page(admin_client, admin_user):
+    from team.models import DiscordLink
 
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
-    event = _finalized_event()
+    team = _team_with_school()
+    DiscordLink.objects.create(team=team, discord_id=1, discord_username="blue", user=admin_user)
 
-    response = _post(admin_client, "clear_event", **({} if typed is None else {"confirm": typed}))
+    page = admin_client.get(reverse("admin_competition")).content.decode()
 
-    assert response.status_code == 400
-    assert response.json()["error"] == 'Type "yolo" to confirm.'
-    assert Event.objects.open() == event
+    assert "Clear leftover data on the competition Danger Zone page" in page
+    assert '@click="closeOutEvent"' not in page
 
 
 @pytest.mark.parametrize("typed", [None, "", "no"])
@@ -399,3 +286,61 @@ def test_clearing_leftovers_keeps_the_schedule(admin_client):
 
     config = CompetitionConfig.get_config()
     assert (config.competition_start_time, config.competition_end_time) == (now, now)
+
+
+def _scoreless_open_event():
+    event = _open_event()
+    _team_with_school()
+    return event
+
+
+def test_the_danger_page_offers_cancel_only_for_an_open_event_with_no_scores(admin_client):
+    from scoring.models import ServiceScore
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
+    _scoreless_open_event()
+    offered = admin_client.get(reverse("admin_competition_danger")).content.decode()
+    ServiceScore.objects.create(team_id=_team_with_school().pk, service_points=1)
+    scored = admin_client.get(reverse("admin_competition_danger")).content.decode()
+
+    assert '@click.prevent="guardedCancelEvent"' in offered
+    assert '@click.prevent="guardedCancelEvent"' not in scored
+
+
+def test_cancelling_from_the_danger_page(admin_client):
+    from core.models import AuditLog
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
+    event = _scoreless_open_event()
+
+    response = _post(admin_client, "cancel_event", open_event=event.pk, confirm="yolo")
+
+    assert response.json() == {"success": True, "message": "Inv cancelled. The school list stays."}
+    event.refresh_from_db()
+    assert not event.is_active
+    assert AuditLog.objects.filter(action="event_cancelled").exists()
+
+
+@pytest.mark.parametrize("typed", [None, "", "no"])
+def test_cancelling_needs_the_typed_confirmation(admin_client, typed):
+    event = _scoreless_open_event()
+
+    response = _post(admin_client, "cancel_event", open_event=event.pk, **({} if typed is None else {"confirm": typed}))
+
+    assert response.status_code == 400
+    assert response.json()["error"] == 'Type "yolo" to confirm.'
+    event.refresh_from_db()
+    assert event.is_active
+
+
+def test_cancelling_needs_admin_or_gold_access(client, create_user_with_groups):
+    event = _scoreless_open_event()
+    client.force_login(create_user_with_groups("nobody", []))
+
+    response = client.post(
+        reverse("admin_competition_action"), {"action": "cancel_event", "open_event": event.pk, "confirm": "yolo"}
+    )
+
+    assert response.status_code == 403
+    event.refresh_from_db()
+    assert event.is_active

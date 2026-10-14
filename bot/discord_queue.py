@@ -250,10 +250,12 @@ class DiscordQueueProcessor:
         )
 
     async def _handle_cleanup_competition(self, payload: CleanupCompetition) -> None:
-        """Run the competition cleanup requested from the ops page."""
+        """Run the competition cleanup Close Out Event queued: only the Discord side for a close-out."""
         from bot.competition_actions import run_competition_cleanup
 
-        await run_competition_cleanup(self.bot, self._guild(), payload.requested_by)
+        await run_competition_cleanup(
+            self.bot, self._guild(), payload.requested_by, closed_out_event_id=payload.closed_out_event_id
+        )
 
     async def _handle_setup_team_infrastructure(self, payload: SetupTeamInfrastructure) -> None:
         team_number = payload.team_number

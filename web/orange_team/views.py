@@ -47,7 +47,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
     my_assignments = list(
         OrangeAssignment.objects.filter(user=user)
-        .exclude(status__in=["approved", "rejected"])
+        .unfinished()
         .select_related("orange_check", "team")
         .prefetch_related("results__criterion")
         .order_by("orange_check__scheduled_at", "orange_check__title", "team__team_number")
@@ -133,7 +133,7 @@ def check_list(request: HttpRequest) -> HttpResponse:
     by_user: dict[int, list[OrangeAssignment]] = {}
     for assignment in (
         OrangeAssignment.objects.filter(user_id__in=[ci.user_id for ci in checkins])
-        .exclude(status__in=["approved", "rejected"])
+        .unfinished()
         .select_related("orange_check", "team")
     ):
         by_user.setdefault(assignment.user_id, []).append(assignment)

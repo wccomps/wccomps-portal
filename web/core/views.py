@@ -13,6 +13,7 @@ from registration.forms import ShownSchoolForm
 from registration.models import Event, Season
 from registration.services import (
     ImportBlockedError,
+    NewEvent,
     PacketsSentError,
     SchoolChangedError,
     SchoolListRow,
@@ -369,7 +370,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
 
 
 def _parse_school_info_csv(
-    csv_file: UploadedFile[bytes], event: Event, mode: ImportMode
+    csv_file: UploadedFile[bytes], event: Event | NewEvent, mode: ImportMode
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
     """Parse and validate a school-info CSV for the import mode into (preview data, session rows; empty on errors)."""
     parse_result = parse_csv_file(csv_file)
@@ -445,10 +446,7 @@ def _apply_school_info_import(
             rows = [SchoolListRow(**row) for row in stored_rows]
     if rows is None or not isinstance(event_fields, dict):
         return _upload_again("The uploaded file is no longer available.")
-    season = Season.objects.active()
-    if season is None:
-        return _upload_again("No season is active.")
-    event_form = ImportEventForm(event_fields, season=season)
+    event_form = ImportEventForm(event_fields, season=Season.objects.active())
     if not event_form.is_valid():
         return _upload_again(*(str(e) for e in event_form.non_field_errors()))
     event = event_form.event_to_import
@@ -457,7 +455,10 @@ def _apply_school_info_import(
         counts = mode.apply(event, rows, authentik_username)
     except ImportBlockedError as blocked:
         return _import_error(str(blocked)), None
-    return None, {"lines": mode.result(event, counts), **counts}
+    lines = mode.result(event, counts)
+    if isinstance(event, NewEvent) and event.season is not None:
+        lines.append(f"Created the {event.season} season and made it the active one.")
+    return None, {"lines": lines, **counts}
 
 
 @require_permission("gold_team")
@@ -472,17 +473,14 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
     error = ""
 
     season = Season.objects.active()
-    if season is None:
-        error = "Activate a season first (Registration, Seasons): imported schools join an event of the active season."
 
     if request.method == "POST":
         if "upload" in request.POST:
             form = CSVUploadForm(request.POST, request.FILES)
-            event_form = ImportEventForm(request.POST, season=season) if season else None
-            event_valid = event_form is not None and event_form.is_valid()
-            if event_form is not None and not event_valid:
+            event_form = ImportEventForm(request.POST, season=season)
+            if not event_form.is_valid():
                 error = " ".join(str(e) for e in event_form.non_field_errors())
-            elif form.is_valid() and event_form is not None:
+            elif form.is_valid():
                 event = event_form.event_to_import
                 mode = IMPORT_MODES[event_form.import_mode]
                 if problem := mode.problem(event):
@@ -498,7 +496,7 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
                                 "event": {name: event_form.data.get(name, "") for name in event_form.fields},
                             },
                         )
-                        preview_data["event_label"] = str(event) if event.pk else f"New: {event.name}"
+                        preview_data["event_label"] = str(event)
                         preview_data["mode_label"] = mode.label.format(event=event)
 
         elif "confirm" in request.POST:
@@ -524,6 +522,7 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
         {
             "authentik_username": authentik_username,
             "form": form,
+            "active_season": season,
             "open_events": season.events.filter(is_finalized=False) if season else [],
             "import_modes": [(key, mode.label.format(event=open_event)) for key, mode in IMPORT_MODES.items()],
             "preview_data": preview_data,

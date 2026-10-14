@@ -120,7 +120,7 @@ def test_confirm_refuses_an_event_finalized_since_the_preview(client):
 
     response = _confirm(client)
 
-    assert b"finalized or removed" in response.content
+    assert b"closed out or removed" in response.content
     event.refresh_from_db()
     assert not event.is_active
     assert not SchoolInfo.objects.exists()
@@ -136,7 +136,7 @@ def test_confirm_refuses_an_event_removed_since_the_preview(client):
     response = _confirm(client)
 
     assert response.status_code == 200
-    assert b"finalized or removed" in response.content
+    assert b"closed out or removed" in response.content
 
 
 def test_confirm_with_session_data_from_before_events_asks_to_upload_again(client):
@@ -168,7 +168,7 @@ def test_import_is_refused_while_the_last_events_scores_are_still_here(client):
 
     response = client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
 
-    assert b"Scores from the last event are still in the portal" in response.content
+    assert b"not recorded at any event yet" in response.content
     assert not SchoolInfo.objects.exists()
 
 
@@ -183,7 +183,7 @@ def test_confirm_is_refused_when_scores_appeared_since_the_preview(client):
 
     response = _confirm(client)
 
-    assert b"Scores from the last event are still in the portal" in response.content
+    assert b"not recorded at any event yet" in response.content
     assert not SchoolInfo.objects.exists()
 
 
@@ -324,7 +324,7 @@ def test_the_session_keeps_the_raw_event_fields(client):
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields})
 
     (stored,) = client.session["school_list_previews"].values()
-    assert stored["event"] == {**fields, "mode": ""}
+    assert stored["event"] == {**fields, "mode": "", "new_season_name": "", "new_season_year": ""}
 
 
 def test_confirm_rechecks_a_new_events_fields(client):
@@ -348,7 +348,94 @@ def test_confirm_rechecks_a_new_events_fields(client):
 
 
 def test_page_error_shows_once_not_under_each_form_field(client):
-    response = client.get(reverse("school_info_import"))
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    _season_and_event(name="Open", active=True)
+    other = _season_and_event(name="Next")
 
-    message = "Activate a season first"
-    assert response.content.decode().count(message) == 1
+    response = _upload(client, event=str(other.pk))
+
+    assert response.content.decode().count("is still open") == 1
+
+
+SEASON_FIELDS = {
+    "event": "new",
+    "new_name": "Invitational 1",
+    "new_date": "2026-10-03",
+    "new_type": "invitational",
+    "new_season_name": "2026-2027",
+    "new_season_year": "2027",
+}
+
+
+def _upload(client, **fields):
+    csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
+    return client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields})
+
+
+def test_with_no_active_season_the_page_offers_a_new_one(client):
+    page = client.get(reverse("school_info_import")).content.decode()
+
+    assert 'name="new_season_name"' in page
+    assert 'name="new_season_year"' in page
+
+
+def test_with_an_active_season_the_page_offers_no_new_one(client):
+    _season_and_event()
+
+    page = client.get(reverse("school_info_import")).content.decode()
+
+    assert 'name="new_season_name"' not in page
+
+
+def test_with_no_active_season_the_import_creates_it_with_the_event(client):
+    from registration.models import Event, Season
+
+    Season.objects.create(name="2025", year=2025, is_active=False)
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+
+    preview = _upload(client, **SEASON_FIELDS)
+    assert b"new season 2026-2027" in preview.content
+    assert not Season.objects.filter(year=2027).exists()
+    response = _confirm(client)
+
+    season = Season.objects.get(year=2027)
+    assert (season.name, season.is_active) == ("2026-2027", True)
+    assert list(Season.objects.filter(is_active=True)) == [season]
+    assert Event.objects.open().season == season
+    assert SchoolInfo.objects.get().school.name == "Example University"
+    assert b"Created the 2026-2027 season" in response.content
+
+
+def test_with_no_active_season_the_season_fields_are_required(client):
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+
+    response = _upload(client, **{**SEASON_FIELDS, "new_season_name": ""})
+
+    assert b"Give the new season a name and a year." in response.content
+    assert not SchoolInfo.objects.exists()
+
+
+def test_with_no_active_season_a_taken_year_is_refused(client):
+    from registration.models import Season
+
+    Season.objects.create(name="Old", year=2027, is_active=False)
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+
+    response = _upload(client, **SEASON_FIELDS)
+
+    assert b"The Old season already has the year 2027" in response.content
+    assert Season.objects.count() == 1
+
+
+def test_a_season_activated_since_the_preview_refuses_the_import(client):
+    from registration.models import Season
+
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    _upload(client, **SEASON_FIELDS)
+    Season.objects.create(name="Other", year=2030, is_active=True)
+
+    response = _confirm(client)
+
+    assert b"Upload the file again" in response.content
+    assert not Season.objects.filter(year=2027).exists()
+    assert not SchoolInfo.objects.exists()
