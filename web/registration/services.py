@@ -290,9 +290,9 @@ def _create_active_season(season: Season) -> Season:
     it can't be."""
     if problem := new_season_problem(season):
         raise ImportBlockedError(problem)
-    season.is_active = True
+    season.is_active = False
     season.save()
-    Season.objects.exclude(pk=season.pk).filter(is_active=True).update(is_active=False)
+    season.activate()
     return season
 
 

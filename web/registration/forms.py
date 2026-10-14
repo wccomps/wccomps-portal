@@ -93,17 +93,34 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
 
 
 class SeasonForm(forms.ModelForm[Season]):
+    """A season's name and year; checking Active Season activates it (Season.activate), which deactivates the
+    others. An active season stays active until another is activated."""
+
+    is_active = forms.BooleanField(
+        required=False,
+        label="Active Season",
+        help_text="Makes this the active season; the season active now stops being active.",
+    )
+
     class Meta:
         model = Season
-        fields = ["name", "year", "is_active"]
+        fields = ["name", "year"]
         labels = {
             "name": "Season Name",
             "year": "Year",
-            "is_active": "Active Season",
         }
-        help_texts = {
-            "is_active": "Only one season should be active at a time.",
-        }
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        if self.instance.is_active:
+            self.fields["is_active"].initial = True
+            self.fields["is_active"].disabled = True
+
+    def save(self, commit: bool = True) -> Season:
+        season = super().save(commit=commit)
+        if commit and self.cleaned_data["is_active"] and not season.is_active:
+            season.activate()
+        return season
 
 
 class EventForm(forms.ModelForm[Event]):

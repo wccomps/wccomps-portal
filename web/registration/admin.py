@@ -1,4 +1,5 @@
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.db.models import QuerySet
 from django.forms import ModelForm
 from django.http import HttpRequest
 
@@ -45,6 +46,18 @@ class SeasonAdmin(admin.ModelAdmin[Season]):
     list_display = ["name", "year", "is_active", "created_at"]
     list_filter = ["is_active"]
     ordering = ["-year"]
+    # Season.activate is the only writer: it takes the school list lock and deactivates the others
+    readonly_fields = ["is_active"]
+    actions = ["activate_season"]
+
+    @admin.action(description="Make the selected season the active one")
+    def activate_season(self, request: HttpRequest, queryset: QuerySet[Season]) -> None:
+        if queryset.count() != 1:
+            self.message_user(request, "Select exactly one season to activate.", level=messages.ERROR)
+            return
+        season = queryset.get()
+        season.activate()
+        self.message_user(request, f"{season} is now the active season.")
 
     def has_delete_permission(self, request: HttpRequest, obj: Season | None = None) -> bool:
         # The admin also asks per selected object in a bulk delete; the registration pages say why

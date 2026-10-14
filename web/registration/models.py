@@ -128,6 +128,15 @@ class Season(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    @transaction.atomic
+    def activate(self) -> None:
+        """Make this the only active season, under the school list lock. The only writer of is_active: a season
+        stops being active when another is activated."""
+        school_list_lock()
+        Season.objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
+        Season.objects.filter(pk=self.pk).update(is_active=True)
+        self.is_active = True
+
 
 class EventQuerySet(models.QuerySet["Event"]):
     def annotate_enrollment_count(self) -> EventQuerySet:
