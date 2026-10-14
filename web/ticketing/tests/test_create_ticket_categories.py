@@ -59,3 +59,21 @@ def test_staff_can_use_staff_only_category(ticketing_admin_user, team_1, staff_o
     )
     assert response.status_code == 302
     assert Ticket.objects.get().category == staff_only
+
+
+def test_box_reset_keeps_the_teams_description_and_the_hostname(blue_team_user, team_1, box_reset_category):
+    response = _client(blue_team_user).post(
+        reverse("create_ticket"),
+        {
+            "title": "Web box won't boot",
+            "category": box_reset_category.pk,
+            "description": "Stuck at the boot loader since the last round",
+            "hostname": "web01",
+            "ip_address": "10.0.1.5",
+        },
+    )
+
+    assert response.status_code == 302
+    ticket = Ticket.objects.get()
+    assert ticket.description == "Stuck at the boot loader since the last round"
+    assert ticket.hostname == "web01"
