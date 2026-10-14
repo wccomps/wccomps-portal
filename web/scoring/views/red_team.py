@@ -478,26 +478,3 @@ def ip_pool_delete(request: HttpRequest, pool_id: int) -> HttpResponse:
     pool.delete()
     messages.success(request, f"IP pool '{pool_name}' deleted")
     return redirect("scoring:ip_pool_list")
-
-
-def api_user_ip_pools(request: HttpRequest) -> JsonResponse:
-    """API endpoint to get user's IP pools for dropdown."""
-    if not has_permission(request.user, "red_team"):
-        return JsonResponse({"error": "Access denied"}, status=403)
-    from ..models import RedTeamIPPool
-
-    user = cast(User, request.user)
-    pools = RedTeamIPPool.objects.filter(created_by=user)
-
-    return JsonResponse(
-        {
-            "pools": [
-                {
-                    "id": pool.id,
-                    "name": pool.name,
-                    "ip_count": pool.ip_count,
-                }
-                for pool in pools
-            ]
-        }
-    )

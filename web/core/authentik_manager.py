@@ -288,29 +288,6 @@ class AuthentikManager:
         """Disable application for blue teams by disabling the BlueTeam group binding."""
         return self._toggle_application(app_slug, enable=False)
 
-    def enable_applications(self, app_slugs: list[str]) -> dict[str, tuple[bool, str | None]]:
-        """Enable multiple applications for blue teams."""
-        logger.info(f"Enabling {len(app_slugs)} applications: {app_slugs}")
-        results: dict[str, tuple[bool, str | None]] = {}
-        for slug in app_slugs:
-            results[slug] = self.enable_application(slug)
-
-        success_count = sum(1 for success, _ in results.values() if success)
-        logger.info(f"Enable applications complete: {success_count}/{len(app_slugs)} succeeded")
-        return results
-
-    def disable_applications(self, app_slugs: list[str]) -> dict[str, tuple[bool, str | None]]:
-        """Disable multiple applications for blue teams."""
-        logger.info(f"Disabling {len(app_slugs)} applications: {app_slugs}")
-        results: dict[str, tuple[bool, str | None]] = {}
-
-        for slug in app_slugs:
-            results[slug] = self.disable_application(slug)
-
-        success_count = sum(1 for success, _ in results.values() if success)
-        logger.info(f"Disable applications complete: {success_count}/{len(app_slugs)} succeeded")
-        return results
-
     def update_user_discord_id(self, username: str, discord_id: int, uid: str) -> bool:
         """Store Discord ID in Authentik user attributes, preserving existing attributes.
 

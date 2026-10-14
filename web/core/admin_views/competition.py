@@ -410,7 +410,7 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
 
 def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
     try:
-        sync_quotient_metadata()
+        sync_quotient_metadata(cast(User, request.user))
         AuditLog.objects.create(
             action="quotient_metadata_synced",
             admin_user=authentik_username,
@@ -600,14 +600,19 @@ def admin_competition_danger(request: HttpRequest) -> HttpResponse:
     )
 
 
+def guide_partial(key: str) -> str:
+    """The guide's section of prose for a step or a rare action, named after its key."""
+    return f"admin/guide/{key}.html"
+
+
 @require_permission("admin", "gold_team")
 def admin_competition_guide(request: HttpRequest) -> HttpResponse:
     """Running an event, step by step, in plain words: the panel's steps, each with its own section of prose."""
     rare = [
-        {"title": title, "key": action.value, "url": action_url(action), "partial": f"admin/guide/{action}.html"}
+        {"title": title, "key": action.value, "url": action_url(action), "partial": guide_partial(action)}
         for action, title in RARE_ACTIONS
     ]
-    steps = [{"step": step, "partial": f"admin/guide/{step.key}.html"} for step in STEPS]
+    steps = [{"step": step, "partial": guide_partial(step.key)} for step in STEPS]
     return render(
         request,
         "admin/competition_guide.html",

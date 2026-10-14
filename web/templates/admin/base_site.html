@@ -44,6 +44,10 @@
                     <a href="{% url 'scoring:submit_incident_report' %}"
                        {% if nav_active == 'incident' %}class="current"{% endif %}>Incident Report</a>
                 {% endif %}
+                {% if is_blue_team %}
+                    <a href="{% url 'team_packet' %}"
+                       {% if nav_active == 'packets' %}class="current"{% endif %}>Packets</a>
+                {% endif %}
                 {% if is_red_team or is_admin %}
                     <a href="{% url 'scoring:submit_red_score' %}"
                        {% if nav_active == 'red_findings' %}class="current"{% endif %}>Red Team Findings</a>

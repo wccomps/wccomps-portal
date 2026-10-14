@@ -7,6 +7,7 @@ from django.core.mail import EmailMultiAlternatives
 from django.db import close_old_connections, transaction
 from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.template.loader import render_to_string
+from django.urls import reverse
 from registration.locks import school_list_lock
 from registration.models import Event
 from registration.stage import ACTIONS, Action
@@ -109,6 +110,11 @@ def check_resendable(packet: Packet) -> str | None:
     return None
 
 
+def team_packet_url() -> str:
+    """The absolute address of the team packet page, for emails."""
+    return settings.BASE_URL.rstrip("/") + reverse("team_packet")
+
+
 class PacketDistributionService:
     def distribute_packet(self, packet: Packet) -> dict[str, int]:
         """Distribute a packet to all teams."""
@@ -187,6 +193,7 @@ class PacketDistributionService:
             "username": username,
             "password": password,
             "team_extras": team_extras,
+            "portal_url": team_packet_url(),
         }
 
         subject = f"WCComps: {packet.title}"
@@ -250,6 +257,7 @@ class PacketDistributionService:
             "username": username,
             "password": password,
             "team_extras": team_extras,
+            "portal_url": team_packet_url(),
         }
 
         subject = f"[TEST] WCComps: {packet.title}"

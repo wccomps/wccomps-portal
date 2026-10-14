@@ -10,7 +10,6 @@ urlpatterns = [
     path("review/", views.review_list, name="registration_review_list"),
     path("approve/<int:registration_id>/", views.approve_registration, name="registration_approve"),
     path("reject/<int:registration_id>/", views.reject_registration, name="registration_reject"),
-    path("mark-paid/<int:registration_id>/", views.mark_paid, name="registration_mark_paid"),
     path("seasons/", views.season_list, name="registration_season_list"),
     path("seasons/create/", views.season_create, name="registration_season_create"),
     path("seasons/<int:season_id>/edit/", views.season_edit, name="registration_season_edit"),

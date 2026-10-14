@@ -25,7 +25,7 @@ from registration.models import School
 from core.models import UserGroups
 from scoring.calculator import (
     calculate_suggested_recovery_points,
-    calculate_team_score,
+    calculate_team_score_detailed,
     compute_standings,
     suggest_red_score_matches,
 )
@@ -99,7 +99,7 @@ class ScoringFormulaTests(TestCase):
         )
         red_finding.affected_teams.add(self.team1)
 
-        scores = calculate_team_score(self.team1)
+        scores = calculate_team_score_detailed(self.team1)
 
         # Service: 500 × 1.0 = 500
         self.assertEqual(scores["service_points"], Decimal("500.0"))
@@ -118,7 +118,7 @@ class ScoringFormulaTests(TestCase):
 
     def test_zero_scores_all_categories(self) -> None:
         """Team with no scoring data gets total 0."""
-        scores = calculate_team_score(self.team1)
+        scores = calculate_team_score_detailed(self.team1)
 
         self.assertEqual(scores["service_points"], Decimal("0"))
         self.assertEqual(scores["inject_points"], Decimal("0"))
@@ -137,7 +137,7 @@ class ScoringFormulaTests(TestCase):
         )
         red.affected_teams.add(self.team1)
 
-        scores = calculate_team_score(self.team1)
+        scores = calculate_team_score_detailed(self.team1)
 
         self.assertEqual(scores["red_deductions"], Decimal("-200"))
         self.assertLess(scores["total_score"], Decimal("0"))
@@ -169,7 +169,7 @@ class ScoringFormulaTests(TestCase):
         )
         red.affected_teams.add(self.team1)
 
-        scores = calculate_team_score(self.team1)
+        scores = calculate_team_score_detailed(self.team1)
 
         self.assertEqual(scores["inject_points"], Decimal("0"))
         self.assertEqual(scores["orange_points"], Decimal("0"))
@@ -711,7 +711,7 @@ class TestIncidentFindingMatching:
             points_returned=Decimal("30.00"),
         )
 
-        scores = calculate_team_score(team)
+        scores = calculate_team_score_detailed(team)
 
         # Only reviewed incident counts - recovery is raw value for display
         # (40 points returned from reviewed incident)

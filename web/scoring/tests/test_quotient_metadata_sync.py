@@ -37,3 +37,19 @@ def test_metadata_sync_derives_inject_max():
         sync_quotient_metadata()
 
     assert ScoringTemplate.objects.first().inject_max == Decimal("255")
+
+
+@pytest.mark.parametrize("data", [{"action": "sync_quotient"}, {"action": "readiness_fix", "fix": "fix_sync_quotient"}])
+def test_a_sync_from_the_portal_records_who_ran_it(admin_user, data):
+    from django.test import Client
+    from django.urls import reverse
+
+    client = Client()
+    client.force_login(admin_user)
+    with patch("scoring.quotient_sync.QuotientClient") as quotient:
+        quotient.return_value.get_infrastructure.return_value = MagicMock(boxes=[], event_name="Event", team_count=5)
+        quotient.return_value.get_injects.return_value = []
+        response = client.post(reverse("admin_competition_action"), data)
+
+    assert response.status_code == 200, response.content
+    assert QuotientMetadataCache.objects.get().synced_by == admin_user

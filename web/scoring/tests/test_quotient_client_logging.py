@@ -71,7 +71,7 @@ def test_endpoint_503_after_login_logs_single_warning(monkeypatch, caplog):
     client = _client_with(monkeypatch, handler)
 
     with caplog.at_level(logging.DEBUG, logger="quotient.client"):
-        assert client.get_scores(force_refresh=True) is None
+        assert client.get_injects(force_refresh=True) is None
 
     assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
     assert not _tracebacks(caplog)

@@ -26,7 +26,6 @@ class LinkCheckResult:
 
     can_link: bool
     error_message: str = ""
-    existing_team_name: str = ""
 
 
 async def check_rate_limit(discord_id: int) -> tuple[bool, int]:
@@ -51,7 +50,6 @@ async def check_existing_link(discord_id: int) -> LinkCheckResult:
 
     return LinkCheckResult(
         can_link=False,
-        existing_team_name=existing_link.team.team_name,
         error_message=f"You are already linked to **{existing_link.team.team_name}**. "
         f"If you need to change teams, please contact an administrator.",
     )

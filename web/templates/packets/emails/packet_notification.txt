@@ -2,7 +2,8 @@
 
 A new team packet is available: {{ packet.title }}
 
-The packet is attached to this email.
+The packet is attached to this email.{% if packet.web_access_enabled %}
+You can also download it in the portal: {{ portal_url }}{% endif %}
 
 Your Team Credentials:
 - Username: {{ username }}

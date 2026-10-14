@@ -60,15 +60,6 @@ class QuotientInfrastructure:
     boxes: list[QuotientBox]
     event_name: str
     team_count: int
-    api_version: str
-
-
-@dataclass
-class TeamScore:
-    team_name: str
-    team_number: int
-    total_score: float
-    score_history: list[dict[str, int | float]]  # [{Round: int, Total: float}, ...]
 
 
 @dataclass
@@ -103,11 +94,6 @@ class Inject:
     inject_id: int
     title: str
     description: str
-    open_time: str | None
-    due_time: str | None
-    close_time: str | None
-    files: list[str]
-    submissions: list[dict[str, str | int]]  # [{TeamID, InjectID, SubmissionTime, ...}, ...]
 
 
 class QuotientAPIError(Exception):
@@ -216,7 +202,6 @@ class QuotientClient:
                 boxes=boxes,
                 event_name="",  # Not provided by metadata endpoint
                 team_count=0,  # Not provided by metadata endpoint
-                api_version="v1",
             )
 
             cache.set(cache_key, infrastructure, self.cache_ttl)
@@ -229,46 +214,6 @@ class QuotientClient:
             return None
         except (KeyError, ValueError) as e:
             logger.exception(f"Failed to parse infrastructure response: {e}")
-            return None
-
-    def get_scores(self, force_refresh: bool = False) -> list[TeamScore] | None:
-        """Fetch team scores from Quotient API, or None if unavailable."""
-        cache_key = "quotient_scores"
-
-        if not force_refresh:
-            cached: list[TeamScore] | None = cache.get(cache_key)
-            if cached:
-                return cached
-
-        try:
-            response = self._request("get", "/api/graphs/scores")
-            response.raise_for_status()
-
-            data = response.json()
-            scores = []
-            for team_data in data.get("series", []):
-                team_name = team_data["Name"]
-                history = team_data.get("Data", [])
-                total = history[-1]["Total"] if history else 0
-
-                scores.append(
-                    TeamScore(
-                        team_name=team_name,
-                        team_number=_team_number(team_name),
-                        total_score=float(total),
-                        score_history=history,
-                    )
-                )
-
-            cache.set(cache_key, scores, self.cache_ttl)
-            logger.info(f"Fetched scores for {len(scores)} teams")
-            return scores
-
-        except (httpx.HTTPError, QuotientAPIError) as e:
-            _log_failure("Failed to fetch scores from Quotient", e)
-            return None
-        except (KeyError, ValueError) as e:
-            logger.exception(f"Failed to parse scores response: {e}")
             return None
 
     def get_injects(self, force_refresh: bool = False) -> list[Inject] | None:
@@ -293,11 +238,6 @@ class QuotientClient:
                     inject_id=i["ID"],
                     title=i["Title"],
                     description=i["Description"],
-                    open_time=i.get("OpenTime"),
-                    due_time=i.get("DueTime"),
-                    close_time=i.get("CloseTime"),
-                    files=i.get("InjectFileNames", []),
-                    submissions=i.get("Submissions", []),
                 )
                 for i in inject_list
             ]

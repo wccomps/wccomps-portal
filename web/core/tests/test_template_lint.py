@@ -71,7 +71,6 @@ class TestCottonComponentUsage:
         "info_box.html",
         "module.html",
         "progress_bar.html",
-        "stats_card.html",
         # Exempt — no unique detectable class
         "button.html",
         "detail_row.html",
@@ -102,7 +101,6 @@ class TestCottonComponentUsage:
 
     RAW_HTML_PATTERNS = [
         (r'<span[^>]*class="[^"]*\bbadge\b[^"]*"[^>]*>', "<c-badge>"),
-        (r'<div[^>]*class="[^"]*\bstats-card\b[^"]*"[^>]*>', "<c-stats_card>"),
         (r'<div[^>]*class="[^"]*\bempty-state\b[^"]*"[^>]*>', "<c-empty_state>"),
         (r'<div[^>]*class="[^"]*\bmodule(?![\w-])[^"]*"[^>]*>', "<c-module>"),
         (r'<div[^>]*class="[^"]*\bsubmit-row\b[^"]*"[^>]*>', "<c-button_row>"),

@@ -41,7 +41,6 @@ urlpatterns = [
     path("register/", include("registration.urls")),
     path("tickets/", include("ticketing.urls")),
     path("ops/review-tickets/", ticketing_views.ops_review_tickets, name="ops_review_tickets"),
-    path("ops/ticket/<str:ticket_number>/verify/", ticketing_views.ops_verify_ticket, name="ops_verify_ticket"),
     path(
         "ops/tickets/batch-verify-points/",
         ticketing_views.ops_batch_verify_tickets,

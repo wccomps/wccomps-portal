@@ -55,9 +55,17 @@ SCORING_ROLES = ["gold_team", "white_team", "admin"]
 # Expected nav links per role (the single source of truth for what's correct)
 # ---------------------------------------------------------------------------
 EXPECTED_PRIMARY_NAV: dict[str, set[str]] = {
-    "blue_team": {"Incident Report"},
+    "blue_team": {"Incident Report", "Packets"},
     "red_team": {"Red Team Findings", "Leaderboard"},
-    "gold_team": {"Incident Report", "Orange Team", "Leaderboard", "Scoring Review", "White Team", "Competition"},
+    "gold_team": {
+        "Incident Report",
+        "Packets",
+        "Orange Team",
+        "Leaderboard",
+        "Scoring Review",
+        "White Team",
+        "Competition",
+    },
     "orange_team": {"Orange Team", "Leaderboard"},
     "white_team": {"Incident Report", "Leaderboard", "Scoring Review", "White Team"},
     "ticketing_support": {"Tickets", "Leaderboard"},
@@ -65,6 +73,7 @@ EXPECTED_PRIMARY_NAV: dict[str, set[str]] = {
     "admin": {
         "Tickets",
         "Incident Report",
+        "Packets",
         "Red Team Findings",
         "Orange Team",
         "Leaderboard",

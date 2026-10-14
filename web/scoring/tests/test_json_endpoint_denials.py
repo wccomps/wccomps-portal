@@ -11,9 +11,6 @@ pytestmark = pytest.mark.django_db
     ("name", "args", "method"),
     [
         ("scoring:api_scores", [], "get"),
-        ("scoring:api_team_detail", [1], "get"),
-        ("scoring:api_attack_types", [], "get"),
-        ("scoring:api_user_ip_pools", [], "get"),
         ("orange_team:assignment_save", [1], "post"),
     ],
 )

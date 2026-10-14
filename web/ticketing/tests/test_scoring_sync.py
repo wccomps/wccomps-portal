@@ -50,21 +50,6 @@ def test_recompute_preserves_service_points() -> None:
     assert ss.point_adjustments == Decimal("-40")
 
 
-def test_verify_view_sets_adjustment(admin_user) -> None:
-    from django.test import Client
-    from django.urls import reverse
-
-    team = Team.objects.create(team_number=10, team_name="T10")
-    t = _ticket(team, 25, approved=False)
-    client = Client()
-    client.force_login(admin_user)
-    resp = client.post(reverse("ops_verify_ticket", args=[t.ticket_number]), {"points_adjustment": "25"})
-    assert resp.status_code in (302, 200)
-    t.refresh_from_db()
-    assert t.is_approved
-    assert ServiceScore.objects.get(team=team).point_adjustments == Decimal("-25")
-
-
 def test_reopen_leaves_approved_adjustment_intact(admin_user) -> None:
     from django.test import Client
     from django.urls import reverse

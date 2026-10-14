@@ -707,32 +707,6 @@ a.button:active {
 }
 
 /* ============================================
-   STATS CARD COMPONENT
-   ============================================ */
-.stats-card {
-    text-align: center;
-    padding: 20px;
-    background: var(--darkened-bg, #f8f9fa);
-    border-radius: 4px;
-    border: 1px solid var(--hairline-color, #dee2e6);
-}
-.stats-card-value {
-    font-size: 48px;
-    font-weight: 700;
-    margin-bottom: 8px;
-}
-.stats-card-value.primary { color: var(--primary, #417690); }
-.stats-card-value.success { color: var(--success-fg); }
-.stats-card-value.warning { color: var(--warning-alert-border); }
-.stats-card-value.danger { color: var(--error-fg, #dc3545); }
-.stats-card-label {
-    font-size: 14px;
-    color: var(--body-quiet-color, #6c757d);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-/* ============================================
    PAGE HEADER SUBTITLE
    ============================================ */
 .page-header-subtitle {

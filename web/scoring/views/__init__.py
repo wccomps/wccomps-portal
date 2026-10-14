@@ -1,7 +1,7 @@
 """Re-exports every view so callers can use ``from scoring import views``."""
 
-from .api import api_attack_types, api_scores, api_team_detail
-from .config import scoring_config, sync_metadata, sync_scores
+from .api import api_scores
+from .config import scoring_config, sync_scores
 from .export import (
     email_scorecard,
     email_scorecards,
@@ -39,7 +39,6 @@ from .orange import (
 )
 from .red_team import (
     _normalize_red_score_post,
-    api_user_ip_pools,
     bulk_approve_red_scores,
     delete_red_score,
     ip_pool_create,
@@ -71,7 +70,6 @@ __all__ = [
     "ip_pool_create",
     "ip_pool_edit",
     "ip_pool_delete",
-    "api_user_ip_pools",
     "orange_team_redirect",
     "review_orange",
     "submit_orange_check",
@@ -92,7 +90,6 @@ __all__ = [
     "approve_inject_feedback",
     "bulk_approve_inject_feedback",
     "scoring_config",
-    "sync_metadata",
     "sync_scores",
     "export_index",
     "export_dataset",
@@ -102,6 +99,4 @@ __all__ = [
     "email_scorecards",
     "stream_email_scorecards",
     "api_scores",
-    "api_team_detail",
-    "api_attack_types",
 ]

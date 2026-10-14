@@ -197,7 +197,6 @@ def mock_quotient_client():
         instance = MagicMock()
         instance.get_infrastructure.return_value = None
         instance.get_injects.return_value = []
-        instance.get_scores.return_value = []
         mock_client.return_value = instance
         yield instance
 

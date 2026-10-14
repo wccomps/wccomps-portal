@@ -1,12 +1,8 @@
 """Tests for clear tickets functionality."""
 
-from typing import Any
-
 import pytest
-from django.contrib.auth.models import User
-from django.test import Client
 
-from core.models import AuditLog, UserGroups
+from core.models import AuditLog
 from team.models import Team
 from ticketing.models import Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
 from ticketing.utils import clear_all_tickets
@@ -109,91 +105,3 @@ class TestClearAllTickets:
 
     def test_handles_no_tickets(self, setup_teams: tuple[Team, Team]) -> None:
         assert clear_all_tickets(actor="web:admin")["tickets_deleted"] == 0
-
-
-@pytest.mark.django_db
-class TestClearTicketsWebView:
-    """Test clear_tickets web view."""
-
-    @pytest.fixture
-    def setup_users_and_auth(self, setup_teams: tuple[Team, Team]) -> dict[str, Any]:
-        """Create test users with authentication."""
-        team1, team2 = setup_teams
-
-        # Admin user
-        admin_user = User.objects.create_user(username="admin_user", password="test123")
-        UserGroups.objects.create(user=admin_user, authentik_id="admin_uid", groups=["WCComps_Ticketing_Admin"])
-
-        # Support user (not admin)
-        support_user = User.objects.create_user(username="support_user", password="test123")
-        UserGroups.objects.create(user=support_user, authentik_id="support_uid", groups=["WCComps_Ticketing_Support"])
-
-        # Team user
-        team_user = User.objects.create_user(username="team_user", password="test123")
-        UserGroups.objects.create(user=team_user, authentik_id="team_uid", groups=["WCComps_BlueTeam01"])
-
-        return {
-            "admin_user": admin_user,
-            "support_user": support_user,
-            "team_user": team_user,
-        }
-
-    def test_clear_requires_admin_permission(
-        self, setup_tickets: tuple[Team, Team, list[Ticket]], setup_users_and_auth: dict[str, Any]
-    ) -> None:
-        """Test only admins can clear tickets."""
-        client = Client()
-
-        # Support user should be denied
-        client.force_login(setup_users_and_auth["support_user"])
-        response = client.post("/tickets/clear-all/")
-        assert response.status_code == 403
-
-        # Team user should be denied
-        client.force_login(setup_users_and_auth["team_user"])
-        response = client.post("/tickets/clear-all/")
-        assert response.status_code == 403
-
-    def test_clear_requires_post_method(
-        self, setup_tickets: tuple[Team, Team, list[Ticket]], setup_users_and_auth: dict[str, Any]
-    ) -> None:
-        """Test clear endpoint requires POST."""
-        client = Client()
-        client.force_login(setup_users_and_auth["admin_user"])
-
-        response = client.get("/tickets/clear-all/")
-        assert response.status_code == 405
-
-    def test_clear_deletes_all_tickets(
-        self, setup_tickets: tuple[Team, Team, list[Ticket]], setup_users_and_auth: dict[str, Any]
-    ) -> None:
-        """Test admin can clear all tickets via web UI."""
-        team1, team2, _ = setup_tickets
-        client = Client()
-        client.force_login(setup_users_and_auth["admin_user"])
-
-        # Verify initial state
-        assert Ticket.objects.count() == 3
-        assert team1.ticket_counter == 5
-        assert team2.ticket_counter == 3
-
-        response = client.post("/tickets/clear-all/")
-
-        # Should redirect to ticket list
-        assert response.status_code == 302
-        assert response["Location"] == "/tickets/"
-
-        # Verify all tickets deleted
-        assert Ticket.objects.count() == 0
-
-        # Verify counters reset
-        team1.refresh_from_db()
-        team2.refresh_from_db()
-        assert team1.ticket_counter == 0
-        assert team2.ticket_counter == 0
-
-        # Verify audit log
-        audit = AuditLog.objects.filter(action="clear_tickets").first()
-        assert audit is not None
-        assert audit.admin_user == "admin_user"
-        assert audit.details["tickets_deleted"] == 3

@@ -63,6 +63,11 @@
                 A new team packet is available: <strong>{{ packet.title }}</strong>
             </p>
             <p>The packet is attached to this email.</p>
+            {% if packet.web_access_enabled %}
+                <p>
+                    You can also download it in the portal: <a href="{{ portal_url }}">{{ portal_url }}</a>
+                </p>
+            {% endif %}
             <div class="credentials">
                 <strong>Your Team Credentials:</strong>
                 <ul style="margin: 10px 0;">

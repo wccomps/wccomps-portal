@@ -7,7 +7,6 @@ urlpatterns = [
     path("create/", views.create_ticket, name="create_ticket"),
     path("bulk-claim/", views.tickets_bulk_claim, name="tickets_bulk_claim"),
     path("bulk-resolve/", views.tickets_bulk_resolve, name="tickets_bulk_resolve"),
-    path("clear-all/", views.tickets_clear_all, name="tickets_clear_all"),
     path("notifications/", views.ticket_notifications, name="ticket_notifications"),
     path("<str:ticket_number>/", views.ticket_detail, name="ticket_detail"),
     path("<str:ticket_number>/dynamic/", views.ticket_detail_dynamic, name="ticket_detail_dynamic"),

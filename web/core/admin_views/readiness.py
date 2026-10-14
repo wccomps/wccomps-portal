@@ -405,10 +405,11 @@ def _fix_group_membership(request: HttpRequest) -> JsonResponse:
 
 
 def _fix_sync_quotient(request: HttpRequest) -> JsonResponse:
+    from django.contrib.auth.models import User
     from scoring.quotient_sync import sync_quotient_metadata
 
     try:
-        sync_quotient_metadata()
+        sync_quotient_metadata(cast(User, request.user))
         return JsonResponse({"success": True, "message": "Quotient metadata synced"})
     except Exception as e:
         logger.exception(f"Failed to sync Quotient metadata: {e}")
