@@ -189,6 +189,12 @@ a.button:active {
     color: var(--button-fg);
 }
 
+/* Django sizes the delete page's "No" link for content-box; the border-box above would squeeze it */
+.delete-confirmation form .cancel-link {
+    height: auto;
+    line-height: normal;
+}
+
 
 /* Team status in mappings page */
 .field-status > div:first-child {

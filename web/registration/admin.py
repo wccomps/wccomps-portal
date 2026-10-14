@@ -49,6 +49,16 @@ class SeasonAdmin(admin.ModelAdmin[Season]):
     # Season.activate is the only writer: it takes the school list lock and deactivates the others
     readonly_fields = ["is_active"]
     actions = ["activate_season"]
+    fieldsets = [
+        (
+            None,
+            {
+                "fields": ["name", "year", "is_active"],
+                "description": 'To make a season the active one, tick it on the Seasons list and run "Make the '
+                'selected season the active one" from the Action menu, or check Active Season on its portal page.',
+            },
+        )
+    ]
 
     @admin.action(description="Make the selected season the active one")
     def activate_season(self, request: HttpRequest, queryset: QuerySet[Season]) -> None:
