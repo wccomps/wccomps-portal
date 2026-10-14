@@ -177,7 +177,7 @@ class Event(models.Model):
     is_finalized = models.BooleanField(default=False)
     max_teams = models.IntegerField(default=50)
 
-    reminder_days = models.JSONField(default=list)
+    reminder_days = models.JSONField(default=list, blank=True)
     last_reminder_sent = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
