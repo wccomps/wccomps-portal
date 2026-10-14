@@ -429,11 +429,18 @@ def test_a_new_event_from_the_import_form_is_created_only_by_the_import():
 
     season = Season.objects.create(name="2026", year=2026, is_active=True)
     form = ImportEventForm(
-        {"event": "new", "new_name": "Qualifier", "new_date": "2026-11-07", "new_type": "qualifier"}, season=season
+        {
+            "event": "new",
+            "new_name": "Qualifier",
+            "new_date": "2026-11-07",
+            "new_type": "qualifier",
+            "current_season": str(season.pk),
+        },
+        season=season,
     )
 
     assert form.is_valid()
-    assert form.event_to_import == NewEvent("Qualifier", date(2026, 11, 7), "qualifier")
+    assert form.event_to_import == NewEvent("Qualifier", date(2026, 11, 7), "qualifier", season.pk)
     assert not Event.objects.exists()
 
 

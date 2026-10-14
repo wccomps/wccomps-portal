@@ -1,0 +1,29 @@
+<p>
+    <strong>What to do:</strong> on <a href="{% url 'school_info' %}">Schools</a>, press Import from CSV and upload a CSV
+    with one row per school (school_name and contact_email, optionally secondary_email and notes). Choose the event the
+    list is for: an event already set up in the active season, or New event with its name, date and type. Keep the mode
+    on Replace the school list for the event's first list, then Upload and Preview, check the preview, and Confirm and
+    Import.
+</p>
+<p>
+    <strong>What happens:</strong> the schools get teams 1 through N in random order, those teams are activated, every
+    team name goes back to its default, and the event is opened. Only one event is open at a time.
+</p>
+<p>
+    <strong>A new school year:</strong> the import page names the season a new event goes in. At the start of a school
+    year, choose New event and fill in New season name and New season year: the import creates the season, makes it
+    the active season and puts the new event in it. If no season is active, the new season is required.
+</p>
+<p>
+    <strong>Late registrations:</strong> import a file with the new schools and choose Add schools to the open event.
+    Schools already on the list keep their team numbers and are skipped; each new school gets a free team. This works
+    after packets went out and after teams started using their numbers. Then send them the packet with Send to Teams
+    Without It (step 2).
+</p>
+<p>
+    <strong>What can go wrong:</strong> the page refuses to Replace a list once packets were sent for the open event, or
+    once teams started using their numbers (scores, tickets or Discord links), because new numbers would send logins to
+    the wrong school. It says to use Add schools, or to change one school on its School Info page. It refuses a list for
+    another event while one is still open, and says whether to close that one out or cancel it. If someone changed the
+    active season while you had the page open, it asks you to reload.
+</p>

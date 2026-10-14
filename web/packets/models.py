@@ -24,6 +24,11 @@ class PacketQuerySet(models.QuerySet["Packet"]):
         return self.sent().filter(web_access_enabled=True)
 
 
+def packets_sent(event: Event | None) -> bool:
+    """Whether any packet went out for the event; sent packets reached its teams under their schools."""
+    return event is not None and Packet.objects.sent().filter(event=event).exists()
+
+
 class Packet(models.Model):
     """Pre-competition information packet to be distributed to all teams."""
 

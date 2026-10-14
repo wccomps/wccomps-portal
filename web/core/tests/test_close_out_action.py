@@ -13,6 +13,7 @@ from registration.models import Event, EventResult, Season
 from registration.services import close_out_event, set_team_school
 from scoring.models import InjectScore, ServiceScore
 
+from core.admin_views.competition import CLOSE_OUT_CHECK_FAILED
 from core.models import CompetitionConfig, DiscordTask
 from team.models import Team
 
@@ -77,7 +78,8 @@ def test_close_out_streams_each_step_and_closes_the_open_event(client):
         "done": True,
         "success": True,
         "message": "Closed out Inv: froze 1 school result(s) and the export archive, deleted 1 ServiceScore, and "
-        "queued the Discord cleanup (the bot reports it in the ops channel).",
+        "queued the Discord cleanup (the bot reports it in the ops channel). Next: Import the next school list to "
+        "open an event.",
     }
     event.refresh_from_db()
     assert not event.is_active and event.is_finalized
@@ -103,7 +105,10 @@ def test_refused_while_the_competition_runs(client):
     assert _close_out(client, open_event=event.pk, confirm="yolo")[-1] == {
         "done": True,
         "success": False,
-        "message": "Stop the competition first.",
+        "message": (
+            "The competition is running. When the competition ends, stop it with Stop Competition on the "
+            "Competition page."
+        ),
     }
     _assert_nothing_happened(event)
 
@@ -167,11 +172,16 @@ def test_unknown_event_type_is_refused(client):
 
 
 def test_no_open_event_creates_and_closes_it_for_the_current_list(client):
-    _season()
+    season = _season()
     _team_with_school()
 
     lines = _close_out(
-        client, confirm="yolo", new_name="Invitational 1", new_date="2026-10-03", new_type="invitational"
+        client,
+        confirm="yolo",
+        new_name="Invitational 1",
+        new_date="2026-10-03",
+        new_type="invitational",
+        current_season=season.pk,
     )
 
     assert lines[-1]["success"] and lines[-1]["message"].startswith("Closed out Invitational 1:")
@@ -186,7 +196,12 @@ def test_a_new_event_is_refused_when_an_event_opened_since_the_page_loaded(clien
     event = _open_event()
 
     lines = _close_out(
-        client, confirm="yolo", new_name="Invitational 1", new_date="2026-10-03", new_type="invitational"
+        client,
+        confirm="yolo",
+        new_name="Invitational 1",
+        new_date="2026-10-03",
+        new_type="invitational",
+        current_season=event.season.pk,
     )
 
     assert lines[-1] == {
@@ -220,7 +235,10 @@ def test_the_page_hides_close_out_while_the_competition_runs(client):
     page = _page(client)
 
     assert BUTTON not in page
-    assert "Stop the competition first." in page
+    assert (
+        "The competition is running. When the competition ends, stop it with Stop Competition on the Competition page."
+        in page
+    )
 
 
 def test_with_no_event_open_the_page_asks_for_the_event_and_names_the_season(client):
@@ -268,9 +286,14 @@ def test_the_check_lists_unfinished_work_with_links_and_no_problem(client):
     assert _check(client).json() == {
         "success": True,
         "problem": "",
+        "fixes": [],
         "warnings": [
             {"text": "3 inject grades are not approved.", "url": reverse("scoring:inject_grades_review")},
-            {"text": "Scorecards haven't been emailed for this event.", "url": reverse("scoring:email_scorecards")},
+            {
+                "text": "No scorecard email is recorded for this event. If you already emailed them, you can close "
+                "out.",
+                "url": reverse("scoring:email_scorecards"),
+            },
         ],
     }
 
@@ -280,7 +303,15 @@ def test_the_check_says_what_would_make_close_out_refuse(client):
     _team_with_school()
     Team.objects.filter(team_number=1).update(is_active=False)
 
-    assert _check(client).json()["problem"] == "Reactivate Team 1 or remove its school first."
+    response = _check(client).json()
+    assert response["problem"] == (
+        "Team 1 is inactive but holds a school on the list: activate it with Activate Team on its Teams page first, "
+        "or remove its school."
+    )
+    assert response["fixes"] == [
+        {"text": "Team 1: Activate Team", "url": reverse("admin_team_detail", args=[1])},
+        {"text": "Team 1: remove its school", "url": reverse("school_info_remove", args=[1])},
+    ]
 
 
 def test_a_failing_check_says_so_and_leaves_the_page_working(client):
@@ -292,7 +323,7 @@ def test_a_failing_check_says_so_and_leaves_the_page_working(client):
         page = client.get(reverse("admin_competition"))
 
     assert response.status_code == 500
-    assert response.json() == {"error": "Couldn't check unfinished work."}
+    assert response.json() == {"error": CLOSE_OUT_CHECK_FAILED}
     assert page.status_code == 200
 
 
@@ -330,21 +361,36 @@ def test_right_after_an_import_the_page_offers_no_close_out(client, gold_team_us
     assert "No team has scores yet, so there is nothing to close out for Inv (2026)." in page
 
 
-def test_with_no_season_active_close_out_records_the_scores_in_a_new_season(client):
+def test_with_no_season_active_close_out_points_at_the_seasons_page(client):
     Season.objects.create(name="2025", year=2025)
     _team_with_school()
 
     page = _page(client)
     lines = _close_out(
+        client, confirm="yolo", new_name="Invitational 1", new_date="2026-10-03", new_type="invitational"
+    )
+
+    assert BUTTON not in page
+    assert "No season is active" in page and "Seasons page" in page
+    assert not lines[-1]["success"]
+    assert "No season is active" in lines[-1]["message"]
+    assert not EventResult.objects.exists()
+
+
+def test_a_crafted_close_out_cannot_start_a_new_season(client):
+    old = _season()
+    _team_with_school()
+
+    _close_out(
         client,
         confirm="yolo",
         new_name="Invitational 1",
         new_date="2026-10-03",
         new_type="invitational",
-        new_season_name="2026-2027",
-        new_season_year="2027",
+        current_season=old.pk,
+        new_season_name="Crafted",
+        new_season_year="2030",
     )
 
-    assert 'id="close_out_season_name"' in page
-    assert lines[-1]["success"], lines
-    assert EventResult.objects.get().event.season == Season.objects.get(year=2027, is_active=True)
+    assert list(Season.objects.all()) == [old]
+    assert EventResult.objects.get().event.season == old

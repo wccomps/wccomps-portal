@@ -15,17 +15,20 @@ from registration.models import Event, Season
 from registration.services import (
     CloseOutError,
     NewEvent,
+    TeamFix,
     cancel_event,
     cancel_event_problem,
     clear_leftover_data,
     clear_leftovers_problem,
     close_out_event,
+    close_out_fixes,
     close_out_problem,
 )
 from registration.stage import Stage, event_stage
 from scoring.models import QuotientMetadataCache
 from scoring.quotient_sync import sync_quotient_metadata
 
+from core.admin_views.event_panel import RARE_ACTIONS, STEPS, action_url, event_facts, event_panel
 from core.admin_views.readiness import action_readiness_check, action_readiness_fix
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import reset_team_credentials
@@ -314,7 +317,12 @@ def _action_clear_leftover_data(
         wiped = clear_leftover_data(authentik_username)
     except CloseOutError as e:
         return JsonResponse({"error": str(e)}, status=400)
-    return JsonResponse({"success": True, "message": f"Leftover data cleared. Deleted: {_wiped_summary(wiped)}"})
+    return JsonResponse(
+        {
+            "success": True,
+            "message": f"Leftover data cleared. Deleted: {_wiped_summary(wiped)}. Next: {event_stage().next_step}",
+        }
+    )
 
 
 def _action_cancel_event(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
@@ -325,7 +333,9 @@ def _action_cancel_event(request: HttpRequest, config: CompetitionConfig, authen
         event = cancel_event(form.cleaned_data["open_event"], authentik_username)
     except CloseOutError as e:
         return JsonResponse({"error": str(e)}, status=400)
-    return JsonResponse({"success": True, "message": f"{event.name} cancelled. The school list stays."})
+    return JsonResponse(
+        {"success": True, "message": f"{event.name} cancelled. The school list stays. Next: {event_stage().next_step}"}
+    )
 
 
 def _typed_confirmation_error(request: HttpRequest) -> JsonResponse | None:
@@ -424,7 +434,7 @@ def _stream_close_out(target: Event | NewEvent, authentik_username: str) -> Iter
     yield ndjson_done(
         f"Closed out {outcome.event.name}: froze {outcome.results} school result(s) and the export archive, "
         f"deleted {_wiped_summary(outcome.wiped)}, and queued the Discord cleanup (the bot reports it in the ops "
-        "channel)."
+        f"channel). Next: {event_stage().next_step}"
     )
 
 
@@ -436,10 +446,31 @@ def _action_close_out_check(request: HttpRequest, config: CompetitionConfig, aut
         stage = event_stage()
         warnings = [{"text": w.text, "url": reverse(w.url_name)} for w in close_out_warnings(stage.event)]
         problem = close_out_problem(stage)
+        fixes = [link for fix in close_out_fixes(stage) for link in _fix_links(fix)] if problem else []
     except Exception:
         logger.exception("Close-out check failed")
-        return JsonResponse({"error": "Couldn't check unfinished work."}, status=500)
-    return JsonResponse({"success": True, "problem": problem, "warnings": warnings})
+        return JsonResponse({"error": CLOSE_OUT_CHECK_FAILED}, status=500)
+    return JsonResponse({"success": True, "problem": problem, "fixes": fixes, "warnings": warnings})
+
+
+# The panel and the Close Out section show it when the on-demand check fails
+CLOSE_OUT_CHECK_FAILED = (
+    "Couldn't check unfinished work. Closing out still works: check grading, tickets and the scorecard emails by hand."
+)
+
+
+def _fix_links(fix: TeamFix) -> list[dict[str, str]]:
+    """Links to where the team's Close Out problem is fixed."""
+    places = [
+        (fix.activate, "Activate Team", "admin_team_detail"),
+        (fix.enter_school, "enter its school", "school_info_edit"),
+        (fix.remove_school, "remove its school", "school_info_remove"),
+    ]
+    return [
+        {"text": f"Team {fix.team_number}: {text}", "url": reverse(url_name, args=[fix.team_number])}
+        for offered, text, url_name in places
+        if offered
+    ]
 
 
 def _action_close_out_event(
@@ -491,13 +522,17 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
     quotient_metadata = QuotientMetadataCache.objects.first()
 
     close_out_refusal = close_out_problem(stage, check_schools=False)
+    active_season = Season.objects.active()
     context = {
-        "stage": stage,
+        "panel": event_panel(event_facts(stage)),
+        "close_out_check_failed": CLOSE_OUT_CHECK_FAILED,
+        # Close Out records scores with no event in the active season; the Seasons page makes one active
+        "needs_active_season": stage.event is None and active_season is None,
+        "active_season": active_season,
         "open_event": stage.event,
         "can_close_out": not close_out_refusal,
         # Shown where the module offers no button for a reason the operator can act on
         "close_out_refusal": close_out_refusal if stage.stage in (Stage.READY, Stage.PLAYED, Stage.UNRECORDED) else "",
-        "active_season": Season.objects.active(),
         "event_type_choices": Event.EVENT_TYPE_CHOICES,
         "config": config,
         "active_teams": active_teams,
@@ -562,4 +597,19 @@ def admin_competition_danger(request: HttpRequest) -> HttpResponse:
             "show_ops_nav": True,
             "nav_active": "ops_admin",
         },
+    )
+
+
+@require_permission("admin", "gold_team")
+def admin_competition_guide(request: HttpRequest) -> HttpResponse:
+    """Running an event, step by step, in plain words: the panel's steps, each with its own section of prose."""
+    rare = [
+        {"title": title, "key": action.value, "url": action_url(action), "partial": f"admin/guide/{action}.html"}
+        for action, title in RARE_ACTIONS
+    ]
+    steps = [{"step": step, "partial": f"admin/guide/{step.key}.html"} for step in STEPS]
+    return render(
+        request,
+        "admin/competition_guide.html",
+        {"steps": steps, "rare": rare, "show_ops_nav": True, "nav_active": "ops_admin"},
     )

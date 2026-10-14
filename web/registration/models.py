@@ -151,8 +151,8 @@ class EventManager(models.Manager["Event"]):
         return self.get_queryset().annotate_enrollment_count()
 
     def open(self) -> Event | None:
-        """The active event (the database allows one)."""
-        return self.filter(is_active=True).first()
+        """The active event (the database allows one), with its season."""
+        return self.filter(is_active=True).select_related("season").first()
 
 
 class Event(models.Model):

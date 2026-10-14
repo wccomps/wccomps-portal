@@ -155,38 +155,31 @@ def _check_no_tickets() -> CheckResult:
 
 
 def _check_packets_distributed() -> CheckResult:
-    """Check that this event's completed packets reached every active team: the open event's, or before one is open,
-    those not yet stamped with an event. Earlier events' packets went to their own teams."""
-    from packets.models import Packet, PacketDistribution
+    """Check that packets went out for the open event and that every team on the school list has a delivered copy
+    of each. Earlier events' packets went to their own teams."""
+    from packets.models import Packet
+    from packets.services import teams_without_delivered_copy
     from registration.models import Event
 
-    active_teams = Team.objects.filter(is_active=True)
-    if not active_teams.exists():
-        return ("warn", "No active teams", None)
+    event = Event.objects.open()
+    if event is None:
+        return ("warn", "No event is open, so no packet can be sent", None)
+    packets_link = {"type": "link", "url": reverse("packets_list"), "label": "View Packets"}
+    sent = Packet.objects.sent().filter(event=event)
+    if not sent.exists():
+        return ("warn", f"No packet has been sent for {event}", packets_link)
 
-    completed_packets = Packet.objects.filter(status="completed", event=Event.objects.open())
-    if not completed_packets.exists():
-        return ("pass", "No completed packets to check", None)
-
-    issues: list[str] = []
-    for packet in completed_packets:
-        distributed_team_ids = set(
-            PacketDistribution.objects.filter(
-                packet=packet,
-                email_status__in=["sent", "delivered"],
-            ).values_list("team_id", flat=True)
-        )
-        missing = active_teams.exclude(id__in=distributed_team_ids).count()
-        if missing > 0:
-            issues.append(f"{packet.title}: {missing} teams missing")
-
+    missing = [
+        (packet.title, teams_without_delivered_copy(Packet.objects.filter(pk=packet.pk)).count()) for packet in sent
+    ]
+    issues = [
+        f"{title}: {count} team{'s' if count != 1 else ''} without a delivered copy"
+        for title, count in missing
+        if count
+    ]
     if issues:
-        return (
-            "warn",
-            "; ".join(issues),
-            {"type": "link", "url": reverse("packets_list"), "label": "View Packets"},
-        )
-    return ("pass", "All packets distributed to all teams", None)
+        return ("warn", "; ".join(issues), packets_link)
+    return ("pass", "Every team on the list has a delivered copy of each sent packet", None)
 
 
 def _check_start_message() -> CheckResult:

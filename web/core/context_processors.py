@@ -68,6 +68,7 @@ NAV_MAPPING: dict[str, tuple[str, str]] = {
     "admin_competition": ("ops_admin", "competition"),
     "admin_competition_action": ("ops_admin", "competition"),
     "admin_competition_danger": ("ops_admin", "competition"),
+    "admin_competition_guide": ("ops_admin", "guide"),
     "admin_teams": ("ops_admin", "teams"),
     "admin_teams_bulk_action": ("ops_admin", "teams"),
     "admin_team_detail": ("ops_admin", "teams"),

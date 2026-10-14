@@ -10,7 +10,7 @@ from django.urls import reverse
 from registration.models import Event
 
 from packets.models import Packet, PacketDistribution
-from packets.services import PacketDistributionService
+from packets.services import NO_EVENT_OPEN, NO_OPEN_EVENT, PacketDistributionService
 
 pytestmark = pytest.mark.django_db
 
@@ -87,7 +87,7 @@ def test_sending_with_no_open_event_is_refused():
     lines = list(PacketDistributionService().stream_distribute_packet(packet))
 
     result = json.loads(lines[-1])
-    assert result == {"done": True, "success": False, "message": "Import the school list for this event first"}
+    assert result == {"done": True, "success": False, "message": NO_OPEN_EVENT}
     packet.refresh_from_db()
     assert packet.status == "draft"
 
@@ -106,7 +106,7 @@ def test_distribute_packet_stamps_the_open_event(current_event):
 def test_distribute_packet_with_no_open_event_is_refused():
     packet = _packet(None, status="draft")
 
-    with pytest.raises(ValueError, match="Import the school list"):
+    with pytest.raises(ValueError, match="No event is open. Import the next school list"):
         PacketDistributionService().distribute_packet(packet)
 
     packet.refresh_from_db()
@@ -125,7 +125,7 @@ def test_admin_distribute_now_shows_the_refusal():
         model_admin.distribute_now(MagicMock(), Packet.objects.filter(pk=packet.pk))
 
     texts = [call.args[1] for call in message_user.call_args_list]
-    assert any("Import the school list for this event first" in t for t in texts)
+    assert any(NO_OPEN_EVENT in t for t in texts)
     assert message_user.call_args_list[0].kwargs["level"] == messages.ERROR
     packet.refresh_from_db()
     assert packet.status == "draft"
@@ -226,7 +226,7 @@ def test_resending_with_no_open_event_says_no_event_is_open(current_event):
     current_event.is_active = False
     current_event.save()
 
-    assert check_resendable(packet) == "No event is open."
+    assert check_resendable(packet) == NO_EVENT_OPEN
 
 
 def test_resending_a_packet_sent_before_events_were_recorded_is_refused(current_event):

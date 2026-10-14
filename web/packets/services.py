@@ -5,9 +5,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db import close_old_connections, transaction
+from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.template.loader import render_to_string
 from registration.locks import school_list_lock
 from registration.models import Event
+from registration.stage import ACTIONS, Action
 
 from core.authentik_utils import reset_team_password
 from core.utils import ndjson_done
@@ -19,26 +21,45 @@ from .models import Packet, PacketDistribution
 logger = logging.getLogger(__name__)
 
 NOT_A_DRAFT = "Only a draft packet can be distributed"
-NO_OPEN_EVENT = "Import the school list for this event first"
-EARLIER_EVENT_PACKET = "This packet belongs to an earlier event; team numbers have been reassigned since"
-NO_EVENT_OPEN = "No event is open."
-UNRECORDED_EVENT_PACKET = "This packet was sent before events were recorded; team numbers may have changed since"
-NOT_SENT_YET = "Only a sent packet can be sent to new teams."
+NO_OPEN_EVENT = f"No event is open. {ACTIONS[Action.IMPORT].instruction} Then send the packet."
+EARLIER_EVENT_PACKET = (
+    "This packet belongs to an earlier event and team numbers have been reassigned since: upload it again as a new "
+    "packet for the open event."
+)
+NO_EVENT_OPEN = (
+    "No event is open, so team numbers may have changed since this packet was sent. Upload the packet again once the "
+    "next school list is imported."
+)
+UNRECORDED_EVENT_PACKET = (
+    "This packet was sent before events were recorded and team numbers may have changed since: upload it again as a "
+    "new packet for the open event."
+)
+NOT_SENT_YET = "Only a sent packet can be sent to new teams: send it with Distribute first."
 EVERY_TEAM_HAS_IT = (
     "No team on the list is without a copy of this packet; teams whose send failed or is pending are not included "
     "(use Resend Failed / Retry Pending)."
 )
 
 
+def packet_recipients() -> QuerySet[Team]:
+    """The teams a packet send reaches: the active teams on the school list."""
+    return Team.objects.filter(is_active=True).exclude(school_info=None)
+
+
+def teams_without_delivered_copy(packets: QuerySet[Packet]) -> QuerySet[Team]:
+    """The recipients missing a delivered copy of any of the packets: no distribution, or an emailed one whose email
+    failed or is still pending (a packet not sent by email is delivered once its distribution exists)."""
+    delivered = PacketDistribution.objects.filter(packet=OuterRef("pk"), team=OuterRef(OuterRef("pk"))).filter(
+        Q(packet__send_via_email=False) | Q(email_status__in=PacketDistribution.DONE_STATUSES)
+    )
+    return packet_recipients().filter(Exists(packets.exclude(Exists(delivered))))
+
+
 def _create_distributions_for_teams(packet: Packet) -> list[PacketDistribution]:
-    """Create the packet's distributions for the active teams on the school list that have none, and return them.
+    """Create the packet's distributions for the recipients that have none, and return them.
 
     Callers hold the school list lock, so the list can't change between choosing the teams and creating the rows."""
-    teams = (
-        Team.objects.filter(is_active=True)
-        .exclude(school_info=None)
-        .exclude(id__in=PacketDistribution.objects.filter(packet=packet).values("team_id"))
-    )
+    teams = packet_recipients().exclude(id__in=PacketDistribution.objects.filter(packet=packet).values("team_id"))
     distributions = PacketDistribution.objects.bulk_create(
         PacketDistribution(packet=packet, team=team, web_access_enabled=packet.web_access_enabled) for team in teams
     )

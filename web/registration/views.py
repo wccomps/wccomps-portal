@@ -5,6 +5,7 @@ from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from packets.models import packets_sent
 
 from core.auth_utils import require_permission
 from core.utils import client_ip
@@ -30,7 +31,6 @@ from .services import (
     delete_event,
     delete_season,
     event_delete_problem,
-    packets_sent,
     remove_team_school,
     season_delete_problem,
     set_team_school,

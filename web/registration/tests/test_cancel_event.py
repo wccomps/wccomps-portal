@@ -15,17 +15,18 @@ from core.models import AuditLog, CompetitionConfig
 from registration.models import Event, Season
 from registration.services import (
     CloseOutError,
-    NewEvent,
     SchoolListRow,
     cancel_event,
     clear_leftover_data,
+    close_out_problem,
     delete_event,
     event_delete_problem,
     import_problem,
     import_school_list,
     set_team_school,
 )
-from registration.stage import STAGE_TEXT, Stage, event_stage
+from registration.stage import Stage, event_stage
+from registration.tests.shown import new_event
 from team.models import DiscordLink, SchoolInfo, Team
 
 pytestmark = pytest.mark.django_db
@@ -77,7 +78,7 @@ def test_cancel_closes_the_event_and_drops_its_assignments_keeping_the_list_and_
 
 def test_after_cancelling_the_next_import_goes_through_clear_leftover_data_and_the_event_can_be_deleted(event):
     cancel_event(event, "gold")
-    new = NewEvent("Qual", date(2026, 11, 7), "qualifier")
+    new = new_event("Qual", date(2026, 11, 7), "qualifier")
     assert "Clear leftover data" in import_problem(new)
 
     clear_leftover_data("gold")
@@ -95,11 +96,11 @@ def test_after_cancelling_the_next_import_goes_through_clear_leftover_data_and_t
     [
         (
             lambda event: ServiceScore.objects.create(team=Team.objects.get(team_number=1), service_points=Decimal(5)),
-            "has scores: close it out instead",
+            "has scores, so it can't be cancelled",
         ),
         (
             lambda event: CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True}),
-            "^Stop the competition first.$",
+            "^The competition is running. When the competition ends, stop it with Stop Competition",
         ),
         (lambda event: Event.objects.filter(pk=event.pk).update(is_active=False), "is no longer open"),
     ],
@@ -119,8 +120,8 @@ def test_a_refused_cancel_changes_nothing(event, setup, message):
 
 
 def test_the_open_event_with_no_scores_names_cancel_as_its_way_out(event):
-    assert "Cancel event" in STAGE_TEXT[Stage.READY][1]
-    assert "Cancel event" in import_problem(NewEvent("Qual", date(2026, 11, 7), "qualifier"))
+    assert "Cancel event" in close_out_problem(event_stage())
+    assert "Cancel event" in import_problem(new_event("Qual", date(2026, 11, 7), "qualifier"))
 
 
 def test_an_event_with_sent_packets_is_kept_after_cancelling(event):

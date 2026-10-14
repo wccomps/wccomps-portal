@@ -151,6 +151,7 @@ def test_add_needs_the_open_event(client, event, teams):
             "new_name": "Qualifier",
             "new_date": "2026-11-07",
             "new_type": "qualifier",
+            "current_season": str(event.season.pk),
             "mode": "add",
         },
     )
