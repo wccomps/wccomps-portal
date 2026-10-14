@@ -376,7 +376,7 @@ class AdminCompetitionCog(commands.Cog):
             "- Delete all team Discord channels and categories\n"
             "- Remove team roles from all members\n"
             "- Deactivate all team member Discord links\n"
-            "- Remove student helper and Room Judge roles\n"
+            "- Remove the Room Judge role\n"
             "- Clear queued announcements\n\n"
             "Are you sure you want to continue?",
             view=view,

@@ -117,22 +117,6 @@ class DiscordLink(models.Model):
     linked_at = models.DateTimeField(auto_now_add=True)
     unlinked_at = models.DateTimeField(null=True, blank=True)
 
-    is_student_helper = models.BooleanField(
-        default=False,
-        db_index=True,
-        help_text="Whether this person is currently a student helper",
-    )
-    helper_role_name = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text='Discord role name (e.g., "UCI Invitationals 2026")',
-    )
-    helper_role_id = models.BigIntegerField(
-        null=True,
-        blank=True,
-        help_text="Discord role ID (snowflake)",
-    )
-
     class Meta:
         indexes = [
             models.Index(fields=["discord_id", "is_active"]),

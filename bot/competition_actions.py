@@ -213,74 +213,18 @@ async def run_competition_cleanup(
 
         await Team.objects.all().aupdate(discord_category_id=None, discord_role_id=None)
 
-        active_helpers = [
-            dl async for dl in DiscordLink.objects.filter(is_student_helper=True, is_active=True).select_related("user")
-        ]
-
-        helpers_removed = 0
-        for discord_link in active_helpers:
-            try:
-                if discord_link.helper_role_id:
-                    role = guild.get_role(discord_link.helper_role_id)
-                    if role:
-                        for member in guild.members:
-                            if role in member.roles:
-                                try:
-                                    await member.remove_roles(role, reason="Competition cleanup")
-                                except Exception as e:
-                                    logger.warning(f"Could not remove helper role from {member}: {e}")
-
-                discord_link.is_student_helper = False
-                await discord_link.asave()
-                helpers_removed += 1
-
-                await AuditLog.objects.acreate(
-                    action="helper_removed",
-                    admin_user=actor,
-                    target_entity="discordlink",
-                    target_id=discord_link.id,
-                    details={
-                        "discord_id": discord_link.discord_id,
-                        "discord_username": discord_link.discord_username,
-                        "role_name": discord_link.helper_role_name,
-                        "reason": "competition_cleanup",
-                    },
-                )
-            except Exception as e:
-                logger.exception(f"Error removing helper {discord_link.user.username}: {e}")
-
-        if helpers_removed > 0:
-            await log_to_ops_channel(bot, f"Removed {helpers_removed} student helper role(s)")
-
-        helper_role_ids: set[int] = set()
-        async for role_id in DiscordLink.objects.filter(helper_role_id__isnull=False).values_list(
-            "helper_role_id", flat=True
-        ):
-            if role_id is not None:
-                helper_role_ids.add(role_id)
-
-        helper_role_removals = 0
-        for role_id in helper_role_ids:
-            role = guild.get_role(role_id)
-            if role:
-                for member in role.members:
-                    try:
-                        await member.remove_roles(role, reason="Competition cleanup")
-                        helper_role_removals += 1
-                    except Exception as e:
-                        logger.warning(f"Could not remove {role.name} from {member}: {e}")
-
+        judges_removed = 0
         room_judge_role = discord.utils.get(guild.roles, name="WCComps Room Judge")
         if room_judge_role:
             for member in room_judge_role.members:
                 try:
                     await member.remove_roles(room_judge_role, reason="Competition cleanup")
-                    helper_role_removals += 1
+                    judges_removed += 1
                 except Exception as e:
                     logger.warning(f"Could not remove Room Judge from {member}: {e}")
 
-        if helper_role_removals > 0:
-            await log_to_ops_channel(bot, f"Removed helper/judge roles from {helper_role_removals} members")
+        if judges_removed > 0:
+            await log_to_ops_channel(bot, f"Removed the Room Judge role from {judges_removed} members")
 
         if not close_out:
             # The start message holds this event's credentials; the next event gets its own.
@@ -302,7 +246,6 @@ async def run_competition_cleanup(
                 "deactivated_links": deactivated,
                 "deleted_categories": deleted_count,
                 "removed_roles": stats["roles_removed"],
-                "helpers_removed": helpers_removed,
                 "closed_out_event": closed_out_event_id,
             },
         )
