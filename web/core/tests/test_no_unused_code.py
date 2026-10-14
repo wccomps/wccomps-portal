@@ -317,14 +317,31 @@ def template_reference_re(template: str) -> re.Pattern[str]:
     return re.compile(rf"{quoted}|<c-{tag}[\s/>]")
 
 
+def guide_partials() -> list[str]:
+    """Every section the guide renders by name: the steps, then the rare actions."""
+    from core.admin_views.competition import RARE_ACTIONS, STEPS, guide_partial
+
+    return [guide_partial(step.key) for step in STEPS] + [guide_partial(action) for action, _ in RARE_ACTIONS]
+
+
+def test_every_guide_section_exists() -> None:
+    """Every section the guide renders by name has its template."""
+    missing = [name for name in guide_partials() if not Path("web/templates", name).is_file()]
+    assert not missing, f"Guide sections with no template: {missing}"
+
+
 def test_every_template_is_used() -> None:
     """Every template under web/templates is rendered, included, extended or used as a cotton component."""
+    # Named at run time from the guide's steps, so no source line spells them out
+    built = set(guide_partials())
     found: set[str] = set()
     unused: list[str] = []
     for path in source_files():
         if not path.startswith("web/templates/"):
             continue
         template = path.removeprefix("web/templates/")
+        if template in built:
+            continue
         reference = template_reference_re(template)
         if any(reference.search(source_text(p)) for p in source_files() if p != path):
             continue
