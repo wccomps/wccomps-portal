@@ -96,3 +96,17 @@ def test_with_no_event_only_sends_since_the_last_clear_count():
         action="scorecards_emailed", admin_user="gold", target_entity="event", target_id=0, details={"event": None}
     )
     assert event_stage().scorecards_emailed
+
+
+@pytest.mark.django_db
+def test_with_no_event_and_nothing_ever_cleared_a_recorded_send_counts():
+    team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    ServiceScore.objects.create(team=team, service_points=Decimal(1))
+    assert not event_stage().scorecards_emailed
+
+    AuditLog.objects.create(
+        action="scorecards_emailed", admin_user="gold", target_entity="event", target_id=0, details={"event": None}
+    )
+
+    assert event_stage().scorecards_emailed
+    assert event_stage().next_action == Action.CLOSE_OUT

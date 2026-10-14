@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from django.db.models import Exists, OuterRef, QuerySet, Subquery
+from django.db.models import Exists, OuterRef, QuerySet
 from packets.models import packets_sent
 from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeamScore, ServiceDetail, ServiceScore
 
@@ -166,12 +166,11 @@ def _scorecards_emailed(event: Event | None) -> bool:
     sends = AuditLog.objects.filter(action=SCORECARDS_EMAILED)
     if event is not None:
         return sends.filter(details__event=event.pk).exists()
-    cleared = (
-        AuditLog.objects.filter(action__in=("event_closed_out", "leftover_data_cleared"))
-        .order_by("-created_at")
-        .values("created_at")[:1]
-    )
-    return sends.filter(details__event=None).exclude(created_at__lte=Subquery(cleared)).exists()
+    sends = sends.filter(details__event=None)
+    cleared = AuditLog.objects.filter(action__in=("event_closed_out", "leftover_data_cleared")).order_by("-created_at")
+    if (last := cleared.first()) is not None:
+        sends = sends.filter(created_at__gt=last.created_at)
+    return sends.exists()
 
 
 def event_stage() -> EventStage:
