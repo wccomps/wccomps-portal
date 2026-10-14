@@ -20,7 +20,7 @@ loglevel = "info"
 access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(m)s %(U)s %(H)s" %(s)s %(b)s "%(a)s"'
 
 
-def when_ready(server: object) -> None:
+def when_ready(_server: object) -> None:
     """Import the URLconf (and so every view module) in the master too, so forked workers start warm."""
     from importlib import import_module
 
