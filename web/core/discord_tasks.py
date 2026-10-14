@@ -101,11 +101,16 @@ class AddUserToThread:
 
 @dataclass(frozen=True, kw_only=True)
 class CleanupCompetition:
-    """Tear down the competition (see bot.competition_actions.run_competition_cleanup)."""
+    """Tear down the competition (see bot.competition_actions.run_competition_cleanup).
+
+    closed_out_event_id: set by Close Out Event, the event it closed. Its transaction already reset the database,
+    so the bot does only the Discord side, and skips if an event was opened or the competition started since.
+    Without it (rows queued before the field existed) the bot runs the full cleanup."""
 
     task_type: ClassVar = "cleanup_competition"
     label: ClassVar = "Clean Up Competition"
     requested_by: str
+    closed_out_event_id: int | None = None
 
 
 type TaskPayload = (

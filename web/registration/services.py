@@ -7,12 +7,13 @@ from django.db.models import Exists, OuterRef, QuerySet
 from packets.models import Packet
 from scoring.calculator import Standing, compute_standings
 from scoring.export import export_all_zip_bytes
+from scoring.models import QuotientMetadataCache
 from scoring.scorecard import build_scorecard_context
 from scoring.snapshot import SNAPSHOT_VERSION, serialize_scorecard
 
 from core.competition_utils import WipedData, wipe_competition_data
 from core.discord_tasks import CleanupCompetition
-from core.models import AuditLog, CompetitionConfig, DiscordTask
+from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnouncement
 from team.models import DiscordLink, SchoolInfo, Team, default_team_name
 from ticketing.models import Ticket
 
@@ -444,8 +445,9 @@ class CloseOutOutcome:
 
 @transaction.atomic
 def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
-    """Freeze the event's results and export archive, then delete the live data, close the event, reset the schedule
-    and queue the Discord cleanup, all committed together. target is what the page showed: the open event, or with
+    """Freeze the event's results and export archive, then delete the live data, close the event, reset the schedule,
+    start message, Quotient box list and queued announcements, and queue the Discord-only cleanup, all committed
+    together. target is what the page showed: the open event, or with
     none open the new event to record the scores at. The school list stays until the next import replaces it.
 
     Under the school list lock and the competition config lock; CloseOutError, writing nothing, says why it refused.
@@ -460,11 +462,16 @@ def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
     results = _freeze_results(event)
     wiped = wipe_competition_data()
     event.close()
+    # The start message holds this event's credentials; the next event gets its own schedule and message
     config.competition_start_time = None
     config.competition_end_time = None
-    config.save(update_fields=["competition_start_time", "competition_end_time", "updated_at"])
-    # Committed with the close-out, so the bot never tears Discord down for a close-out that rolled back
-    DiscordTask.enqueue(CleanupCompetition(requested_by=actor))
+    config.start_message = ""
+    config.save(update_fields=["competition_start_time", "competition_end_time", "start_message", "updated_at"])
+    QuotientMetadataCache.objects.all().delete()
+    announcements, _ = QueuedAnnouncement.objects.all().delete()
+    # Committed with the close-out, so the bot never tears Discord down for a close-out that rolled back. The
+    # database is reset here, so the bot does only the Discord side.
+    DiscordTask.enqueue(CleanupCompetition(requested_by=actor, closed_out_event_id=event.pk))
     AuditLog.objects.create(
         action="event_closed_out",
         admin_user=actor,
@@ -476,6 +483,7 @@ def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
             "deleted_counts": {k: v for k, v in wiped.deleted.items() if v},
             "total_deleted": sum(wiped.deleted.values()),
             "ticket_counters_reset": wiped.ticket_counters_reset,
+            "queued_announcements_deleted": announcements,
         },
     )
     return CloseOutOutcome(event, results, wiped)

@@ -203,7 +203,7 @@
             <form @submit.prevent="setStartMessage">
                 <c-form_field label="Message"
                               id="start_message"
-                              help_text="Posted to every active team's private chat channel when the competition starts, by schedule or by hand. Use it for the default VM credentials. Leave it empty to send nothing. Cleanup clears it.">
+                              help_text="Posted to every active team's private chat channel when the competition starts, by schedule or by hand. Use it for the default VM credentials. Leave it empty to send nothing. Close Out Event clears it.">
                     <textarea name="start_message"
                               id="start_message"
                               :value="startMessage"
@@ -315,10 +315,10 @@
                 </template>
                 <p class="help-text">
                     Run it once grading is done and the scorecards are emailed. In one step it freezes every listed
-                    school's scorecard and the export archive as the event's results, deletes the live scores, tickets
-                    and blue team Discord links, closes the event, clears the schedule and queues the Discord cleanup
-                    (team channels, roles and helpers). The school list stays until the next import. It refuses while
-                    a listed team is inactive or a team with scores has no school.
+                    school's scorecard and a zip of every export (scores, tickets, findings) as the event's results,
+                    then deletes the live scores, tickets and blue team Discord links, closes the event, and clears the
+                    schedule, the start message, the Quotient box list and queued announcements. It then queues the
+                    Discord cleanup (team channels, roles and helpers). The school list stays until the next import.
                 </p>
                 <c-button_row>
                     <c-button variant="danger" @click="closeOutEvent" ::disabled="closeOutBlocked">

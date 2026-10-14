@@ -14,9 +14,9 @@ from django.db import connection
 from django.utils import timezone
 from packets.models import Packet
 from scoring.export import DATASETS
-from scoring.models import InjectScore, RedTeamScore, ServiceScore
+from scoring.models import InjectScore, QuotientMetadataCache, RedTeamScore, ServiceScore
 
-from core.models import AuditLog, CompetitionConfig, DiscordTask
+from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnouncement
 from registration.models import Event, EventArchive, EventResult, School, Season
 from registration.services import (
     CloseOutError,
@@ -67,8 +67,11 @@ def _assert_nothing_written(event=None, scores=2):
 def test_close_out_freezes_wipes_closes_and_queues_the_cleanup(event):
     now = timezone.now()
     CompetitionConfig.objects.update_or_create(
-        pk=1, defaults={"competition_start_time": now, "competition_end_time": now}
+        pk=1, defaults={"competition_start_time": now, "competition_end_time": now, "start_message": "VM: admin/pw"}
     )
+    QuotientMetadataCache.objects.create()
+    QueuedAnnouncement.objects.create(team=Team.objects.get(team_number=1), message="Hi", sender_name="gold")
+    _link_team(Team.objects.get(team_number=1))
 
     outcome = close_out_event(event, "gold")
 
@@ -85,13 +88,17 @@ def test_close_out_freezes_wipes_closes_and_queues_the_cleanup(event):
     assert SchoolInfo.objects.count() == 2
     assert event.team_assignments.count() == 2
     [cleanup] = _cleanups()
-    assert cleanup.payload == {"requested_by": "gold"}
+    # The bot does only the Discord side for a close-out: every database reset is in this transaction
+    assert cleanup.payload == {"requested_by": "gold", "closed_out_event_id": event.pk}
     config = CompetitionConfig.get_config()
-    assert (config.competition_start_time, config.competition_end_time) == (None, None)
+    assert (config.competition_start_time, config.competition_end_time, config.start_message) == (None, None, "")
+    assert not QuotientMetadataCache.objects.exists()
+    assert not QueuedAnnouncement.objects.exists()
     log = AuditLog.objects.get(action="event_closed_out")
     assert log.target_id == event.pk
     assert log.details["results"] == 2
-    assert log.details["deleted_counts"] == {"ServiceScore": 2}
+    assert log.details["deleted_counts"] == {"ServiceScore": 2, "BlueTeamDiscordLink": 1}
+    assert log.details["queued_announcements_deleted"] == 1
     assert not AuditLog.objects.filter(action__in=["event_finalized", "event_cleared"]).exists()
 
 
