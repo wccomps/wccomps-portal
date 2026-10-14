@@ -178,7 +178,7 @@ class NewEventFields(forms.Form):
     """The fields of an event to create (the import's new event, Close Out's event for scores that ran without an
     import) and, when no season is active, its new season. new_event() checks them together, as non-field errors."""
 
-    NEW_FIELDS = ("new_name", "new_date", "new_type", "new_season_name", "new_season_year")
+    NEW_FIELDS = ("new_name", "new_date", "new_type", "new_season_name", "new_season_year", "current_season")
     MISSING = "Give the new event a name, a date and a type."
 
     new_name = forms.CharField(
@@ -194,6 +194,11 @@ class NewEventFields(forms.Form):
     new_season_year = forms.IntegerField(
         min_value=2000, max_value=2100, required=False, error_messages={"invalid": "Give the season a valid year."}
     )
+    # The season that was active when the page showed the new season fields: a new season takes over from it
+    current_season = forms.IntegerField(required=False)
+
+    def wants_new_season(self) -> bool:
+        return bool(self.cleaned_data.get("new_season_name") or self.cleaned_data.get("new_season_year"))
 
     def new_event(self) -> NewEvent:
         """The event to create, from the cleaned fields. Call from clean(); ValidationError says what is wrong."""
@@ -204,10 +209,12 @@ class NewEventFields(forms.Form):
         if not (data.get("new_name") and data.get("new_date") and data.get("new_type")):
             raise forms.ValidationError(self.MISSING)
         season = None
-        if data.get("new_season_name") or data.get("new_season_year"):
+        if self.wants_new_season():
             if not (data.get("new_season_name") and data.get("new_season_year")):
                 raise forms.ValidationError("Give the new season a name and a year.")
-            season = NewSeason(name=data["new_season_name"], year=data["new_season_year"])
+            season = NewSeason(
+                name=data["new_season_name"], year=data["new_season_year"], replaces=data.get("current_season")
+            )
         new_event = NewEvent(name=data["new_name"], date=data["new_date"], event_type=data["new_type"], season=season)
         if problem := new_event_problem(new_event):
             raise forms.ValidationError(problem)

@@ -116,8 +116,8 @@ class CSVUploadForm(forms.Form):
 
 
 class ImportEventForm(NewEventFields):
-    """The event a school list is for: an unfinalized event of the active season, or a new one (with a new season
-    when none is active); and the import mode's key (IMPORT_MODES), Replace when not given."""
+    """The event a school list is for: an unfinalized event of the active season, or a new one, in a new season when
+    none is active or when the import starts one; and the import mode's key (IMPORT_MODES), Replace when not given."""
 
     event = forms.CharField(required=False)
     mode = forms.CharField(required=False)
@@ -135,6 +135,8 @@ class ImportEventForm(NewEventFields):
         choice = str(data.get("event") or "")
         if choice == "new":
             self.event_to_import = self.new_event()
+        elif self.wants_new_season():
+            raise ValidationError("A new season needs a new event: choose New event, or leave the new season empty.")
         elif self.season is None:
             raise ValidationError("No season is active: import into a new event, with a new season.")
         elif not choice.isdecimal():

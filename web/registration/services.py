@@ -173,10 +173,12 @@ class ImportBlockedError(Exception):
 
 @dataclass(frozen=True)
 class NewSeason:
-    """A season to create, as the only active one, with the event it holds."""
+    """A season to create, as the only active one, with the event it holds. replaces: the id of the season that was
+    active when the page showed the choice (None when none was), which it takes over from at a new school year."""
 
     name: str
     year: int
+    replaces: int | None = None
 
     def __str__(self) -> str:
         return self.name
@@ -185,7 +187,8 @@ class NewSeason:
 @dataclass(frozen=True)
 class NewEvent:
     """An event to create for a school list: the import's new event, or the event Close Out records for scores
-    that ran without an import. season: a new season for it, given only when none is active."""
+    that ran without an import. season: a new season for it, needed when none is active; the import can also start
+    one while a season is active, at a new school year."""
 
     name: str
     date: date
@@ -205,8 +208,10 @@ def new_event_problem(new_event: NewEvent) -> str:
         if Event.objects.filter(season=active, name=new_event.name).exists():
             return f"The {active} season already has an event named {new_event.name}. Choose another name."
         return ""
-    if active is not None:
-        return f"The {active} season was activated since this page loaded. Reload the page."
+    if (active.pk if active else None) != new_event.season.replaces:
+        if new_event.season.replaces is None:
+            return f"The {active} season was activated since this page loaded. Reload the page."
+        return "The active season changed since this page loaded. Reload the page."
     if taken := Season.objects.filter(year=new_event.season.year).first():
         return (
             f"The {taken} season already has the year {new_event.season.year}. Pick another year, or activate "

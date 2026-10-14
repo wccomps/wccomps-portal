@@ -66,3 +66,36 @@ def test_a_new_event_name_must_be_free_in_the_active_season():
     with pytest.raises(ImportBlockedError, match="already has an event named Inv"):
         import_school_list(NewEvent("Inv", date(2026, 10, 3), "invitational"), ROWS, "gold")
     assert Event.objects.count() == 1
+
+
+def test_an_import_can_start_a_new_season_while_one_is_active():
+    old = Season.objects.create(name="2026", year=2026, is_active=True)
+    Team.objects.create(team_number=1, team_name="Team 01")
+    rollover = NewEvent("Invitational 1", date(2027, 10, 2), "invitational", NewSeason("2027", 2027, replaces=old.pk))
+
+    import_school_list(rollover, ROWS, "gold")
+
+    season = Season.objects.get(year=2027)
+    assert list(Season.objects.filter(is_active=True)) == [season]
+    assert Event.objects.open().season == season
+
+
+def test_without_a_new_season_the_active_one_holds_the_new_event():
+    active = Season.objects.create(name="2026", year=2026, is_active=True)
+    Team.objects.create(team_number=1, team_name="Team 01")
+
+    import_school_list(NewEvent("Invitational 1", date(2026, 10, 3), "invitational"), ROWS, "gold")
+
+    assert Event.objects.open().season == active
+    assert list(Season.objects.all()) == [active]
+
+
+def test_a_new_season_refuses_when_the_active_season_is_not_the_one_the_page_showed():
+    shown = Season.objects.create(name="2026", year=2026)
+    Season.objects.create(name="Other", year=2030, is_active=True)
+
+    problem = new_event_problem(
+        NewEvent("Inv", date(2027, 10, 2), "invitational", NewSeason("2027", 2027, replaces=shown.pk))
+    )
+
+    assert problem == "The active season changed since this page loaded. Reload the page."
