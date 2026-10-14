@@ -224,33 +224,21 @@
             <c-slot name="title">
                 Close Out Event
             </c-slot>
-            {% if open_event %}
-                <p>
-                    Open event: <strong>{{ open_event.name }}</strong> ({{ open_event.date }}).
-                </p>
-            {% elif live_data == "leftovers" %}
-                <p>
-                    No event is open. Live data arrived after the last event was closed out: remove it with Clear
-                    leftover data on the <a href="{% url 'admin_competition_danger' %}">Danger Zone</a> page, then
-                    import the next school list.
-                </p>
-            {% elif live_data == "none" %}
-                <p>No event is open and there are no live scores. Import the next school list to open an event.</p>
-            {% else %}
-                <p>
-                    No event is open, but there are live scores: the event ran without a school list import. Closing
-                    out creates the event for the current school list.
-                </p>
-                {% if active_season %}
-                    <p>
-                        New event in season <strong>{{ active_season.name }}</strong>.
-                    </p>
-                {% else %}
-                    <p>No season is active: activate one before closing out.</p>
-                {% endif %}
-            {% endif %}
+            <p>{{ stage.status }}</p>
+            <p class="help-text">Next: {{ stage.next_step }}</p>
             {% if can_close_out %}
                 {% if not open_event %}
+                    {% if active_season %}
+                        <p>
+                            The scores are recorded at a new event in season <strong>{{ active_season.name }}</strong>,
+                            with the current school list.
+                        </p>
+                    {% else %}
+                        <p>
+                            No season is active: the scores are recorded at a new event in a new season, which becomes
+                            the active one.
+                        </p>
+                    {% endif %}
                     <c-form_field label="Event name" id="close_out_name">
                         <input type="text"
                                id="close_out_name"
@@ -278,6 +266,27 @@
                             {% endfor %}
                         </select>
                     </c-form_field>
+                    {% if not active_season %}
+                        <c-form_field label="New season name" id="close_out_season_name">
+                            <input type="text"
+                                   id="close_out_season_name"
+                                   maxlength="100"
+                                   :value="closeOutSeasonName"
+                                   @input="setField"
+                                   data-field="closeOutSeasonName"
+                                   class="vTextField">
+                        </c-form_field>
+                        <c-form_field label="New season year" id="close_out_season_year">
+                            <input type="number"
+                                   id="close_out_season_year"
+                                   min="2000"
+                                   max="2100"
+                                   :value="closeOutSeasonYear"
+                                   @input="setField"
+                                   data-field="closeOutSeasonYear"
+                                   class="vTextField">
+                        </c-form_field>
+                    {% endif %}
                 {% endif %}
                 {% if close_out_warnings %}
                     <c-alert variant="warning">
@@ -302,8 +311,8 @@
                 <template x-if="closingOut">
                     <c-progress_bar />
                 </template>
-            {% elif config.applications_enabled and open_event %}
-                <p class="help-text">Stop the competition before closing out the event.</p>
+            {% elif close_out_refusal %}
+                <p class="help-text">{{ close_out_refusal }}</p>
             {% endif %}
         </c-module>
         <c-module class="mt-20">
@@ -468,6 +477,8 @@ document.addEventListener('alpine:init', () => {
         closeOutName: '',
         closeOutDate: '',
         closeOutType: 'invitational',
+        closeOutSeasonName: '',
+        closeOutSeasonYear: '',
         closeOutOpenEvent: '{{ open_event.pk|default_if_none:"" }}',
         closingOut: false,
         csvContent: '',
@@ -545,9 +556,11 @@ document.addEventListener('alpine:init', () => {
                 this.doStreamAction('close_out_event', {
                     confirm: response,
                     open_event: this.closeOutOpenEvent,
-                    event_name: this.closeOutName,
-                    event_date: this.closeOutDate,
-                    event_type: this.closeOutType,
+                    new_name: this.closeOutName,
+                    new_date: this.closeOutDate,
+                    new_type: this.closeOutType,
+                    new_season_name: this.closeOutSeasonName,
+                    new_season_year: this.closeOutSeasonYear,
                 });
             }
         },

@@ -1,5 +1,5 @@
 from django import forms
-from django.http import QueryDict
+from registration.forms import NewEventFields
 from registration.models import Event
 from registration.services import NewEvent
 
@@ -78,40 +78,26 @@ class TypedConfirmForm(forms.Form):
         return typed
 
 
-class CloseOutForm(TypedConfirmForm):
-    """What the page showed: the open event (its id), or with none open the event Close Out creates for the current
-    school list; and the typed confirmation."""
-
-    MISSING = "No event is open: give the event a name, a date and a valid type to close out the current list."
+class CloseOutForm(TypedConfirmForm, NewEventFields):
+    """What the page showed: the open event (its id), or with none open the event Close Out records the scores at
+    (and its new season when none is active); and the typed confirmation."""
 
     open_event = forms.ModelChoiceField(
-        queryset=Event.objects.all(), error_messages={"invalid_choice": "That event no longer exists. Reload the page."}
-    )
-    event_name = forms.CharField(
-        max_length=255,
-        error_messages={"required": MISSING, "max_length": "The event name must be at most 255 characters."},
-    )
-    event_date = forms.DateField(error_messages={"required": MISSING, "invalid": MISSING})
-    event_type = forms.ChoiceField(
-        choices=Event.EVENT_TYPE_CHOICES,
-        error_messages={"required": MISSING, "invalid_choice": "Choose a valid event type."},
+        queryset=Event.objects.all(),
+        required=False,
+        error_messages={"invalid_choice": "That event no longer exists. Reload the page."},
     )
 
-    def __init__(self, data: QueryDict) -> None:
-        super().__init__(data)
-        if self.data.get("open_event"):
-            for name in ("event_name", "event_date", "event_type"):
-                del self.fields[name]
-        else:
-            del self.fields["open_event"]
+    def clean(self) -> dict[str, object]:
+        data = super().clean() or {}
+        if not self.errors and not data.get("open_event"):
+            self.new_event_to_create = self.new_event()
+        return data
 
     def target(self) -> Event | NewEvent:
         """The page's open event, or the new event to create. Call once is_valid() is True."""
-        data = self.cleaned_data
-        if "open_event" in data:
-            event: Event = data["open_event"]
-            return event
-        return NewEvent(name=data["event_name"], date=data["event_date"], event_type=data["event_type"])
+        event: Event | None = self.cleaned_data.get("open_event")
+        return event if event is not None else self.new_event_to_create
 
     def first_error(self) -> str:
         return str(next(iter(self.errors.values()))[0])

@@ -120,7 +120,7 @@ def test_confirm_refuses_an_event_finalized_since_the_preview(client):
 
     response = _confirm(client)
 
-    assert b"finalized or removed" in response.content
+    assert b"closed out or removed" in response.content
     event.refresh_from_db()
     assert not event.is_active
     assert not SchoolInfo.objects.exists()
@@ -136,7 +136,7 @@ def test_confirm_refuses_an_event_removed_since_the_preview(client):
     response = _confirm(client)
 
     assert response.status_code == 200
-    assert b"finalized or removed" in response.content
+    assert b"closed out or removed" in response.content
 
 
 def test_confirm_with_session_data_from_before_events_asks_to_upload_again(client):
@@ -168,7 +168,7 @@ def test_import_is_refused_while_the_last_events_scores_are_still_here(client):
 
     response = client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, "event": str(event.pk)})
 
-    assert b"Scores from the last event are still in the portal" in response.content
+    assert b"not recorded at any event yet" in response.content
     assert not SchoolInfo.objects.exists()
 
 
@@ -183,7 +183,7 @@ def test_confirm_is_refused_when_scores_appeared_since_the_preview(client):
 
     response = _confirm(client)
 
-    assert b"Scores from the last event are still in the portal" in response.content
+    assert b"not recorded at any event yet" in response.content
     assert not SchoolInfo.objects.exists()
 
 
@@ -411,7 +411,7 @@ def test_with_no_active_season_the_season_fields_are_required(client):
 
     response = _upload(client, **{**SEASON_FIELDS, "new_season_name": ""})
 
-    assert b"No season is active: give the new season a name and a year." in response.content
+    assert b"Give the new season a name and a year." in response.content
     assert not SchoolInfo.objects.exists()
 
 

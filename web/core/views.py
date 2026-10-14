@@ -13,6 +13,7 @@ from registration.forms import ShownSchoolForm
 from registration.models import Event, Season
 from registration.services import (
     ImportBlockedError,
+    NewEvent,
     PacketsSentError,
     SchoolChangedError,
     SchoolListRow,
@@ -369,7 +370,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
 
 
 def _parse_school_info_csv(
-    csv_file: UploadedFile[bytes], event: Event, mode: ImportMode
+    csv_file: UploadedFile[bytes], event: Event | NewEvent, mode: ImportMode
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
     """Parse and validate a school-info CSV for the import mode into (preview data, session rows; empty on errors)."""
     parse_result = parse_csv_file(csv_file)
@@ -450,13 +451,12 @@ def _apply_school_info_import(
         return _upload_again(*(str(e) for e in event_form.non_field_errors()))
     event = event_form.event_to_import
     mode = IMPORT_MODES[event_form.import_mode]
-    new_season = event.season._state.adding
     try:
         counts = mode.apply(event, rows, authentik_username)
     except ImportBlockedError as blocked:
         return _import_error(str(blocked)), None
     lines = mode.result(event, counts)
-    if new_season:
+    if isinstance(event, NewEvent) and event.season is not None:
         lines.append(f"Created the {event.season} season and made it the active one.")
     return None, {"lines": lines, **counts}
 
@@ -496,12 +496,7 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
                                 "event": {name: event_form.data.get(name, "") for name in event_form.fields},
                             },
                         )
-                        preview_data["event_label"] = (
-                            str(event)
-                            if event.pk
-                            else f"New: {event.name}"
-                            + (f", in new season {event.season}" if event.season._state.adding else "")
-                        )
+                        preview_data["event_label"] = str(event)
                         preview_data["mode_label"] = mode.label.format(event=event)
 
         elif "confirm" in request.POST:

@@ -149,6 +149,7 @@ def test_closing_an_event_takes_the_lock():
 def test_closing_out_takes_the_lock_before_reading_the_open_event(team):
     event = _event()
     set_team_school(team, "Example University", contact_email="c@example.edu")
+    ServiceScore.objects.create(team=team, service_points=1)
 
     with CaptureQueriesContext(connection) as queries:
         close_out_event(event, "gold")

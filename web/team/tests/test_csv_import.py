@@ -1,10 +1,12 @@
 """Tests for CSV import functionality."""
 
+from datetime import date
+
 import pytest
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from registration.models import EventTeamAssignment, School
-from registration.services import SchoolListRow, import_school_list
+from registration.models import Event, EventTeamAssignment, School
+from registration.services import NewEvent, SchoolListRow, import_school_list
 
 from team.forms import parse_csv_file, validate_csv_data
 from team.models import SchoolInfo, Team
@@ -420,7 +422,7 @@ class TestImportOpensEvent:
         assert not any("team assignment" in w for w in result["warnings"])
 
 
-def test_a_new_event_from_the_import_form_is_unsaved_and_closed_to_registration():
+def test_a_new_event_from_the_import_form_is_created_only_by_the_import():
     from registration.models import Season
 
     from team.forms import ImportEventForm
@@ -431,8 +433,8 @@ def test_a_new_event_from_the_import_form_is_unsaved_and_closed_to_registration(
     )
 
     assert form.is_valid()
-    assert form.event_to_import._state.adding
-    assert form.event_to_import.registration_open is False
+    assert form.event_to_import == NewEvent("Qualifier", date(2026, 11, 7), "qualifier")
+    assert not Event.objects.exists()
 
 
 @pytest.mark.parametrize("choice", ["²", "abc", "-1", ""])

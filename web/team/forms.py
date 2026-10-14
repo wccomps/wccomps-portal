@@ -10,8 +10,11 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import validate_email
 from django.db.models import Count, Q
+from registration.forms import NewEventFields
 from registration.models import Event, School, Season, normalize_school_name
 from registration.services import (
+    ADD_NEEDS_OPEN_EVENT,
+    NewEvent,
     SchoolListRow,
     add_problem,
     add_to_school_list,
@@ -19,7 +22,6 @@ from registration.services import (
     held_schools,
     import_problem,
     import_school_list,
-    new_season_problem,
 )
 
 from team.models import SchoolInfo, Team, default_team_name
@@ -113,58 +115,26 @@ class CSVUploadForm(forms.Form):
         return csv_file
 
 
-class ImportEventForm(forms.Form):
-    """The event a school list is for: an unfinalized event of the active season, or a new one; and the import mode's
-    key (IMPORT_MODES), Replace when not given. With no active season, the event is new and so is its season, which
-    the import creates as the active one."""
+class ImportEventForm(NewEventFields):
+    """The event a school list is for: an unfinalized event of the active season, or a new one (with a new season
+    when none is active); and the import mode's key (IMPORT_MODES), Replace when not given."""
 
     event = forms.CharField(required=False)
     mode = forms.CharField(required=False)
-    new_name = forms.CharField(max_length=255, required=False)
-    new_date = forms.DateField(required=False)
-    new_type = forms.CharField(required=False)
-    new_season_name = forms.CharField(max_length=100, required=False)
-    new_season_year = forms.IntegerField(min_value=2000, max_value=2100, required=False)
 
-    # After validation: the chosen event, or an unsaved new one the import saves; and the mode's key
-    event_to_import: Event
+    # After validation: the chosen event, or the new one the import creates; and the mode's key
+    event_to_import: Event | NewEvent
     import_mode: str
 
     def __init__(self, *args: object, season: Season | None, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         self.season = season
 
-    def _season_for_new_event(self, data: dict[str, object]) -> Season:
-        """The active season, or with none the new season from the form, unsaved."""
-        if self.season is not None:
-            if data.get("new_season_name") or data.get("new_season_year"):
-                raise ValidationError(
-                    f"The {self.season} season was activated since the preview. Upload the file again."
-                )
-            return self.season
-        if not data.get("new_season_name") or not data.get("new_season_year"):
-            raise ValidationError("No season is active: give the new season a name and a year.")
-        season = Season(name=str(data["new_season_name"]), year=int(str(data["new_season_year"])), is_active=True)
-        if problem := new_season_problem(season):
-            raise ValidationError(problem)
-        return season
-
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}
         choice = str(data.get("event") or "")
         if choice == "new":
-            if not data.get("new_name") or not data.get("new_date"):
-                raise ValidationError("Give the new event a name and a date.")
-            if data.get("new_type") not in dict(Event.EVENT_TYPE_CHOICES):
-                raise ValidationError("Pick the new event's type.")
-            # Schools come from the list, so the public registration form doesn't offer it
-            self.event_to_import = Event(
-                season=self._season_for_new_event(data),
-                name=data["new_name"],
-                date=data["new_date"],
-                event_type=data["new_type"],
-                registration_open=False,
-            )
+            self.event_to_import = self.new_event()
         elif self.season is None:
             raise ValidationError("No season is active: import into a new event, with a new season.")
         elif not choice.isdecimal():
@@ -172,7 +142,7 @@ class ImportEventForm(forms.Form):
         else:
             chosen = self.season.events.filter(pk=int(choice), is_finalized=False).first()
             if chosen is None:
-                raise ValidationError("That event was finalized or removed.")
+                raise ValidationError("That event was closed out or removed.")
             self.event_to_import = chosen
         self.import_mode = str(data.get("mode") or "replace")
         if self.import_mode not in IMPORT_MODES:
@@ -312,12 +282,13 @@ def _team_warnings(teams: list[Team], renamed_teams: Iterable[Team]) -> list[str
     return warnings
 
 
-def validate_csv_data(rows: list[CSVRowData], event: Event | None = None) -> CSVValidationResult:
+def validate_csv_data(rows: list[CSVRowData], event: Event | NewEvent | None = None) -> CSVValidationResult:
     """Assign the rows to teams 1..N in random order; the import replaces all existing school info.
 
-    The event is the one imported into; None, or an unsaved event, is a new one.
+    The event is the one imported into; None, or a NewEvent, is a new one.
     """
-    event_id = event.pk if event is not None else None
+    saved = event if isinstance(event, Event) else None
+    event_id = saved.pk if saved is not None else None
     errors = _repeated_schools(rows)
     warnings: list[str] = []
 
@@ -335,18 +306,20 @@ def validate_csv_data(rows: list[CSVRowData], event: Event | None = None) -> CSV
     # Every team name is reset, not only the rows' teams
     warnings.extend(_team_warnings(teams, Team.objects.all()))
 
-    if event is not None and event_id is not None:
-        replaced = event.team_assignments.count()
+    if saved is not None:
+        replaced = saved.team_assignments.count()
         if replaced:
-            warnings.append(f"Replaces the {replaced} team assignment(s) for {event}.")
+            warnings.append(f"Replaces the {replaced} team assignment(s) for {saved}.")
 
     return {"teams_to_create": _assign(rows, teams, event_id), "errors": errors, "warnings": warnings}
 
 
-def validate_csv_additions(rows: list[CSVRowData], event: Event) -> CSVValidationResult:
+def validate_csv_additions(rows: list[CSVRowData], event: Event | NewEvent) -> CSVValidationResult:
     """Give the rows' schools free teams, the lowest numbers in random order, at the open event.
 
     Schools already on the list (or at the event) keep their teams and are skipped, so nobody moves."""
+    if isinstance(event, NewEvent):
+        return {"teams_to_create": [], "errors": [ADD_NEEDS_OPEN_EVENT], "warnings": []}
     errors = _repeated_schools(rows)
     warnings: list[str] = []
 
@@ -376,11 +349,11 @@ class ImportMode:
     """One way to import a school list. Its services re-check the event and the teams under the school list lock."""
 
     label: str  # What the page calls it; {event} is the event imported into
-    problem: Callable[[Event], str]  # Why the event can't take the import now, or ''
-    validate: Callable[[list[CSVRowData], Event], CSVValidationResult]
-    preview: Callable[[Event, list[CSVRowData]], str]  # A sentence on what the import keeps, or ''
-    apply: Callable[[Event, list[SchoolListRow], str], dict[str, int]]
-    result: Callable[[Event, dict[str, int]], list[str]]  # The lines saying what it did
+    problem: Callable[[Event | NewEvent], str]  # Why the event can't take the import now, or ''
+    validate: Callable[[list[CSVRowData], Event | NewEvent], CSVValidationResult]
+    preview: Callable[[Event | NewEvent, list[CSVRowData]], str]  # A sentence on what the import keeps, or ''
+    apply: Callable[[Event | NewEvent, list[SchoolListRow], str], dict[str, int]]
+    result: Callable[[Event | NewEvent, dict[str, int]], list[str]]  # The lines saying what it did
 
 
 IMPORT_MODES = {

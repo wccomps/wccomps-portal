@@ -12,13 +12,14 @@ from django.shortcuts import render
 from registration.models import Event, Season
 from registration.services import (
     CloseOutError,
-    LiveData,
     NewEvent,
     clear_leftover_data,
+    clear_leftovers_problem,
     close_out_event,
+    close_out_problem,
     close_out_warnings,
-    live_data_state,
 )
+from registration.stage import Stage, event_stage
 from scoring.models import QuotientMetadataCache
 from scoring.quotient_sync import sync_quotient_metadata
 
@@ -450,7 +451,7 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
     from team.models import DiscordLink, Team
 
     config = CompetitionConfig.get_config()
-    open_event = Event.objects.open()
+    stage = event_stage()
 
     active_teams = Team.objects.filter(is_active=True).count()
     total_teams = Team.objects.count()
@@ -458,13 +459,14 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
 
     quotient_metadata = QuotientMetadataCache.objects.first()
 
-    live_data = live_data_state()
-    can_close_out = not config.applications_enabled and (open_event is not None or live_data == LiveData.UNFINALIZED)
+    close_out_refusal = close_out_problem(stage, check_schools=False)
     context = {
-        "open_event": open_event,
-        "live_data": live_data.value,
-        "can_close_out": can_close_out,
-        "close_out_warnings": close_out_warnings(open_event) if can_close_out else [],
+        "stage": stage,
+        "open_event": stage.event,
+        "can_close_out": not close_out_refusal,
+        # Shown where the module offers no button for a reason the operator can act on
+        "close_out_refusal": close_out_refusal if stage.stage in (Stage.READY, Stage.PLAYED, Stage.UNRECORDED) else "",
+        "close_out_warnings": close_out_warnings(stage.event) if not close_out_refusal else [],
         "active_season": Season.objects.active(),
         "event_type_choices": Event.EVENT_TYPE_CHOICES,
         "config": config,
@@ -517,13 +519,15 @@ def admin_competition_action(request: HttpRequest) -> HttpResponseBase:
 def admin_competition_danger(request: HttpRequest) -> HttpResponse:
     """Danger zone page for destructive competition operations."""
     config = CompetitionConfig.get_config()
-    leftovers = live_data_state() == LiveData.LEFTOVERS
+    stage = event_stage()
+    can_clear = not clear_leftovers_problem(stage)
     return render(
         request,
         "admin/competition_danger.html",
         {
             "config": config,
-            "leftovers": _wiped_summary(competition_data_counts()) if leftovers else "",
+            "stage": stage,
+            "leftovers": _wiped_summary(competition_data_counts()) if can_clear else "",
             "show_ops_nav": True,
             "nav_active": "ops_admin",
         },

@@ -167,6 +167,7 @@ def _leftovers():
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     event = _open_event()
     team = _team_with_school()
+    ServiceScore.objects.create(team=team, service_points=5)
     close_out_event(event, "admin")
     ServiceScore.objects.create(team=team, service_points=3)
     return Event.objects.get(pk=event.pk)
@@ -179,7 +180,8 @@ def test_the_danger_page_offers_leftovers_with_their_counts(admin_client):
 
     assert "Clear Leftover Data" in page
     assert "1 ServiceScore" in page
-    assert "belongs to no event and is not archived" in page
+    assert "not recorded at any event yet" in page
+    assert "It is not archived" in page
 
 
 def test_clearing_leftovers_deletes_them(admin_client):
@@ -207,7 +209,8 @@ def test_without_a_finalized_event_leftovers_are_hidden_and_refused(admin_client
     assert "Clear Leftover Data" not in page
     assert response.status_code == 400
     assert response.json()["error"] == (
-        "This live data belongs to an event that was never closed out: use Close Out Event."
+        "These scores are not recorded at any event yet and no event was ever closed out: record them with "
+        "Close Out Event."
     )
     assert ServiceScore.objects.exists()
 
@@ -236,12 +239,26 @@ def test_clearing_leftovers_is_refused_while_running(admin_client):
     assert ServiceScore.objects.exists()
 
 
-def test_with_leftovers_the_competition_page_points_at_the_danger_page(admin_client):
+def test_scores_after_a_close_out_can_still_be_recorded_with_close_out(admin_client):
+    """An event that ran without an import after the first close-out is not leftovers to delete unrecorded."""
     _leftovers()
 
     page = admin_client.get(reverse("admin_competition")).content.decode()
 
-    assert "Live data arrived after the last event was closed out" in page
+    assert "not recorded at any event yet" in page
+    assert '@click="closeOutEvent"' in page
+
+
+def test_live_data_without_scores_points_at_the_danger_page(admin_client, admin_user):
+    from team.models import DiscordLink
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
+    team = _team_with_school()
+    DiscordLink.objects.create(team=team, discord_id=1, discord_username="blue", user=admin_user)
+
+    page = admin_client.get(reverse("admin_competition")).content.decode()
+
+    assert "Clear leftover data on the competition Danger Zone page" in page
     assert '@click="closeOutEvent"' not in page
 
 

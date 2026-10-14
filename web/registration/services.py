@@ -3,7 +3,6 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
-from enum import StrEnum
 
 from django.db import transaction
 from django.db.models import Exists, OuterRef, QuerySet
@@ -11,7 +10,7 @@ from orange_team.models import OrangeAssignment
 from packets.models import Packet
 from scoring.calculator import Standing, compute_standings
 from scoring.export import export_all_zip_bytes
-from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeamScore, ServiceDetail, ServiceScore
+from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeamScore
 from scoring.scorecard import build_scorecard_context
 from scoring.snapshot import SNAPSHOT_VERSION, serialize_scorecard
 
@@ -32,6 +31,7 @@ from .models import (
     TeamRegistration,
     normalize_school_name,
 )
+from .stage import EventStage, Stage, event_stage, scored_teams
 
 
 class PacketsSentError(Exception):
@@ -174,25 +174,72 @@ class ImportBlockedError(Exception):
     """Why a school list can't be imported into or added to the event now."""
 
 
-class LiveData(StrEnum):
-    """Whose live competition data is in the portal while no event is open."""
+@dataclass(frozen=True)
+class NewSeason:
+    """A season to create, as the only active one, with the event it holds."""
 
-    NONE = "none"  # an event is open (the data is its), or there is none
-    LEFTOVERS = "leftovers"  # an event was closed out, so this arrived after the last close-out
-    UNFINALIZED = "unfinalized"  # no event was ever finalized: an event that ran without an import
+    name: str
+    year: int
 
-
-def live_data_state() -> LiveData:
-    """What the live data is with no event open; Close Out, Clear leftover data, the import and the pages agree on
-    it."""
-    if Event.objects.open() is not None or not live_competition_data_exists():
-        return LiveData.NONE
-    return LiveData.LEFTOVERS if Event.objects.filter(is_finalized=True).exists() else LiveData.UNFINALIZED
+    def __str__(self) -> str:
+        return self.name
 
 
-def import_problem(event: Event) -> str:
-    """Why this event can't be imported into now, or ''. An unsaved event is a new one."""
-    open_now = Event.objects.open()
+@dataclass(frozen=True)
+class NewEvent:
+    """An event to create for a school list: the import's new event, or the event Close Out records for scores
+    that ran without an import. season: a new season for it, given only when none is active."""
+
+    name: str
+    date: date
+    event_type: str
+    season: NewSeason | None = None
+
+    def __str__(self) -> str:
+        return f"New: {self.name}" + (f", in new season {self.season}" if self.season else "")
+
+
+def new_event_problem(new_event: NewEvent) -> str:
+    """Why the new event (and its new season) can't be created now, or ''."""
+    active = Season.objects.active()
+    if new_event.season is None:
+        if active is None:
+            return "No season is active: give the new season a name and a year."
+        if Event.objects.filter(season=active, name=new_event.name).exists():
+            return f"The {active} season already has an event named {new_event.name}. Choose another name."
+        return ""
+    if active is not None:
+        return f"The {active} season was activated since this page loaded. Reload the page."
+    if taken := Season.objects.filter(year=new_event.season.year).first():
+        return (
+            f"The {taken} season already has the year {new_event.season.year}. Pick another year, or activate "
+            "that season."
+        )
+    return ""
+
+
+def _create_event(new_event: NewEvent) -> Event:
+    """Save the new event, not yet open, in the active season or in its new season, which becomes the only active
+    one. Call under the school list lock once new_event_problem has nothing to say."""
+    if new_event.season is None:
+        season = Season.objects.get(is_active=True)
+    else:
+        season = Season.objects.create(name=new_event.season.name, year=new_event.season.year)
+        season.activate()
+    return Event.objects.create(
+        season=season,
+        name=new_event.name,
+        date=new_event.date,
+        event_type=new_event.event_type,
+        # Schools come from the list, not the public registration form
+        registration_open=False,
+    )
+
+
+def import_problem(event: Event | NewEvent) -> str:
+    """Why this event can't be imported into now, or ''."""
+    stage = event_stage()
+    open_now = stage.event
     if open_now and open_now != event:
         return (
             f"{open_now} is still open. Close it out (Close Out Event on the Competition page) before importing a "
@@ -204,18 +251,10 @@ def import_problem(event: Event) -> str:
             "would reach the wrong school. Change a single school on its School Info page instead. "
             "To add late schools, use Add schools."
         )
-    if not live_competition_data_exists():
+    if not stage.live_data:
         return ""
     if open_now is None:
-        if live_data_state() == LiveData.LEFTOVERS:
-            return (
-                "Live data arrived after the last event was closed out. Remove it with Clear leftover data on the "
-                "competition Danger Zone page, then import the school list."
-            )
-        return (
-            "Scores from the last event are still in the portal. "
-            "Close that event out (Close Out Event on the Competition page) before importing a new school list."
-        )
+        return f"{stage.status} {stage.next_step}"
     return (
         f"Teams have already started using their team numbers for {open_now} (scores, tickets or Discord links). "
         "Re-importing reassigns team numbers under them. Change a single school on its School Info page instead. "
@@ -235,10 +274,10 @@ class SchoolListRow:
 
 
 @transaction.atomic
-def import_school_list(event: Event, rows: list[SchoolListRow], updated_by: str) -> dict[str, int]:
-    """Replace the school list with the rows and open the event (saving it first when new, and its season when new
-    too, as the only active season), replacing its assignments: each row's school holds the row's team. Resets every
-    team name and activates the rows' teams.
+def import_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updated_by: str) -> dict[str, int]:
+    """Replace the school list with the rows and open the event (creating it first when new, and its new season as
+    the only active one), replacing its assignments: each row's school holds the row's team. Resets every team name
+    and activates the rows' teams.
 
     Under the school list lock; the event is re-checked under it, and ImportBlockedError says why the import can't
     go ahead.
@@ -249,10 +288,10 @@ def import_school_list(event: Event, rows: list[SchoolListRow], updated_by: str)
     teams = Team.objects.in_bulk([row.team_number for row in rows], field_name="team_number")
     if missing := [str(row.team_number) for row in rows if row.team_number not in teams]:
         raise ImportBlockedError(f"These teams no longer exist: {', '.join(missing)}. Upload the file again.")
-    if event.season._state.adding:
-        event.season = _create_active_season(event.season)
-    if event._state.adding:
-        event.save()
+    if isinstance(event, NewEvent):
+        if problem := new_event_problem(event):
+            raise ImportBlockedError(problem)
+        event = _create_event(event)
 
     # Opened before the clear, so the clear also replaces assignments the event had while it wasn't open
     event.open()
@@ -276,30 +315,10 @@ def import_school_list(event: Event, rows: list[SchoolListRow], updated_by: str)
     return {"created": len(rows), "activated": activated}
 
 
-def new_season_problem(season: Season) -> str:
-    """Why the new season can't be created as the active one now, or ''."""
-    if active := Season.objects.active():
-        return f"The {active} season was activated since the preview. Upload the file again."
-    if taken := Season.objects.filter(year=season.year).first():
-        return f"The {taken} season already has the year {season.year}. Pick another year, or activate that season."
-    return ""
-
-
-def _create_active_season(season: Season) -> Season:
-    """Save the new season as the only active one. Call under the school list lock; ImportBlockedError says why
-    it can't be."""
-    if problem := new_season_problem(season):
-        raise ImportBlockedError(problem)
-    season.is_active = False
-    season.save()
-    season.activate()
-    return season
-
-
 ADD_NEEDS_OPEN_EVENT = "Add schools needs the open event. Use Replace for an event's first school list."
 
 
-def add_problem(event: Event) -> str:
+def add_problem(event: Event | NewEvent) -> str:
     """Why schools can't be added to this event now, or ''. Only the open event's list can grow."""
     return "" if Event.objects.open() == event else ADD_NEEDS_OPEN_EVENT
 
@@ -325,7 +344,7 @@ def held_schools(name_keys: Iterable[str], event: Event) -> set[str]:
 
 
 @transaction.atomic
-def add_to_school_list(event: Event, rows: list[SchoolListRow], updated_by: str) -> dict[str, int]:
+def add_to_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updated_by: str) -> dict[str, int]:
     """Add the rows' schools to the open event's school list, each holding the row's team, which must be free.
 
     Moves nobody: existing schools keep their teams, assignments and team names, so it is allowed after packets
@@ -334,7 +353,7 @@ def add_to_school_list(event: Event, rows: list[SchoolListRow], updated_by: str)
     school or a school was put on the list since the preview.
     """
     school_list_lock()
-    if problem := add_problem(event):
+    if (problem := add_problem(event)) or not isinstance(event, Event):
         raise ImportBlockedError(problem)
     teams = Team.objects.in_bulk([row.team_number for row in rows], field_name="team_number")
     if missing := [str(row.team_number) for row in rows if row.team_number not in teams]:
@@ -371,38 +390,51 @@ class CloseOutError(Exception):
     """Close Out Event or Clear leftover data refused; the message says why."""
 
 
-@dataclass(frozen=True)
-class NewEvent:
-    """The event Close Out creates for the school list as it stands, for an event that ran without an import."""
-
-    name: str
-    date: date
-    event_type: str
-
-
 def _refuse_while_running(message: str) -> CompetitionConfig:
-    """The competition config, its row locked as run_competition locks it, so a start can't land until commit.
-    CloseOutError with the message while the competition runs."""
+    """The competition config, its row locked until commit. CloseOutError with the message while the competition
+    runs. A start writes applications_enabled under the same row lock, so it can't mark the competition running
+    until this commits; a start already under way may have turned Authentik on before it waits, and the queued
+    Discord cleanup then skips."""
     config = CompetitionConfig.objects.select_for_update().get(pk=CompetitionConfig.get_config().pk)
     if config.applications_enabled:
         raise CloseOutError(message)
     return config
 
 
-def _locked_target(target: Event | NewEvent) -> Event:
-    """The open event the page showed, its row locked; or, with none open, new_event created and opened for the
-    current school list. CloseOutError when the open event is no longer what the page showed. Call under the school
-    list lock."""
-    open_now = Event.objects.open()
+def close_out_problem(stage: EventStage, *, check_schools: bool = True) -> str:
+    """Why the stage can't be closed out now, or ''. With check_schools, also whether every score would be kept:
+    each listed school's team active, and every scored team holding a school. The page asks without it first."""
+    if stage.running:
+        return "Stop the competition first."
+    if stage.stage == Stage.READY:
+        return f"No team has scores yet, so there is nothing to close out for {stage.event}."
+    if stage.stage not in (Stage.PLAYED, Stage.UNRECORDED):
+        return f"Nothing to close out. {stage.status} {stage.next_step}"
+    return _unfreezable_problem(stage.event) if check_schools else ""
+
+
+def _refuse_a_stale_target(target: Event | NewEvent, stage: EventStage) -> None:
+    """CloseOutError when the open event is no longer what the page showed."""
     if isinstance(target, NewEvent):
-        if open_now is not None:
-            raise CloseOutError(f"{open_now} was opened since the page loaded. Reload the page.")
-        event = _open_event_for_current_schools(target)
-    elif open_now != target:
+        if stage.event is not None:
+            raise CloseOutError(f"{stage.event} was opened since the page loaded. Reload the page.")
+    elif stage.event != target:
         raise CloseOutError(f"{target} is no longer open. Reload the page.")
-    else:
-        event = open_now
-    return Event.objects.select_for_update().get(pk=event.pk)
+
+
+def _locked_target(target: Event | NewEvent, stage: EventStage) -> Event:
+    """The open event, its row locked; or the new event target, created and opened for the current school list.
+    Call under the school list lock once the target and the stage passed their checks."""
+    if not isinstance(target, NewEvent):
+        return Event.objects.select_for_update().get(pk=target.pk)
+    if problem := new_event_problem(target):
+        raise CloseOutError(problem)
+    event = _create_event(target)
+    event.open()
+    _assign_school_list(event)
+    # Sending needs an open event (begin_distribution), so only packets sent before events existed can match
+    Packet.objects.sent().filter(event=None).update(event=event)
+    return event
 
 
 @dataclass(frozen=True)
@@ -416,16 +448,19 @@ class CloseOutOutcome:
 
 @transaction.atomic
 def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
-    """Freeze the event's results and export archive, delete the live competition data, close the event, reset the
-    competition's start and end times and queue the Discord cleanup for the bot, all in one transaction. target is
-    what the page showed: the open event, or, with none open, the new event to create for the current school list.
-    The school list stays until the next import replaces it.
+    """Freeze the event's results and export archive, then delete the live data, close the event, reset the schedule
+    and queue the Discord cleanup, all committed together. target is what the page showed: the open event, or with
+    none open the new event to record the scores at. The school list stays until the next import replaces it.
 
     Under the school list lock and the competition config lock; CloseOutError, writing nothing, says why it refused.
     """
     school_list_lock()
     config = _refuse_while_running("Stop the competition first.")
-    event = _locked_target(target)
+    stage = event_stage()
+    _refuse_a_stale_target(target, stage)
+    if problem := close_out_problem(stage):
+        raise CloseOutError(problem)
+    event = _locked_target(target, stage)
     results = _freeze_results(event)
     wiped = wipe_competition_data()
     event.close()
@@ -450,43 +485,18 @@ def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
     return CloseOutOutcome(event, results, wiped)
 
 
-def _open_event_for_current_schools(new_event: NewEvent) -> Event:
-    """Create and open new_event in the active season for the school list as it stands: each school on the list is
-    assigned its team at it, and packets sent while no event was open are stamped with it."""
-    state = live_data_state()
-    if state == LiveData.LEFTOVERS:
-        raise CloseOutError(
-            "Live data after the last close-out is leftovers: use Clear leftover data on the Danger Zone page, "
-            "then import the next school list."
-        )
-    if state == LiveData.NONE:
-        raise CloseOutError("Nothing to close out: no live scores. Import the next school list to open an event.")
-    season = Season.objects.active()
-    if season is None:
-        raise CloseOutError("There is no active season to hold the event. Activate a season first.")
-    if Event.objects.filter(season=season, name=new_event.name).exists():
-        raise CloseOutError(f"The {season} season already has an event named {new_event.name}. Choose another name.")
-    event = Event.objects.create(
-        season=season,
-        name=new_event.name,
-        date=new_event.date,
-        event_type=new_event.event_type,
-        # Schools come from the list, not the public registration form
-        registration_open=False,
-    )
-    event.open()
-    _assign_school_list(event)
-    # Sending needs an open event (begin_distribution), so only packets sent before events existed can match
-    Packet.objects.sent().filter(event=None).update(event=event)
-    return event
-
-
 def _assign_school_list(event: Event) -> None:
     """Record each school on the list as holding its team at the new event; the list itself stays as it is."""
     EventTeamAssignment.objects.bulk_create(
         EventTeamAssignment(event=event, school_id=school_id, team_id=team_id)
         for school_id, team_id in SchoolInfo.objects.values_list("school_id", "team_id")
     )
+
+
+def _school_by_team(event: Event | None) -> dict[int, int]:
+    """Team id to school id at the event; with none, on the school list (what Close Out assigns a new event)."""
+    holders = event.team_assignments if event is not None else SchoolInfo.objects
+    return dict(holders.values_list("team_id", "school_id"))
 
 
 @dataclass(frozen=True)
@@ -498,10 +508,9 @@ class SchoolSnapshot:
 
 
 def current_snapshots(event: Event | None) -> dict[int, SchoolSnapshot]:
-    """Each school assigned at the event whose team is active, by id, with its standing and scorecard now. With no
-    event, the schools on the school list, which an event created at close-out is assigned."""
-    holders = event.team_assignments if event is not None else SchoolInfo.objects
-    school_by_team = dict(holders.values_list("team_id", "school_id"))
+    """Each school assigned at the event (with none, on the school list) whose team is active, by id, with its
+    standing and scorecard now."""
+    school_by_team = _school_by_team(event)
     standings = compute_standings()
     return {
         school_by_team[standing.team.pk]: SchoolSnapshot(
@@ -588,33 +597,19 @@ def _scorecard_warnings(event: Event | None) -> list[str]:
     return warnings
 
 
-def _scored_teams() -> QuerySet[Team]:
-    """Teams with any live score row: what the close-out would delete for them."""
-    team = OuterRef("pk")
-    return Team.objects.filter(
-        Exists(ServiceScore.objects.filter(team=team))
-        | Exists(ServiceDetail.objects.filter(team=team))
-        | Exists(InjectScore.objects.filter(team=team))
-        | Exists(OrangeTeamScore.objects.filter(team=team))
-        | Exists(IncidentReport.objects.filter(team=team))
-        | Exists(RedTeamScore.objects.filter(affected_teams=team))
-    )
-
-
-def _unfreezable_problem(event: Event) -> str:
+def _unfreezable_problem(event: Event | None) -> str:
     """Why some live scores would have no result to keep them, or ''. Every school on the list must be on an active
     team (only active teams have standings), and every team with scores must hold a school."""
-    assigned = event.team_assignments.select_related("team").order_by("team__team_number")
-    if not assigned:
-        return f"{event} has no schools on its list, so there are no results to keep."
-    if inactive := [a.team.team_number for a in assigned if not a.team.is_active]:
+    school_by_team = _school_by_team(event)
+    listed = Team.objects.filter(pk__in=school_by_team).order_by("team_number")
+    if not school_by_team:
+        where = f"{event} has no schools on its list" if event is not None else "The school list is empty"
+        return f"{where}, so there are no results to keep."
+    if inactive := [team.team_number for team in listed if not team.is_active]:
         theirs = "its school" if len(inactive) == 1 else "their schools"
         return f"Reactivate {_team_list(inactive)} or remove {theirs} first."
     unlisted = list(
-        _scored_teams()
-        .exclude(pk__in=[a.team_id for a in assigned])
-        .order_by("team_number")
-        .values_list("team_number", flat=True)
+        scored_teams().exclude(pk__in=school_by_team).order_by("team_number").values_list("team_number", flat=True)
     )
     if unlisted:
         has, theirs = ("has", "its school") if len(unlisted) == 1 else ("have", "their schools")
@@ -624,9 +619,8 @@ def _unfreezable_problem(event: Event) -> str:
 
 def _freeze_results(event: Event) -> int:
     """Freeze every listed school's scorecard and the export zip for the open event, replacing earlier ones.
-    Returns how many results were written. Call under the school list lock with the event row locked."""
-    if problem := _unfreezable_problem(event):
-        raise CloseOutError(problem)
+    Returns how many results were written. Call under the school list lock with the event row locked, once
+    close_out_problem has nothing to say."""
     snapshots = current_snapshots(event)
     EventResult.objects.filter(event=event).delete()
     EventResult.objects.bulk_create(
@@ -652,20 +646,32 @@ def _team_list(numbers: list[int], shown: int = 3) -> str:
     return f"{named} and {len(numbers) - shown} more" if len(numbers) > shown else named
 
 
+def clear_leftovers_problem(stage: EventStage) -> str:
+    """Why Clear leftover data can't run now, or ''. It deletes live data no open event holds: data with no scores,
+    or scores once some event was closed out (before that, scores are an event that ran without an import)."""
+    if stage.running:
+        return "Competition must be stopped before clearing"
+    if stage.event is not None:
+        return f"{stage.event} is open: its data goes when it is closed out (Close Out Event)."
+    if stage.stage == Stage.IDLE:
+        return "There is no leftover data to clear."
+    if stage.stage == Stage.UNRECORDED and not stage.closed_out_before:
+        return (
+            "These scores are not recorded at any event yet and no event was ever closed out: record them with "
+            "Close Out Event."
+        )
+    return ""
+
+
 @transaction.atomic
 def clear_leftover_data(actor: str) -> WipedData:
-    """Delete live data that arrived after the last close-out, with no event open. The schedule stays: a start may
-    already be set for the next event. Under the school list lock and the competition config lock; CloseOutError
-    unless it is leftovers."""
+    """Delete live data no open event holds, unarchived. The schedule stays: a start may already be set for the
+    next event. Under the school list lock and the competition config lock; CloseOutError when
+    clear_leftovers_problem says why not."""
     school_list_lock()
     config = _refuse_while_running("Competition must be stopped before clearing")
-    state = live_data_state()
-    if state == LiveData.UNFINALIZED:
-        raise CloseOutError("This live data belongs to an event that was never closed out: use Close Out Event.")
-    if state == LiveData.NONE:
-        if open_now := Event.objects.open():
-            raise CloseOutError(f"{open_now} is open: its data goes when it is closed out (Close Out Event).")
-        raise CloseOutError("There is no leftover data to clear.")
+    if problem := clear_leftovers_problem(event_stage()):
+        raise CloseOutError(problem)
     wiped = wipe_competition_data()
     AuditLog.objects.create(
         action="leftover_data_cleared",

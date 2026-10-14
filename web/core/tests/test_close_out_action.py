@@ -137,8 +137,7 @@ def test_no_open_event_needs_a_name(client):
         {
             "done": True,
             "success": False,
-            "message": "No event is open: give the event a name, a date and a valid type to close out the current "
-            "list.",
+            "message": "Give the new event a name, a date and a type.",
         }
     ]
     assert not Event.objects.exists()
@@ -148,7 +147,7 @@ def test_an_event_name_over_255_characters_is_refused(client):
     _season()
     _team_with_school()
 
-    lines = _close_out(client, confirm="yolo", event_name="x" * 256, event_date="2026-10-03", event_type="invitational")
+    lines = _close_out(client, confirm="yolo", new_name="x" * 256, new_date="2026-10-03", new_type="invitational")
 
     assert lines[-1]["message"] == "The event name must be at most 255 characters."
     assert not Event.objects.exists()
@@ -158,7 +157,7 @@ def test_unknown_event_type_is_refused(client):
     _season()
     _team_with_school()
 
-    lines = _close_out(client, confirm="yolo", event_name="Inv 1", event_date="2026-10-03", event_type="bogus")
+    lines = _close_out(client, confirm="yolo", new_name="Inv 1", new_date="2026-10-03", new_type="bogus")
 
     assert lines[-1]["message"] == "Choose a valid event type."
     assert not Event.objects.exists()
@@ -169,7 +168,7 @@ def test_no_open_event_creates_and_closes_it_for_the_current_list(client):
     _team_with_school()
 
     lines = _close_out(
-        client, confirm="yolo", event_name="Invitational 1", event_date="2026-10-03", event_type="invitational"
+        client, confirm="yolo", new_name="Invitational 1", new_date="2026-10-03", new_type="invitational"
     )
 
     assert lines[-1] == {"done": True, "success": True, "message": "Closed out Invitational 1."}
@@ -184,7 +183,7 @@ def test_a_new_event_is_refused_when_an_event_opened_since_the_page_loaded(clien
     event = _open_event()
 
     lines = _close_out(
-        client, confirm="yolo", event_name="Invitational 1", event_date="2026-10-03", event_type="invitational"
+        client, confirm="yolo", new_name="Invitational 1", new_date="2026-10-03", new_type="invitational"
     )
 
     assert lines[-1] == {
@@ -206,7 +205,7 @@ def test_the_page_offers_close_out_for_the_open_event_once_stopped(client):
     page = _page(client)
 
     assert BUTTON in page
-    assert "Open event: <strong>Inv</strong>" in page
+    assert "Inv (2026) is open and teams have scores." in page
     assert 'id="close_out_name"' not in page
 
 
@@ -218,7 +217,7 @@ def test_the_page_hides_close_out_while_the_competition_runs(client):
     page = _page(client)
 
     assert BUTTON not in page
-    assert "Stop the competition before closing out the event." in page
+    assert "Stop the competition first." in page
 
 
 def test_with_no_event_open_the_page_asks_for_the_event_and_names_the_season(client):
@@ -229,7 +228,7 @@ def test_with_no_event_open_the_page_asks_for_the_event_and_names_the_season(cli
 
     assert BUTTON in page
     assert 'id="close_out_name"' in page
-    assert "New event in season <strong>2026</strong>" in page
+    assert "new event in season <strong>2026</strong>" in page
 
 
 def test_after_closing_out_the_page_points_at_the_next_import(client):
@@ -272,3 +271,37 @@ def test_the_page_shows_no_warnings_while_close_out_is_not_offered(client):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
 
     assert "Unfinished work" not in _page(client)
+
+
+def test_right_after_an_import_the_page_offers_no_close_out(client, gold_team_user):
+    from team.models import DiscordLink
+
+    _open_event()
+    team = _team_with_school()
+    ServiceScore.objects.all().delete()
+    DiscordLink.objects.create(team=team, discord_id=7, discord_username="blue", user=gold_team_user)
+
+    page = _page(client)
+
+    assert BUTTON not in page
+    assert "No team has scores yet, so there is nothing to close out for Inv (2026)." in page
+
+
+def test_with_no_season_active_close_out_records_the_scores_in_a_new_season(client):
+    Season.objects.create(name="2025", year=2025)
+    _team_with_school()
+
+    page = _page(client)
+    lines = _close_out(
+        client,
+        confirm="yolo",
+        new_name="Invitational 1",
+        new_date="2026-10-03",
+        new_type="invitational",
+        new_season_name="2026-2027",
+        new_season_year="2027",
+    )
+
+    assert 'id="close_out_season_name"' in page
+    assert lines[-1]["success"], lines
+    assert EventResult.objects.get().event.season == Season.objects.get(year=2027, is_active=True)

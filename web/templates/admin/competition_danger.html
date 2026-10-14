@@ -10,9 +10,11 @@
                        parent_label="Competition" />
         {% if leftovers %}
             <c-action_box variant="warning" heading="Clear Leftover Data">
+                <p class="mb-15">{{ stage.status }}</p>
                 <p class="mb-15">
-                    No event is open, but live data arrived after the last event was closed out. It belongs to no event
-                    and is not archived: clearing it deletes it for good. Closed out events' results are not touched.
+                    It is not archived: clearing it deletes it for good. To keep scores, record them with Close Out
+                    Event on the <a href="{% url 'admin_competition' %}">Competition</a> page instead. Closed-out events'
+                    results are not touched.
                 </p>
                 <p class="mb-15">As of loading this page: {{ leftovers }}.</p>
                 <c-link href="#"
@@ -63,9 +65,9 @@
 
             clearLeftovers() {
                 const message = 'CLEAR LEFTOVER DATA?\n\n' +
-                    'This deletes all live data that arrived after the last close-out, including any added since this page loaded.\n' +
-                    'It belongs to no event and is NOT archived.\n' +
-                    'Closed out events\' results are kept.\n\n' +
+                    'This deletes all live data not recorded at any event, including any added since this page loaded.\n' +
+                    'It is NOT archived.\n' +
+                    'Closed-out events\' results are kept.\n\n' +
                     'Type "yolo" to confirm:';
                 const response = prompt(message);
                 if (response && response.toLowerCase() === 'yolo') {
