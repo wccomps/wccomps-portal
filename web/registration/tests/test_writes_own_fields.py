@@ -97,11 +97,8 @@ def _post_event_admin(event, **changes):
     data |= {
         "name": "Renamed",
         "date": "2026-10-03",
-        "reminder_days": "[7]",
         "registration_deadline_0": "",
         "registration_deadline_1": "",
-        "last_reminder_sent_0": "",
-        "last_reminder_sent_1": "",
         "team_assignments-TOTAL_FORMS": "0",
         "team_assignments-INITIAL_FORMS": "0",
     }

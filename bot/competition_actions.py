@@ -231,8 +231,6 @@ async def run_competition_cleanup(
                                     logger.warning(f"Could not remove helper role from {member}: {e}")
 
                 discord_link.is_student_helper = False
-                discord_link.helper_removal_reason = "Competition cleanup"
-                discord_link.helper_deactivated_at = timezone.now()
                 await discord_link.asave()
                 helpers_removed += 1
 

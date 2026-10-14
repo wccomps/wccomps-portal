@@ -177,9 +177,6 @@ class Event(models.Model):
     is_finalized = models.BooleanField(default=False)
     max_teams = models.IntegerField(default=50)
 
-    reminder_days = models.JSONField(default=list, blank=True)
-    last_reminder_sent = models.DateTimeField(null=True, blank=True)
-
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -268,7 +265,6 @@ class EventTeamAssignment(models.Model):
     team = models.ForeignKey("team.Team", on_delete=models.CASCADE, related_name="event_assignments")
     assigned_at = models.DateTimeField(auto_now_add=True)
     credentials_sent_at = models.DateTimeField(null=True, blank=True)
-    password_generated = models.CharField(max_length=100, blank=True)
 
     class Meta:
         constraints = [

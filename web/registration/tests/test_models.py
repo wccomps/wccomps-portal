@@ -187,7 +187,6 @@ class TestEvent:
         assert str(event.start_time)[:5] == "09:00"
         assert str(event.end_time)[:5] == "17:00"
         assert event.max_teams == 50
-        assert event.reminder_days == []
 
     def test_string_representation(self, season):
         """Test string representation."""

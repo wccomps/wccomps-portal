@@ -132,20 +132,6 @@ class DiscordLink(models.Model):
         blank=True,
         help_text="Discord role ID (snowflake)",
     )
-    helper_activated_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="When helper access was granted",
-    )
-    helper_deactivated_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="When helper access was revoked",
-    )
-    helper_removal_reason = models.TextField(
-        blank=True,
-        help_text="Reason for helper access removal",
-    )
 
     class Meta:
         indexes = [
@@ -163,23 +149,6 @@ class DiscordLink(models.Model):
         if self.team:
             return f"{self.discord_username} → Team {self.team.team_number}"
         return f"{self.discord_username} → {self.user.username}"
-
-    def set_helper(self, role_name: str, role_id: int | None = None) -> None:
-        self.is_student_helper = True
-        self.helper_role_name = role_name
-        if role_id is not None:
-            self.helper_role_id = role_id
-        self.helper_activated_at = timezone.now()
-        self.helper_deactivated_at = None
-        self.helper_removal_reason = ""
-        self.save()
-
-    def remove_helper(self, reason: str = "") -> None:
-        if self.is_student_helper:
-            self.is_student_helper = False
-            self.helper_deactivated_at = timezone.now()
-            self.helper_removal_reason = reason
-            self.save()
 
     @classmethod
     def deactivate_previous_links(cls, discord_id: int, exclude_pk: int | None = None) -> int:

@@ -37,7 +37,6 @@ class OrangeCheck(models.Model):
     scheduled_at = models.DateTimeField(null=True, blank=True, help_text="When assignments go live")
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="created_checks")
     created_at = models.DateTimeField(auto_now_add=True)
-    closed_at = models.DateTimeField(null=True, blank=True)
     max_points = models.PositiveIntegerField(default=0, help_text="Max score when the check has no criteria")
     time_limit = models.DurationField(
         null=True, blank=True, help_text="How long the window stays open from scheduled_at"
