@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
-from django.db import connection
+from django.db import OperationalError, connection
 from django.utils import timezone
 from packets.models import Packet
 from scoring.export import DATASETS
@@ -438,3 +438,66 @@ def test_two_close_outs_at_once_close_it_out_once(event):
     assert "no longer open" in str(errors[0])
     assert EventResult.objects.filter(event=event).count() == 2
     assert len(_cleanups()) == 1
+
+
+def _while_closing_out(change):
+    """Patch the wipe so another connection commits change between the freeze and the wipe."""
+    from registration import services
+
+    real_wipe = services.wipe_competition_data
+
+    def wipe():
+        def run():
+            try:
+                change()
+            finally:
+                connection.close()
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        thread.join()
+        return real_wipe()
+
+    return patch("registration.services.wipe_competition_data", wipe)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_score_changed_while_closing_out_refuses_and_writes_nothing(event):
+    """At READ COMMITTED the wipe would delete the new points without their being frozen."""
+    with (
+        _while_closing_out(lambda: ServiceScore.objects.filter(team__team_number=2).update(service_points=400)),
+        pytest.raises(CloseOutError, match="^Scores changed while closing out, so nothing was changed. Try again.$"),
+    ):
+        close_out_event(event, "gold")
+
+    _assert_nothing_written(event)
+    assert ServiceScore.objects.get(team__team_number=2).service_points == 400
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_row_created_while_closing_out_stays_as_live_data(event):
+    def grade():
+        InjectScore.objects.create(
+            team=Team.objects.get(team_number=1), inject_id="9", inject_name="Late", points_awarded=5
+        )
+
+    with _while_closing_out(grade):
+        close_out_event(event, "gold")
+
+    assert list(InjectScore.objects.values_list("inject_id", flat=True)) == ["9"]
+    assert event_stage().stage == Stage.UNRECORDED
+
+
+def test_a_serialization_failure_inside_a_callers_transaction_is_a_refusal(event):
+    class CouldNotSerializeError(Exception):
+        pgcode = "40001"
+
+    failure = OperationalError("could not serialize access due to concurrent update")
+    failure.__cause__ = CouldNotSerializeError()
+
+    with (
+        patch("registration.services.wipe_competition_data", side_effect=failure),
+        pytest.raises(CloseOutError, match="Scores changed while closing out"),
+    ):
+        close_out_event(event, "gold")
+    _assert_nothing_written(event)

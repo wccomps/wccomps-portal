@@ -2,7 +2,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 
-from django.db import transaction
+from django.db import OperationalError, connection, transaction
 from django.db.models import Exists, OuterRef, QuerySet
 from packets.models import Packet
 from scoring.calculator import Standing, compute_standings
@@ -17,7 +17,7 @@ from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnounce
 from team.models import DiscordLink, SchoolInfo, Team, default_team_name
 from ticketing.models import Ticket
 
-from .locks import school_list_lock
+from .locks import school_list_held, school_list_lock
 from .models import (
     Event,
     EventArchive,
@@ -443,8 +443,33 @@ class CloseOutOutcome:
     wiped: WipedData
 
 
-@transaction.atomic
+# PostgreSQL's could-not-serialize error, raised in a REPEATABLE READ transaction that would overwrite a newer row
+SERIALIZATION_FAILURE = "40001"
+SCORES_CHANGED = "Scores changed while closing out, so nothing was changed. Try again."
+
+
 def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
+    """Close out the event (see _close_out). As the outermost transaction it runs at REPEATABLE READ, so the results
+    it freezes, the archive and the rows it deletes are one snapshot: a score changed meanwhile makes it refuse with
+    SCORES_CHANGED, writing nothing, and rows created after its snapshot stay as live data. Inside a caller's
+    transaction, that transaction's isolation applies.
+    """
+    try:
+        if connection.in_atomic_block:
+            return _close_out(target, actor)
+        # The lock first: inside the transaction it would come after the snapshot
+        with school_list_held(), transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            return _close_out(target, actor)
+    except OperationalError as e:
+        if getattr(e.__cause__, "pgcode", None) == SERIALIZATION_FAILURE:
+            raise CloseOutError(SCORES_CHANGED) from e
+        raise
+
+
+@transaction.atomic
+def _close_out(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
     """Freeze the event's results and export archive, then delete the live data, close the event, reset the schedule,
     start message, Quotient box list and queued announcements, and queue the Discord-only cleanup, all committed
     together. target is what the page showed: the open event, or with
