@@ -85,3 +85,17 @@ def test_the_admin_shows_is_active_read_only_and_activates_through_its_action():
     old.refresh_from_db()
     assert not old.is_active
     assert Season.objects.active() == new
+
+
+def test_the_season_form_saves_and_activates_in_one_transaction():
+    from unittest.mock import patch
+
+    from registration.forms import SeasonForm
+
+    form = SeasonForm({"name": "2026", "year": 2026, "is_active": "on"})
+    assert form.is_valid()
+
+    with patch.object(Season, "activate", side_effect=RuntimeError("lock wait timeout")), pytest.raises(RuntimeError):
+        form.save()
+
+    assert not Season.objects.filter(year=2026).exists()

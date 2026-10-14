@@ -1,4 +1,5 @@
 from django import forms
+from django.db import transaction
 
 from .models import Event, RegistrationContact, Season, TeamRegistration
 from .services import NewEvent, NewSeason, new_event_problem
@@ -117,7 +118,9 @@ class SeasonForm(forms.ModelForm[Season]):
             self.fields["is_active"].initial = True
             self.fields["is_active"].disabled = True
 
+    @transaction.atomic
     def save(self, commit: bool = True) -> Season:
+        """Save the season and, when checked, activate it, together."""
         season = super().save(commit=commit)
         if commit and self.cleaned_data["is_active"] and not season.is_active:
             season.activate()
