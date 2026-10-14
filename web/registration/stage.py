@@ -29,8 +29,8 @@ STAGE_TEXT: dict[Stage, tuple[str, str]] = {
     ),
     Stage.READY: (
         "{event} is open. No team has scores yet.",
-        "Start the competition when it is time. To call the event off, use Cancel event on the competition Danger "
-        "Zone page.",
+        "Send the packets and check readiness, then start the competition when it is time. To call the event off, "
+        "use Cancel event on the competition Danger Zone page.",
     ),
     Stage.PLAYED: (
         "{event} is open and teams have scores.",
@@ -46,6 +46,10 @@ STAGE_TEXT: dict[Stage, tuple[str, str]] = {
         "Remove it with Clear leftover data on the competition Danger Zone page, then import the next school list.",
     ),
 }
+
+
+# The next step while the competition runs, whatever the stage
+RUNNING_NEXT_STEP = "When the competition ends, stop it with Stop Competition on the Competition page."
 
 
 def scored_teams() -> QuerySet[Team]:
@@ -79,7 +83,7 @@ class EventStage:
 
     @property
     def next_step(self) -> str:
-        return "Stop the competition first." if self.running else STAGE_TEXT[self.stage][1]
+        return RUNNING_NEXT_STEP if self.running else STAGE_TEXT[self.stage][1]
 
 
 def event_stage() -> EventStage:

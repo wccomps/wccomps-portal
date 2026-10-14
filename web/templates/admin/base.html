@@ -6,6 +6,7 @@
 {% block content %}
     <c-nav>
         <c-nav_item name="competition" href="{% url 'admin_competition' %}">Competition</c-nav_item>
+        <c-nav_item name="guide" href="{% url 'admin_competition_guide' %}">Running an Event</c-nav_item>
         <c-nav_item name="config" href="{% url 'scoring:scoring_config' %}">Configuration</c-nav_item>
         <c-nav_item name="export" href="{% url 'scoring:export_index' %}">Export Data</c-nav_item>
         <c-nav_item name="teams" href="{% url 'admin_teams' %}">Teams</c-nav_item>

@@ -11,6 +11,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonRespons
 from django.shortcuts import render
 from django.urls import reverse
 from registration.close_out_checks import close_out_warnings
+from registration.event_steps import event_facts, event_panel
 from registration.models import Event, Season
 from registration.services import (
     CloseOutError,
@@ -493,6 +494,7 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
     close_out_refusal = close_out_problem(stage, check_schools=False)
     context = {
         "stage": stage,
+        "panel": event_panel(event_facts(stage)),
         "open_event": stage.event,
         "can_close_out": not close_out_refusal,
         # Shown where the module offers no button for a reason the operator can act on
@@ -563,3 +565,9 @@ def admin_competition_danger(request: HttpRequest) -> HttpResponse:
             "nav_active": "ops_admin",
         },
     )
+
+
+@require_permission("admin", "gold_team")
+def admin_competition_guide(request: HttpRequest) -> HttpResponse:
+    """Running an event, step by step, in plain words."""
+    return render(request, "admin/competition_guide.html", {"show_ops_nav": True, "nav_active": "ops_admin"})

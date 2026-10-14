@@ -58,6 +58,7 @@ urlpatterns = [
     path("ops/admin/competition/action/", admin_views.admin_competition_action, name="admin_competition_action"),
     path("ops/admin/competition/apps/", admin_views.admin_competition_apps, name="admin_competition_apps"),
     path("ops/admin/competition/danger/", admin_views.admin_competition_danger, name="admin_competition_danger"),
+    path("ops/admin/competition/guide/", admin_views.admin_competition_guide, name="admin_competition_guide"),
     path("ops/admin/teams/", admin_views.admin_teams, name="admin_teams"),
     path("ops/admin/teams/bulk/", admin_views.admin_teams_bulk_action, name="admin_teams_bulk_action"),
     path("ops/admin/teams/<int:team_number>/", admin_views.admin_team_detail, name="admin_team_detail"),

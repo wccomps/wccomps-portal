@@ -6,26 +6,38 @@
 {% block admin_content %}
     <div x-data="competitionAdmin">
         <c-page_header title="Competition Management" />
-        {% if not config.competition_start_time and not config.controlled_applications and linked_users == 0 %}
-            <c-alert variant="info">
-                <strong>Getting Started</strong>
-                <ol class="mb-0 mt-5">
-                    <li>
-                        Set <strong>Max Team Members</strong> and add <strong>Controlled Apps</strong> below
+        <c-module id="event-panel">
+            <c-slot name="title">
+                Event
+            </c-slot>
+            <p class="font-semibold">{{ panel.title }}</p>
+            <p>{{ panel.status }}</p>
+            <p>
+                <strong>Next step:</strong> {{ panel.next_step }}
+            </p>
+            <c-button_row>
+                {% if panel.action %}
+                    <a href="{{ panel.action.url }}" class="button default">{{ panel.action.label }}</a>
+                {% endif %}
+                <a href="{% url 'admin_competition_guide' %}">How this works</a>
+            </c-button_row>
+            <ol class="ml-20 mt-15">
+                {% for row in panel.steps %}
+                    <li class="py-5">
+                        <c-badge variant="{{ row.state.badge }}">
+                            {{ row.state.label }}
+                        </c-badge>
+                        <a href="{{ row.step.link.url }}"
+                           class="font-semibold"
+                           {% if row.state == 'current' %}aria-current="step"{% endif %}>{{ row.step.label }}</a>
+                        <span class="text-muted text-sm">{{ row.step.help }}</span>
+                        {% if row.detail %}<div class="text-sm">{{ row.detail }}</div>{% endif %}
+                        {% if row.close_out_checks %}<div class="text-sm" x-text="closeOutSummary"></div>{% endif %}
                     </li>
-                    <li>
-                        Set the competition <strong>Schedule</strong> (start and end times)
-                    </li>
-                    <li>
-                        Sync <strong>Quotient Metadata</strong> for service scoring
-                    </li>
-                    <li>
-                        Click <strong>Start Competition</strong> when ready
-                    </li>
-                </ol>
-            </c-alert>
-        {% endif %}
-        <c-module>
+                {% endfor %}
+            </ol>
+        </c-module>
+        <c-module class="mt-20">
             <c-slot name="title">
                 Competition Status
             </c-slot>
@@ -222,10 +234,96 @@
         </c-module>
         <c-module class="mt-20">
             <c-slot name="title">
+                Quotient Integration
+            </c-slot>
+            {% if quotient_metadata %}
+                <div class="d-flex gap-20 items-center flex-wrap">
+                    <span><strong>Last Synced:</strong> {{ quotient_metadata.last_synced|date:"Y-m-d H:i:s" }}</span>
+                    {% if quotient_metadata.event_name %}
+                        <span><strong>Event:</strong> {{ quotient_metadata.event_name }}</span>
+                    {% endif %}
+                    <span><strong>Teams:</strong> {{ quotient_metadata.team_count }}</span>
+                    <span><strong>Boxes:</strong> {{ quotient_metadata.boxes|length }}</span>
+                </div>
+            {% else %}
+                <p class="text-muted">Metadata not synced yet.</p>
+            {% endif %}
+            <c-button_row>
+                <c-button variant="default" @click="syncQuotient" ::disabled="loading">
+                    Sync Metadata
+                </c-button>
+            </c-button_row>
+        </c-module>
+        <c-module class="mt-20" id="readiness">
+            <c-slot name="title">
+                Readiness Check
+            </c-slot>
+            <p class="text-muted mb-15">Run all checks to verify the system is ready for competition.</p>
+            <c-button_row>
+                <c-button variant="default"
+                          @click="runReadinessChecks"
+                          ::disabled="readinessLoading">
+                    <span x-show="notReadinessLoading">Run Checks</span>
+                    <span x-show="readinessLoading">Running...</span>
+                </c-button>
+            </c-button_row>
+            <template x-if="hasReadinessResults">
+                <div class="mt-15">
+                    <template x-for="(r, idx) in readinessResults" :key="idx">
+                        <div class="d-flex items-center gap-10 py-5 border-bottom">
+                            <span x-show="r.isPass" class="text-success font-bold" aria-label="Pass">✓</span>
+                            <span x-show="r.isFail" class="text-danger font-bold" aria-label="Fail">✗</span>
+                            <span x-show="r.isWarn" class="text-warning font-bold" aria-label="Warning">⚠</span>
+                            <span class="font-semibold" x-text="r.step"></span>
+                            <span class="text-muted text-sm" x-text="r.detail"></span>
+                            <template x-if="r.isLinkAction">
+                                <a :href="r.actionUrl"
+                                   class="btn btn-sm btn-outline-primary ms-auto"
+                                   x-text="r.actionLabel"></a>
+                            </template>
+                            <template x-if="r.isFixAction">
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-warning ms-auto"
+                                        @click="doReadinessFix"
+                                        :data-fix="r.fixKey"
+                                        :disabled="readinessFixing"
+                                        x-text="r.actionLabel"></button>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </template>
+            <template x-if="readinessOk">
+                <c-alert variant="success" class="mt-15">
+                    <span x-text="readinessSummary"></span>
+                </c-alert>
+            </template>
+            <template x-if="readinessNotOk">
+                <c-alert variant="warning" class="mt-15">
+                    <span x-text="readinessSummary"></span>
+                </c-alert>
+            </template>
+        </c-module>
+        <c-module class="mt-20" id="controls">
+            <c-slot name="title">
+                Competition Controls
+            </c-slot>
+            <c-button_row>
+                <c-button variant="primary" @click="startCompetition" ::disabled="loading">
+                    Start Competition
+                </c-button>
+                <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
+                    Stop Competition
+                </c-button>
+            </c-button_row>
+            <template x-if="notCloseOutStreaming">
+                <c-progress_bar />
+            </template>
+        </c-module>
+        <c-module class="mt-20" id="close-out">
+            <c-slot name="title">
                 Close Out Event
             </c-slot>
-            <p>{{ stage.status }}</p>
-            <p class="help-text">Next: {{ stage.next_step }}</p>
             {% if can_close_out %}
                 {% if not open_event %}
                     {% if active_season %}
@@ -332,97 +430,11 @@
                 <p class="help-text">{{ close_out_refusal }}</p>
             {% endif %}
         </c-module>
-        <c-module class="mt-20">
+        <h2 class="mt-20" id="advanced">Advanced</h2>
+        <p class="help">Tools outside the normal run of an event.</p>
+        <c-module>
             <c-slot name="title">
-                Quotient Integration
-            </c-slot>
-            {% if quotient_metadata %}
-                <div class="d-flex gap-20 items-center flex-wrap">
-                    <span><strong>Last Synced:</strong> {{ quotient_metadata.last_synced|date:"Y-m-d H:i:s" }}</span>
-                    {% if quotient_metadata.event_name %}
-                        <span><strong>Event:</strong> {{ quotient_metadata.event_name }}</span>
-                    {% endif %}
-                    <span><strong>Teams:</strong> {{ quotient_metadata.team_count }}</span>
-                    <span><strong>Boxes:</strong> {{ quotient_metadata.boxes|length }}</span>
-                </div>
-            {% else %}
-                <p class="text-muted">Metadata not synced yet.</p>
-            {% endif %}
-            <c-button_row>
-                <c-button variant="default" @click="syncQuotient" ::disabled="loading">
-                    Sync Metadata
-                </c-button>
-            </c-button_row>
-        </c-module>
-        <c-module class="mt-20">
-            <c-slot name="title">
-                Readiness Check
-            </c-slot>
-            <p class="text-muted mb-15">Run all checks to verify the system is ready for competition.</p>
-            <c-button_row>
-                <c-button variant="default"
-                          @click="runReadinessChecks"
-                          ::disabled="readinessLoading">
-                    <span x-show="notReadinessLoading">Run Checks</span>
-                    <span x-show="readinessLoading">Running...</span>
-                </c-button>
-            </c-button_row>
-            <template x-if="hasReadinessResults">
-                <div class="mt-15">
-                    <template x-for="(r, idx) in readinessResults" :key="idx">
-                        <div class="d-flex items-center gap-10 py-5 border-bottom">
-                            <span x-show="r.isPass" class="text-success font-bold" aria-label="Pass">✓</span>
-                            <span x-show="r.isFail" class="text-danger font-bold" aria-label="Fail">✗</span>
-                            <span x-show="r.isWarn" class="text-warning font-bold" aria-label="Warning">⚠</span>
-                            <span class="font-semibold" x-text="r.step"></span>
-                            <span class="text-muted text-sm" x-text="r.detail"></span>
-                            <template x-if="r.isLinkAction">
-                                <a :href="r.actionUrl"
-                                   class="btn btn-sm btn-outline-primary ms-auto"
-                                   x-text="r.actionLabel"></a>
-                            </template>
-                            <template x-if="r.isFixAction">
-                                <button type="button"
-                                        class="btn btn-sm btn-outline-warning ms-auto"
-                                        @click="doReadinessFix"
-                                        :data-fix="r.fixKey"
-                                        :disabled="readinessFixing"
-                                        x-text="r.actionLabel"></button>
-                            </template>
-                        </div>
-                    </template>
-                </div>
-            </template>
-            <template x-if="readinessOk">
-                <c-alert variant="success" class="mt-15">
-                    <span x-text="readinessSummary"></span>
-                </c-alert>
-            </template>
-            <template x-if="readinessNotOk">
-                <c-alert variant="warning" class="mt-15">
-                    <span x-text="readinessSummary"></span>
-                </c-alert>
-            </template>
-        </c-module>
-        <c-module class="mt-20">
-            <c-slot name="title">
-                Competition Controls
-            </c-slot>
-            <c-button_row>
-                <c-button variant="primary" @click="startCompetition" ::disabled="loading">
-                    Start Competition
-                </c-button>
-                <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
-                    Stop Competition
-                </c-button>
-            </c-button_row>
-            <template x-if="notCloseOutStreaming">
-                <c-progress_bar />
-            </template>
-        </c-module>
-        <c-module class="mt-20">
-            <c-slot name="title">
-                Post-Competition
+                Reset Team Passwords
             </c-slot>
             <form @submit.prevent="resetPasswords">
                 <c-form_field label="Team Numbers"
@@ -455,11 +467,18 @@
                     </c-button_row>
                 </c-action_box>
             </template>
-            <div class="mt-20">
-                <c-link href="{% url 'admin_competition_danger' %}" variant="danger">
-                    Danger Zone →
-                </c-link>
-            </div>
+        </c-module>
+        <c-module class="mt-20">
+            <c-slot name="title">
+                Danger Zone
+            </c-slot>
+            <p class="help">
+                Cancel an event opened by mistake or called off before any team scored, or clear data left over that no
+                event recorded.
+            </p>
+            <c-link href="{% url 'admin_competition_danger' %}" variant="danger">
+                Danger Zone →
+            </c-link>
         </c-module>
         <c-toast />
     </div>
@@ -525,6 +544,13 @@ document.addEventListener('alpine:init', () => {
         get closeOutStreaming() { return this.streamAction === 'close_out_event'; },
         get notCloseOutStreaming() { return !this.closeOutStreaming; },
         get hasCloseOutWarnings() { return this.closeOutWarnings.length > 0; },
+        get closeOutSummary() {
+            if (this.closeOutChecking) return 'Checking for unfinished work...';
+            if (this.closeOutCheckFailed) return "Couldn't check unfinished work: check grading, tickets and the scorecard emails by hand.";
+            const count = this.closeOutWarnings.length;
+            if (count === 0) return 'No unfinished work found, and the scorecards went out with the current scores.';
+            return (count === 1 ? '1 item' : count + ' items') + ' to finish: see Close Out Event below.';
+        },
         get closeOutBlocked() { return this.loading || this.closeOutChecking || !!this.closeOutProblem; },
         get addDisabled() { return this.loading || !this.newApp; },
         get notReadinessLoading() { return !this.readinessLoading; },
