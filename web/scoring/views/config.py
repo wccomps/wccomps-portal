@@ -10,7 +10,7 @@ from core.auth_utils import require_permission
 
 from ..forms import ScoringTemplateForm
 from ..models import QuotientMetadataCache, ScoringTemplate
-from ..quotient_sync import sync_quotient_metadata, sync_service_scores
+from ..quotient_sync import sync_service_scores
 
 
 @require_permission("gold_team", error_message="Only Gold Team members can access this")
@@ -44,19 +44,6 @@ def scoring_config(request: HttpRequest) -> HttpResponse:
         "metadata": metadata,
     }
     return render(request, "scoring/scoring_config.html", context)
-
-
-@require_permission("gold_team", error_message="Only Gold Team members can access this")
-@require_http_methods(["POST"])
-def sync_metadata(request: HttpRequest) -> HttpResponse:
-    try:
-        sync_quotient_metadata(cast(User, request.user))
-        messages.success(request, "Metadata synced successfully")
-    except ValueError as e:
-        messages.error(request, f"Failed to sync metadata: {e}")
-    except Exception as e:
-        messages.error(request, f"Unexpected error syncing metadata: {e}")
-    return redirect("scoring:scoring_config")
 
 
 @require_permission("gold_team", error_message="Only Gold Team members can access this")
