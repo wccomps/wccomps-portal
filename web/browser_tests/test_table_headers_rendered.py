@@ -93,16 +93,7 @@ def test_table_headers_line_up_on_every_page(live_server, pw_browser):
     ]
     # Not in PAGES: the role tests there would call the real Quotient
     urls.append(("scoring:inject_grading", reverse("scoring:inject_grading") + "?inject=1"))
-    inject = Inject(
-        inject_id=1,
-        title="Inject 1",
-        description="",
-        open_time=None,
-        due_time=None,
-        close_time=None,
-        files=[],
-        submissions=[],
-    )
+    inject = Inject(inject_id=1, title="Inject 1", description="")
 
     context = create_session_context(pw_browser, live_server, viewer)
     page = context.new_page()
