@@ -236,8 +236,9 @@ class SchoolListRow:
 
 @transaction.atomic
 def import_school_list(event: Event, rows: list[SchoolListRow], updated_by: str) -> dict[str, int]:
-    """Replace the school list with the rows and open the event (saving it first when new), replacing its
-    assignments: each row's school holds the row's team. Resets every team name and activates the rows' teams.
+    """Replace the school list with the rows and open the event (saving it first when new, and its season when new
+    too, as the only active season), replacing its assignments: each row's school holds the row's team. Resets every
+    team name and activates the rows' teams.
 
     Under the school list lock; the event is re-checked under it, and ImportBlockedError says why the import can't
     go ahead.
@@ -248,6 +249,8 @@ def import_school_list(event: Event, rows: list[SchoolListRow], updated_by: str)
     teams = Team.objects.in_bulk([row.team_number for row in rows], field_name="team_number")
     if missing := [str(row.team_number) for row in rows if row.team_number not in teams]:
         raise ImportBlockedError(f"These teams no longer exist: {', '.join(missing)}. Upload the file again.")
+    if event.season._state.adding:
+        event.season = _create_active_season(event.season)
     if event._state.adding:
         event.save()
 
@@ -271,6 +274,26 @@ def import_school_list(event: Event, rows: list[SchoolListRow], updated_by: str)
             updated_by=updated_by,
         )
     return {"created": len(rows), "activated": activated}
+
+
+def new_season_problem(season: Season) -> str:
+    """Why the new season can't be created as the active one now, or ''."""
+    if active := Season.objects.active():
+        return f"The {active} season was activated since the preview. Upload the file again."
+    if taken := Season.objects.filter(year=season.year).first():
+        return f"The {taken} season already has the year {season.year}. Pick another year, or activate that season."
+    return ""
+
+
+def _create_active_season(season: Season) -> Season:
+    """Save the new season as the only active one. Call under the school list lock; ImportBlockedError says why
+    it can't be."""
+    if problem := new_season_problem(season):
+        raise ImportBlockedError(problem)
+    season.is_active = True
+    season.save()
+    Season.objects.exclude(pk=season.pk).filter(is_active=True).update(is_active=False)
+    return season
 
 
 ADD_NEEDS_OPEN_EVENT = "Add schools needs the open event. Use Replace for an event's first school list."

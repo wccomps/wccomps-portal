@@ -19,6 +19,7 @@ from registration.services import (
     held_schools,
     import_problem,
     import_school_list,
+    new_season_problem,
 )
 
 from team.models import SchoolInfo, Team, default_team_name
@@ -114,21 +115,39 @@ class CSVUploadForm(forms.Form):
 
 class ImportEventForm(forms.Form):
     """The event a school list is for: an unfinalized event of the active season, or a new one; and the import mode's
-    key (IMPORT_MODES), Replace when not given."""
+    key (IMPORT_MODES), Replace when not given. With no active season, the event is new and so is its season, which
+    the import creates as the active one."""
 
     event = forms.CharField(required=False)
     mode = forms.CharField(required=False)
     new_name = forms.CharField(max_length=255, required=False)
     new_date = forms.DateField(required=False)
     new_type = forms.CharField(required=False)
+    new_season_name = forms.CharField(max_length=100, required=False)
+    new_season_year = forms.IntegerField(min_value=2000, max_value=2100, required=False)
 
     # After validation: the chosen event, or an unsaved new one the import saves; and the mode's key
     event_to_import: Event
     import_mode: str
 
-    def __init__(self, *args: object, season: Season, **kwargs: object) -> None:
+    def __init__(self, *args: object, season: Season | None, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         self.season = season
+
+    def _season_for_new_event(self, data: dict[str, object]) -> Season:
+        """The active season, or with none the new season from the form, unsaved."""
+        if self.season is not None:
+            if data.get("new_season_name") or data.get("new_season_year"):
+                raise ValidationError(
+                    f"The {self.season} season was activated since the preview. Upload the file again."
+                )
+            return self.season
+        if not data.get("new_season_name") or not data.get("new_season_year"):
+            raise ValidationError("No season is active: give the new season a name and a year.")
+        season = Season(name=str(data["new_season_name"]), year=int(str(data["new_season_year"])), is_active=True)
+        if problem := new_season_problem(season):
+            raise ValidationError(problem)
+        return season
 
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}
@@ -140,12 +159,14 @@ class ImportEventForm(forms.Form):
                 raise ValidationError("Pick the new event's type.")
             # Schools come from the list, so the public registration form doesn't offer it
             self.event_to_import = Event(
-                season=self.season,
+                season=self._season_for_new_event(data),
                 name=data["new_name"],
                 date=data["new_date"],
                 event_type=data["new_type"],
                 registration_open=False,
             )
+        elif self.season is None:
+            raise ValidationError("No season is active: import into a new event, with a new season.")
         elif not choice.isdecimal():
             raise ValidationError("Pick the event this school list is for.")
         else:
