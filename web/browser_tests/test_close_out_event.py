@@ -86,3 +86,33 @@ def test_a_failing_check_leaves_close_out_usable(live_server, pw_browser):
             assert page.get_by_role("button", name="Start Competition").is_enabled()
     finally:
         context.close()
+
+
+def test_cancel_event_on_the_danger_page(live_server, pw_browser):
+    from registration.models import Event, Season
+    from registration.services import set_team_school
+
+    from team.models import Team
+
+    season = Season.objects.create(name="2026", year=2026, is_active=True)
+    event = Event.objects.create(
+        season=season, name="Invitational", event_type="invitational", date=date(2026, 10, 3), is_active=True
+    )
+    team, _ = Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01", "is_active": True})
+    set_team_school(team, "Example University", contact_email="coach@example.edu")
+    user = _create_role_user("admin", None)
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    page.on("dialog", lambda dialog: dialog.accept("yolo"))
+
+    try:
+        page.goto(f"{live_server.url}/ops/admin/competition/danger/")
+        with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):
+            page.get_by_text("Cancel Event", exact=True).last.click()
+        page.get_by_text("Invitational cancelled. The school list stays.").wait_for()
+
+        event.refresh_from_db()
+        assert not event.is_active
+        assert not event.team_assignments.exists()
+    finally:
+        context.close()

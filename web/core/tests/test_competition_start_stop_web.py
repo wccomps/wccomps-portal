@@ -286,3 +286,61 @@ def test_clearing_leftovers_keeps_the_schedule(admin_client):
 
     config = CompetitionConfig.get_config()
     assert (config.competition_start_time, config.competition_end_time) == (now, now)
+
+
+def _scoreless_open_event():
+    event = _open_event()
+    _team_with_school()
+    return event
+
+
+def test_the_danger_page_offers_cancel_only_for_an_open_event_with_no_scores(admin_client):
+    from scoring.models import ServiceScore
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
+    _scoreless_open_event()
+    offered = admin_client.get(reverse("admin_competition_danger")).content.decode()
+    ServiceScore.objects.create(team_id=_team_with_school().pk, service_points=1)
+    scored = admin_client.get(reverse("admin_competition_danger")).content.decode()
+
+    assert '@click.prevent="guardedCancelEvent"' in offered
+    assert '@click.prevent="guardedCancelEvent"' not in scored
+
+
+def test_cancelling_from_the_danger_page(admin_client):
+    from core.models import AuditLog
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
+    event = _scoreless_open_event()
+
+    response = _post(admin_client, "cancel_event", open_event=event.pk, confirm="yolo")
+
+    assert response.json() == {"success": True, "message": "Inv cancelled. The school list stays."}
+    event.refresh_from_db()
+    assert not event.is_active
+    assert AuditLog.objects.filter(action="event_cancelled").exists()
+
+
+@pytest.mark.parametrize("typed", [None, "", "no"])
+def test_cancelling_needs_the_typed_confirmation(admin_client, typed):
+    event = _scoreless_open_event()
+
+    response = _post(admin_client, "cancel_event", open_event=event.pk, **({} if typed is None else {"confirm": typed}))
+
+    assert response.status_code == 400
+    assert response.json()["error"] == 'Type "yolo" to confirm.'
+    event.refresh_from_db()
+    assert event.is_active
+
+
+def test_cancelling_needs_admin_or_gold_access(client, create_user_with_groups):
+    event = _scoreless_open_event()
+    client.force_login(create_user_with_groups("nobody", []))
+
+    response = client.post(
+        reverse("admin_competition_action"), {"action": "cancel_event", "open_event": event.pk, "confirm": "yolo"}
+    )
+
+    assert response.status_code == 403
+    event.refresh_from_db()
+    assert event.is_active

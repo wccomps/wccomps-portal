@@ -78,6 +78,21 @@ class TypedConfirmForm(forms.Form):
         return typed
 
 
+class CancelEventForm(TypedConfirmForm):
+    """The open event the page showed, and the typed confirmation."""
+
+    open_event = forms.ModelChoiceField(
+        queryset=Event.objects.all(),
+        error_messages={
+            "required": "No event was shown. Reload the page.",
+            "invalid_choice": "That event no longer exists. Reload the page.",
+        },
+    )
+
+    def first_error(self) -> str:
+        return str(next(iter(self.errors.values()))[0])
+
+
 class CloseOutForm(TypedConfirmForm, NewEventFields):
     """What the page showed: the open event (its id), or with none open the event Close Out records the scores at
     (and its new season when none is active); and the typed confirmation."""

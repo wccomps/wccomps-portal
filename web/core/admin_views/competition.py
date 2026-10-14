@@ -15,6 +15,8 @@ from registration.models import Event, Season
 from registration.services import (
     CloseOutError,
     NewEvent,
+    cancel_event,
+    cancel_event_problem,
     clear_leftover_data,
     clear_leftovers_problem,
     close_out_event,
@@ -32,6 +34,7 @@ from core.discord_tasks import LogToChannel
 from core.forms import (
     ActionForm,
     AppSlugForm,
+    CancelEventForm,
     CloseOutForm,
     ResetPasswordsForm,
     SetMaxMembersForm,
@@ -314,6 +317,17 @@ def _action_clear_leftover_data(
     return JsonResponse({"success": True, "message": f"Leftover data cleared. Deleted: {_wiped_summary(wiped)}"})
 
 
+def _action_cancel_event(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
+    form = CancelEventForm(request.POST)
+    if not form.is_valid():
+        return JsonResponse({"error": form.first_error()}, status=400)
+    try:
+        event = cancel_event(form.cleaned_data["open_event"], authentik_username)
+    except CloseOutError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    return JsonResponse({"success": True, "message": f"{event.name} cancelled. The school list stays."})
+
+
 def _typed_confirmation_error(request: HttpRequest) -> JsonResponse | None:
     form = TypedConfirmForm(request.POST)
     if form.is_valid():
@@ -454,6 +468,7 @@ _COMPETITION_ACTION_HANDLERS = {
     "start_competition": _action_start_competition,
     "stop_competition": _action_stop_competition,
     "clear_leftover_data": _action_clear_leftover_data,
+    "cancel_event": _action_cancel_event,
     "reset_passwords": _action_reset_passwords,
     "sync_quotient": _action_sync_quotient,
     "readiness_check": action_readiness_check,
@@ -543,6 +558,7 @@ def admin_competition_danger(request: HttpRequest) -> HttpResponse:
             "config": config,
             "stage": stage,
             "leftovers": _wiped_summary(competition_data_counts()) if can_clear else "",
+            "can_cancel": not cancel_event_problem(stage),
             "show_ops_nav": True,
             "nav_active": "ops_admin",
         },

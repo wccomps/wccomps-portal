@@ -29,7 +29,8 @@ STAGE_TEXT: dict[Stage, tuple[str, str]] = {
     ),
     Stage.READY: (
         "{event} is open. No team has scores yet.",
-        "Start the competition when it is time.",
+        "Start the competition when it is time. To call the event off, use Cancel event on the competition Danger "
+        "Zone page.",
     ),
     Stage.PLAYED: (
         "{event} is open and teams have scores.",

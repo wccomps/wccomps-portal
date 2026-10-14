@@ -238,6 +238,11 @@ def import_problem(event: Event | NewEvent) -> str:
     stage = event_stage()
     open_now = stage.event
     if open_now and open_now != event:
+        if stage.stage == Stage.READY:
+            return (
+                f"{open_now} is still open, and no team has scores yet. To call it off, use Cancel event on the "
+                "competition Danger Zone page, then import the list for another event."
+            )
         return (
             f"{open_now} is still open. Close it out (Close Out Event on the Competition page) before importing a "
             "list for another event."
@@ -404,7 +409,10 @@ def close_out_problem(stage: EventStage, *, check_schools: bool = True) -> str:
     if stage.running:
         return "Stop the competition first."
     if stage.stage == Stage.READY:
-        return f"No team has scores yet, so there is nothing to close out for {stage.event}."
+        return (
+            f"No team has scores yet, so there is nothing to close out for {stage.event}. To call it off, use Cancel "
+            "event on the Danger Zone page."
+        )
     if stage.stage not in (Stage.PLAYED, Stage.UNRECORDED):
         return f"Nothing to close out. {stage.status} {stage.next_step}"
     return _unfreezable_problem(stage.event) if check_schools else ""
@@ -606,6 +614,8 @@ def clear_leftovers_problem(stage: EventStage) -> str:
     if stage.running:
         return "Competition must be stopped before clearing"
     if stage.event is not None:
+        if stage.stage == Stage.READY:
+            return f"{stage.event} is open: cancel it first (Cancel event), then clear the data left over."
         return f"{stage.event} is open: its data goes when it is closed out (Close Out Event)."
     if stage.stage == Stage.IDLE:
         return "There is no leftover data to clear."
@@ -641,6 +651,43 @@ def clear_leftover_data(actor: str) -> WipedData:
     return wiped
 
 
+def cancel_event_problem(stage: EventStage) -> str:
+    """Why the open event can't be cancelled now, or ''. Only an event no team has scored: scores are closed out."""
+    if stage.running:
+        return "Stop the competition first."
+    if stage.event is None:
+        return "No event is open."
+    if stage.stage != Stage.READY:
+        return f"{stage.event} has scores: close it out instead (Close Out Event on the Competition page)."
+    return ""
+
+
+@transaction.atomic
+def cancel_event(target: Event, actor: str) -> Event:
+    """Call off the open event before any team scored: close it and drop its assignments, so it can be deleted. The
+    school list stays (the next import replaces it), and packets keep their event. Live data with no scores (Discord
+    links, tickets) is then left over for Clear leftover data. Under the school list lock and the competition config
+    lock; CloseOutError, writing nothing, says why it refused."""
+    school_list_lock()
+    _refuse_while_running("Stop the competition first.")
+    stage = event_stage()
+    if stage.event != target:
+        raise CloseOutError(f"{target} is no longer open. Reload the page.")
+    if problem := cancel_event_problem(stage):
+        raise CloseOutError(problem)
+    event = Event.objects.select_for_update().get(pk=target.pk)
+    assignments, _ = event.team_assignments.all().delete()
+    event.close()
+    AuditLog.objects.create(
+        action="event_cancelled",
+        admin_user=actor,
+        target_entity="event",
+        target_id=event.pk,
+        details={"event": event.name, "assignments_deleted": assignments},
+    )
+    return event
+
+
 class EventKeptError(Exception):
     """The event, or an event in the season, is part of the season's history; the message says why."""
 
@@ -653,6 +700,8 @@ def event_delete_problem(event: Event) -> str:
         return f"{event} has finalized results, which are kept."
     if event.team_assignments.exists():
         return f"{event} has schools assigned to teams, which are kept as the season's history."
+    if Packet.objects.sent().filter(event=event).exists():
+        return f"Packets were sent for {event}; they are kept with it."
     return ""
 
 

@@ -8,6 +8,22 @@
         <c-page_header title="Competition Danger Zone"
                        parent_url="{% url 'admin_competition' %}"
                        parent_label="Competition" />
+        {% if can_cancel %}
+            <c-action_box variant="warning" heading="Cancel Event" class="mb-20">
+                <p class="mb-15">
+                    {{ stage.event }} is open and no team has scores yet. Cancelling calls it off: it closes the event
+                    and removes its team assignments, so it can be deleted. Nothing is recorded for it. The school list
+                    and sent packets stay; Discord links and tickets are left over for Clear leftover data.
+                </p>
+                <c-link href="#"
+                        variant="danger"
+                        @click.prevent="guardedCancelEvent"
+                        ::class="disabledClass">
+                    <span x-show="notLoading">Cancel Event</span>
+                    <span x-show="loading" x-cloak>Processing...</span>
+                </c-link>
+            </c-action_box>
+        {% endif %}
         {% if leftovers %}
             <c-action_box variant="warning" heading="Clear Leftover Data">
                 <p class="mb-15">{{ stage.status }}</p>
@@ -25,7 +41,7 @@
                     <span x-show="loading" x-cloak>Processing...</span>
                 </c-link>
             </c-action_box>
-        {% else %}
+        {% elif not can_cancel %}
             <p>
                 Nothing to clear. To close out an event (freeze its results, then delete its live data), use Close Out
                 Event on the <a href="{% url 'admin_competition' %}">Competition</a> page.
@@ -37,10 +53,23 @@
     document.addEventListener('alpine:init', () => {
         Alpine.data('competitionDanger', () => compose(toastMixin(), {
             loading: false,
+            openEvent: '{{ stage.event.pk|default_if_none:"" }}',
             get disabledClass() { return this.loading ? 'disabled' : ''; },
             get notLoading() { return !this.loading; },
 
             guardedClearLeftovers() { if (!this.loading) this.clearLeftovers(); },
+            guardedCancelEvent() { if (!this.loading) this.cancelEvent(); },
+
+            cancelEvent() {
+                const message = 'CANCEL THE OPEN EVENT?\n\n' +
+                    'It closes the event and removes its team assignments. Nothing is recorded for it.\n' +
+                    'The school list and sent packets stay.\n\n' +
+                    'Type "yolo" to confirm:';
+                const response = prompt(message);
+                if (response && response.toLowerCase() === 'yolo') {
+                    this.doAction('cancel_event', { confirm: response, open_event: this.openEvent });
+                }
+            },
 
             async doAction(action, data = {}) {
                 this.loading = true;
