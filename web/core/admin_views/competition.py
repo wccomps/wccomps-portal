@@ -410,7 +410,7 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
 
 def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
     try:
-        sync_quotient_metadata()
+        sync_quotient_metadata(cast(User, request.user))
         AuditLog.objects.create(
             action="quotient_metadata_synced",
             admin_user=authentik_username,
