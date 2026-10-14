@@ -191,7 +191,11 @@ def test_clearing_leftovers_deletes_them(admin_client):
 
     response = _post(admin_client, "clear_leftover_data", confirm="YOLO")
 
-    assert response.json() == {"success": True, "message": "Leftover data cleared. Deleted: 1 ServiceScore"}
+    assert response.json() == {
+        "success": True,
+        "message": "Leftover data cleared. Deleted: 1 ServiceScore. Next: Import the next school list to open an "
+        "event.",
+    }
     assert not ServiceScore.objects.exists()
 
 
@@ -235,7 +239,7 @@ def test_clearing_leftovers_is_refused_while_running(admin_client):
 
     response = _post(admin_client, "clear_leftover_data", confirm="YOLO")
 
-    assert response.json()["error"] == "Competition must be stopped before clearing"
+    assert response.json()["error"] == "Stop the competition first, with Stop Competition on the Competition page."
     assert ServiceScore.objects.exists()
 
 
@@ -315,7 +319,10 @@ def test_cancelling_from_the_danger_page(admin_client):
 
     response = _post(admin_client, "cancel_event", open_event=event.pk, confirm="yolo")
 
-    assert response.json() == {"success": True, "message": "Inv cancelled. The school list stays."}
+    assert response.json() == {
+        "success": True,
+        "message": "Inv cancelled. The school list stays. Next: Import the next school list to open an event.",
+    }
     event.refresh_from_db()
     assert not event.is_active
     assert AuditLog.objects.filter(action="event_cancelled").exists()

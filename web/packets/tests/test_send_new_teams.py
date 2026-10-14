@@ -103,7 +103,7 @@ def test_a_draft_packet_is_distributed_instead(current_event):
     assert result == {
         "done": True,
         "success": False,
-        "message": "Only a sent packet can be sent to new teams.",
+        "message": "Only a sent packet can be sent to new teams: send it with Distribute first.",
     }
     assert not PacketDistribution.objects.exists()
 

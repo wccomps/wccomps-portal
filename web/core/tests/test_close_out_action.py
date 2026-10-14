@@ -77,7 +77,8 @@ def test_close_out_streams_each_step_and_closes_the_open_event(client):
         "done": True,
         "success": True,
         "message": "Closed out Inv: froze 1 school result(s) and the export archive, deleted 1 ServiceScore, and "
-        "queued the Discord cleanup (the bot reports it in the ops channel).",
+        "queued the Discord cleanup (the bot reports it in the ops channel). Next: Import the next school list to "
+        "open an event.",
     }
     event.refresh_from_db()
     assert not event.is_active and event.is_finalized
@@ -103,7 +104,7 @@ def test_refused_while_the_competition_runs(client):
     assert _close_out(client, open_event=event.pk, confirm="yolo")[-1] == {
         "done": True,
         "success": False,
-        "message": "Stop the competition first.",
+        "message": "Stop the competition first, with Stop Competition on the Competition page.",
     }
     _assert_nothing_happened(event)
 
@@ -220,7 +221,7 @@ def test_the_page_hides_close_out_while_the_competition_runs(client):
     page = _page(client)
 
     assert BUTTON not in page
-    assert "Stop the competition first." in page
+    assert "Stop the competition first, with Stop Competition on the Competition page." in page
 
 
 def test_with_no_event_open_the_page_asks_for_the_event_and_names_the_season(client):
@@ -280,7 +281,7 @@ def test_the_check_says_what_would_make_close_out_refuse(client):
     _team_with_school()
     Team.objects.filter(team_number=1).update(is_active=False)
 
-    assert _check(client).json()["problem"] == "Reactivate Team 1 or remove its school first."
+    assert _check(client).json()["problem"] == "Reactivate Team 1 on the Teams page (or remove its school) first."
 
 
 def test_a_failing_check_says_so_and_leaves_the_page_working(client):

@@ -138,7 +138,7 @@ def test_an_event_finalized_before_is_frozen_again_from_the_live_scores(event):
     [
         (
             lambda event: CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True}),
-            "^Stop the competition first.$",
+            "^Stop the competition first, with Stop Competition on the Competition page.$",
         ),
         (lambda event: Team.objects.filter(team_number=2).update(is_active=False), "Reactivate Team 2"),
         (
@@ -378,7 +378,9 @@ def test_clearing_leftovers_is_refused_while_the_competition_runs(event):
     _closed_out_with_a_late_score(event)
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
 
-    with pytest.raises(CloseOutError, match="Competition must be stopped before clearing"):
+    with pytest.raises(
+        CloseOutError, match="^Stop the competition first, with Stop Competition on the Competition page.$"
+    ):
         clear_leftover_data("gold")
     assert ServiceScore.objects.count() == 1
 

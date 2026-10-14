@@ -19,11 +19,22 @@ from .models import Packet, PacketDistribution
 logger = logging.getLogger(__name__)
 
 NOT_A_DRAFT = "Only a draft packet can be distributed"
-NO_OPEN_EVENT = "Import the school list for this event first"
-EARLIER_EVENT_PACKET = "This packet belongs to an earlier event; team numbers have been reassigned since"
-NO_EVENT_OPEN = "No event is open."
-UNRECORDED_EVENT_PACKET = "This packet was sent before events were recorded; team numbers may have changed since"
-NOT_SENT_YET = "Only a sent packet can be sent to new teams."
+NO_OPEN_EVENT = (
+    "No event is open: import the school list for this event first (Schools, Import from CSV), then send the packet."
+)
+EARLIER_EVENT_PACKET = (
+    "This packet belongs to an earlier event and team numbers have been reassigned since: upload it again as a new "
+    "packet for the open event."
+)
+NO_EVENT_OPEN = (
+    "No event is open, so team numbers may have changed since this packet was sent. Upload the packet again once the "
+    "next school list is imported."
+)
+UNRECORDED_EVENT_PACKET = (
+    "This packet was sent before events were recorded and team numbers may have changed since: upload it again as a "
+    "new packet for the open event."
+)
+NOT_SENT_YET = "Only a sent packet can be sent to new teams: send it with Distribute first."
 EVERY_TEAM_HAS_IT = (
     "No team on the list is without a copy of this packet; teams whose send failed or is pending are not included "
     "(use Resend Failed / Retry Pending)."

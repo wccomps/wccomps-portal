@@ -99,7 +99,7 @@ def test_after_cancelling_the_next_import_goes_through_clear_leftover_data_and_t
         ),
         (
             lambda event: CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True}),
-            "^Stop the competition first.$",
+            "^Stop the competition first, with Stop Competition on the Competition page.$",
         ),
         (lambda event: Event.objects.filter(pk=event.pk).update(is_active=False), "is no longer open"),
     ],

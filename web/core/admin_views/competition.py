@@ -315,7 +315,12 @@ def _action_clear_leftover_data(
         wiped = clear_leftover_data(authentik_username)
     except CloseOutError as e:
         return JsonResponse({"error": str(e)}, status=400)
-    return JsonResponse({"success": True, "message": f"Leftover data cleared. Deleted: {_wiped_summary(wiped)}"})
+    return JsonResponse(
+        {
+            "success": True,
+            "message": f"Leftover data cleared. Deleted: {_wiped_summary(wiped)}. Next: {event_stage().next_step}",
+        }
+    )
 
 
 def _action_cancel_event(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
@@ -326,7 +331,9 @@ def _action_cancel_event(request: HttpRequest, config: CompetitionConfig, authen
         event = cancel_event(form.cleaned_data["open_event"], authentik_username)
     except CloseOutError as e:
         return JsonResponse({"error": str(e)}, status=400)
-    return JsonResponse({"success": True, "message": f"{event.name} cancelled. The school list stays."})
+    return JsonResponse(
+        {"success": True, "message": f"{event.name} cancelled. The school list stays. Next: {event_stage().next_step}"}
+    )
 
 
 def _typed_confirmation_error(request: HttpRequest) -> JsonResponse | None:
@@ -425,7 +432,7 @@ def _stream_close_out(target: Event | NewEvent, authentik_username: str) -> Iter
     yield ndjson_done(
         f"Closed out {outcome.event.name}: froze {outcome.results} school result(s) and the export archive, "
         f"deleted {_wiped_summary(outcome.wiped)}, and queued the Discord cleanup (the bot reports it in the ops "
-        "channel)."
+        f"channel). Next: {event_stage().next_step}"
     )
 
 

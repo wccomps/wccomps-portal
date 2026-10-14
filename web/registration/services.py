@@ -393,6 +393,10 @@ def add_to_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
     return {"created": len(rows), "activated": activated}
 
 
+# Why a close-out, cancel or clear refuses while the competition runs
+STOP_FIRST = "Stop the competition first, with Stop Competition on the Competition page."
+
+
 class CloseOutError(Exception):
     """Close Out Event or Clear leftover data refused; the message says why."""
 
@@ -413,7 +417,7 @@ def close_out_problem(stage: EventStage, *, check_schools: bool = True) -> str:
     """Why the stage can't be closed out now, or ''. With check_schools, also whether every score would be kept:
     each listed school's team active, and every scored team holding a school. The page asks without it first."""
     if stage.running:
-        return "Stop the competition first."
+        return STOP_FIRST
     if stage.stage == Stage.READY:
         return (
             f"No team has scores yet, so there is nothing to close out for {stage.event}. To call it off, use Cancel "
@@ -493,7 +497,7 @@ def _close_out(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
     Under the school list lock and the competition config lock; CloseOutError, writing nothing, says why it refused.
     """
     school_list_lock()
-    config = _refuse_while_running("Stop the competition first.")
+    config = _refuse_while_running(STOP_FIRST)
     stage = event_stage()
     _refuse_a_stale_target(target, stage)
     if problem := close_out_problem(stage):
@@ -573,16 +577,22 @@ def _unfreezable_problem(event: Event | None) -> str:
     listed = Team.objects.filter(pk__in=school_by_team).order_by("team_number")
     if not school_by_team:
         where = f"{event} has no schools on its list" if event is not None else "The school list is empty"
-        return f"{where}, so there are no results to keep."
+        return (
+            f"{where}, so there are no results to keep. On the Schools page, open each team with scores and enter its "
+            "school first."
+        )
     if inactive := [team.team_number for team in listed if not team.is_active]:
         theirs = "its school" if len(inactive) == 1 else "their schools"
-        return f"Reactivate {_team_list(inactive)} or remove {theirs} first."
+        return f"Reactivate {_team_list(inactive)} on the Teams page (or remove {theirs}) first."
     unlisted = list(
         scored_teams().exclude(pk__in=school_by_team).order_by("team_number").values_list("team_number", flat=True)
     )
     if unlisted:
-        has, theirs = ("has", "its school") if len(unlisted) == 1 else ("have", "their schools")
-        return f"{_team_list(unlisted)} {has} scores but no school: put {theirs} on the list first."
+        has, each = ("has", "the team") if len(unlisted) == 1 else ("have", "each team")
+        return (
+            f"{_team_list(unlisted)} {has} scores but no school: on the Schools page, open {each} and enter its "
+            "school first."
+        )
     return ""
 
 
@@ -619,13 +629,13 @@ def clear_leftovers_problem(stage: EventStage) -> str:
     """Why Clear leftover data can't run now, or ''. It deletes live data no open event holds: data with no scores,
     or scores once some event was closed out (before that, scores are an event that ran without an import)."""
     if stage.running:
-        return "Competition must be stopped before clearing"
+        return STOP_FIRST
     if stage.event is not None:
         if stage.stage == Stage.READY:
             return f"{stage.event} is open: cancel it first (Cancel event), then clear the data left over."
         return f"{stage.event} is open: its data goes when it is closed out (Close Out Event)."
     if stage.stage == Stage.IDLE:
-        return "There is no leftover data to clear."
+        return f"There is no leftover data to clear. {stage.next_step}"
     if stage.stage == Stage.UNRECORDED and not stage.closed_out_before:
         return (
             "These scores are not recorded at any event yet and no event was ever closed out: record them with "
@@ -640,7 +650,7 @@ def clear_leftover_data(actor: str) -> WipedData:
     next event. Under the school list lock and the competition config lock; CloseOutError when
     clear_leftovers_problem says why not."""
     school_list_lock()
-    config = _refuse_while_running("Competition must be stopped before clearing")
+    config = _refuse_while_running(STOP_FIRST)
     if problem := clear_leftovers_problem(event_stage()):
         raise CloseOutError(problem)
     wiped = wipe_competition_data()
@@ -661,9 +671,9 @@ def clear_leftover_data(actor: str) -> WipedData:
 def cancel_event_problem(stage: EventStage) -> str:
     """Why the open event can't be cancelled now, or ''. Only an event no team has scored: scores are closed out."""
     if stage.running:
-        return "Stop the competition first."
+        return STOP_FIRST
     if stage.event is None:
-        return "No event is open."
+        return f"No event is open, so there is nothing to cancel. {stage.next_step}"
     if stage.stage != Stage.READY:
         return f"{stage.event} has scores: close it out instead (Close Out Event on the Competition page)."
     return ""
@@ -676,7 +686,7 @@ def cancel_event(target: Event, actor: str) -> Event:
     links, tickets) is then left over for Clear leftover data. Under the school list lock and the competition config
     lock; CloseOutError, writing nothing, says why it refused."""
     school_list_lock()
-    _refuse_while_running("Stop the competition first.")
+    _refuse_while_running(STOP_FIRST)
     stage = event_stage()
     if stage.event != target:
         raise CloseOutError(f"{target} is no longer open. Reload the page.")
