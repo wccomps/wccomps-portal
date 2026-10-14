@@ -101,11 +101,6 @@ class TeamRegistration(models.Model):
         self.rejection_reason = reason
         self.save(update_fields=["status", "rejection_reason"])
 
-    def mark_as_paid(self) -> None:
-        self.status = "paid"
-        self.paid_at = timezone.now()
-        self.save(update_fields=["status", "paid_at"])
-
 
 class SeasonManager(models.Manager["Season"]):
     def active(self) -> Season | None:

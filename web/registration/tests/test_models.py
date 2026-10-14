@@ -101,13 +101,6 @@ class TestTeamRegistration:
         assert registration.status == "rejected"
         assert registration.rejection_reason == reason
 
-    def test_mark_as_paid(self):
-        """Test marking registration as paid."""
-        registration = TeamRegistration.objects.create(school_name="Test School", status="approved")
-        registration.mark_as_paid()
-        assert registration.status == "paid"
-        assert registration.paid_at is not None
-
     def test_string_representation(self):
         """Test string representation."""
         registration = TeamRegistration.objects.create(school_name="Test School")

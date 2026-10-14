@@ -10,17 +10,16 @@ from .actions import (
     ticket_unclaim,
 )
 from .attachments import ticket_attachment_download, ticket_attachment_upload
-from .bulk import tickets_bulk_claim, tickets_bulk_resolve, tickets_clear_all
+from .bulk import tickets_bulk_claim, tickets_bulk_resolve
 from .create import create_ticket
 from .detail import ticket_comment, ticket_detail, ticket_detail_dynamic
 from .list import ticket_list, ticket_notifications
-from .ops import ops_batch_verify_tickets, ops_review_tickets, ops_verify_ticket
+from .ops import ops_batch_verify_tickets, ops_review_tickets
 
 __all__ = [
     "create_ticket",
     "ops_batch_verify_tickets",
     "ops_review_tickets",
-    "ops_verify_ticket",
     "ticket_attachment_download",
     "ticket_attachment_upload",
     "ticket_cancel",
@@ -37,5 +36,4 @@ __all__ = [
     "ticket_unclaim",
     "tickets_bulk_claim",
     "tickets_bulk_resolve",
-    "tickets_clear_all",
 ]

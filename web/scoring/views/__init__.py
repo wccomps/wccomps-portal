@@ -1,6 +1,6 @@
 """Re-exports every view so callers can use ``from scoring import views``."""
 
-from .api import api_scores, api_team_detail
+from .api import api_scores
 from .config import scoring_config, sync_scores
 from .export import (
     email_scorecard,
@@ -99,5 +99,4 @@ __all__ = [
     "email_scorecards",
     "stream_email_scorecards",
     "api_scores",
-    "api_team_detail",
 ]

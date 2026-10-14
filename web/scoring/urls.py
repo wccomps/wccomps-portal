@@ -46,7 +46,6 @@ urlpatterns = [
     path("admin/config/", views.scoring_config, name="scoring_config"),
     path("admin/sync-scores/", views.sync_scores, name="sync_scores"),
     path("api/scores/", views.api_scores, name="api_scores"),
-    path("api/team/<int:team_number>/", views.api_team_detail, name="api_team_detail"),
     path("export/", views.export_index, name="export_index"),
     path("export/all/", views.export_all, name="export_all"),
     path("export/red-scores/", views.export_dataset, {"dataset": "red_scores"}, name="export_red_scores"),

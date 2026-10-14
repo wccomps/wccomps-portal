@@ -158,18 +158,6 @@ def reject_registration(request: HttpRequest, registration_id: int) -> HttpRespo
 
 
 @require_permission("gold_team")
-def mark_paid(request: HttpRequest, registration_id: int) -> HttpResponse:
-    if request.method != "POST":
-        return redirect("registration_review_list")
-
-    registration = get_object_or_404(TeamRegistration, id=registration_id)
-    registration.mark_as_paid()
-    messages.success(request, f"Registration for {registration.school_name} marked as paid.")
-
-    return redirect("registration_review_list")
-
-
-@require_permission("gold_team")
 def season_list(request: HttpRequest) -> HttpResponse:
     seasons = Season.objects.prefetch_related("events").all()
     return render(request, "registration/seasons/list.html", {"seasons": seasons, "subnav_active": "seasons"})

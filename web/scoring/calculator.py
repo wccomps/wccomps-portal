@@ -21,7 +21,7 @@ from .models import (
 
 
 class ScoreBreakdown(TypedDict):
-    """Score breakdown returned by calculate_team_score()."""
+    """A team's score by component, and its total."""
 
     service_points: Decimal
     inject_points: Decimal
@@ -171,8 +171,8 @@ def _template() -> ScoringTemplate:
     return ScoringTemplate.objects.first() or ScoringTemplate()
 
 
-def calculate_team_score(team: Team) -> ScoreBreakdown:
-    """Calculate final score for a team using scaling-factor formula.
+def calculate_team_score_detailed(team: Team) -> DetailedScoreBreakdown:
+    """A team's score with its raw scores, modifiers and weights.
 
     Formula:
         total = (service × service_modifier)
@@ -181,21 +181,6 @@ def calculate_team_score(team: Team) -> ScoreBreakdown:
               + sla_violations + point_adjustments
               + red_deductions + incident_recovery
     """
-    detailed = calculate_team_score_detailed(team)
-    return {
-        "service_points": detailed["service_points"],
-        "inject_points": detailed["inject_points"],
-        "orange_points": detailed["orange_points"],
-        "red_deductions": detailed["red_deductions"],
-        "sla_penalties": detailed["sla_penalties"],
-        "point_adjustments": detailed["point_adjustments"],
-        "incident_recovery_points": detailed["incident_recovery_points"],
-        "total_score": detailed["total_score"],
-    }
-
-
-def calculate_team_score_detailed(team: Team) -> DetailedScoreBreakdown:
-    """Like calculate_team_score but also returns raw scores, modifiers, and weights."""
     return _breakdown(_raw_scores([team])[team.pk], _template())
 
 

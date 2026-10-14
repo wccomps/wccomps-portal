@@ -10,7 +10,6 @@ from core.auth_utils import has_permission
 from ticketing.forms import TicketBulkActionForm
 from ticketing.lifecycle import claim_ticket, resolve_ticket
 from ticketing.models import Ticket
-from ticketing.utils import clear_all_tickets
 
 logger = logging.getLogger(__name__)
 
@@ -76,20 +75,4 @@ def tickets_bulk_resolve(request: HttpRequest) -> HttpResponse:
     if skipped:
         messages.warning(request, "Not resolved: " + "; ".join(skipped))
     logger.info(f"Bulk resolved {resolved} tickets by {user.username}")
-    return redirect("ticket_list")
-
-
-def tickets_clear_all(request: HttpRequest) -> HttpResponse:
-    """Clear all tickets and reset counters (admin only)."""
-    if request.method != "POST":
-        return HttpResponse("Method not allowed", status=405)
-
-    user = cast(User, request.user)
-    authentik_username = user.username
-
-    if not has_permission(user, "ticketing_admin"):
-        return HttpResponse("Access denied - admin only", status=403)
-
-    counts = clear_all_tickets(actor=authentik_username)
-    logger.info(f"Cleared all tickets ({counts['tickets_deleted']}) by {authentik_username}")
     return redirect("ticket_list")

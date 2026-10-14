@@ -32,11 +32,6 @@ class TicketChangeCategoryForm(forms.Form):
     new_category = forms.IntegerField()
 
 
-class TicketVerifyForm(forms.Form):
-    points_adjustment = forms.IntegerField(required=False)
-    verification_notes = forms.CharField(required=False)
-
-
 class TicketBulkActionForm(forms.Form):
     ticket_numbers = forms.CharField()
 
