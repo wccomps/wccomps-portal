@@ -319,8 +319,9 @@
     <script>
 document.addEventListener('alpine:init', () => {
     const actionUrl = '{% url "admin_competition_action" %}';
-    Alpine.data('competitionAdmin', () => compose(streamMixin(actionUrl), competitionActionsMixin(actionUrl), {
+    Alpine.data('competitionAdmin', () => compose(competitionActionsMixin(actionUrl), readinessMixin(actionUrl), {
         teamNumbers: '',
+        csvContent: '',
         closeOutName: '',
         closeOutDate: '',
         closeOutType: 'invitational',
@@ -395,10 +396,12 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        resetPasswords() {
+        // The passwords are changed when the CSV arrives: keep it on screen (no reload), it is the only copy
+        async resetPasswords() {
             const teamDesc = this.teamNumbers ? `teams ${this.teamNumbers}` : 'every active team';
             if (confirm(`Reset passwords for ${teamDesc}?\n\nThis will generate new passwords and revoke existing sessions.`)) {
-                this.doAction('reset_passwords', { team_numbers: this.teamNumbers });
+                const result = await this.doAction('reset_passwords', { team_numbers: this.teamNumbers }, { reload: false });
+                if (result && result.success) this.csvContent = result.csv;
             }
         },
 

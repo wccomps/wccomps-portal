@@ -1,16 +1,53 @@
 /**
- * Shared by the competition page and the Competition setup page: posting an action to the competition action
- * endpoint, the readiness check, and showing a stored time in the viewer's zone and in California's.
- * Loaded by both pages before Alpine.js initializes.
+ * The competition pages (Competition, Competition setup, Danger Zone): posting to the competition action endpoint,
+ * the readiness check, and showing a stored time in the viewer's zone and in California's.
+ * Loaded before Alpine.js initializes.
  */
 
 /**
- * Actions and the readiness check.
- * @param {string} url — the competition action endpoint (rendered by Django template tag).
+ * Streamed and plain actions with the toast and progress bar.
+ * @param {string} url: the competition action endpoint (rendered by Django template tag).
  */
 function competitionActionsMixin(url) {
+    return compose(streamMixin(url), {
+        setField(e) {
+            this[e.target.dataset.field] = e.target.value;
+        },
+
+        // Posts the action, shows its message and returns the response (null if the request failed). A success
+        // reloads the page, so a save shows what is stored now, unless the caller keeps a result on screen
+        // (reload: false).
+        async doAction(action, data = {}, { reload = true } = {}) {
+            this.loading = true;
+            this.message = '';
+            let result = null;
+            try {
+                result = await wcPost(url, { action, ...data });
+                if (result.success) {
+                    this.message = result.message;
+                    this.messageType = 'success';
+                    if (reload) setTimeout(() => location.reload(), 2000);
+                } else {
+                    this.message = result.error || 'Action failed';
+                    this.messageType = 'error';
+                }
+            } catch (e) {
+                this.message = 'Request failed: ' + e.message;
+                this.messageType = 'error';
+            }
+            this.loading = false;
+            setTimeout(() => this.message = '', 5000);
+            return result;
+        },
+    });
+}
+
+/**
+ * The readiness check and its fixes; compose after competitionActionsMixin, whose toast it uses.
+ * @param {string} url: the competition action endpoint.
+ */
+function readinessMixin(url) {
     return {
-        csvContent: '',
         readinessResults: [],
         readinessLoading: false,
         readinessFixing: false,
@@ -22,34 +59,6 @@ function competitionActionsMixin(url) {
         get hasReadinessResults() { return this.readinessResults.length > 0; },
         get readinessOk() { return this.readinessDone && this.readinessSuccess; },
         get readinessNotOk() { return this.readinessDone && !this.readinessSuccess; },
-
-        setField(e) {
-            this[e.target.dataset.field] = e.target.value;
-        },
-
-        // A success reloads the page the action was taken on, so a save shows what is stored now
-        async doAction(action, data = {}) {
-            this.loading = true;
-            this.message = '';
-            try {
-                const result = await wcPost(url, { action, ...data });
-                if (result.success) {
-                    this.message = result.message;
-                    this.messageType = 'success';
-                    if (result.csv) this.csvContent = result.csv;
-                    if (result.apps) this.apps = result.apps;
-                    setTimeout(() => location.reload(), 2000);
-                } else {
-                    this.message = result.error || 'Action failed';
-                    this.messageType = 'error';
-                }
-            } catch (e) {
-                this.message = 'Request failed: ' + e.message;
-                this.messageType = 'error';
-            }
-            this.loading = false;
-            setTimeout(() => this.message = '', 5000);
-        },
 
         async runReadinessChecks() {
             this.readinessLoading = true;
@@ -98,7 +107,6 @@ function competitionActionsMixin(url) {
                 if (result.success) {
                     this.message = result.message;
                     this.messageType = 'success';
-                    if (result.csv) this.csvContent = result.csv;
                 } else {
                     this.message = result.error || 'Fix failed';
                     this.messageType = 'error';

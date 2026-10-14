@@ -99,3 +99,31 @@ def test_django_admin_team_pages_have_reset_password(live_server, pw_browser, pa
             assert page.url.endswith("/change/"), "the click must not submit the admin form"
     finally:
         context.close()
+
+
+def test_competition_reset_passwords_keeps_the_csv_and_its_download(live_server, pw_browser):
+    """The passwords are already changed in Authentik when the CSV shows: a reload would lose the only copy."""
+    from team.models import Team
+
+    Team.objects.create(team_number=3, team_name="Team 03", is_active=True)
+    user = _create_role_user("admin", None)
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    page.on("dialog", lambda dialog: dialog.accept())
+
+    try:
+        with patch("core.admin_views.competition.reset_team_credentials", return_value=("Csv-Pass-3!", "", True)):
+            page.goto(live_server.url + reverse("admin_competition"))
+            page.locator("details.advanced summary").click()
+            page.get_by_label("Team Numbers").fill("3")
+            with page.expect_response(lambda r: r.url.endswith("/action/")):
+                page.get_by_role("button", name="Reset Passwords").click()
+            csv = page.locator("textarea[readonly]")
+            csv.wait_for()
+            page.wait_for_timeout(4000)
+            assert "Csv-Pass-3!" in csv.input_value(), "the CSV must stay up"
+            with page.expect_download() as download:
+                page.get_by_role("button", name="Download CSV").click()
+            assert download.value.suggested_filename == "blueteam_passwords.csv"
+    finally:
+        context.close()

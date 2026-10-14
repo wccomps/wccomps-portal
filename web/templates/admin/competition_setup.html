@@ -223,7 +223,7 @@
     <script>
 document.addEventListener('alpine:init', () => {
     const actionUrl = '{% url "admin_competition_action" %}';
-    Alpine.data('competitionSetup', () => compose(streamMixin(actionUrl), competitionActionsMixin(actionUrl), {
+    Alpine.data('competitionSetup', () => compose(competitionActionsMixin(actionUrl), readinessMixin(actionUrl), {
         maxMembers: {{ config.max_team_members }},
         startMessage: JSON.parse(document.getElementById('start-message-data').textContent),
         apps: [{% for app in config.controlled_applications %}'{{ app }}'{% if not forloop.last %}, {% endif %}{% endfor %}],
@@ -261,18 +261,23 @@ document.addEventListener('alpine:init', () => {
 
         // Send only the app being changed; the server applies it to the current list,
         // so a stale page (e.g. mid-reload) can't overwrite apps added elsewhere.
-        addApp() {
+        async addApp() {
             const app = this.newApp.trim().toLowerCase();
             if (app && !this.apps.includes(app)) {
                 this.newApp = '';
-                this.doAction('add_app', { app_slug: app });
+                this.showApps(await this.doAction('add_app', { app_slug: app }));
             }
         },
 
-        removeApp(e) {
+        async removeApp(e) {
             const app = e.currentTarget.dataset.app;
-            if (!confirm('Remove ' + app + ' from controlled apps?')) return;
-            this.doAction('remove_app', { app_slug: app });
+            if (!confirm('Remove ' + app + ' from the competition apps?')) return;
+            this.showApps(await this.doAction('remove_app', { app_slug: app }));
+        },
+
+        // The stored list as the server returned it, until the reload
+        showApps(result) {
+            if (result && result.apps) this.apps = result.apps;
         },
 
         setSchedule() {
