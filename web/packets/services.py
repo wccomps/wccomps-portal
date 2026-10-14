@@ -5,9 +5,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db import close_old_connections, transaction
+from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.template.loader import render_to_string
 from registration.locks import school_list_lock
 from registration.models import Event
+from registration.stage import ACTIONS, Action
 
 from core.authentik_utils import reset_team_password
 from core.utils import ndjson_done
@@ -19,9 +21,7 @@ from .models import Packet, PacketDistribution
 logger = logging.getLogger(__name__)
 
 NOT_A_DRAFT = "Only a draft packet can be distributed"
-NO_OPEN_EVENT = (
-    "No event is open: import the school list for this event first (Schools, Import from CSV), then send the packet."
-)
+NO_OPEN_EVENT = f"No event is open. {ACTIONS[Action.IMPORT].instruction} Then send the packet."
 EARLIER_EVENT_PACKET = (
     "This packet belongs to an earlier event and team numbers have been reassigned since: upload it again as a new "
     "packet for the open event."
@@ -41,15 +41,25 @@ EVERY_TEAM_HAS_IT = (
 )
 
 
+def packet_recipients() -> QuerySet[Team]:
+    """The teams a packet send reaches: the active teams on the school list."""
+    return Team.objects.filter(is_active=True).exclude(school_info=None)
+
+
+def teams_without_delivered_copy(packets: QuerySet[Packet]) -> QuerySet[Team]:
+    """The recipients missing a delivered copy of any of the packets: no distribution, or an emailed one whose email
+    failed or is still pending (a packet not sent by email is delivered once its distribution exists)."""
+    delivered = PacketDistribution.objects.filter(packet=OuterRef("pk"), team=OuterRef(OuterRef("pk"))).filter(
+        Q(packet__send_via_email=False) | Q(email_status__in=PacketDistribution.DONE_STATUSES)
+    )
+    return packet_recipients().filter(Exists(packets.exclude(Exists(delivered))))
+
+
 def _create_distributions_for_teams(packet: Packet) -> list[PacketDistribution]:
-    """Create the packet's distributions for the active teams on the school list that have none, and return them.
+    """Create the packet's distributions for the recipients that have none, and return them.
 
     Callers hold the school list lock, so the list can't change between choosing the teams and creating the rows."""
-    teams = (
-        Team.objects.filter(is_active=True)
-        .exclude(school_info=None)
-        .exclude(id__in=PacketDistribution.objects.filter(packet=packet).values("team_id"))
-    )
+    teams = packet_recipients().exclude(id__in=PacketDistribution.objects.filter(packet=packet).values("team_id"))
     distributions = PacketDistribution.objects.bulk_create(
         PacketDistribution(packet=packet, team=team, web_access_enabled=packet.web_access_enabled) for team in teams
     )

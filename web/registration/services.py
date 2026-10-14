@@ -4,7 +4,7 @@ from datetime import date
 
 from django.db import OperationalError, connection, transaction
 from django.db.models import Exists, OuterRef, QuerySet
-from packets.models import Packet
+from packets.models import Packet, packets_sent
 from scoring.calculator import Standing, compute_standings
 from scoring.export import export_all_zip_bytes
 from scoring.models import QuotientMetadataCache
@@ -28,7 +28,7 @@ from .models import (
     TeamRegistration,
     normalize_school_name,
 )
-from .stage import EventStage, Stage, event_stage, scored_teams
+from .stage import Action, EventStage, Stage, event_stage, scored_teams
 
 
 class PacketsSentError(Exception):
@@ -112,11 +112,6 @@ def set_team_school(
     return info
 
 
-def packets_sent(event: Event | None) -> bool:
-    """Whether any packet went out for the event; sent packets reached its teams under their schools."""
-    return event is not None and Packet.objects.sent().filter(event=event).exists()
-
-
 def activate_teams(teams: list[Team]) -> int:
     """Activate the teams given a school: only active teams show on School Info, get packets and count in standings.
 
@@ -173,12 +168,10 @@ class ImportBlockedError(Exception):
 
 @dataclass(frozen=True)
 class NewSeason:
-    """A season to create, as the only active one, with the event it holds. replaces: the id of the season that was
-    active when the page showed the choice (None when none was), which it takes over from at a new school year."""
+    """A season to create, as the only active one, with the event it holds."""
 
     name: str
     year: int
-    replaces: int | None = None
 
     def __str__(self) -> str:
         return self.name
@@ -187,12 +180,14 @@ class NewSeason:
 @dataclass(frozen=True)
 class NewEvent:
     """An event to create for a school list: the import's new event, or the event Close Out records for scores
-    that ran without an import. season: a new season for it, needed when none is active; the import can also start
-    one while a season is active, at a new school year."""
+    that ran without an import. seen_season: the id of the season that was active when the page showed it (None when
+    none was); the event is refused if another is active now. season: a new season for it, from the import only:
+    needed when none is active, or started at a new school year."""
 
     name: str
     date: date
     event_type: str
+    seen_season: int | None
     season: NewSeason | None = None
 
     def __str__(self) -> str:
@@ -202,17 +197,20 @@ class NewEvent:
 def new_event_problem(new_event: NewEvent) -> str:
     """Why the new event (and its new season) can't be created now, or ''."""
     active = Season.objects.active()
+    if (active.pk if active else None) != new_event.seen_season:
+        return "The active season changed since this page loaded. Reload the page."
     if new_event.season is None:
         if active is None:
             return "No season is active: give the new season a name and a year."
         if Event.objects.filter(season=active, name=new_event.name).exists():
             return f"The {active} season already has an event named {new_event.name}. Choose another name."
         return ""
-    if (active.pk if active else None) != new_event.season.replaces:
-        if new_event.season.replaces is None:
-            return f"The {active} season was activated since this page loaded. Reload the page."
-        return "The active season changed since this page loaded. Reload the page."
     if taken := Season.objects.filter(year=new_event.season.year).first():
+        if taken.is_active:
+            return (
+                f"{taken.year} is the year of the active season, {taken}: leave the new season empty to put the "
+                "event in it."
+            )
         return (
             f"The {taken} season already has the year {new_event.season.year}. Pick another year, or activate "
             "that season."
@@ -243,15 +241,8 @@ def import_problem(event: Event | NewEvent) -> str:
     stage = event_stage()
     open_now = stage.event
     if open_now and open_now != event:
-        if stage.stage == Stage.READY:
-            return (
-                f"{open_now} is still open, and no team has scores yet. To call it off, use Cancel event on the "
-                "competition Danger Zone page, then import the list for another event."
-            )
-        return (
-            f"{open_now} is still open. Close it out (Close Out Event on the Competition page) before importing a "
-            "list for another event."
-        )
+        instead = Action.CANCEL if stage.stage == Stage.READY else Action.CLOSE_OUT
+        return f"{open_now} is still open. {stage.instruction(instead)} Then import the list for another event."
     if packets_sent(open_now):
         return (
             f"Packets have already been sent for {open_now}. Re-importing reassigns team numbers, so sent credentials "
@@ -261,7 +252,7 @@ def import_problem(event: Event | NewEvent) -> str:
     if not stage.live_data:
         return ""
     if open_now is None:
-        return f"{stage.status} {stage.next_step}"
+        return f"{stage.status} {stage.steps_left}"
     return (
         f"Teams have already started using their team numbers for {open_now} (scores, tickets or Discord links). "
         "Re-importing reassigns team numbers under them. Change a single school on its School Info page instead. "
@@ -393,39 +384,46 @@ def add_to_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
     return {"created": len(rows), "activated": activated}
 
 
-# Why a close-out, cancel or clear refuses while the competition runs
-STOP_FIRST = "Stop the competition first, with Stop Competition on the Competition page."
-
-
 class CloseOutError(Exception):
     """Close Out Event or Clear leftover data refused; the message says why."""
 
 
-def _refuse_while_running(message: str) -> CompetitionConfig:
-    """The competition config, its row locked until commit. CloseOutError with the message while the competition
+def _lock_config() -> CompetitionConfig:
+    """The competition config, its row locked until commit; the stage read after it sees whether the competition
     runs. A start writes applications_enabled under the same row lock, so it can't mark the competition running
     until this commits. A start already under way may have turned Authentik on before it waits, and the queued
     Discord cleanup checks for a running competition only when the bot picks it up, so it can still run as such a
     start lands."""
-    config = CompetitionConfig.objects.select_for_update().get(pk=CompetitionConfig.get_config().pk)
-    if config.applications_enabled:
-        raise CloseOutError(message)
-    return config
+    return CompetitionConfig.objects.select_for_update().get(pk=CompetitionConfig.get_config().pk)
+
+
+def _running_refusal(stage: EventStage) -> str:
+    return f"The competition is running. {stage.next_step}"
 
 
 def close_out_problem(stage: EventStage, *, check_schools: bool = True) -> str:
     """Why the stage can't be closed out now, or ''. With check_schools, also whether every score would be kept:
     each listed school's team active, and every scored team holding a school. The page asks without it first."""
     if stage.running:
-        return STOP_FIRST
+        return _running_refusal(stage)
     if stage.stage == Stage.READY:
         return (
-            f"No team has scores yet, so there is nothing to close out for {stage.event}. To call it off, use Cancel "
-            "event on the Danger Zone page."
+            f"No team has scores yet, so there is nothing to close out for {stage.event}. "
+            f"{stage.instruction(Action.CANCEL)}"
         )
     if stage.stage not in (Stage.PLAYED, Stage.UNRECORDED):
         return f"Nothing to close out. {stage.status} {stage.next_step}"
-    return _unfreezable_problem(stage.event) if check_schools else ""
+    if stage.event is None and not Season.objects.filter(is_active=True).exists():
+        return (
+            "No season is active, and Close Out records these scores at a new event in the active season. Make a "
+            "season active on the Seasons page (Registration, Seasons), then close out."
+        )
+    return _unfreezable(stage.event)[0] if check_schools else ""
+
+
+def close_out_fixes(stage: EventStage) -> list[TeamFix]:
+    """The teams close_out_problem names as keeping Close Out from keeping their scores, and how each is fixed."""
+    return _unfreezable(stage.event)[1] if stage.stage in (Stage.PLAYED, Stage.UNRECORDED) else []
 
 
 def _refuse_a_stale_target(target: Event | NewEvent, stage: EventStage) -> None:
@@ -442,6 +440,8 @@ def _locked_target(target: Event | NewEvent, stage: EventStage) -> Event:
     Call under the school list lock once the target and the stage passed their checks."""
     if not isinstance(target, NewEvent):
         return Event.objects.select_for_update().get(pk=target.pk)
+    if target.season is not None:
+        raise CloseOutError("Close Out records the scores in the active season; it doesn't start a new season.")
     if problem := new_event_problem(target):
         raise CloseOutError(problem)
     event = _create_event(target)
@@ -497,7 +497,7 @@ def _close_out(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
     Under the school list lock and the competition config lock; CloseOutError, writing nothing, says why it refused.
     """
     school_list_lock()
-    config = _refuse_while_running(STOP_FIRST)
+    config = _lock_config()
     stage = event_stage()
     _refuse_a_stale_target(target, stage)
     if problem := close_out_problem(stage):
@@ -570,30 +570,48 @@ def current_snapshots(event: Event | None, standings: list[Standing] | None = No
     }
 
 
-def _unfreezable_problem(event: Event | None) -> str:
-    """Why some live scores would have no result to keep them, or ''. Every school on the list must be on an active
-    team (only active teams have standings), and every team with scores must hold a school."""
+@dataclass(frozen=True)
+class TeamFix:
+    """A team whose scores Close Out can't keep yet, and what the pages offer to fix it."""
+
+    team_number: int
+    activate: bool  # Inactive: Activate Team on its Teams page first
+    enter_school: bool  # No school: enter it on its School Info page
+    remove_school: bool  # Its school can be removed instead: no packets went out for the event
+
+
+def _unfreezable(event: Event | None) -> tuple[str, list[TeamFix]]:
+    """Why some live scores would have no result to keep them ('' if none would), and the teams named. Every school
+    on the list must be on an active team (only active teams have standings), and every team with scores must hold a
+    school."""
     school_by_team = _school_by_team(event)
     listed = Team.objects.filter(pk__in=school_by_team).order_by("team_number")
+    if inactive := [team.team_number for team in listed if not team.is_active]:
+        removable = not packets_sent(event)
+        one = len(inactive) == 1
+        problem = (
+            f"{_team_list(inactive)} {'is' if one else 'are'} inactive but {'holds' if one else 'hold'} a school on "
+            f"the list: activate {'it' if one else 'them'} with Activate Team on {'its' if one else 'their'} Teams "
+            "page first" + (f", or remove {'its school' if one else 'their schools'}." if removable else ".")
+        )
+        return problem, [TeamFix(n, True, False, removable) for n in inactive[:SHOWN]]
+    unlisted = list(scored_teams().exclude(pk__in=school_by_team).order_by("team_number"))
+    if not unlisted:
+        return "", []
+    one = len(unlisted) == 1
     if not school_by_team:
         where = f"{event} has no schools on its list" if event is not None else "The school list is empty"
-        return (
-            f"{where}, so there are no results to keep. On the Schools page, open each team with scores and enter its "
-            "school first."
-        )
-    if inactive := [team.team_number for team in listed if not team.is_active]:
-        theirs = "its school" if len(inactive) == 1 else "their schools"
-        return f"Reactivate {_team_list(inactive)} on the Teams page (or remove {theirs}) first."
-    unlisted = list(
-        scored_teams().exclude(pk__in=school_by_team).order_by("team_number").values_list("team_number", flat=True)
-    )
-    if unlisted:
-        has, each = ("has", "the team") if len(unlisted) == 1 else ("have", "each team")
-        return (
-            f"{_team_list(unlisted)} {has} scores but no school: on the Schools page, open {each} and enter its "
-            "school first."
-        )
-    return ""
+        problem = f"{where}, so there are no results to keep."
+    else:
+        numbers = _team_list([team.team_number for team in unlisted])
+        problem = f"{numbers} {'has' if one else 'have'} scores but no school."
+    enter = "enter its school on its School Info page" if one else "enter each team's school on its School Info page"
+    if any(not team.is_active for team in unlisted):
+        activate = "it" if one else "each inactive one"
+        problem += f" Activate {activate} with Activate Team on its Teams page, then {enter} first."
+    else:
+        problem += f" {enter[0].upper()}{enter[1:]} first."
+    return problem, [TeamFix(team.team_number, not team.is_active, True, False) for team in unlisted[:SHOWN]]
 
 
 def _freeze_results(event: Event) -> int:
@@ -620,27 +638,28 @@ def _freeze_results(event: Event) -> int:
     return len(snapshots)
 
 
-def _team_list(numbers: list[int], shown: int = 3) -> str:
-    named = ", ".join(f"Team {number}" for number in numbers[:shown])
-    return f"{named} and {len(numbers) - shown} more" if len(numbers) > shown else named
+# How many teams a refusal names
+SHOWN = 3
+
+
+def _team_list(numbers: list[int]) -> str:
+    named = ", ".join(f"Team {number}" for number in numbers[:SHOWN])
+    return f"{named} and {len(numbers) - SHOWN} more" if len(numbers) > SHOWN else named
 
 
 def clear_leftovers_problem(stage: EventStage) -> str:
     """Why Clear leftover data can't run now, or ''. It deletes live data no open event holds: data with no scores,
     or scores once some event was closed out (before that, scores are an event that ran without an import)."""
     if stage.running:
-        return STOP_FIRST
+        return _running_refusal(stage)
     if stage.event is not None:
         if stage.stage == Stage.READY:
-            return f"{stage.event} is open: cancel it first (Cancel event), then clear the data left over."
-        return f"{stage.event} is open: its data goes when it is closed out (Close Out Event)."
+            return f"{stage.event} is open. {stage.instruction(Action.CANCEL)} Then clear the data left over."
+        return f"{stage.event} is open: its data goes when it is closed out. {stage.instruction(Action.CLOSE_OUT)}"
     if stage.stage == Stage.IDLE:
         return f"There is no leftover data to clear. {stage.next_step}"
     if stage.stage == Stage.UNRECORDED and not stage.closed_out_before:
-        return (
-            "These scores are not recorded at any event yet and no event was ever closed out: record them with "
-            "Close Out Event."
-        )
+        return f"These scores are not recorded at any event yet and no event was ever closed out. {stage.steps_left}"
     return ""
 
 
@@ -650,7 +669,7 @@ def clear_leftover_data(actor: str) -> WipedData:
     next event. Under the school list lock and the competition config lock; CloseOutError when
     clear_leftovers_problem says why not."""
     school_list_lock()
-    config = _refuse_while_running(STOP_FIRST)
+    config = _lock_config()
     if problem := clear_leftovers_problem(event_stage()):
         raise CloseOutError(problem)
     wiped = wipe_competition_data()
@@ -671,11 +690,11 @@ def clear_leftover_data(actor: str) -> WipedData:
 def cancel_event_problem(stage: EventStage) -> str:
     """Why the open event can't be cancelled now, or ''. Only an event no team has scored: scores are closed out."""
     if stage.running:
-        return STOP_FIRST
+        return _running_refusal(stage)
     if stage.event is None:
         return f"No event is open, so there is nothing to cancel. {stage.next_step}"
     if stage.stage != Stage.READY:
-        return f"{stage.event} has scores: close it out instead (Close Out Event on the Competition page)."
+        return f"{stage.event} has scores, so it can't be cancelled. {stage.next_step}"
     return ""
 
 
@@ -686,7 +705,7 @@ def cancel_event(target: Event, actor: str) -> Event:
     links, tickets) is then left over for Clear leftover data. Under the school list lock and the competition config
     lock; CloseOutError, writing nothing, says why it refused."""
     school_list_lock()
-    _refuse_while_running(STOP_FIRST)
+    _lock_config()
     stage = event_stage()
     if stage.event != target:
         raise CloseOutError(f"{target} is no longer open. Reload the page.")

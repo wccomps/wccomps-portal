@@ -106,7 +106,7 @@ def test_distribute_packet_stamps_the_open_event(current_event):
 def test_distribute_packet_with_no_open_event_is_refused():
     packet = _packet(None, status="draft")
 
-    with pytest.raises(ValueError, match="import the school list for this event first"):
+    with pytest.raises(ValueError, match="No event is open. Import the next school list"):
         PacketDistributionService().distribute_packet(packet)
 
     packet.refresh_from_db()

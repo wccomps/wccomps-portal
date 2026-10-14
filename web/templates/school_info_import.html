@@ -192,7 +192,10 @@ Tech Institute,admin@techinst.edu,,</pre>
                             </c-form_field>
                             {% if active_season %}
                                 <input type="hidden" name="current_season" value="{{ active_season.pk }}">
-                                <p>This event will be in season <strong>{{ active_season.name }}</strong>.</p>
+                                <p>
+                                    Unless you start a new season below, this event will be in season
+                                    <strong>{{ active_season.name }}</strong>.
+                                </p>
                                 <p>
                                     <strong>Start a new season</strong> instead at the start of a school year: choose New
                                     event and give the new season a name and a year below.

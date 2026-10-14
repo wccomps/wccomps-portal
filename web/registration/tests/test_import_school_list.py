@@ -6,7 +6,8 @@ from datetime import date
 import pytest
 
 from registration.models import Event, Season
-from registration.services import ImportBlockedError, NewEvent, SchoolListRow, import_school_list
+from registration.services import ImportBlockedError, SchoolListRow, import_school_list
+from registration.tests.shown import new_event
 from team.models import SchoolInfo, Team
 
 pytestmark = pytest.mark.django_db
@@ -52,7 +53,7 @@ def test_a_new_event_is_saved_only_when_the_import_goes_ahead(season):
 
 
 def test_a_new_event_is_created_and_opened(season):
-    new = NewEvent("New", date(2026, 11, 7), "qualifier")
+    new = new_event("New", date(2026, 11, 7), "qualifier")
 
     counts = import_school_list(new, _rows(), "gold")
 

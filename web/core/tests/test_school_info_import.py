@@ -24,6 +24,14 @@ def _confirm(client):
     return client.post(reverse("school_info_import"), {"confirm": "true", "preview": token})
 
 
+def _shown():
+    """The active season's id as the import page posts it, or '' when none is active."""
+    from registration.models import Season
+
+    active = Season.objects.active()
+    return str(active.pk) if active else ""
+
+
 def _season_and_event(name="Invitational", active=False):
     from datetime import date
 
@@ -90,7 +98,13 @@ def test_import_can_create_the_event(client):
     Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     _season_and_event(name="Earlier")
     csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
-    fields = {"event": "new", "new_name": "Invitational 2", "new_date": "2026-11-07", "new_type": "invitational"}
+    fields = {
+        "event": "new",
+        "new_name": "Invitational 2",
+        "new_date": "2026-11-07",
+        "new_type": "invitational",
+        "current_season": _shown(),
+    }
 
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields})
     _confirm(client)
@@ -272,6 +286,7 @@ def test_a_new_event_from_the_import_is_closed_to_registration(client):
             "new_name": "Qualifier",
             "new_date": "2026-11-07",
             "new_type": "qualifier",
+            "current_season": _shown(),
         },
     )
 
@@ -319,7 +334,13 @@ def test_the_session_keeps_the_raw_event_fields(client):
     Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     _season_and_event()
     csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
-    fields = {"event": "new", "new_name": "Invitational 2", "new_date": "2026-11-07", "new_type": "invitational"}
+    fields = {
+        "event": "new",
+        "new_name": "Invitational 2",
+        "new_date": "2026-11-07",
+        "new_type": "invitational",
+        "current_season": _shown(),
+    }
 
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields})
 
@@ -329,7 +350,6 @@ def test_the_session_keeps_the_raw_event_fields(client):
         "mode": "",
         "new_season_name": "",
         "new_season_year": "",
-        "current_season": "",
     }
 
 
@@ -339,7 +359,13 @@ def test_confirm_rechecks_a_new_events_fields(client):
     Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     _season_and_event()
     csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
-    fields = {"event": "new", "new_name": "Invitational 2", "new_date": "2026-11-07", "new_type": "invitational"}
+    fields = {
+        "event": "new",
+        "new_name": "Invitational 2",
+        "new_date": "2026-11-07",
+        "new_type": "invitational",
+        "current_season": _shown(),
+    }
     client.post(reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields})
     session = client.session
     (stored,) = session["school_list_previews"].values()
@@ -390,7 +416,8 @@ def test_with_an_active_season_the_page_names_it_and_still_offers_a_new_one(clie
 
     page = client.get(reverse("school_info_import")).content.decode()
 
-    assert "This event will be in season <strong>2026</strong>" in page
+    assert "Unless you start a new season below, this event will be in season" in page
+    assert "<strong>2026</strong>" in page
     assert 'name="new_season_name"' in page
     assert f'name="current_season" value="{event.season.pk}"' in page
 

@@ -18,7 +18,6 @@ from scoring.models import ServiceScore
 from core.models import UserGroups
 from registration.models import Event, Season
 from registration.services import (
-    NewEvent,
     SchoolListRow,
     add_to_school_list,
     clear_school_list,
@@ -27,6 +26,7 @@ from registration.services import (
     remove_team_school,
     set_team_school,
 )
+from registration.tests.shown import new_event
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
@@ -164,7 +164,7 @@ def test_opening_an_event_for_the_current_schools_takes_the_lock(team):
     ServiceScore.objects.create(team=team, service_points=1)
 
     with CaptureQueriesContext(connection) as queries:
-        close_out_event(NewEvent("Invitational", date(2026, 10, 3), "invitational"), "gold")
+        close_out_event(new_event("Invitational", date(2026, 10, 3), "invitational"), "gold")
 
     _assert_locks_before_reading_the_open_event(queries)
 

@@ -14,6 +14,8 @@ from registration.models import Event, Season
 from registration.services import set_team_school
 from scoring.models import ServiceScore
 
+from core.admin_views.competition import CLOSE_OUT_CHECK_FAILED
+from core.admin_views.event_panel import RARE_ACTIONS, STEPS
 from core.models import CompetitionConfig
 from team.models import Team
 
@@ -130,7 +132,7 @@ def test_a_failing_close_out_check_does_not_break_the_page(client):
         response = client.post(reverse("admin_competition_action"), {"action": "close_out_check"})
 
     assert response.status_code == 500
-    assert response.json() == {"error": "Couldn't check unfinished work."}
+    assert response.json() == {"error": CLOSE_OUT_CHECK_FAILED}
 
 
 def test_the_rarely_used_tools_sit_under_advanced_below_the_normal_flow(client):
@@ -161,27 +163,18 @@ def test_the_page_query_count_does_not_grow_with_the_teams(client):
     assert one <= 40
 
 
-GUIDE_URL_NAMES = [
-    "admin_competition",
-    "admin_competition_danger",
-    "school_info",
-    "school_info_import",
-    "packets_list",
-    "scoring:email_scorecards",
-    "scoring:review_incidents",
-    "scoring:inject_grading",
-]
-
-
-def test_the_guide_renders_for_gold_team_and_links_where_each_step_is_done(client):
+def test_the_guide_walks_the_panels_steps_in_order_with_their_links(client):
     response = client.get(reverse("admin_competition_guide"))
 
     assert response.status_code == 200
     page = response.content.decode()
-    hrefs = set(re.findall(r'href="(/[^"#]*)', page))
-    for name in GUIDE_URL_NAMES:
-        assert reverse(name) in hrefs, name
-    assert "—" not in page and "–" not in page
+    headings = re.findall(r'<h2 class="mt-20" id="([a-z_]+)">', page)
+    assert headings == [step.key for step in STEPS] + [action.value for action, _ in RARE_ACTIONS]
+    hrefs = set(re.findall(r'href="([^"]*)"', page))
+    for step in STEPS:
+        assert step.url in hrefs, step.key
+    assert reverse("admin_competition_danger") in hrefs
+    assert "\u2014" not in page and "\u2013" not in page
 
 
 def test_every_guide_link_resolves(client):
@@ -204,3 +197,10 @@ def test_the_guide_is_in_the_ops_navigation(client):
     assert 'aria-current="page"' in page
     with pytest.raises(NoReverseMatch):
         reverse("admin_competition_guide", args=[1])
+
+
+def test_the_competition_page_uses_words_not_symbol_marks(client):
+    page = _page(client)
+
+    for mark in ("\u2713", "\u2717", "\u26a0", "\u2192"):
+        assert mark not in page, mark

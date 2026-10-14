@@ -9,9 +9,9 @@
                        parent_url="{% url 'admin_competition' %}"
                        parent_label="Competition" />
         <p>
-            This page walks through one event, from the school list to the season's results. You don't need to
-            remember it: the <a href="{% url 'admin_competition' %}">Event panel</a> at the top of the Competition page
-            always says where the event stands, the one next step, and links to where it is done.
+            This page walks through one event, from the school list to its saved results. You don't need to remember
+            it: the <a href="{% url 'admin_competition' %}">Event panel</a> at the top of the Competition page always
+            says where the event stands and the next step, and links to where that step is done.
         </p>
         <p>
             <strong>Live data</strong> means everything the portal holds for the event in progress: scores, inject
@@ -19,159 +19,19 @@
             It stays until Close Out Event (or Clear leftover data) deletes it, so grading can go on after the
             competition stops.
         </p>
-        <h2 class="mt-20">1. Import the school list</h2>
-        <p>
-            <strong>Where:</strong> <a href="{% url 'school_info' %}">Schools</a>, then
-            <a href="{% url 'school_info_import' %}">Import from CSV</a>.
-        </p>
-        <p>
-            <strong>What to do:</strong> upload a CSV with one row per school (school_name and contact_email, optionally
-            secondary_email and notes). Choose the event the list is for: an event already set up in the active season,
-            or New event with its name, date and type. Keep the mode on Replace the school list for the event's first
-            list, then Upload and Preview, check the preview, and Confirm and Import.
-        </p>
-        <p>
-            <strong>What happens:</strong> the schools get teams 1 through N in random order, those teams are activated,
-            every team name goes back to its default, and the event is opened. Only one event is open at a time.
-        </p>
-        <p>
-            <strong>A new school year:</strong> the import page names the season the event will be in ("This event will
-            be in season ..."). At the start of a school year, choose New event and fill in Start a new season (a name
-            and a year): the import creates the season, makes it the active season and puts the new event in it. If no
-            season is active, the new season is required.
-        </p>
-        <p>
-            <strong>Late registrations:</strong> import a file with the new schools and choose Add schools to the open
-            event. Schools already on the list keep their team numbers and are skipped; each new school gets a free
-            team. This works after packets went out and after teams started using their numbers. Then send them the
-            packet with Send to Teams Without It (step 2).
-        </p>
-        <p>
-            <strong>What can go wrong:</strong> the page refuses to Replace a list once packets were sent for the open
-            event, or once teams started using their numbers (scores, tickets or Discord links), because new numbers
-            would send logins to the wrong school. It says to use Add schools, or to change one school on its School
-            Info page. It refuses a list for another event while one is still open, and says whether to close that one
-            out or cancel it.
-        </p>
-        <h2 class="mt-20">2. Send packets</h2>
-        <p>
-            <strong>Where:</strong> <a href="{% url 'packets_list' %}">Packets</a>. Upload New Packet, open it, and
-            press Distribute.
-        </p>
-        <p>
-            <strong>What happens:</strong> each school on the list is emailed the packet with its team's username and
-            password (the password is set the first time the team is sent a packet), and, unless the packet turns it
-            off, teams can download it in the portal. The packet then belongs to the open event.
-        </p>
-        <p>
-            <strong>Late teams:</strong> after Add schools, open the sent packet and press Send to Teams Without It. It
-            sends to the teams on the list that have no copy yet. Resend Failed and Retry Pending cover sends that
-            failed or were interrupted.
-        </p>
-        <p>
-            <strong>What can go wrong:</strong> a packet can't be sent while no event is open (import the school list
-            first). A packet sent for an earlier event can't be sent again, because team numbers changed since: upload
-            it again as a new packet. The Event panel shows how many draft packets are not sent and how many teams on
-            the list have no copy of a sent packet.
-        </p>
-        <h2 class="mt-20">3. Check readiness</h2>
-        <p>
-            <strong>Where:</strong> <a href="{% url 'admin_competition' %}#readiness">Readiness Check</a> on the
-            Competition page. Press Run Checks.
-        </p>
-        <p>
-            <strong>What happens:</strong> it checks that the team accounts exist and are in the right groups, the
-            Discord settings are set, the packets went out, the start message is set, Quotient answers and is synced,
-            and no tickets, scores, grades or orange assignments are left from before. Some results have a button that
-            fixes them or a link to where they are fixed.
-        </p>
-        <p>
-            Before competition day, also set up the Competition page: Max Team Members and the Controlled Apps (the
-            apps Start and Stop open and close), the Schedule, the Start Message (posted to every active team when the
-            competition starts) and Sync Metadata under Quotient Integration.
-        </p>
-        <h2 class="mt-20">4. Start the competition</h2>
-        <p>
-            <strong>Where:</strong> <a href="{% url 'admin_competition' %}#controls">Competition Controls</a>, Start
-            Competition. If a start time is set under Schedule, the bot starts it at that time on its own.
-        </p>
-        <p>
-            <strong>What happens:</strong> the controlled apps open to blue teams, the active teams' accounts are
-            turned on, Quotient metadata is synced, and the start message is posted to every active team.
-        </p>
-        <p>
-            <strong>What can go wrong:</strong> with no controlled apps configured it refuses. If some apps or accounts
-            didn't change, the progress list marks them and says the run is incomplete: run Start again.
-        </p>
-        <h2 class="mt-20">5. Stop the competition</h2>
-        <p>
-            <strong>Where:</strong> <a href="{% url 'admin_competition' %}#controls">Competition Controls</a>, Stop
-            Competition, or the end time under Schedule.
-        </p>
-        <p>
-            <strong>What happens:</strong> student access goes off: the controlled apps close and every team account is
-            turned off. The live data stays, so grading goes on. You can start again later.
-        </p>
-        <h2 class="mt-20">6. Finish scoring and email scorecards</h2>
-        <p>
-            <strong>Where:</strong> white team grades injects under
-            <a href="{% url 'scoring:inject_grading' %}">White Team</a>, and the reviews are approved under
-            <a href="{% url 'scoring:review_incidents' %}">Scoring Review</a>. Then
-            <a href="{% url 'scoring:email_scorecards' %}">Email Scorecards</a> sends each school its scorecard.
-        </p>
-        <p>
-            <strong>What happens:</strong> grading usually takes a day or two after the competition. Scores are still
-            live data, so they can change until Close Out. Email Scorecards emails each school with a contact email
-            its PDF scorecard, usually on the Sunday or Monday after.
-        </p>
-        <p>
-            <strong>What the page tells you:</strong> once the competition is stopped, the Event panel and the Close
-            Out Event section check for unfinished work: grades, tickets, incident reports, red team findings and orange
-            scores not approved, and whether the scorecards were emailed and still match the scores. Each item links to
-            where it is finished.
-        </p>
-        <h2 class="mt-20">7. Close Out Event</h2>
-        <p>
-            <strong>Where:</strong> <a href="{% url 'admin_competition' %}#close-out">Close Out Event</a> on the
-            Competition page. Type yolo to confirm.
-        </p>
-        <p>
-            <strong>What happens:</strong> in one step it freezes every listed school's scorecard and a zip of every
-            export as the event's results for the season, then deletes the live data, closes the event, clears the
-            schedule, the start message, the Quotient box list and queued announcements, and queues the Discord
-            cleanup (team channels, roles and helpers). The school list stays until the next import. It can't be
-            undone, so finish grading and email the scorecards first.
-        </p>
-        <p>
-            <strong>Scores with no event:</strong> if teams have scores but no event is open (an event ran without an
-            import), Close Out asks for the event's name, date and type and records the scores at a new event in the
-            active season, which it names (or in a new season it asks for, when none is active).
-        </p>
-        <p>
-            <strong>What can go wrong:</strong> it refuses while the competition runs (stop it first), when no team has
-            scores (cancel the event instead), and when a score would be lost: a school on the list whose team is
-            inactive, or a team with scores but no school. The message says which teams and what to fix.
-        </p>
-        <h2 class="mt-20">Rare: Cancel event</h2>
-        <p>
-            <strong>Where:</strong> <a href="{% url 'admin_competition_danger' %}">Danger Zone</a>, under Advanced on
-            the Competition page.
-        </p>
-        <p>
-            For an event opened by mistake, or called off before any team has scores. It closes the event and removes
-            its team assignments, so it can be deleted; nothing is recorded for it. The school list and sent packets
-            stay. Discord links and tickets are then left over for Clear leftover data. Once teams have scores, close
-            the event out instead.
-        </p>
-        <h2 class="mt-20">Rare: Clear leftover data</h2>
-        <p>
-            <strong>Where:</strong> <a href="{% url 'admin_competition_danger' %}">Danger Zone</a>.
-        </p>
-        <p>
-            When no event is open but live data is still there (for example tickets or Discord links after Cancel
-            event), the Event panel says so and links here. Clearing deletes that data for good; it is not archived.
-            Results of events already closed out are not touched. If the leftovers include scores that were never
-            recorded and no event was ever closed out, the page asks you to record them with Close Out Event instead.
-        </p>
+        {% for row in steps %}
+            <h2 class="mt-20" id="{{ row.step.key }}">{{ forloop.counter }}. {{ row.step.label }}</h2>
+            <p>
+                <strong>Where:</strong> <a href="{{ row.step.url }}">{{ row.step.link_label }}</a>.
+            </p>
+            {% include row.partial %}
+        {% endfor %}
+        {% for row in rare %}
+            <h2 class="mt-20" id="{{ row.key }}">Rare: {{ row.title }}</h2>
+            <p>
+                <strong>Where:</strong> <a href="{{ row.url }}">Danger Zone</a>, under Advanced on the Competition page.
+            </p>
+            {% include row.partial %}
+        {% endfor %}
     </div>
 {% endblock admin_content %}

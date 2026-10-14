@@ -15,6 +15,7 @@ from registration.models import Event, School, Season, normalize_school_name
 from registration.services import (
     ADD_NEEDS_OPEN_EVENT,
     NewEvent,
+    NewSeason,
     SchoolListRow,
     add_problem,
     add_to_school_list,
@@ -117,10 +118,14 @@ class CSVUploadForm(forms.Form):
 
 class ImportEventForm(NewEventFields):
     """The event a school list is for: an unfinalized event of the active season, or a new one, in a new season when
-    none is active or when the import starts one; and the import mode's key (IMPORT_MODES), Replace when not given."""
+    none is active or at a new school year; and the import mode's key (IMPORT_MODES), Replace when not given."""
 
     event = forms.CharField(required=False)
     mode = forms.CharField(required=False)
+    new_season_name = forms.CharField(max_length=100, required=False)
+    new_season_year = forms.IntegerField(
+        min_value=2000, max_value=2100, required=False, error_messages={"invalid": "Give the season a valid year."}
+    )
 
     # After validation: the chosen event, or the new one the import creates; and the mode's key
     event_to_import: Event | NewEvent
@@ -129,6 +134,20 @@ class ImportEventForm(NewEventFields):
     def __init__(self, *args: object, season: Season | None, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         self.season = season
+
+    def wants_new_season(self) -> bool:
+        return bool(self.cleaned_data.get("new_season_name") or self.cleaned_data.get("new_season_year"))
+
+    def new_season(self) -> NewSeason | None:
+        for name in ("new_season_name", "new_season_year"):
+            if name in self.errors:
+                raise ValidationError(self.errors[name][0])
+        if not self.wants_new_season():
+            return None
+        data = self.cleaned_data
+        if not (data.get("new_season_name") and data.get("new_season_year")):
+            raise ValidationError("Give the new season a name and a year.")
+        return NewSeason(name=data["new_season_name"], year=data["new_season_year"])
 
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}

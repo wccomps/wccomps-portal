@@ -213,8 +213,9 @@ def test_without_a_finalized_event_leftovers_are_hidden_and_refused(admin_client
     assert "Clear Leftover Data" not in page
     assert response.status_code == 400
     assert response.json()["error"] == (
-        "These scores are not recorded at any event yet and no event was ever closed out: record them with "
-        "Close Out Event."
+        "These scores are not recorded at any event yet and no event was ever closed out. Finish grading, then email "
+        "every school its scorecard with Email Scorecards. Close out the event with Close Out Event on the "
+        "Competition page; with no event open, it asks for the event's name, date and type."
     )
     assert ServiceScore.objects.exists()
 
@@ -239,7 +240,9 @@ def test_clearing_leftovers_is_refused_while_running(admin_client):
 
     response = _post(admin_client, "clear_leftover_data", confirm="YOLO")
 
-    assert response.json()["error"] == "Stop the competition first, with Stop Competition on the Competition page."
+    assert response.json()["error"] == (
+        "The competition is running. When the competition ends, stop it with Stop Competition on the Competition page."
+    )
     assert ServiceScore.objects.exists()
 
 

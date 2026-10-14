@@ -95,7 +95,7 @@ class CancelEventForm(TypedConfirmForm):
 
 class CloseOutForm(TypedConfirmForm, NewEventFields):
     """What the page showed: the open event (its id), or with none open the event Close Out records the scores at
-    (and its new season when none is active); and the typed confirmation."""
+    in the active season the page showed; and the typed confirmation."""
 
     open_event = forms.ModelChoiceField(
         queryset=Event.objects.all(),

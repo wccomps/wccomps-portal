@@ -15,8 +15,7 @@ from ticketing.models import Ticket
 
 from .models import Event
 from .services import current_snapshots
-
-SCORECARDS_EMAILED = "scorecards_emailed"
+from .stage import SCORECARDS_EMAILED
 
 
 @dataclass(frozen=True)

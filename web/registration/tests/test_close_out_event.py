@@ -20,7 +20,7 @@ from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnounce
 from registration.models import Event, EventArchive, EventResult, School, Season
 from registration.services import (
     CloseOutError,
-    NewEvent,
+    NewSeason,
     SchoolListRow,
     clear_leftover_data,
     close_out_event,
@@ -29,11 +29,14 @@ from registration.services import (
     set_team_school,
 )
 from registration.stage import Stage, event_stage
+from registration.tests.shown import new_event
 from team.models import DiscordLink, SchoolInfo, Team
 
 pytestmark = pytest.mark.django_db
 
-OCT_3 = NewEvent("Invitational 1", date(2026, 10, 3), "invitational")
+
+def _oct_3():
+    return new_event("Invitational 1", date(2026, 10, 3), "invitational")
 
 
 @pytest.fixture
@@ -138,9 +141,12 @@ def test_an_event_finalized_before_is_frozen_again_from_the_live_scores(event):
     [
         (
             lambda event: CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True}),
-            "^Stop the competition first, with Stop Competition on the Competition page.$",
+            "^The competition is running. When the competition ends, stop it with Stop Competition",
         ),
-        (lambda event: Team.objects.filter(team_number=2).update(is_active=False), "Reactivate Team 2"),
+        (
+            lambda event: Team.objects.filter(team_number=2).update(is_active=False),
+            "Team 2 is inactive but holds a school",
+        ),
         (
             lambda event: InjectScore.objects.create(
                 team=Team.objects.create(team_number=3, team_name="Team 03"),
@@ -188,7 +194,7 @@ def test_an_event_closed_since_the_page_loaded_is_refused(event):
 
 def test_a_new_event_is_refused_once_an_event_is_open(event):
     with pytest.raises(CloseOutError, match="was opened since the page loaded. Reload the page"):
-        close_out_event(NewEvent("Invitational 2", date(2026, 11, 3), "invitational"), "gold")
+        close_out_event(new_event("Invitational 2", date(2026, 11, 3), "invitational"), "gold")
     assert Event.objects.count() == 1
     _assert_nothing_written(event)
 
@@ -228,7 +234,7 @@ def test_with_no_event_open_it_creates_and_closes_the_event_for_the_current_scho
     ServiceScore.objects.create(team=first, service_points=Decimal(100))
     assert event_stage().stage == Stage.UNRECORDED
 
-    outcome = close_out_event(OCT_3, "gold")
+    outcome = close_out_event(_oct_3(), "gold")
 
     event = outcome.event
     assert outcome.results == 2
@@ -260,7 +266,7 @@ def test_with_no_event_open_a_failure_writes_nothing():
         patch("registration.services.wipe_competition_data", side_effect=RuntimeError("boom")),
         pytest.raises(RuntimeError),
     ):
-        close_out_event(OCT_3, "gold")
+        close_out_event(_oct_3(), "gold")
 
     assert not Event.objects.exists()
     _assert_nothing_written(scores=1)
@@ -273,8 +279,20 @@ def test_with_no_event_open_it_needs_an_active_season():
     ServiceScore.objects.create(team=team, service_points=1)
 
     with pytest.raises(CloseOutError, match="No season is active"):
-        close_out_event(OCT_3, "gold")
+        close_out_event(_oct_3(), "gold")
     assert not Event.objects.exists()
+    _assert_nothing_written(scores=1)
+
+
+def test_close_out_does_not_start_a_new_season():
+    old = Season.objects.create(name="2026", year=2026, is_active=True)
+    team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+    ServiceScore.objects.create(team=team, service_points=1)
+
+    with pytest.raises(CloseOutError, match="doesn't start a new season"):
+        close_out_event(new_event("Inv", date(2027, 10, 2), "invitational", NewSeason("2027", 2027)), "gold")
+    assert list(Season.objects.all()) == [old] and old.is_active
     _assert_nothing_written(scores=1)
 
 
@@ -286,7 +304,7 @@ def test_with_no_event_open_a_name_used_in_the_season_is_refused():
     ServiceScore.objects.create(team=team, service_points=1)
 
     with pytest.raises(CloseOutError, match="already has an event named Invitational 1"):
-        close_out_event(OCT_3, "gold")
+        close_out_event(_oct_3(), "gold")
     assert Event.objects.count() == 1
     _assert_nothing_written(scores=1)
 
@@ -295,7 +313,7 @@ def test_with_no_event_open_and_no_live_data_there_is_nothing_to_close_out(event
     close_out_event(event, "gold")
 
     with pytest.raises(CloseOutError, match="Nothing to close out"):
-        close_out_event(NewEvent("Invitational 2", date(2026, 11, 3), "invitational"), "gold")
+        close_out_event(new_event("Invitational 2", date(2026, 11, 3), "invitational"), "gold")
     assert list(Event.objects.all()) == [event]
     assert len(_cleanups()) == 1
 
@@ -326,7 +344,7 @@ def test_scores_after_a_close_out_can_be_recorded_at_a_new_event(event):
     _closed_out_with_a_late_score(event)
 
     assert event_stage().stage == Stage.UNRECORDED
-    outcome = close_out_event(NewEvent("Invitational 2", date(2026, 11, 3), "invitational"), "gold")
+    outcome = close_out_event(new_event("Invitational 2", date(2026, 11, 3), "invitational"), "gold")
 
     assert outcome.results == 2
     assert EventResult.objects.get(event=outcome.event, team_number=1).total_score > 0
@@ -340,7 +358,7 @@ def test_clearing_unrecorded_scores_after_a_close_out_keeps_the_schedule_and_let
     CompetitionConfig.objects.update_or_create(
         pk=1, defaults={"competition_start_time": now, "competition_end_time": now}
     )
-    new = NewEvent("Qual", date(2026, 11, 7), "qualifier")
+    new = new_event("Qual", date(2026, 11, 7), "qualifier")
     assert "not recorded at any event yet" in import_problem(new)
 
     wiped = clear_leftover_data("gold")
@@ -366,9 +384,9 @@ def test_live_data_with_no_scores_is_leftovers_to_clear(event):
     _link_team(Team.objects.get(team_number=1))
 
     assert event_stage().stage == Stage.LEFTOVERS
-    assert "Clear leftover data" in import_problem(NewEvent("Qual", date(2026, 11, 7), "qualifier"))
+    assert "Clear leftover data" in import_problem(new_event("Qual", date(2026, 11, 7), "qualifier"))
     with pytest.raises(CloseOutError, match="Nothing to close out"):
-        close_out_event(NewEvent("Qual", date(2026, 11, 7), "qualifier"), "gold")
+        close_out_event(new_event("Qual", date(2026, 11, 7), "qualifier"), "gold")
 
     assert clear_leftover_data("gold").deleted["BlueTeamDiscordLink"] == 1
     assert event_stage().stage == Stage.IDLE
@@ -379,7 +397,8 @@ def test_clearing_leftovers_is_refused_while_the_competition_runs(event):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
 
     with pytest.raises(
-        CloseOutError, match="^Stop the competition first, with Stop Competition on the Competition page.$"
+        CloseOutError,
+        match="^The competition is running. When the competition ends, stop it with Stop Competition",
     ):
         clear_leftover_data("gold")
     assert ServiceScore.objects.count() == 1
@@ -393,7 +412,7 @@ def test_with_an_event_open_its_data_is_not_leftovers(event):
 
 
 def test_after_a_close_out_a_replace_import_opens_the_next_event(event):
-    new = NewEvent("Qual", date(2026, 11, 7), "qualifier")
+    new = new_event("Qual", date(2026, 11, 7), "qualifier")
     assert "Close Out Event" in import_problem(new)
     close_out_event(event, "gold")
     rows = [SchoolListRow(team_number=2, school_name="Example University", contact_email="c@example.edu")]
@@ -412,8 +431,8 @@ def test_scores_never_recorded_point_the_import_at_close_out_and_cannot_be_clear
     Event.objects.filter(pk=event.pk).update(is_active=False)
 
     assert event_stage().stage == Stage.UNRECORDED
-    assert "Close Out Event" in import_problem(NewEvent("Qual", date(2026, 11, 7), "qualifier"))
-    with pytest.raises(CloseOutError, match="record them with Close Out Event"):
+    assert "Close Out Event" in import_problem(new_event("Qual", date(2026, 11, 7), "qualifier"))
+    with pytest.raises(CloseOutError, match="Close out the event with Close Out Event"):
         clear_leftover_data("gold")
     assert ServiceScore.objects.count() == 2
 
