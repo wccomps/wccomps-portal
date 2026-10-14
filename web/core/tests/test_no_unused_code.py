@@ -395,7 +395,6 @@ URL_EXCEPTIONS = {
     "scoring:orange_team_redirect": "Old orange team address, redirects to the orange team dashboard for bookmarks",
     "scoring:submit_orange_check": "Old orange check address, redirects to the orange team dashboard for bookmarks",
     "admin_task_status": "The Sync Roles page polls /ops/admin/task/<id>/status/ by path from its script",
-    "team_packet": "The team packet page at /packet/; no portal page links it, so teams reach it by its address",
 }
 
 PROJECT_MODULE_RE = re.compile(rf"^({'|'.join(p.name for p in WEB_DIR.iterdir() if (p / '__init__.py').exists())})\.")
