@@ -89,9 +89,8 @@ def test_which_steps_are_done(stage, facts, done):
     assert [row.step.action for row in panel.steps if row.state == StepState.DONE] == done
 
 
-def test_the_panel_names_the_event_and_its_season():
-    assert _panel(Stage.PLAYED).title == "Invitational, season 2026"
-    assert _panel(Stage.IDLE).title == "No event open"
+def test_the_panel_links_the_seasons_page():
+    assert _panel(Stage.PLAYED).seasons_url == reverse("registration_season_list")
 
 
 @pytest.mark.parametrize(

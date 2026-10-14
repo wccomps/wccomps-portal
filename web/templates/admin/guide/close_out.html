@@ -11,7 +11,8 @@
 <p>
     <strong>Scores with no event:</strong> if teams have scores but no event is open (an event ran without an import),
     Close Out asks for the event's name, date and type and records the scores at a new event in the active season, which
-    it names. It needs an active season: if none is active, make one active on the Seasons page first.
+    it names. It needs an active season: if none is active, make one active on the
+    <a href="{% url 'registration_season_list' %}">Seasons page</a> first.
 </p>
 <p>
     <strong>What can go wrong:</strong> it refuses while the competition runs (stop it first), when no team has scores

@@ -522,14 +522,17 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
     quotient_metadata = QuotientMetadataCache.objects.first()
 
     close_out_refusal = close_out_problem(stage, check_schools=False)
+    active_season = Season.objects.active()
     context = {
         "panel": event_panel(event_facts(stage)),
         "close_out_check_failed": CLOSE_OUT_CHECK_FAILED,
+        # Close Out records scores with no event in the active season; the Seasons page makes one active
+        "needs_active_season": stage.event is None and active_season is None,
+        "active_season": active_season,
         "open_event": stage.event,
         "can_close_out": not close_out_refusal,
         # Shown where the module offers no button for a reason the operator can act on
         "close_out_refusal": close_out_refusal if stage.stage in (Stage.READY, Stage.PLAYED, Stage.UNRECORDED) else "",
-        "active_season": Season.objects.active(),
         "event_type_choices": Event.EVENT_TYPE_CHOICES,
         "config": config,
         "active_teams": active_teams,

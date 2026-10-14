@@ -416,7 +416,7 @@ def close_out_problem(stage: EventStage, *, check_schools: bool = True) -> str:
     if stage.event is None and not Season.objects.filter(is_active=True).exists():
         return (
             "No season is active, and Close Out records these scores at a new event in the active season. Make a "
-            "season active on the Seasons page (Registration, Seasons), then close out."
+            "season active on the Seasons page, then close out."
         )
     return _unfreezable(stage.event)[0] if check_schools else ""
 

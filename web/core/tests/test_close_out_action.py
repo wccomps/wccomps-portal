@@ -289,7 +289,11 @@ def test_the_check_lists_unfinished_work_with_links_and_no_problem(client):
         "fixes": [],
         "warnings": [
             {"text": "3 inject grades are not approved.", "url": reverse("scoring:inject_grades_review")},
-            {"text": "Scorecards haven't been emailed for this event.", "url": reverse("scoring:email_scorecards")},
+            {
+                "text": "No scorecard email is recorded for this event. If you already emailed them, you can close "
+                "out.",
+                "url": reverse("scoring:email_scorecards"),
+            },
         ],
     }
 

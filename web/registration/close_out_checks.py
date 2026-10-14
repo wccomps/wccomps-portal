@@ -126,7 +126,7 @@ def _scorecard_warnings(event: Event | None) -> list[str]:
     sends = AuditLog.objects.filter(action=SCORECARDS_EMAILED, details__event=event.pk)
     emailed = sends.order_by("-created_at", "-pk").first()
     if emailed is None:
-        return ["Scorecards haven't been emailed for this event."]
+        return ["No scorecard email is recorded for this event. If you already emailed them, you can close out."]
     warnings = []
     if failed := emailed.details.get("failed", 0):
         one, many = "scorecard email failed in the last send", "scorecard emails failed in the last send"

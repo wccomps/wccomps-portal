@@ -46,7 +46,10 @@ def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_bro
             page.goto(f"{live_server.url}/ops/admin/competition/")
             # The check loads after the page, with a link to where each item is finished
             page.get_by_role("link", name="1 inject grade is not approved.").wait_for()
-            assert page.get_by_role("link", name="Scorecards haven't been emailed for this event.").is_visible()
+            assert page.get_by_role(
+                "link",
+                name="No scorecard email is recorded for this event. If you already emailed them, you can close out.",
+            ).is_visible()
 
             if typed != "yolo":
                 page.get_by_role("button", name="Close Out Event").click()

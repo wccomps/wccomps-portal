@@ -10,7 +10,13 @@
             <c-slot name="title">
                 Event
             </c-slot>
-            <p class="font-semibold">{{ panel.title }}</p>
+            <p class="font-semibold">
+                {% if panel.stage.event %}
+                    {{ panel.stage.event.name }}, season <a href="{{ panel.seasons_url }}">{{ panel.stage.event.season.name }}</a>
+                {% else %}
+                    No event open
+                {% endif %}
+            </p>
             <p>{{ panel.stage.status }}</p>
             <p>
                 <strong>Next step:</strong> {{ panel.stage.next_step }}
@@ -405,6 +411,11 @@
                 </template>
             {% elif close_out_refusal %}
                 <p class="help-text">{{ close_out_refusal }}</p>
+                {% if needs_active_season %}
+                    <p>
+                        <a href="{% url 'registration_season_list' %}">Open the Seasons page</a>
+                    </p>
+                {% endif %}
             {% endif %}
         </c-module>
         <h2 class="mt-20" id="advanced">Advanced</h2>

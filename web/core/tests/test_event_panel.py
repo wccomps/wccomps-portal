@@ -71,7 +71,8 @@ def test_an_open_event_names_its_season_and_points_at_the_packets(client):
 
     panel = _panel(_page(client))
 
-    assert "Invitational 1, season WCComps 2027" in panel
+    assert "Invitational 1, season" in panel
+    assert f'<a href="{reverse("registration_season_list")}">WCComps 2027</a>' in panel
     assert "Invitational 1 (WCComps 2027) is open. No team has scores yet." in panel
     assert f'href="{reverse("packets_list")}"' in panel
     assert "2 schools are on the list." in panel
@@ -128,7 +129,7 @@ def test_a_failing_close_out_check_does_not_break_the_page(client):
     _teams(1, score=True)
 
     with patch("core.admin_views.competition.close_out_warnings", side_effect=RuntimeError("boom")):
-        assert "Invitational 1, season WCComps 2027" in _page(client)
+        assert "Invitational 1, season" in _page(client)
         response = client.post(reverse("admin_competition_action"), {"action": "close_out_check"})
 
     assert response.status_code == 500
@@ -204,3 +205,30 @@ def test_the_competition_page_uses_words_not_symbol_marks(client):
 
     for mark in ("\u2713", "\u2717", "\u26a0", "\u2192"):
         assert mark not in page, mark
+
+
+def test_the_finish_step_says_an_unrecorded_send_is_fine(client):
+    _event(is_active=True)
+    _teams(1, score=True)
+
+    assert "If you already emailed them, you can close out." in _panel(_page(client))
+
+
+def test_with_no_active_season_close_out_links_the_seasons_page(client):
+    Season.objects.create(name="2025", year=2025)
+    _teams(1, score=True)
+
+    page = _page(client)
+    close_out = page[page.index('id="close-out"') :]
+
+    assert "No season is active" in close_out
+    assert f'href="{reverse("registration_season_list")}"' in close_out
+    assert "Registration, Seasons" not in page
+
+
+def test_the_guide_links_the_seasons_page_and_says_where_the_checks_show(client):
+    page = client.get(reverse("admin_competition_guide")).content.decode()
+
+    assert f'href="{reverse("registration_season_list")}"' in page
+    assert "If you already emailed them, you can close out." in page
+    assert "this step and the next" not in page

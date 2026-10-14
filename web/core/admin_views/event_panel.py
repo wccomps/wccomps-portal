@@ -145,7 +145,8 @@ STEPS: tuple[Step, ...] = (
         Action.FINISH,
         "Finish scoring and email scorecards",
         "White team finishes grading and the scoring reviews are approved, then Email Scorecards sends each school "
-        "its scorecard.",
+        "its scorecard. Sends made before the portal recorded them don't show. If you already emailed them, you can "
+        "close out.",
         done=lambda stage: stage.scorecards_emailed,
         close_out_checks=True,
     ),
@@ -195,9 +196,8 @@ class EventPanel:
     steps: list[ShownStep]
 
     @property
-    def title(self) -> str:
-        event = self.stage.event
-        return f"{event.name}, season {event.season.name}" if event is not None else "No event open"
+    def seasons_url(self) -> str:
+        return reverse("registration_season_list")
 
     @property
     def action_url(self) -> str:

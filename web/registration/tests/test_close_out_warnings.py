@@ -26,7 +26,9 @@ from ticketing.models import Ticket
 pytestmark = pytest.mark.django_db
 
 EMAIL = "scoring:email_scorecards"
-NOT_EMAILED = CloseOutWarning("Scorecards haven't been emailed for this event.", EMAIL)
+NOT_EMAILED = CloseOutWarning(
+    "No scorecard email is recorded for this event. If you already emailed them, you can close out.", EMAIL
+)
 
 
 @pytest.fixture
