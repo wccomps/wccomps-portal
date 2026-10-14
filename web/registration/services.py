@@ -158,8 +158,8 @@ def clear_school_list() -> int:
     event = Event.objects.open()
     if packets_sent(event):
         raise PacketsSentError(
-            f"Packets have already been sent for {event}. Finalize and clear the event instead, "
-            "or change single schools on their School Info pages."
+            f"Packets have already been sent for {event}. Close it out instead (Close Out Event on the Competition "
+            "page), or change single schools on their School Info pages."
         )
     deleted, _ = SchoolInfo.objects.all().delete()
     if event is not None:

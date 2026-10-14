@@ -80,8 +80,8 @@ def test_clear_is_refused_once_packets_went_out_for_the_open_event(client):
     response = client.post(reverse("school_info_clear"))
 
     assert (
-        f"Packets have already been sent for {event}. Finalize and clear the event instead, "
-        "or change single schools on their School Info pages."
+        f"Packets have already been sent for {event}. Close it out instead (Close Out Event on the Competition "
+        "page), or change single schools on their School Info pages."
     ) in html.unescape(response.content.decode())
     assert SchoolInfo.objects.count() == 1
     assert EventTeamAssignment.objects.count() == 2
