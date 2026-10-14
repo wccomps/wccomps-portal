@@ -288,14 +288,31 @@
                         </c-form_field>
                     {% endif %}
                 {% endif %}
-                {% if close_out_warnings %}
+                <template x-if="closeOutChecking">
+                    <p class="help-text">Checking for unfinished work...</p>
+                </template>
+                <template x-if="closeOutCheckFailed">
+                    <c-alert variant="warning">
+                        Couldn't check unfinished work. Closing out still works; check grading and tickets by hand.
+                    </c-alert>
+                </template>
+                <template x-if="closeOutProblem">
+                    <c-alert variant="error">
+                        <span x-text="closeOutProblem"></span>
+                    </c-alert>
+                </template>
+                <template x-if="hasCloseOutWarnings">
                     <c-alert variant="warning">
                         <strong>Unfinished work (closing out freezes the results as they stand):</strong>
                         <ul class="mt-10 ml-20">
-                            {% for warning in close_out_warnings %}<li>{{ warning }}</li>{% endfor %}
+                            <template x-for="(warning, index) in closeOutWarnings" :key="index">
+                                <li>
+                                    <a :href="warning.url" x-text="warning.text"></a>
+                                </li>
+                            </template>
                         </ul>
                     </c-alert>
-                {% endif %}
+                </template>
                 <p class="help-text">
                     Run it once grading is done and the scorecards are emailed. In one step it freezes every listed
                     school's scorecard and the export archive as the event's results, deletes the live scores, tickets
@@ -304,11 +321,11 @@
                     a listed team is inactive or a team with scores has no school.
                 </p>
                 <c-button_row>
-                    <c-button variant="danger" @click="closeOutEvent" ::disabled="loading">
+                    <c-button variant="danger" @click="closeOutEvent" ::disabled="closeOutBlocked">
                         Close Out Event
                     </c-button>
                 </c-button_row>
-                <template x-if="closingOut">
+                <template x-if="closeOutStreaming">
                     <c-progress_bar />
                 </template>
             {% elif close_out_refusal %}
@@ -399,7 +416,7 @@
                     Stop Competition
                 </c-button>
             </c-button_row>
-            <template x-if="notClosingOut">
+            <template x-if="notCloseOutStreaming">
                 <c-progress_bar />
             </template>
         </c-module>
@@ -480,7 +497,11 @@ document.addEventListener('alpine:init', () => {
         closeOutSeasonName: '',
         closeOutSeasonYear: '',
         closeOutOpenEvent: '{{ open_event.pk|default_if_none:"" }}',
-        closingOut: false,
+        closeOutOffered: {{ can_close_out|yesno:"true,false" }},
+        closeOutChecking: false,
+        closeOutCheckFailed: false,
+        closeOutProblem: '',
+        closeOutWarnings: [],
         csvContent: '',
         readinessResults: [],
         readinessLoading: false,
@@ -490,6 +511,7 @@ document.addEventListener('alpine:init', () => {
         readinessSummary: '',
 
         async init() {
+            if (this.closeOutOffered) this.checkCloseOut();
             try {
                 const response = await fetch('{% url "admin_competition_apps" %}');
                 this.availableApps = (await response.json()).apps || [];
@@ -500,7 +522,10 @@ document.addEventListener('alpine:init', () => {
         },
 
         get noApps() { return this.apps.length === 0; },
-        get notClosingOut() { return !this.closingOut; },
+        get closeOutStreaming() { return this.streamAction === 'close_out_event'; },
+        get notCloseOutStreaming() { return !this.closeOutStreaming; },
+        get hasCloseOutWarnings() { return this.closeOutWarnings.length > 0; },
+        get closeOutBlocked() { return this.loading || this.closeOutChecking || !!this.closeOutProblem; },
         get addDisabled() { return this.loading || !this.newApp; },
         get notReadinessLoading() { return !this.readinessLoading; },
         get hasReadinessResults() { return this.readinessResults.length > 0; },
@@ -532,16 +557,30 @@ document.addEventListener('alpine:init', () => {
 
         startCompetition() {
             if (confirm('Start the competition?\n\nThis will open the controlled applications to BlueTeam and enable the active teams\' accounts.')) {
-                this.closingOut = false;
                 this.doStreamAction('start_competition');
             }
         },
 
         stopCompetition() {
             if (confirm('Stop the competition?\n\nThis will close the controlled applications to BlueTeam and disable every team account.\nYou can restart later.')) {
-                this.closingOut = false;
                 this.doStreamAction('stop_competition');
             }
+        },
+
+        async checkCloseOut() {
+            this.closeOutChecking = true;
+            try {
+                const result = await wcPost('{% url "admin_competition_action" %}', { action: 'close_out_check' });
+                if (result.success) {
+                    this.closeOutProblem = result.problem;
+                    this.closeOutWarnings = result.warnings;
+                } else {
+                    this.closeOutCheckFailed = true;
+                }
+            } catch (e) {
+                this.closeOutCheckFailed = true;
+            }
+            this.closeOutChecking = false;
         },
 
         closeOutEvent() {
@@ -552,7 +591,6 @@ document.addEventListener('alpine:init', () => {
                 'Type "yolo" to confirm:';
             const response = prompt(message);
             if (response && response.toLowerCase() === 'yolo') {
-                this.closingOut = true;
                 this.doStreamAction('close_out_event', {
                     confirm: response,
                     open_event: this.closeOutOpenEvent,

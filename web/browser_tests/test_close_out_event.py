@@ -44,8 +44,9 @@ def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_bro
     try:
         with patch("core.admin_views.competition.AuthentikManager", return_value=manager):
             page.goto(f"{live_server.url}/ops/admin/competition/")
-            assert page.get_by_text("1 inject grade is not approved.").is_visible()
-            assert page.get_by_text("Scorecards haven't been emailed for this event.").is_visible()
+            # The check loads after the page, with a link to where each item is finished
+            page.get_by_role("link", name="1 inject grade is not approved.").wait_for()
+            assert page.get_by_role("link", name="Scorecards haven't been emailed for this event.").is_visible()
 
             if typed != "yolo":
                 page.get_by_role("button", name="Close Out Event").click()
@@ -57,10 +58,31 @@ def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_bro
 
             with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):
                 page.get_by_role("button", name="Close Out Event").click()
-            page.get_by_text("Closed out Invitational.").wait_for()
+            page.get_by_text("Closed out Invitational:").wait_for()
 
         event.refresh_from_db()
         assert not event.is_active and event.is_finalized
         assert DiscordTask.objects.filter(task_type="cleanup_competition").count() == 1
+    finally:
+        context.close()
+
+
+def test_a_failing_check_leaves_close_out_usable(live_server, pw_browser):
+    _open_event_with_a_score()
+    user = _create_role_user("admin", None)
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    manager = MagicMock()
+    manager.list_applications.return_value = []
+
+    try:
+        with (
+            patch("core.admin_views.competition.AuthentikManager", return_value=manager),
+            patch("core.admin_views.competition.close_out_warnings", side_effect=RuntimeError("scoring broke")),
+        ):
+            page.goto(f"{live_server.url}/ops/admin/competition/")
+            page.get_by_text("Couldn't check unfinished work.").wait_for()
+            assert page.get_by_role("button", name="Close Out Event").is_enabled()
+            assert page.get_by_role("button", name="Start Competition").is_enabled()
     finally:
         context.close()

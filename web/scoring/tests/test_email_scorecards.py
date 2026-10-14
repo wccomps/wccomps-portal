@@ -222,8 +222,8 @@ class TestStreamEmailScorecards:
         """Close Out Event warns when the scorecards weren't emailed, or changed after the last send."""
         from datetime import date
 
+        from registration.close_out_checks import scorecards_fingerprint
         from registration.models import Event, Season
-        from registration.services import scorecards_fingerprint
 
         season = Season.objects.create(name="2026", year=2026, is_active=True)
         event = Event.objects.create(
@@ -234,17 +234,21 @@ class TestStreamEmailScorecards:
         client = Client()
         client.force_login(gold_user)
 
+        emailed = scorecards_fingerprint(event)
+
+        def a_grade_lands_while_sending(*args):
+            ServiceScore.objects.filter(team__team_number=2).update(service_points=Decimal("450"))
+            return True
+
+        mock_send.side_effect = a_grade_lands_while_sending
         self._parse_ndjson(client.post(reverse("scoring:stream_email_scorecards")))
 
         log = AuditLog.objects.get(action="scorecards_emailed")
         assert log.admin_user == "gold"
         assert log.target_id == event.pk
-        assert log.details == {
-            "event": event.pk,
-            "teams": 2,
-            "failed": 0,
-            "scorecards_hash": scorecards_fingerprint(event),
-        }
+        # The hash is of the scorecards the emails carried, not of the scores after them
+        assert log.details == {"event": event.pk, "teams": 2, "failed": 0, "scorecards_hash": emailed}
+        assert emailed != scorecards_fingerprint(event)
 
     @patch("scoring.views.export._send_scorecard_email", return_value=False)
     def test_a_send_that_reached_nobody_records_nothing(self, mock_send, gold_user, final_scores, school_infos):

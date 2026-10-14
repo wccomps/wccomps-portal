@@ -103,8 +103,17 @@ class OrangeCheckCriterion(models.Model):
         return f"{self.label} ({self.points} pts)"
 
 
+class OrangeAssignmentQuerySet(models.QuerySet["OrangeAssignment"]):
+    def unfinished(self) -> OrangeAssignmentQuerySet:
+        """Assignments still to score or review: approved and rejected ones are done."""
+        return self.exclude(status__in=OrangeAssignment.FINISHED_STATUSES)
+
+
 class OrangeAssignment(models.Model):
     """Assignment of an orange teamer to score a specific team on a check."""
+
+    objects = OrangeAssignmentQuerySet.as_manager()
+    FINISHED_STATUSES = ("approved", "rejected")
 
     STATUS_CHOICES = [
         ("pending", "Pending"),

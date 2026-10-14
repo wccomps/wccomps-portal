@@ -9,6 +9,8 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
+from django.urls import reverse
+from registration.close_out_checks import close_out_warnings
 from registration.models import Event, Season
 from registration.services import (
     CloseOutError,
@@ -17,7 +19,6 @@ from registration.services import (
     clear_leftovers_problem,
     close_out_event,
     close_out_problem,
-    close_out_warnings,
 )
 from registration.stage import Stage, event_stage
 from scoring.models import QuotientMetadataCache
@@ -400,17 +401,31 @@ def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authe
 
 
 def _stream_close_out(target: Event | NewEvent, authentik_username: str) -> Iterator[str]:
-    # One transaction: each step below is reported once all of them committed together
-    yield _progress("Checking, freezing the results, clearing the live data and closing the event", 1, 4)
+    yield _progress("Closing out: freezing the results, then clearing the live data", 1, 1)
     try:
         outcome = close_out_event(target, authentik_username)
     except CloseOutError as e:
         yield ndjson_done(str(e), success=False)
         return
-    yield _progress(f"Froze {outcome.results} school result(s) and the export archive", 2, 4)
-    yield _progress(f"Cleared the live data. Deleted: {_wiped_summary(outcome.wiped)}", 3, 4)
-    yield _progress("Queued the Discord cleanup; the bot reports its progress in the ops channel", 4, 4)
-    yield ndjson_done(f"Closed out {outcome.event.name}.")
+    yield ndjson_done(
+        f"Closed out {outcome.event.name}: froze {outcome.results} school result(s) and the export archive, "
+        f"deleted {_wiped_summary(outcome.wiped)}, and queued the Discord cleanup (the bot reports it in the ops "
+        "channel)."
+    )
+
+
+def _action_close_out_check(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
+    """What would make Close Out refuse, and the unfinished work it would freeze, fetched once the page shows the
+    section: the scorecard check builds every school's scorecard, too slow for the page load, and a failure here
+    must not break the page that holds Start and Stop."""
+    try:
+        stage = event_stage()
+        warnings = [{"text": w.text, "url": reverse(w.url_name)} for w in close_out_warnings(stage.event)]
+        problem = close_out_problem(stage)
+    except Exception:
+        logger.exception("Close-out check failed")
+        return JsonResponse({"error": "Couldn't check unfinished work."}, status=500)
+    return JsonResponse({"success": True, "problem": problem, "warnings": warnings})
 
 
 def _action_close_out_event(
@@ -428,6 +443,7 @@ def _action_close_out_event(
 
 _COMPETITION_ACTION_HANDLERS = {
     "close_out_event": _action_close_out_event,
+    "close_out_check": _action_close_out_check,
     "set_max_members": _action_set_max_members,
     "set_start_message": _action_set_start_message,
     "add_app": _action_add_app,
@@ -466,7 +482,6 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
         "can_close_out": not close_out_refusal,
         # Shown where the module offers no button for a reason the operator can act on
         "close_out_refusal": close_out_refusal if stage.stage in (Stage.READY, Stage.PLAYED, Stage.UNRECORDED) else "",
-        "close_out_warnings": close_out_warnings(stage.event) if not close_out_refusal else [],
         "active_season": Season.objects.active(),
         "event_type_choices": Event.EVENT_TYPE_CHOICES,
         "config": config,

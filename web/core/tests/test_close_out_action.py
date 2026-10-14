@@ -4,6 +4,7 @@ import json
 import threading
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 from django.test import Client
@@ -70,12 +71,14 @@ def test_close_out_streams_each_step_and_closes_the_open_event(client):
     lines = _close_out(client, open_event=event.pk, confirm="yolo")
 
     assert [line.get("step") for line in lines[:-1]] == [
-        "Checking, freezing the results, clearing the live data and closing the event",
-        "Froze 1 school result(s) and the export archive",
-        "Cleared the live data. Deleted: 1 ServiceScore",
-        "Queued the Discord cleanup; the bot reports its progress in the ops channel",
+        "Closing out: freezing the results, then clearing the live data"
     ]
-    assert lines[-1] == {"done": True, "success": True, "message": "Closed out Inv."}
+    assert lines[-1] == {
+        "done": True,
+        "success": True,
+        "message": "Closed out Inv: froze 1 school result(s) and the export archive, deleted 1 ServiceScore, and "
+        "queued the Discord cleanup (the bot reports it in the ops channel).",
+    }
     event.refresh_from_db()
     assert not event.is_active and event.is_finalized
     assert DiscordTask.objects.filter(task_type="cleanup_competition").count() == 1
@@ -171,7 +174,7 @@ def test_no_open_event_creates_and_closes_it_for_the_current_list(client):
         client, confirm="yolo", new_name="Invitational 1", new_date="2026-10-03", new_type="invitational"
     )
 
-    assert lines[-1] == {"done": True, "success": True, "message": "Closed out Invitational 1."}
+    assert lines[-1]["success"] and lines[-1]["message"].startswith("Closed out Invitational 1:")
     result = EventResult.objects.get()
     assert result.event.name == "Invitational 1"
     assert not result.event.is_active
@@ -252,25 +255,65 @@ def test_the_pages_no_longer_offer_finalize_clear_or_cleanup(client):
         assert gone not in page
 
 
-def test_the_page_shows_unfinished_work_above_the_confirmation(client):
+def _check(client):
+    return client.post(reverse("admin_competition_action"), {"action": "close_out_check"})
+
+
+def test_the_check_lists_unfinished_work_with_links_and_no_problem(client):
     _open_event()
     team = _team_with_school()
     for inject in ("1", "2", "3"):
         InjectScore.objects.create(team=team, inject_id=inject, inject_name="Memo", points_awarded=Decimal(5))
 
-    page = _page(client)
+    assert _check(client).json() == {
+        "success": True,
+        "problem": "",
+        "warnings": [
+            {"text": "3 inject grades are not approved.", "url": reverse("scoring:inject_grades_review")},
+            {"text": "Scorecards haven't been emailed for this event.", "url": reverse("scoring:email_scorecards")},
+        ],
+    }
 
-    assert "3 inject grades are not approved." in page
-    assert "Scorecards haven&#x27;t been emailed for this event." in page
-    assert page.index("3 inject grades are not approved.") < page.index(BUTTON)
 
-
-def test_the_page_shows_no_warnings_while_close_out_is_not_offered(client):
+def test_the_check_says_what_would_make_close_out_refuse(client):
     _open_event()
     _team_with_school()
-    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
+    Team.objects.filter(team_number=1).update(is_active=False)
 
-    assert "Unfinished work" not in _page(client)
+    assert _check(client).json()["problem"] == "Reactivate Team 1 or remove its school first."
+
+
+def test_a_failing_check_says_so_and_leaves_the_page_working(client):
+    _open_event()
+    _team_with_school()
+
+    with patch("core.admin_views.competition.close_out_warnings", side_effect=RuntimeError("scoring broke")):
+        response = _check(client)
+        page = client.get(reverse("admin_competition"))
+
+    assert response.status_code == 500
+    assert response.json() == {"error": "Couldn't check unfinished work."}
+    assert page.status_code == 200
+
+
+def test_the_page_load_does_not_build_scorecards(client):
+    _open_event()
+    _team_with_school()
+
+    with patch("registration.close_out_checks.scorecards_fingerprint") as fingerprint:
+        page = _page(client)
+
+    fingerprint.assert_not_called()
+    assert BUTTON in page
+    assert "Couldn't check unfinished work" in page
+
+
+def test_the_check_needs_admin_or_gold_access(create_user_with_groups):
+    _open_event()
+    client = Client()
+    client.force_login(create_user_with_groups("nobody", []))
+
+    assert _check(client).status_code == 403
 
 
 def test_right_after_an_import_the_page_offers_no_close_out(client, gold_team_user):

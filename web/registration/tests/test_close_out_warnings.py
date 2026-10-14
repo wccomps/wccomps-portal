@@ -1,5 +1,5 @@
-"""Unfinished work shown before a close-out: each kind with its count, and whether the scorecards went out as they
-stand now. Warnings never block."""
+"""Unfinished work shown before a close-out: each kind with its count and the page that finishes it, and whether the
+scorecards went out as they stand now. Warnings never block."""
 
 from datetime import date
 from decimal import Decimal
@@ -7,19 +7,26 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
+from django.urls import reverse
 from orange_team.models import OrangeAssignment, OrangeCheck
 from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeamScore, ServiceScore
 from scoring.scorecard import build_scorecard_context
 
-from core.models import AuditLog
+from registration.close_out_checks import (
+    CloseOutWarning,
+    close_out_warnings,
+    record_scorecards_emailed,
+    scorecards_fingerprint,
+)
 from registration.models import Event, Season
-from registration.services import close_out_event, close_out_warnings, scorecards_fingerprint, set_team_school
+from registration.services import close_out_event, set_team_school
 from team.models import Team
 from ticketing.models import Ticket
 
 pytestmark = pytest.mark.django_db
 
-NOT_EMAILED = "Scorecards haven't been emailed for this event."
+EMAIL = "scoring:email_scorecards"
+NOT_EMAILED = CloseOutWarning("Scorecards haven't been emailed for this event.", EMAIL)
 
 
 @pytest.fixture
@@ -35,14 +42,8 @@ def event():
     return event
 
 
-def _emailed(event, **details):
-    AuditLog.objects.create(
-        action="scorecards_emailed",
-        admin_user="gold",
-        target_entity="event",
-        target_id=event.pk if event else 0,
-        details={"event": event.pk if event else None, "teams": 2, "failed": 0, **details},
-    )
+def _emailed(event, sent=2, failed=0):
+    record_scorecards_emailed(event, scorecards_fingerprint(event), sent, failed, "gold")
 
 
 def _team(number=1):
@@ -50,12 +51,12 @@ def _team(number=1):
 
 
 def test_finished_work_emailed_and_unchanged_has_no_warnings(event):
-    _emailed(event, scorecards_hash=scorecards_fingerprint(event))
+    _emailed(event)
 
     assert close_out_warnings(event) == []
 
 
-def test_each_kind_of_unfinished_work_is_counted(event):
+def test_each_kind_of_unfinished_work_is_counted_with_the_page_that_finishes_it(event):
     user = User.objects.create_user("grader")
     for inject in ("1", "2", "3"):
         InjectScore.objects.create(team=_team(), inject_id=inject, inject_name="Memo", points_awarded=Decimal(5))
@@ -73,19 +74,30 @@ def test_each_kind_of_unfinished_work_is_counted(event):
     RedTeamScore.objects.create(attack_vector="ssh", points_per_team=Decimal(10), submitted_by=user)
     OrangeTeamScore.objects.create(team=_team(), description="Call", points_awarded=Decimal(5))
     check = OrangeCheck.objects.create(title="Phone call", created_by=user)
-    for team, status in ((_team(1), "pending"), (_team(2), "submitted")):
-        OrangeAssignment.objects.create(orange_check=check, user=user, team=team, status=status)
-    _emailed(event, scorecards_hash=scorecards_fingerprint(event))
+    second = OrangeCheck.objects.create(title="Email", created_by=user)
+    for orange_check, team, status in (
+        (check, _team(1), "pending"),
+        (check, _team(2), "submitted"),
+        (second, _team(1), "rejected"),
+        (second, _team(2), "approved"),
+    ):
+        OrangeAssignment.objects.create(orange_check=orange_check, user=user, team=team, status=status)
+    _emailed(event)
 
-    assert close_out_warnings(event) == [
-        "3 inject grades are not approved.",
-        "2 tickets are not resolved.",
-        "1 resolved ticket is not approved.",
-        "2 incident reports are not reviewed.",
-        "1 red team finding is not approved.",
-        "1 orange check score is not approved.",
-        "2 orange assignments are not scored and approved.",
+    warnings = close_out_warnings(event)
+
+    assert warnings == [
+        CloseOutWarning("3 inject grades are not approved.", "scoring:inject_grades_review"),
+        CloseOutWarning("2 tickets are not resolved.", "ticket_list"),
+        CloseOutWarning("1 resolved ticket is not approved.", "ops_review_tickets"),
+        CloseOutWarning("2 incident reports are not reviewed.", "scoring:review_incidents"),
+        CloseOutWarning("1 red team finding is not approved.", "scoring:red_team_findings"),
+        CloseOutWarning("1 orange check score is not approved.", "scoring:review_orange"),
+        # Rejected is done, as on the orange team's own pages
+        CloseOutWarning("2 orange assignments are not scored and reviewed.", "orange_team:check_list"),
     ]
+    for warning in warnings:
+        reverse(warning.url_name)
 
 
 def test_scorecards_never_emailed(event):
@@ -94,31 +106,31 @@ def test_scorecards_never_emailed(event):
 
 def test_scorecards_emailed_for_another_event_do_not_count(event):
     other = Event.objects.create(season=event.season, name="Earlier", event_type="qualifier", date=date(2026, 9, 1))
-    _emailed(other, scorecards_hash=scorecards_fingerprint(event))
+    _emailed(other)
 
     assert close_out_warnings(event) == [NOT_EMAILED]
 
 
 def test_scores_changed_after_the_last_scorecard_email(event):
-    _emailed(event, scorecards_hash=scorecards_fingerprint(event))
+    _emailed(event)
     ServiceScore.objects.filter(team__team_number=2).update(service_points=Decimal(400))
 
-    assert close_out_warnings(event) == ["Scores changed after the last scorecard email."]
+    assert close_out_warnings(event) == [CloseOutWarning("Scores changed after the last scorecard email.", EMAIL)]
 
 
 def test_the_latest_scorecard_email_decides(event):
     stale = scorecards_fingerprint(event)
     ServiceScore.objects.filter(team__team_number=2).update(service_points=Decimal(400))
-    _emailed(event, scorecards_hash=stale)
-    _emailed(event, scorecards_hash=scorecards_fingerprint(event))
+    record_scorecards_emailed(event, stale, 2, 0, "gold")
+    _emailed(event)
 
     assert close_out_warnings(event) == []
 
 
 def test_failed_scorecard_emails_are_counted(event):
-    _emailed(event, scorecards_hash=scorecards_fingerprint(event), failed=1)
+    _emailed(event, failed=1)
 
-    assert close_out_warnings(event) == ["1 scorecard email failed in the last send."]
+    assert close_out_warnings(event) == [CloseOutWarning("1 scorecard email failed in the last send.", EMAIL)]
 
 
 def test_the_fingerprint_is_stable_with_averaged_decimals_and_int_keys(event):
@@ -134,21 +146,16 @@ def test_the_fingerprint_is_stable_with_averaged_decimals_and_int_keys(event):
         assert scorecards_fingerprint(event) == scorecards_fingerprint(event)
 
 
-def test_with_no_event_open_the_school_list_decides(event):
+def test_sends_with_no_event_open_never_count(event):
+    """Every event run without an import would share the no-event key, so they can't be told apart."""
     Event.objects.filter(pk=event.pk).update(is_active=False)
-    _emailed(None, scorecards_hash=scorecards_fingerprint(None))
+    _emailed(None)
 
-    assert scorecards_fingerprint(None) == scorecards_fingerprint(event)
-    assert close_out_warnings(None) == []
-    set_team_school(_team(2), "Example University", contact_email="c@example.edu")
-    assert close_out_warnings(None) == ["Scores changed after the last scorecard email."]
-
-
-def test_an_open_event_with_no_live_scores_says_its_results_will_be_empty(event):
-    ServiceScore.objects.all().delete()
-    _emailed(event, scorecards_hash=scorecards_fingerprint(event))
-
-    assert close_out_warnings(event) == ["No team has live scores yet, so the results will be empty."]
+    assert close_out_warnings(None) == [
+        CloseOutWarning(
+            "No event is open, so scorecard emails can't be checked: make sure the scorecards went out.", EMAIL
+        )
+    ]
 
 
 def test_warnings_never_block_a_close_out(event):
