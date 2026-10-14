@@ -1,3 +1,5 @@
+import hashlib
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
@@ -5,6 +7,7 @@ from enum import StrEnum
 
 from django.db import transaction
 from django.db.models import Exists, OuterRef, QuerySet
+from orange_team.models import OrangeAssignment
 from packets.models import Packet
 from scoring.calculator import Standing, compute_standings
 from scoring.export import export_all_zip_bytes
@@ -471,9 +474,11 @@ class SchoolSnapshot:
     scorecard: dict[str, object]
 
 
-def current_snapshots(event: Event) -> dict[int, SchoolSnapshot]:
-    """Each school assigned at the event whose team is active, by id, with its standing and scorecard now."""
-    school_by_team = dict(event.team_assignments.values_list("team_id", "school_id"))
+def current_snapshots(event: Event | None) -> dict[int, SchoolSnapshot]:
+    """Each school assigned at the event whose team is active, by id, with its standing and scorecard now. With no
+    event, the schools on the school list, which an event created at close-out is assigned."""
+    holders = event.team_assignments if event is not None else SchoolInfo.objects
+    school_by_team = dict(holders.values_list("team_id", "school_id"))
     standings = compute_standings()
     return {
         school_by_team[standing.team.pk]: SchoolSnapshot(
@@ -482,6 +487,82 @@ def current_snapshots(event: Event) -> dict[int, SchoolSnapshot]:
         for standing in standings
         if standing.team.pk in school_by_team
     }
+
+
+def scorecards_fingerprint(event: Event | None) -> str:
+    """A hash of every school's scorecard as current_snapshots gives it now, to tell later whether the scorecards
+    emailed then still say what the scores say."""
+    scorecards = {
+        school_id: (snapshot.standing.team.team_number, snapshot.scorecard)
+        for school_id, snapshot in current_snapshots(event).items()
+    }
+    # Through JSON first, as the stored results go: int dict keys become strings, so the keys sort
+    normalized = json.dumps(json.loads(json.dumps(scorecards)), sort_keys=True)
+    return hashlib.sha256(normalized.encode()).hexdigest()
+
+
+def _counted(count: int, one: str, many: str) -> list[str]:
+    """The sentence for count things, or none when there are none."""
+    if not count:
+        return []
+    return [f"{count} {one if count == 1 else many}."]
+
+
+def close_out_warnings(event: Event | None) -> list[str]:
+    """Unfinished work a close-out of the event (None: the event it creates) would freeze as it stands, as sentences
+    for the page to show before confirming. They never block the close-out."""
+    open_tickets = Ticket.objects.filter(status__in=[Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED]).count()
+    unapproved_tickets = Ticket.objects.filter(status=Ticket.STATUS_RESOLVED, is_approved=False).count()
+    unscored = OrangeAssignment.objects.exclude(status="approved").count()
+    warnings = [
+        *_counted(
+            InjectScore.objects.filter(is_approved=False).count(),
+            "inject grade is not approved",
+            "inject grades are not approved",
+        ),
+        *_counted(open_tickets, "ticket is not resolved", "tickets are not resolved"),
+        *_counted(unapproved_tickets, "resolved ticket is not approved", "resolved tickets are not approved"),
+        *_counted(
+            IncidentReport.objects.filter(is_approved=False).count(),
+            "incident report is not reviewed",
+            "incident reports are not reviewed",
+        ),
+        *_counted(
+            RedTeamScore.objects.filter(is_approved=False).count(),
+            "red team finding is not approved",
+            "red team findings are not approved",
+        ),
+        *_counted(
+            OrangeTeamScore.objects.filter(is_approved=False).count(),
+            "orange check score is not approved",
+            "orange check scores are not approved",
+        ),
+        *_counted(
+            unscored, "orange assignment is not scored and approved", "orange assignments are not scored and approved"
+        ),
+    ]
+    if event is not None and not live_competition_data_exists():
+        warnings.append("No team has live scores yet, so the results will be empty.")
+    return warnings + _scorecard_warnings(event)
+
+
+def _scorecard_warnings(event: Event | None) -> list[str]:
+    """Whether the last Email Scorecards for the event sent the scorecards as they stand now."""
+    emailed = (
+        AuditLog.objects.filter(action="scorecards_emailed", details__event=event.pk if event else None)
+        .order_by("-created_at", "-pk")
+        .first()
+    )
+    if emailed is None:
+        return ["Scorecards haven't been emailed for this event."]
+    warnings = _counted(
+        emailed.details.get("failed", 0),
+        "scorecard email failed in the last send",
+        "scorecard emails failed in the last send",
+    )
+    if emailed.details.get("scorecards_hash") != scorecards_fingerprint(event):
+        warnings.append("Scores changed after the last scorecard email.")
+    return warnings
 
 
 def _scored_teams() -> QuerySet[Team]:

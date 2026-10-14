@@ -279,6 +279,14 @@
                         </select>
                     </c-form_field>
                 {% endif %}
+                {% if close_out_warnings %}
+                    <c-alert variant="warning">
+                        <strong>Unfinished work (closing out freezes the results as they stand):</strong>
+                        <ul class="mt-10 ml-20">
+                            {% for warning in close_out_warnings %}<li>{{ warning }}</li>{% endfor %}
+                        </ul>
+                    </c-alert>
+                {% endif %}
                 <p class="help-text">
                     Run it once grading is done and the scorecards are emailed. In one step it freezes every listed
                     school's scorecard and the export archive as the event's results, deletes the live scores, tickets

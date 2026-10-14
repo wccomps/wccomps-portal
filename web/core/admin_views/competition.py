@@ -16,6 +16,7 @@ from registration.services import (
     NewEvent,
     clear_leftover_data,
     close_out_event,
+    close_out_warnings,
     live_data_state,
 )
 from scoring.models import QuotientMetadataCache
@@ -458,11 +459,12 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
     quotient_metadata = QuotientMetadataCache.objects.first()
 
     live_data = live_data_state()
+    can_close_out = not config.applications_enabled and (open_event is not None or live_data == LiveData.UNFINALIZED)
     context = {
         "open_event": open_event,
         "live_data": live_data.value,
-        "can_close_out": not config.applications_enabled
-        and (open_event is not None or live_data == LiveData.UNFINALIZED),
+        "can_close_out": can_close_out,
+        "close_out_warnings": close_out_warnings(open_event) if can_close_out else [],
         "active_season": Season.objects.active(),
         "event_type_choices": Event.EVENT_TYPE_CHOICES,
         "config": config,

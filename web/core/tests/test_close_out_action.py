@@ -10,7 +10,7 @@ from django.test import Client
 from django.urls import reverse
 from registration.models import Event, EventResult, Season
 from registration.services import close_out_event, set_team_school
-from scoring.models import ServiceScore
+from scoring.models import InjectScore, ServiceScore
 
 from core.models import CompetitionConfig, DiscordTask
 from team.models import Team
@@ -251,3 +251,24 @@ def test_the_pages_no_longer_offer_finalize_clear_or_cleanup(client):
 
     for gone in ("finalize_event", "Finalize Results", "clear_event", "Clear Event", "cleanup_competition"):
         assert gone not in page
+
+
+def test_the_page_shows_unfinished_work_above_the_confirmation(client):
+    _open_event()
+    team = _team_with_school()
+    for inject in ("1", "2", "3"):
+        InjectScore.objects.create(team=team, inject_id=inject, inject_name="Memo", points_awarded=Decimal(5))
+
+    page = _page(client)
+
+    assert "3 inject grades are not approved." in page
+    assert "Scorecards haven&#x27;t been emailed for this event." in page
+    assert page.index("3 inject grades are not approved.") < page.index(BUTTON)
+
+
+def test_the_page_shows_no_warnings_while_close_out_is_not_offered(client):
+    _open_event()
+    _team_with_school()
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
+
+    assert "Unfinished work" not in _page(client)
