@@ -1,4 +1,4 @@
-"""The Event panel on the competition page, in two stages: no event open, and an event played and stopped."""
+"""The competition page in three stages: no event open, running, and an event played and stopped."""
 
 from datetime import date
 from decimal import Decimal
@@ -60,17 +60,49 @@ def test_played_and_stopped_the_panel_checks_unfinished_work(live_server, pw_bro
         with patch("core.admin_views.competition.AuthentikManager", return_value=manager):
             page, status, errors = visit_and_capture_errors(context, f"{live_server.url}/ops/admin/competition/")
             panel = page.locator("#event-panel")
-            # The close-out check loads after the page and fills in the step's line
-            panel.get_by_text("to finish: see Close Out Event below.").wait_for()
+            # The close-out check loads after the page and lists the unfinished work in the section below
+            page.locator("#close-out").get_by_role("link", name="No scorecard email is recorded").wait_for()
             text = panel.inner_text()
             action = panel.locator("a.button").first
             assert status == 200
-            assert "Invitational 1, season WCComps 2027" in text
-            assert "Invitational 1 (WCComps 2027) is open and teams have scores." in text
+            assert "Invitational 1" in text and "Season WCComps 2027" in text
+            assert "STOPPED" in text.upper()
+            assert [s.inner_text().upper() for s in panel.locator(".step-grid__badge").all()] == [
+                "DONE",
+                "LATER",
+                "DONE",
+                "DONE",
+                "NOW",
+                "NEXT",
+            ]
+            assert page.locator("#readiness").count() == 0 and page.locator("#live").count() == 0
             assert (action.inner_text(), action.get_attribute("href")) == (
                 "Email scorecards",
                 "/scoring/email-scorecards/",
             )
             assert not errors, errors
+    finally:
+        context.close()
+
+
+def test_while_running_the_page_offers_stop_and_shows_the_live_numbers(live_server, pw_browser):
+    from core.models import CompetitionConfig
+
+    _played_event()
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
+    user = _create_role_user("gold_team", None)
+    context = create_session_context(pw_browser, live_server, user)
+    try:
+        page, status, errors = visit_and_capture_errors(context, f"{live_server.url}/ops/admin/competition/")
+        panel = page.locator("#event-panel")
+        assert status == 200
+        assert "RUNNING" in panel.inner_text().upper()
+        assert panel.get_by_role("button", name="Stop Competition").is_visible()
+        live = page.locator("#live")
+        assert "Open tickets" in live.inner_text()
+        assert "Never synced" in live.inner_text()
+        assert page.locator("#close-out").count() == 0
+        assert not page.locator("details.advanced").get_attribute("open")
+        assert not errors, errors
     finally:
         context.close()

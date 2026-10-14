@@ -12,7 +12,15 @@ from registration.services import set_team_school
 from registration.stage import Action, EventStage, Stage, event_stage
 from scoring.models import ServiceScore
 
-from core.admin_views.event_panel import PLACES, STEPS, EventFacts, StepState, event_facts, event_panel
+from core.admin_views.event_panel import (
+    PLACES,
+    STEPS,
+    EventFacts,
+    Section,
+    StepState,
+    event_facts,
+    event_panel,
+)
 from team.models import Team
 
 
@@ -94,23 +102,45 @@ def test_the_panel_links_the_seasons_page():
 
 
 @pytest.mark.parametrize(
-    ("stage", "facts", "shown"),
+    ("stage", "facts", "following"),
     [
-        (Stage.PLAYED, {}, [Action.FINISH]),
-        (Stage.UNRECORDED, {}, [Action.FINISH]),
-        (Stage.PLAYED, {"scorecards_emailed": True}, [Action.CLOSE_OUT]),
-        (Stage.READY, {}, []),
+        (Stage.READY, {}, [Action.START]),
+        (Stage.READY, {"packets_sent": True}, []),
+        (Stage.PLAYED, {}, [Action.CLOSE_OUT]),
+        (Stage.PLAYED, {"running": True}, []),
+        (Stage.PLAYED, {"scorecards_emailed": True}, []),
+        (Stage.UNRECORDED, {}, [Action.CLOSE_OUT]),
+        (Stage.IDLE, {}, []),
     ],
 )
-def test_the_close_out_checks_show_under_the_current_scoring_or_close_out_step(stage, facts, shown):
+def test_the_stages_steps_after_the_current_one_are_next_and_the_rest_later(stage, facts, following):
     panel = _panel(stage, **facts)
 
-    assert [row.step.action for row in panel.steps if row.shows_close_out_checks] == shown
+    assert [row.step.action for row in panel.steps if row.state == StepState.NEXT] == following
+    assert {row.label for row in panel.steps} <= {"Done", "Now", "Next", "Later"}
 
 
-def test_every_step_has_a_label_a_help_line_and_a_link():
+@pytest.mark.parametrize(
+    ("stage", "facts", "section"),
+    [
+        (Stage.IDLE, {}, None),
+        (Stage.READY, {}, None),
+        (Stage.READY, {"packets_sent": True}, Section.READINESS),
+        (Stage.PLAYED, {"running": True}, Section.RUNNING),
+        (Stage.IDLE, {"running": True}, Section.RUNNING),
+        (Stage.PLAYED, {}, Section.CLOSE_OUT),
+        (Stage.PLAYED, {"scorecards_emailed": True}, Section.CLOSE_OUT),
+        (Stage.UNRECORDED, {}, Section.CLOSE_OUT),
+        (Stage.LEFTOVERS, {}, Section.LEFTOVERS),
+    ],
+)
+def test_the_page_shows_the_section_of_the_next_step_only(stage, facts, section):
+    assert _panel(stage, **facts).section == section
+
+
+def test_every_step_has_a_label_and_a_link():
     for step in STEPS:
-        assert step.label and step.help and step.link_label and step.url
+        assert step.label and step.link_label and step.url
 
 
 @pytest.mark.django_db

@@ -1,504 +1,325 @@
 {% extends "admin/base.html" %}
-{% load cotton %}
+{% load cotton static %}
 {% block title %}
-    Competition Management - WCComps Portal
+    Competition - WCComps Portal
 {% endblock title %}
 {% block admin_content %}
     <div x-data="competitionAdmin">
-        <c-page_header title="Competition Management" />
-        <c-module id="event-panel">
-            <c-slot name="title">
-                Event
-            </c-slot>
-            <p class="font-semibold">
-                {% if panel.stage.event %}
-                    {{ panel.stage.event.name }}, season <a href="{{ panel.seasons_url }}">{{ panel.stage.event.season.name }}</a>
-                {% else %}
-                    No event open
-                {% endif %}
-            </p>
-            <p>{{ panel.stage.status }}</p>
-            <p>
-                <strong>Next step:</strong> {{ panel.stage.next_step }}
-            </p>
-            <c-button_row>
-                <a href="{{ panel.action_url }}" class="button default">{{ panel.action_label }}</a>
-                <a href="{% url 'admin_competition_guide' %}">How this works</a>
-            </c-button_row>
-            <ol class="ml-20 mt-15">
-                {% for row in panel.steps %}
-                    <li class="py-5">
-                        <c-badge variant="{{ row.badge }}">
-                            {{ row.label }}
+        <c-page_header title="Competition">
+            <div class="d-flex justify-end flex-wrap gap-20 mt-10 text-md">
+                <a href="{% url 'admin_competition_guide' %}">Running an event</a>
+                <a href="{% url 'admin_competition_setup' %}">Competition setup</a>
+            </div>
+        </c-page_header>
+        <section id="event-panel" class="event-card mt-10">
+            <div class="event-card__head">
+                <div>
+                    {% if panel.stage.event %}
+                        <div class="event-card__name">{{ panel.stage.event.name }}</div>
+                        <div class="event-card__meta">
+                            Season <a href="{{ panel.seasons_url }}">{{ panel.stage.event.season.name }}</a>
+                            · {{ panel.schools }} school{{ panel.schools|pluralize }}
+                            · {{ panel.stage.event.date|date:"M j, Y" }}
+                        </div>
+                    {% else %}
+                        <div class="event-card__name">No event open</div>
+                        <div class="event-card__meta">{{ panel.stage.status }}</div>
+                    {% endif %}
+                </div>
+                {% if config.applications_enabled %}
+                    <span class="event-card__status">
+                        <c-badge variant="success" aria_label="Competition running">
+                            Running
                         </c-badge>
-                        <a href="{{ row.step.url }}"
-                           class="font-semibold"
-                           {% if row.is_current %}aria-current="step"{% endif %}>{{ row.step.label }}</a>
-                        <span class="text-muted text-sm">{{ row.step.help }}</span>
-                        {% if row.detail %}<div class="text-sm">{{ row.detail }}</div>{% endif %}
-                        {% if row.shows_close_out_checks %}<div class="text-sm" x-text="closeOutSummary"></div>{% endif %}
+                    </span>
+                {% elif panel.stage.event %}
+                    <span class="event-card__status">
+                        <c-badge variant="warning" aria_label="Competition stopped">
+                            Stopped
+                        </c-badge>
+                    </span>
+                {% else %}
+                    <span class="event-card__status">
+                        <c-badge variant="neutral" aria_label="No event open">
+                            No event
+                        </c-badge>
+                    </span>
+                {% endif %}
+            </div>
+            <div class="next-step">
+                <div class="next-step__body">
+                    <div class="next-step__label">Next step</div>
+                    <p class="next-step__text">{{ panel.stage.next_step }}</p>
+                </div>
+                {% if panel.stage.next_action == "stop" %}
+                    <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
+                        Stop Competition
+                    </c-button>
+                {% else %}
+                    <a href="{{ panel.action_url }}" class="button default">{{ panel.action_label }}</a>
+                {% endif %}
+            </div>
+            <ol class="step-grid">
+                {% for row in panel.steps %}
+                    <li {% if row.is_current %}class="step-grid__current" aria-current="step"{% endif %}>
+                        <span class="step-grid__badge">
+                            <c-badge variant="{{ row.badge }}" aria_label="{{ row.label }}">
+                                {{ row.label }}
+                            </c-badge>
+                        </span>
+                        <a href="{{ row.step.url }}">{{ forloop.counter }}. {{ row.step.label }}</a>
                     </li>
                 {% endfor %}
             </ol>
-        </c-module>
-        <c-module class="mt-20">
-            <c-slot name="title">
-                Competition Status
-            </c-slot>
-            <c-detail_grid>
-                <c-detail_row label="Status">
-                    {% if config.applications_enabled %}
-                        <c-badge variant="success">
-                            Running
-                        </c-badge>
-                    {% elif config.competition_start_time %}
-                        <c-badge variant="info">
-                            Scheduled
-                        </c-badge>
-                    {% else %}
-                        <c-badge variant="warning">
-                            Stopped
-                        </c-badge>
-                    {% endif %}
-                </c-detail_row>
-                <c-detail_row label="Teams">
-                    {{ active_teams }}/{{ total_teams }} registered
-                </c-detail_row>
-                <c-detail_row label="Users">
-                    {{ linked_users }} linked
-                </c-detail_row>
-                <c-detail_row label="Max Members">
-                    {{ config.max_team_members }}
-                </c-detail_row>
-                {% if config.controlled_applications %}
-                    <c-detail_row label="Apps">
-                        {{ config.controlled_applications|length }} configured
-                    </c-detail_row>
-                {% endif %}
-                <c-detail_row label="Accounts">
-                    {% if config.applications_enabled %}
-                        Enabled
-                    {% else %}
-                        Disabled
-                    {% endif %}
-                </c-detail_row>
-                {% if config.competition_start_time %}
-                    <c-detail_row label="Starts">
-                        <span x-data="formatTime"
-                              data-iso="{{ config.competition_start_time|date:'c' }}"
-                              x-text="formatted"></span>
-                    </c-detail_row>
-                {% endif %}
-                {% if config.competition_end_time %}
-                    <c-detail_row label="Ends">
-                        <span x-data="formatTime"
-                              data-iso="{{ config.competition_end_time|date:'c' }}"
-                              x-text="formatted"></span>
-                    </c-detail_row>
-                {% endif %}
-            </c-detail_grid>
-        </c-module>
-        <c-module class="mt-20">
-            <c-slot name="title">
-                Team Configuration
-            </c-slot>
-            <form @submit.prevent="setMaxMembers"
-                  class="d-flex gap-10 items-center mb-15">
-                <label for="max_members" class="font-semibold text-sm">Max Team Members</label>
-                <input type="number"
-                       name="max_members"
-                       id="max_members"
-                       :value="maxMembers"
-                       @input="setField"
-                       data-field="maxMembers"
-                       min="1"
-                       max="20"
-                       class="vTextField w-80">
-                <c-button type="submit" variant="default" ::disabled="loading">
-                    Update
-                </c-button>
-            </form>
-            <div>
-                <label class="font-semibold text-sm d-block mb-5">Controlled Apps</label>
-                <p class="help">Authentik applications whose access will be toggled when starting/stopping the competition.</p>
-                <div class="d-flex gap-10 flex-wrap mb-10">
-                    <template x-for="(app, index) in apps" :key="index">
-                        <c-badge variant="default" class="d-flex items-center gap-10">
-                            <span x-text="app"></span>
-                            <button type="button"
-                                    @click="removeApp"
-                                    :data-app="app"
-                                    aria-label="Remove app"
-                                    class="text-danger btn-reset text-md">×</button>
-                        </c-badge>
-                    </template>
-                    <template x-if="noApps">
-                        <span class="text-muted text-sm">No apps configured</span>
-                    </template>
-                </div>
-                <form @submit.prevent="addApp" class="d-flex gap-10 items-center">
-                    <input type="text"
-                           list="authentik-apps"
-                           :value="newApp"
-                           @input="setField"
-                           data-field="newApp"
-                           placeholder="App slug"
-                           aria-label="Authentik application slug"
-                           class="vTextField w-200">
-                    <datalist id="authentik-apps">
-                        <template x-for="app in availableApps" :key="app">
-                            <option :value="app"></option>
-                        </template>
-                    </datalist>
-                    <c-button type="submit" variant="default" ::disabled="addDisabled">
-                        Add
-                    </c-button>
-                </form>
-            </div>
-        </c-module>
-        <c-module class="mt-20">
-            <c-slot name="title">
-                Schedule
-            </c-slot>
-            <form @submit.prevent="setSchedule">
-                <div class="grid-2">
-                    <div>
-                        <c-form_field label="Start Time" id="start_datetime">
-                            <div class="d-flex gap-10">
-                                <input type="datetime-local"
-                                       name="start_datetime"
-                                       id="start_datetime"
-                                       :value="startDatetime"
-                                       @input="setField"
-                                       data-field="startDatetime"
-                                       class="vTextField flex-1">
-                                <select name="start_timezone"
-                                        id="start_timezone"
-                                        :value="startTimezone"
-                                        @change="setField"
-                                        data-field="startTimezone"
-                                        class="vTextField">
-                                    {% for value, label in timezone_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-                                </select>
-                            </div>
-                        </c-form_field>
-                    </div>
-                    <div>
-                        <c-form_field label="End Time" id="end_datetime">
-                            <div class="d-flex gap-10">
-                                <input type="datetime-local"
-                                       name="end_datetime"
-                                       id="end_datetime"
-                                       :value="endDatetime"
-                                       @input="setField"
-                                       data-field="endDatetime"
-                                       class="vTextField flex-1">
-                                <select name="end_timezone"
-                                        id="end_timezone"
-                                        :value="endTimezone"
-                                        @change="setField"
-                                        data-field="endTimezone"
-                                        class="vTextField">
-                                    {% for value, label in timezone_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-                                </select>
-                            </div>
-                        </c-form_field>
-                    </div>
-                </div>
-                <c-button_row class="mt-10">
-                    <c-button type="submit" variant="default" ::disabled="loading">
-                        Save Schedule
-                    </c-button>
-                </c-button_row>
-            </form>
-        </c-module>
-        <c-module class="mt-20">
-            <c-slot name="title">
-                Start Message
-            </c-slot>
-            <form @submit.prevent="setStartMessage">
-                <c-form_field label="Message"
-                              id="start_message"
-                              help_text="Posted to every active team's private chat channel when the competition starts, by schedule or by hand. Use it for the default VM credentials. Leave it empty to send nothing. Close Out Event clears it.">
-                    <textarea name="start_message"
-                              id="start_message"
-                              :value="startMessage"
-                              @input="setField"
-                              data-field="startMessage"
-                              class="vTextField"
-                              rows="6"
-                              maxlength="{{ start_message_max_length }}"></textarea>
-                </c-form_field>
-                <c-button_row class="mt-10">
-                    <c-button type="submit" variant="default" ::disabled="loading">
-                        Save Start Message
-                    </c-button>
-                </c-button_row>
-            </form>
-        </c-module>
-        <c-module class="mt-20">
-            <c-slot name="title">
-                Quotient Integration
-            </c-slot>
-            {% if quotient_metadata %}
-                <div class="d-flex gap-20 items-center flex-wrap">
-                    <span><strong>Last Synced:</strong> {{ quotient_metadata.last_synced|date:"Y-m-d H:i:s" }}</span>
-                    {% if quotient_metadata.event_name %}
-                        <span><strong>Event:</strong> {{ quotient_metadata.event_name }}</span>
-                    {% endif %}
-                    <span><strong>Teams:</strong> {{ quotient_metadata.team_count }}</span>
-                    <span><strong>Boxes:</strong> {{ quotient_metadata.boxes|length }}</span>
-                </div>
-            {% else %}
-                <p class="text-muted">Metadata not synced yet.</p>
+            {% if panel.notes %}
+                <ul class="step-notes">
+                    {% for row in panel.notes %}
+                        <li>
+                            <strong>{{ row.step.label }}:</strong> {{ row.detail }}
+                        </li>
+                    {% endfor %}
+                </ul>
             {% endif %}
-            <c-button_row>
-                <c-button variant="default" @click="syncQuotient" ::disabled="loading">
-                    Sync Metadata
-                </c-button>
-            </c-button_row>
-        </c-module>
-        <c-module class="mt-20" id="readiness">
-            <c-slot name="title">
-                Readiness Check
-            </c-slot>
-            <p class="text-muted mb-15">Run all checks to verify the system is ready for competition.</p>
-            <c-button_row>
-                <c-button variant="default"
-                          @click="runReadinessChecks"
-                          ::disabled="readinessLoading">
-                    <span x-show="notReadinessLoading">Run Checks</span>
-                    <span x-show="readinessLoading">Running...</span>
-                </c-button>
-            </c-button_row>
-            <template x-if="hasReadinessResults">
-                <div class="mt-15">
-                    <template x-for="(r, idx) in readinessResults" :key="idx">
-                        <div class="d-flex items-center gap-10 py-5 border-bottom">
-                            <span x-show="r.isPass" class="text-success font-bold">Pass</span>
-                            <span x-show="r.isFail" class="text-danger font-bold">Fail</span>
-                            <span x-show="r.isWarn" class="text-warning font-bold">Warning</span>
-                            <span class="font-semibold" x-text="r.step"></span>
-                            <span class="text-muted text-sm" x-text="r.detail"></span>
-                            <template x-if="r.isLinkAction">
-                                <a :href="r.actionUrl"
-                                   class="btn btn-sm btn-outline-primary ms-auto"
-                                   x-text="r.actionLabel"></a>
-                            </template>
-                            <template x-if="r.isFixAction">
-                                <button type="button"
-                                        class="btn btn-sm btn-outline-warning ms-auto"
-                                        @click="doReadinessFix"
-                                        :data-fix="r.fixKey"
-                                        :disabled="readinessFixing"
-                                        x-text="r.actionLabel"></button>
-                            </template>
+        </section>
+        <section id="controls" class="controls-row mt-20">
+            <c-button variant="primary" @click="startCompetition" ::disabled="loading">
+                Start Competition
+            </c-button>
+            <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
+                Stop Competition
+            </c-button>
+            <span class="text-muted text-md">
+                {% if config.applications_enabled %}
+                    Teams can sign in and use the competition apps.
+                    {% if config.competition_end_time %}
+                        The schedule stops it at <span x-data="formatTime"
+       data-iso="{{ config.competition_end_time|date:'c' }}"
+       x-text="formatted"></span>.
+                    {% endif %}
+                {% else %}
+                    Teams can't sign in while stopped.{% if scored %} Scores stay, so grading goes on.{% endif %}
+                    {% if config.competition_start_time %}
+                        The schedule starts it at <span x-data="formatTime"
+       data-iso="{{ config.competition_start_time|date:'c' }}"
+       x-text="formatted"></span>.
+                    {% endif %}
+                {% endif %}
+            </span>
+        </section>
+        <template x-if="notCloseOutStreaming">
+            <c-progress_bar />
+        </template>
+        {% if panel.section == "readiness" %}
+            <c-module class="mt-20" id="readiness">
+                <c-slot name="title">
+                    Readiness check
+                </c-slot>
+                <p class="help">
+                    Checks Authentik, Discord, packets, Quotient and the teams before the competition starts. Fix what
+                    fails, then press Start Competition.
+                </p>
+                {% include "admin/includes/readiness_check.html" %}
+            </c-module>
+        {% elif panel.section == "running" %}
+            <c-module class="mt-20" id="live">
+                <c-slot name="title">
+                    Right now
+                </c-slot>
+                <div class="grid-3">
+                    <div class="live-number">
+                        <div class="text-muted text-md">Open tickets</div>
+                        <div class="live-number__value">{{ live.open_tickets }}</div>
+                        <a href="{% url 'ticket_list' %}">Tickets</a>
+                    </div>
+                    <div class="live-number">
+                        <div class="text-muted text-md">Team accounts turned on at start</div>
+                        <div class="live-number__value">
+                            {% if live.accounts_on is None %}
+                                Not recorded
+                            {% else %}
+                                {{ live.accounts_on }} of {{ live.accounts_tried }}
+                            {% endif %}
+                        </div>
+                        <a href="{% url 'admin_teams' %}">Teams</a>
+                    </div>
+                    <div class="live-number">
+                        <div class="text-muted text-md">Quotient boxes and services</div>
+                        <div class="live-number__value">
+                            {% if quotient_metadata %}
+                                Synced {{ quotient_metadata.last_synced|timesince }} ago
+                            {% else %}
+                                Never synced
+                            {% endif %}
+                        </div>
+                        <a href="{% url 'leaderboard_page' %}">Leaderboard</a>
+                    </div>
+                </div>
+            </c-module>
+        {% elif panel.section == "close_out" %}
+            <c-module class="mt-20" id="close-out">
+                <c-slot name="title">
+                    Before you close out
+                </c-slot>
+                {% if can_close_out %}
+                    {% if not open_event %}
+                        <p>
+                            The scores are recorded at a new event in season <strong>{{ active_season.name }}</strong>,
+                            with the current school list.
+                        </p>
+                        <c-form_field label="Event name" id="close_out_name">
+                            <input type="text"
+                                   id="close_out_name"
+                                   :value="closeOutName"
+                                   @input="setField"
+                                   data-field="closeOutName"
+                                   class="vTextField">
+                        </c-form_field>
+                        <c-form_field label="Event date" id="close_out_date">
+                            <input type="date"
+                                   id="close_out_date"
+                                   :value="closeOutDate"
+                                   @input="setField"
+                                   data-field="closeOutDate"
+                                   class="vTextField">
+                        </c-form_field>
+                        <c-form_field label="Event type" id="close_out_type">
+                            <select id="close_out_type"
+                                    :value="closeOutType"
+                                    @change="setField"
+                                    data-field="closeOutType"
+                                    class="vTextField">
+                                {% for value, label in event_type_choices %}
+                                    <option value="{{ value }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </c-form_field>
+                    {% endif %}
+                    <template x-if="closeOutChecking">
+                        <p class="help-text">Checking for unfinished work...</p>
+                    </template>
+                    <template x-if="closeOutCheckFailed">
+                        <c-alert variant="warning">
+                            {{ close_out_check_failed }}
+                        </c-alert>
+                    </template>
+                    <template x-if="closeOutProblem">
+                        <c-alert variant="error">
+                            <span x-text="closeOutProblem"></span>
+                            <ul class="mt-10 ml-20">
+                                <template x-for="(fix, index) in closeOutFixes" :key="index">
+                                    <li>
+                                        <a :href="fix.url" x-text="fix.text"></a>
+                                    </li>
+                                </template>
+                            </ul>
+                        </c-alert>
+                    </template>
+                    <template x-if="hasCloseOutWarnings">
+                        <div>
+                            <p class="help">Warnings only. You can still close out: it freezes the results as they stand.</p>
+                            <ul class="close-out-warnings">
+                                <template x-for="(warning, index) in closeOutWarnings" :key="index">
+                                    <li>
+                                        <a :href="warning.url" x-text="warning.text"></a>
+                                    </li>
+                                </template>
+                            </ul>
                         </div>
                     </template>
-                </div>
-            </template>
-            <template x-if="readinessOk">
-                <c-alert variant="success" class="mt-15">
-                    <span x-text="readinessSummary"></span>
-                </c-alert>
-            </template>
-            <template x-if="readinessNotOk">
-                <c-alert variant="warning" class="mt-15">
-                    <span x-text="readinessSummary"></span>
-                </c-alert>
-            </template>
-        </c-module>
-        <c-module class="mt-20" id="controls">
-            <c-slot name="title">
-                Competition Controls
-            </c-slot>
-            <c-button_row>
-                <c-button variant="primary" @click="startCompetition" ::disabled="loading">
-                    Start Competition
-                </c-button>
-                <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
-                    Stop Competition
-                </c-button>
-            </c-button_row>
-            <template x-if="notCloseOutStreaming">
-                <c-progress_bar />
-            </template>
-        </c-module>
-        <c-module class="mt-20" id="close-out">
-            <c-slot name="title">
-                Close Out Event
-            </c-slot>
-            {% if can_close_out %}
-                {% if not open_event %}
-                    <p>
-                        The scores are recorded at a new event in season <strong>{{ active_season.name }}</strong>,
-                        with the current school list.
-                    </p>
-                    <c-form_field label="Event name" id="close_out_name">
-                        <input type="text"
-                               id="close_out_name"
-                               :value="closeOutName"
-                               @input="setField"
-                               data-field="closeOutName"
-                               class="vTextField">
-                    </c-form_field>
-                    <c-form_field label="Event date" id="close_out_date">
-                        <input type="date"
-                               id="close_out_date"
-                               :value="closeOutDate"
-                               @input="setField"
-                               data-field="closeOutDate"
-                               class="vTextField">
-                    </c-form_field>
-                    <c-form_field label="Event type" id="close_out_type">
-                        <select id="close_out_type"
-                                :value="closeOutType"
-                                @change="setField"
-                                data-field="closeOutType"
-                                class="vTextField">
-                            {% for value, label in event_type_choices %}
-                                <option value="{{ value }}">{{ label }}</option>
-                            {% endfor %}
-                        </select>
-                    </c-form_field>
+                    <template x-if="closeOutNothingLeft">
+                        <p>No unfinished work found, and the scorecards went out with the current scores.</p>
+                    </template>
+                    <c-info_box class="d-flex flex-wrap items-center justify-between gap-20 mt-15">
+                        <p class="close-out-text m-0">
+                            Close Out saves every school's scorecard as its result, then clears the live scores, tickets
+                            and team Discord access. Do it after the scorecards are out.
+                        </p>
+                        <c-button variant="danger" @click="closeOutEvent" ::disabled="closeOutBlocked">
+                            Close Out Event
+                        </c-button>
+                    </c-info_box>
+                    <template x-if="closeOutStreaming">
+                        <c-progress_bar />
+                    </template>
+                {% elif close_out_refusal %}
+                    <p class="help-text">{{ close_out_refusal }}</p>
+                    {% if needs_active_season %}
+                        <p>
+                            <a href="{% url 'registration_season_list' %}">Open the Seasons page</a>
+                        </p>
+                    {% endif %}
                 {% endif %}
-                <template x-if="closeOutChecking">
-                    <p class="help-text">Checking for unfinished work...</p>
-                </template>
-                <template x-if="closeOutCheckFailed">
-                    <c-alert variant="warning">
-                        {{ close_out_check_failed }}
-                    </c-alert>
-                </template>
-                <template x-if="closeOutProblem">
-                    <c-alert variant="error">
-                        <span x-text="closeOutProblem"></span>
-                        <ul class="mt-10 ml-20">
-                            <template x-for="(fix, index) in closeOutFixes" :key="index">
-                                <li>
-                                    <a :href="fix.url" x-text="fix.text"></a>
-                                </li>
-                            </template>
-                        </ul>
-                    </c-alert>
-                </template>
-                <template x-if="hasCloseOutWarnings">
-                    <c-alert variant="warning">
-                        <strong>Unfinished work (closing out freezes the results as they stand):</strong>
-                        <ul class="mt-10 ml-20">
-                            <template x-for="(warning, index) in closeOutWarnings" :key="index">
-                                <li>
-                                    <a :href="warning.url" x-text="warning.text"></a>
-                                </li>
-                            </template>
-                        </ul>
-                    </c-alert>
-                </template>
-                <p class="help-text">
-                    Run it once grading is done and the scorecards are emailed. In one step it freezes every listed
-                    school's scorecard and a zip of every export (scores, tickets, findings) as the event's results,
-                    then deletes the live scores, tickets and blue team Discord links, closes the event, and clears the
-                    schedule, the start message, the Quotient metadata and queued announcements. It then queues the
-                    Discord cleanup (team channels, team roles and the Room Judge role). The school list stays until the next import.
+            </c-module>
+        {% elif panel.section == "leftovers" %}
+            <c-module class="mt-20" id="leftovers">
+                <c-slot name="title">
+                    Leftover data
+                </c-slot>
+                <p>
+                    Clear leftover data deletes it for good; it is not archived. Results of events already closed out
+                    are not touched. It is on the <a href="{% url 'admin_competition_danger' %}">Danger Zone</a> page.
                 </p>
-                <c-button_row>
-                    <c-button variant="danger" @click="closeOutEvent" ::disabled="closeOutBlocked">
-                        Close Out Event
-                    </c-button>
-                </c-button_row>
-                <template x-if="closeOutStreaming">
-                    <c-progress_bar />
-                </template>
-            {% elif close_out_refusal %}
-                <p class="help-text">{{ close_out_refusal }}</p>
-                {% if needs_active_season %}
-                    <p>
-                        <a href="{% url 'registration_season_list' %}">Open the Seasons page</a>
-                    </p>
-                {% endif %}
-            {% endif %}
-        </c-module>
-        <h2 class="mt-20" id="advanced">Advanced</h2>
-        <p class="help">Tools outside the normal run of an event.</p>
-        <c-module>
-            <c-slot name="title">
-                Reset Team Passwords
-            </c-slot>
-            <form @submit.prevent="resetPasswords">
-                <c-form_field label="Team Numbers"
-                              id="team_numbers"
-                              help_text="Leave empty to reset every active team. Generates new passwords and revokes sessions.">
-                    <input type="text"
-                           name="team_numbers"
-                           id="team_numbers"
-                           :value="teamNumbers"
-                           @input="setField"
-                           data-field="teamNumbers"
-                           placeholder="1,3,5-10 (empty = all active)"
-                           class="vTextField">
-                </c-form_field>
-                <c-button_row class="mt-10">
-                    <c-button type="submit" variant="warning" ::disabled="loading">
-                        Reset Passwords
-                    </c-button>
-                </c-button_row>
-            </form>
-            <template x-if="csvContent">
-                <c-action_box heading="Password CSV Generated" class="mt-20">
-                    <textarea readonly
-                              class="w-full vTextField h-120 font-mono text-sm"
-                              x-text="csvContent"></textarea>
+            </c-module>
+        {% endif %}
+        <details class="advanced mt-20" id="advanced">
+            <summary>Advanced: reset team passwords, Danger Zone</summary>
+            <p class="help">Tools outside the normal run of an event.</p>
+            <c-module>
+                <c-slot name="title">
+                    Reset Team Passwords
+                </c-slot>
+                <form @submit.prevent="resetPasswords">
+                    <c-form_field label="Team Numbers"
+                                  id="team_numbers"
+                                  help_text="Leave empty to reset every active team. Generates new passwords and revokes sessions.">
+                        <input type="text"
+                               name="team_numbers"
+                               id="team_numbers"
+                               :value="teamNumbers"
+                               @input="setField"
+                               data-field="teamNumbers"
+                               placeholder="1,3,5-10 (empty = all active)"
+                               class="vTextField">
+                    </c-form_field>
                     <c-button_row class="mt-10">
-                        <c-button type="button" variant="default" @click="downloadCsv">
-                            Download CSV
+                        <c-button type="submit" variant="warning" ::disabled="loading">
+                            Reset Passwords
                         </c-button>
                     </c-button_row>
-                </c-action_box>
-            </template>
-        </c-module>
-        <c-module class="mt-20">
-            <c-slot name="title">
-                Danger Zone
-            </c-slot>
-            <p class="help">
-                Cancel an event opened by mistake or called off before any team scored, or clear data left over that no
-                event recorded.
-            </p>
-            <c-link href="{% url 'admin_competition_danger' %}" variant="danger">
-                Open the Danger Zone
-            </c-link>
-        </c-module>
+                </form>
+                <template x-if="csvContent">
+                    <c-action_box heading="Password CSV Generated" class="mt-20">
+                        <textarea readonly
+                                  class="w-full vTextField h-120 font-mono text-sm"
+                                  x-text="csvContent"></textarea>
+                        <c-button_row class="mt-10">
+                            <c-button type="button" variant="default" @click="downloadCsv">
+                                Download CSV
+                            </c-button>
+                        </c-button_row>
+                    </c-action_box>
+                </template>
+            </c-module>
+            <c-module class="mt-20">
+                <c-slot name="title">
+                    Danger Zone
+                </c-slot>
+                <p class="help">
+                    Cancel an event opened by mistake or called off before any team scored, or clear data left over that no
+                    event recorded.
+                </p>
+                <c-link href="{% url 'admin_competition_danger' %}" variant="danger">
+                    Open the Danger Zone
+                </c-link>
+            </c-module>
+        </details>
         <c-toast />
     </div>
-    {{ config.start_message|json_script:"start-message-data" }}
-    {{ close_out_check_failed|json_script:"close-out-check-failed" }}
-    {{ close_out_refusal|json_script:"close-out-refusal" }}
+    <script src="{% static 'js/competition.js' %}"></script>
     <script>
 document.addEventListener('alpine:init', () => {
-    Alpine.data('formatTime', function() {
-        return {
-            formatted: '',
-            init() {
-                const iso = this.$el.dataset.iso;
-                const date = new Date(iso);
-                const opts = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
-                const local = date.toLocaleString('en-US', opts);
-                const ca = date.toLocaleString('en-US', { ...opts, timeZone: 'America/Los_Angeles' });
-                this.formatted = `${local} (Local) / ${ca} (CA)`;
-            }
-        };
-    });
-
-    Alpine.data('competitionAdmin', () => compose(streamMixin('{% url "admin_competition_action" %}'), {
-        maxMembers: {{ config.max_team_members }},
-        startMessage: JSON.parse(document.getElementById('start-message-data').textContent),
-        apps: [{% for app in config.controlled_applications %}'{{ app }}'{% if not forloop.last %}, {% endif %}{% endfor %}],
-        newApp: '',
-        availableApps: [],
-        startDatetime: '',
-        startTimezone: 'America/Los_Angeles',
-        endDatetime: '',
-        endTimezone: 'America/Los_Angeles',
+    const actionUrl = '{% url "admin_competition_action" %}';
+    Alpine.data('competitionAdmin', () => compose(streamMixin(actionUrl), competitionActionsMixin(actionUrl), {
         teamNumbers: '',
         closeOutName: '',
         closeOutDate: '',
@@ -507,73 +328,23 @@ document.addEventListener('alpine:init', () => {
         closeOutOpenEvent: '{{ open_event.pk|default_if_none:"" }}',
         closeOutOffered: {{ can_close_out|yesno:"true,false" }},
         closeOutChecking: false,
+        closeOutChecked: false,
         closeOutCheckFailed: false,
         closeOutProblem: '',
         closeOutFixes: [],
         closeOutWarnings: [],
-        closeOutCheckFailedText: JSON.parse(document.getElementById('close-out-check-failed').textContent),
-        closeOutRefusal: JSON.parse(document.getElementById('close-out-refusal').textContent),
-        csvContent: '',
-        readinessResults: [],
-        readinessLoading: false,
-        readinessFixing: false,
-        readinessDone: false,
-        readinessSuccess: false,
-        readinessSummary: '',
 
-        async init() {
+        init() {
             if (this.closeOutOffered) this.checkCloseOut();
-            try {
-                const response = await fetch('{% url "admin_competition_apps" %}');
-                this.availableApps = (await response.json()).apps || [];
-            } catch (e) {
-                this.message = 'Could not load the Authentik app list: ' + e.message;
-                this.messageType = 'error';
-            }
         },
 
-        get noApps() { return this.apps.length === 0; },
         get closeOutStreaming() { return this.streamAction === 'close_out_event'; },
         get notCloseOutStreaming() { return !this.closeOutStreaming; },
         get hasCloseOutWarnings() { return this.closeOutWarnings.length > 0; },
-        get closeOutSummary() {
-            if (!this.closeOutOffered) return this.closeOutRefusal ? 'Close Out is blocked: ' + this.closeOutRefusal : '';
-            if (this.closeOutChecking) return 'Checking for unfinished work...';
-            if (this.closeOutCheckFailed) return this.closeOutCheckFailedText;
-            if (this.closeOutProblem) return 'Close Out is blocked: ' + this.closeOutProblem;
-            const count = this.closeOutWarnings.length;
-            if (count === 0) return 'No unfinished work found, and the scorecards went out with the current scores.';
-            return (count === 1 ? '1 item' : count + ' items') + ' to finish: see Close Out Event below.';
+        get closeOutNothingLeft() {
+            return this.closeOutChecked && !this.closeOutProblem && this.closeOutWarnings.length === 0;
         },
         get closeOutBlocked() { return this.loading || this.closeOutChecking || !!this.closeOutProblem; },
-        get addDisabled() { return this.loading || !this.newApp; },
-        get notReadinessLoading() { return !this.readinessLoading; },
-        get hasReadinessResults() { return this.readinessResults.length > 0; },
-        get readinessOk() { return this.readinessDone && this.readinessSuccess; },
-        get readinessNotOk() { return this.readinessDone && !this.readinessSuccess; },
-
-        async doAction(action, data = {}) {
-            this.loading = true;
-            this.message = '';
-            try {
-                const result = await wcPost('{% url "admin_competition_action" %}', { action, ...data });
-                if (result.success) {
-                    this.message = result.message;
-                    this.messageType = 'success';
-                    if (result.csv) this.csvContent = result.csv;
-                    if (result.apps) this.apps = result.apps;
-                    setTimeout(() => location.reload(), 2000);
-                } else {
-                    this.message = result.error || 'Action failed';
-                    this.messageType = 'error';
-                }
-            } catch (e) {
-                this.message = 'Request failed: ' + e.message;
-                this.messageType = 'error';
-            }
-            this.loading = false;
-            setTimeout(() => this.message = '', 5000);
-        },
 
         startCompetition() {
             if (confirm('Start the competition?\n\nThis will open the controlled applications to BlueTeam and enable the active teams\' accounts.')) {
@@ -590,11 +361,12 @@ document.addEventListener('alpine:init', () => {
         async checkCloseOut() {
             this.closeOutChecking = true;
             try {
-                const result = await wcPost('{% url "admin_competition_action" %}', { action: 'close_out_check' });
+                const result = await wcPost(actionUrl, { action: 'close_out_check' });
                 if (result.success) {
                     this.closeOutProblem = result.problem;
                     this.closeOutFixes = result.fixes;
                     this.closeOutWarnings = result.warnings;
+                    this.closeOutChecked = true;
                 } else {
                     this.closeOutCheckFailed = true;
                 }
@@ -623,56 +395,6 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        syncQuotient() {
-            this.doAction('sync_quotient');
-        },
-
-        setMaxMembers() {
-            this.doAction('set_max_members', { max_members: this.maxMembers });
-        },
-
-        setStartMessage() {
-            this.doAction('set_start_message', { start_message: this.startMessage });
-        },
-
-        setField(e) {
-            this[e.target.dataset.field] = e.target.value;
-        },
-
-        // Send only the app being changed; the server applies it to the current list,
-        // so a stale page (e.g. mid-reload) can't overwrite apps added elsewhere.
-        addApp() {
-            const app = this.newApp.trim().toLowerCase();
-            if (app && !this.apps.includes(app)) {
-                this.newApp = '';
-                this.doAction('add_app', { app_slug: app });
-            }
-        },
-
-        removeApp(e) {
-            const app = e.currentTarget.dataset.app;
-            if (!confirm('Remove ' + app + ' from controlled apps?')) return;
-            this.doAction('remove_app', { app_slug: app });
-        },
-
-        setSchedule() {
-            const data = {};
-            if (this.startDatetime) {
-                data.start_datetime = this.startDatetime;
-                data.start_timezone = this.startTimezone;
-            }
-            if (this.endDatetime) {
-                data.end_datetime = this.endDatetime;
-                data.end_timezone = this.endTimezone;
-            }
-            if (!data.start_datetime && !data.end_datetime) {
-                this.message = 'Please set at least one time';
-                this.messageType = 'error';
-                return;
-            }
-            this.doAction('set_schedule', data);
-        },
-
         resetPasswords() {
             const teamDesc = this.teamNumbers ? `teams ${this.teamNumbers}` : 'every active team';
             if (confirm(`Reset passwords for ${teamDesc}?\n\nThis will generate new passwords and revoke existing sessions.`)) {
@@ -688,66 +410,6 @@ document.addEventListener('alpine:init', () => {
             a.download = 'blueteam_passwords.csv';
             a.click();
             URL.revokeObjectURL(url);
-        },
-
-        async runReadinessChecks() {
-            this.readinessLoading = true;
-            this.readinessResults = [];
-            this.readinessDone = false;
-            this.readinessSummary = '';
-            try {
-                await wcStream(
-                    '{% url "admin_competition_action" %}',
-                    { action: 'readiness_check' },
-                    (msg) => {
-                        const sev = msg.severity || (msg.ok ? 'pass' : 'fail');
-                        const act = msg.action || null;
-                        this.readinessResults.push({
-                            step: msg.step,
-                            severity: sev,
-                            detail: msg.detail || '',
-                            isPass: sev === 'pass',
-                            isFail: sev === 'fail',
-                            isWarn: sev === 'warn',
-                            isLinkAction: act && act.type === 'link',
-                            isFixAction: act && act.type === 'fix',
-                            actionUrl: act ? act.url : '',
-                            actionLabel: act ? act.label : '',
-                            fixKey: act ? (act.key || '') : '',
-                        });
-                    },
-                    (msg) => {
-                        this.readinessSummary = msg.message;
-                        this.readinessSuccess = msg.success;
-                        this.readinessDone = true;
-                    },
-                );
-            } catch (e) {
-                this.message = 'Readiness check failed: ' + e.message;
-                this.messageType = 'error';
-            }
-            this.readinessLoading = false;
-        },
-
-        async doReadinessFix(e) {
-            const key = e.currentTarget.dataset.fix;
-            this.readinessFixing = true;
-            try {
-                const result = await wcPost('{% url "admin_competition_action" %}', { action: 'readiness_fix', fix: key });
-                if (result.success) {
-                    this.message = result.message;
-                    this.messageType = 'success';
-                    if (result.csv) this.csvContent = result.csv;
-                } else {
-                    this.message = result.error || 'Fix failed';
-                    this.messageType = 'error';
-                }
-            } catch (e) {
-                this.message = 'Fix failed: ' + e.message;
-                this.messageType = 'error';
-            }
-            this.readinessFixing = false;
-            setTimeout(() => this.message = '', 5000);
         },
     }));
 });

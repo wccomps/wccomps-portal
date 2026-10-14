@@ -223,7 +223,7 @@ def test_the_page_offers_close_out_for_the_open_event_once_stopped(client):
     page = _page(client)
 
     assert BUTTON in page
-    assert "Inv (2026) is open and teams have scores." in page
+    assert "Before you close out" in page
     assert 'id="close_out_name"' not in page
 
 
@@ -235,10 +235,7 @@ def test_the_page_hides_close_out_while_the_competition_runs(client):
     page = _page(client)
 
     assert BUTTON not in page
-    assert (
-        "The competition is running. When the competition ends, stop it with Stop Competition on the Competition page."
-        in page
-    )
+    assert "When the competition ends, stop it with Stop Competition on the Competition page." in page
 
 
 def test_with_no_event_open_the_page_asks_for_the_event_and_names_the_season(client):
@@ -336,7 +333,7 @@ def test_the_page_load_does_not_build_scorecards(client):
 
     fingerprint.assert_not_called()
     assert BUTTON in page
-    assert "Couldn't check unfinished work" in page
+    assert "Couldn&#x27;t check unfinished work" in page
 
 
 def test_the_check_needs_admin_or_gold_access(create_user_with_groups):
@@ -358,7 +355,7 @@ def test_right_after_an_import_the_page_offers_no_close_out(client, gold_team_us
     page = _page(client)
 
     assert BUTTON not in page
-    assert "No team has scores yet, so there is nothing to close out for Inv (2026)." in page
+    assert 'id="close-out"' not in page
 
 
 def test_with_no_season_active_close_out_points_at_the_seasons_page(client):

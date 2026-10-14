@@ -152,12 +152,17 @@ class EventStage:
         return self.instruction(self.next_action)
 
     @property
+    def actions_after_next(self) -> tuple[Action, ...]:
+        """The stage's actions after the next one; none while the competition runs."""
+        if self.running:
+            return ()
+        actions = STAGE_ACTIONS[self.stage]
+        return actions[actions.index(self.next_action) + 1 :]
+
+    @property
     def steps_left(self) -> str:
         """The next step and the stage's actions after it."""
-        if self.running:
-            return self.next_step
-        actions = STAGE_ACTIONS[self.stage]
-        return " ".join(self.instruction(action) for action in actions[actions.index(self.next_action) :])
+        return " ".join(self.instruction(action) for action in (self.next_action, *self.actions_after_next))
 
 
 def _scorecards_emailed(event: Event | None) -> bool:

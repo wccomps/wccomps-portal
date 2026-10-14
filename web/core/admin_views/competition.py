@@ -3,6 +3,7 @@ import io
 import json
 import logging
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import cast
 
 from django.contrib.auth.models import User
@@ -28,7 +29,7 @@ from registration.stage import Stage, event_stage
 from scoring.models import QuotientMetadataCache
 from scoring.quotient_sync import sync_quotient_metadata
 
-from core.admin_views.event_panel import RARE_ACTIONS, STEPS, action_url, event_facts, event_panel
+from core.admin_views.event_panel import RARE_ACTIONS, STEPS, Section, action_url, event_facts, event_panel
 from core.admin_views.readiness import action_readiness_check, action_readiness_fix
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import reset_team_credentials
@@ -507,45 +508,73 @@ _COMPETITION_ACTION_HANDLERS = {
 }
 
 
+@dataclass(frozen=True)
+class LiveNumbers:
+    """What the competition page shows while the competition runs: a few counts, none growing with the teams."""
+
+    open_tickets: int
+    # Team accounts the last start turned on, of those it tried; None when no start is recorded
+    accounts_on: int | None
+    accounts_tried: int | None
+
+
+def _live_numbers() -> LiveNumbers:
+    from ticketing.models import Ticket
+
+    open_tickets = Ticket.objects.filter(status__in=(Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED)).count()
+    start = AuditLog.objects.filter(action="competition_started").order_by("-created_at").first()
+    if start is None:
+        return LiveNumbers(open_tickets, None, None)
+    on = int(start.details.get("accounts_ok", 0))
+    return LiveNumbers(open_tickets, on, on + int(start.details.get("accounts_failed", 0)))
+
+
 @require_permission("admin", "gold_team")
 def admin_competition(request: HttpRequest) -> HttpResponse:
-
-    from team.models import DiscordLink, Team
-
     config = CompetitionConfig.get_config()
     stage = event_stage()
-
-    active_teams = Team.objects.filter(is_active=True).count()
-    total_teams = Team.objects.count()
-    linked_users = DiscordLink.objects.filter(is_active=True, team__isnull=False).count()
-
-    quotient_metadata = QuotientMetadataCache.objects.first()
+    panel = event_panel(event_facts(stage))
 
     close_out_refusal = close_out_problem(stage, check_schools=False)
     active_season = Season.objects.active()
     context = {
-        "panel": event_panel(event_facts(stage)),
+        "panel": panel,
         "close_out_check_failed": CLOSE_OUT_CHECK_FAILED,
         # Close Out records scores with no event in the active season; the Seasons page makes one active
         "needs_active_season": stage.event is None and active_season is None,
         "active_season": active_season,
         "open_event": stage.event,
         "can_close_out": not close_out_refusal,
-        # Shown where the module offers no button for a reason the operator can act on
-        "close_out_refusal": close_out_refusal if stage.stage in (Stage.READY, Stage.PLAYED, Stage.UNRECORDED) else "",
+        # Shown in the Close Out section when it offers no button, for a reason the operator can act on
+        "close_out_refusal": close_out_refusal if panel.section == Section.CLOSE_OUT else "",
         "event_type_choices": Event.EVENT_TYPE_CHOICES,
         "config": config,
-        "active_teams": active_teams,
-        "total_teams": total_teams,
-        "linked_users": linked_users,
-        "timezone_choices": TIMEZONE_CHOICES,
-        "quotient_metadata": quotient_metadata,
-        "start_message_max_length": StartMessageForm.MAX_LENGTH,
+        "scored": stage.stage in (Stage.PLAYED, Stage.UNRECORDED),
+        "live": _live_numbers() if panel.section == Section.RUNNING else None,
+        "quotient_metadata": QuotientMetadataCache.objects.first() if panel.section == Section.RUNNING else None,
         "show_ops_nav": True,
         "nav_active": "ops_admin",
     }
 
     return render(request, "admin/competition.html", context)
+
+
+@require_permission("admin", "gold_team")
+def admin_competition_setup(request: HttpRequest) -> HttpResponse:
+    """What is set before an event: the schedule, the start message, team access and the scoring engine, with the
+    readiness check. Saves go through admin_competition_action like the competition page's."""
+    return render(
+        request,
+        "admin/competition_setup.html",
+        {
+            "config": CompetitionConfig.get_config(),
+            "timezone_choices": TIMEZONE_CHOICES,
+            "quotient_metadata": QuotientMetadataCache.objects.first(),
+            "start_message_max_length": StartMessageForm.MAX_LENGTH,
+            "show_ops_nav": True,
+            "nav_active": "ops_admin",
+        },
+    )
 
 
 def admin_competition_apps(request: HttpRequest) -> JsonResponse:

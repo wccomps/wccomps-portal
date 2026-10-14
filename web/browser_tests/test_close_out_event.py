@@ -85,7 +85,7 @@ def test_a_failing_check_leaves_close_out_usable(live_server, pw_browser):
         ):
             page.goto(f"{live_server.url}/ops/admin/competition/")
             page.get_by_role("alert").get_by_text("Couldn't check unfinished work.").wait_for()
-            assert "Couldn't check unfinished work." in page.locator("#event-panel").inner_text()
+            assert "Couldn't check unfinished work." in page.locator("#close-out").inner_text()
             assert page.get_by_role("button", name="Close Out Event").is_enabled()
             assert page.get_by_role("button", name="Start Competition").is_enabled()
     finally:

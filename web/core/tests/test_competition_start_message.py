@@ -1,4 +1,4 @@
-"""The start message: saved on the competition page, checked for readiness, sent by run_competition."""
+"""The start message: saved on the Competition setup page, checked for readiness, sent by run_competition."""
 
 import pytest
 from django.test import Client
@@ -62,7 +62,7 @@ def test_message_too_long_for_discord_is_refused(admin_client):
 def test_page_loads_the_stored_message_as_json(admin_client):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"start_message": "</script><b>x</b>"})
 
-    content = admin_client.get(reverse("admin_competition")).content.decode()
+    content = admin_client.get(reverse("admin_competition_setup")).content.decode()
 
     assert '<script id="start-message-data" type="application/json">' in content
     assert "</script><b>x</b>" not in content

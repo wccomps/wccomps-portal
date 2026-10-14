@@ -113,12 +113,16 @@ def _check_team_group_membership() -> CheckResult:
     return ("pass", "All accounts in correct groups", None)
 
 
+def _configure_apps_link() -> dict[str, str]:
+    return {"type": "link", "url": reverse("admin_competition_setup") + "#team-access", "label": "Configure Apps"}
+
+
 def _check_blueteam_bindings() -> CheckResult:
     """Verify BlueTeam group bindings exist on all controlled apps."""
     config = CompetitionConfig.get_config()
     apps = config.controlled_applications
     if not apps:
-        return ("warn", "No controlled apps configured", {"type": "link", "url": "#setup", "label": "Configure Apps"})
+        return ("warn", "No controlled apps configured", _configure_apps_link())
 
     mgr = AuthentikManager()
     missing: list[str] = []
@@ -135,7 +139,7 @@ def _check_blueteam_bindings() -> CheckResult:
         return (
             "fail",
             f"Missing bindings: {', '.join(missing)}",
-            {"type": "link", "url": "#setup", "label": "Configure Apps"},
+            _configure_apps_link(),
         )
     return ("pass", f"Bindings exist for all {len(apps)} apps", None)
 

@@ -33,6 +33,7 @@ def action_url(action: Action) -> str:
 class StepState(StrEnum):
     DONE = "done"
     CURRENT = "current"
+    NEXT = "next"  # One of the stage's actions after the current one
     UPCOMING = "upcoming"
 
 
@@ -40,7 +41,26 @@ class StepState(StrEnum):
 STATE_SHOWN: dict[StepState, tuple[str, str]] = {
     StepState.DONE: ("Done", "success"),
     StepState.CURRENT: ("Now", "info"),
+    StepState.NEXT: ("Next", "neutral"),
     StepState.UPCOMING: ("Later", "neutral"),
+}
+
+
+class Section(StrEnum):
+    """The one section the competition page shows below Start and Stop, for the next step."""
+
+    READINESS = "readiness"
+    RUNNING = "running"
+    CLOSE_OUT = "close_out"
+    LEFTOVERS = "leftovers"
+
+
+SECTIONS: dict[Action, Section] = {
+    Action.START: Section.READINESS,
+    Action.STOP: Section.RUNNING,
+    Action.FINISH: Section.CLOSE_OUT,
+    Action.CLOSE_OUT: Section.CLOSE_OUT,
+    Action.CLEAR: Section.LEFTOVERS,
 }
 
 
@@ -59,11 +79,10 @@ def _plural(count: int, one: str, many: str) -> str:
 
 
 def _import_detail(facts: EventFacts) -> str:
-    if not facts.schools:
+    # With an event open, the panel's event line counts the schools
+    if not facts.schools or facts.stage.event is not None:
         return ""
     schools = _plural(facts.schools, "school is", "schools are")
-    if facts.stage.event is not None:
-        return f"{schools} on the list."
     return f"{schools} on the list from the last import; the next import replaces it."
 
 
@@ -86,16 +105,13 @@ def _played(stage: EventStage) -> bool:
 
 @dataclass(frozen=True)
 class Step:
-    """One step of running an event: the action it takes, what it does, and when it is done. It is current when
-    its action is the stage's next one."""
+    """One step of running an event: the action it takes and when it is done. It is current when its action is the
+    stage's next one."""
 
     action: Action
     label: str
-    help: str
     done: Callable[[EventStage], bool]
     detail: Callable[[EventFacts], str] = lambda facts: ""
-    # The Close Out checks (unfinished grading, scorecard emails, school problems) load on demand under this step
-    close_out_checks: bool = False
 
     @property
     def key(self) -> str:
@@ -114,49 +130,34 @@ STEPS: tuple[Step, ...] = (
     Step(
         Action.IMPORT,
         "Import the school list",
-        "Gives each school a team number and opens the event. Later registrations go in with Add schools.",
         done=lambda stage: stage.event is not None,
         detail=_import_detail,
     ),
     Step(
         Action.SEND_PACKETS,
         "Send packets",
-        "Gives each school on the list the packet and its team's username and password: by email when the packet "
-        "says so, and to download in the portal unless that is turned off.",
         done=lambda stage: stage.packets_sent,
         detail=_packets_detail,
     ),
     Step(
         Action.START,
         "Check readiness and start the competition",
-        "Run the Readiness Check, then on competition day Start Competition turns on the active teams' accounts, "
-        "opens the controlled apps to blue teams and posts the start message, if one is set. A start time set under "
-        "Schedule starts it on its own.",
         done=lambda stage: stage.running or _played(stage),
     ),
     Step(
         Action.STOP,
         "Stop the competition",
-        "At the end: turns every team account off and closes the controlled apps. Scores stay, so grading goes on. "
-        "An end time set under Schedule stops it on its own.",
         done=lambda stage: not stage.running and _played(stage),
     ),
     Step(
         Action.FINISH,
         "Finish scoring and email scorecards",
-        "White team finishes grading and the scoring reviews are approved, then Email Scorecards sends each school "
-        "its scorecard. Sends made before the portal recorded them don't show. If you already emailed them, you can "
-        "close out.",
         done=lambda stage: stage.scorecards_emailed,
-        close_out_checks=True,
     ),
     Step(
         Action.CLOSE_OUT,
         "Close Out Event",
-        "Saves every listed school's scorecard as its result for the event, then deletes the event's scores, "
-        "tickets and team Discord links, ready for the next event.",
         done=lambda stage: False,
-        close_out_checks=True,
     ),
 )
 
@@ -182,18 +183,24 @@ class ShownStep:
     def is_current(self) -> bool:
         return self.state == StepState.CURRENT
 
-    @property
-    def shows_close_out_checks(self) -> bool:
-        return self.step.close_out_checks and self.is_current
-
 
 @dataclass(frozen=True)
 class EventPanel:
-    """What the panel shows: the event, the stage (its sentence and next step), where the next step is taken, and the
-    steps."""
+    """What the panel shows: the event and its schools, the stage (its sentence and next step), where the next step
+    is taken, the steps, and the page's section for the next step."""
 
     stage: EventStage
+    schools: int
     steps: list[ShownStep]
+
+    @property
+    def section(self) -> Section | None:
+        return SECTIONS.get(self.stage.next_action)
+
+    @property
+    def notes(self) -> list[ShownStep]:
+        """The steps with something to say beyond their line (schools on the list, packets not delivered)."""
+        return [row for row in self.steps if row.detail]
 
     @property
     def seasons_url(self) -> str:
@@ -211,11 +218,14 @@ class EventPanel:
 def _state(step: Step, stage: EventStage) -> StepState:
     if step.action == stage.next_action:
         return StepState.CURRENT
-    return StepState.DONE if step.done(stage) else StepState.UPCOMING
+    if step.done(stage):
+        return StepState.DONE
+    return StepState.NEXT if step.action in stage.actions_after_next else StepState.UPCOMING
 
 
 def event_panel(facts: EventFacts) -> EventPanel:
-    return EventPanel(facts.stage, [ShownStep(step, _state(step, facts.stage), step.detail(facts)) for step in STEPS])
+    steps = [ShownStep(step, _state(step, facts.stage), step.detail(facts)) for step in STEPS]
+    return EventPanel(facts.stage, facts.schools, steps)
 
 
 def event_facts(stage: EventStage) -> EventFacts:

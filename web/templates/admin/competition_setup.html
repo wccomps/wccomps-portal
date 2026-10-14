@@ -1,0 +1,298 @@
+{% extends "admin/base.html" %}
+{% load cotton static %}
+{% block title %}
+    Competition Setup - WCComps Portal
+{% endblock title %}
+{% block admin_content %}
+    <div x-data="competitionSetup">
+        <c-page_header title="Competition setup"
+                       parent_url="{% url 'admin_competition' %}"
+                       parent_label="Competition">
+            <p class="mt-10">
+                <a href="{% url 'admin_competition' %}">Back to Competition</a>
+            </p>
+            <p>
+                Set these before the season, and check them before each event. The readiness check below says if
+                something is missing.
+            </p>
+        </c-page_header>
+        <c-module class="mt-20" id="schedule">
+            <c-slot name="title">
+                Schedule
+            </c-slot>
+            <p class="help">
+                Optional: the bot starts and stops the competition at these times. Start and Stop on the Competition
+                page always work.
+            </p>
+            <p>
+                Starts:
+                {% if config.competition_start_time %}
+                    <span x-data="formatTime"
+                          data-iso="{{ config.competition_start_time|date:'c' }}"
+                          x-text="formatted"></span>
+                {% else %}
+                    not set
+                {% endif %}
+                <br>
+                Stops:
+                {% if config.competition_end_time %}
+                    <span x-data="formatTime"
+                          data-iso="{{ config.competition_end_time|date:'c' }}"
+                          x-text="formatted"></span>
+                {% else %}
+                    not set
+                {% endif %}
+            </p>
+            <form @submit.prevent="setSchedule">
+                <div class="grid-2">
+                    <div>
+                        <c-form_field label="Start Time" id="start_datetime">
+                            <div class="d-flex gap-10">
+                                <input type="datetime-local"
+                                       name="start_datetime"
+                                       id="start_datetime"
+                                       :value="startDatetime"
+                                       @input="setField"
+                                       data-field="startDatetime"
+                                       class="vTextField flex-1">
+                                <select name="start_timezone"
+                                        id="start_timezone"
+                                        aria-label="Start time zone"
+                                        :value="startTimezone"
+                                        @change="setField"
+                                        data-field="startTimezone"
+                                        class="vTextField">
+                                    {% for value, label in timezone_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                                </select>
+                            </div>
+                        </c-form_field>
+                    </div>
+                    <div>
+                        <c-form_field label="End Time" id="end_datetime">
+                            <div class="d-flex gap-10">
+                                <input type="datetime-local"
+                                       name="end_datetime"
+                                       id="end_datetime"
+                                       :value="endDatetime"
+                                       @input="setField"
+                                       data-field="endDatetime"
+                                       class="vTextField flex-1">
+                                <select name="end_timezone"
+                                        id="end_timezone"
+                                        aria-label="End time zone"
+                                        :value="endTimezone"
+                                        @change="setField"
+                                        data-field="endTimezone"
+                                        class="vTextField">
+                                    {% for value, label in timezone_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                                </select>
+                            </div>
+                        </c-form_field>
+                    </div>
+                </div>
+                <c-button_row class="mt-10">
+                    <c-button type="submit" variant="default" ::disabled="loading">
+                        Save Schedule
+                    </c-button>
+                </c-button_row>
+            </form>
+        </c-module>
+        <c-module class="mt-20" id="start-message">
+            <c-slot name="title">
+                Start message
+            </c-slot>
+            <form @submit.prevent="setStartMessage">
+                <c-form_field label="Message"
+                              id="start_message"
+                              help_text="Posted to every active team's private chat channel when the competition starts, by schedule or by hand. Use it for the default VM credentials. Leave it empty to send nothing. Close Out Event clears it.">
+                    <textarea name="start_message"
+                              id="start_message"
+                              :value="startMessage"
+                              @input="setField"
+                              data-field="startMessage"
+                              class="vTextField"
+                              rows="6"
+                              maxlength="{{ start_message_max_length }}"></textarea>
+                </c-form_field>
+                <c-button_row class="mt-10">
+                    <c-button type="submit" variant="default" ::disabled="loading">
+                        Save Start Message
+                    </c-button>
+                </c-button_row>
+            </form>
+        </c-module>
+        <c-module class="mt-20" id="team-access">
+            <c-slot name="title">
+                Team access
+            </c-slot>
+            <form @submit.prevent="setMaxMembers"
+                  class="d-flex flex-wrap gap-10 items-center mb-15">
+                <label for="max_members" class="font-semibold text-sm">People per team</label>
+                <input type="number"
+                       name="max_members"
+                       id="max_members"
+                       :value="maxMembers"
+                       @input="setField"
+                       data-field="maxMembers"
+                       min="1"
+                       max="20"
+                       class="vTextField w-80">
+                <c-button type="submit" variant="default" ::disabled="loading">
+                    Update
+                </c-button>
+                <span class="text-muted text-md">How many Discord accounts can link to one team.</span>
+            </form>
+            <div>
+                <label class="font-semibold text-sm d-block mb-5">Apps teams can use during the competition</label>
+                <p class="help">The Authentik applications Start opens to blue teams and Stop closes (the controlled apps).</p>
+                <div class="d-flex gap-10 flex-wrap mb-10">
+                    <template x-for="(app, index) in apps" :key="index">
+                        <c-badge variant="default" class="d-flex items-center gap-10">
+                            <span x-text="app"></span>
+                            <button type="button"
+                                    @click="removeApp"
+                                    :data-app="app"
+                                    aria-label="Remove app"
+                                    class="text-danger btn-reset text-md">×</button>
+                        </c-badge>
+                    </template>
+                    <template x-if="noApps">
+                        <span class="text-muted text-sm">No apps configured</span>
+                    </template>
+                </div>
+                <form @submit.prevent="addApp" class="d-flex gap-10 items-center">
+                    <input type="text"
+                           list="authentik-apps"
+                           :value="newApp"
+                           @input="setField"
+                           data-field="newApp"
+                           placeholder="App slug"
+                           aria-label="Authentik application slug"
+                           class="vTextField w-200">
+                    <datalist id="authentik-apps">
+                        <template x-for="app in availableApps" :key="app">
+                            <option :value="app"></option>
+                        </template>
+                    </datalist>
+                    <c-button type="submit" variant="default" ::disabled="addDisabled">
+                        Add
+                    </c-button>
+                </form>
+            </div>
+        </c-module>
+        <c-module class="mt-20" id="scoring-engine">
+            <c-slot name="title">
+                Scoring engine (Quotient)
+            </c-slot>
+            <p class="help">
+                The boxes and services Quotient scores. Start syncs them, and the bot syncs them on its own while
+                Quotient is up.
+            </p>
+            {% if quotient_metadata %}
+                <div class="d-flex gap-20 items-center flex-wrap">
+                    <span><strong>Last synced:</strong> {{ quotient_metadata.last_synced|date:"Y-m-d H:i:s" }}</span>
+                    {% if quotient_metadata.event_name %}
+                        <span><strong>Event:</strong> {{ quotient_metadata.event_name }}</span>
+                    {% endif %}
+                    <span><strong>Teams:</strong> {{ quotient_metadata.team_count }}</span>
+                    <span><strong>Boxes:</strong> {{ quotient_metadata.boxes|length }}</span>
+                </div>
+            {% else %}
+                <p class="text-muted">Not synced yet.</p>
+            {% endif %}
+            <c-button_row>
+                <c-button variant="default" @click="syncQuotient" ::disabled="loading">
+                    Sync Now
+                </c-button>
+            </c-button_row>
+        </c-module>
+        <c-module class="mt-20" id="readiness">
+            <c-slot name="title">
+                Readiness check
+            </c-slot>
+            <p class="help">
+                Checks Authentik, Discord, packets, Quotient and the teams before competition day. The Competition
+                page also shows it when Start is the next step.
+            </p>
+            {% include "admin/includes/readiness_check.html" %}
+        </c-module>
+        <c-toast />
+    </div>
+    {{ config.start_message|json_script:"start-message-data" }}
+    <script src="{% static 'js/competition.js' %}"></script>
+    <script>
+document.addEventListener('alpine:init', () => {
+    const actionUrl = '{% url "admin_competition_action" %}';
+    Alpine.data('competitionSetup', () => compose(streamMixin(actionUrl), competitionActionsMixin(actionUrl), {
+        maxMembers: {{ config.max_team_members }},
+        startMessage: JSON.parse(document.getElementById('start-message-data').textContent),
+        apps: [{% for app in config.controlled_applications %}'{{ app }}'{% if not forloop.last %}, {% endif %}{% endfor %}],
+        newApp: '',
+        availableApps: [],
+        startDatetime: '',
+        startTimezone: 'America/Los_Angeles',
+        endDatetime: '',
+        endTimezone: 'America/Los_Angeles',
+
+        async init() {
+            try {
+                const response = await fetch('{% url "admin_competition_apps" %}');
+                this.availableApps = (await response.json()).apps || [];
+            } catch (e) {
+                this.message = 'Could not load the Authentik app list: ' + e.message;
+                this.messageType = 'error';
+            }
+        },
+
+        get noApps() { return this.apps.length === 0; },
+        get addDisabled() { return this.loading || !this.newApp; },
+
+        syncQuotient() {
+            this.doAction('sync_quotient');
+        },
+
+        setMaxMembers() {
+            this.doAction('set_max_members', { max_members: this.maxMembers });
+        },
+
+        setStartMessage() {
+            this.doAction('set_start_message', { start_message: this.startMessage });
+        },
+
+        // Send only the app being changed; the server applies it to the current list,
+        // so a stale page (e.g. mid-reload) can't overwrite apps added elsewhere.
+        addApp() {
+            const app = this.newApp.trim().toLowerCase();
+            if (app && !this.apps.includes(app)) {
+                this.newApp = '';
+                this.doAction('add_app', { app_slug: app });
+            }
+        },
+
+        removeApp(e) {
+            const app = e.currentTarget.dataset.app;
+            if (!confirm('Remove ' + app + ' from controlled apps?')) return;
+            this.doAction('remove_app', { app_slug: app });
+        },
+
+        setSchedule() {
+            const data = {};
+            if (this.startDatetime) {
+                data.start_datetime = this.startDatetime;
+                data.start_timezone = this.startTimezone;
+            }
+            if (this.endDatetime) {
+                data.end_datetime = this.endDatetime;
+                data.end_timezone = this.endTimezone;
+            }
+            if (!data.start_datetime && !data.end_datetime) {
+                this.message = 'Please set at least one time';
+                this.messageType = 'error';
+                return;
+            }
+            this.doAction('set_schedule', data);
+        },
+    }));
+});
+    </script>
+{% endblock admin_content %}
