@@ -123,25 +123,6 @@ Color mapping:
 - Negative values: #dc3545 (red)
 - Zero: #6c757d (gray)
 
-#### `<c-stats_card>`
-Stats card component for dashboard displays.
-```django
-<c-stats_card value="42" label="Total Teams" color="primary" />
-<c-stats_card value="+15" label="Points Gained" color="success" />
-<c-stats_card value="-5" label="Penalties" color="danger" />
-```
-
-Props:
-- `value` (required): The statistic number or value to display
-- `label` (required): Description of the statistic
-- `color` (optional): Color theme - primary|success|warning|danger (default: primary)
-
-Color mapping:
-- primary: #417690 (admin blue)
-- success: #28a745 (green)
-- warning: #ffc107 (yellow)
-- danger: #dc3545 (red)
-
 #### `<c-empty_state>`
 Empty state display for when no data is available.
 ```django
