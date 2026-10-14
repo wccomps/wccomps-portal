@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 START_MESSAGE_SENDER = "Black Team"
 
+# The audit action a start records, with the team accounts it turned on (accounts_ok) and could not (accounts_failed)
+COMPETITION_STARTED = "competition_started"
+
 
 @dataclass(frozen=True)
 class CompetitionStep:
@@ -155,7 +158,7 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
             result.start_message_queued = True
 
     AuditLog.objects.create(
-        action="competition_started" if enable else "competition_stopped",
+        action=COMPETITION_STARTED if enable else "competition_stopped",
         admin_user=actor,
         target_entity="competition_config",
         target_id=config.pk,
@@ -169,6 +172,16 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
         },
     )
     return result
+
+
+def last_start_accounts() -> tuple[int, int] | None:
+    """The team accounts the last recorded start turned on, and how many it tried; None when none is recorded."""
+    details = (
+        AuditLog.objects.filter(action=COMPETITION_STARTED).order_by("-created_at").values_list("details", flat=True)
+    ).first()
+    if not details or "accounts_ok" not in details or "accounts_failed" not in details:
+        return None
+    return details["accounts_ok"], details["accounts_ok"] + details["accounts_failed"]
 
 
 def run_competition_to_completion(

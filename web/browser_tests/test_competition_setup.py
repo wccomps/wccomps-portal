@@ -30,7 +30,7 @@ def test_a_save_returns_to_the_setup_page_with_no_console_errors(live_server, pw
 
             assert CompetitionConfig.get_config().max_team_members == 6
             assert page.locator("#max_members").input_value() == "6"
-            assert page.get_by_role("link", name="Back to Competition").get_attribute("href") == (
+            assert page.locator(".breadcrumbs").get_by_role("link", name="Competition").get_attribute("href") == (
                 "/ops/admin/competition/"
             )
             assert not errors, errors

@@ -98,8 +98,11 @@ def test_while_running_the_page_offers_stop_and_shows_the_live_numbers(live_serv
         assert status == 200
         assert "RUNNING" in panel.inner_text().upper()
         assert panel.get_by_role("button", name="Stop Competition").is_visible()
+        # One Stop, in the next-step bar, as the approved running mockup shows; no Start while running
+        assert page.get_by_role("button", name="Stop Competition").count() == 1
+        assert page.get_by_role("button", name="Start Competition").count() == 0
         live = page.locator("#live")
-        assert "Open tickets" in live.inner_text()
+        assert "Open or claimed tickets" in live.inner_text()
         assert "Never synced" in live.inner_text()
         assert page.locator("#close-out").count() == 0
         assert not page.locator("details.advanced").get_attribute("open")

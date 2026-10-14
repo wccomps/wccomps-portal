@@ -9,20 +9,18 @@
                        parent_url="{% url 'admin_competition' %}"
                        parent_label="Competition">
             <p class="mt-10">
-                <a href="{% url 'admin_competition' %}">Back to Competition</a>
-            </p>
-            <p>
-                Set these before the season, and check them before each event. The readiness check below says if
-                something is missing.
+                Check these before each event. Close Out clears the schedule, the start message and the scoring
+                engine's box list, so set those again for each event; people per team and the apps carry over. The
+                readiness check below says if something is missing.
             </p>
         </c-page_header>
-        <c-module class="mt-20" id="schedule">
+        <c-module class="mt-20" id="{{ sections.SCHEDULE }}">
             <c-slot name="title">
                 Schedule
             </c-slot>
             <p class="help">
-                Optional: the bot starts and stops the competition at these times. Start and Stop on the Competition
-                page always work.
+                Optional: the bot starts and stops the competition at these times. You can also start or stop by
+                hand on the Competition page; that clears the scheduled time.
             </p>
             <p>
                 Starts:
@@ -97,7 +95,7 @@
                 </c-button_row>
             </form>
         </c-module>
-        <c-module class="mt-20" id="start-message">
+        <c-module class="mt-20" id="{{ sections.START_MESSAGE }}">
             <c-slot name="title">
                 Start message
             </c-slot>
@@ -121,7 +119,7 @@
                 </c-button_row>
             </form>
         </c-module>
-        <c-module class="mt-20" id="team-access">
+        <c-module class="mt-20" id="{{ sections.TEAM_ACCESS }}">
             <c-slot name="title">
                 Team access
             </c-slot>
@@ -144,7 +142,10 @@
             </form>
             <div>
                 <label class="font-semibold text-sm d-block mb-5">Apps teams can use during the competition</label>
-                <p class="help">The Authentik applications Start opens to blue teams and Stop closes (the controlled apps).</p>
+                <p class="help">
+                    Sign-in apps in Authentik (the portal's login system) that Start opens to the blue teams and Stop
+                    closes, also called the controlled apps. Add one by its short name in Authentik (its slug).
+                </p>
                 <div class="d-flex gap-10 flex-wrap mb-10">
                     <template x-for="(app, index) in apps" :key="index">
                         <c-badge variant="default" class="d-flex items-center gap-10">
@@ -152,8 +153,9 @@
                             <button type="button"
                                     @click="removeApp"
                                     :data-app="app"
-                                    aria-label="Remove app"
-                                    class="text-danger btn-reset text-md">×</button>
+                                    class="text-danger btn-reset text-sm">
+                                Remove <span class="sr-only" x-text="app"></span>
+                            </button>
                         </c-badge>
                     </template>
                     <template x-if="noApps">
@@ -166,7 +168,7 @@
                            :value="newApp"
                            @input="setField"
                            data-field="newApp"
-                           placeholder="App slug"
+                           placeholder="App short name (slug)"
                            aria-label="Authentik application slug"
                            class="vTextField w-200">
                     <datalist id="authentik-apps">
@@ -180,13 +182,13 @@
                 </form>
             </div>
         </c-module>
-        <c-module class="mt-20" id="scoring-engine">
+        <c-module class="mt-20" id="{{ sections.SCORING_ENGINE }}">
             <c-slot name="title">
                 Scoring engine (Quotient)
             </c-slot>
             <p class="help">
-                The boxes and services Quotient scores. Start syncs them, and the bot syncs them on its own while
-                Quotient is up.
+                Quotient is the scoring engine: it checks each team's services on its boxes (servers). The portal keeps
+                a copy of that list. Start syncs it, and the bot syncs it on its own while Quotient is up.
             </p>
             {% if quotient_metadata %}
                 <div class="d-flex gap-20 items-center flex-wrap">
@@ -206,13 +208,12 @@
                 </c-button>
             </c-button_row>
         </c-module>
-        <c-module class="mt-20" id="readiness">
+        <c-module class="mt-20" id="{{ sections.READINESS }}">
             <c-slot name="title">
                 Readiness check
             </c-slot>
             <p class="help">
-                Checks Authentik, Discord, packets, Quotient and the teams before competition day. The Competition
-                page also shows it when Start is the next step.
+                Checks Discord, the team accounts and their apps, the school list, packets, the start message and the scoring engine, and warns about data left from before. The Competition page also shows it when Start is the next step.
             </p>
             {% include "admin/includes/readiness_check.html" %}
         </c-module>

@@ -15,7 +15,7 @@ from registration.services import set_team_school
 from scoring.models import ServiceScore
 
 from core.admin_views.competition import CLOSE_OUT_CHECK_FAILED
-from core.admin_views.event_panel import RARE_ACTIONS, STEPS
+from core.admin_views.event_panel import RARE_ACTIONS, STEPS, action_url
 from core.models import CompetitionConfig
 from team.models import Team
 
@@ -70,13 +70,13 @@ def test_with_no_event_the_panel_points_at_the_import(client):
     assert ">No event<" in _flat(panel)
 
 
-def test_the_title_links_the_guide_and_the_setup_page(client):
+def test_the_title_links_the_setup_page_and_the_nav_the_guide(client):
     page = _page(client)
-    title = page[: page.index('id="event-panel"')]
+    title = page[page.index('class="breadcrumbs"') : page.index('id="event-panel"')]
 
-    assert f'href="{reverse("admin_competition_guide")}"' in title
     assert f'href="{reverse("admin_competition_setup")}"' in title
     assert "Competition setup" in title
+    assert f'href="{reverse("admin_competition_guide")}"' not in title
 
 
 def test_an_open_event_names_its_season_schools_and_date_and_points_at_the_packets(client):
@@ -89,7 +89,7 @@ def test_an_open_event_names_its_season_schools_and_date_and_points_at_the_packe
     assert f'Season<a href="{reverse("registration_season_list")}">WCComps 2027</a>' in panel
     assert "2 schools" in panel
     assert "Oct 3, 2027" in panel
-    assert ">Stopped<" in panel
+    assert ">Not started<" in panel
     assert f'href="{reverse("packets_list")}"' in panel
 
 
@@ -198,9 +198,75 @@ def test_the_page_shows_only_the_next_steps_section(client, stage, section):
 
     shown = [key for key, heading in SECTION_HEADINGS.items() if heading in page and f'id="{key}"' in page]
     assert shown == ([section] if section else [])
-    # Start and Stop, and the advanced tools, are always there
-    assert '@click="startCompetition"' in page and '@click="stopCompetition"' in page
+    # Stop is in one place: the next-step button while running, the Start/Stop row otherwise
+    assert page.count('@click="stopCompetition"') == 1
+    assert ('@click="startCompetition"' in page) == (stage != "running")
     assert "<summary>Advanced: reset team passwords, Danger Zone</summary>" in page
+
+
+ALL_STAGES = ["idle", "packets", "start", "running", "played", "unrecorded", "leftovers"]
+
+
+def _ids(html):
+    return set(re.findall(r'\bid="([^"]+)"', html))
+
+
+@pytest.mark.parametrize("stage", ALL_STAGES)
+def test_no_link_on_the_page_or_in_the_guide_lands_on_a_missing_section(client, stage):
+    _arrange(stage)
+    pages = {
+        reverse("admin_competition"): _page(client),
+        reverse("admin_competition_setup"): client.get(reverse("admin_competition_setup")).content.decode(),
+    }
+    guide = client.get(reverse("admin_competition_guide")).content.decode()
+
+    for html in (*pages.values(), guide):
+        for path, anchor in re.findall(r'href="(/ops/admin/competition/(?:setup/)?)#([^"]+)"', html):
+            assert anchor in _ids(pages[path]), f"{path}#{anchor} in stage {stage}"
+
+
+@pytest.mark.parametrize(
+    ("stage", "word"),
+    [
+        ("idle", "No event"),
+        ("packets", "Not started"),
+        ("start", "Not started"),
+        ("running", "Running"),
+        ("played", "Stopped"),
+        ("unrecorded", "No event"),
+    ],
+)
+def test_the_status_badge_says_where_the_competition_stands(client, stage, word):
+    _arrange(stage)
+
+    head = _flat(_panel(_page(client)))
+    head = head[: head.index("next-step")]
+
+    assert f">{word}<" in head
+
+
+def test_the_card_counts_the_schools_and_the_linked_team_members(client, gold_team_user):
+    from team.models import DiscordLink
+
+    _event(is_active=True)
+    _teams(2)
+    DiscordLink.objects.create(
+        team=Team.objects.get(team_number=1), discord_id=5, discord_username="b", user=gold_team_user
+    )
+
+    panel = _flat(_panel(_page(client)))
+
+    assert "2 schools" in panel
+    assert "1 team member linked" in panel
+
+
+def test_before_any_scores_the_next_step_says_how_to_call_the_event_off(client):
+    _arrange("packets")
+
+    panel = _flat(_panel(_page(client)))
+
+    bar = panel[panel.index("next-step") : panel.index("step-grid")]
+    assert "No team has scores yet. To call the event off, use Cancel event" in bar
 
 
 def test_the_competition_status_table_and_the_setup_forms_are_gone(client):
@@ -233,10 +299,10 @@ def test_while_running_the_page_shows_the_live_numbers(client):
     live = _flat(_page(client))
     live = live[live.index('id="live"') :]
 
-    assert ">2<" in live
+    assert "Open or claimed tickets" in live and ">2<" in live
     assert ">33 of 34<" in live
-    assert "Synced" in live and "ago" in live
-    for url in (reverse("ticket_list"), reverse("admin_teams"), reverse("leaderboard_page")):
+    assert "ago" in live
+    for url in (reverse("ticket_list"), reverse("admin_teams"), reverse("admin_competition_setup") + "#scoring-engine"):
         assert f'href="{url}"' in live, url
 
 
@@ -316,7 +382,7 @@ def test_the_guide_walks_the_panels_steps_in_order_with_their_links(client):
     assert headings == [step.key for step in STEPS] + [action.value for action, _ in RARE_ACTIONS]
     hrefs = set(re.findall(r'href="([^"]*)"', page))
     for step in STEPS:
-        assert step.url in hrefs, step.key
+        assert action_url(step.action) in hrefs, step.key
     assert reverse("admin_competition_danger") in hrefs
     assert "\u2014" not in page and "\u2013" not in page
 

@@ -18,6 +18,7 @@ from core.admin_views.event_panel import (
     EventFacts,
     Section,
     StepState,
+    action_url,
     event_facts,
     event_panel,
 )
@@ -69,9 +70,24 @@ def test_the_next_step_and_the_current_step_are_the_same_action(stage, facts):
     current = [row.step.action for row in panel.steps if row.state == StepState.CURRENT]
     stepped = {step.action for step in STEPS}
     assert current == ([panel.stage.next_action] if panel.stage.next_action in stepped else [])
-    assert panel.action_url == reverse(PLACES[panel.stage.next_action][0]) + (
-        f"#{PLACES[panel.stage.next_action][1]}" if PLACES[panel.stage.next_action][1] else ""
-    )
+    # The next step's own section is the one the page shows, so its link reaches it
+    place = PLACES[panel.stage.next_action]
+    assert panel.action_url == reverse(place.url_name) + (f"#{place.section}" if place.section else "")
+
+
+@pytest.mark.parametrize(
+    ("action", "shown", "url"),
+    [
+        (Action.START, Section.READINESS, "/ops/admin/competition/#readiness"),
+        (Action.START, None, "/ops/admin/competition/setup/#readiness"),
+        (Action.START, Section.LIVE, "/ops/admin/competition/setup/#readiness"),
+        (Action.CLOSE_OUT, Section.CLOSE_OUT, "/ops/admin/competition/#close-out"),
+        (Action.CLOSE_OUT, None, "/ops/admin/competition/"),
+        (Action.STOP, Section.LIVE, "/ops/admin/competition/"),
+    ],
+)
+def test_a_link_points_at_a_section_only_while_the_page_shows_it(action, shown, url):
+    assert action_url(action, shown) == url
 
 
 @pytest.mark.parametrize(
@@ -126,8 +142,8 @@ def test_the_stages_steps_after_the_current_one_are_next_and_the_rest_later(stag
         (Stage.IDLE, {}, None),
         (Stage.READY, {}, None),
         (Stage.READY, {"packets_sent": True}, Section.READINESS),
-        (Stage.PLAYED, {"running": True}, Section.RUNNING),
-        (Stage.IDLE, {"running": True}, Section.RUNNING),
+        (Stage.PLAYED, {"running": True}, Section.LIVE),
+        (Stage.IDLE, {"running": True}, Section.LIVE),
         (Stage.PLAYED, {}, Section.CLOSE_OUT),
         (Stage.PLAYED, {"scorecards_emailed": True}, Section.CLOSE_OUT),
         (Stage.UNRECORDED, {}, Section.CLOSE_OUT),
@@ -140,7 +156,7 @@ def test_the_page_shows_the_section_of_the_next_step_only(stage, facts, section)
 
 def test_every_step_has_a_label_and_a_link():
     for step in STEPS:
-        assert step.label and step.link_label and step.url
+        assert step.label and step.link_label and action_url(step.action)
 
 
 @pytest.mark.django_db

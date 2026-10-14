@@ -86,6 +86,9 @@ ACTIONS: dict[Action, ActionText] = {
     ),
 }
 
+# A rare action a stage also offers, said after the next step, with why it applies
+STAGE_ALTERNATIVES: dict[Stage, tuple[str, Action]] = {Stage.READY: ("No team has scores yet.", Action.CANCEL)}
+
 # Each stage's actions in order. While the competition runs the next action is Stop; otherwise it is the first of the
 # stage's actions that isn't done, or its last.
 STAGE_ACTIONS: dict[Stage, tuple[Action, ...]] = {
@@ -125,6 +128,11 @@ class EventStage:
     scorecards_emailed: bool
 
     @property
+    def played(self) -> bool:
+        """Whether teams have scores: the event was played, or scores came in with no event open."""
+        return self.stage in (Stage.PLAYED, Stage.UNRECORDED)
+
+    @property
     def status(self) -> str:
         sentence = STAGE_SENTENCES[self.stage].format(event=self.event)
         return f"{sentence} The competition is running." if self.running else sentence
@@ -158,6 +166,14 @@ class EventStage:
             return ()
         actions = STAGE_ACTIONS[self.stage]
         return actions[actions.index(self.next_action) + 1 :]
+
+    @property
+    def alternative(self) -> str:
+        """The stage's rare action, when it offers one and the competition isn't running."""
+        if self.running or self.stage not in STAGE_ALTERNATIVES:
+            return ""
+        why, action = STAGE_ALTERNATIVES[self.stage]
+        return f"{why} {self.instruction(action)}"
 
     @property
     def steps_left(self) -> str:

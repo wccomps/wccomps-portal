@@ -185,3 +185,22 @@ def test_stop_never_sends_the_start_message(authentik, config):
     run_competition_to_completion(False, "timer")
 
     assert _queued_broadcasts() == []
+
+
+def test_the_last_start_reader_returns_the_accounts_or_none():
+    from core.models import AuditLog
+    from core.services.competition import COMPETITION_STARTED, last_start_accounts
+
+    assert last_start_accounts() is None
+    AuditLog.objects.create(
+        action=COMPETITION_STARTED, admin_user="g", target_entity="competition_config", target_id=1, details={}
+    )
+    assert last_start_accounts() is None
+    AuditLog.objects.create(
+        action=COMPETITION_STARTED,
+        admin_user="g",
+        target_entity="competition_config",
+        target_id=1,
+        details={"accounts_ok": 2, "accounts_failed": 1},
+    )
+    assert last_start_accounts() == (2, 3)

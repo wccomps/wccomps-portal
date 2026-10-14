@@ -10,8 +10,9 @@
                        parent_label="Competition" />
         <p>
             This page walks through one event, from the school list to its saved results. You don't need to remember
-            it: the <a href="{% url 'admin_competition' %}">Event panel</a> at the top of the Competition page always
-            says where the event stands and the next step, and links to where that step is done.
+            it: the event card at the top of the <a href="{% url 'admin_competition' %}">Competition</a> page (the
+            event's name and status, a Next step bar with its button, and the six steps) always says where the event
+            stands and the next step, and links to where that step is done.
         </p>
         <p>
             <strong>Live data</strong> means everything the portal holds for the event in progress: scores, inject
@@ -22,7 +23,7 @@
         {% for row in steps %}
             <h2 class="mt-20" id="{{ row.step.key }}">{{ forloop.counter }}. {{ row.step.label }}</h2>
             <p>
-                <strong>Where:</strong> <a href="{{ row.step.url }}">{{ row.step.link_label }}</a>.
+                <strong>Where:</strong> <a href="{{ row.url }}">{{ row.step.link_label }}</a>.
             </p>
             {% include row.partial %}
         {% endfor %}

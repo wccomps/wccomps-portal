@@ -45,7 +45,7 @@ def test_stale_page_edit_keeps_apps_added_elsewhere(live_server, pw_browser):
 
             # Remove from the (still stale) page
             with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):
-                page.locator("button[aria-label='Remove app'][data-app=netbird]").click()
+                page.get_by_role("button", name="Remove netbird").click()
 
             config.refresh_from_db()
             assert config.controlled_applications == ["scoring", "containerssh", "quotient2"]
@@ -77,7 +77,7 @@ def test_a_slug_missing_from_authentiks_app_list_can_be_typed_in(live_server, pw
 
             config.refresh_from_db()
             assert config.controlled_applications == ["scoring", "competitions"]
-            page.locator("button[aria-label='Remove app'][data-app=competitions]").wait_for()
+            page.get_by_role("button", name="Remove competitions").wait_for()
     finally:
         context.close()
 

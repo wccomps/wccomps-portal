@@ -25,11 +25,20 @@ from registration.services import (
     close_out_fixes,
     close_out_problem,
 )
-from registration.stage import Stage, event_stage
+from registration.stage import event_stage
 from scoring.models import QuotientMetadataCache
 from scoring.quotient_sync import sync_quotient_metadata
 
-from core.admin_views.event_panel import RARE_ACTIONS, STEPS, Section, action_url, event_facts, event_panel
+from core.admin_views.event_panel import (
+    RARE_ACTIONS,
+    STEPS,
+    Section,
+    SetupSection,
+    action_url,
+    event_facts,
+    event_panel,
+    setup_url,
+)
 from core.admin_views.readiness import action_readiness_check, action_readiness_fix
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import reset_team_credentials
@@ -47,7 +56,7 @@ from core.forms import (
     TypedConfirmForm,
 )
 from core.models import AuditLog, CompetitionConfig, DiscordTask
-from core.services.competition import CompetitionRunResult, run_competition
+from core.services.competition import CompetitionRunResult, last_start_accounts, run_competition
 from core.utils import ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
 from team.models import active_team_numbers, team_username
@@ -454,7 +463,7 @@ def _action_close_out_check(request: HttpRequest, config: CompetitionConfig, aut
     return JsonResponse({"success": True, "problem": problem, "fixes": fixes, "warnings": warnings})
 
 
-# The panel and the Close Out section show it when the on-demand check fails
+# The Before you close out section shows it when the on-demand check fails
 CLOSE_OUT_CHECK_FAILED = (
     "Couldn't check unfinished work. Closing out still works: check grading, tickets and the scorecard emails by hand."
 )
@@ -510,28 +519,22 @@ _COMPETITION_ACTION_HANDLERS = {
 
 @dataclass(frozen=True)
 class LiveNumbers:
-    """What the competition page shows while the competition runs: a few counts, none growing with the teams."""
+    """What the competition page shows while the competition runs: a few counts from a fixed number of queries."""
 
-    open_tickets: int
-    # Team accounts the last start turned on, of those it tried; None when no start is recorded
-    accounts_on: int | None
-    accounts_tried: int | None
+    unresolved_tickets: int  # Open or claimed
+    # Team accounts the last start turned on, and how many it tried; None when no start is recorded
+    accounts: tuple[int, int] | None
 
 
 def _live_numbers() -> LiveNumbers:
     from ticketing.models import Ticket
 
-    open_tickets = Ticket.objects.filter(status__in=(Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED)).count()
-    start = AuditLog.objects.filter(action="competition_started").order_by("-created_at").first()
-    if start is None:
-        return LiveNumbers(open_tickets, None, None)
-    on = int(start.details.get("accounts_ok", 0))
-    return LiveNumbers(open_tickets, on, on + int(start.details.get("accounts_failed", 0)))
+    unresolved = Ticket.objects.filter(status__in=(Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED)).count()
+    return LiveNumbers(unresolved, last_start_accounts())
 
 
 @require_permission("admin", "gold_team")
 def admin_competition(request: HttpRequest) -> HttpResponse:
-    config = CompetitionConfig.get_config()
     stage = event_stage()
     panel = event_panel(event_facts(stage))
 
@@ -545,13 +548,12 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
         "active_season": active_season,
         "open_event": stage.event,
         "can_close_out": not close_out_refusal,
-        # Shown in the Close Out section when it offers no button, for a reason the operator can act on
-        "close_out_refusal": close_out_refusal if panel.section == Section.CLOSE_OUT else "",
+        # Shown in the Before you close out section when it offers no button
+        "close_out_refusal": close_out_refusal,
         "event_type_choices": Event.EVENT_TYPE_CHOICES,
-        "config": config,
-        "scored": stage.stage in (Stage.PLAYED, Stage.UNRECORDED),
-        "live": _live_numbers() if panel.section == Section.RUNNING else None,
-        "quotient_metadata": QuotientMetadataCache.objects.first() if panel.section == Section.RUNNING else None,
+        "live": _live_numbers() if panel.section == Section.LIVE else None,
+        "quotient_metadata": QuotientMetadataCache.objects.first() if panel.section == Section.LIVE else None,
+        "scoring_engine_url": setup_url(SetupSection.SCORING_ENGINE),
         "show_ops_nav": True,
         "nav_active": "ops_admin",
     }
@@ -561,8 +563,7 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
 
 @require_permission("admin", "gold_team")
 def admin_competition_setup(request: HttpRequest) -> HttpResponse:
-    """What is set before an event: the schedule, the start message, team access and the scoring engine, with the
-    readiness check. Saves go through admin_competition_action like the competition page's."""
+    """Saves go through admin_competition_action, like the competition page's."""
     return render(
         request,
         "admin/competition_setup.html",
@@ -571,6 +572,7 @@ def admin_competition_setup(request: HttpRequest) -> HttpResponse:
             "timezone_choices": TIMEZONE_CHOICES,
             "quotient_metadata": QuotientMetadataCache.objects.first(),
             "start_message_max_length": StartMessageForm.MAX_LENGTH,
+            "sections": {section.name: section.value for section in SetupSection},
             "show_ops_nav": True,
             "nav_active": "ops_admin",
         },
@@ -641,7 +643,7 @@ def admin_competition_guide(request: HttpRequest) -> HttpResponse:
         {"title": title, "key": action.value, "url": action_url(action), "partial": guide_partial(action)}
         for action, title in RARE_ACTIONS
     ]
-    steps = [{"step": step, "partial": guide_partial(step.key)} for step in STEPS]
+    steps = [{"step": step, "url": action_url(step.action), "partial": guide_partial(step.key)} for step in STEPS]
     return render(
         request,
         "admin/competition_guide.html",

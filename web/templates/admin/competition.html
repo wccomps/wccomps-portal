@@ -6,8 +6,7 @@
 {% block admin_content %}
     <div x-data="competitionAdmin">
         <c-page_header title="Competition">
-            <div class="d-flex justify-end flex-wrap gap-20 mt-10 text-md">
-                <a href="{% url 'admin_competition_guide' %}">Running an event</a>
+            <div class="d-flex justify-end mt-10 text-md">
                 <a href="{% url 'admin_competition_setup' %}">Competition setup</a>
             </div>
         </c-page_header>
@@ -18,7 +17,8 @@
                         <div class="event-card__name">{{ panel.stage.event.name }}</div>
                         <div class="event-card__meta">
                             Season <a href="{{ panel.seasons_url }}">{{ panel.stage.event.season.name }}</a>
-                            · {{ panel.schools }} school{{ panel.schools|pluralize }}
+                            · {{ panel.facts.schools }} school{{ panel.facts.schools|pluralize }}
+                            · {{ panel.facts.members_linked }} team member{{ panel.facts.members_linked|pluralize }} linked
                             · {{ panel.stage.event.date|date:"M j, Y" }}
                         </div>
                     {% else %}
@@ -26,32 +26,26 @@
                         <div class="event-card__meta">{{ panel.stage.status }}</div>
                     {% endif %}
                 </div>
-                {% if config.applications_enabled %}
-                    <span class="event-card__status">
-                        <c-badge variant="success" aria_label="Competition running">
-                            Running
-                        </c-badge>
-                    </span>
-                {% elif panel.stage.event %}
-                    <span class="event-card__status">
-                        <c-badge variant="warning" aria_label="Competition stopped">
-                            Stopped
-                        </c-badge>
-                    </span>
-                {% else %}
-                    <span class="event-card__status">
-                        <c-badge variant="neutral" aria_label="No event open">
-                            No event
-                        </c-badge>
-                    </span>
-                {% endif %}
+                <span class="event-card__status">
+                    <c-badge variant="{{ panel.status_badge }}" aria_label="Status">
+                        {{ panel.status_word }}
+                    </c-badge>
+                </span>
             </div>
             <div class="next-step">
                 <div class="next-step__body">
                     <div class="next-step__label">Next step</div>
-                    <p class="next-step__text">{{ panel.stage.next_step }}</p>
+                    <p class="next-step__text">
+                        {{ panel.stage.next_step }}
+                        {% if panel.stage.running and panel.facts.ends_at %}
+                            The schedule stops it at <span x-data="formatTime"
+       data-iso="{{ panel.facts.ends_at|date:'c' }}"
+       x-text="formatted"></span>.
+                        {% endif %}
+                        {{ panel.stage.alternative }}
+                    </p>
                 </div>
-                {% if panel.stage.next_action == "stop" %}
+                {% if panel.next_step_is_a_button %}
                     <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
                         Stop Competition
                     </c-button>
@@ -59,20 +53,20 @@
                     <a href="{{ panel.action_url }}" class="button default">{{ panel.action_label }}</a>
                 {% endif %}
             </div>
-            <ol class="step-grid">
+            <ol class="step-grid grid-3">
                 {% for row in panel.steps %}
-                    <li {% if row.is_current %}class="step-grid__current" aria-current="step"{% endif %}>
+                    <li {% if row.is_current %}class="font-semibold" aria-current="step"{% endif %}>
                         <span class="step-grid__badge">
                             <c-badge variant="{{ row.badge }}" aria_label="{{ row.label }}">
                                 {{ row.label }}
                             </c-badge>
                         </span>
-                        <a href="{{ row.step.url }}">{{ forloop.counter }}. {{ row.step.label }}</a>
+                        <a href="{{ row.url }}">{{ forloop.counter }}. {{ row.step.label }}</a>
                     </li>
                 {% endfor %}
             </ol>
             {% if panel.notes %}
-                <ul class="step-notes">
+                <ul class="step-notes list-none">
                     {% for row in panel.notes %}
                         <li>
                             <strong>{{ row.step.label }}:</strong> {{ row.detail }}
@@ -81,31 +75,28 @@
                 </ul>
             {% endif %}
         </section>
-        <section id="controls" class="controls-row mt-20">
-            <c-button variant="primary" @click="startCompetition" ::disabled="loading">
-                Start Competition
-            </c-button>
-            <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
-                Stop Competition
-            </c-button>
-            <span class="text-muted text-md">
-                {% if config.applications_enabled %}
-                    Teams can sign in and use the competition apps.
-                    {% if config.competition_end_time %}
-                        The schedule stops it at <span x-data="formatTime"
-       data-iso="{{ config.competition_end_time|date:'c' }}"
-       x-text="formatted"></span>.
+        {% if not panel.stage.running %}
+            <section id="controls" class="d-flex flex-wrap items-center gap-10 mt-20">
+                <c-button variant="primary" @click="startCompetition" ::disabled="loading">
+                    Start Competition
+                </c-button>
+                <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
+                    Stop Competition
+                </c-button>
+                <span class="text-muted text-md">
+                    {% if panel.stage.played %}
+                        Teams can't sign in while stopped. Scores stay, so grading goes on.
+                    {% else %}
+                        Start turns on the active teams' accounts and opens the competition apps to them.
                     {% endif %}
-                {% else %}
-                    Teams can't sign in while stopped.{% if scored %} Scores stay, so grading goes on.{% endif %}
-                    {% if config.competition_start_time %}
+                    {% if panel.facts.starts_at %}
                         The schedule starts it at <span x-data="formatTime"
-       data-iso="{{ config.competition_start_time|date:'c' }}"
+       data-iso="{{ panel.facts.starts_at|date:'c' }}"
        x-text="formatted"></span>.
                     {% endif %}
-                {% endif %}
-            </span>
-        </section>
+                </span>
+            </section>
+        {% endif %}
         <template x-if="notCloseOutStreaming">
             <c-progress_bar />
         </template>
@@ -115,47 +106,47 @@
                     Readiness check
                 </c-slot>
                 <p class="help">
-                    Checks Authentik, Discord, packets, Quotient and the teams before the competition starts. Fix what
-                    fails, then press Start Competition.
+                    Checks Discord, the team accounts and their apps, the school list, packets, the start message and
+                    the scoring engine, and warns about data left from before. Fix what fails, then press Start Competition.
                 </p>
                 {% include "admin/includes/readiness_check.html" %}
             </c-module>
-        {% elif panel.section == "running" %}
+        {% elif panel.section == "live" %}
             <c-module class="mt-20" id="live">
                 <c-slot name="title">
                     Right now
                 </c-slot>
                 <div class="grid-3">
                     <div class="live-number">
-                        <div class="text-muted text-md">Open tickets</div>
-                        <div class="live-number__value">{{ live.open_tickets }}</div>
+                        <div class="text-muted text-md">Open or claimed tickets</div>
+                        <div class="live-number__value">{{ live.unresolved_tickets }}</div>
                         <a href="{% url 'ticket_list' %}">Tickets</a>
                     </div>
                     <div class="live-number">
                         <div class="text-muted text-md">Team accounts turned on at start</div>
                         <div class="live-number__value">
-                            {% if live.accounts_on is None %}
-                                Not recorded
+                            {% if live.accounts %}
+                                {{ live.accounts.0 }} of {{ live.accounts.1 }}
                             {% else %}
-                                {{ live.accounts_on }} of {{ live.accounts_tried }}
+                                Not recorded
                             {% endif %}
                         </div>
                         <a href="{% url 'admin_teams' %}">Teams</a>
                     </div>
                     <div class="live-number">
-                        <div class="text-muted text-md">Quotient boxes and services</div>
+                        <div class="text-muted text-md">Scoring engine (Quotient) last synced</div>
                         <div class="live-number__value">
                             {% if quotient_metadata %}
-                                Synced {{ quotient_metadata.last_synced|timesince }} ago
+                                {{ quotient_metadata.last_synced|timesince }} ago
                             {% else %}
                                 Never synced
                             {% endif %}
                         </div>
-                        <a href="{% url 'leaderboard_page' %}">Leaderboard</a>
+                        <a href="{{ scoring_engine_url }}">Scoring engine</a>
                     </div>
                 </div>
             </c-module>
-        {% elif panel.section == "close_out" %}
+        {% elif panel.section == "close-out" %}
             <c-module class="mt-20" id="close-out">
                 <c-slot name="title">
                     Before you close out
@@ -216,8 +207,13 @@
                     </template>
                     <template x-if="hasCloseOutWarnings">
                         <div>
-                            <p class="help">Warnings only. You can still close out: it freezes the results as they stand.</p>
-                            <ul class="close-out-warnings">
+                            <template x-if="closeOutProblem">
+                                <p class="help">Also unfinished:</p>
+                            </template>
+                            <template x-if="closeOutNotBlocked">
+                                <p class="help">These don't block Close Out: it freezes the results as they stand.</p>
+                            </template>
+                            <ul class="mt-10 ml-20">
                                 <template x-for="(warning, index) in closeOutWarnings" :key="index">
                                     <li>
                                         <a :href="warning.url" x-text="warning.text"></a>
@@ -231,8 +227,10 @@
                     </template>
                     <c-info_box class="d-flex flex-wrap items-center justify-between gap-20 mt-15">
                         <p class="close-out-text m-0">
-                            Close Out saves every school's scorecard as its result, then clears the live scores, tickets
-                            and team Discord access. Do it after the scorecards are out.
+                            Close Out saves each listed school's scorecard as its result for the event, then deletes the
+                            live scores, tickets and team Discord links, closes the event, clears the schedule, the start
+                            message and the scoring engine's box list, and queues the Discord cleanup (team channels and
+                            roles). Do it after the scorecards are out.
                         </p>
                         <c-button variant="danger" @click="closeOutEvent" ::disabled="closeOutBlocked">
                             Close Out Event
@@ -256,8 +254,9 @@
                     Leftover data
                 </c-slot>
                 <p>
-                    Clear leftover data deletes it for good; it is not archived. Results of events already closed out
-                    are not touched. It is on the <a href="{% url 'admin_competition_danger' %}">Danger Zone</a> page.
+                    Live data no event recorded is still here: Discord links, tickets or orange assignments. Clear
+                    leftover data (the button above) deletes it for good; it is not archived. Results of events already
+                    closed out are not touched.
                 </p>
             </c-module>
         {% endif %}
@@ -342,19 +341,20 @@ document.addEventListener('alpine:init', () => {
         get closeOutStreaming() { return this.streamAction === 'close_out_event'; },
         get notCloseOutStreaming() { return !this.closeOutStreaming; },
         get hasCloseOutWarnings() { return this.closeOutWarnings.length > 0; },
+        get closeOutNotBlocked() { return !this.closeOutProblem; },
         get closeOutNothingLeft() {
             return this.closeOutChecked && !this.closeOutProblem && this.closeOutWarnings.length === 0;
         },
         get closeOutBlocked() { return this.loading || this.closeOutChecking || !!this.closeOutProblem; },
 
         startCompetition() {
-            if (confirm('Start the competition?\n\nThis will open the controlled applications to BlueTeam and enable the active teams\' accounts.')) {
+            if (confirm('Start the competition?\n\nThis opens the competition apps to the blue teams and turns on the active teams\' accounts.')) {
                 this.doStreamAction('start_competition');
             }
         },
 
         stopCompetition() {
-            if (confirm('Stop the competition?\n\nThis will close the controlled applications to BlueTeam and disable every team account.\nYou can restart later.')) {
+            if (confirm('Stop the competition?\n\nThis closes the competition apps to the blue teams and turns off every team account.\nYou can start again later.')) {
                 this.doStreamAction('stop_competition');
             }
         },

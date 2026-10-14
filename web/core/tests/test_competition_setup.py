@@ -53,7 +53,9 @@ def test_the_page_has_each_moved_section_in_order_and_links_back(admin_client):
 
     headings = re.findall(r"<h2>([^<]+)</h2>", page)
     assert headings == ["Schedule", "Start message", "Team access", "Scoring engine (Quotient)", "Readiness check"]
-    assert f'<a href="{reverse("admin_competition")}">Back to Competition</a>' in page
+    # The breadcrumb leads back; no second link says the same
+    assert re.search(r'class="breadcrumbs"><a href="' + reverse("admin_competition") + '">Competition</a>', page)
+    assert "Back to Competition" not in page
 
 
 def test_the_page_renders_each_moved_form(admin_client):
@@ -139,6 +141,15 @@ def test_the_competition_page_reaches_the_setup_page_and_the_nav_names_scoring_s
     assert re.search(r'nav-item--current[^>]*aria-current="page">Competition<', _flat(setup))
 
 
+def test_every_setup_section_the_links_name_is_on_the_page(admin_client):
+    from core.admin_views.event_panel import SetupSection
+
+    page = _setup_page(admin_client)
+
+    for section in SetupSection:
+        assert f'id="{section}"' in page, section
+
+
 def test_the_readiness_check_sends_missing_apps_to_the_setup_page():
     from core.admin_views.readiness import _check_blueteam_bindings
 
@@ -148,3 +159,4 @@ def test_the_readiness_check_sends_missing_apps_to_the_setup_page():
 
     assert severity == "warn"
     assert action is not None and action["url"] == reverse("admin_competition_setup") + "#team-access"
+

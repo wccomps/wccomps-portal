@@ -1,4 +1,4 @@
-"""Pre-competition readiness checks and fix handlers for the competition page."""
+"""Pre-competition readiness checks and fix handlers for the competition and Competition setup pages."""
 
 import json
 import logging
@@ -10,6 +10,7 @@ from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.urls import reverse
 from django.utils import timezone
 
+from core.admin_views.event_panel import SetupSection, setup_url
 from core.authentik_manager import AuthentikManager
 from core.forms import ReadinessFixForm
 from core.models import CompetitionConfig
@@ -114,7 +115,7 @@ def _check_team_group_membership() -> CheckResult:
 
 
 def _configure_apps_link() -> dict[str, str]:
-    return {"type": "link", "url": reverse("admin_competition_setup") + "#team-access", "label": "Configure Apps"}
+    return {"type": "link", "url": setup_url(SetupSection.TEAM_ACCESS), "label": "Configure Apps"}
 
 
 def _check_blueteam_bindings() -> CheckResult:

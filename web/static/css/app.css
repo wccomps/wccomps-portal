@@ -245,6 +245,15 @@ a.button:active {
 .d-block { display: block; }
 .d-flex { display: flex; }
 .list-none { list-style: none; padding-left: 0; }
+/* Read by screen readers, not shown */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
 
 /* Modal styles */
 .modal {
@@ -1039,7 +1048,7 @@ table thead th .text span .school-name {
 
 
 /* ============================================
-   COMPETITION PAGE (event card, Start/Stop row, live numbers)
+   COMPETITION PAGE (event card, live numbers)
    ============================================ */
 .event-card {
     border: 1px solid var(--hairline-color, #ddd);
@@ -1088,30 +1097,24 @@ table thead th .text span .school-name {
     text-transform: uppercase;
     color: var(--info-fg);
 }
+/* .module p pads its sides; the bar already does */
 .event-card .next-step__text {
     margin: 4px 0 0;
     padding: 0;
     font-size: 16px;
 }
+/* .module ol indents its items */
 .event-card .step-grid {
-    list-style: none;
     margin: 0;
     padding: 10px 20px 14px;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 4px 24px;
 }
-@media (max-width: 767px) { .event-card .step-grid { grid-template-columns: 1fr; } }
-.event-card .step-grid li {
+.step-grid li {
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 6px 0;
     font-size: 14px;
-    list-style: none;
-}
-.step-grid__current {
-    font-weight: 600;
 }
 .step-grid__badge .badge {
     min-width: 52px;
@@ -1122,17 +1125,10 @@ table thead th .text span .school-name {
     margin: 0;
     padding: 0 20px 14px;
     font-size: 13px;
-    list-style: none;
 }
-.step-notes li {
+/* Django admin squares every ul li */
+.event-card .step-notes li {
     list-style: none;
-    padding: 2px 0;
-}
-.controls-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 12px;
 }
 .live-number {
     display: flex;
@@ -1146,12 +1142,8 @@ table thead th .text span .school-name {
     font-size: 24px;
     font-weight: 600;
 }
-.close-out-warnings {
-    margin: 0 0 10px;
-    padding-left: 20px;
-}
-.close-out-warnings li {
-    padding: 3px 0;
+.close-out-text {
+    flex: 1 1 280px;
 }
 details.advanced {
     border-top: 1px solid var(--hairline-color, #ddd);
@@ -1161,7 +1153,4 @@ details.advanced > summary {
     cursor: pointer;
     font-size: 15px;
     font-weight: 600;
-}
-.close-out-text {
-    flex: 1 1 280px;
 }
