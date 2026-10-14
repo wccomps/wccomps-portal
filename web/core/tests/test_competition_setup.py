@@ -160,3 +160,15 @@ def test_the_readiness_check_sends_missing_apps_to_the_setup_page():
     assert severity == "warn"
     assert action is not None and action["url"] == reverse("admin_competition_setup") + "#team-access"
 
+
+def test_the_empty_leaderboard_sends_admins_to_the_scoring_engine_section(admin_client):
+    page = admin_client.get(reverse("leaderboard_page")).content.decode()
+
+    assert f'href="{reverse("admin_competition_setup")}#scoring-engine"' in page
+
+
+def test_the_scoring_setup_page_is_named_like_its_nav_item(admin_client):
+    page = _flat(admin_client.get(reverse("scoring:scoring_config")).content.decode())
+
+    assert ">Scoring setup<" in page
+    assert "Scoring Configuration" not in page
