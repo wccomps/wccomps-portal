@@ -9,9 +9,9 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 def test_delete_confirmation_buttons_match(live_server, pw_browser):
     from django.contrib.auth.models import User
+    from registration.models import Season
 
     from core.models import UserGroups
-    from registration.models import Season
 
     admin = User.objects.create(username="admindelete", is_staff=True, is_superuser=True)
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
