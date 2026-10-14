@@ -1,23 +1,26 @@
 """Code nothing uses fails these tests, so leftovers can't build up between reviews that only read diffs.
 
-Each test lists every unused item with where it is defined, so a failure reads as a to-do list. Delete the item,
-or add it to that test's exceptions dict with a one-line reason: who uses it from outside this repo, or why it
-must stay. An exception that no longer matches anything fails too.
+Each test lists every unused item with where to find it, so a failure reads as a to-do list. Delete the item, or add
+it to that test's exceptions with a one-line reason: who uses it from outside this repo, or why it must stay. An
+exception that no longer matches anything fails too.
 
-"Used" means referenced from the project's own source: tracked .py files, templates and static JS, minus tests,
-migrations and vendored files. Code that only tests reach counts as unused.
+"Used" means read by the project's own source: tracked .py files and templates, minus tests, migrations and vendored
+files. Code that only tests reach counts as unused. The checks share one index of the names source reads
+(read_names): vulture's AST view of Python, plus names in template tags, quoted names and queryset lookups.
 """
 
 import ast
+import fnmatch
 import re
 import subprocess
 from functools import cache
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 import vulture
 from django.apps import apps
-from django.conf import settings
+from django.conf import global_settings
 from django.db import models
 from django.urls import URLPattern, URLResolver, get_resolver
 
@@ -26,7 +29,6 @@ from core import discord_tasks
 REPO_DIR = Path(__file__).resolve().parents[3]
 WEB_DIR = REPO_DIR / "web"
 SETTINGS_FILE = "web/portal/settings.py"
-VULTURE_WHITELIST = Path(__file__).with_name("vulture_whitelist.py")
 
 SOURCE_SUFFIXES = (".py", ".html", ".txt", ".js")
 NOT_SOURCE_RE = re.compile(
@@ -36,7 +38,10 @@ NOT_SOURCE_RE = re.compile(
 
 @cache
 def source_files() -> tuple[str, ...]:
-    """Tracked project source (repo-relative paths), without tests, migrations and vendored files."""
+    """Tracked project source (repo-relative paths), without tests, migrations and vendored files.
+
+    A tracked file deleted from the working tree but not yet staged is left out, as it will be once committed.
+    """
     tracked = subprocess.run(
         ["git", "ls-files", "-z"],  # noqa: S607
         cwd=REPO_DIR,
@@ -44,7 +49,9 @@ def source_files() -> tuple[str, ...]:
         text=True,
         check=True,
     ).stdout.split("\0")
-    return tuple(p for p in tracked if p.endswith(SOURCE_SUFFIXES) and not NOT_SOURCE_RE.search(p))
+    return tuple(
+        p for p in tracked if p.endswith(SOURCE_SUFFIXES) and not NOT_SOURCE_RE.search(p) and (REPO_DIR / p).is_file()
+    )
 
 
 @cache
@@ -53,17 +60,146 @@ def source_text(path: str) -> str:
 
 
 @cache
-def corpus() -> str:
-    """All source in one string, for searches that don't care which file matched."""
-    return "\n".join(source_text(p) for p in source_files())
+def python_trees() -> dict[str, ast.Module]:
+    return {p: ast.parse(source_text(p), filename=p) for p in source_files() if p.endswith(".py")}
 
 
-def fail_with(title: str, unused: list[str], exceptions: dict[str, str], found: set[str]) -> None:
-    """Fail listing the unused items, plus exceptions that no longer match anything."""
-    stale = [f"{key}: in the exceptions but no longer unused; drop it there" for key in exceptions if key not in found]
-    problems = sorted(unused) + stale
+def template_texts() -> dict[str, str]:
+    return {p: source_text(p) for p in source_files() if p.startswith("web/templates/")}
+
+
+class Unused(NamedTuple):
+    key: str  # what the failure shows and what exceptions match
+    where: str
+    also: tuple[str, ...] = ()  # more keys exceptions may match, e.g. the item's decorators
+
+
+def fail_with(title: str, unused: list[Unused], exceptions: dict[str, str]) -> None:
+    """Fail listing the unused items no exception covers, plus exceptions that cover nothing.
+
+    Exception keys are fnmatch patterns, so one entry can cover a framework convention ("*:clean_*").
+    """
+    matched: set[str] = set()
+    problems: list[str] = []
+    for item in unused:
+        hits = {p for p in exceptions if any(fnmatch.fnmatchcase(k, p) for k in (item.key, *item.also))}
+        matched |= hits
+        if not hits:
+            problems.append(f"{item.key} ({item.where})")
+    problems.sort()
+    problems += [
+        f"{p}: in the exceptions but matches nothing unused; drop it there" for p in exceptions if p not in matched
+    ]
     if problems:
         pytest.fail(f"{title} ({len(problems)}):\n" + "\n".join(f"  {p}" for p in problems), pytrace=False)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# The index of names source reads
+# ---------------------------------------------------------------------------------------------------------------
+
+IDENTIFIER_RE = re.compile(r"\w+")
+DOTTED_NAME_RE = re.compile(r"[A-Za-z_][\w.]*")
+# Template tags and variables, and cotton's :attr="expression" attributes
+TEMPLATE_EXPRESSION_RE = re.compile(r"""{{.*?}}|{%.*?%}|\s:[\w-]+="[^"]*\"""", re.DOTALL)
+
+# Calls whose keyword arguments are lookups (filter(team=x) reads team); other keywords (create, update) write
+LOOKUP_CALLS = {
+    "filter", "exclude", "get", "aget", "get_or_create", "aget_or_create", "update_or_create",
+    "aupdate_or_create", "Q", "get_object_or_404", "get_list_or_404",
+}  # fmt: skip
+# Keywords that name fields only to write them: save(update_fields=[...]), update_or_create(defaults={...})
+WRITE_KEYWORDS = {"update_fields", "defaults", "create_defaults"}
+# Calls whose first argument is an environment variable name, not a Python name
+ENV_READERS = {"os.environ.get", "os.getenv", "environ.get"}
+
+
+@cache
+def vulture_scan() -> vulture.Vulture:
+    scanner = vulture.Vulture()
+    scanner.scavenge([str(REPO_DIR / p) for p in python_trees()])
+    return scanner
+
+
+def call_name(node: ast.Call) -> str:
+    return node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+
+
+@cache
+def template_names() -> frozenset[str]:
+    """Identifiers in template expressions, where templates read fields, properties and methods."""
+    return frozenset(
+        word
+        for text in template_texts().values()
+        for expression in TEMPLATE_EXPRESSION_RE.findall(text)
+        for word in IDENTIFIER_RE.findall(expression)
+    )
+
+
+@cache
+def lookup_names() -> frozenset[str]:
+    """Every name in a lookup keyword: team__name__in=x reads team and name."""
+    return frozenset(
+        part
+        for tree in python_trees().values()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and call_name(node) in LOOKUP_CALLS
+        for keyword in node.keywords
+        if keyword.arg
+        for part in keyword.arg.split("__")
+    )
+
+
+def write_only_strings(path: str, tree: ast.Module) -> set[int]:
+    """ids of string constants that name something without reading it.
+
+    Fields listed to be written (update_fields, defaults), environment variable names, and a model's own Meta
+    (an index, constraint or ordering on a field nothing reads doesn't make it read).
+    """
+    skipped: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg in WRITE_KEYWORDS:
+            skipped.update(id(n) for n in ast.walk(node.value))
+        elif isinstance(node, ast.Call) and node.args and ast.unparse(node.func) in ENV_READERS:
+            skipped.update(id(n) for n in ast.walk(node.args[0]))
+        elif isinstance(node, ast.Subscript) and ast.unparse(node.value) == "os.environ":
+            skipped.update(id(n) for n in ast.walk(node.slice))
+        elif path.endswith("/models.py") and isinstance(node, ast.ClassDef) and node.name == "Meta":
+            skipped.update(id(n) for n in ast.walk(node))
+    return skipped
+
+
+@cache
+def quoted_names() -> frozenset[str]:
+    """Names Python reads through strings: admin list_display, getattr, order_by("-x"), "team__name", dotted paths."""
+    names: set[str] = set()
+    for path, tree in python_trees().items():
+        skipped = write_only_strings(path, tree)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in skipped:
+                text = node.value.lstrip("-")
+                if DOTTED_NAME_RE.fullmatch(text):
+                    names.update(re.split(r"\.|__", text))
+    return frozenset(names)
+
+
+@cache
+def read_names() -> frozenset[str]:
+    """Every name source reads: vulture's used names (loads, not stores), plus template, quoted and lookup names."""
+    return frozenset(vulture_scan().used_names) | template_names() | quoted_names() | lookup_names()
+
+
+def definition_line(cls: type, name: str) -> str:
+    """path:line where `name` is assigned in the body of cls or a project base class."""
+    for klass in cls.__mro__:
+        path = f"web/{klass.__module__.replace('.', '/')}.py"
+        for node in ast.walk(python_trees().get(path, ast.Module(body=[], type_ignores=[]))):
+            if isinstance(node, ast.ClassDef) and node.name == klass.__name__:
+                for stmt in node.body:
+                    targets = stmt.targets if isinstance(stmt, ast.Assign) else [getattr(stmt, "target", None)]
+                    if any(isinstance(t, ast.Name) and t.id == name for t in targets):
+                        return f"{path}:{stmt.lineno}"
+    return cls.__module__
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -78,86 +214,25 @@ FIELD_EXCEPTIONS = {
     "read in the Django admin; no portal page shows it",
 }
 
-FIELD_DEFINITION_RE = re.compile(r"^\s*\w+\s*(:[^=\n]*)?=\s*(models\.\w+|\w+Field)\(", re.MULTILINE)
-# Field names quoted only to write them: save(update_fields=[...]), update_or_create(defaults={...})
-FIELD_WRITE_LIST_RE = re.compile(r"\b(update_fields\s*=\s*[\[(][^\])]*[\])]|(create_)?defaults\s*=\s*\{[^}]*\})")
-
 
 def project_models() -> list[type[models.Model]]:
     return [m for m in apps.get_models() if Path(m._meta.app_config.path).is_relative_to(WEB_DIR)]
 
 
-def project_field_names() -> set[str]:
-    fields = (field for model in project_models() for field in model._meta.get_fields())
-    return {name for field in fields for name in (field.name, getattr(field, "attname", ""))}
-
-
-@cache
-def corpus_without_field_definitions() -> str:
-    """The corpus minus field definitions and update_fields / defaults lists, which name a field only to write it."""
-    return FIELD_WRITE_LIST_RE.sub("", FIELD_DEFINITION_RE.sub("", corpus()))
-
-
-# Calls whose keyword arguments are lookups (filter(team=x) reads team); other keywords (create, update) write
-LOOKUP_CALLS = {
-    "filter", "exclude", "get", "aget", "get_or_create", "aget_or_create", "update_or_create",
-    "aupdate_or_create", "Q", "get_object_or_404", "get_list_or_404",
-}  # fmt: skip
-
-
-@cache
-def lookup_keywords() -> frozenset[str]:
-    """Every field name used in a lookup keyword (team__name__in=x reads team and name)."""
-    names: set[str] = set()
-    for path in source_files():
-        if path.endswith(".py"):
-            for node in ast.walk(ast.parse(source_text(path))):
-                if not isinstance(node, ast.Call):
-                    continue
-                func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
-                if func in LOOKUP_CALLS:
-                    names.update(part for kw in node.keywords if kw.arg for part in kw.arg.split("__"))
-    return frozenset(names)
-
-
-def field_read_re(name: str) -> re.Pattern[str]:
-    """Text that reads a field called `name`; assignments and create()/update() keywords are writes.
-
-    Reads: obj.name (not obj.name = / +=), the name quoted ("name", "-name", "team__name", "name__in": lookups,
-    order_by, values(), admin and form field lists), and template variables and tags.
-    """
-    n = re.escape(name)
-    return re.compile(
-        rf"""\.{n}\b(?!\s*[-+*/|&]?=[^=])"""
-        rf"""|["'](-|\w+__)?{n}(__\w+)?["']"""
-        rf"""|{{{{[^}}]*\b{n}\b|{{%[^%]*\b{n}\b"""
-    )
-
-
 def test_every_model_field_is_read() -> None:
-    """Every concrete field of the project's models is read somewhere outside migrations and tests.
+    """Every concrete field of the project's models is read: writes (assignments, create() and update() keywords,
+    update_fields) and the model's own Meta don't count.
 
-    The check goes by name: a read of any field or attribute with the same name counts, so `name` passes as long
-    as anything reads a `.name`. That keeps it simple; the cost is that a write-only field sharing its name with
-    a read one slips through.
+    The check goes by name, so a write-only field that shares its name with something read slips through.
     """
-    text = corpus_without_field_definitions()
-    lookups = lookup_keywords()
-    found: set[str] = set()
-    unused: list[str] = []
-    for model in project_models():
-        for field in (*model._meta.concrete_fields, *model._meta.many_to_many):
-            if field.primary_key and field.name == "id":
-                continue
-            names = {field.name, field.attname}
-            if names & lookups or any(field_read_re(name).search(text) for name in names):
-                continue
-            key = f"{model._meta.label}.{field.name}"
-            found.add(key)
-            if key not in FIELD_EXCEPTIONS:
-                where = Path(model._meta.app_config.path).relative_to(REPO_DIR) / "models.py"
-                unused.append(f"{key} ({where})")
-    fail_with("Model fields nothing reads", unused, FIELD_EXCEPTIONS, found)
+    reads = read_names()
+    unused = [
+        Unused(f"{model._meta.label}.{field.name}", definition_line(model, field.name))
+        for model in project_models()
+        for field in (*model._meta.concrete_fields, *model._meta.many_to_many)
+        if not (field.primary_key and field.name == "id") and not {field.name, field.attname} & reads
+    ]
+    fail_with("Model fields nothing reads", unused, FIELD_EXCEPTIONS)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -166,133 +241,97 @@ def test_every_model_field_is_read() -> None:
 
 VULTURE_CONFIDENCE = 60
 
-# Callbacks a framework registers through their decorator
-IGNORE_DECORATORS = [
-    # discord.py: slash commands, listeners, buttons, background tasks
-    "@app_commands.command",
-    "@*.command",
-    "@commands.Cog.listener",
-    "@discord.ui.button",
-    "@tasks.loop",
-    "@*.before_loop",
-    # Django admin registrations, actions and columns; template filters
-    "@admin.register",
-    "@admin.action",
-    "@admin.display",
-    "@register.filter",
-    "@register.simple_tag",
-]
+DJANGO_MODEL_OPTION = "Django reads this model Meta option by name"
+DJANGO_ADMIN_OPTION = "Django admin reads this ModelAdmin or inline option by name"
+DJANGO_FORM_OPTION = "Django reads this form option by name"
 
-# Names a framework calls or reads by convention
-IGNORE_NAMES = [
-    # discord.py: cog lifecycle, bot startup, modal and view callbacks, app command transformers
-    "cog_load",
-    "cog_unload",
-    "setup_hook",
-    "on_*",
-    "transform",
-    # Django: app configs, management commands, form validation, admin permission hooks
-    "*Config",
-    "ready",
-    "Command",
-    "handle",
-    "add_arguments",
-    "clean_*",
-    "has_*_permission",
-    "label_from_instance",
-    "get_readonly_fields",
-    # Django model Meta, ModelAdmin, inline and form options
-    "Meta",
-    "abstract",
-    "ordering",
-    "db_table",
-    "verbose_name",
-    "verbose_name_plural",
-    "constraints",
-    "indexes",
-    "unique_together",
-    "default_auto_field",
-    "list_display",
-    "list_filter",
-    "list_select_related",
-    "search_fields",
-    "readonly_fields",
-    "autocomplete_fields",
-    "filter_horizontal",
-    "fieldsets",
-    "inlines",
-    "actions",
-    "extra",
-    "widgets",
-    "labels",
-    "help_texts",
-    "empty_label",
-    "help",
-    "urlpatterns",
-    "app_name",
-]
-
-# "path:name" -> why it stays although nothing in the repo uses it
+# fnmatch pattern over "path:name", or "@decorator" for anything with that decorator -> why it stays
 CODE_EXCEPTIONS = {
+    # discord.py registers these through their decorators or calls them by name
+    "@*.command": "discord.py registers a slash command through its decorator",
+    "@discord.ui.button": "discord.py calls a button callback when the button is pressed",
+    "@*.before_loop": "discord.py runs it before its task loop starts",
+    "*:cog_unload": "discord.py calls it when the cog unloads",
+    "*:cog_load": "discord.py calls it when the cog loads",
+    "*:setup_hook": "discord.py calls it while the bot starts",
+    "*:on_*": "discord.py calls event listeners and modal callbacks by name",
+    "*:transform": "discord.py calls an app command Transformer's transform",
+    # Django
+    "@admin.register": "Django admin registers the class through its decorator",
+    "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",
+    "*/management/commands/*:Command": "manage.py runs a command by its file name",
+    "*/management/commands/*:handle": "manage.py calls Command.handle",
+    "*:clean_*": "Django form validation calls clean_<field>",
+    "*:has_*_permission": "Django admin calls its permission hooks",
+    "*:label_from_instance": "Django model choice fields call it for each option",
+    "*:get_readonly_fields": "Django admin calls it on the change form",
+    "*:abstract": DJANGO_MODEL_OPTION,
+    "*:ordering": DJANGO_MODEL_OPTION,
+    "*:db_table": DJANGO_MODEL_OPTION,
+    "*:verbose_name": DJANGO_MODEL_OPTION,
+    "*:verbose_name_plural": DJANGO_MODEL_OPTION,
+    "*:constraints": DJANGO_MODEL_OPTION,
+    "*:indexes": DJANGO_MODEL_OPTION,
+    "*:unique_together": DJANGO_MODEL_OPTION,
+    "*:default_auto_field": "Django reads AppConfig.default_auto_field",
+    "*:list_display": DJANGO_ADMIN_OPTION,
+    "*:list_filter": DJANGO_ADMIN_OPTION,
+    "*:list_select_related": DJANGO_ADMIN_OPTION,
+    "*:search_fields": DJANGO_ADMIN_OPTION,
+    "*:autocomplete_fields": DJANGO_ADMIN_OPTION,
+    "*:filter_horizontal": DJANGO_ADMIN_OPTION,
+    "*:fieldsets": DJANGO_ADMIN_OPTION,
+    "*:inlines": DJANGO_ADMIN_OPTION,
+    "*:extra": DJANGO_ADMIN_OPTION,
+    "*:widgets": DJANGO_FORM_OPTION,
+    "*:labels": DJANGO_FORM_OPTION,
+    "*:help_texts": DJANGO_FORM_OPTION,
+    "*:empty_label": DJANGO_FORM_OPTION,
+    "*/urls*.py:urlpatterns": "Django reads urlpatterns from each URLconf",
+    "web/core/admin.py:site_*": "Django admin reads site_header, site_title and site_url off the AdminSite",
+    "web/core/admin.py:index_title": "Django admin reads index_title off the AdminSite",
+    "web/core/views.py:modified": "Setting request.session.modified tells Django to save the session",
+    "web/gunicorn.conf.py:*": "gunicorn reads every top-level name in its config file",
+    # Project code kept on purpose
     "web/scoring/models.py:validate_file_size": "scoring migration 0001 imports it as the screenshot validator; it "
     "can go once that migration is squashed",
     "web/scoring/snapshot.py:context_from_snapshot": "Reads back the scorecard snapshots Close Out stores in "
     "EventResult; no page shows a stored result yet",
 }
 
-IDENTIFIER_RE = re.compile(r"\w+")
-DOTTED_NAME_RE = re.compile(r"[A-Za-z_][\w.]*")
-TEMPLATE_TAG_RE = re.compile(r"{{.*?}}|{%.*?%}", re.DOTALL)
-
 
 @cache
-def template_names() -> frozenset[str]:
-    """Identifiers inside template tags and variables, where templates call methods and properties."""
-    return frozenset(
-        word
-        for path in source_files()
-        if path.startswith("web/templates/")
-        for tag in TEMPLATE_TAG_RE.findall(source_text(path))
-        for word in IDENTIFIER_RE.findall(tag)
-    )
-
-
-@cache
-def quoted_python_names() -> frozenset[str]:
-    """Names Python passes as strings: admin list_display, getattr, "team__name" lookups, dotted import paths."""
-    strings = (
-        node.value
-        for path in source_files()
-        if path.endswith(".py")
-        for node in ast.walk(ast.parse(source_text(path)))
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
-    )
-    return frozenset(name for s in strings if DOTTED_NAME_RE.fullmatch(s) for name in re.split(r"\.|__", s))
+def decorators_at() -> dict[tuple[str, int], tuple[str, ...]]:
+    """(path, line) -> "@name" of each decorator on the def or class there, keyed by its first decorator's line."""
+    found: dict[tuple[str, int], tuple[str, ...]] = {}
+    for path, tree in python_trees().items():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and node.decorator_list:
+                names = tuple("@" + ast.unparse(d.func if isinstance(d, ast.Call) else d) for d in node.decorator_list)
+                found[path, min(d.lineno for d in node.decorator_list)] = names
+    return found
 
 
 def test_no_unused_python_code() -> None:
     """Functions, classes, methods, properties, attributes and module constants are used somewhere (vulture).
 
-    vulture only reads Python, so a name used inside a template tag or passed as a string also counts. Model
-    fields and settings are left to their own tests, which tell reads from writes.
+    vulture only reads Python, so a name in a template expression, a quoted name or a lookup counts too. Model
+    fields and settings are left to their own tests.
     """
-    scanner = vulture.Vulture(ignore_names=IGNORE_NAMES, ignore_decorators=IGNORE_DECORATORS)
-    scanner.scavenge([*(str(REPO_DIR / p) for p in source_files() if p.endswith(".py")), str(VULTURE_WHITELIST)])
-    used_elsewhere = template_names() | quoted_python_names()
-    field_names = project_field_names()
-    found: set[str] = set()
-    unused: list[str] = []
-    for item in scanner.get_unused_code(min_confidence=VULTURE_CONFIDENCE):
+    extra_reads = template_names() | quoted_names() | lookup_names()
+    field_names = {
+        name for m in project_models() for f in m._meta.get_fields() for name in (f.name, getattr(f, "attname", ""))
+    }
+    unused = []
+    for item in vulture_scan().get_unused_code(min_confidence=VULTURE_CONFIDENCE):
         path = Path(item.filename).relative_to(REPO_DIR).as_posix()
-        if item.name in used_elsewhere or path == SETTINGS_FILE:
+        if path == SETTINGS_FILE or item.name in extra_reads:
             continue
         if item.typ in ("attribute", "variable") and item.name in field_names:
             continue
-        key = f"{path}:{item.name}"
-        found.add(key)
-        if key not in CODE_EXCEPTIONS:
-            unused.append(f"{key} (line {item.first_lineno}, {item.typ})")
-    fail_with("Python code nothing uses", unused, CODE_EXCEPTIONS, found)
+        decorators = decorators_at().get((path, item.first_lineno), ())
+        unused.append(Unused(f"{path}:{item.name}", f"line {item.first_lineno}, {item.typ}", decorators))
+    fail_with("Python code nothing uses", unused, CODE_EXCEPTIONS)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -317,38 +356,24 @@ def template_reference_re(template: str) -> re.Pattern[str]:
     return re.compile(rf"{quoted}|<c-{tag}[\s/>]")
 
 
-def guide_partials() -> list[str]:
-    """Every section the guide renders by name: the steps, then the rare actions."""
+def guide_partials() -> set[str]:
+    """The guide's sections, which it names at run time from its step and rare-action keys."""
     from core.admin_views.competition import RARE_ACTIONS, STEPS, guide_partial
 
-    return [guide_partial(step.key) for step in STEPS] + [guide_partial(action) for action, _ in RARE_ACTIONS]
-
-
-def test_every_guide_section_exists() -> None:
-    """Every section the guide renders by name has its template."""
-    missing = [name for name in guide_partials() if not Path("web/templates", name).is_file()]
-    assert not missing, f"Guide sections with no template: {missing}"
+    return {guide_partial(step.key) for step in STEPS} | {guide_partial(action) for action, _ in RARE_ACTIONS}
 
 
 def test_every_template_is_used() -> None:
     """Every template under web/templates is rendered, included, extended or used as a cotton component."""
-    # Named at run time from the guide's steps, so no source line spells them out
-    built = set(guide_partials())
-    found: set[str] = set()
-    unused: list[str] = []
-    for path in source_files():
-        if not path.startswith("web/templates/"):
-            continue
+    built = guide_partials()
+    unused = []
+    for path in template_texts():
         template = path.removeprefix("web/templates/")
-        if template in built:
-            continue
         reference = template_reference_re(template)
-        if any(reference.search(source_text(p)) for p in source_files() if p != path):
+        if template in built or any(reference.search(source_text(p)) for p in source_files() if p != path):
             continue
-        found.add(template)
-        if template not in TEMPLATE_EXCEPTIONS:
-            unused.append(path)
-    fail_with("Templates nothing renders", unused, TEMPLATE_EXCEPTIONS, found)
+        unused.append(Unused(template, path))
+    fail_with("Templates nothing renders", unused, TEMPLATE_EXCEPTIONS)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -357,7 +382,7 @@ def test_every_template_is_used() -> None:
 
 # URL name (with namespace) -> who requests it without the portal linking to it by name
 URL_EXCEPTIONS = {
-    "health_check": "Health endpoint for monitoring, requested by path",
+    "health_check": "The Kubernetes readiness probe and the uptime probe request /health/ by path",
     "livez": "Liveness probe (docker-compose.yml healthcheck, the Kubernetes deployment), requested by path",
     "oauth_callback": "Authentik redirects here after login (core/oauth.py sends the path as redirect_uri)",
     "link_initiate": "The bot DMs this path with a link token (bot/cogs/linking.py builds it from BASE_URL)",
@@ -369,130 +394,73 @@ URL_EXCEPTIONS = {
     "scoring:scorecard_pdf": "Old /scoring/ address of a scorecard PDF (now under /leaderboard/), kept for bookmarks",
     "scoring:orange_team_redirect": "Old orange team address, redirects to the orange team dashboard for bookmarks",
     "scoring:submit_orange_check": "Old orange check address, redirects to the orange team dashboard for bookmarks",
-    "scoring:api_team_detail": "Per-team JSON counterpart of api_scores (linked as JSON on the leaderboard), for "
-    "scripts; callers outside the repo can't be ruled out",
+    "admin_task_status": "The Sync Roles page polls /ops/admin/task/<id>/status/ by path from its script",
+    "team_packet": "The team packet page at /packet/; no portal page links it, so teams reach it by its address",
 }
 
 PROJECT_MODULE_RE = re.compile(rf"^({'|'.join(p.name for p in WEB_DIR.iterdir() if (p / '__init__.py').exists())})\.")
+# Calls that take a URL name as their first argument
+URL_CALLS = {"reverse", "reverse_lazy", "redirect", "resolve_url"}
+TEMPLATE_URL_RE = re.compile(r"""{%\s*url\s+["']([^"']+)["']""")
 
 
-def project_url_names(resolver: URLResolver, namespace: str = "") -> dict[str, str]:
-    """Named URL patterns whose view is project code (Django admin's own URLs are left out), name -> route."""
+def project_url_names(resolver: URLResolver, namespace: str = "", prefix: str = "/") -> dict[str, str]:
+    """Named URL patterns whose view is project code (Django admin's own URLs are left out), name -> full route."""
     names: dict[str, str] = {}
     for pattern in resolver.url_patterns:
+        route = f"{prefix}{pattern.pattern}"
         if isinstance(pattern, URLResolver):
-            names |= project_url_names(pattern, f"{namespace}{pattern.namespace}:" if pattern.namespace else namespace)
+            inner = f"{namespace}{pattern.namespace}:" if pattern.namespace else namespace
+            names |= project_url_names(pattern, inner, route)
         elif isinstance(pattern, URLPattern) and pattern.name and PROJECT_MODULE_RE.match(pattern.callback.__module__):
-            names[f"{namespace}{pattern.name}"] = str(pattern.pattern)
+            names[f"{namespace}{pattern.name}"] = route
+    return names
+
+
+def linked_url_names() -> set[str]:
+    """URL names source links to: {% url "x" %}, the first argument of reverse()/redirect()/..., and *url= keywords
+    (bulk_approve(redirect_url="x") hands the name on to redirect)."""
+    names = {name for text in template_texts().values() for name in TEMPLATE_URL_RE.findall(text)}
+    for tree in python_trees().values():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            values = [node.args[0]] if node.args and call_name(node) in URL_CALLS else []
+            values += [k.value for k in node.keywords if k.arg and k.arg.endswith("url")]
+            names.update(v.value for v in values if isinstance(v, ast.Constant) and isinstance(v.value, str))
     return names
 
 
 def test_every_url_name_is_linked() -> None:
-    """Every named URL is reversed or linked somewhere ({% url %}, reverse, redirect, ...)."""
-    text = corpus()
-    found: set[str] = set()
-    unused: list[str] = []
-    for name, route in project_url_names(get_resolver()).items():
-        if re.search(rf"""(?<!name=)["']{re.escape(name)}["']""", text):
-            continue
-        found.add(name)
-        if name not in URL_EXCEPTIONS:
-            unused.append(f"{name} ({route})")
-    fail_with("URL names nothing links to", unused, URL_EXCEPTIONS, found)
+    """Every named URL is linked by name somewhere: {% url %}, reverse, redirect, ..."""
+    linked = linked_url_names()
+    unused = [Unused(n, route) for n, route in project_url_names(get_resolver()).items() if n not in linked]
+    fail_with("URL names nothing links to", unused, URL_EXCEPTIONS)
 
 
 # ---------------------------------------------------------------------------------------------------------------
 # 5. Settings
 # ---------------------------------------------------------------------------------------------------------------
 
-# Settings Django reads by name
-FRAMEWORK_SETTINGS = {
-    "ALLOWED_HOSTS",
-    "AUTH_PASSWORD_VALIDATORS",
-    "CSRF_TRUSTED_ORIGINS",
-    "DATABASES",
-    "DEBUG",
-    "DEFAULT_AUTO_FIELD",
-    "DEFAULT_FROM_EMAIL",
-    "EMAIL_BACKEND",
-    "EMAIL_HOST",
-    "EMAIL_HOST_PASSWORD",
-    "EMAIL_HOST_USER",
-    "EMAIL_PORT",
-    "EMAIL_USE_SSL",
-    "EMAIL_USE_TLS",
-    "INSTALLED_APPS",
-    "LANGUAGE_CODE",
-    "LOGGING",
-    "LOGIN_REDIRECT_URL",
-    "LOGIN_URL",
-    "LOGOUT_REDIRECT_URL",
-    "MEDIA_ROOT",
-    "MEDIA_URL",
-    "MIDDLEWARE",
-    "ROOT_URLCONF",
-    "SECRET_KEY",
-    "SECURE_PROXY_SSL_HEADER",
-    "SERVER_EMAIL",
-    "SESSION_COOKIE_AGE",
-    "SESSION_COOKIE_HTTPONLY",
-    "SESSION_COOKIE_SAMESITE",
-    "SESSION_SAVE_EVERY_REQUEST",
-    "STATICFILES_DIRS",
-    "STATIC_ROOT",
-    "STATIC_URL",
-    "STORAGES",
-    "TEMPLATES",
-    "TIME_ZONE",
-    "USE_I18N",
-    "USE_TZ",
-    "WSGI_APPLICATION",
-}
+# Settings Django reads: every one it has a default for, plus ROOT_URLCONF, which has none
+DJANGO_SETTINGS = {name for name in dir(global_settings) if name.isupper()} | {"ROOT_URLCONF"}
 
 # setting -> why it stays although nothing reads it
 SETTING_EXCEPTIONS: dict[str, str] = {}
 
 
-def defined_settings() -> dict[str, int]:
-    """Top-level UPPER_CASE names assigned in settings.py, with their line."""
-    defined: dict[str, int] = {}
-    for node in ast.parse(source_text(SETTINGS_FILE)).body:
-        if isinstance(node, ast.Assign):
-            targets = node.targets
-        elif isinstance(node, ast.AnnAssign):
-            targets = [node.target]
-        else:
-            continue
-        for target in targets:
-            if isinstance(target, ast.Name) and target.id.isupper():
-                defined.setdefault(target.id, node.lineno)
-    return defined
-
-
 def test_every_setting_is_read() -> None:
     """Every setting in portal/settings.py is read: by project code, by another setting, or by Django."""
-    defined = defined_settings()
-    settings_lines = source_text(SETTINGS_FILE).splitlines()
-    found: set[str] = set()
-    unused: list[str] = []
-    for name, line in defined.items():
-        if name in FRAMEWORK_SETTINGS:
-            continue
-        word = re.compile(rf"\b{name}\b")
-        elsewhere = any(word.search(source_text(p)) for p in source_files() if p != SETTINGS_FILE)
-        in_settings = any(word.search(text) for number, text in enumerate(settings_lines, 1) if number != line)
-        if elsewhere or in_settings:
-            continue
-        found.add(name)
-        if name not in SETTING_EXCEPTIONS:
-            unused.append(f"{name} ({SETTINGS_FILE}:{line})")
-    fail_with("Settings nothing reads", unused, SETTING_EXCEPTIONS, found)
-
-
-def test_framework_settings_are_defined() -> None:
-    """The allowlist names only settings that exist, so it can't hide a typo or outlive a removed setting."""
-    assert sorted(FRAMEWORK_SETTINGS - set(defined_settings())) == []
-    assert all(hasattr(settings, name) for name in FRAMEWORK_SETTINGS)
+    reads = read_names()
+    unused = [
+        Unused(target.id, f"{SETTINGS_FILE}:{node.lineno}")
+        for node in python_trees()[SETTINGS_FILE].body
+        if isinstance(node, ast.Assign | ast.AnnAssign)
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name) and target.id.isupper()
+        if target.id not in DJANGO_SETTINGS and target.id not in reads
+    ]
+    fail_with("Settings nothing reads", unused, SETTING_EXCEPTIONS)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -506,16 +474,13 @@ PAYLOAD_EXCEPTIONS: dict[str, str] = {}
 def test_every_task_payload_is_enqueued() -> None:
     """Each payload type in the TaskPayload union is built somewhere, so the bot doesn't handle a task nobody sends.
 
-    The bot's dispatch matches every type (mypy checks that); this checks the other end.
+    The bot's dispatch matches every type (mypy checks that); this checks the other end. A `case Name()` pattern
+    is not a call, so the dispatch itself doesn't count.
     """
-    python = [source_text(p) for p in source_files() if p.endswith(".py")]
-    found: set[str] = set()
-    unused: list[str] = []
-    for name in sorted(cls.__name__ for cls in discord_tasks.PAYLOAD_TYPES.values()):
-        built = re.compile(rf"^(?!\s*(case|class)\b).*\b{name}\(", re.MULTILINE)
-        if any(built.search(text) for text in python):
-            continue
-        found.add(name)
-        if name not in PAYLOAD_EXCEPTIONS:
-            unused.append(f"{name} (web/core/discord_tasks.py)")
-    fail_with("Discord task payloads nothing enqueues", unused, PAYLOAD_EXCEPTIONS, found)
+    called = {call_name(n) for tree in python_trees().values() for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    unused = [
+        Unused(cls.__name__, "web/core/discord_tasks.py")
+        for cls in discord_tasks.PAYLOAD_TYPES.values()
+        if cls.__name__ not in called
+    ]
+    fail_with("Discord task payloads nothing enqueues", unused, PAYLOAD_EXCEPTIONS)
