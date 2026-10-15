@@ -1,0 +1,36 @@
+{# Live numbers, shown while the competition runs #}
+{% load cotton %}
+<c-module class="mt-20" id="{{ panel.section }}">
+    <c-slot name="title">
+        Right now
+    </c-slot>
+    <div class="grid-3">
+        <div class="live-number">
+            <div class="text-muted text-md">Open or claimed tickets</div>
+            <div class="live-number__value">{{ live.unresolved_tickets }}</div>
+            <a href="{% url 'ticket_list' %}">Tickets</a>
+        </div>
+        <div class="live-number">
+            <div class="text-muted text-md">Team accounts turned on at start</div>
+            <div class="live-number__value">
+                {% if live.accounts %}
+                    {{ live.accounts.0 }} of {{ live.accounts.1 }}
+                {% else %}
+                    Not recorded
+                {% endif %}
+            </div>
+            <a href="{% url 'admin_teams' %}">Teams</a>
+        </div>
+        <div class="live-number">
+            <div class="text-muted text-md">Scoring engine (Quotient) last synced</div>
+            <div class="live-number__value">
+                {% if quotient_metadata %}
+                    {{ quotient_metadata.last_synced|timesince }} ago
+                {% else %}
+                    Never synced
+                {% endif %}
+            </div>
+            <a href="{{ scoring_engine_url }}">Scoring engine</a>
+        </div>
+    </div>
+</c-module>

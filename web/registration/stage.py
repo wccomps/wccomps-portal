@@ -86,9 +86,6 @@ ACTIONS: dict[Action, ActionText] = {
     ),
 }
 
-# A rare action a stage also offers, said after the next step, with why it applies
-STAGE_ALTERNATIVES: dict[Stage, tuple[str, Action]] = {Stage.READY: ("No team has scores yet.", Action.CANCEL)}
-
 # Each stage's actions in order. While the competition runs the next action is Stop; otherwise it is the first of the
 # stage's actions that isn't done, or its last.
 STAGE_ACTIONS: dict[Stage, tuple[Action, ...]] = {
@@ -138,12 +135,21 @@ class EventStage:
         return f"{sentence} The competition is running." if self.running else sentence
 
     def done(self, action: Action) -> bool:
-        """Whether the stage's action is done; only the actions a stage moves past have a record of it."""
-        if action == Action.SEND_PACKETS:
-            return self.packets_sent
-        if action == Action.FINISH:
-            return self.scorecards_emailed
-        return False
+        """Whether the action is done for the live event. Close Out, Cancel and Clear leave no live event to ask
+        about, so they are never done."""
+        match action:
+            case Action.IMPORT:
+                return self.event is not None
+            case Action.SEND_PACKETS:
+                return self.packets_sent
+            case Action.START:
+                return self.running or self.played
+            case Action.STOP:
+                return not self.running and self.played
+            case Action.FINISH:
+                return self.scorecards_emailed
+            case Action.CLOSE_OUT | Action.CANCEL | Action.CLEAR:
+                return False
 
     @property
     def next_action(self) -> Action:
@@ -169,11 +175,10 @@ class EventStage:
 
     @property
     def alternative(self) -> str:
-        """The stage's rare action, when it offers one and the competition isn't running."""
-        if self.running or self.stage not in STAGE_ALTERNATIVES:
+        """Before any team has scores, how to call the event off."""
+        if self.running or self.stage != Stage.READY:
             return ""
-        why, action = STAGE_ALTERNATIVES[self.stage]
-        return f"{why} {self.instruction(action)}"
+        return f"No team has scores yet. {self.instruction(Action.CANCEL)}"
 
     @property
     def steps_left(self) -> str:

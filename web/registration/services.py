@@ -407,10 +407,7 @@ def close_out_problem(stage: EventStage, *, check_schools: bool = True) -> str:
     if stage.running:
         return _running_refusal(stage)
     if stage.stage == Stage.READY:
-        return (
-            f"No team has scores yet, so there is nothing to close out for {stage.event}. "
-            f"{stage.instruction(Action.CANCEL)}"
-        )
+        return f"Nothing to close out for {stage.event}. {stage.alternative}"
     if not stage.played:
         return f"Nothing to close out. {stage.status} {stage.next_step}"
     if stage.event is None and not Season.objects.filter(is_active=True).exists():

@@ -1,5 +1,5 @@
-"""The competition page's event card and the Running an Event guide: the steps of an event, where each is taken,
-and which are done and which is current, read from the stage (registration.stage owns the lifecycle)."""
+"""The competition page's event card: the event, its status, the next step and the steps, which are done and which
+is current, read from the stage (registration.stage owns the lifecycle; places says where each action is taken)."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -11,71 +11,9 @@ from packets.models import Packet
 from packets.services import teams_without_delivered_copy
 from registration.stage import ACTIONS, Action, EventStage
 
+from core.admin_views.places import PLACES, STEPS, Section, action_url
 from core.models import CompetitionConfig
 from team.models import DiscordLink, SchoolInfo
-
-
-class Section(StrEnum):
-    """A section of the competition page, shown only while its action is next; the value is its id."""
-
-    READINESS = "readiness"
-    LIVE = "live"
-    CLOSE_OUT = "close-out"
-    LEFTOVERS = "leftovers"
-
-
-class SetupSection(StrEnum):
-    """A section of the Competition setup page, always shown; the value is its id."""
-
-    SCHEDULE = "schedule"
-    START_MESSAGE = "start-message"
-    TEAM_ACCESS = "team-access"
-    SCORING_ENGINE = "scoring-engine"
-    READINESS = "readiness"
-
-
-def setup_url(section: SetupSection) -> str:
-    return f"{reverse('admin_competition_setup')}#{section}"
-
-
-@dataclass(frozen=True)
-class Place:
-    """Where an action is taken, and what the competition page shows while it is the next action."""
-
-    url_name: str
-    # The competition page section the action is taken in; it exists only while the action is next
-    section: Section | None = None
-    # Where the action can also be taken while that section isn't shown
-    elsewhere: SetupSection | None = None
-    # The section the competition page shows while the action is next
-    shows: Section | None = None
-    # Taken by the next-step button itself rather than at a link
-    by_next_step_button: bool = False
-
-
-PLACES: dict[Action, Place] = {
-    Action.IMPORT: Place("school_info_import"),
-    Action.SEND_PACKETS: Place("packets_list"),
-    Action.START: Place(
-        "admin_competition", Section.READINESS, elsewhere=SetupSection.READINESS, shows=Section.READINESS
-    ),
-    Action.STOP: Place("admin_competition", shows=Section.LIVE, by_next_step_button=True),
-    Action.FINISH: Place("scoring:email_scorecards", shows=Section.CLOSE_OUT),
-    Action.CLOSE_OUT: Place("admin_competition", Section.CLOSE_OUT, shows=Section.CLOSE_OUT),
-    Action.CANCEL: Place("admin_competition_danger"),
-    Action.CLEAR: Place("admin_competition_danger", shows=Section.LEFTOVERS),
-}
-
-
-def action_url(action: Action, shown: Section | None = None) -> str:
-    """Where to take the action, given the section the competition page shows now (None: a page with no stage, like
-    the guide). A link never points at a section the page isn't showing."""
-    place = PLACES[action]
-    if place.section is not None and place.section == shown:
-        return f"{reverse(place.url_name)}#{place.section}"
-    if place.elsewhere is not None:
-        return setup_url(place.elsewhere)
-    return reverse(place.url_name)
 
 
 class StepState(StrEnum):
@@ -85,7 +23,7 @@ class StepState(StrEnum):
     UPCOMING = "upcoming"
 
 
-# Each state's word and badge variant on the panel
+# Each state's word and badge variant on the event card
 STATE_SHOWN: dict[StepState, tuple[str, str]] = {
     StepState.DONE: ("Done", "success"),
     StepState.CURRENT: ("Now", "info"),
@@ -96,9 +34,9 @@ STATE_SHOWN: dict[StepState, tuple[str, str]] = {
 
 class EventStatus(StrEnum):
     RUNNING = "running"
-    STOPPED = "stopped"  # Teams have scores and the competition isn't running
+    STOPPED = "stopped"  # An event is open, teams have scores and the competition isn't running
     NOT_STARTED = "not_started"  # An event is open and no team has scores yet
-    NO_EVENT = "no_event"
+    NO_EVENT = "no_event"  # No event is open and the competition isn't running, whether or not teams have scores
 
 
 # Each status's word and badge variant on the event card
@@ -126,9 +64,9 @@ class EventFacts:
     schools: int
     draft_packets: int
     teams_without_copy: int  # Teams on the list missing a delivered copy of a packet sent for the open event
-    members_linked: int = 0  # Discord accounts linked to a team
-    starts_at: datetime | None = None  # The scheduled start and stop
-    ends_at: datetime | None = None
+    members_linked: int  # Discord accounts linked to a team
+    starts_at: datetime | None  # The scheduled start, while the schedule will still start it
+    ends_at: datetime | None  # The scheduled stop
 
 
 def _plural(count: int, one: str, many: str) -> str:
@@ -136,7 +74,7 @@ def _plural(count: int, one: str, many: str) -> str:
 
 
 def _import_detail(facts: EventFacts) -> str:
-    # With an event open, the panel's event line counts the schools
+    # With an event open, the event card's meta line counts the schools
     if not facts.schools or facts.stage.event is not None:
         return ""
     schools = _plural(facts.schools, "school is", "schools are")
@@ -156,70 +94,23 @@ def _packets_detail(facts: EventFacts) -> str:
     return " ".join(lines)
 
 
-@dataclass(frozen=True)
-class Step:
-    """One step of running an event: the action it takes and when it is done. It is current when its action is the
-    stage's next one."""
-
-    action: Action
-    label: str
-    done: Callable[[EventStage], bool]
-    detail: Callable[[EventFacts], str] = lambda facts: ""
-
-    @property
-    def key(self) -> str:
-        return self.action.value
-
-    @property
-    def link_label(self) -> str:
-        return ACTIONS[self.action].link_label
-
-
-STEPS: tuple[Step, ...] = (
-    Step(
-        Action.IMPORT,
-        "Import the school list",
-        done=lambda stage: stage.event is not None,
-        detail=_import_detail,
-    ),
-    Step(
-        Action.SEND_PACKETS,
-        "Send packets",
-        done=lambda stage: stage.packets_sent,
-        detail=_packets_detail,
-    ),
-    Step(
-        Action.START,
-        "Check readiness and start the competition",
-        done=lambda stage: stage.running or stage.played,
-    ),
-    Step(
-        Action.STOP,
-        "Stop the competition",
-        done=lambda stage: not stage.running and stage.played,
-    ),
-    Step(
-        Action.FINISH,
-        "Finish scoring and email scorecards",
-        done=lambda stage: stage.scorecards_emailed,
-    ),
-    Step(
-        Action.CLOSE_OUT,
-        "Close Out Event",
-        done=lambda stage: False,
-    ),
-)
-
-# The actions outside the normal run of an event, as the guide titles them
-RARE_ACTIONS: tuple[tuple[Action, str], ...] = ((Action.CANCEL, "Cancel event"), (Action.CLEAR, "Clear leftover data"))
+# What a step says beyond its line
+DETAILS: dict[Action, Callable[[EventFacts], str]] = {
+    Action.IMPORT: _import_detail,
+    Action.SEND_PACKETS: _packets_detail,
+}
 
 
 @dataclass(frozen=True)
 class ShownStep:
-    step: Step
+    action: Action
     state: StepState
     detail: str
     url: str  # Where the step is taken, given the section the page shows
+
+    @property
+    def heading(self) -> str:
+        return PLACES[self.action].heading
 
     @property
     def label(self) -> str:
@@ -258,10 +149,6 @@ class EventPanel:
         return STATUS_SHOWN[_status(self.stage)][1]
 
     @property
-    def next_step_is_a_button(self) -> bool:
-        return PLACES[self.stage.next_action].by_next_step_button
-
-    @property
     def notes(self) -> list[ShownStep]:
         """The steps with something to say beyond their line (schools on the list, packets not delivered)."""
         return [row for row in self.steps if row.detail]
@@ -279,18 +166,24 @@ class EventPanel:
         return ACTIONS[self.stage.next_action].link_label
 
 
-def _state(step: Step, stage: EventStage) -> StepState:
-    if step.action == stage.next_action:
+def _state(action: Action, stage: EventStage) -> StepState:
+    if action == stage.next_action:
         return StepState.CURRENT
-    if step.done(stage):
+    if stage.done(action):
         return StepState.DONE
-    return StepState.NEXT if step.action in stage.actions_after_next else StepState.UPCOMING
+    return StepState.NEXT if action in stage.actions_after_next else StepState.UPCOMING
 
 
 def event_panel(facts: EventFacts) -> EventPanel:
     shown = PLACES[facts.stage.next_action].shows
     steps = [
-        ShownStep(step, _state(step, facts.stage), step.detail(facts), action_url(step.action, shown)) for step in STEPS
+        ShownStep(
+            action,
+            _state(action, facts.stage),
+            DETAILS[action](facts) if action in DETAILS else "",
+            action_url(action, shown),
+        )
+        for action in STEPS
     ]
     return EventPanel(facts, steps)
 
@@ -307,6 +200,6 @@ def event_facts(stage: EventStage) -> EventFacts:
         draft_packets=Packet.objects.filter(status="draft").count(),
         teams_without_copy=teams_without_copy,
         members_linked=DiscordLink.objects.filter(is_active=True, team__isnull=False).count(),
-        starts_at=config.competition_start_time,
+        starts_at=config.competition_start_time if config.schedule_will_start() else None,
         ends_at=config.competition_end_time,
     )

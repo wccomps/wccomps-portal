@@ -15,7 +15,7 @@ from registration.services import set_team_school
 from scoring.models import ServiceScore
 
 from core.admin_views.competition import CLOSE_OUT_CHECK_FAILED
-from core.admin_views.event_panel import RARE_ACTIONS, STEPS, action_url
+from core.admin_views.places import PLACES, action_url
 from core.models import CompetitionConfig
 from team.models import Team
 
@@ -380,10 +380,10 @@ def test_the_guide_walks_the_panels_steps_in_order_with_their_links(client):
     assert response.status_code == 200
     page = response.content.decode()
     headings = re.findall(r'<h2 class="mt-20" id="([a-z_]+)">', page)
-    assert headings == [step.key for step in STEPS] + [action.value for action, _ in RARE_ACTIONS]
+    assert headings == [action.value for action in PLACES]
     hrefs = set(re.findall(r'href="([^"]*)"', page))
-    for step in STEPS:
-        assert action_url(step.action) in hrefs, step.key
+    for action in PLACES:
+        assert action_url(action) in hrefs, action
     assert reverse("admin_competition_danger") in hrefs
     assert "\u2014" not in page and "\u2013" not in page
 

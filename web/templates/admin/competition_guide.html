@@ -20,17 +20,17 @@
             It stays until Close Out Event (or Clear leftover data) deletes it, so grading can go on after the
             competition stops.
         </p>
-        {% for row in steps %}
-            <h2 class="mt-20" id="{{ row.step.key }}">{{ forloop.counter }}. {{ row.step.label }}</h2>
+        {% for row in rows %}
+            <h2 class="mt-20" id="{{ row.key }}">
+                {% if row.rare %}
+                    Rare: {{ row.heading }}
+                {% else %}
+                    {{ forloop.counter }}. {{ row.heading }}
+                {% endif %}
+            </h2>
             <p>
-                <strong>Where:</strong> <a href="{{ row.url }}">{{ row.step.link_label }}</a>.
-            </p>
-            {% include row.partial %}
-        {% endfor %}
-        {% for row in rare %}
-            <h2 class="mt-20" id="{{ row.key }}">Rare: {{ row.title }}</h2>
-            <p>
-                <strong>Where:</strong> <a href="{{ row.url }}">Danger Zone</a>, under Advanced on the Competition page.
+                <strong>Where:</strong> <a href="{{ row.url }}">{{ row.link_label }}</a>
+                {% if row.rare %}on the Danger Zone page, under Advanced on the Competition page{% endif %}.
             </p>
             {% include row.partial %}
         {% endfor %}

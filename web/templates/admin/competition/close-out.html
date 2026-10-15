@@ -1,0 +1,104 @@
+{# Before you close out, shown while Finish or Close Out is next; the page's competitionAdmin script runs its check #}
+{% load cotton %}
+<c-module class="mt-20" id="{{ panel.section }}">
+    <c-slot name="title">
+        Before you close out
+    </c-slot>
+    {% if can_close_out %}
+        {% if not open_event %}
+            <p>
+                The scores are recorded at a new event in season <strong>{{ active_season.name }}</strong>,
+                with the current school list.
+            </p>
+            <c-form_field label="Event name" id="close_out_name">
+                <input type="text"
+                       id="close_out_name"
+                       :value="closeOutName"
+                       @input="setField"
+                       data-field="closeOutName"
+                       class="vTextField">
+            </c-form_field>
+            <c-form_field label="Event date" id="close_out_date">
+                <input type="date"
+                       id="close_out_date"
+                       :value="closeOutDate"
+                       @input="setField"
+                       data-field="closeOutDate"
+                       class="vTextField">
+            </c-form_field>
+            <c-form_field label="Event type" id="close_out_type">
+                <select id="close_out_type"
+                        :value="closeOutType"
+                        @change="setField"
+                        data-field="closeOutType"
+                        class="vTextField">
+                    {% for value, label in event_type_choices %}
+                        <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </c-form_field>
+        {% endif %}
+        <template x-if="closeOutChecking">
+            <p class="help-text">Checking for unfinished work...</p>
+        </template>
+        <template x-if="closeOutCheckFailed">
+            <c-alert variant="warning">
+                {{ close_out_check_failed }}
+            </c-alert>
+        </template>
+        <template x-if="closeOutProblem">
+            <c-alert variant="error">
+                <span x-text="closeOutProblem"></span>
+                <ul class="mt-10 ml-20">
+                    <template x-for="(fix, index) in closeOutFixes" :key="index">
+                        <li>
+                            <a :href="fix.url" x-text="fix.text"></a>
+                        </li>
+                    </template>
+                </ul>
+            </c-alert>
+        </template>
+        <template x-if="hasCloseOutWarnings">
+            <div>
+                <template x-if="closeOutProblem">
+                    <p class="help">Also unfinished:</p>
+                </template>
+                <template x-if="closeOutNotBlocked">
+                    <p class="help">These don't block Close Out: it freezes the results as they stand.</p>
+                </template>
+                <ul class="mt-10 ml-20">
+                    <template x-for="(warning, index) in closeOutWarnings" :key="index">
+                        <li>
+                            <a :href="warning.url" x-text="warning.text"></a>
+                        </li>
+                    </template>
+                </ul>
+            </div>
+        </template>
+        <template x-if="closeOutNothingLeft">
+            <p>No unfinished work found, and the scorecards went out with the current scores.</p>
+        </template>
+        <c-info_box class="d-flex flex-wrap items-center justify-between gap-20 mt-15">
+            <p class="close-out-text m-0">
+                Close Out saves each listed school's scorecard as its result for the event, then deletes the
+                live data (scores, tickets, orange assignments and check-ins, team Discord links and queued
+                announcements), resets the ticket numbers, closes the event, clears the schedule, the start message
+                and the scoring engine's box list, and queues the Discord cleanup (team channels and roles). Do it
+                after the scorecards are out.
+            </p>
+            <c-button variant="danger" @click="closeOutEvent" ::disabled="closeOutBlocked">
+                Close Out Event
+            </c-button>
+        </c-info_box>
+        <template x-if="closeOutStreaming">
+            <c-progress_bar />
+        </template>
+    {% elif close_out_refusal %}
+        <p class="help-text">{{ close_out_refusal }}</p>
+        {% if needs_active_season %}
+            <p>
+                <a href="{% url 'registration_season_list' %}">Open the Seasons page</a>
+            </p>
+        {% endif %}
+    {% endif %}
+</c-module>

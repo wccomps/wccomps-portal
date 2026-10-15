@@ -10,7 +10,7 @@ from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.urls import reverse
 from django.utils import timezone
 
-from core.admin_views.event_panel import SetupSection, setup_url
+from core.admin_views.places import SetupSection, setup_url
 from core.authentik_manager import AuthentikManager
 from core.forms import ReadinessFixForm
 from core.models import CompetitionConfig

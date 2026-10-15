@@ -142,7 +142,7 @@ def test_the_competition_page_reaches_the_setup_page_and_the_nav_names_scoring_s
 
 
 def test_every_setup_section_the_links_name_is_on_the_page(admin_client):
-    from core.admin_views.event_panel import SetupSection
+    from core.admin_views.places import SetupSection
 
     page = _setup_page(admin_client)
 

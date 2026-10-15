@@ -357,16 +357,17 @@ def template_reference_re(template: str) -> re.Pattern[str]:
     return re.compile(rf"{quoted}|<c-{tag}[\s/>]")
 
 
-def guide_partials() -> set[str]:
-    """The guide's sections, which it names at run time from its step and rare-action keys."""
-    from core.admin_views.competition import RARE_ACTIONS, STEPS, guide_partial
+def built_partials() -> set[str]:
+    """Templates named at run time: the guide's section for each action, and the competition page's sections."""
+    from core.admin_views.competition import guide_partial
+    from core.admin_views.places import PLACES, Section, section_partial
 
-    return {guide_partial(step.key) for step in STEPS} | {guide_partial(action) for action, _ in RARE_ACTIONS}
+    return {guide_partial(action) for action in PLACES} | {section_partial(section) for section in Section}
 
 
 def test_every_template_is_used() -> None:
     """Every template under web/templates is rendered, included, extended or used as a cotton component."""
-    built = guide_partials()
+    built = built_partials()
     unused = []
     for path in template_texts():
         template = path.removeprefix("web/templates/")
