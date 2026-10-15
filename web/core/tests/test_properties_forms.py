@@ -11,9 +11,11 @@ checked against their columns (assert_storable).
 import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from django import forms
@@ -22,7 +24,8 @@ from django.contrib.messages.storage.cookie import CookieStorage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models import QuerySet
 from django.http import QueryDict
-from django.test import RequestFactory
+from django.test import Client, RequestFactory
+from django.urls import reverse
 from django.utils import timezone
 from hypothesis import given
 from hypothesis import strategies as st
@@ -33,11 +36,10 @@ from orange_team.forms import (
     OrangeCheckForm,
     ReassignForm,
     SubmitScoreForm,
-    extract_criteria,
 )
-from orange_team.models import OrangeAssignment, OrangeCheck, OrangeCheckCriterion, OrangeFollowUp
+from orange_team.models import OrangeAssignment, OrangeCheck
 from packets.forms import PacketActionForm, PacketResendForm, PacketUploadForm
-from packets.models import Packet
+from packets.models import Packet, PacketDistribution
 from registration.forms import (
     EventForm,
     NewEventFields,
@@ -91,8 +93,7 @@ from core.forms import (
     TeamsBulkActionForm,
     TypedConfirmForm,
 )
-from core.models import AuditLog, CompetitionConfig
-from core.stored_files import clean_name
+from core.models import AuditLog
 from core.tests.strategies import (
     assert_storable,
     column,
@@ -103,9 +104,8 @@ from core.tests.strategies import (
     resubmission,
     rolled_back,
 )
-from core.utils import parse_datetime_to_utc
 from team.forms import CSVUploadForm, ImportConfirmForm, ImportEventForm, parse_csv_file
-from team.models import DiscordLink, LinkToken, SchoolInfo, Team
+from team.models import DiscordLink, LinkToken, Team
 from ticketing.forms import (
     CreateTicketForm,
     TicketBulkActionForm,
@@ -116,7 +116,7 @@ from ticketing.forms import (
     TicketReopenForm,
     TicketResolveForm,
 )
-from ticketing.models import Ticket, TicketCategory, TicketComment, TicketHistory, parse_playbook_steps
+from ticketing.models import Ticket, TicketCategory, parse_playbook_steps
 
 pytestmark = pytest.mark.django_db
 
@@ -128,7 +128,8 @@ pytestmark = pytest.mark.django_db
 
 @dataclass
 class World:
-    user: User
+    user: User  # a Discord admin, so every page lets them in
+    client: Client  # logged in as user
     season: Season
     open_event: Event
     teams: list[Team]
@@ -137,11 +138,19 @@ class World:
     incident: IncidentReport
     template: ScoringTemplate
     registration: TeamRegistration
+    pending: OrangeAssignment  # the user's, not yet submitted
+    submitted: OrangeAssignment  # the user's, waiting for review
+    claimed: Ticket  # claimed by the user
+    resolved: Ticket
+    grade: InjectScore
+    packet: Packet  # sent, with a distribution for team 1
 
 
 @pytest.fixture
-def world(db: Any) -> World:
-    user = User.objects.create_user(username="propertyuser")
+def world(db: Any, create_user_with_groups: Callable[..., User]) -> World:
+    user = create_user_with_groups("propertyuser", ["WCComps_Discord_Admin"])
+    client = Client()
+    client.force_login(user)
     season = Season.objects.create(name="2026", year=2026, is_active=True)
     open_event = Event.objects.create(
         season=season, name="Invitational", event_type="invitational", event_number=1, date=date(2026, 10, 3)
@@ -170,7 +179,59 @@ def world(db: Any) -> World:
     )
     template = ScoringTemplate.objects.first() or ScoringTemplate.objects.create()
     registration = TeamRegistration.objects.create(school_name="Registered School")
-    return World(user, season, open_event, teams, pool, finding, incident, template, registration)
+    check = OrangeCheck.objects.create(title="Phones", description="", max_points=10)
+    pending = OrangeAssignment.objects.create(orange_check=check, user=user, team=teams[0])
+    submitted = OrangeAssignment.objects.create(orange_check=check, user=user, team=teams[1], status="submitted")
+    category = TicketCategory.objects.first()
+    Team.objects.filter(pk=teams[0].pk).update(ticket_counter=2)  # the two tickets below took numbers 1 and 2
+    claimed = Ticket.objects.create(
+        team=teams[0], category=category, ticket_number="T001-001", title="Help", status="claimed", assigned_to=user
+    )
+    resolved = Ticket.objects.create(
+        team=teams[0], category=category, ticket_number="T001-002", title="Done", status="resolved"
+    )
+    grade = InjectScore.objects.create(
+        team=teams[0], inject_id="1", inject_name="Inject 01", points_awarded=0, graded_by=user
+    )
+    set_team_school(teams[0], "School One", contact_email="coach@example.edu")
+    packet = Packet.objects.create(
+        title="Packet",
+        file_data=b"%PDF-1.7",
+        filename="p.pdf",
+        mime_type="application/pdf",
+        file_size=8,
+        status="completed",
+        uploaded_by="gold",
+    )
+    PacketDistribution.objects.create(packet=packet, team=teams[0])
+    return World(
+        user, client, season, open_event, teams, pool, finding, incident, template, registration,
+        pending, submitted, claimed, resolved, grade, packet,
+    )  # fmt: skip
+
+
+def posts_to(path: Callable[[World], str], **extra: str) -> Use:
+    """What the view does with the same POST (and files), driven through the test client: it must not fail."""
+
+    def use(w: World, form: Any) -> None:
+        post: dict[str, Any] = {key: form.data.getlist(key) for key in form.data} | extra
+        for upload in form.files.values():
+            upload.seek(0)
+        response = w.client.post(path(w), {**post, **form.files})
+        assert response.status_code < 500
+
+    return use
+
+
+def competition_action(action: str) -> Use:
+    return posts_to(lambda w: reverse("admin_competition_action"), action=action)
+
+
+def _inject_grading_through_the_view(w: World, form: Any) -> None:
+    """The grading page lists Quotient's injects; one inject is enough to grade."""
+    inject = SimpleNamespace(inject_id=1, title="Inject 01 - Web (100 pts)")
+    with patch("quotient.client.QuotientClient.get_injects", return_value=[inject]):
+        posts_to(lambda w: reverse("scoring:inject_grading") + "?inject=1")(w, form)
 
 
 def store(*pairs: tuple[Any, object]) -> None:
@@ -266,49 +327,11 @@ def _new_event_use(w: World, form: Any) -> None:
             store((column(Season, "name"), target.season.name), (column(Season, "year"), target.season.year))
 
 
-def _schedule_use(start_key: str, tz_key: str, end_key: str = "", end_tz_key: str = "") -> Use:
-    """The view parses each time in its timezone (ValueError is its only refusal) and stores it."""
-
-    def use(w: World, form: Any) -> None:
-        cd = form.cleaned_data
-        for key, tz in ((start_key, tz_key), (end_key, end_tz_key)):
-            if not key or not cd.get(key):
-                continue
-            try:
-                when = parse_datetime_to_utc(cd[key], cd.get(tz) or "America/Los_Angeles")
-            except ValueError:
-                continue
-            store((column(CompetitionConfig, "competition_start_time"), when))
-
-    return use
-
-
 def _team_numbers_check(w: World, form: Any) -> None:
     numbers = form.cleaned_data["team_numbers"]
     if numbers is not None:
         assert numbers == sorted(set(numbers)) and all(1 <= n <= MAX_TEAMS for n in numbers)
         store((column(AuditLog, "details"), {"team_numbers": numbers}))
-
-
-def _orange_check_use(w: World, form: Any) -> None:
-    cd = form.cleaned_data
-    minutes = cd.get("time_limit_minutes")
-    check = OrangeCheck.objects.create(
-        title=cd["title"],
-        description=cd["description"],
-        scheduled_at=cd["scheduled_at"] or None,
-        max_points=cd.get("max_points") or 0,
-        time_limit=timedelta(minutes=minutes) if minutes else None,
-        created_by=w.user,
-    )
-    try:
-        criteria = extract_criteria(form.data)
-    except forms.ValidationError:
-        return  # the view refuses the save
-    for c in criteria:
-        OrangeCheckCriterion.objects.create(
-            orange_check=check, label=c["label"], points=c["points"], sort_order=c["sort_order"]
-        )
 
 
 def _red_score_make(w: World, draw: st.DataObject) -> Factory:
@@ -321,39 +344,9 @@ def _incident_make(w: World, draw: st.DataObject) -> Factory:
     return lambda data, files: IncidentReportForm(None if is_admin else w.teams[0], is_admin, data, files)
 
 
-def _incident_use(w: World, form: Any) -> None:
-    incident = form.save(commit=False)
-    incident.team = form.cleaned_data.get("team") or w.teams[0]
-    incident.submitted_by = w.user
-    incident.save()
-
-
 def _incident_match_use(w: World, form: Any) -> None:
     incident = form.save(commit=False)
     incident.approve(w.user)
-
-
-def _inject_grading_use(w: World, form: Any) -> None:
-    for team in w.teams:
-        points = form.cleaned_data.get(f"points_team_{team.team_number}")
-        feedback = (form.cleaned_data.get(f"feedback_team_{team.team_number}") or "").replace("\r\n", "\n").strip()
-        if points is not None:
-            store((column(InjectScore, "points_awarded"), points))
-        store((column(InjectScore, "feedback"), feedback))
-
-
-def _packet_upload_use(w: World, form: Any) -> None:
-    cd = form.cleaned_data
-    uploaded = cd["packet_file"]
-    file_data = uploaded.read()
-    team_extras = cd["team_extras"]
-    store(
-        (column(Packet, "title"), cd["title"]),
-        (column(Packet, "notes"), cd["notes"]),
-        (column(Packet, "file_data"), file_data),
-        (column(Packet, "filename"), clean_name(uploaded.name, "unnamed")),
-        (column(Packet, "team_extras"), team_extras),
-    )
 
 
 def _resubmit_team_numbers(cleaned: dict[str, Any]) -> QueryDict:
@@ -452,19 +445,8 @@ CASES = [
             "school_name": st.one_of(st.text(min_size=1, max_size=255), st.sampled_from(("ß" * 200, " A  b ")))
         },
     ),
-    FormCase(
-        BroadcastForm,
-        use=lambda w, f: store(
-            (
-                column(AuditLog, "details"),
-                {"target": f.cleaned_data["target"], "message_preview": f.cleaned_data["message"][:200]},
-            )
-        ),
-    ),
-    FormCase(
-        SetMaxMembersForm,
-        use=lambda w, f: store((column(CompetitionConfig, "max_team_members"), f.cleaned_data["max_members"])),
-    ),
+    FormCase(BroadcastForm, use=posts_to(lambda w: reverse("admin_broadcast_action"))),
+    FormCase(SetMaxMembersForm, use=competition_action("set_max_members")),
     FormCase(TypedConfirmForm, hints=lambda w: {"confirm": YOLO}),
     FormCase(
         CancelEventForm,
@@ -485,18 +467,16 @@ CASES = [
         examples=({"start_message": "a\r\r\nb"},),
         use=lambda w, f: (
             assert_message_fits(f.cleaned_data["start_message"]),
-            store((column(CompetitionConfig, "start_message"), f.cleaned_data["start_message"])),
+            competition_action("set_start_message")(w, f),
         ),
     ),
-    FormCase(
-        AppSlugForm,
-        use=lambda w, f: store((column(CompetitionConfig, "controlled_applications"), [f.cleaned_data["app_slug"]])),
-    ),
+    # Adding an app asks Authentik about it; removing one is the same form and stores the same list
+    FormCase(AppSlugForm, use=competition_action("remove_app")),
     FormCase(
         SetTimeForm,
         examples=({"datetime": "0001-01-01T00:00", "timezone": "Asia/Tokyo"},),
         hints=lambda w: {"datetime": _datetime_local(), "timezone": _tz_hint()},
-        use=_schedule_use("datetime", "timezone"),
+        use=competition_action("set_start_time"),
     ),
     FormCase(
         SetScheduleForm,
@@ -507,7 +487,7 @@ CASES = [
             "start_timezone": _tz_hint(),
             "end_timezone": _tz_hint(),
         },
-        use=_schedule_use("start_datetime", "start_timezone", "end_datetime", "end_timezone"),
+        use=competition_action("set_schedule"),
     ),
     FormCase(
         ResetPasswordsForm,
@@ -532,7 +512,7 @@ CASES = [
     FormCase(SyncRolesForm, use=lambda w, f: assert_bool(f.cleaned_data["dry_run"]), resubmit=_resubmit_dry_run),
     FormCase(
         OrangeCheckForm,
-        use=_orange_check_use,
+        use=posts_to(lambda w: reverse("orange_team:check_create")),
         examples=(
             {"title": "T", "max_points": "100000000"},
             {"title": "T", "time_limit_minutes": "1440000000000"},
@@ -544,28 +524,21 @@ CASES = [
     FormCase(
         FollowUpForm,
         examples=({"assignment_id": "1", "minutes": "-1065460825"},),
-        use=lambda w, f: store(
-            (column(OrangeFollowUp, "remind_at"), timezone.now() + timedelta(minutes=f.cleaned_data["minutes"])),
-            (column(OrangeFollowUp, "note"), f.cleaned_data["note"]),
-        ),
+        hints=lambda w: {"assignment_id": st.just(str(w.pending.pk))},
+        use=posts_to(lambda w: reverse("orange_team:followup_create")),
     ),
     FormCase(
-        AssignmentRejectForm, use=lambda w, f: store((column(OrangeAssignment, "notes"), f.cleaned_data["notes"]))
+        AssignmentRejectForm, use=posts_to(lambda w: reverse("orange_team:assignment_reject", args=[w.submitted.pk]))
     ),
     FormCase(ReassignForm, use=lambda w, f: User.objects.filter(pk=f.cleaned_data["user_id"]).exists()),
     FormCase(
         SubmitScoreForm,
-        # The view stores a score only up to the check's max_score, itself a stored PositiveIntegerField
-        use=lambda w, f: (
-            f.cleaned_data["score"] is not None
-            and f.cleaned_data["score"] <= 2**31 - 1
-            and store((column(OrangeAssignment, "score"), f.cleaned_data["score"]))
-        ),
+        use=posts_to(lambda w: reverse("orange_team:assignment_submit", args=[w.pending.pk])),
     ),
     FormCase(
         PacketUploadForm,
         hints=lambda w: {"team_extras": st.sampled_from(("team,api_key\nTeam01,abc\n", "Team 3,x", ""))},
-        use=_packet_upload_use,
+        use=posts_to(lambda w: reverse("upload_packet")),
         not_idempotent="a file can't be posted back from cleaned data",
     ),
     FormCase(
@@ -580,10 +553,7 @@ CASES = [
     FormCase(
         PacketResendForm,
         examples=({"primary_email": long_email(255)},),
-        use=lambda w, f: store(
-            (column(SchoolInfo, "contact_email"), f.cleaned_data["primary_email"]),
-            (column(SchoolInfo, "secondary_email"), f.cleaned_data["secondary_email"]),
-        ),
+        use=posts_to(lambda w: reverse("packet_resend_team", args=[w.packet.pk, w.teams[0].pk])),
     ),
     FormCase(
         RegistrationForm,
@@ -650,7 +620,7 @@ CASES = [
             "attack_detected_at": _datetime_local(),
             "team": st.just(str(w.teams[0].pk)),
         },
-        use=_incident_use,
+        use=posts_to(lambda w: reverse("scoring:submit_incident_report")),
     ),
     FormCase(
         IncidentMatchForm,
@@ -674,14 +644,12 @@ CASES = [
     FormCase(
         InjectGradingForm,
         make=lambda w, draw: lambda data, files: InjectGradingForm(data, team_numbers=[t.team_number for t in w.teams]),
-        use=_inject_grading_use,
+        use=_inject_grading_through_the_view,
     ),
     FormCase(
         SaveInjectFeedbackForm,
-        use=lambda w, f: (
-            InjectScore.objects.filter(pk=f.cleaned_data["score_id"]).exists(),
-            store((column(InjectScore, "feedback"), f.cleaned_data["feedback"])),
-        ),
+        hints=lambda w: {"score_id": st.just(str(w.grade.pk))},
+        use=posts_to(lambda w: reverse("scoring:save_inject_feedback")),
     ),
     FormCase(
         ApproveInjectFeedbackForm, use=lambda w, f: InjectScore.objects.filter(pk=f.cleaned_data["score_id"]).exists()
@@ -714,9 +682,7 @@ CASES = [
         },
         use=lambda w, f: _create_ticket(w, f),
     ),
-    FormCase(
-        TicketCommentForm, use=lambda w, f: store((column(TicketComment, "comment_text"), f.cleaned_data["comment"]))
-    ),
+    FormCase(TicketCommentForm, use=posts_to(lambda w: reverse("ticket_comment", args=[w.claimed.ticket_number]))),
     FormCase(
         TicketReassignForm,
         use=lambda w, f: User.objects.filter(username=f.cleaned_data["new_assignee_username"]).exists(),
@@ -724,14 +690,11 @@ CASES = [
     FormCase(
         TicketResolveForm,
         examples=({"points_override": "2147483648"},),
-        use=lambda w, f: store(
-            (column(Ticket, "resolution_notes"), f.cleaned_data["resolution_notes"]),
-            (column(Ticket, "points_charged"), f.cleaned_data["points_override"] or 0),
-        ),
+        use=posts_to(lambda w: reverse("ticket_resolve", args=[w.claimed.ticket_number])),
     ),
     FormCase(
         TicketReopenForm,
-        use=lambda w, f: store((column(TicketHistory, "details"), {"reason": f.cleaned_data["reopen_reason"]})),
+        use=posts_to(lambda w: reverse("ticket_reopen", args=[w.resolved.ticket_number])),
     ),
     FormCase(
         TicketChangeCategoryForm,
