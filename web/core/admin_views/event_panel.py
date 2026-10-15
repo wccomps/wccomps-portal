@@ -1,4 +1,4 @@
-"""The competition page's event card: the event, its status, the next step and the steps, which are done and which
+"""The competition page's event panel: the event, its status, the next step and the steps, which are done and which
 is current, read from the stage (registration.stage owns the lifecycle; places says where each action is taken)."""
 
 from collections.abc import Callable
@@ -23,7 +23,7 @@ class StepState(StrEnum):
     UPCOMING = "upcoming"
 
 
-# Each state's word and badge variant on the event card
+# Each state's word and badge variant on the event panel
 STATE_SHOWN: dict[StepState, tuple[str, str]] = {
     StepState.DONE: ("Done", "success"),
     StepState.CURRENT: ("Now", "info"),
@@ -39,7 +39,7 @@ class EventStatus(StrEnum):
     NO_EVENT = "no_event"  # No event is open and the competition isn't running, whether or not teams have scores
 
 
-# Each status's word and badge variant on the event card
+# Each status's word and badge variant on the event panel
 STATUS_SHOWN: dict[EventStatus, tuple[str, str]] = {
     EventStatus.RUNNING: ("Running", "success"),
     EventStatus.STOPPED: ("Stopped", "warning"),
@@ -58,7 +58,7 @@ def _status(stage: EventStage) -> EventStatus:
 
 @dataclass(frozen=True)
 class EventFacts:
-    """The stage, and the counts and schedule the event card shows beyond it."""
+    """The stage, and the counts and schedule the event panel shows beyond it."""
 
     stage: EventStage
     schools: int
@@ -74,7 +74,7 @@ def _plural(count: int, one: str, many: str) -> str:
 
 
 def _import_detail(facts: EventFacts) -> str:
-    # With an event open, the event card's meta line counts the schools
+    # With an event open, the event panel's Schools row counts them
     if not facts.schools or facts.stage.event is not None:
         return ""
     schools = _plural(facts.schools, "school is", "schools are")
@@ -113,6 +113,10 @@ class ShownStep:
         return PLACES[self.action].heading
 
     @property
+    def page(self) -> str:
+        return PLACES[self.action].page
+
+    @property
     def label(self) -> str:
         return STATE_SHOWN[self.state][0]
 
@@ -127,7 +131,7 @@ class ShownStep:
 
 @dataclass(frozen=True)
 class EventPanel:
-    """What the competition page's event card shows, and the one section below it."""
+    """What the competition page's event panel shows, and the one section below it."""
 
     facts: EventFacts
     steps: list[ShownStep]
@@ -156,6 +160,11 @@ class EventPanel:
     @property
     def seasons_url(self) -> str:
         return reverse("registration_season_list")
+
+    @property
+    def action_page(self) -> str:
+        """The page the next action is taken on, when it isn't this one (whose controls need no link)."""
+        return PLACES[self.stage.next_action].page
 
     @property
     def action_url(self) -> str:
@@ -189,7 +198,7 @@ def event_panel(facts: EventFacts) -> EventPanel:
 
 
 def event_facts(stage: EventStage) -> EventFacts:
-    """The counts and schedule the event card shows, from a fixed number of queries."""
+    """The counts and schedule the event panel shows, from a fixed number of queries."""
     teams_without_copy = 0
     if stage.packets_sent:
         teams_without_copy = teams_without_delivered_copy(Packet.objects.sent().filter(event=stage.event)).count()

@@ -114,7 +114,7 @@ def test_competition_reset_passwords_keeps_the_csv_and_its_download(live_server,
     try:
         with patch("core.admin_views.competition.reset_team_credentials", return_value=("Csv-Pass-3!", "", True)):
             page.goto(live_server.url + reverse("admin_competition"))
-            page.locator("details.advanced summary").click()
+            page.get_by_role("button", name="Advanced: reset team passwords, Danger Zone").click()
             page.get_by_label("Team Numbers").fill("3")
             with page.expect_response(lambda r: r.url.endswith("/action/")):
                 page.get_by_role("button", name="Reset Passwords").click()

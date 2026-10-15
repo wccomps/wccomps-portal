@@ -4,33 +4,52 @@
     <c-slot name="title">
         Right now
     </c-slot>
-    <div class="grid-3">
-        <div class="live-number">
-            <div class="text-muted text-md">Open or claimed tickets</div>
-            <div class="live-number__value">{{ live.unresolved_tickets }}</div>
-            <a href="{% url 'ticket_list' %}">Tickets</a>
-        </div>
-        <div class="live-number">
-            <div class="text-muted text-md">Team accounts turned on at start</div>
-            <div class="live-number__value">
+    <c-table id="live_list" class="w-full" aria_label="Live numbers">
+        <c-slot name="headers">
+            <tr>
+                <c-table_header sortable="false">
+                    What
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Now
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Where
+                </c-table_header>
+            </tr>
+        </c-slot>
+        <tr class="row1">
+            <td>Open or claimed tickets</td>
+            <td>{{ live.unresolved_tickets }}</td>
+            <td>
+                <a href="{% url 'ticket_list' %}">Tickets</a>
+            </td>
+        </tr>
+        <tr class="row2">
+            <td>Team accounts turned on at start</td>
+            <td>
                 {% if live.accounts %}
                     {{ live.accounts.0 }} of {{ live.accounts.1 }}
                 {% else %}
                     Not recorded
                 {% endif %}
-            </div>
-            <a href="{% url 'admin_teams' %}">Teams</a>
-        </div>
-        <div class="live-number">
-            <div class="text-muted text-md">Scoring engine (Quotient) last synced</div>
-            <div class="live-number__value">
+            </td>
+            <td>
+                <a href="{% url 'admin_teams' %}">Teams</a>
+            </td>
+        </tr>
+        <tr class="row1">
+            <td>Scoring engine (Quotient) last synced</td>
+            <td>
                 {% if quotient_metadata %}
                     {{ quotient_metadata.last_synced|timesince }} ago
                 {% else %}
                     Never synced
                 {% endif %}
-            </div>
-            <a href="{{ scoring_engine_url }}">Scoring engine</a>
-        </div>
-    </div>
+            </td>
+            <td>
+                <a href="{{ scoring_engine_url }}">Scoring engine</a>
+            </td>
+        </tr>
+    </c-table>
 </c-module>

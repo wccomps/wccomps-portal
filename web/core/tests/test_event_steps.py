@@ -1,4 +1,4 @@
-"""The event card's steps: which is done and which is current, read from the stage and a few cheap counts."""
+"""The event panel's steps: which is done and which is current, read from the stage and a few cheap counts."""
 
 import itertools
 from datetime import date

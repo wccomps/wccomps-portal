@@ -1,7 +1,7 @@
 """Where each event action is taken, and the sections of the competition pages that links point at.
 
 registration.stage owns the lifecycle (which action is next, which is done); this module says where the portal
-takes each action and how it names it, for the competition page's event card, the guide and other pages' links.
+takes each action and how it names it, for the competition page's event panel, the guide and other pages' links.
 """
 
 from dataclasses import dataclass
@@ -49,28 +49,43 @@ class ActionPlace:
     target: str = ""
     # The section the competition page shows while this is the next action
     shows: Section | None = None
-    # Outside the normal run of an event: not one of the event card's steps
+    # Outside the normal run of an event: not one of the event panel's steps
     rare: bool = False
+    # The title of the other page it is taken on; empty when it is taken on the competition page
+    page: str = ""
 
 
 # In the order of an event (Action's order)
 PLACES: dict[Action, ActionPlace] = {
-    Action.IMPORT: ActionPlace("Import the school list", Kind.PAGE, "school_info_import"),
-    Action.SEND_PACKETS: ActionPlace("Send packets", Kind.PAGE, "packets_list"),
+    Action.IMPORT: ActionPlace(
+        "Import the school list", Kind.PAGE, "school_info_import", page="Import School Information"
+    ),
+    Action.SEND_PACKETS: ActionPlace("Send packets", Kind.PAGE, "packets_list", page="Packets"),
     Action.START: ActionPlace("Check readiness and start the competition", Kind.CONTROLS, shows=Section.READINESS),
     # While it runs Stop is the next-step button at the top of the competition page
     Action.STOP: ActionPlace("Stop the competition", Kind.PAGE, "admin_competition", shows=Section.LIVE),
     Action.FINISH: ActionPlace(
-        "Finish scoring and email scorecards", Kind.PAGE, "scoring:email_scorecards", shows=Section.CLOSE_OUT
+        "Finish scoring and email scorecards",
+        Kind.PAGE,
+        "scoring:email_scorecards",
+        shows=Section.CLOSE_OUT,
+        page="Email All Scorecards",
     ),
     Action.CLOSE_OUT: ActionPlace("Close Out Event", Kind.SECTION, Section.CLOSE_OUT, shows=Section.CLOSE_OUT),
-    Action.CANCEL: ActionPlace("Cancel event", Kind.PAGE, "admin_competition_danger", rare=True),
+    Action.CANCEL: ActionPlace(
+        "Cancel event", Kind.PAGE, "admin_competition_danger", rare=True, page="Competition Danger Zone"
+    ),
     Action.CLEAR: ActionPlace(
-        "Clear leftover data", Kind.PAGE, "admin_competition_danger", shows=Section.LEFTOVERS, rare=True
+        "Clear leftover data",
+        Kind.PAGE,
+        "admin_competition_danger",
+        shows=Section.LEFTOVERS,
+        rare=True,
+        page="Competition Danger Zone",
     ),
 }
 
-# The event card's steps, in order
+# The event panel's steps, in order
 STEPS: tuple[Action, ...] = tuple(action for action, place in PLACES.items() if not place.rare)
 
 

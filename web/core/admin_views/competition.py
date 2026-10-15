@@ -558,7 +558,7 @@ def _close_out_context(stage: EventStage) -> dict[str, object]:
     }
 
 
-# The data each competition page section needs beyond the event card
+# The data each competition page section needs beyond the event panel
 SECTION_CONTEXT: dict[Section, Callable[[EventStage], dict[str, object]]] = {
     Section.LIVE: _live_context,
     Section.CLOSE_OUT: _close_out_context,
@@ -650,7 +650,7 @@ def guide_partial(action: Action) -> str:
 
 @require_permission("admin", "gold_team")
 def admin_competition_guide(request: HttpRequest) -> HttpResponse:
-    """Running an event, action by action, in plain words: the event card's steps, then the rare actions."""
+    """Running an event, action by action, in plain words: the event panel's steps, then the rare actions."""
     rows = [
         {
             "key": action.value,
