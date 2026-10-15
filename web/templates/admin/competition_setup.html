@@ -224,7 +224,7 @@
     <script>
 document.addEventListener('alpine:init', () => {
     const actionUrl = '{% url "admin_competition_action" %}';
-    Alpine.data('competitionSetup', () => compose(competitionActionsMixin(actionUrl), readinessMixin(actionUrl), {
+    Alpine.data('competitionSetup', () => compose(actionMixin(actionUrl), readinessMixin(actionUrl), {
         maxMembers: {{ config.max_team_members }},
         startMessage: JSON.parse(document.getElementById('start-message-data').textContent),
         apps: [{% for app in config.controlled_applications %}'{{ app }}'{% if not forloop.last %}, {% endif %}{% endfor %}],

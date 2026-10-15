@@ -137,13 +137,12 @@
     </div>
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('teamDetail', () => compose(toastMixin(), {
-                loading: false,
+        Alpine.data('teamDetail', () => compose(actionMixin('{% url "admin_team_action" team.team_number %}'), {
                 newPassword: '',
                 membersUnlinked: false,
                 get membersShown() { return !this.membersUnlinked; },
 
-                async teamAction(e) {
+                teamAction(e) {
                     const action = e.currentTarget.dataset.action;
                     const actionDesc = {
                         'activate': 'activate this team',
@@ -154,89 +153,30 @@
                     if (!confirm(`Are you sure you want to ${actionDesc}?`)) {
                         return;
                     }
-
-                    this.loading = true;
-                    this.message = '';
                     this.newPassword = '';
-
-                    try {
-                        const result = await wcPost('{% url "admin_team_action" team.team_number %}', { action });
-                        if (result.success) {
-                            this.message = result.message;
-                            this.messageType = 'success';
-                            setTimeout(() => location.reload(), 1500);
-                        } else {
-                            this.message = result.error || result.message || 'Action failed';
-                            this.messageType = 'error';
-                        }
-                    } catch (e) {
-                        this.message = 'Request failed: ' + e.message;
-                        this.messageType = 'error';
-                    }
-
-                    this.loading = false;
-                    setTimeout(() => this.message = '', 5000);
+                    this.doAction(action);
                 },
 
                 async resetTeam() {
                     if (!confirm('Reset this team? This will:\n- Unlink all members\n- Generate a new Authentik password\n- Revoke all active sessions\n\nThis cannot be undone.')) {
                         return;
                     }
-
-                    this.loading = true;
-                    this.message = '';
                     this.newPassword = '';
-
-                    try {
-                        const result = await wcPost('{% url "admin_team_action" team.team_number %}', { action: 'reset' });
-                        if (result.success) {
-                            this.message = result.message;
-                            this.messageType = 'success';
-                            if (result.password) {
-                                this.newPassword = result.password;
-                            }
-                            // Update in place: a reload would wipe the new password before anyone copied it
-                            this.membersUnlinked = true;
-                        } else {
-                            this.message = result.error || result.message || 'Reset failed';
-                            this.messageType = 'error';
-                        }
-                    } catch (e) {
-                        this.message = 'Request failed: ' + e.message;
-                        this.messageType = 'error';
+                    // No reload: it would wipe the new password before anyone copied it
+                    const result = await this.doAction('reset', {}, { reload: false });
+                    if (result && result.success) {
+                        if (result.password) this.newPassword = result.password;
+                        this.membersUnlinked = true;
                     }
-
-                    this.loading = false;
-                    setTimeout(() => this.message = '', 10000);
                 },
 
-                async unlinkUser(e) {
+                unlinkUser(e) {
                     const discordId = e.currentTarget.dataset.discordId;
                     const username = e.currentTarget.dataset.username;
                     if (!confirm(`Unlink ${username} from this team?`)) {
                         return;
                     }
-
-                    this.loading = true;
-                    this.message = '';
-
-                    try {
-                        const result = await wcPost('{% url "admin_team_action" team.team_number %}', { action: 'unlink_user', discord_id: discordId });
-                        if (result.success) {
-                            this.message = result.message;
-                            this.messageType = 'success';
-                            setTimeout(() => location.reload(), 1000);
-                        } else {
-                            this.message = result.error || 'Unlink failed';
-                            this.messageType = 'error';
-                        }
-                    } catch (e) {
-                        this.message = 'Request failed: ' + e.message;
-                        this.messageType = 'error';
-                    }
-
-                    this.loading = false;
-                    setTimeout(() => this.message = '', 5000);
+                    this.doAction('unlink_user', { discord_id: discordId });
                 }
             }));
     });

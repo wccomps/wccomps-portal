@@ -96,14 +96,11 @@
     </div>
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('teamsAdmin', () => compose(toastMixin(), {
-                loading: false,
+        Alpine.data('teamsAdmin', () => compose(actionMixin('{% url "admin_teams_bulk_action" %}'), {
                 bulkTeamNumbers: '',
                 bulkActionType: 'activate',
 
-                setField(e) { this[e.target.dataset.field] = e.target.value; },
-
-                async bulkAction() {
+                bulkAction() {
                     if (!this.bulkTeamNumbers) {
                         this.message = 'Please enter team numbers';
                         this.messageType = 'error';
@@ -119,28 +116,7 @@
                     if (!confirm(`${actionDesc.charAt(0).toUpperCase() + actionDesc.slice(1)} teams ${this.bulkTeamNumbers}?`)) {
                         return;
                     }
-
-                    this.loading = true;
-
-                    try {
-                        const result = await wcPost('{% url "admin_teams_bulk_action" %}', { action: this.bulkActionType, team_numbers: this.bulkTeamNumbers });
-                        if (result.success) {
-                            this.message = result.message;
-                            this.messageType = 'success';
-                            setTimeout(() => location.reload(), 1500);
-                        } else {
-                            this.message = result.error || 'Action failed';
-                            this.messageType = 'error';
-                        }
-                    } catch (e) {
-                        this.message = 'Request failed: ' + e.message;
-                        this.messageType = 'error';
-                    }
-
-                    this.loading = false;
-                    if (this.messageType === 'success') {
-                        setTimeout(() => this.message = '', 5000);
-                    }
+                    this.doAction(this.bulkActionType, { team_numbers: this.bulkTeamNumbers });
                 }
             }));
     });

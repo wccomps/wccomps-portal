@@ -1,5 +1,5 @@
 {% extends "admin/base.html" %}
-{% load cotton static %}
+{% load cotton %}
 {% block title %}
     Competition Danger Zone - WCComps Portal
 {% endblock title %}
@@ -49,10 +49,9 @@
         {% endif %}
         <c-toast />
     </div>
-    <script src="{% static 'js/competition.js' %}"></script>
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('competitionDanger', () => compose(competitionActionsMixin('{% url "admin_competition_action" %}'), {
+        Alpine.data('competitionDanger', () => compose(actionMixin('{% url "admin_competition_action" %}'), {
             openEvent: '{{ stage.event.pk|default_if_none:"" }}',
 
             guardedClearLeftovers() { if (!this.loading) this.clearLeftovers(); },
