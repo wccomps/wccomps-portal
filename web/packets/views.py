@@ -1,7 +1,4 @@
-import csv
-import io
 import mimetypes
-import re
 from collections.abc import Iterator
 from typing import TypedDict, cast
 
@@ -114,34 +111,6 @@ def packets_list(request: HttpRequest) -> HttpResponse:
     return render(request, "packets/ops_packets_list.html", context)
 
 
-def _parse_team_extras_csv(csv_text: str) -> dict[str, dict[str, str]]:
-    """Parse per-team CSV data into a dict keyed by team number.
-
-    Expects a CSV with a 'team' column (e.g. 'Team01', 'Team 3', '5').
-    Returns dict like {"1": {"api_key": "sk-...", ...}, "2": {...}}.
-    """
-    reader = csv.DictReader(io.StringIO(csv_text.strip()))
-    try:
-        fieldnames = reader.fieldnames
-        if not fieldnames:
-            return {}
-        team_col = next((col for col in fieldnames if "team" in col.lower()), None)
-        if not team_col:
-            return {}
-        other_cols = [c for c in fieldnames if c != team_col]
-
-        result: dict[str, dict[str, str]] = {}
-        for row in reader:
-            # Extract team number: "Team01" -> 1, "Team 3" -> 3, "5" -> 5; no team has more than a few digits
-            digits = re.sub(r"[^\d]", "", row.get(team_col) or "")
-            if not digits or len(digits) > 9:
-                continue
-            result[str(int(digits))] = {col: (row.get(col) or "").strip() for col in other_cols}
-    except csv.Error:  # e.g. a bare carriage return inside an unquoted cell
-        return {}
-    return result
-
-
 @require_http_methods(["GET", "POST"])
 @require_permission("gold_team")
 def upload_packet(request: HttpRequest) -> HttpResponse:
@@ -158,20 +127,13 @@ def upload_packet(request: HttpRequest) -> HttpResponse:
         notes = form.cleaned_data["notes"]
         send_via_email = form.cleaned_data["send_via_email"]
         web_access_enabled = form.cleaned_data["web_access_enabled"]
-        team_extras_csv = form.cleaned_data["team_extras"]
+        team_extras = form.cleaned_data["team_extras"]
         uploaded_file = form.cleaned_data["packet_file"]
 
         file_data = uploaded_file.read()
         filename = upload_name(uploaded_file, "unnamed")
         # From the name, not the client's claimed type, which can be anything (and longer than the column)
         mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-
-        team_extras: dict[str, dict[str, str]] = {}
-        if team_extras_csv:
-            team_extras = _parse_team_extras_csv(team_extras_csv)
-            if not team_extras:
-                messages.error(request, "Could not parse per-team data. Ensure CSV has a 'team' column.")
-                return render(request, "packets/ops_upload_packet.html", form_context)
 
         Packet.objects.create(
             title=title,

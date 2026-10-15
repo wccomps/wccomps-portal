@@ -26,9 +26,8 @@ from django.test import Client
 from django.urls import reverse
 from hypothesis import given
 from hypothesis import strategies as st
-from packets.forms import PacketUploadForm
+from packets.forms import PacketUploadForm, parse_team_extras
 from packets.models import Packet
-from packets.views import _parse_team_extras_csv
 from registration.models import Event, Season, normalize_school_name
 from registration.services import ImportBlockedError, SchoolListRow, import_school_list
 from scoring.models import IncidentScreenshot, RedTeamScreenshot, validate_file_size
@@ -170,7 +169,7 @@ def test_school_list_csv_gives_rows_or_errors_for_any_bytes(content: bytes) -> N
             validate_email(row["secondary_email"])
 
 
-@given(rows=school_rows(), newline=st.sampled_from(("\r\n", "\n")), bom=st.booleans())
+@given(rows=school_rows(), newline=st.sampled_from(("\r\n", "\n", "\r")), bom=st.booleans())
 def test_school_list_csv_round_trips_valid_rows(rows: list[dict[str, str]], newline: str, bom: bool) -> None:
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=SCHOOL_HEADERS, lineterminator=newline)
@@ -231,7 +230,7 @@ def _write_school_csv(rows: list[dict[str, str]]) -> bytes:
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# A packet's per-team CSV (packets.views._parse_team_extras_csv)
+# A packet's per-team CSV (packets.forms.parse_team_extras)
 # ---------------------------------------------------------------------------------------------------------------
 
 
@@ -257,7 +256,12 @@ def test_team_extras_csv_gives_a_mapping_or_nothing_for_any_text(text: str) -> N
     cleaned = _form_text(text)
     if cleaned is None:
         return
-    result = _parse_team_extras_csv(cleaned)
+    try:
+        result = parse_team_extras(cleaned)
+    except ValidationError as refused:
+        assert refused.messages and all(refused.messages)
+        return
+    assert result
     for team, values in result.items():
         assert team.isdecimal() and str(int(team)) == team
         assert all(isinstance(k, str) and isinstance(v, str) for k, v in values.items())
@@ -272,17 +276,18 @@ def test_team_extras_csv_gives_a_mapping_or_nothing_for_any_text(text: str) -> N
         max_size=5,
     ),
     spelling=st.sampled_from(("Team{:02d}", "Team {}", "{}", "team-{}")),
+    newline=st.sampled_from(("\r\n", "\n", "\r")),
 )
-def test_team_extras_csv_round_trips_rows(teams: dict[int, list[str]], spelling: str) -> None:
+def test_team_extras_csv_round_trips_rows(teams: dict[int, list[str]], spelling: str, newline: str) -> None:
     out = io.StringIO()
-    writer = csv.writer(out)
+    writer = csv.writer(out, lineterminator=newline)
     writer.writerow(["team", "api_key", "password"])
     for number, values in teams.items():
         writer.writerow([spelling.format(number), *values])
     cleaned = _form_text(out.getvalue())
     if cleaned is None:  # the form refuses the text (a NUL), so the parser never sees it
         return
-    assert _parse_team_extras_csv(cleaned) == {str(n): {"api_key": v[0], "password": v[1]} for n, v in teams.items()}
+    assert parse_team_extras(cleaned) == {str(n): {"api_key": v[0], "password": v[1]} for n, v in teams.items()}
 
 
 @given(key=request_text(40), value=st.one_of(request_text(200), st.just(PROBE)))
@@ -482,7 +487,7 @@ PARSERS: dict[str, list[Callable[..., None]]] = {
     ],
     "web/core/views.py:_parse_school_info_csv": [test_school_list_upload_view_answers_any_file],
     "web/core/views.py:school_info_import": [test_school_list_upload_view_answers_any_file],
-    "web/packets/views.py:_parse_team_extras_csv": [
+    "web/packets/forms.py:parse_team_extras": [
         test_team_extras_csv_gives_a_mapping_or_nothing_for_any_text,
         test_team_extras_csv_round_trips_rows,
         test_team_extras_are_escaped_in_the_packet_email,

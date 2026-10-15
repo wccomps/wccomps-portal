@@ -20,9 +20,8 @@ from hypothesis import strategies as st
 from orange_team.forms import FollowUpForm, OrangeCheckForm, extract_criteria
 from orange_team.models import OrangeCheck
 from orange_team.services import update_check_criteria
-from packets.forms import PacketResendForm
+from packets.forms import PacketResendForm, parse_team_extras
 from packets.models import SENT_STATUSES, Packet
-from packets.views import _parse_team_extras_csv
 from registration.forms import EventForm, RegistrationForm
 from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, School, Season, TeamRegistration, normalize_school_name
 from registration.services import SchoolListRow, import_school_list
@@ -162,13 +161,21 @@ def test_a_school_list_file_gets_row_errors_not_a_parse_failure(content: bytes) 
 
 @given(text=request_text())
 @example(text='team\r""\r')
+@example(text="team,key\r1,x\r")
 @example(text="team,key\n" + "9" * 5000 + ",x\n")
 @example(text="team,key\n1\n")
-def test_a_packets_per_team_csv_parses_or_gives_nothing(text: str) -> None:
-    """The view says the per-team data can't be parsed when the parser gives nothing; it must not raise."""
-    for team, values in _parse_team_extras_csv(text).items():
+def test_a_packets_per_team_csv_parses_or_says_why_not(text: str) -> None:
+    """A carriage return alone ends a line, as in any CSV; text with no team rows is refused with a reason."""
+    try:
+        result = parse_team_extras(text)
+    except ValidationError as refused:
+        assert refused.messages
+        return
+    for team, values in result.items():
         assert team == str(int(team))
         assert all(isinstance(v, str) for v in values.values())
+    if text == "team,key\r1,x\r":
+        assert result == {"1": {"key": "x"}}
 
 
 @pytest.mark.django_db

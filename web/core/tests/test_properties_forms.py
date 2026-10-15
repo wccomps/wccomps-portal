@@ -38,7 +38,6 @@ from orange_team.forms import (
 from orange_team.models import OrangeAssignment, OrangeCheck, OrangeCheckCriterion, OrangeFollowUp
 from packets.forms import PacketActionForm, PacketResendForm, PacketUploadForm
 from packets.models import Packet
-from packets.views import _parse_team_extras_csv
 from registration.forms import (
     EventForm,
     NewEventFields,
@@ -346,7 +345,7 @@ def _packet_upload_use(w: World, form: Any) -> None:
     cd = form.cleaned_data
     uploaded = cd["packet_file"]
     file_data = uploaded.read()
-    team_extras = _parse_team_extras_csv(cd["team_extras"]) if cd["team_extras"] else {}
+    team_extras = cd["team_extras"]
     store(
         (column(Packet, "title"), cd["title"]),
         (column(Packet, "notes"), cd["notes"]),

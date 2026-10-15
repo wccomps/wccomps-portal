@@ -1,4 +1,38 @@
+import csv
+import io
+import re
+
 from django import forms
+
+TEAM_EXTRAS_HELP = "Give a 'team' column and a row per team, with its number (like Team01 or 3)."
+
+
+def parse_team_extras(csv_text: str) -> dict[str, dict[str, str]]:
+    """Per-team CSV data, keyed by team number: {"1": {"api_key": "sk-...", ...}, ...}.
+
+    The team column is the first whose header has 'team' in it; its cells give the number ("Team01" -> 1,
+    "Team 3" -> 3, "5" -> 5), and a row without a number of 1 to 9 digits is skipped. Raises ValidationError
+    saying what to fix when the text has no team column, no team rows, or isn't CSV.
+    """
+    # newline="": the csv module reads line ends itself, so CR alone, LF and CRLF all end a row
+    reader = csv.DictReader(io.StringIO(csv_text.strip(), newline=""))
+    result: dict[str, dict[str, str]] = {}
+    try:
+        team_col = next((col for col in reader.fieldnames or [] if "team" in col.lower()), None)
+        if team_col is None:
+            raise forms.ValidationError(f"The per-team data has no 'team' column. {TEAM_EXTRAS_HELP}")
+        other_cols = [c for c in reader.fieldnames or [] if c != team_col]
+        for row in reader:
+            digits = re.sub(r"[^0-9]", "", row.get(team_col) or "")
+            if digits and len(digits) <= 9:
+                result[str(int(digits))] = {col: (row.get(col) or "").strip() for col in other_cols}
+    except csv.Error as e:
+        raise forms.ValidationError(
+            f"The per-team data isn't CSV the upload can read (line {reader.line_num}). {TEAM_EXTRAS_HELP}"
+        ) from e
+    if not result:
+        raise forms.ValidationError(f"No row of the per-team data has a team number. {TEAM_EXTRAS_HELP}")
+    return result
 
 
 class PacketUploadForm(forms.Form):
@@ -8,6 +42,10 @@ class PacketUploadForm(forms.Form):
     web_access_enabled = forms.BooleanField(required=False)
     team_extras = forms.CharField(required=False)
     packet_file = forms.FileField()
+
+    def clean_team_extras(self) -> dict[str, dict[str, str]]:
+        text: str = self.cleaned_data["team_extras"]
+        return parse_team_extras(text) if text else {}
 
     def clean_packet_file(self) -> object:
         f = self.cleaned_data["packet_file"]

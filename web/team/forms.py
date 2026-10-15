@@ -202,7 +202,8 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
         content = csv_file.read().decode("utf-8-sig")
         csv_file.seek(0)
 
-        reader = csv.DictReader(io.StringIO(content))
+        # newline="": the csv module reads line ends itself, so CR alone, LF and CRLF all end a row
+        reader = csv.DictReader(io.StringIO(content, newline=""))
 
         required_headers = {"school_name", "contact_email"}
         optional_headers = {"secondary_email", "notes"}
@@ -255,8 +256,11 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
 
     except UnicodeDecodeError:
         errors.append("File encoding error. Please ensure the file is UTF-8 encoded.")
-    except csv.Error as e:
-        errors.append(f"The file isn't a CSV the import can read: {e}")
+    except csv.Error:
+        errors.append(
+            f"The file isn't a CSV the import can read (line {reader.line_num}): save it from your spreadsheet as CSV "
+            "and upload it again."
+        )
 
     return {"rows": rows, "errors": errors, "warnings": warnings}
 
