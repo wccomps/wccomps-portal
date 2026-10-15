@@ -22,7 +22,7 @@ from orange_team.services import update_check_criteria
 from packets.forms import PacketResendForm
 from packets.models import SENT_STATUSES, Packet
 from packets.views import _parse_team_extras_csv
-from registration.forms import RegistrationForm
+from registration.forms import EventForm, RegistrationForm
 from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, Season, TeamRegistration, normalize_school_name
 from registration.services import SchoolListRow, import_school_list
 from scoring.models import ScoringTemplate
@@ -281,3 +281,18 @@ def test_a_follow_up_the_form_accepts_has_a_storable_time(minutes: str) -> None:
     if form.is_valid():
         remind_at = timezone.now() + timedelta(minutes=form.cleaned_data["minutes"])
         assert remind_at > timezone.now()
+
+
+@pytest.mark.django_db
+@given(event_type=st.sampled_from([t for t, _ in Event.EVENT_TYPE_CHOICES]), number=st.sampled_from(("", "1", "2")))
+@example(event_type="qualifier", number="1")
+def test_an_event_the_form_accepts_saves(event_type: str, number: str, school_list_event: Event) -> None:
+    """Events are unique by season, type and number; the form doesn't have the season, the view sets it."""
+    season = school_list_event.season
+    Event.objects.filter(pk=school_list_event.pk).update(event_type="qualifier", event_number=1)
+    post = {"name": "Next", "event_type": event_type, "event_number": number, "date": "2026-11-07"}
+    post |= {"start_time": "09:00", "end_time": "17:00", "max_teams": "50"}
+    form = EventForm(post, instance=Event(season=season))
+    if form.is_valid():
+        with rolled_back():
+            form.save()
