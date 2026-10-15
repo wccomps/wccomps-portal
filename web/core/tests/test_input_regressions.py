@@ -190,3 +190,12 @@ def test_a_ticket_attachment_is_typed_from_its_bytes(
             inline_type = detect_inline_type(content)
             assert download["Content-Type"] == (inline_type or attachment.mime_type)
             assert download["Content-Disposition"].startswith("inline" if inline_type else "attachment")
+
+
+@pytest.mark.django_db
+@given(name=st.text(min_size=1, max_size=100).filter(lambda s: s.strip() and "\x00" not in s))
+@example(name="Category")
+def test_a_new_ticket_category_gets_an_id_past_the_seeded_ones(name: str) -> None:
+    """Migration 0009 seeds categories 1 to 6 with explicit ids, which doesn't move the id sequence on."""
+    with rolled_back():
+        assert TicketCategory.objects.create(display_name=name).pk > 6
