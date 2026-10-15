@@ -1,9 +1,5 @@
-"""The writer for every CSV the portal hands out, so user text in it can't run as a spreadsheet formula.
-
-A spreadsheet treats a cell that starts with =, +, -, @, a tab or a carriage return as a formula (CSV injection), so
-a team named =HYPERLINK(...) would run in whoever opens the export. Such text cells get a leading single quote (the
-OWASP rule); numbers are written as numbers. test_property_coverage fails on a CSV writer that isn't this one.
-"""
+"""Every CSV export's writer: a text cell that starts like a formula (=, +, -, @, tab, CR) gets a leading quote, the
+OWASP rule against CSV injection; test_property_coverage enforces its use."""
 
 import csv
 from collections.abc import Iterable

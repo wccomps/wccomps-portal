@@ -42,7 +42,7 @@ def test_an_exported_text_cell_never_starts_a_formula_and_reads_back_with_only_t
             assert read == ("'" + written if written.lstrip("'").startswith(FORMULA_STARTS) else written)
             assert unquote_cell(read) == written
         else:
-            assert read == str(written)  # numbers stay numbers, unquoted
+            assert read == str(written)  # numbers are written as numbers, with no ' in front
 
 
 @pytest.mark.django_db

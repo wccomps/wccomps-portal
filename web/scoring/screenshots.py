@@ -16,7 +16,7 @@ class ScreenshotError(ValueError):
 def read_screenshot(upload: UploadedFile[bytes]) -> tuple[bytes, str, str]:
     """Read an upload. Returns (data, filename, mime to store); raises ScreenshotError if too large.
 
-    The stored type is core.stored_files.stored_type's, never the client's claim.
+    The stored type is core.stored_files.stored_type's, not the content type the client sent.
     """
     name = clean_name(upload.name, "screenshot.png")
     too_big = f"{name} is larger than {MAX_SCREENSHOT_SIZE // (1024 * 1024)} MB"

@@ -1,8 +1,8 @@
 """Hypothesis strategies for what a user can send, and helpers for property tests that touch the database.
 
-Text from a request is already decoded (Django replaces bad UTF-8), so request strategies never hold lone
-surrogates; `any_str` adds them for functions that take a str from anywhere. Every strategy mixes the hostile
-cases into ordinary values, so a property sees both the inputs that pass validation and the ones that shouldn't.
+Text from a request is already decoded (Django replaces bad UTF-8), so the strategies never hold lone surrogates.
+Every input strategy (field_values and those it uses) mixes the hostile cases into ordinary values, so a property
+sees both the inputs that pass validation and the ones that shouldn't; valid_values leans to accepted values.
 """
 
 from collections.abc import Iterator
@@ -159,13 +159,17 @@ def decimal_text(max_digits: int | None = None, decimal_places: int | None = Non
 
 
 def long_email(n: int) -> str:
-    """A valid address n characters long: a 64-character local part and 63-character domain labels."""
+    """An address exactly n characters long (n >= 70) from valid parts: a 64-character local part and domain labels
+    of at most 63 characters. Django refuses an address longer than 320 characters as a whole."""
     local = "u" * 64
+    rest = n - len(local) - 1 - len("com")  # the domain's labels, each with the dot after it
     labels: list[str] = []
-    while len(local) + 1 + len(".".join([*labels, "com"])) < n:
-        room = n - (len(local) + 1 + len(".".join([*labels, "com"]))) - 1
-        labels.append("d" * max(1, min(63, room)))
-    return f"{local}@{'.'.join([*labels, 'com'])}"
+    while rest > 0:
+        # A label and its dot take 2 to 64 characters; never leave 1, which no label can fill
+        take = min(64, rest) if rest - min(64, rest) != 1 else 63
+        labels.append("d" * (take - 1))
+        rest -= take
+    return f"{local}@{''.join(label + '.' for label in labels)}com"
 
 
 def email_text() -> st.SearchStrategy[str]:

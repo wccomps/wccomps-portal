@@ -1,4 +1,5 @@
-"""Inputs the property tests found breaking the portal, each pinned with @example of its minimal failing input."""
+"""Inputs the property tests found breaking the portal outside its forms, each pinned with @example of a failing
+input. A form's failing POSTs are pinned in its FormCase examples (test_properties_forms.py)."""
 
 import csv
 import io

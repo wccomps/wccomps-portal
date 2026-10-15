@@ -261,7 +261,7 @@ Use = Callable[[World, Any], None]
 @dataclass(frozen=True)
 class FormCase:
     form: type[forms.BaseForm]
-    make: Make | None = None  # how the view builds it; default form(data, files)
+    make: Make | None = None  # default form(data, files)
     hints: Hints | None = None  # values that reach the valid branch
     use: Use | None = None  # what the view does with a valid form; must not raise
     # Why posting the cleaned data back doesn't apply, when it doesn't
@@ -755,7 +755,7 @@ def _check_own_constraints(form: Any) -> None:
 @pytest.mark.parametrize("case", CASES, ids=list(FORM_CASES))
 def test_any_post_validates_without_raising(case: FormCase, world: World) -> None:
     """Any POST (hostile values in every field, fields missing, posted twice, or extra) gets an answer from
-    is_valid(), never an exception, and the errors are messages the page can show."""
+    is_valid(), never an exception, and every error is a non-empty message."""
 
     @given(data=st.data())
     def run(data: st.DataObject) -> None:

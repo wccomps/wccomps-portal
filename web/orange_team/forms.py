@@ -6,7 +6,7 @@ from django.http import QueryDict
 
 from orange_team.models import MAX_POINTS, OrangeCheckCriterion
 
-# A check's window and a follow-up reminder: at most a week ahead
+# A check's time limit and a follow-up's delay: at most a week
 MAX_MINUTES = 7 * 24 * 60
 
 

@@ -3,10 +3,11 @@
 import pytest
 from django import forms
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.validators import validate_email
 from hypothesis import given
 from hypothesis import strategies as st
 
-from core.tests.strategies import field_values, valid_values
+from core.tests.strategies import field_values, long_email, valid_values
 
 FIELDS = (
     forms.CharField(max_length=20),
@@ -30,3 +31,11 @@ def test_every_field_strategy_draws_what_a_browser_posts(field: forms.Field, dat
     value = data.draw(valid_values(field) if valid else field_values(field))
     posted = value if isinstance(value, list) else [value]
     assert all(isinstance(v, (str, SimpleUploadedFile)) for v in posted), value
+
+
+@pytest.mark.parametrize("n", range(240, 331))
+def test_a_long_email_is_valid_and_exactly_as_long_as_asked(n: int) -> None:
+    email = long_email(n)
+    assert len(email) == n
+    if n <= 320:
+        validate_email(email)
