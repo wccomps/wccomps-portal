@@ -1,5 +1,5 @@
 {# Unified ticket list table - swappable content for htmx #}
-{% load cotton %}
+{% load cotton status_variants %}
 <div {{ attrs }}
      id="ticket-list-content"
      {% if is_ops %}x-data="ticketBulkSelect"{% endif %}
@@ -41,32 +41,10 @@
             </div>
         </div>
     {% endif %}
-    <c-table id="result_list" role="grid" aria_label="Tickets list">
-        <c-slot name="colgroup">
-            {# djlint:off H021 #}
-            {% if is_ops %}
-                <colgroup>
-                    <col style="width: 4%;">
-                    <col style="width: 9%;">
-                    <col style="width: 20%;">
-                    <col style="width: 9%;">
-                    <col style="width: 13%;">
-                    <col style="width: 8%;">
-                    <col style="width: 9%;">
-                    <col style="width: 10%;">
-                    <col style="width: 18%;">
-                </colgroup>
-            {% else %}
-                <colgroup>
-                    <col style="width: 12%;">
-                    <col style="width: 35%;">
-                    <col style="width: 20%;">
-                    <col style="width: 13%;">
-                    <col style="width: 20%;">
-                </colgroup>
-            {% endif %}
-            {# djlint:on #}
-        </c-slot>
+    <c-table id="result_list"
+             role="grid"
+             widths="{% if is_ops %}4% 9% 20% 9% 13% 8% 9% 10% 18%{% else %}12% 35% 20% 13% 20%{% endif %}"
+             aria_label="Tickets list">
         <c-slot name="headers">
             <tr role="row">
                 {% if is_ops %}
@@ -169,7 +147,7 @@
                 {% if is_ops %}<td role="gridcell">Team {{ item.ticket.team.team_number }}</td>{% endif %}
                 <td role="gridcell">{{ item.category_name }}</td>
                 <td role="gridcell">
-                    <c-badge variant="{{ item.ticket.status }}"
+                    <c-badge variant="{{ item.ticket.status|badge_variant:'ticket' }}"
                              aria_label="Status: {{ item.status_display }}">
                         {{ item.status_display }}
                     </c-badge>

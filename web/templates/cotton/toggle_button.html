@@ -1,0 +1,5 @@
+{# Toggle button: stays pressed (box-toggle--selected) while its choice is picked; the page's script toggles it #}
+{# Usage: <c-toggle_button data-box="web01">web01</c-toggle_button> #}
+{# Props: class (additional classes) #}
+<c-vars class />
+<button type="button" {{ attrs }} class="button box-toggle {{ class }}">{{ slot }}</button>

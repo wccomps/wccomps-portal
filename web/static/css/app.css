@@ -292,12 +292,17 @@ a.button:active {
 
 /* Borders */
 .border { border: 1px solid var(--hairline-color, #ddd); }
-.border-top { border-top: 1px solid var(--hairline-color, #ddd); }
-.border-bottom { border-bottom: 1px solid var(--hairline-color, #ddd); }
 .border-warning { border: 2px solid var(--warning-alert-border); }
 .border-success { border: 2px solid var(--success-fg); }
 .rounded { border-radius: 4px; }
 .whitespace-pre-wrap { white-space: pre-wrap; }
+/* A table row flagged as a problem */
+.row-danger td { background: var(--danger-bg); }
+/* A cell's action forms sit side by side */
+.field-actions form {
+    display: inline-block;
+    margin-right: 6px;
+}
 .max-h-300 { max-height: 300px; }
 .overflow-y-auto { overflow-y: auto; }
 .table-fixed { table-layout: fixed; }
@@ -338,15 +343,6 @@ a.button:active {
 /* Toast placement (c-toast) */
 .toast-position { position: fixed; bottom: 16px; right: 16px; z-index: 50; }
 
-/* Module header (colored bar at top of module) */
-.module-header {
-    background: var(--primary, #417690);
-    color: white;
-    margin: -15px -15px 15px -15px;
-    padding: 15px;
-}
-.module-header-success { background: var(--success-fg); }
-
 /* Secondary button */
 .btn-secondary {
     padding: 5px 10px;
@@ -358,33 +354,7 @@ a.button:active {
 }
 .btn-secondary:hover { background: var(--darkened-bg, #f8f8f8); }
 
-/* Team selector button */
-.team-btn {
-    padding: 8px 16px;
-    min-width: 60px;
-    font-weight: 500;
-    border: 1px solid var(--hairline-color, #ddd);
-    background: var(--body-bg, white);
-    color: var(--body-fg, #333);
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-.team-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-.team-btn--selected {
-    background: var(--error-fg, #dc3545);
-    border-color: var(--error-fg, #dc3545);
-    color: white;
-}
-.team-btn--selected:hover {
-    background: var(--error-fg, #c82333);
-    border-color: var(--error-fg, #c82333);
-}
-
-/* Box toggle buttons */
+/* Toggle button (c-toggle_button): pressed while its choice is picked */
 .box-toggle--selected {
     background: var(--primary, #417690);
     border-color: var(--primary, #417690);
@@ -417,11 +387,6 @@ a.button:active {
 }
 .results table {
     width: 100%;
-}
-/* A row's action forms sit side by side in its actions cell (c-table) */
-.results .field-actions form {
-    display: inline-block;
-    margin-right: 6px;
 }
 .action-box-warning {
     background: var(--warning-alert-bg);
@@ -586,50 +551,12 @@ a.button:active {
 .score-positive { color: var(--success-fg); }
 .score-negative { color: var(--error-fg, #dc3545); }
 .score-zero { color: var(--body-quiet-color, #6c757d); }
-.row-below-avg td { background: var(--danger-bg); }
 
-/* ============================================
-   SCORECARD
-   ============================================ */
-.neighbors {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 0.9em;
-    font-variant-numeric: tabular-nums;
-}
-.neighbor-current {
-    font-size: 1.5em;
-    font-weight: 600;
-}
-.scorecard-insights {
-    font-size: 0.85em;
-    color: var(--body-quiet-color, #666);
-    margin-top: 10px;
-}
-.scorecard-insights ul {
-    margin: 0;
-    padding-left: 20px;
-}
-.scorecard-insights li {
-    margin-bottom: 4px;
-}
-.row-total td {
-    border-top: 2px solid var(--hairline-color, #ddd);
-    background: var(--darkened-bg, #f8f8f8);
-}
 @media print {
     nav,
-    .sidebar,
     header,
     footer {
         display: none !important;
-    }
-    .scorecard {
-        font-size: 11pt;
-    }
-    .scorecard table {
-        page-break-inside: avoid;
     }
 }
 
@@ -651,26 +578,7 @@ a.button:active {
     display: block;
 }
 
-/* ============================================
-   FORM GRID COMPONENT
-   ============================================ */
-.form-grid label {
-    display: block;
-    margin-bottom: 5px;
-    font-weight: 600;
-    font-size: 14px;
-}
-.form-grid input[type="text"],
-.form-grid input[type="email"],
-.form-grid input[type="number"],
-.form-grid select,
-.form-grid textarea {
-    width: 100%;
-    padding: 8px;
-    border: 1px solid var(--hairline-color, #ddd);
-    border-radius: 4px;
-    font-size: 14px;
-}
+/* Required field labels (c-form_field) */
 label.required::after {
     content: " *";
     color: var(--error-fg, #ba2121);
@@ -691,121 +599,7 @@ label.required::after {
     color: var(--body-fg, #333);
 }
 
-/* ============================================
-   SCREENSHOT PREVIEW (for file uploads)
-   ============================================ */
-.screenshot-preview-img {
-    width: 100%;
-    height: 150px;
-    object-fit: cover;
-    border: 1px solid var(--hairline-color, #ddd);
-    border-radius: 4px;
-}
-.screenshot-preview-name {
-    padding: 5px;
-    font-size: 11px;
-    color: var(--body-quiet-color, #666);
-}
-
-/* ============================================
-   ATTACHMENT GRID (ticket attachments preview)
-   ============================================ */
-.attachment-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 15px;
-}
-.attachment-item {
-    border: 1px solid var(--hairline-color, #ddd);
-    border-radius: 4px;
-    overflow: hidden;
-    background: var(--darkened-bg, #f8f8f8);
-}
-.attachment-preview {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 120px;
-    background: var(--body-bg, #fff);
-    border-bottom: 1px solid var(--hairline-color, #ddd);
-}
-.attachment-thumbnail {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-}
-.attachment-pdf {
-    text-decoration: none;
-}
-.pdf-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 60px;
-    height: 60px;
-    background: #dc3545;
-    color: #fff;
-    font-weight: 700;
-    font-size: 14px;
-    border-radius: 4px;
-}
-.attachment-file {
-    background: var(--darkened-bg, #f8f8f8);
-}
-.file-icon {
-    font-size: 40px;
-}
-.attachment-info {
-    padding: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-.attachment-name {
-    font-weight: 600;
-    font-size: 13px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.attachment-meta {
-    font-size: 11px;
-    color: var(--body-quiet-color, #666);
-}
-
-/* ============================================
-   CLICK-TO-EDIT
-   ============================================ */
-.click-to-edit {
-    cursor: pointer;
-    padding: 4px 6px;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    white-space: pre-wrap;
-    font-size: 13px;
-    line-height: 1.4;
-    color: var(--body-quiet-color, #666);
-}
-.click-to-edit:hover {
-    border-color: var(--hairline-color, #ddd);
-    background: var(--darkened-bg, #f8f8f8);
-}
-td textarea[x-ref="editor"] {
-    width: 100%;
-    min-height: 60px;
-    padding: 4px 6px;
-    border: 1px solid var(--primary, #417690);
-    border-radius: 4px;
-    font-size: 13px;
-    line-height: 1.4;
-    resize: vertical;
-    font-family: inherit;
-}
-
 @media (prefers-reduced-motion: reduce) {
-    .team-btn:hover {
-        transform: none;
-    }
     .progress-bar__fill {
         transition: none;
     }
@@ -867,63 +661,6 @@ td textarea[x-ref="editor"] {
 .breadcrumbs .bc-separator {
     margin: 0 6px;
     color: var(--body-quiet-color, #999);
-}
-
-/* ============================================
-   RESPONSIVE HISTORY (ticket detail mobile)
-   ============================================ */
-.history-cards {
-    display: none;
-}
-
-@media (max-width: 767px) {
-    .history-table {
-        display: none;
-    }
-    .history-cards {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-    .history-card {
-        padding: 10px;
-        background: var(--darkened-bg, #f8f8f8);
-        border: 1px solid var(--hairline-color, #ddd);
-        border-radius: 4px;
-    }
-    .history-card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 13px;
-        font-weight: 600;
-        margin-bottom: 4px;
-    }
-    .history-card-time {
-        font-size: 12px;
-        color: var(--body-quiet-color, #666);
-        font-weight: 400;
-    }
-    .history-card-details {
-        font-size: 13px;
-        color: var(--body-quiet-color, #666);
-        margin-top: 4px;
-    }
-}
-
-/* ============================================
-   LEADERBOARD (Team/School Name Toggle)
-   ============================================ */
-#content-main.show-schools .team-name {
-    display: none;
-}
-#content-main:not(.show-schools) .school-name {
-    display: none;
-}
-table thead th .text span .team-name,
-table thead th .text span .school-name {
-    padding: 0;
-    display: inline;
 }
 
 /* ============================================
@@ -1348,7 +1085,7 @@ html[data-theme="dark"] .dark-mode-toggle .light-icon {
 @media (min-width: 768px) { .team-list { columns: 3; } }
 @media (min-width: 1024px) { .team-list { columns: 4; } }
 
-/* Ticket comments and playbook (ticket_detail.html, ops_ticket_detail_dynamic.html) */
+/* Ticket comments (ticketing/comments_list.html) and playbook (ticket_detail.html) */
 .comment-list {
     display: flex;
     flex-direction: column;
@@ -1403,4 +1140,239 @@ html[data-theme="dark"] .dark-mode-toggle .light-icon {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 15px;
+}
+
+/* Match incident: the two panels' title bars (scoring/match_incident.html) */
+.module-header {
+    background: var(--primary, #417690);
+    color: white;
+    margin: -15px -15px 15px -15px;
+    padding: 15px;
+}
+.module-header-success { background: var(--success-fg); }
+
+/* Red team finding: the team picker (scoring/submit_red_finding.html) */
+.team-btn {
+    padding: 8px 16px;
+    min-width: 60px;
+    font-weight: 500;
+    border: 1px solid var(--hairline-color, #ddd);
+    background: var(--body-bg, white);
+    color: var(--body-fg, #333);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.team-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.team-btn--selected {
+    background: var(--error-fg, #dc3545);
+    border-color: var(--error-fg, #dc3545);
+    color: white;
+}
+.team-btn--selected:hover {
+    background: var(--error-fg, #c82333);
+    border-color: var(--error-fg, #c82333);
+}
+@media (prefers-reduced-motion: reduce) {
+    .team-btn:hover {
+        transform: none;
+    }
+}
+
+/* Scorecard (scoring/_scorecard_body.html, scoring/scorecard.html) */
+.neighbors {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.9em;
+    font-variant-numeric: tabular-nums;
+}
+.neighbor-current {
+    font-size: 1.5em;
+    font-weight: 600;
+}
+.scorecard-insights {
+    font-size: 0.85em;
+    color: var(--body-quiet-color, #666);
+    margin-top: 10px;
+}
+.scorecard-insights ul {
+    margin: 0;
+    padding-left: 20px;
+}
+.scorecard-insights li {
+    margin-bottom: 4px;
+}
+.row-total td {
+    border-top: 2px solid var(--hairline-color, #ddd);
+    background: var(--darkened-bg, #f8f8f8);
+}
+@media print {
+    .scorecard {
+        font-size: 11pt;
+    }
+    .scorecard table {
+        page-break-inside: avoid;
+    }
+}
+
+/* Report forms: previews of the screenshots chosen (scoring/submit_incident.html, submit_red_finding.html) */
+.screenshot-preview-img {
+    width: 100%;
+    height: 150px;
+    object-fit: cover;
+    border: 1px solid var(--hairline-color, #ddd);
+    border-radius: 4px;
+}
+.screenshot-preview-name {
+    padding: 5px;
+    font-size: 11px;
+    color: var(--body-quiet-color, #666);
+}
+
+/* Ticket attachments (ticket_detail.html) */
+.attachment-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 15px;
+}
+.attachment-item {
+    border: 1px solid var(--hairline-color, #ddd);
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--darkened-bg, #f8f8f8);
+}
+.attachment-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 120px;
+    background: var(--body-bg, #fff);
+    border-bottom: 1px solid var(--hairline-color, #ddd);
+}
+.attachment-thumbnail {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+.attachment-pdf {
+    text-decoration: none;
+}
+.pdf-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 60px;
+    height: 60px;
+    background: #dc3545;
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    border-radius: 4px;
+}
+.attachment-file {
+    background: var(--darkened-bg, #f8f8f8);
+}
+.file-icon {
+    font-size: 40px;
+}
+.attachment-info {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.attachment-name {
+    font-weight: 600;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.attachment-meta {
+    font-size: 11px;
+    color: var(--body-quiet-color, #666);
+}
+
+/* Inject feedback edited in place (scoring/partials/inject_feedback_table.html) */
+.click-to-edit {
+    cursor: pointer;
+    padding: 4px 6px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--body-quiet-color, #666);
+}
+.click-to-edit:hover {
+    border-color: var(--hairline-color, #ddd);
+    background: var(--darkened-bg, #f8f8f8);
+}
+td textarea[x-ref="editor"] {
+    width: 100%;
+    min-height: 60px;
+    padding: 4px 6px;
+    border: 1px solid var(--primary, #417690);
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.4;
+    resize: vertical;
+    font-family: inherit;
+}
+
+/* Ticket history: a table on wide screens, cards on phones (ticketing/history_list.html) */
+.history-cards {
+    display: none;
+}
+
+@media (max-width: 767px) {
+    .history-table {
+        display: none;
+    }
+    .history-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .history-card {
+        padding: 10px;
+        background: var(--darkened-bg, #f8f8f8);
+        border: 1px solid var(--hairline-color, #ddd);
+        border-radius: 4px;
+    }
+    .history-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+    .history-card-time {
+        font-size: 12px;
+        color: var(--body-quiet-color, #666);
+        font-weight: 400;
+    }
+    .history-card-details {
+        font-size: 13px;
+        color: var(--body-quiet-color, #666);
+        margin-top: 4px;
+    }
+}
+
+/* Leaderboard: team or school names (scoring/leaderboard.html) */
+#content-main.show-schools .team-name {
+    display: none;
+}
+#content-main:not(.show-schools) .school-name {
+    display: none;
+}
+table thead th .text span .team-name,
+table thead th .text span .school-name {
+    padding: 0;
+    display: inline;
 }

@@ -28,9 +28,9 @@
                         {% if form.box_choices %}
                             <div class="d-flex flex-wrap gap-10">
                                 {% for value, label in form.box_choices %}
-                                    <c-button class="box-toggle" data-box="{{ value }}">
+                                    <c-toggle_button data-box="{{ value }}">
                                         {{ label }}
-                                    </c-button>
+                                    </c-toggle_button>
                                 {% endfor %}
                             </div>
                         {% endif %}

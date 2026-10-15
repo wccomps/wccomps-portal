@@ -8,21 +8,10 @@
           action="{% url 'scoring:inject_grades_bulk_approve' %}"
           x-ref="bulkForm">
         {% csrf_token %}
-        <c-table id="result_list" role="grid" aria_label="Inject grades list">
-            <c-slot name="colgroup">
-                {# djlint:off H021 #}
-                <colgroup>
-                    <col style="width: 40px;">
-                    <col style="width: 22%;">
-                    <col style="width: 15%;">
-                    <col style="width: 10%;">
-                    <col style="width: 8%;">
-                    <col style="width: 15%;">
-                    <col style="width: 10%;">
-                    <col style="width: 12%;">
-                </colgroup>
-                {# djlint:on #}
-            </c-slot>
+        <c-table id="result_list"
+                 role="grid"
+                 widths="40px 22% 15% 10% 8% 15% 10% 12%"
+                 aria_label="Inject grades list">
             <c-slot name="headers">
                 <tr role="row">
                     <th scope="col" class="action-checkbox-column">

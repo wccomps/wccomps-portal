@@ -9,26 +9,10 @@
           action="{% url 'scoring:bulk_approve_red_scores' %}"
           x-ref="bulkForm">
         {% csrf_token %}
-        <c-table id="result_list" role="grid" aria_label="Red team findings list">
-            <c-slot name="colgroup">
-                {# djlint:off H021 #}
-                <colgroup>
-                    {% if is_gold_team %}<col style="width: 40px;">{% endif %}
-                    <col style="width: 6%;">
-                    <col style="width: 23%;">
-                    <col style="width: 9%;">
-                    <col style="width: 9%;">
-                    <col style="width: 14%;">
-                    <col style="width: 11%;">
-                    <col style="width: 7%;">
-                    {% if is_gold_team %}
-                        <col style="width: 7%;">
-                    {% endif %}
-                    <col style="width: 7%;">
-                    <col style="width: 7%;">
-                </colgroup>
-                {# djlint:on #}
-            </c-slot>
+        <c-table id="result_list"
+                 role="grid"
+                 widths="{% if is_gold_team %}40px {% endif %}6% 23% 9% 9% 14% 11% 7% {% if is_gold_team %}7% {% endif %}7% 7%"
+                 aria_label="Red team findings list">
             <c-slot name="headers">
                 <tr role="row">
                     {% if is_gold_team %}
