@@ -1,7 +1,11 @@
 """Editing a check's rubric keeps grading done on the criteria that stay."""
 
+import json
+import re
+
 import pytest
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.http import QueryDict
 from django.test import Client
 
@@ -57,9 +61,106 @@ def test_extract_criteria_reads_rows_past_gaps():
     post.update(
         {"criterion_label_2": "B", "criterion_points_2": "3", "criterion_label_0": "A", "criterion_points_0": "1"}
     )
-    post.update({"criterion_label_5": "bad", "criterion_points_5": "-1"})
+    post.update({"criterion_label_5": "", "criterion_points_5": "", "criterion_id_5": ""})  # an empty row
 
     assert extract_criteria(post) == [
         {"id": None, "label": "A", "points": 1, "sort_order": 0},
         {"id": None, "label": "B", "points": 3, "sort_order": 1},
     ]
+
+
+def _results(check: OrangeCheck) -> dict[str, bool]:
+    assignment = OrangeAssignment.objects.get(orange_check=check)
+    return {r.criterion.label: r.met for r in assignment.results.select_related("criterion")}
+
+
+def test_an_out_of_range_criterion_refuses_the_save_and_keeps_the_rubric(gold_team_user, graded_check):
+    """A lead typing 30000 for 3000 must get an error, not lose the criterion and its grading."""
+    check, keep, drop = graded_check
+    client = Client()
+    client.force_login(gold_team_user)
+
+    response = client.post(
+        f"/orange-team/checks/{check.pk}/edit/",
+        {
+            "title": "Phones",
+            "criterion_id_0": keep.pk,
+            "criterion_label_0": "Polite",
+            "criterion_points_0": "5",
+            "criterion_id_1": drop.pk,
+            "criterion_label_1": "Fast",
+            "criterion_points_1": "30000",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Criterion 2 (Fast)" in response.content.decode()
+    drop.refresh_from_db()
+    assert drop.points == 3
+    assert _results(check) == {"Polite": True, "Fast": True}
+
+
+def _criteria_shown(response) -> list[dict[str, object]]:
+    match = re.search(r'<script id="criteria-data" type="application/json">(.*?)</script>', response.content.decode())
+    assert match, "the page shows no criteria"
+    return json.loads(match.group(1))
+
+
+def test_a_refused_edit_shows_what_was_posted_and_the_corrected_save_keeps_the_grading(gold_team_user, graded_check):
+    """The error page must carry the posted rubric and fields, so saving it again doesn't post an empty rubric."""
+    check, keep, drop = graded_check
+    client = Client()
+    client.force_login(gold_team_user)
+    rubric = {
+        "criterion_id_0": keep.pk,
+        "criterion_label_0": "Polite",
+        "criterion_points_0": "5",
+        "criterion_id_1": drop.pk,
+        "criterion_label_1": "Fast",
+        "criterion_points_1": "3",
+    }
+
+    refused = client.post(
+        f"/orange-team/checks/{check.pk}/edit/",
+        {"title": "Phones v2", "max_points": "20000", "time_limit_minutes": "45", **rubric},
+    )
+
+    assert refused.status_code == 200
+    page = refused.content.decode()
+    assert 'value="Phones v2"' in page and 'value="45"' in page
+    shown = _criteria_shown(refused)
+    assert [(c["id"], c["label"], str(c["points"])) for c in shown] == [
+        (str(keep.pk), "Polite", "5"),
+        (str(drop.pk), "Fast", "3"),
+    ]
+
+    # The browser posts back the rows the page shows, numbered as the page's script numbers them
+    reposted = {"title": "Phones v2", "max_points": "200", "time_limit_minutes": "45"}
+    for n, c in enumerate(shown):
+        reposted |= {
+            f"criterion_id_{n}": c["id"],
+            f"criterion_label_{n}": c["label"],
+            f"criterion_points_{n}": c["points"],
+        }
+    saved = client.post(f"/orange-team/checks/{check.pk}/edit/", reposted)
+
+    assert saved.status_code == 302
+    assert _results(check) == {"Polite": True, "Fast": True}
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"criterion_label_5": "bad", "criterion_points_5": "-1"},
+        {"criterion_label_5": "", "criterion_points_5": "3"},
+        {"criterion_label_5": "x" * 201, "criterion_points_5": "3"},
+        {"criterion_label_5": "ok", "criterion_points_5": "3", "criterion_id_5": "two"},
+    ],
+)
+def test_extract_criteria_refuses_a_row_it_cannot_keep(row):
+    post = QueryDict(mutable=True)
+    post.update({"criterion_label_0": "A", "criterion_points_0": "1", **row})
+
+    with pytest.raises(ValidationError) as refused:
+        extract_criteria(post)
+    assert refused.value.messages[0].startswith("Criterion 2 (")

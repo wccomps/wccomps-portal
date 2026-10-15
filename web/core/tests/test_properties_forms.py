@@ -28,6 +28,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from orange_team.forms import (
     AssignmentRejectForm,
+    CriterionForm,
     FollowUpForm,
     OrangeCheckForm,
     ReassignForm,
@@ -314,7 +315,11 @@ def _orange_check_use(w: World, form: Any) -> None:
         time_limit=timedelta(minutes=minutes) if minutes else None,
         created_by=w.user,
     )
-    for c in extract_criteria(form.data):
+    try:
+        criteria = extract_criteria(form.data)
+    except forms.ValidationError:
+        return  # the view refuses the save
+    for c in criteria:
         OrangeCheckCriterion.objects.create(
             orange_check=check, label=c["label"], points=c["points"], sort_order=c["sort_order"]
         )
@@ -402,6 +407,12 @@ def assert_bool(value: object) -> None:
 
 def assert_str(value: object) -> None:
     assert isinstance(value, str)
+
+
+def _save_criterion(form: Any) -> None:
+    criterion = form.save(commit=False)
+    criterion.orange_check = OrangeCheck.objects.create(title="Check", description="")
+    criterion.save()
 
 
 def _save_pool(w: World, form: Any) -> None:
@@ -543,6 +554,7 @@ CASES = [
             {"title": "T", "criterion_label_1": "L", "criterion_points_1": "99999999999"},
         ),
     ),
+    FormCase(CriterionForm, use=lambda w, f: _save_criterion(f)),
     FormCase(
         FollowUpForm,
         examples=({"assignment_id": "1", "minutes": "-1065460825"},),

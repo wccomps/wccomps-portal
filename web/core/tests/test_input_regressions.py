@@ -269,9 +269,13 @@ def test_a_criterion_row_extract_criteria_keeps_saves(
 ) -> None:
     post = QueryDict(mutable=True)
     post.update({"criterion_label_1": "Works", "criterion_points_1": points, "criterion_id_1": row_id})
+    try:
+        criteria = extract_criteria(post)
+    except ValidationError:
+        return  # the page shows the refusal and changes nothing
     with rolled_back():
         check = OrangeCheck.objects.create(title="Check", description="")
-        update_check_criteria(check, extract_criteria(post))
+        update_check_criteria(check, criteria)
 
 
 @pytest.mark.django_db
