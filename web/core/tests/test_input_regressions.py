@@ -10,6 +10,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from hypothesis import example, given
 from hypothesis import strategies as st
 from packets.forms import PacketResendForm
+from packets.views import _parse_team_extras_csv
 from registration.forms import RegistrationForm
 from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, Season, TeamRegistration, normalize_school_name
 from registration.services import SchoolListRow, import_school_list
@@ -115,3 +116,14 @@ def test_a_school_list_file_gets_row_errors_not_a_parse_failure(content: bytes) 
     assert not any(e.startswith("Error parsing CSV file") for e in parsed["errors"]), parsed["errors"]
     if content.startswith(b"\xef\xbb\xbfschool_name,contact_email\r\n"):
         assert parsed["warnings"] == []
+
+
+@given(text=request_text())
+@example(text='team\r""\r')
+@example(text="team,key\n" + "9" * 5000 + ",x\n")
+@example(text="team,key\n1\n")
+def test_a_packets_per_team_csv_parses_or_gives_nothing(text: str) -> None:
+    """The view says the per-team data can't be parsed when the parser gives nothing; it must not raise."""
+    for team, values in _parse_team_extras_csv(text).items():
+        assert team == str(int(team))
+        assert all(isinstance(v, str) for v in values.values())

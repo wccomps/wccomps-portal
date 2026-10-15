@@ -120,30 +120,24 @@ def _parse_team_extras_csv(csv_text: str) -> dict[str, dict[str, str]]:
     Returns dict like {"1": {"api_key": "sk-...", ...}, "2": {...}}.
     """
     reader = csv.DictReader(io.StringIO(csv_text.strip()))
-    if not reader.fieldnames:
+    try:
+        fieldnames = reader.fieldnames
+        if not fieldnames:
+            return {}
+        team_col = next((col for col in fieldnames if "team" in col.lower()), None)
+        if not team_col:
+            return {}
+        other_cols = [c for c in fieldnames if c != team_col]
+
+        result: dict[str, dict[str, str]] = {}
+        for row in reader:
+            # Extract team number: "Team01" -> 1, "Team 3" -> 3, "5" -> 5; no team has more than a few digits
+            digits = re.sub(r"[^\d]", "", row.get(team_col) or "")
+            if not digits or len(digits) > 9:
+                continue
+            result[str(int(digits))] = {col: (row.get(col) or "").strip() for col in other_cols}
+    except csv.Error:  # e.g. a bare carriage return inside an unquoted cell
         return {}
-
-    team_col = None
-    for col in reader.fieldnames:
-        if "team" in col.lower():
-            team_col = col
-            break
-
-    if not team_col:
-        return {}
-
-    result: dict[str, dict[str, str]] = {}
-    other_cols = [c for c in reader.fieldnames if c != team_col]
-
-    for row in reader:
-        raw_team = row.get(team_col, "").strip()
-        # Extract team number: "Team01" -> 1, "Team 3" -> 3, "5" -> 5
-        digits = re.sub(r"[^\d]", "", raw_team)
-        if not digits:
-            continue
-        team_num = str(int(digits))
-        result[team_num] = {col: row.get(col, "").strip() for col in other_cols}
-
     return result
 
 
