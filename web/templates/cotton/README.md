@@ -159,6 +159,9 @@ Data table with header and body slots.
 </c-table>
 ```
 
+Props: `id`, `class`, `aria_label`, `role` (e.g. `grid` for a table whose cells are `gridcell`s), `fixed_layout`.
+Slots: `colgroup` (column widths), `headers`.
+
 #### `<c-table_header>`
 Sortable table column header.
 ```django
@@ -184,6 +187,14 @@ Page navigation for paginated results.
 4. **Type Safety**: Components enforce correct prop usage
 5. **Documentation**: Self-documenting with clear prop names
 6. **Migration Path**: Easy to switch from Django Admin CSS to Bootstrap 5 by updating component internals
+
+## Styling Vocabulary
+
+A page styles itself only with classes these components render or style, the utilities between
+`BEGIN UTILITIES` and `END UTILITIES` in `static/css/app.css`, and Django admin's classes. Buttons and tables
+go through `<c-button>` and `<c-table>`. `core/tests/test_template_vocabulary.py` enforces this: a class the
+page invents, a class no stylesheet defines, a raw `<button>` or `<table>`, or an app.css rule nothing uses
+fails it, unless its exceptions list says why no component or utility fits.
 
 ## Migration Strategy
 

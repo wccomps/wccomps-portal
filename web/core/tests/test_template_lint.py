@@ -11,6 +11,52 @@ import pytest
 TEMPLATES_DIR = Path(__file__).parent.parent.parent / "templates"
 
 
+# The shared components: the portal's building blocks, whose classes make up the vocabulary pages style with
+# (test_template_vocabulary). Every .html in cotton/ is in this set or PAGE_PARTIALS.
+SHARED_COMPONENTS = {
+    # Enforced: have a RAW_HTML_PATTERNS entry
+    "action_box.html",
+    "alert.html",
+    "badge.html",
+    "button_row.html",
+    "detail_grid.html",
+    "empty_state.html",
+    "filter_field.html",
+    "form_field.html",
+    "info_box.html",
+    "module.html",
+    "progress_bar.html",
+    # Exempt: no unique detectable class
+    "button.html",
+    "detail_row.html",
+    "fieldset.html",
+    "filter_toolbar.html",
+    "form.html",
+    "image_grid.html",
+    "link.html",
+    "messages.html",
+    "nav.html",
+    "nav_item.html",
+    "page_header.html",
+    "pagination.html",
+    "score_value.html",
+    "table.html",
+    "table_header.html",
+    "toast.html",
+}
+# One page's markup kept in cotton/, not shared: test_template_vocabulary checks these like pages
+PAGE_PARTIALS = {
+    "inject_grades_table.html",
+    "inject_grading_content.html",
+    "red_findings_table.html",
+    "registration_review_table.html",
+    "review_incidents_table.html",
+    "review_orange_table.html",
+    "review_tickets_table.html",
+    "ticket_list_table.html",
+}
+
+
 def get_all_template_files() -> list[Path]:
     return list(TEMPLATES_DIR.rglob("*.html"))
 
@@ -57,47 +103,8 @@ class TestCottonComponentUsage:
 
     COTTON_DIR = TEMPLATES_DIR / "cotton"
 
-    # Every .html in cotton/ must be in this set.
-    REGISTERED_COMPONENTS = {
-        # Enforced — have a RAW_HTML_PATTERNS entry
-        "action_box.html",
-        "alert.html",
-        "badge.html",
-        "button_row.html",
-        "detail_grid.html",
-        "empty_state.html",
-        "filter_field.html",
-        "form_field.html",
-        "info_box.html",
-        "module.html",
-        "progress_bar.html",
-        # Exempt — no unique detectable class
-        "button.html",
-        "detail_row.html",
-        "fieldset.html",
-        "filter_toolbar.html",
-        "form.html",
-        "image_grid.html",
-        "link.html",
-        "messages.html",
-        "nav.html",
-        "nav_item.html",
-        "page_header.html",
-        "pagination.html",
-        "score_value.html",
-        "table.html",
-        "table_header.html",
-        "toast.html",
-        # Page-specific partials
-        "inject_grading_content.html",
-        "inject_grades_table.html",
-        "red_findings_table.html",
-        "registration_review_table.html",
-        "review_incidents_table.html",
-        "review_orange_table.html",
-        "review_tickets_table.html",
-        "ticket_list_table.html",
-    }
+    # Every .html in cotton/ must be in one of these sets.
+    REGISTERED_COMPONENTS = SHARED_COMPONENTS | PAGE_PARTIALS
 
     RAW_HTML_PATTERNS = [
         (r'<span[^>]*class="[^"]*\bbadge\b[^"]*"[^>]*>', "<c-badge>"),
