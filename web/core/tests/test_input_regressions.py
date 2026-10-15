@@ -9,17 +9,23 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
+from django.http import QueryDict
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.http import content_disposition_header
 from hypothesis import example, given
 from hypothesis import strategies as st
+from orange_team.forms import FollowUpForm, OrangeCheckForm, extract_criteria
+from orange_team.models import OrangeCheck
+from orange_team.services import update_check_criteria
 from packets.forms import PacketResendForm
 from packets.models import SENT_STATUSES, Packet
 from packets.views import _parse_team_extras_csv
 from registration.forms import RegistrationForm
 from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, Season, TeamRegistration, normalize_school_name
 from registration.services import SchoolListRow, import_school_list
+from scoring.models import ScoringTemplate
 from scoring.screenshots import detect_inline_type
 
 from core.admin_views.competition import TIMEZONE_CHOICES
@@ -224,3 +230,54 @@ def test_an_integer_a_form_stores_fits_its_column(value: str) -> None:
             if cleaned is not None:
                 low, high = INTEGER_COLUMN
                 assert low <= cleaned <= high, f"{form_class.__name__}.{name} accepts {cleaned}"
+
+
+@pytest.fixture
+def scoring_template(db: object) -> ScoringTemplate:
+    return ScoringTemplate.objects.first() or ScoringTemplate.objects.create()
+
+
+@pytest.mark.django_db
+@given(max_points=int_text(), minutes=int_text())
+@example(max_points="100000000", minutes="")
+@example(max_points="", minutes="1440000000000")
+def test_an_orange_check_the_form_accepts_saves(
+    max_points: str, minutes: str, scoring_template: ScoringTemplate
+) -> None:
+    """Saving a check recomputes ScoringTemplate.orange_max (numeric(10, 2)) from every check's points."""
+    form = OrangeCheckForm({"title": "Check", "max_points": max_points, "time_limit_minutes": minutes})
+    if not form.is_valid():
+        return
+    with rolled_back():
+        OrangeCheck.objects.create(
+            title="Check",
+            description="",
+            max_points=form.cleaned_data["max_points"] or 0,
+            time_limit=timedelta(minutes=m) if (m := form.cleaned_data["time_limit_minutes"]) else None,
+        )
+
+
+@pytest.mark.django_db
+@given(points=st.one_of(int_text(), st.sampled_from(("²", "³", "¹⁰", "٣"))), row_id=int_text())
+@example(points="²", row_id="")
+@example(points="1", row_id="²")
+@example(points="99999999999", row_id="")
+def test_a_criterion_row_extract_criteria_keeps_saves(
+    points: str, row_id: str, scoring_template: ScoringTemplate
+) -> None:
+    post = QueryDict(mutable=True)
+    post.update({"criterion_label_1": "Works", "criterion_points_1": points, "criterion_id_1": row_id})
+    with rolled_back():
+        check = OrangeCheck.objects.create(title="Check", description="")
+        update_check_criteria(check, extract_criteria(post))
+
+
+@pytest.mark.django_db
+@given(minutes=int_text())
+@example(minutes="-1065460825")
+@example(minutes="10000000000")
+def test_a_follow_up_the_form_accepts_has_a_storable_time(minutes: str) -> None:
+    form = FollowUpForm({"assignment_id": "1", "minutes": minutes})
+    if form.is_valid():
+        remind_at = timezone.now() + timedelta(minutes=form.cleaned_data["minutes"])
+        assert remind_at > timezone.now()

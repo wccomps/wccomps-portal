@@ -3,6 +3,7 @@ import json
 from datetime import timedelta
 from typing import cast
 
+from django import forms
 from django.contrib import messages
 from django.contrib.auth.models import User
 from django.db import transaction
@@ -36,6 +37,16 @@ from orange_team.services import (
     update_check_criteria,
 )
 from team.models import Team
+
+
+def _form_errors(form: forms.Form) -> str:
+    """The form's errors as one message, each naming its field."""
+    lines: list[str] = []
+    for name, errors in form.errors.items():
+        field = form.fields.get(name)
+        prefix = f"{field.label or name.replace('_', ' ').capitalize()}: " if field is not None else ""
+        lines += [f"{prefix}{error}" for error in errors]
+    return " ".join(lines)
 
 
 @require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
@@ -184,7 +195,7 @@ def check_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = OrangeCheckForm(request.POST)
         if not form.is_valid():
-            messages.error(request, "Title is required.")
+            messages.error(request, _form_errors(form))
             return render(request, "orange_team/check_form.html", {"mode": "create", "is_lead": True})
 
         title = form.cleaned_data["title"]
@@ -243,7 +254,7 @@ def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
     if request.method == "POST":
         form = OrangeCheckForm(request.POST)
         if not form.is_valid():
-            messages.error(request, "Title is required.")
+            messages.error(request, _form_errors(form))
             return render(
                 request,
                 "orange_team/check_form.html",
@@ -461,7 +472,7 @@ def followup_create(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)
     form = FollowUpForm(request.POST)
     if not form.is_valid():
-        messages.error(request, "Invalid form data.")
+        messages.error(request, _form_errors(form))
         return redirect("orange_team:dashboard")
 
     minutes = form.cleaned_data["minutes"]
