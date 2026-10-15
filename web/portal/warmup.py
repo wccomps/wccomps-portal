@@ -8,6 +8,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.template import engines
+from django.template.backends.django import DjangoTemplates
 from django.urls import get_resolver
 from django.utils.formats import get_format
 
@@ -21,8 +22,13 @@ def warm() -> None:
     get_resolver().reverse_dict  # noqa: B018 - reading it builds it
     get_format("DATE_FORMAT")
     engine = engines["django"]
+    assert isinstance(engine, DjangoTemplates)  # noqa: S101 - settings.TEMPLATES names it; narrows the type
+    # Each loader that searches directories names them (the cached loader asks the loaders it wraps)
     directories = dict.fromkeys(
-        Path(directory) for loader in engine.engine.template_loaders for directory in loader.get_dirs()
+        Path(directory)
+        for loader in engine.engine.template_loaders
+        if hasattr(loader, "get_dirs")
+        for directory in loader.get_dirs()
     )
     for directory in directories:
         for path in directory.rglob("*.html"):
