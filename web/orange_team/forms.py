@@ -4,11 +4,8 @@ from typing import TypedDict
 from django import forms
 from django.http import QueryDict
 
-from orange_team.models import OrangeCheckCriterion
+from orange_team.models import MAX_POINTS, OrangeCheckCriterion
 
-# A check's or criterion's points. Every check's maximum is summed into ScoringTemplate.orange_max, a
-# numeric(10, 2) column, so no single value may come near its limit.
-MAX_POINTS = 10_000
 # A check's window and a follow-up reminder: at most a week ahead
 MAX_MINUTES = 7 * 24 * 60
 
@@ -43,9 +40,7 @@ ROW_NUMBER = re.compile(r"[0-9]{1,9}")
 
 
 class CriterionForm(forms.ModelForm[OrangeCheckCriterion]):
-    """One rubric row of the check form."""
-
-    points = forms.IntegerField(min_value=1, max_value=MAX_POINTS)
+    """One rubric row of the check form; its limits are the model's."""
 
     class Meta:
         model = OrangeCheckCriterion

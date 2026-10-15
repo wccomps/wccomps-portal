@@ -16,7 +16,6 @@ from core.auth_utils import has_permission, require_permission
 from core.csv_export import csv_writer
 from orange_team.forms import (
     MAX_MINUTES,
-    MAX_POINTS,
     AssignmentRejectForm,
     CriterionInput,
     CriterionRow,
@@ -28,12 +27,14 @@ from orange_team.forms import (
     extract_criteria,
 )
 from orange_team.models import (
+    MAX_POINTS,
     OrangeAssignment,
     OrangeAssignmentResult,
     OrangeCheck,
     OrangeCheckCriterion,
     OrangeCheckIn,
     OrangeFollowUp,
+    scores_total_problem,
 )
 from orange_team.services import (
     assign_all_checks,
@@ -200,7 +201,7 @@ def auto_assign_all(request: HttpRequest) -> HttpResponse:
 def check_create(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return _check_page(request, None, _EMPTY_CHECK, [])
-    form, criteria = _posted_check(request)
+    form, criteria = _posted_check(request, None)
     if form is None or criteria is None:
         return _check_page(request, None, _posted_values(request), criterion_rows(request.POST))
 
@@ -238,7 +239,7 @@ def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
     if request.method != "POST":
         shown = [CriterionRow(id=str(c.pk), label=c.label, points=str(c.points)) for c in orange_check.criteria.all()]
         return _check_page(request, orange_check, _check_values(orange_check), shown)
-    form, criteria = _posted_check(request)
+    form, criteria = _posted_check(request, orange_check)
     if form is None or criteria is None:
         # Show what was posted, rubric included: a page without the rows would save an empty rubric next time
         return _check_page(request, orange_check, _posted_values(request), criterion_rows(request.POST))
@@ -256,7 +257,9 @@ def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
 _EMPTY_CHECK = {"title": "", "description": "", "scheduled_at": "", "time_limit_minutes": "", "max_points": "0"}
 
 
-def _posted_check(request: HttpRequest) -> tuple[OrangeCheckForm | None, list[CriterionInput] | None]:
+def _posted_check(
+    request: HttpRequest, orange_check: OrangeCheck | None
+) -> tuple[OrangeCheckForm | None, list[CriterionInput] | None]:
     """The check form and its rubric when both are valid; otherwise (None, None), with the problems as a message."""
     form = OrangeCheckForm(request.POST)
     problems = [] if form.is_valid() else [_form_errors(form)]
@@ -264,6 +267,10 @@ def _posted_check(request: HttpRequest) -> tuple[OrangeCheckForm | None, list[Cr
         criteria = extract_criteria(request.POST)
     except ValidationError as refused:
         problems += refused.messages
+    else:
+        worth = sum(c["points"] for c in criteria) if criteria else form.cleaned_data.get("max_points") or 0
+        if not problems and (problem := scores_total_problem(orange_check.pk if orange_check else None, worth)):
+            problems.append(problem)
     if problems:
         messages.error(request, " ".join(problems))
         return None, None
