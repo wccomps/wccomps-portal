@@ -4,6 +4,8 @@ import re
 
 from django import forms
 
+from team.models import SchoolInfo
+
 TEAM_EXTRAS_HELP = "Give a 'team' column and a row per team, with its number (like Team01 or 3)."
 
 
@@ -71,6 +73,8 @@ class PacketActionForm(forms.Form):
 
 
 class PacketResendForm(forms.Form):
-    # 254: SchoolInfo's email columns, where a resend saves them
-    primary_email = forms.EmailField(max_length=254)
-    secondary_email = forms.EmailField(max_length=254, required=False)
+    # A resend saves them as the team's contacts, so they stop at those columns' lengths
+    primary_email = forms.EmailField(max_length=SchoolInfo._meta.get_field("contact_email").max_length)
+    secondary_email = forms.EmailField(
+        max_length=SchoolInfo._meta.get_field("secondary_email").max_length, required=False
+    )

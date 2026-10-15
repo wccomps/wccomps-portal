@@ -23,7 +23,15 @@ from orange_team.services import update_check_criteria
 from packets.forms import PacketResendForm, parse_team_extras
 from packets.models import SENT_STATUSES, Packet
 from registration.forms import EventForm, RegistrationForm
-from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, School, Season, TeamRegistration, normalize_school_name
+from registration.models import (
+    SCHOOL_NAME_MAX_LENGTH,
+    Event,
+    RegistrationContact,
+    School,
+    Season,
+    TeamRegistration,
+    normalize_school_name,
+)
 from registration.services import SchoolListRow, import_school_list
 from scoring.models import ScoringTemplate
 from scoring.screenshots import detect_inline_type, read_screenshot
@@ -44,7 +52,7 @@ from core.tests.strategies import (
 )
 from core.utils import parse_datetime_to_utc
 from team.forms import parse_csv_file
-from team.models import Team
+from team.models import SchoolInfo, Team
 from ticketing.forms import TicketCategoryForm, TicketResolveForm
 from ticketing.models import Ticket, TicketAttachment, TicketCategory
 
@@ -61,27 +69,29 @@ def test_schedule_time_parses_to_utc_or_raises_value_error(when: str, tz: str) -
     assert result.utcoffset() == timedelta(0)
 
 
-# The 254-character column every stored email goes in (models.EmailField); a form's EmailField accepts up to 320
-EMAIL_COLUMN = 254
+# Each form email field with the column it is saved in
 STORED_EMAILS = (
-    (SchoolInfoEditForm, ("contact_email", "secondary_email")),
-    (PacketResendForm, ("primary_email", "secondary_email")),
-    (RegistrationForm, ("captain_email", "coach_email")),
+    (SchoolInfoEditForm, "contact_email", SchoolInfo, "contact_email"),
+    (SchoolInfoEditForm, "secondary_email", SchoolInfo, "secondary_email"),
+    (PacketResendForm, "primary_email", SchoolInfo, "contact_email"),
+    (PacketResendForm, "secondary_email", SchoolInfo, "secondary_email"),
+    (RegistrationForm, "captain_email", RegistrationContact, "email"),
+    (RegistrationForm, "coach_email", RegistrationContact, "email"),
 )
 
 
 @given(email=email_text())
-@example(email=long_email(EMAIL_COLUMN + 1))
+@example(email=long_email(255))
 def test_an_email_a_form_stores_fits_its_column(email: str) -> None:
-    for form_class, names in STORED_EMAILS:
-        for name in names:
-            try:
-                cleaned = form_class.base_fields[name].clean(email)
-            except ValidationError:
-                continue
-            assert len(cleaned) <= EMAIL_COLUMN, (
-                f"{form_class.__name__}.{name} accepts a {len(cleaned)}-character email"
-            )
+    """A form EmailField alone accepts 320 characters; the columns hold 254."""
+    for form_class, name, model, column_name in STORED_EMAILS:
+        column_length = model._meta.get_field(column_name).max_length
+        assert form_class.base_fields[name].max_length == column_length
+        try:
+            cleaned = form_class.base_fields[name].clean(email)
+        except ValidationError:
+            continue
+        assert len(cleaned) <= column_length, f"{form_class.__name__}.{name} accepts a {len(cleaned)}-character email"
 
 
 @pytest.mark.django_db

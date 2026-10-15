@@ -6,13 +6,16 @@ from registration.models import SCHOOL_NAME_MAX_LENGTH, Event
 from registration.services import NewEvent
 
 from core.authentik_utils import parse_team_range
+from team.models import SchoolInfo
 
 
 class SchoolInfoEditForm(forms.Form):
     school_name = forms.CharField(max_length=SCHOOL_NAME_MAX_LENGTH)
-    # 254: SchoolInfo's email columns (a form EmailField alone accepts 320 characters)
-    contact_email = forms.EmailField(max_length=254)
-    secondary_email = forms.EmailField(max_length=254, required=False)
+    # The columns' lengths: a form EmailField alone accepts 320 characters
+    contact_email = forms.EmailField(max_length=SchoolInfo._meta.get_field("contact_email").max_length)
+    secondary_email = forms.EmailField(
+        max_length=SchoolInfo._meta.get_field("secondary_email").max_length, required=False
+    )
     notes = forms.CharField(required=False)
 
 
