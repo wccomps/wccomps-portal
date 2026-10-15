@@ -14,6 +14,8 @@ WCComps Portal is a competition management platform for WRCCDC. Three components
 # From web/ pytest ignores testpaths and skips bot/tests.
 PYTHONPATH="$(pwd)/web:$(pwd)" DB_HOST=localhost DB_PORT=5433 DB_USER=test_user DB_PASSWORD=test_password DB_NAME=wccomps_test uv run pytest -m "not browser"
 # Browser tests (Playwright): same env, `-m browser -n0`
+# Hypothesis uses the "ci" profile (fixed examples, fast); HYPOTHESIS_PROFILE=deep searches far more inputs.
+# User-input property tests: web/core/tests/test_properties_*.py; test_property_coverage.py fails on any input without one.
 
 # Lint and type checks (CI runs these plus the tests on every PR)
 uv run ruff check . && uv run djlint web/templates --lint && DJANGO_SETTINGS_MODULE=portal.settings uv run mypy
