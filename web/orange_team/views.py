@@ -15,6 +15,7 @@ from django.utils import timezone
 from core.auth_utils import has_permission, require_permission
 from core.csv_export import csv_writer
 from orange_team.forms import (
+    MAX_FOLLOW_UP_MINUTES,
     MAX_MINUTES,
     AssignmentRejectForm,
     CriterionInput,
@@ -85,6 +86,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "assignments": my_assignments,
         "followups": followups,
         "is_lead": is_lead,
+        "max_follow_up_minutes": MAX_FOLLOW_UP_MINUTES,
     }
 
     return render(request, "orange_team/dashboard.html", context)

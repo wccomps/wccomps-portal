@@ -6,8 +6,10 @@ from django.http import QueryDict
 
 from orange_team.models import MAX_POINTS, OrangeCheckCriterion
 
-# A check's time limit and a follow-up's delay: at most a week
+# A check's time limit: at most a week
 MAX_MINUTES = 7 * 24 * 60
+# A follow-up reminder: at most a working day ahead
+MAX_FOLLOW_UP_MINUTES = 8 * 60
 
 
 class OrangeCheckForm(forms.Form):
@@ -20,7 +22,7 @@ class OrangeCheckForm(forms.Form):
 
 class FollowUpForm(forms.Form):
     assignment_id = forms.IntegerField()
-    minutes = forms.IntegerField(initial=15, min_value=1, max_value=MAX_MINUTES)
+    minutes = forms.IntegerField(initial=15, min_value=1, max_value=MAX_FOLLOW_UP_MINUTES)
     note = forms.CharField(required=False)
 
 
