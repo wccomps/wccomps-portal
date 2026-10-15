@@ -64,11 +64,32 @@ CSV_READERS = {"csv.reader", "csv.DictReader", "csv.Sniffer"}
 UPLOAD_NAMES = ("file", "upload", "attachment")
 
 
-def _parser_reasons(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+def import_aliases(tree: ast.AST) -> dict[str, str]:
+    """What each name a module imports refers to: {"c": "csv"} for import csv as c, {"R": "csv.DictReader"} for
+    from csv import DictReader as R."""
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return aliases
+
+
+def _resolved(func: ast.expr, aliases: dict[str, str]) -> str:
+    """The dotted name a call's function refers to, through the module's imports."""
+    called = ast.unparse(func)
+    head, _, rest = called.partition(".")
+    return f"{aliases[head]}.{rest}".rstrip(".") if head in aliases else called
+
+
+def _parser_reasons(function: ast.FunctionDef | ast.AsyncFunctionDef, aliases: dict[str, str]) -> set[str]:
     reasons: set[str] = set()
     for node in ast.walk(function):
         if isinstance(node, ast.Call):
-            called = ast.unparse(node.func)
+            called = _resolved(node.func, aliases)
             if called in CSV_READERS:
                 reasons.add(called)
             if (
@@ -76,7 +97,7 @@ def _parser_reasons(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str
                 and node.func.attr in {"read", "chunks", "readlines"}
                 and any(n in ast.unparse(node.func.value).lower() for n in UPLOAD_NAMES)
             ):
-                reasons.add(f"{called}()")
+                reasons.add(f"{ast.unparse(node.func)}()")
         elif isinstance(node, ast.Attribute) and node.attr == "FILES":
             reasons.add("request.FILES")
         elif (
@@ -98,8 +119,9 @@ def _functions(tree: ast.AST, prefix: str = "") -> Iterator[tuple[str, ast.Funct
 def parser_entry_points() -> dict[str, str]:
     found: dict[str, str] = {}
     for path, tree in python_trees().items():
+        aliases = import_aliases(tree)
         for name, function in _functions(tree):
-            if reasons := _parser_reasons(function):
+            if reasons := _parser_reasons(function, aliases):
                 found[f"{path}:{name}"] = ", ".join(sorted(reasons))
     return found
 
@@ -488,20 +510,24 @@ def _nodes_in_scope(node: ast.AST, scope: str = "<module>", prefix: str = "") ->
             yield from _nodes_in_scope(child, scope, prefix)
 
 
+def csv_writer_calls(tree: ast.AST) -> dict[str, str]:
+    """csv.writer/DictWriter calls in a module (however csv was imported), keyed by the function they are in."""
+    aliases = import_aliases(tree)
+    return {
+        scope: _resolved(node.func, aliases)
+        for scope, node in _nodes_in_scope(tree)
+        if isinstance(node, ast.Call) and _resolved(node.func, aliases) in RAW_CSV_WRITERS
+    }
+
+
 def raw_csv_writers() -> dict[str, str]:
-    """csv.writer/DictWriter calls or imports outside core.csv_export, keyed by the function they are in."""
-    found: dict[str, str] = {}
-    for path, tree in python_trees().items():
-        if path == CSV_EXPORT_MODULE:
-            continue
-        for scope, node in _nodes_in_scope(tree):
-            if isinstance(node, ast.Call) and ast.unparse(node.func) in RAW_CSV_WRITERS:
-                found[f"{path}:{scope}"] = ast.unparse(node.func)
-            elif isinstance(node, ast.ImportFrom) and node.module == "csv":
-                for alias in node.names:
-                    if alias.name in {"writer", "DictWriter"}:
-                        found[f"{path}:{scope}"] = f"from csv import {alias.name}"
-    return found
+    """csv.writer/DictWriter calls outside core.csv_export, keyed by path and function."""
+    return {
+        f"{path}:{scope}": call
+        for path, tree in python_trees().items()
+        if path != CSV_EXPORT_MODULE
+        for scope, call in csv_writer_calls(tree).items()
+    }
 
 
 def test_every_csv_writer_neutralises_formulas() -> None:
@@ -511,3 +537,21 @@ def test_every_csv_writer_neutralises_formulas() -> None:
         [Unused(key, call) for key, call in raw_csv_writers().items()],
         CSV_WRITER_EXCEPTIONS,
     )
+
+
+@pytest.mark.parametrize(
+    ("source", "parser", "writer"),
+    [
+        ("import csv\ndef f(t, o):\n    csv.DictReader(t)\n    csv.writer(o)\n", True, True),
+        ("from csv import DictReader\ndef f(t):\n    return DictReader(t)\n", True, False),
+        ("import csv as c\ndef f(t, o):\n    c.reader(t)\n    c.DictWriter(o, [])\n", True, True),
+        ("from csv import writer as w\ndef f(o):\n    w(o)\n", False, True),
+        ("def f(reader):\n    reader(1)\n", False, False),
+    ],
+)
+def test_the_guards_find_csv_readers_and_writers_however_they_are_imported(
+    source: str, parser: bool, writer: bool
+) -> None:
+    tree = ast.parse(source)
+    assert bool(_parser_reasons(tree.body[-1], import_aliases(tree))) is parser
+    assert bool(csv_writer_calls(tree)) is writer
