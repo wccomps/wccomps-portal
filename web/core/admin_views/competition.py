@@ -2,7 +2,8 @@ import csv
 import io
 import json
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from typing import cast
 
 from django.contrib.auth.models import User
@@ -24,11 +25,21 @@ from registration.services import (
     close_out_fixes,
     close_out_problem,
 )
-from registration.stage import Stage, event_stage
+from registration.stage import ACTIONS, Action, EventStage, event_stage
 from scoring.models import QuotientMetadataCache
 from scoring.quotient_sync import sync_quotient_metadata
 
-from core.admin_views.event_panel import RARE_ACTIONS, STEPS, action_url, event_facts, event_panel
+from core.admin_views.event_panel import event_facts, event_panel
+from core.admin_views.places import (
+    CONTROLS,
+    PLACES,
+    Section,
+    SetupSection,
+    action_url,
+    ids,
+    section_partial,
+    setup_url,
+)
 from core.admin_views.readiness import action_readiness_check, action_readiness_fix
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import reset_team_credentials
@@ -46,7 +57,7 @@ from core.forms import (
     TypedConfirmForm,
 )
 from core.models import AuditLog, CompetitionConfig, DiscordTask
-from core.services.competition import CompetitionRunResult, run_competition
+from core.services.competition import CompetitionRunResult, last_start_accounts, run_competition
 from core.utils import ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
 from team.models import active_team_numbers, team_username
@@ -453,7 +464,7 @@ def _action_close_out_check(request: HttpRequest, config: CompetitionConfig, aut
     return JsonResponse({"success": True, "problem": problem, "fixes": fixes, "warnings": warnings})
 
 
-# The panel and the Close Out section show it when the on-demand check fails
+# The Before you close out section shows it when the on-demand check fails
 CLOSE_OUT_CHECK_FAILED = (
     "Couldn't check unfinished work. Closing out still works: check grading, tickets and the scorecard emails by hand."
 )
@@ -507,45 +518,79 @@ _COMPETITION_ACTION_HANDLERS = {
 }
 
 
-@require_permission("admin", "gold_team")
-def admin_competition(request: HttpRequest) -> HttpResponse:
+@dataclass(frozen=True)
+class LiveNumbers:
+    """What the competition page shows while the competition runs: a few counts from a fixed number of queries."""
 
-    from team.models import DiscordLink, Team
+    unresolved_tickets: int  # Open or claimed
+    # Team accounts the last start turned on, and how many it tried; None when no start is recorded
+    accounts: tuple[int, int] | None
 
-    config = CompetitionConfig.get_config()
-    stage = event_stage()
 
-    active_teams = Team.objects.filter(is_active=True).count()
-    total_teams = Team.objects.count()
-    linked_users = DiscordLink.objects.filter(is_active=True, team__isnull=False).count()
+def _live_numbers() -> LiveNumbers:
+    from ticketing.models import Ticket
 
-    quotient_metadata = QuotientMetadataCache.objects.first()
+    unresolved = Ticket.objects.filter(status__in=(Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED)).count()
+    return LiveNumbers(unresolved, last_start_accounts())
 
-    close_out_refusal = close_out_problem(stage, check_schools=False)
+
+def _live_context(stage: EventStage) -> dict[str, object]:
+    return {
+        "live": _live_numbers(),
+        "quotient_metadata": QuotientMetadataCache.objects.first(),
+        "scoring_engine_url": setup_url(SetupSection.SCORING_ENGINE),
+    }
+
+
+def _close_out_context(stage: EventStage) -> dict[str, object]:
+    refusal = close_out_problem(stage, check_schools=False)
     active_season = Season.objects.active()
-    context = {
-        "panel": event_panel(event_facts(stage)),
+    return {
         "close_out_check_failed": CLOSE_OUT_CHECK_FAILED,
         # Close Out records scores with no event in the active season; the Seasons page makes one active
         "needs_active_season": stage.event is None and active_season is None,
         "active_season": active_season,
         "open_event": stage.event,
-        "can_close_out": not close_out_refusal,
-        # Shown where the module offers no button for a reason the operator can act on
-        "close_out_refusal": close_out_refusal if stage.stage in (Stage.READY, Stage.PLAYED, Stage.UNRECORDED) else "",
+        "can_close_out": not refusal,
+        # Shown when the section offers no button
+        "close_out_refusal": refusal,
         "event_type_choices": Event.EVENT_TYPE_CHOICES,
-        "config": config,
-        "active_teams": active_teams,
-        "total_teams": total_teams,
-        "linked_users": linked_users,
-        "timezone_choices": TIMEZONE_CHOICES,
-        "quotient_metadata": quotient_metadata,
-        "start_message_max_length": StartMessageForm.MAX_LENGTH,
-        "show_ops_nav": True,
-        "nav_active": "ops_admin",
     }
 
+
+# The data each competition page section needs beyond the event card
+SECTION_CONTEXT: dict[Section, Callable[[EventStage], dict[str, object]]] = {
+    Section.LIVE: _live_context,
+    Section.CLOSE_OUT: _close_out_context,
+}
+
+
+@require_permission("admin", "gold_team")
+def admin_competition(request: HttpRequest) -> HttpResponse:
+    stage = event_stage()
+    panel = event_panel(event_facts(stage))
+    context: dict[str, object] = {"panel": panel, "controls_id": CONTROLS}
+    if (section := panel.section) is not None:
+        context["section_partial"] = section_partial(section)
+        if section in SECTION_CONTEXT:
+            context |= SECTION_CONTEXT[section](stage)
     return render(request, "admin/competition.html", context)
+
+
+@require_permission("admin", "gold_team")
+def admin_competition_setup(request: HttpRequest) -> HttpResponse:
+    """Saves go through admin_competition_action, like the competition page's."""
+    return render(
+        request,
+        "admin/competition_setup.html",
+        {
+            "config": CompetitionConfig.get_config(),
+            "timezone_choices": TIMEZONE_CHOICES,
+            "quotient_metadata": QuotientMetadataCache.objects.first(),
+            "start_message_max_length": StartMessageForm.MAX_LENGTH,
+            "sections": ids(SetupSection),
+        },
+    )
 
 
 def admin_competition_apps(request: HttpRequest) -> JsonResponse:
@@ -594,27 +639,27 @@ def admin_competition_danger(request: HttpRequest) -> HttpResponse:
             "stage": stage,
             "leftovers": _wiped_summary(competition_data_counts()) if can_clear else "",
             "can_cancel": not cancel_event_problem(stage),
-            "show_ops_nav": True,
-            "nav_active": "ops_admin",
         },
     )
 
 
-def guide_partial(key: str) -> str:
-    """The guide's section of prose for a step or a rare action, named after its key."""
-    return f"admin/guide/{key}.html"
+def guide_partial(action: Action) -> str:
+    """The guide's section of prose for an action, named after it."""
+    return f"admin/guide/{action}.html"
 
 
 @require_permission("admin", "gold_team")
 def admin_competition_guide(request: HttpRequest) -> HttpResponse:
-    """Running an event, step by step, in plain words: the panel's steps, each with its own section of prose."""
-    rare = [
-        {"title": title, "key": action.value, "url": action_url(action), "partial": guide_partial(action)}
-        for action, title in RARE_ACTIONS
+    """Running an event, action by action, in plain words: the event card's steps, then the rare actions."""
+    rows = [
+        {
+            "key": action.value,
+            "heading": place.heading,
+            "rare": place.rare,
+            "url": action_url(action),
+            "link_label": ACTIONS[action].link_label,
+            "partial": guide_partial(action),
+        }
+        for action, place in PLACES.items()
     ]
-    steps = [{"step": step, "partial": guide_partial(step.key)} for step in STEPS]
-    return render(
-        request,
-        "admin/competition_guide.html",
-        {"steps": steps, "rare": rare, "show_ops_nav": True, "nav_active": "ops_admin"},
-    )
+    return render(request, "admin/competition_guide.html", {"rows": rows})

@@ -1,4 +1,4 @@
-"""Pre-competition readiness checks and fix handlers for the competition page."""
+"""Pre-competition readiness checks and fix handlers for the competition and Competition setup pages."""
 
 import json
 import logging
@@ -10,6 +10,7 @@ from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.urls import reverse
 from django.utils import timezone
 
+from core.admin_views.places import SetupSection, setup_url
 from core.authentik_manager import AuthentikManager
 from core.forms import ReadinessFixForm
 from core.models import CompetitionConfig
@@ -113,12 +114,21 @@ def _check_team_group_membership() -> CheckResult:
     return ("pass", "All accounts in correct groups", None)
 
 
+def _setup_link(section: SetupSection, label: str) -> dict[str, str]:
+    """A link to the Competition setup section where a failed check is fixed."""
+    return {"type": "link", "url": setup_url(section), "label": label}
+
+
+def _configure_apps_link() -> dict[str, str]:
+    return _setup_link(SetupSection.TEAM_ACCESS, "Configure Apps")
+
+
 def _check_blueteam_bindings() -> CheckResult:
     """Verify BlueTeam group bindings exist on all controlled apps."""
     config = CompetitionConfig.get_config()
     apps = config.controlled_applications
     if not apps:
-        return ("warn", "No controlled apps configured", {"type": "link", "url": "#setup", "label": "Configure Apps"})
+        return ("warn", "No controlled apps configured", _configure_apps_link())
 
     mgr = AuthentikManager()
     missing: list[str] = []
@@ -135,7 +145,7 @@ def _check_blueteam_bindings() -> CheckResult:
         return (
             "fail",
             f"Missing bindings: {', '.join(missing)}",
-            {"type": "link", "url": "#setup", "label": "Configure Apps"},
+            _configure_apps_link(),
         )
     return ("pass", f"Bindings exist for all {len(apps)} apps", None)
 
@@ -185,7 +195,11 @@ def _check_packets_distributed() -> CheckResult:
 def _check_start_message() -> CheckResult:
     """The start message (default VM credentials) goes to every team when the competition starts."""
     if not CompetitionConfig.get_config().start_message.strip():
-        return ("warn", "No start message: teams get no message when the competition starts", None)
+        return (
+            "warn",
+            "No start message: teams get no message when the competition starts",
+            _setup_link(SetupSection.START_MESSAGE, "Set Start Message"),
+        )
     return ("pass", "Start message set", None)
 
 
@@ -276,10 +290,10 @@ def _check_quotient_api() -> CheckResult:
     try:
         infra = client.get_infrastructure(force_refresh=True)
     except Exception as e:
-        return ("fail", f"API error: {e}", None)
+        return ("fail", f"API error: {e}", _setup_link(SetupSection.SCORING_ENGINE, "Scoring Engine"))
 
     if not infra:
-        return ("fail", "Could not reach Quotient API", None)
+        return ("fail", "Could not reach Quotient API", _setup_link(SetupSection.SCORING_ENGINE, "Scoring Engine"))
     return ("pass", f"Connected — {len(infra.boxes)} boxes, {infra.team_count} teams", None)
 
 

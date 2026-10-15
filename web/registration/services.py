@@ -407,11 +407,8 @@ def close_out_problem(stage: EventStage, *, check_schools: bool = True) -> str:
     if stage.running:
         return _running_refusal(stage)
     if stage.stage == Stage.READY:
-        return (
-            f"No team has scores yet, so there is nothing to close out for {stage.event}. "
-            f"{stage.instruction(Action.CANCEL)}"
-        )
-    if stage.stage not in (Stage.PLAYED, Stage.UNRECORDED):
+        return f"Nothing to close out for {stage.event}. {stage.alternative}"
+    if not stage.played:
         return f"Nothing to close out. {stage.status} {stage.next_step}"
     if stage.event is None and not Season.objects.filter(is_active=True).exists():
         return (
@@ -423,7 +420,7 @@ def close_out_problem(stage: EventStage, *, check_schools: bool = True) -> str:
 
 def close_out_fixes(stage: EventStage) -> list[TeamFix]:
     """The teams close_out_problem names as keeping Close Out from keeping their scores, and how each is fixed."""
-    return _unfreezable(stage.event)[1] if stage.stage in (Stage.PLAYED, Stage.UNRECORDED) else []
+    return _unfreezable(stage.event)[1] if stage.played else []
 
 
 def _refuse_a_stale_target(target: Event | NewEvent, stage: EventStage) -> None:

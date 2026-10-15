@@ -62,7 +62,7 @@ class TestAdminCompetitionView:
         client.force_login(user)
         response = client.get(reverse("admin_competition"))
         assert response.status_code == 200
-        assert b"Competition Management" in response.content or b"Competition Status" in response.content
+        assert b'id="event-panel"' in response.content
 
 
 class TestAdminTeamsView:

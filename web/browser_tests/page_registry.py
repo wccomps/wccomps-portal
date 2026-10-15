@@ -58,6 +58,11 @@ PAGES: list[PageDef] = [
         denied_roles=["blue_team", "red_team", "ticketing_support", "unauthenticated"],
     ),
     PageDef(
+        url_name="admin_competition_setup",
+        allowed_roles=["gold_team", "admin"],
+        denied_roles=["blue_team", "red_team", "ticketing_support", "unauthenticated"],
+    ),
+    PageDef(
         url_name="admin_competition_guide",
         allowed_roles=["gold_team", "admin"],
         denied_roles=["blue_team", "red_team", "ticketing_support", "unauthenticated"],

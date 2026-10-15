@@ -125,17 +125,31 @@ class EventStage:
     scorecards_emailed: bool
 
     @property
+    def played(self) -> bool:
+        """Whether teams have scores: the event was played, or scores came in with no event open."""
+        return self.stage in (Stage.PLAYED, Stage.UNRECORDED)
+
+    @property
     def status(self) -> str:
         sentence = STAGE_SENTENCES[self.stage].format(event=self.event)
         return f"{sentence} The competition is running." if self.running else sentence
 
     def done(self, action: Action) -> bool:
-        """Whether the stage's action is done; only the actions a stage moves past have a record of it."""
-        if action == Action.SEND_PACKETS:
-            return self.packets_sent
-        if action == Action.FINISH:
-            return self.scorecards_emailed
-        return False
+        """Whether the action is done for the live event. Close Out, Cancel and Clear leave no live event to ask
+        about, so they are never done."""
+        match action:
+            case Action.IMPORT:
+                return self.event is not None
+            case Action.SEND_PACKETS:
+                return self.packets_sent
+            case Action.START:
+                return self.running or self.played
+            case Action.STOP:
+                return not self.running and self.played
+            case Action.FINISH:
+                return self.scorecards_emailed
+            case Action.CLOSE_OUT | Action.CANCEL | Action.CLEAR:
+                return False
 
     @property
     def next_action(self) -> Action:
@@ -152,12 +166,24 @@ class EventStage:
         return self.instruction(self.next_action)
 
     @property
+    def actions_after_next(self) -> tuple[Action, ...]:
+        """The stage's actions after the next one; none while the competition runs."""
+        if self.running:
+            return ()
+        actions = STAGE_ACTIONS[self.stage]
+        return actions[actions.index(self.next_action) + 1 :]
+
+    @property
+    def alternative(self) -> str:
+        """Before any team has scores, how to call the event off."""
+        if self.running or self.stage != Stage.READY:
+            return ""
+        return f"No team has scores yet. {self.instruction(Action.CANCEL)}"
+
+    @property
     def steps_left(self) -> str:
         """The next step and the stage's actions after it."""
-        if self.running:
-            return self.next_step
-        actions = STAGE_ACTIONS[self.stage]
-        return " ".join(self.instruction(action) for action in actions[actions.index(self.next_action) :])
+        return " ".join(self.instruction(action) for action in (self.next_action, *self.actions_after_next))
 
 
 def _scorecards_emailed(event: Event | None) -> bool:

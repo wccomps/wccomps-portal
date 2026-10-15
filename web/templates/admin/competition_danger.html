@@ -51,11 +51,8 @@
     </div>
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('competitionDanger', () => compose(toastMixin(), {
-            loading: false,
+        Alpine.data('competitionDanger', () => compose(actionMixin('{% url "admin_competition_action" %}'), {
             openEvent: '{{ stage.event.pk|default_if_none:"" }}',
-            get disabledClass() { return this.loading ? 'disabled' : ''; },
-            get notLoading() { return !this.loading; },
 
             guardedClearLeftovers() { if (!this.loading) this.clearLeftovers(); },
             guardedCancelEvent() { if (!this.loading) this.cancelEvent(); },
@@ -69,27 +66,6 @@
                 if (response && response.toLowerCase() === 'yolo') {
                     this.doAction('cancel_event', { confirm: response, open_event: this.openEvent });
                 }
-            },
-
-            async doAction(action, data = {}) {
-                this.loading = true;
-                this.message = '';
-                try {
-                    const result = await wcPost('{% url "admin_competition_action" %}', { action, ...data });
-                    if (result.success) {
-                        this.message = result.message;
-                        this.messageType = 'success';
-                        setTimeout(() => location.reload(), 2000);
-                    } else {
-                        this.message = result.error || 'Action failed';
-                        this.messageType = 'error';
-                    }
-                } catch (e) {
-                    this.message = 'Request failed: ' + e.message;
-                    this.messageType = 'error';
-                }
-                this.loading = false;
-                setTimeout(() => this.message = '', 5000);
             },
 
             clearLeftovers() {

@@ -1,10 +1,10 @@
 {% extends "admin/base.html" %}
 {% load cotton %}
 {% block title %}
-    Scoring Configuration
+    Scoring setup
 {% endblock title %}
 {% block admin_content %}
-    <c-page_header title="Scoring Configuration" />
+    <c-page_header title="Scoring setup" />
     <c-module>
         <h2>Scoring Formula</h2>
         <p>
@@ -59,7 +59,7 @@
             <c-button_row>
                 <c-link href="{% url 'leaderboard_page' %}" variant="cancel">Cancel</c-link>
                 <c-button type="submit" variant="primary" ::disabled="submitting">
-                    Update Configuration
+                    Save Scoring Setup
                 </c-button>
             </c-button_row>
         </c-form>

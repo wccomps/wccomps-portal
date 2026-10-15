@@ -1,19 +1,22 @@
 <p>
-    <strong>Before competition day:</strong> set up the Competition page: Max Team Members and the Controlled Apps (the
-    apps Start and Stop open and close), the Schedule, the Start Message (posted to every active team when the
-    competition starts) and Sync Metadata under Quotient Integration.
+    <strong>Before competition day:</strong> on the <a href="{% url 'admin_competition_setup' %}">Competition setup</a>
+    page (linked at the top of the Competition page), set the Schedule, the Start message (posted to every active team
+    when the competition starts), and under Team access the people per team and the apps teams can use during the
+    competition (the apps Start and Stop open and close). Under Scoring engine, press Sync Now.
 </p>
 <p>
-    <strong>Check readiness:</strong> press Run Checks under Readiness Check. It checks that the team accounts exist and
+    <strong>Check readiness:</strong> press Run Checks under Readiness check: on the Competition page while
+    Start is the next step, or any time on the Competition setup page. It checks that the team accounts exist and
     are in the right groups, the Discord settings are set, a packet went out for the event and every team on the list
     has a delivered copy, the start message is set, Quotient answers and is synced, and no tickets, red team findings,
     incident reports, inject grades or orange assignments are left from before. Some results have a button that fixes
     them or a link to where they are fixed.
 </p>
 <p>
-    <strong>Start:</strong> press Start Competition under Competition Controls. If a start time is set under Schedule,
+    <strong>Start:</strong> press Start Competition on the Competition page, below the event card. If a start time is
+    set under Schedule on the Competition setup page,
     the bot starts it at that time on its own. The controlled apps open to blue teams, the active teams' accounts are
-    turned on, Quotient metadata is synced, and the start message is posted to every active team, if one is set.
+    turned on, the scoring engine's box list is synced, and the start message is posted to every active team, if one is set.
 </p>
 <p>
     <strong>What can go wrong:</strong> with no controlled apps configured it refuses. If some apps or accounts didn't

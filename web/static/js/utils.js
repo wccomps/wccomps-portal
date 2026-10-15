@@ -109,14 +109,48 @@ function progressMixin() {
 }
 
 /**
- * Streaming action mixin: toast + progress + doStreamAction().
- * @param {string} url — POST endpoint (rendered by Django template tag).
+ * Plain action mixin: toast + loading + doAction().
+ * @param {string} url: the POST endpoint; a call can name another with { url }.
  */
-function streamMixin(url) {
-    return compose(toastMixin(), progressMixin(), {
+function actionMixin(url) {
+    return compose(toastMixin(), {
         loading: false,
         get notLoading() { return !this.loading; },
         get disabledClass() { return this.loading ? 'disabled' : ''; },
+
+        setField(e) {
+            this[e.target.dataset.field] = e.target.value;
+        },
+
+        // Posts the action and shows its message; returns the response, or null if the request failed. A success
+        // reloads the page (so it shows what is stored now) unless reload is false: a result to keep on screen.
+        async doAction(action, data = {}, { reload = true, url: target = url } = {}) {
+            this.loading = true;
+            this.message = '';
+            let result = null;
+            try {
+                result = await wcPost(target, { action, ...data });
+                this.message = result.success ? result.message : (result.error || result.message || 'Action failed');
+                this.messageType = result.success ? 'success' : 'error';
+                if (result.success && reload) setTimeout(() => location.reload(), 1500);
+            } catch (e) {
+                this.message = 'Request failed: ' + e.message;
+                this.messageType = 'error';
+            }
+            this.loading = false;
+            // A failure stays until the next action: it says what didn't happen
+            if (this.messageType === 'success') setTimeout(() => { this.message = ''; }, 5000);
+            return result;
+        },
+    });
+}
+
+/**
+ * Streaming action mixin: actionMixin + progress + doStreamAction().
+ * @param {string} url: the POST endpoint.
+ */
+function streamMixin(url) {
+    return compose(actionMixin(url), progressMixin(), {
 
         streamAction: '',
 

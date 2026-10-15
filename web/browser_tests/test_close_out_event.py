@@ -85,7 +85,7 @@ def test_a_failing_check_leaves_close_out_usable(live_server, pw_browser):
         ):
             page.goto(f"{live_server.url}/ops/admin/competition/")
             page.get_by_role("alert").get_by_text("Couldn't check unfinished work.").wait_for()
-            assert "Couldn't check unfinished work." in page.locator("#event-panel").inner_text()
+            assert "Couldn't check unfinished work." in page.locator("#close-out").inner_text()
             assert page.get_by_role("button", name="Close Out Event").is_enabled()
             assert page.get_by_role("button", name="Start Competition").is_enabled()
     finally:
@@ -118,5 +118,31 @@ def test_cancel_event_on_the_danger_page(live_server, pw_browser):
         event.refresh_from_db()
         assert not event.is_active
         assert not event.team_assignments.exists()
+    finally:
+        context.close()
+
+
+def test_a_blocking_problem_comes_first_and_the_warnings_never_say_go_ahead(live_server, pw_browser):
+    from team.models import Team
+
+    _open_event_with_a_score()
+    Team.objects.filter(team_number=1).update(is_active=False)
+    user = _create_role_user("admin", None)
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    manager = MagicMock()
+    manager.list_applications.return_value = []
+
+    try:
+        with patch("core.admin_views.competition.AuthentikManager", return_value=manager):
+            page.goto(f"{live_server.url}/ops/admin/competition/")
+            section = page.locator("#close-out")
+            section.get_by_role("link", name="1 inject grade is not approved.").wait_for()
+            text = section.inner_text()
+            assert "Team 1 is inactive" in text
+            assert text.index("Team 1 is inactive") < text.index("1 inject grade is not approved.")
+            assert "Also unfinished" in text
+            assert "don't block" not in text
+            assert page.get_by_role("button", name="Close Out Event").is_disabled()
     finally:
         context.close()

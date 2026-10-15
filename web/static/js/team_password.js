@@ -3,31 +3,17 @@
  * data-url, the team's admin_team_action URL.
  */
 document.addEventListener('alpine:init', () => {
-    Alpine.data('teamPasswordReset', () => compose(toastMixin(), {
-        loading: false,
+    Alpine.data('teamPasswordReset', () => compose(actionMixin(), {
         newPassword: '',
 
         async resetPassword() {
             if (!confirm('Reset this team\'s password?\n\nThis will:\n- Generate a new password and set it in Authentik\n- End the team account\'s Authentik sessions\n\nDiscord links are kept. Anyone using the old password must use the new one.')) {
                 return;
             }
-
-            this.loading = true;
-            this.message = '';
             this.newPassword = '';
-
-            try {
-                const result = await wcPost(this.$root.dataset.url, { action: 'reset_password' });
-                this.message = result.message || result.error || 'Password reset failed';
-                this.messageType = result.success ? 'success' : 'error';
-                // No reload: the new password stays on screen until you leave the page
-                if (result.password) this.newPassword = result.password;
-            } catch (e) {
-                this.message = 'Request failed: ' + e.message;
-                this.messageType = 'error';
-            }
-
-            this.loading = false;
+            // No reload: the new password stays on screen until you leave the page
+            const result = await this.doAction('reset_password', {}, { reload: false, url: this.$root.dataset.url });
+            if (result && result.password) this.newPassword = result.password;
         },
     }));
 });

@@ -3,6 +3,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 from django.template.loader import render_to_string
 
+from core.admin_views.places import SetupSection, setup_url
 from core.auth_utils import has_permission, require_permission
 
 from ..calculator import compute_standings, get_leaderboard, get_standing
@@ -31,6 +32,7 @@ def leaderboard(request: HttpRequest) -> HttpResponse:
             "scores": get_leaderboard(),
             "show_schools": show_schools,
             "is_admin": is_admin,
+            "scoring_engine_url": setup_url(SetupSection.SCORING_ENGINE),
         },
     )
 

@@ -191,13 +191,17 @@ class CompetitionConfig(models.Model):
             return "The end time must be after the start time"
         return None
 
-    def should_enable_applications(self) -> bool:
+    def schedule_will_start(self) -> bool:
+        """Whether a start time is set and the end time, if any, hasn't passed: the timer still starts it."""
         if not self.competition_start_time:
             return False
-        now = timezone.now()
-        after_start = now >= self.competition_start_time
-        before_end = self.competition_end_time is None or now < self.competition_end_time
-        return after_start and before_end and not self.applications_enabled
+        return self.competition_end_time is None or timezone.now() < self.competition_end_time
+
+    def should_enable_applications(self) -> bool:
+        start = self.competition_start_time
+        if start is None or not self.schedule_will_start():
+            return False
+        return timezone.now() >= start and not self.applications_enabled
 
     def should_disable_applications(self) -> bool:
         if not self.competition_end_time:

@@ -1,0 +1,46 @@
+{# The readiness check's button and streamed results; include it inside a component composed with readinessMixin #}
+{% load cotton %}
+<c-button_row>
+    <c-button variant="default"
+              @click="runReadinessChecks"
+              ::disabled="readinessLoading">
+        <span x-show="notReadinessLoading">Run Checks</span>
+        <span x-show="readinessLoading">Running...</span>
+    </c-button>
+</c-button_row>
+<template x-if="hasReadinessResults">
+    <div class="mt-15">
+        <template x-for="(r, idx) in readinessResults" :key="idx">
+            <div class="d-flex items-center gap-10 py-5 border-bottom">
+                <span x-show="r.isPass" class="text-success font-bold">Pass</span>
+                <span x-show="r.isFail" class="text-danger font-bold">Fail</span>
+                <span x-show="r.isWarn" class="text-warning font-bold">Warning</span>
+                <span class="font-semibold" x-text="r.step"></span>
+                <span class="text-muted text-sm" x-text="r.detail"></span>
+                <template x-if="r.isLinkAction">
+                    <a :href="r.actionUrl"
+                       class="btn btn-sm btn-outline-primary ms-auto"
+                       x-text="r.actionLabel"></a>
+                </template>
+                <template x-if="r.isFixAction">
+                    <button type="button"
+                            class="btn btn-sm btn-outline-warning ms-auto"
+                            @click="doReadinessFix"
+                            :data-fix="r.fixKey"
+                            :disabled="readinessFixing"
+                            x-text="r.actionLabel"></button>
+                </template>
+            </div>
+        </template>
+    </div>
+</template>
+<template x-if="readinessOk">
+    <c-alert variant="success" class="mt-15">
+        <span x-text="readinessSummary"></span>
+    </c-alert>
+</template>
+<template x-if="readinessNotOk">
+    <c-alert variant="warning" class="mt-15">
+        <span x-text="readinessSummary"></span>
+    </c-alert>
+</template>

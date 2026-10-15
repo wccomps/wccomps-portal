@@ -1,0 +1,12 @@
+{# Readiness check, shown while Start is the next step #}
+{% load cotton %}
+<c-module class="mt-20" id="{{ panel.section }}">
+    <c-slot name="title">
+        Readiness check
+    </c-slot>
+    <p class="help">
+        Checks Discord, the team accounts and their apps, the school list, packets, the start message and
+        the scoring engine, and warns about data left from before. Fix what fails, then press Start Competition.
+    </p>
+    {% include "admin/includes/readiness_check.html" %}
+</c-module>
