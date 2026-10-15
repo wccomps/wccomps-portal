@@ -23,7 +23,7 @@ from core.tests.strategies import assert_storable, column, file_bytes, file_name
 from team.models import Team
 from ticketing.models import Ticket, TicketAttachment, TicketCategory
 
-BIDI_CONTROLS = "‪‫‬‭‮⁦⁧⁨⁩"
+BIDI_CONTROLS = "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
 FILE_TABLES = (Packet, TicketAttachment, RedTeamScreenshot, IncidentScreenshot)
 
 
@@ -33,8 +33,8 @@ def test_every_stored_file_name_column_holds_the_cleaned_name_length() -> None:
 
 @pytest.mark.django_db
 @given(name=st.one_of(file_names(), request_text(300)), default=st.sampled_from(("", "unnamed")))
-@example(name="a\x00b‮gnp.exe", default="")
-@example(name="می‌روم.png", default="")  # Persian, with a zero-width non-joiner
+@example(name="a\x00b\u202egnp.exe", default="")
+@example(name="می\u200cروم.png", default="")  # Persian, with a zero-width non-joiner
 def test_a_cleaned_name_is_storable_and_only_loses_control_and_bidi_characters(name: str, default: str) -> None:
     cleaned = clean_name(name, default)
     assert len(cleaned) <= MAX_NAME_LENGTH

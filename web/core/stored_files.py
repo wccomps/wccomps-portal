@@ -26,8 +26,8 @@ _SIGNATURES: tuple[tuple[bytes, str], ...] = (
     (b"GIF89a", "image/gif"),
     (b"%PDF-", "application/pdf"),
 )
-# Bidi embeddings, overrides and isolates: they show a name's characters out of order ("evil‮gnp.exe")
-_BIDI_CONTROLS = frozenset("‪‫‬‭‮⁦⁧⁨⁩")
+# Bidi embeddings, overrides and isolates: they show a name's characters out of order ("evil\u202egnp.exe")
+_BIDI_CONTROLS = frozenset("\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
 
 
 def clean_name(name: str | None, default: str) -> str:

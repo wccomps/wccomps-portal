@@ -23,7 +23,7 @@ from hypothesis import strategies as st
 # ---------------------------------------------------------------------------------------------------------------
 
 # Bidi overrides and isolates, zero-width characters, the BOM and other format characters a name can hide behind
-INVISIBLE = "​‌‍⁠﻿‪‫‬‭‮⁦⁧⁨⁩‎‏­"
+INVISIBLE = "\u200b\u200c\u200d\u2060\ufeff\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\u200e\u200f\u00ad"
 WHITESPACE = " \t\r\n\x0b\x0c\x1c\x1d\x1e\x1f\x85\xa0    　"
 # Characters that grow when case-folded or normalized (a name at its length limit becomes longer than it)
 EXPANDING = ("ß", "ﬃ", "ŉ", "İ", "ǰ", "ﬆ", "ΐ", "ẞ", "ﷺ")
@@ -58,7 +58,7 @@ PAYLOADS = (
     "@everyone",
     "<@&123456789012345678>",
     "```",
-    "‮gnp.exe",
+    "\u202egnp.exe",
     "NaN",
     "null",
     "None",

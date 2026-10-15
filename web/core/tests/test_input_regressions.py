@@ -235,7 +235,7 @@ def scoring_template(db: object) -> ScoringTemplate:
 @pytest.mark.django_db
 @given(name=file_names())
 @example(name="a\x00.png")
-@example(name="a\x1f‮.png")
+@example(name="a\x1f\u202e.png")
 def test_an_upload_name_is_stored_without_control_or_bidi_characters(
     name: str, ticketing_support_user: User, red_team_user: User
 ) -> None:
