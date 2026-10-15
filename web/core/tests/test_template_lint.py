@@ -131,7 +131,10 @@ class TestCottonComponentUsage:
     def _should_skip(self, path: Path) -> bool:
         if is_cotton_component(path):
             return True
-        if "emails" in path.parts or "registration" in path.parts:
+        if "emails" in path.parts:
+            return True
+        # The public registration form is a standalone page with its own stylesheet, not the portal's base
+        if path == TEMPLATES_DIR / "registration" / "register.html":
             return True
         # Admin templates that don't use cotton are Django admin overrides
         if "admin" in path.parts:

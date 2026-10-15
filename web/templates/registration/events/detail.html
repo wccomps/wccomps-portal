@@ -5,26 +5,26 @@
 {% endblock title %}
 {% block registration_content %}
     <div id="content-main">
-        <c-page_header title="{{ event.name }}" subtitle="{{ event.season.name }}">
-            <a href="{% url 'registration_event_edit' event_id=event.id %}"
-               class="btn btn-secondary">Edit Event</a>
-        </c-page_header>
+        <c-page_header title="{{ event.name }}"
+                       subtitle="{{ event.season.name }}"
+                       parent_url="{% url 'registration_event_list' season_id=event.season_id %}"
+                       parent_label="{{ event.season.name }} Events" />
         <c-module>
-            <p>
-                <a href="{% url 'registration_event_list' season_id=event.season_id %}">← Back to Events</a>
-            </p>
-            <div class="event-info mb-20">
-                <p>
-                    <strong>Date:</strong> {{ event.date|date:"F d, Y" }}
-                </p>
-                <p>
-                    <strong>Time:</strong> {{ event.start_time|time:"g:i A" }} - {{ event.end_time|time:"g:i A" }}
-                </p>
-                <p>
-                    <strong>Type:</strong> {{ event.get_event_type_display }}
-                </p>
-                <p>
-                    <strong>Status:</strong>
+            <c-slot name="toolbar">
+                <c-link href="{% url 'registration_event_edit' event_id=event.id %}"
+                        variant="change">Edit Event</c-link>
+            </c-slot>
+            <c-detail_grid>
+                <c-detail_row label="Date">
+                    {{ event.date|date:"F d, Y" }}
+                </c-detail_row>
+                <c-detail_row label="Time">
+                    {{ event.start_time|time:"g:i A" }} - {{ event.end_time|time:"g:i A" }}
+                </c-detail_row>
+                <c-detail_row label="Type">
+                    {{ event.get_event_type_display }}
+                </c-detail_row>
+                <c-detail_row label="Status">
                     {% if event.is_finalized %}
                         <c-badge variant="neutral">
                             Finalized
@@ -42,8 +42,8 @@
                             Registration Closed
                         </c-badge>
                     {% endif %}
-                </p>
-            </div>
+                </c-detail_row>
+            </c-detail_grid>
         </c-module>
         <c-module>
             <h3>Team Enrollments ({{ total_enrolled }})</h3>
@@ -64,82 +64,93 @@
                     </c-button>
                 </form>
             {% endif %}
-            <table class="table">
-                <thead>
+            <c-table id="enrollments_list" class="w-full" aria_label="Team enrollments">
+                <c-slot name="headers">
                     <tr>
-                        <th>School</th>
-                        <th>Status</th>
-                        <th>Captain</th>
-                        <th>Team #</th>
-                        <th>Actions</th>
+                        <c-table_header sortable="false">
+                            School
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Status
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Captain
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Team #
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Actions
+                        </c-table_header>
                     </tr>
-                </thead>
-                <tbody>
-                    {% for item in enrollment_data %}
-                        <tr>
-                            <td>{{ item.registration.school_name }}</td>
-                            <td>
-                                {% if item.registration.status == "pending" %}
-                                    <c-badge variant="warning">
-                                        Pending
-                                    </c-badge>
-                                {% elif item.registration.status == "approved" %}
-                                    <c-badge variant="info">
-                                        Approved
-                                    </c-badge>
-                                {% elif item.registration.status == "paid" %}
-                                    <c-badge variant="success">
-                                        Paid
-                                    </c-badge>
-                                {% elif item.registration.status == "credentials_sent" %}
-                                    <c-badge variant="neutral">
-                                        Credentials Sent
-                                    </c-badge>
-                                {% elif item.registration.status == "rejected" %}
-                                    <c-badge variant="danger">
-                                        Rejected
-                                    </c-badge>
+                </c-slot>
+                {% for item in enrollment_data %}
+                    <tr>
+                        <td>{{ item.registration.school_name }}</td>
+                        <td>
+                            {% if item.registration.status == "pending" %}
+                                <c-badge variant="warning">
+                                    Pending
+                                </c-badge>
+                            {% elif item.registration.status == "approved" %}
+                                <c-badge variant="info">
+                                    Approved
+                                </c-badge>
+                            {% elif item.registration.status == "paid" %}
+                                <c-badge variant="success">
+                                    Paid
+                                </c-badge>
+                            {% elif item.registration.status == "credentials_sent" %}
+                                <c-badge variant="neutral">
+                                    Credentials Sent
+                                </c-badge>
+                            {% elif item.registration.status == "rejected" %}
+                                <c-badge variant="danger">
+                                    Rejected
+                                </c-badge>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% for contact in item.registration.contacts.all %}
+                                {% if contact.role == "captain" %}
+                                    {{ contact.name }}
+                                    <br>
+                                    <small>{{ contact.email }}</small>
                                 {% endif %}
-                            </td>
-                            <td>
-                                {% for contact in item.registration.contacts.all %}
-                                    {% if contact.role == "captain" %}
-                                        {{ contact.name }}
-                                        <br>
-                                        <small>{{ contact.email }}</small>
-                                    {% endif %}
-                                {% endfor %}
-                            </td>
-                            <td>
-                                {% if item.assignment %}
-                                    <strong>Team {{ item.assignment.team.team_number|stringformat:"02d" }}</strong>
-                                {% elif item.can_assign %}
-                                    <span class="text-muted">Ready to assign</span>
-                                {% else %}
-                                    <span class="text-muted">Not eligible</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% if item.assignment and can_unassign %}
-                                    <form method="post"
-                                          action="{% url 'registration_unassign_team' assignment_id=item.assignment.id %}"
-                                          class="d-inline">
-                                        {% csrf_token %}
-                                        <input type="hidden" name="school" value="{{ item.assignment.school_id }}">
-                                        <button type="submit"
-                                                class="btn btn-sm btn-danger"
-                                                onclick="return confirm('Remove team assignment?')">Unassign</button>
-                                    </form>
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% empty %}
-                        <tr>
-                            <td colspan="5" class="text-center">No teams enrolled for this event.</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                            {% endfor %}
+                        </td>
+                        <td>
+                            {% if item.assignment %}
+                                <strong>Team {{ item.assignment.team.team_number|stringformat:"02d" }}</strong>
+                            {% elif item.can_assign %}
+                                <span class="text-muted">Ready to assign</span>
+                            {% else %}
+                                <span class="text-muted">Not eligible</span>
+                            {% endif %}
+                        </td>
+                        <td class="field-actions">
+                            {% if item.assignment and can_unassign %}
+                                <form method="post"
+                                      action="{% url 'registration_unassign_team' assignment_id=item.assignment.id %}"
+                                      class="d-inline"
+                                      onsubmit="return confirm('Remove team assignment?')">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="school" value="{{ item.assignment.school_id }}">
+                                    <c-button type="submit" variant="danger">
+                                        Unassign
+                                    </c-button>
+                                </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5">
+                            <c-empty_state title="No teams enrolled for this event" />
+                        </td>
+                    </tr>
+                {% endfor %}
+            </c-table>
         </c-module>
     </div>
 {% endblock registration_content %}

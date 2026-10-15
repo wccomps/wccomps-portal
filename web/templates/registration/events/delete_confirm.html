@@ -8,12 +8,12 @@
         <c-page_header title="Delete Event" />
         <c-module>
             {% if problem %}
-                <c-alert variant="danger">
+                <c-alert variant="error">
                     {{ problem }}
                 </c-alert>
                 <c-button_row class="mt-20 justify-end">
-                    <a href="{% url 'registration_event_list' season_id=event.season_id %}"
-                       class="btn btn-secondary">Back</a>
+                    <c-link href="{% url 'registration_event_list' season_id=event.season_id %}"
+                            variant="cancel">Back</c-link>
                 </c-button_row>
             {% else %}
                 <c-alert variant="warning">
@@ -23,8 +23,8 @@
                 <form method="post">
                     {% csrf_token %}
                     <c-button_row class="mt-20 justify-end">
-                        <a href="{% url 'registration_event_list' season_id=event.season_id %}"
-                           class="btn btn-secondary">Cancel</a>
+                        <c-link href="{% url 'registration_event_list' season_id=event.season_id %}"
+                                variant="cancel">Cancel</c-link>
                         <c-button type="submit" variant="danger">
                             Delete Event
                         </c-button>

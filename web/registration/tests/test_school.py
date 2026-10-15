@@ -1,5 +1,6 @@
 """A school is one record across events, matched by name ignoring case and spacing."""
 
+import re
 from datetime import date
 
 import pytest
@@ -20,6 +21,9 @@ from registration.models import (
 )
 from registration.services import set_team_school
 from team.models import SchoolInfo, Team
+
+# The Unassign button (a c-button, so its label sits between whitespace)
+UNASSIGN = re.compile(r">\s*Unassign\s*<")
 
 pytestmark = pytest.mark.django_db
 
@@ -339,8 +343,8 @@ def test_event_detail_offers_no_unassign_once_packets_went_out(gold_team_user, e
 
     after = client.get(url).content.decode()
 
-    assert ">Unassign<" in before
-    assert ">Unassign<" not in after
+    assert UNASSIGN.search(before)
+    assert not UNASSIGN.search(after)
     assert "Packets sent" in after
 
 
@@ -406,4 +410,4 @@ def test_event_detail_offers_no_unassign_for_an_earlier_event(gold_team_user, ev
     content = _client(gold_team_user).get(reverse("registration_event_detail", args=[past.pk])).content.decode()
 
     assert "Team 04" in content
-    assert ">Unassign<" not in content
+    assert not UNASSIGN.search(content)

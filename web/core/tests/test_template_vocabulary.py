@@ -53,17 +53,8 @@ NOT_SOURCE_DIRS = {"tests", "migrations", "browser_tests", "integration_tests", 
 # Exceptions
 # ---------------------------------------------------------------------------------------------------------------
 
-REGISTRATION = "Registration pages were kept out of the portal's UI consistency work: "
-
 # "template:class" for a class no stylesheet defines and no script reads
-UNDEFINED_EXCEPTIONS: dict[str, str] = {
-    "registration/*:btn": REGISTRATION + "Bootstrap button class, renders unstyled",
-    "registration/*:btn-primary": REGISTRATION + "Bootstrap button class, renders unstyled",
-    "registration/*:btn-danger": REGISTRATION + "Bootstrap button class, renders unstyled",
-    "registration/*:btn-sm": REGISTRATION + "Bootstrap button class, renders unstyled",
-    "registration/*:table": REGISTRATION + "Bootstrap table class, renders as a plain table",
-    "registration/events/detail.html:event-info": REGISTRATION + "a wrapper class with no style",
-}
+UNDEFINED_EXCEPTIONS: dict[str, str] = {}
 
 # "template:class" for a class app.css styles outside the shared vocabulary: page-specific styling
 PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
@@ -101,8 +92,6 @@ RAW_TAG_EXCEPTIONS: dict[str, str] = {
     "scoring/submit_red_finding.html:button": (
         "The team picker and the dialog's close button have their own look; c-button would add Django's filled .button"
     ),
-    "registration/events/detail.html:button": REGISTRATION + "a raw submit button",
-    "registration/*:table": REGISTRATION + "raw tables, not c-table",
 }
 
 # "app.css:class" for a class app.css defines that no template, script or Python source uses

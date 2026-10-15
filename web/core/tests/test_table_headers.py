@@ -14,7 +14,7 @@ TEMPLATES_DIR = Path(__file__).parent.parent.parent / "templates"
 
 # Not styled by the portal's admin CSS, with the reason.
 EXCLUDED = {
-    "registration/": "registration templates are outside the UI consistency work",
+    "registration/register.html": "the public registration form, a standalone page with its own styles",
     "emails/": "email bodies carry their own inline styles",
     "scoring/scorecard_print.html": "standalone print page with its own styles",
     "cotton/table_header.html": "the component itself",
