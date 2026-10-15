@@ -1,4 +1,4 @@
-"""The competition page's event panel, and the Running an event guide it links to."""
+"""The competition page's Event and Steps sections, and the Running an event guide."""
 
 import re
 from contextlib import ExitStack
@@ -36,8 +36,8 @@ def _page(client):
     return response.content.decode()
 
 
-def _panel(page):
-    """The Event module's HTML: from its opening tag to the Steps module."""
+def _event_section(page):
+    """The Event section's HTML: from its opening tag to the Steps section."""
     start = page.index('id="event-panel"')
     return page[start : page.index('id="steps"', start)]
 
@@ -75,8 +75,8 @@ def _flat(html):
     return re.sub(r"\s+<", "<", re.sub(r">\s+", ">", html))
 
 
-def test_with_no_event_the_panel_points_at_the_import(client):
-    panel = _panel(_page(client))
+def test_with_no_event_the_event_section_points_at_the_import(client):
+    panel = _event_section(_page(client))
 
     assert _row(panel, "Event") == "No event open"
     assert "No event is open and there is no live data." in _row(panel, "Status")
@@ -97,7 +97,7 @@ def test_an_open_event_names_its_season_schools_and_date_and_points_at_the_packe
     _event(is_active=True)
     _teams(2)
 
-    panel = _panel(_page(client))
+    panel = _event_section(_page(client))
 
     assert _row(panel, "Event") == "Invitational 1"
     assert _row(panel, "Season") == f'<a href="{reverse("registration_season_list")}">WCComps 2027</a>'
@@ -107,23 +107,23 @@ def test_an_open_event_names_its_season_schools_and_date_and_points_at_the_packe
     assert f'href="{reverse("packets_list")}"' in _row(panel, "Next step")
 
 
-def test_while_running_the_panel_offers_stop(client):
+def test_while_running_the_event_section_offers_stop(client):
     _event(is_active=True)
     _teams(1, score=True)
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
 
-    panel = _flat(_panel(_page(client)))
+    panel = _flat(_event_section(_page(client)))
 
     assert ">Running<" in panel
     assert '@click="stopCompetition"' in panel
     assert "When the competition ends, stop it" in panel
 
 
-def test_played_and_stopped_the_panel_points_at_the_scorecards(client):
+def test_played_and_stopped_the_event_section_points_at_the_scorecards(client):
     _event(is_active=True)
     _teams(1, score=True)
 
-    panel = _panel(_page(client))
+    panel = _event_section(_page(client))
 
     assert f'href="{reverse("scoring:email_scorecards")}"' in panel
     assert "Teams can't sign in while stopped. Scores stay, so grading goes on." in _page(client)
@@ -134,8 +134,8 @@ def test_unrecorded_scores_point_at_the_scorecards_then_close_out_on_this_page(c
 
     page = _page(client)
 
-    assert "not recorded at any event yet" in _row(_panel(page), "Status")
-    assert f'href="{reverse("scoring:email_scorecards")}"' in _row(_panel(page), "Next step")
+    assert "not recorded at any event yet" in _row(_event_section(page), "Status")
+    assert f'href="{reverse("scoring:email_scorecards")}"' in _row(_event_section(page), "Next step")
     assert _steps(page)[-1][2] == "On this page"
 
 
@@ -277,10 +277,10 @@ def test_no_link_on_the_page_or_in_the_guide_lands_on_a_missing_section(client, 
 def test_the_status_badge_says_where_the_competition_stands(client, stage, word):
     _arrange(stage)
 
-    assert f">{word}</span>" in _row(_panel(_page(client)), "Status")
+    assert f">{word}</span>" in _row(_event_section(_page(client)), "Status")
 
 
-def test_the_card_counts_the_schools_and_the_linked_team_members(client, gold_team_user):
+def test_the_event_section_counts_the_schools_and_the_linked_team_members(client, gold_team_user):
     from team.models import DiscordLink
 
     _event(is_active=True)
@@ -289,7 +289,7 @@ def test_the_card_counts_the_schools_and_the_linked_team_members(client, gold_te
         team=Team.objects.get(team_number=1), discord_id=5, discord_username="b", user=gold_team_user
     )
 
-    panel = _panel(_page(client))
+    panel = _event_section(_page(client))
 
     assert _row(panel, "Schools") == "2"
     assert _row(panel, "Team members linked") == "1"
@@ -298,7 +298,9 @@ def test_the_card_counts_the_schools_and_the_linked_team_members(client, gold_te
 def test_before_any_scores_the_next_step_says_how_to_call_the_event_off(client):
     _arrange("packets")
 
-    assert "No team has scores yet. To call the event off, use Cancel event" in _row(_panel(_page(client)), "Next step")
+    assert "No team has scores yet. To call the event off, use Cancel event" in _row(
+        _event_section(_page(client)), "Next step"
+    )
 
 
 def test_the_competition_status_table_and_the_setup_forms_are_gone(client):
@@ -355,7 +357,7 @@ def test_leftovers_point_at_the_danger_zone(client):
     team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     Ticket.objects.create(ticket_number="T001-001", team=team, title="Left")
 
-    panel = _panel(_page(client))
+    panel = _event_section(_page(client))
 
     assert "Clear leftover data" in panel
     assert f'href="{reverse("admin_competition_danger")}"' in panel
@@ -420,7 +422,7 @@ def test_a_page_a_step_links_names_itself_with_the_title_the_step_shows(admin_cl
     assert re.search(rf'class="breadcrumbs">{parent}{re.escape(place.page_title)}<', page)
 
 
-def test_the_guide_walks_the_panels_steps_in_order_with_their_links(client):
+def test_the_guide_walks_the_steps_in_order_with_their_links(client):
     response = client.get(reverse("admin_competition_guide"))
 
     assert response.status_code == 200

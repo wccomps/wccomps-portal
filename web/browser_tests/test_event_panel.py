@@ -37,7 +37,7 @@ def _controls(page):
     }
 
 
-def test_with_no_event_the_panel_sends_you_to_the_import(live_server, pw_browser):
+def test_with_no_event_the_event_section_sends_you_to_the_import(live_server, pw_browser):
     user = _create_role_user("gold_team", None)
     context = create_session_context(pw_browser, live_server, user)
     manager = MagicMock()
@@ -61,7 +61,7 @@ def test_with_no_event_the_panel_sends_you_to_the_import(live_server, pw_browser
         context.close()
 
 
-def test_played_and_stopped_the_panel_checks_unfinished_work(live_server, pw_browser):
+def test_played_and_stopped_the_page_checks_unfinished_work(live_server, pw_browser):
     _played_event()
     user = _create_role_user("gold_team", None)
     context = create_session_context(pw_browser, live_server, user)

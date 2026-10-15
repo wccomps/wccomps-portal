@@ -1,4 +1,4 @@
-"""The event panel's steps: which is done and which is current, read from the stage and a few cheap counts."""
+"""The competition page's steps: which is done and which is current, read from the stage and a few cheap counts."""
 
 import itertools
 from datetime import date
@@ -118,7 +118,7 @@ def test_which_steps_are_done(stage, facts, done):
     assert [row.action for row in panel.steps if row.state == StepState.DONE] == done
 
 
-def test_the_panel_links_the_seasons_page():
+def test_the_event_section_links_the_seasons_page():
     assert _panel(Stage.PLAYED).seasons_url == reverse("registration_season_list")
 
 

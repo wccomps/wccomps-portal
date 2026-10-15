@@ -1,7 +1,8 @@
 """Where each event action is taken, and the sections of the competition pages that links point at.
 
 registration.stage owns the lifecycle (which action is next, which is done); this module says where the portal
-takes each action and how it names it, for the competition page's event panel, the guide and other pages' links.
+takes each action and how it names it, for the competition page's Event and Steps sections, the guide and other
+pages' links.
 """
 
 from dataclasses import dataclass

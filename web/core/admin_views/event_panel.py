@@ -1,5 +1,6 @@
-"""The competition page's event panel: the event, its status, the next step and the steps, which are done and which
-is current, read from the stage (registration.stage owns the lifecycle; places says where each action is taken)."""
+"""The competition page's Event and Steps sections: the event, its status, the next step and the steps, which are
+done and which is current, read from the stage (registration.stage owns the lifecycle; places says where each action
+is taken)."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,7 +24,7 @@ class StepState(StrEnum):
     UPCOMING = "upcoming"
 
 
-# Each state's word and badge variant on the event panel
+# Each step state's word and badge variant in the Steps section
 STATE_SHOWN: dict[StepState, tuple[str, str]] = {
     StepState.DONE: ("Done", "success"),
     StepState.CURRENT: ("Now", "info"),
@@ -39,7 +40,7 @@ class EventStatus(StrEnum):
     NO_EVENT = "no_event"  # No event is open and the competition isn't running, whether or not teams have scores
 
 
-# Each status's word and badge variant on the event panel
+# Each status's word and badge variant in the Event section
 STATUS_SHOWN: dict[EventStatus, tuple[str, str]] = {
     EventStatus.RUNNING: ("Running", "success"),
     EventStatus.STOPPED: ("Stopped", "warning"),
@@ -58,7 +59,7 @@ def _status(stage: EventStage) -> EventStatus:
 
 @dataclass(frozen=True)
 class EventFacts:
-    """The stage, and the counts and schedule the event panel shows beyond it."""
+    """The stage, and the counts and schedule the Event and Steps sections show beyond it."""
 
     stage: EventStage
     schools: int
@@ -74,7 +75,7 @@ def _plural(count: int, one: str, many: str) -> str:
 
 
 def _import_detail(facts: EventFacts) -> str:
-    # With an event open, the event panel's Schools row counts them
+    # With an event open, the Event section counts the schools
     if not facts.schools or facts.stage.event is not None:
         return ""
     schools = _plural(facts.schools, "school is", "schools are")
@@ -138,7 +139,7 @@ class ShownStep:
 
 @dataclass(frozen=True)
 class EventPanel:
-    """What the competition page's event panel shows, and the one section below it."""
+    """What the competition page's Event and Steps sections show, and the one section below them."""
 
     facts: EventFacts
     steps: list[ShownStep]
@@ -194,7 +195,7 @@ def event_panel(facts: EventFacts) -> EventPanel:
 
 
 def event_facts(stage: EventStage) -> EventFacts:
-    """The counts and schedule the event panel shows, from a fixed number of queries."""
+    """The counts and schedule the Event and Steps sections show, from a fixed number of queries."""
     teams_without_copy = 0
     if stage.packets_sent:
         teams_without_copy = teams_without_delivered_copy(Packet.objects.sent().filter(event=stage.event)).count()
