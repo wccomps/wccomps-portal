@@ -93,18 +93,11 @@ class StartMessageForm(forms.Form):
 
 
 class AppSlugForm(forms.Form):
-    MAX_LENGTH = 100
-
-    app_slug = forms.CharField(max_length=MAX_LENGTH)
+    # An Authentik application slug: ASCII letters, digits, - and _ (so lowercasing keeps its length)
+    app_slug = forms.SlugField(max_length=100)
 
     def clean_app_slug(self) -> str:
-        slug: str = self.cleaned_data["app_slug"].strip().lower()
-        if not slug:
-            raise forms.ValidationError("App slug is required")
-        if len(slug) > self.MAX_LENGTH:
-            # Lowercasing lengthens some letters (İ is i and a combining dot)
-            raise forms.ValidationError("The app slug is too long")
-        return slug
+        return str(self.cleaned_data["app_slug"]).lower()
 
 
 class SetTimeForm(forms.Form):
