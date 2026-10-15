@@ -172,3 +172,22 @@ def test_the_scoring_setup_page_is_named_like_its_nav_item(admin_client):
 
     assert ">Scoring setup<" in page
     assert "Scoring Configuration" not in page
+
+
+def test_readiness_failures_link_the_setup_section_that_fixes_them():
+    from unittest.mock import patch
+
+    from core.admin_views import readiness
+    from core.admin_views.places import SetupSection, setup_url
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"start_message": ""})
+    assert readiness._check_start_message()[2] == {
+        "type": "link",
+        "url": setup_url(SetupSection.START_MESSAGE),
+        "label": "Set Start Message",
+    }
+    with patch("quotient.client.QuotientClient") as client:
+        client.return_value.get_infrastructure.return_value = None
+        severity, _, action = readiness._check_quotient_api()
+    assert severity == "fail"
+    assert action is not None and action["url"] == setup_url(SetupSection.SCORING_ENGINE)

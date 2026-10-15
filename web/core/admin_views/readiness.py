@@ -114,8 +114,13 @@ def _check_team_group_membership() -> CheckResult:
     return ("pass", "All accounts in correct groups", None)
 
 
+def _setup_link(section: SetupSection, label: str) -> dict[str, str]:
+    """A link to the Competition setup section where a failed check is fixed."""
+    return {"type": "link", "url": setup_url(section), "label": label}
+
+
 def _configure_apps_link() -> dict[str, str]:
-    return {"type": "link", "url": setup_url(SetupSection.TEAM_ACCESS), "label": "Configure Apps"}
+    return _setup_link(SetupSection.TEAM_ACCESS, "Configure Apps")
 
 
 def _check_blueteam_bindings() -> CheckResult:
@@ -190,7 +195,11 @@ def _check_packets_distributed() -> CheckResult:
 def _check_start_message() -> CheckResult:
     """The start message (default VM credentials) goes to every team when the competition starts."""
     if not CompetitionConfig.get_config().start_message.strip():
-        return ("warn", "No start message: teams get no message when the competition starts", None)
+        return (
+            "warn",
+            "No start message: teams get no message when the competition starts",
+            _setup_link(SetupSection.START_MESSAGE, "Set Start Message"),
+        )
     return ("pass", "Start message set", None)
 
 
@@ -281,10 +290,10 @@ def _check_quotient_api() -> CheckResult:
     try:
         infra = client.get_infrastructure(force_refresh=True)
     except Exception as e:
-        return ("fail", f"API error: {e}", None)
+        return ("fail", f"API error: {e}", _setup_link(SetupSection.SCORING_ENGINE, "Scoring Engine"))
 
     if not infra:
-        return ("fail", "Could not reach Quotient API", None)
+        return ("fail", "Could not reach Quotient API", _setup_link(SetupSection.SCORING_ENGINE, "Scoring Engine"))
     return ("pass", f"Connected — {len(infra.boxes)} boxes, {infra.team_count} teams", None)
 
 
