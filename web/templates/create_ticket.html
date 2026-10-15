@@ -198,7 +198,7 @@
                     this.onHostnameChange();
                     // Update button styling
                     document.querySelectorAll('.box-toggle').forEach(btn => {
-                        btn.classList.toggle('box-toggle--selected', btn.dataset.hostname === this.selectedHostname);
+                        setTogglePressed(btn, btn.dataset.hostname === this.selectedHostname);
                     });
                 },
 
@@ -213,7 +213,7 @@
                     // Keep button styling in sync
                     this.$watch('selectedHostname', (value) => {
                         document.querySelectorAll('.box-toggle').forEach(btn => {
-                            btn.classList.toggle('box-toggle--selected', btn.dataset.hostname === value);
+                            setTogglePressed(btn, btn.dataset.hostname === value);
                         });
                     });
                 },

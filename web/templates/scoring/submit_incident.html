@@ -161,7 +161,7 @@
         function updateBoxButtons() {
             const selected = getSelectedBoxes();
             document.querySelectorAll('.box-toggle').forEach(btn => {
-                btn.classList.toggle('box-toggle--selected', selected.includes(btn.dataset.box));
+                setTogglePressed(btn, selected.includes(btn.dataset.box));
             });
         }
 
