@@ -45,7 +45,10 @@ def parse_datetime_to_utc(datetime_str: str, tz_name: str = "America/Los_Angeles
     except ZoneInfoNotFoundError, ValueError:
         raise UnknownTimezoneError(f"Unknown timezone: {tz_name}") from None
     local_time = datetime(dt.year, dt.month, dt.day, dt.hour, dt.minute, tzinfo=zone)
-    return local_time.astimezone(ZoneInfo("UTC"))
+    try:
+        return local_time.astimezone(ZoneInfo("UTC"))
+    except OverflowError as e:  # year 1 or 9999, pushed past the calendar by the zone's offset
+        raise ValueError(f"{datetime_str} in {tz_name} is outside the calendar") from e
 
 
 def ndjson_progress(step: str, current: int, total: int, ok: bool = True) -> str:
