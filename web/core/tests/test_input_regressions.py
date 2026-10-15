@@ -30,7 +30,7 @@ from scoring.models import ScoringTemplate
 from scoring.screenshots import detect_inline_type, read_screenshot
 
 from core.admin_views.competition import TIMEZONE_CHOICES
-from core.forms import CategoryForm, SchoolInfoEditForm, StartMessageForm
+from core.forms import AppSlugForm, CategoryForm, SchoolInfoEditForm, StartMessageForm
 from core.tests.strategies import (
     content_types,
     datetime_text,
@@ -334,3 +334,12 @@ def test_an_upload_name_is_stored_as_text_without_control_characters(
     upload.seek(0)
     _, stored_name, _ = read_screenshot(upload)
     assert stored_name and not any(unicodedata.category(c) in ("Cc", "Cf") for c in stored_name)
+
+
+@given(slug=request_text(100))
+@example(slug="İ" * 100)
+def test_an_app_slug_is_within_its_length_after_lowercasing(slug: str) -> None:
+    """Lowercasing lengthens some letters (İ is i plus a combining dot), so the limit is checked after it."""
+    form = AppSlugForm({"app_slug": slug})
+    if form.is_valid():
+        assert 0 < len(form.cleaned_data["app_slug"]) <= 100
