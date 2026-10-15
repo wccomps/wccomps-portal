@@ -1,6 +1,6 @@
 {# A ticket's history: on the ticket page, and what its 30-second poll swaps in (ops_ticket_detail_dynamic.html) #}
 {% load cotton ticket_filters %}
-<div id="history-list" aria-live="polite">
+<div id="history-list">
     {% if history %}
         <div class="history-table">
             <c-table aria_label="Ticket history">

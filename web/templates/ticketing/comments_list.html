@@ -1,6 +1,6 @@
 {# A ticket's comments: on the ticket page, and what its 30-second poll swaps in (ops_ticket_detail_dynamic.html) #}
 {% load cotton %}
-<div id="comments-list" aria-live="polite">
+<div id="comments-list">
     {% if comments %}
         <div class="comment-list">
             {% for comment in comments %}
