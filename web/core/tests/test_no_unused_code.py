@@ -10,14 +10,11 @@ files. Code that only tests reach counts as unused. The checks share one index o
 """
 
 import ast
-import fnmatch
 import re
-import subprocess
 from functools import cache
 from pathlib import Path
 from typing import NamedTuple
 
-import pytest
 import vulture
 from django.apps import apps
 from django.conf import global_settings
@@ -25,9 +22,10 @@ from django.db import models
 from django.urls import URLPattern, URLResolver, get_resolver
 
 from core import discord_tasks
+from core.tests import guards
 
-REPO_DIR = Path(__file__).resolve().parents[3]
-WEB_DIR = REPO_DIR / "web"
+REPO_DIR = guards.REPO_DIR
+WEB_DIR = guards.WEB_DIR
 SETTINGS_FILE = "web/portal/settings.py"
 
 SOURCE_SUFFIXES = (".py", ".html", ".txt", ".js")
@@ -38,20 +36,8 @@ NOT_SOURCE_RE = re.compile(
 
 @cache
 def source_files() -> tuple[str, ...]:
-    """Tracked project source (repo-relative paths), without tests, migrations and vendored files.
-
-    A tracked file deleted from the working tree but not yet staged is left out, as it will be once committed.
-    """
-    tracked = subprocess.run(
-        ["git", "ls-files", "-z"],  # noqa: S607
-        cwd=REPO_DIR,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split("\0")
-    return tuple(
-        p for p in tracked if p.endswith(SOURCE_SUFFIXES) and not NOT_SOURCE_RE.search(p) and (REPO_DIR / p).is_file()
-    )
+    """Tracked project source (repo-relative paths), without tests, migrations and vendored files."""
+    return tuple(p for p in guards.tracked_files() if p.endswith(SOURCE_SUFFIXES) and not NOT_SOURCE_RE.search(p))
 
 
 @cache
@@ -75,23 +61,8 @@ class Unused(NamedTuple):
 
 
 def fail_with(title: str, unused: list[Unused], exceptions: dict[str, str]) -> None:
-    """Fail listing the unused items no exception covers, plus exceptions that cover nothing.
-
-    Exception keys are fnmatch patterns, so one entry can cover a framework convention ("*:clean_*").
-    """
-    matched: set[str] = set()
-    problems: list[str] = []
-    for item in unused:
-        hits = {p for p in exceptions if any(fnmatch.fnmatchcase(k, p) for k in (item.key, *item.also))}
-        matched |= hits
-        if not hits:
-            problems.append(f"{item.key} ({item.where})")
-    problems.sort()
-    problems += [
-        f"{p}: in the exceptions but matches nothing unused; drop it there" for p in exceptions if p not in matched
-    ]
-    if problems:
-        pytest.fail(f"{title} ({len(problems)}):\n" + "\n".join(f"  {p}" for p in problems), pytrace=False)
+    """Fail listing the unused items no exception covers, plus exceptions that cover nothing (guards.fail_with)."""
+    guards.fail_with(title, {u.key: u.where for u in unused}, exceptions, also={u.key: u.also for u in unused})
 
 
 # ---------------------------------------------------------------------------------------------------------------

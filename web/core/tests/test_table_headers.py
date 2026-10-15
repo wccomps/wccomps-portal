@@ -6,17 +6,14 @@ checkbox column classes so it lines up with the row checkboxes.
 """
 
 import re
-from pathlib import Path
 
 import pytest
 
-TEMPLATES_DIR = Path(__file__).parent.parent.parent / "templates"
+from core.tests.guards import is_standalone_document, template_name, tracked_templates
 
-# Not styled by the portal's admin CSS, with the reason.
+# Not styled by the portal's admin CSS, with the reason. Standalone documents (guards.is_standalone_document)
+# carry their own styles and are left out too.
 EXCLUDED = {
-    "registration/register.html": "the public registration form, a standalone page with its own styles",
-    "emails/": "email bodies carry their own inline styles",
-    "scoring/scorecard_print.html": "standalone print page with its own styles",
     "cotton/table_header.html": "the component itself",
 }
 
@@ -27,12 +24,11 @@ ROW_CHECKBOX = re.compile(r'<input\b[^>]*type="checkbox"[^>]*@change="toggleItem
 
 
 def _templates() -> list[tuple[str, str]]:
-    found = []
-    for path in sorted(TEMPLATES_DIR.rglob("*.html")):
-        rel = str(path.relative_to(TEMPLATES_DIR))
-        if not any(rel.startswith(prefix) for prefix in EXCLUDED):
-            found.append((rel, path.read_text()))
-    return found
+    return [
+        (template_name(path), path.read_text())
+        for path in tracked_templates()
+        if not is_standalone_document(path) and template_name(path) not in EXCLUDED
+    ]
 
 
 def _line(text: str, index: int) -> int:

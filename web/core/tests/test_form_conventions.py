@@ -8,16 +8,16 @@ from pathlib import Path
 
 import pytest
 
-TEMPLATES_DIR = Path(__file__).parent.parent.parent / "templates"
+from core.tests.guards import is_standalone_document, template_name, tracked_templates
 
 
 def all_page_templates() -> list[Path]:
-    """Every template except cotton components and email bodies."""
-    return sorted(p for p in TEMPLATES_DIR.rglob("*.html") if "cotton" not in p.parts and "emails" not in p.parts)
+    """Every template except cotton components and standalone documents (emails, the public registration form)."""
+    return [p for p in tracked_templates() if "cotton" not in p.parts and not is_standalone_document(p)]
 
 
 def rel(path: Path) -> str:
-    return str(path.relative_to(TEMPLATES_DIR))
+    return template_name(path)
 
 
 MESSAGE_LOOP = re.compile(r"{%\s*if\s+messages\s*%}|{%\s*for\s+\w+\s+in\s+messages\s*%}")
@@ -25,7 +25,6 @@ MESSAGE_LOOP = re.compile(r"{%\s*if\s+messages\s*%}|{%\s*for\s+\w+\s+in\s+messag
 # Files allowed to loop over messages themselves, with the reason.
 MESSAGE_LOOP_ALLOWLIST = {
     "admin/base_site.html": "the one place messages render",
-    "registration/register.html": "standalone public page that extends no base; has its own message styling",
 }
 
 
