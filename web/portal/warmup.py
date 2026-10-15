@@ -1,5 +1,6 @@
 """Load in the web server's master process what a worker's first page would otherwise load, so workers forked from
-it start warm. Only portal.wsgi calls it: the bot, migrations and manage.py stay cold."""
+it start warm. Only portal.wsgi calls it (gunicorn, and runserver through WSGI_APPLICATION): the bot, migrations
+and other manage.py commands stay cold."""
 
 import gc
 import logging
