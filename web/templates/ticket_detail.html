@@ -190,6 +190,7 @@
             <div hx-get="{% url 'ticket_detail_dynamic' ticket.ticket_number %}"
                  hx-trigger="every 30s"
                  hx-select="#comments-list"
+                 hx-include="find input[name='comments_version']"
                  hx-swap="innerHTML"
                  aria-live="polite">{% include "ticketing/comments_list.html" %}</div>
             {% if ticket.status != "resolved" and ticket.status != "cancelled" %}
@@ -287,6 +288,7 @@
             <div hx-get="{% url 'ticket_detail_dynamic' ticket.ticket_number %}"
                  hx-trigger="every 30s"
                  hx-select="#history-list"
+                 hx-include="find input[name='history_version']"
                  hx-swap="innerHTML"
                  aria-live="polite">{% include "ticketing/history_list.html" %}</div>
         </c-fieldset>
