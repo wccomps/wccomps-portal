@@ -1,6 +1,5 @@
 """Admin commands for competition and account management."""
 
-import csv
 import io
 import logging
 
@@ -14,6 +13,7 @@ from bot.competition_actions import run_competition_cleanup
 from bot.permissions import permission_check
 from bot.utils import ConfirmView, log_to_ops_channel, team_chat_channel
 from core.authentik_utils import parse_team_range, reset_team_credentials
+from core.csv_export import csv_writer
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.utils import UnknownTimezoneError, parse_datetime_to_utc
 from team.models import Team, active_team_numbers, team_username
@@ -129,7 +129,7 @@ class AdminCompetitionCog(commands.Cog):
             return
 
         csv_buffer = io.StringIO()
-        writer = csv.writer(csv_buffer)
+        writer = csv_writer(csv_buffer)
         writer.writerow(["Username", "Password"])
         writer.writerows((username, password) for _num, username, password in password_list)
         file = discord.File(fp=io.BytesIO(csv_buffer.getvalue().encode("utf-8")), filename="blueteam_passwords.csv")

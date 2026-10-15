@@ -1,0 +1,43 @@
+"""The writer for every CSV the portal hands out, so user text in it can't run as a spreadsheet formula.
+
+A spreadsheet treats a cell that starts with =, +, -, @, a tab or a carriage return as a formula (CSV injection), so
+a team named =HYPERLINK(...) would run in whoever opens the export. Such text cells get a leading single quote (the
+OWASP rule); numbers are written as numbers. test_property_coverage fails on a CSV writer that isn't this one.
+"""
+
+import csv
+from collections.abc import Iterable
+from decimal import Decimal
+from typing import Protocol
+
+FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
+
+
+class _Writable(Protocol):
+    def write(self, text: str, /) -> object: ...
+
+
+def safe_cell(value: object) -> object:
+    """The value as a cell a spreadsheet won't run: text that starts like a formula is prefixed with '."""
+    if value is None or isinstance(value, (bool, int, float, Decimal)):
+        return value
+    text = str(value)
+    return f"'{text}" if text.startswith(FORMULA_STARTS) else text
+
+
+class CsvWriter:
+    """csv.writer that writes every cell through safe_cell."""
+
+    def __init__(self, out: _Writable) -> None:
+        self._writer = csv.writer(out)
+
+    def writerow(self, row: Iterable[object]) -> None:
+        self._writer.writerow([safe_cell(value) for value in row])
+
+    def writerows(self, rows: Iterable[Iterable[object]]) -> None:
+        for row in rows:
+            self.writerow(row)
+
+
+def csv_writer(out: _Writable) -> CsvWriter:
+    return CsvWriter(out)

@@ -1,4 +1,3 @@
-import csv
 import json
 from datetime import timedelta
 from typing import cast
@@ -13,6 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from core.auth_utils import has_permission, require_permission
+from core.csv_export import csv_writer
 from orange_team.forms import (
     AssignmentRejectForm,
     FollowUpForm,
@@ -574,7 +574,7 @@ def export_scores(request: HttpRequest) -> HttpResponse:
 
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="orange_checks.csv"'
-    writer = csv.writer(response)
+    writer = csv_writer(response)
     writer.writerow(
         [
             "Check",

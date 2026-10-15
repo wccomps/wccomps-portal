@@ -148,12 +148,12 @@ class SchoolInfoAdmin(admin.ModelAdmin[SchoolInfo]):
 
     @admin.action(description="Export as CSV")
     def export_as_csv(self, request: HttpRequest, queryset: QuerySet[SchoolInfo]) -> HttpResponse:
-        import csv
+        from core.csv_export import csv_writer
 
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="school_info.csv"'
 
-        writer = csv.writer(response)
+        writer = csv_writer(response)
         writer.writerow(
             [
                 "team_number",

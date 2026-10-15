@@ -466,3 +466,32 @@ def test_every_bot_entry_point_is_covered_or_left_for_pr_c() -> None:
         [Unused(key, where) for key, where in found.items()],
         {k: v for k, v in EXCEPTIONS.items() if k.startswith("bot:")},
     )
+
+
+CSV_EXPORT_MODULE = "web/core/csv_export.py"
+RAW_CSV_WRITERS = {"csv.writer", "csv.DictWriter"}
+
+
+def raw_csv_writers() -> dict[str, str]:
+    """CSV writers source builds itself instead of through core.csv_export (found by what it calls or imports)."""
+    found: dict[str, str] = {}
+    for path, tree in python_trees().items():
+        if path == CSV_EXPORT_MODULE:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and ast.unparse(node.func) in RAW_CSV_WRITERS:
+                found[f"{path}:{node.lineno}"] = ast.unparse(node.func)
+            elif isinstance(node, ast.ImportFrom) and node.module == "csv":
+                for alias in node.names:
+                    if alias.name in {"writer", "DictWriter"}:
+                        found[f"{path}:{node.lineno}"] = f"from csv import {alias.name}"
+    return found
+
+
+def test_every_csv_writer_neutralises_formulas() -> None:
+    """User text in a CSV must not run as a spreadsheet formula: write CSV with core.csv_export.csv_writer."""
+    fail_with(
+        "CSV writers that don't go through core.csv_export.csv_writer",
+        [Unused(key, call) for key, call in raw_csv_writers().items()],
+        {},
+    )

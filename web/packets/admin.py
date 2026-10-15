@@ -202,14 +202,14 @@ class PacketAdmin(admin.ModelAdmin[Packet]):
 
     @admin.action(description="Export distribution report to CSV")
     def export_distribution_report(self, request: HttpRequest, queryset: QuerySet[Packet]) -> HttpResponse:
-        import csv
-
         from django.http import HttpResponse
+
+        from core.csv_export import csv_writer
 
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="packet_distribution_report.csv"'
 
-        writer = csv.writer(response)
+        writer = csv_writer(response)
         writer.writerow(
             [
                 "Packet Title",

@@ -230,14 +230,14 @@ def school_info(request: HttpRequest) -> HttpResponse:
 
 @require_permission("gold_team")
 def school_info_export(request: HttpRequest) -> HttpResponse:
-    import csv
+    from core.csv_export import csv_writer
 
     records = SchoolInfo.objects.select_related("team", "school").order_by("team__team_number")
 
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="school_info.csv"'
 
-    writer = csv.writer(response)
+    writer = csv_writer(response)
     writer.writerow(["team_number", "team_name", "school_name", "contact_email", "secondary_email", "notes"])
 
     for si in records:

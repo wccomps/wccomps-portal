@@ -1,4 +1,3 @@
-import csv
 import io
 import json
 import logging
@@ -44,6 +43,7 @@ from core.admin_views.readiness import action_readiness_check, action_readiness_
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import reset_team_credentials
 from core.competition_utils import WipedData, competition_data_counts
+from core.csv_export import csv_writer
 from core.discord_tasks import LogToChannel
 from core.forms import (
     ActionForm,
@@ -386,7 +386,7 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
             failed_resets.append((username, error))
 
     csv_buffer = io.StringIO()
-    writer = csv.writer(csv_buffer)
+    writer = csv_writer(csv_buffer)
     writer.writerow(["Username", "Password"])
     for _team_num, username, password in password_list:
         writer.writerow([username, password])

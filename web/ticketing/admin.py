@@ -225,12 +225,12 @@ class TicketAdmin(admin.ModelAdmin[Ticket]):
 
     @admin.action(description="Export selected tickets as CSV")
     def export_as_csv(self, request: HttpRequest, queryset: QuerySet[Ticket]) -> HttpResponse:
-        import csv
+        from core.csv_export import csv_writer
 
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="tickets.csv"'
 
-        writer = csv.writer(response)
+        writer = csv_writer(response)
         writer.writerow(
             [
                 "Ticket Number",
