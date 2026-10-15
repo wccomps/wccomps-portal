@@ -357,3 +357,46 @@ class TestCottonAttrsPassthrough:
                 "Cotton components missing {{ attrs }} (attributes silently dropped):\n"
                 + "\n".join(f"  - cotton/{n}" for n in missing)
             )
+
+
+class TestComponentVariants:
+    """A variant the component doesn't know falls through to its default look without an error.
+
+    <c-alert variant="danger"> rendered problems green (alert knows "error", not "danger"). The variants a
+    component knows are the ones its template compares `variant` with, plus its default.
+    """
+
+    COTTON_DIR = TEMPLATES_DIR / "cotton"
+    TAG_RE = re.compile(r"<c-(\w+)\b([^>]*)>", re.S)
+    VARIANT_RE = re.compile(r'(?<![:\w])variant="([^"{]*)"')
+    # badge.html: an empty variant leaves the badge--* class to an Alpine ::class binding on the caller
+    ALLOWED = {("badge", "")}
+
+    def _known_variants(self) -> dict[str, set[str]]:
+        known = {}
+        for path in self.COTTON_DIR.glob("*.html"):
+            content = path.read_text()
+            compared = set(re.findall(r"variant\s*==\s*['\"]([^'\"]*)['\"]", content))
+            if compared:
+                default = re.search(r'<c-vars\b[^>]*\bvariant="([^"]*)"', content)
+                known[path.stem] = compared | ({default.group(1)} if default else set())
+        return known
+
+    def test_variants_are_ones_the_component_knows(self) -> None:
+        known = self._known_variants()
+        issues = []
+        for path in get_all_template_files():
+            content = path.read_text()
+            for tag in self.TAG_RE.finditer(content):
+                name, attrs = tag.groups()
+                match = self.VARIANT_RE.search(attrs)
+                variant = match.group(1) if match else None
+                if name not in known or variant is None or variant in known[name] or (name, variant) in self.ALLOWED:
+                    continue
+                line = content[: tag.start()].count("\n") + 1
+                issues.append(
+                    f'  - {path.relative_to(TEMPLATES_DIR)}:{line} <c-{name} variant="{variant}">: '
+                    f"known: {', '.join(sorted(known[name]))}"
+                )
+        if issues:
+            pytest.fail("Unknown component variant:\n" + "\n".join(sorted(issues)))

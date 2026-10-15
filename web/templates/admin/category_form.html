@@ -19,7 +19,7 @@
                    parent_url="{% url 'admin_categories' %}"
                    parent_label="Categories" />
     <c-module>
-        {% if error %}<c-alert variant="danger">{{ error }}</c-alert>{% endif %}
+        {% if error %}<c-alert variant="error">{{ error }}</c-alert>{% endif %}
         <c-form>
             {% csrf_token %}
             <c-fieldset heading="Category Details" aligned="true">
