@@ -21,9 +21,22 @@ access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(m)s %(U)s %(H)s" %(s)s %(b)s "%(
 
 
 def when_ready(_server: object) -> None:
-    """Import the URLconf (and so every view module) in the master too, so forked workers start warm."""
+    """Load in the master what a worker's first page would otherwise load, so forked workers start warm: the URLconf
+    (and so every view module), its reverse lookups, the date formats and every template compiled. Cold, a worker's
+    first page took about ten times a warm render."""
     from importlib import import_module
+    from pathlib import Path
 
     from django.conf import settings
+    from django.template import engines
+    from django.template.utils import get_app_template_dirs
+    from django.urls import get_resolver
+    from django.utils.formats import get_format
 
     import_module(settings.ROOT_URLCONF)
+    get_resolver().reverse_dict  # noqa: B018 - reading it builds it
+    get_format("DATE_FORMAT")
+    engine = engines["django"]
+    for directory in (*engine.engine.dirs, *get_app_template_dirs("templates")):
+        for path in Path(directory).rglob("*.html"):
+            engine.get_template(path.relative_to(directory).as_posix())
