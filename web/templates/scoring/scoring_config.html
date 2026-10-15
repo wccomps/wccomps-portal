@@ -46,13 +46,13 @@
                 </p>
                 <div class="max-points-grid">
                     <c-form_field label="Service Max">
-                        <span class="readonly-value">{{ template.service_max }}</span>
+                        <span>{{ template.service_max }}</span>
                     </c-form_field>
                     <c-form_field label="Inject Max">
-                        <span class="readonly-value">{{ template.inject_max }}</span>
+                        <span>{{ template.inject_max }}</span>
                     </c-form_field>
                     <c-form_field label="Orange Check Max">
-                        <span class="readonly-value">{{ template.orange_max }}</span>
+                        <span>{{ template.orange_max }}</span>
                     </c-form_field>
                 </div>
             </c-fieldset>
@@ -75,11 +75,4 @@
             </c-form>
         </c-button_row>
     </c-module>
-    <style>
-        .max-points-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 15px;
-        }
-    </style>
 {% endblock admin_content %}

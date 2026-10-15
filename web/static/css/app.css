@@ -190,18 +190,6 @@ a.button:active {
 }
 
 
-/* Team status in mappings page */
-.field-status > div:first-child {
-    font-weight: 700;
-    font-size: 16px;
-}
-
-/* Actions column spacing */
-.field-actions form {
-    display: inline-block;
-    margin-right: 6px;
-}
-
 /* Make checkbox column narrower */
 .action-checkbox-column,
 .action-checkbox {
@@ -210,9 +198,12 @@ a.button:active {
 }
 
 /* ============================================
-   UTILITY CLASSES
-   Use these instead of inline styles
+   UTILITIES
+   Single-purpose classes any page may use, and the few small blocks several pages share (code-block,
+   status-bar). test_template_vocabulary reads the classes between the BEGIN and END markers as the shared
+   vocabulary; a class defined anywhere else in this file belongs to a component or to one page.
    ============================================ */
+/* BEGIN UTILITIES */
 
 /* Text colors */
 .text-dark { color: var(--body-fg, #333); }
@@ -255,76 +246,7 @@ a.button:active {
     white-space: nowrap;
 }
 
-/* Modal styles */
-.modal {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 1000;
-    align-items: center;
-    justify-content: center;
-}
-.modal--open { display: flex; }
-.modal-backdrop {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.5);
-}
-.modal-content {
-    position: relative;
-    background: var(--body-bg, #fff);
-    border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-    max-width: 500px;
-    width: 90%;
-    max-height: 90vh;
-    overflow-y: auto;
-}
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 15px 20px;
-    border-bottom: 1px solid var(--hairline-color, #e8e8e8);
-}
-.modal-title {
-    margin: 0;
-    font-size: 18px;
-    color: var(--body-fg, #333);
-}
-.modal-close {
-    background: none;
-    border: none;
-    font-size: 24px;
-    cursor: pointer;
-    color: var(--body-quiet-color, #666);
-    padding: 4px 8px;
-    min-width: 24px;
-    min-height: 24px;
-    line-height: 1;
-}
-.modal-close:hover {
-    color: var(--body-fg, #333);
-}
-.modal-body {
-    padding: 20px;
-}
-.modal-footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    padding: 15px 20px;
-    border-top: 1px solid var(--hairline-color, #e8e8e8);
-}
-
 /* Flex utilities */
-.flex-column { flex-direction: column; }
 .flex-1 { flex: 1; }
 .flex-grow-1 { flex-grow: 1; }
 .flex-wrap { flex-wrap: wrap; }
@@ -336,9 +258,6 @@ a.button:active {
 .gap-20 { gap: 20px; }
 .justify-end { justify-content: flex-end; }
 
-/* Filter toolbar specific */
-.filter-actions { padding-top: 22px; }
-
 /* Margins */
 .m-0 { margin: 0; }
 .mt-0 { margin-top: 0; }
@@ -347,7 +266,6 @@ a.button:active {
 .mt-15 { margin-top: 15px; }
 .mt-20 { margin-top: 20px; }
 .mb-0 { margin-bottom: 0; }
-.mb-4 { margin-bottom: 4px; }
 .mb-5 { margin-bottom: 5px; }
 .mb-8 { margin-bottom: 8px; }
 .mb-10 { margin-bottom: 10px; }
@@ -361,13 +279,9 @@ a.button:active {
 .p-20 { padding: 20px; }
 .py-5 { padding-top: 5px; padding-bottom: 5px; }
 .px-10 { padding-left: 10px; padding-right: 10px; }
-.pt-15 { padding-top: 15px; }
 
 /* Widths */
-.w-40 { width: 40px; }
 .w-150 { width: 150px; }
-.min-w-150 { min-width: 150px; }
-.min-w-200 { min-width: 200px; }
 .w-full { width: 100%; }
 .d-contents { display: contents; }
 .h-120 { height: 120px; }
@@ -383,15 +297,46 @@ a.button:active {
 .border-warning { border: 2px solid var(--warning-alert-border); }
 .border-success { border: 2px solid var(--success-fg); }
 .rounded { border-radius: 4px; }
-.checkbox-group { display: flex; flex-direction: column; gap: 8px; }
-.toast-position { position: fixed; bottom: 16px; right: 16px; z-index: 50; }
 .whitespace-pre-wrap { white-space: pre-wrap; }
 .max-h-300 { max-height: 300px; }
 .overflow-y-auto { overflow-y: auto; }
 .table-fixed { table-layout: fixed; }
-.team-list { columns: 2; list-style: disc inside; padding: 0; }
-@media (min-width: 768px) { .team-list { columns: 3; } }
-@media (min-width: 1024px) { .team-list { columns: 4; } }
+
+/* Grid layouts */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+@media (max-width: 767px) { .grid-2 { grid-template-columns: 1fr; } }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+
+/* Container widths */
+.max-w-400 { max-width: 400px; margin: 0 auto; }
+.max-w-800 { max-width: 800px; margin: 0 auto; }
+
+/* Print */
+@media print { .no-print { display: none !important; } }
+
+/* Shared blocks */
+.code-block {
+    display: block;
+    padding: 15px;
+    background: var(--darkened-bg, #f5f5f5);
+    border-radius: 4px;
+    margin: 10px 0;
+    overflow-x: auto;
+}
+.status-bar {
+    padding: 10px;
+    margin: 0 0 10px 0;
+    border-radius: 4px;
+    background: var(--darkened-bg, #f8f8f8);
+    border: 1px solid var(--hairline-color, #ddd);
+}
+/* END UTILITIES */
+
+/* Filter toolbar actions (c-filter_toolbar) */
+.filter-actions { padding-top: 22px; }
+
+/* Toast placement (c-toast) */
+.toast-position { position: fixed; bottom: 16px; right: 16px; z-index: 50; }
 
 /* Module header (colored bar at top of module) */
 .module-header {
@@ -473,6 +418,11 @@ a.button:active {
 .results table {
     width: 100%;
 }
+/* A row's action forms sit side by side in its actions cell (c-table) */
+.results .field-actions form {
+    display: inline-block;
+    margin-right: 6px;
+}
 .action-box-warning {
     background: var(--warning-alert-bg);
     border-color: var(--warning-alert-border);
@@ -484,9 +434,6 @@ a.button:active {
 }
 .action-box-warning h3, .action-box-warning h4 {
     color: var(--warning-alert-fg);
-}
-.action-box .form-group {
-    margin-bottom: 15px;
 }
 .action-box label {
     display: block;
@@ -525,24 +472,8 @@ a.button:active {
     border-left: 4px solid var(--primary, #417690);
 }
 
-/* Code block */
-.code-block {
-    display: block;
-    padding: 15px;
-    background: var(--darkened-bg, #f5f5f5);
-    border-radius: 4px;
-    margin: 10px 0;
-    overflow-x: auto;
-}
 
-/* Grid layouts */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-@media (max-width: 767px) { .grid-2 { grid-template-columns: 1fr; } }
-.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 
-/* Container widths */
-.max-w-400 { max-width: 400px; margin: 0 auto; }
-.max-w-800 { max-width: 800px; margin: 0 auto; }
 
 
 /* Detail list - definition list styling */
@@ -603,16 +534,6 @@ a.button:active {
     border: 1px solid var(--hairline-color, #ddd);
 }
 
-/* ============================================
-   STATUS BAR (ticket detail neutral header)
-   ============================================ */
-.status-bar {
-    padding: 10px;
-    margin: 0 0 10px 0;
-    border-radius: 4px;
-    background: var(--darkened-bg, #f8f8f8);
-    border: 1px solid var(--hairline-color, #ddd);
-}
 
 /* ============================================
    ALERT COMPONENT STYLES
@@ -698,7 +619,6 @@ a.button:active {
     background: var(--darkened-bg, #f8f8f8);
 }
 @media print {
-    .no-print,
     nav,
     .sidebar,
     header,
@@ -928,42 +848,6 @@ td textarea[x-ref="editor"] {
 }
 
 /* ============================================
-   TABLE HEADER TOOLTIP INDICATOR
-   ============================================ */
-.th-tooltip-icon {
-    display: inline-block;
-    width: 14px;
-    height: 14px;
-    line-height: 14px;
-    text-align: center;
-    font-size: 10px;
-    font-weight: 700;
-    border-radius: 50%;
-    background: var(--darkened-bg, #e0e0e0);
-    color: var(--body-quiet-color, #666);
-    margin-left: 4px;
-    vertical-align: middle;
-    cursor: help;
-}
-
-/* ============================================
-   ADVANCED FILTERS TOGGLE
-   ============================================ */
-.advanced-filters-wrap {
-    width: 100%;
-    margin-top: 8px;
-}
-.advanced-filters-toggle {
-    font-size: 12px;
-    color: var(--link-fg, #447e9b);
-}
-.advanced-filters-badge {
-    font-size: 10px;
-    padding: 1px 6px;
-    vertical-align: middle;
-}
-
-/* ============================================
    BREADCRUMBS
    ============================================ */
 .breadcrumbs {
@@ -1042,3 +926,481 @@ table thead th .text span .school-name {
     display: inline;
 }
 
+/* ============================================
+   PORTAL CHROME (admin/base_site.html): the nav bar, the new-ticket toast and the page frame every page shares
+   ============================================ */
+#content {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.primary-navigation {
+    background: var(--primary, #417690);
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--primary-dark, #2e5266);
+    display: flex;
+    align-items: center;
+}
+
+.nav-spacer {
+    flex: 1;
+}
+
+.nav-user {
+    color: var(--header-link-color, #c4dde8);
+    font-size: 13px;
+    margin-right: 10px;
+}
+
+.primary-navigation a {
+    color: var(--header-link-color, #fff);
+    text-decoration: none;
+    padding: 8px 15px;
+    margin-right: 5px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+    display: inline-block;
+    transition: background-color 0.2s;
+}
+
+.primary-navigation a:hover {
+    background-color: var(--primary-dark, #2e5266);
+}
+
+.primary-navigation a.current {
+    background-color: var(--primary-dark, #2e5266);
+    font-weight: 600;
+}
+
+.primary-navigation a:focus {
+    outline: 2px solid var(--header-link-color, #fff);
+    outline-offset: 2px;
+}
+
+/* Hamburger toggle - hidden on desktop */
+.nav-toggle {
+    display: none;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    color: var(--header-link-color, #fff);
+    font-size: 20px;
+    padding: 4px 10px;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.nav-toggle:hover {
+    background: var(--primary-dark, #2e5266);
+}
+
+/* Nav menu container - flex row on desktop */
+.nav-menu {
+    display: contents;
+}
+
+.nav-links {
+    display: contents;
+}
+
+.nav-utils {
+    display: contents;
+}
+
+/* Mobile layout */
+@media (max-width: 767px) {
+    #header {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        position: relative;
+    }
+
+    #branding {
+        flex: 1;
+    }
+
+    .primary-navigation {
+        padding: 0;
+        background: transparent;
+        border-bottom: none;
+    }
+
+    .nav-toggle {
+        display: block;
+    }
+
+    .nav-menu {
+        display: none;
+        flex-direction: column;
+        padding-top: 10px;
+    }
+
+    .nav-menu--open {
+        display: flex;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: var(--primary, #417690);
+        padding: 10px 15px;
+        border-bottom: 1px solid var(--primary-dark, #2e5266);
+        z-index: 1000;
+    }
+
+    .nav-links {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .nav-links a {
+        display: block;
+        margin-right: 0;
+        padding: 10px 12px;
+        border-radius: 4px;
+    }
+
+    .nav-spacer {
+        display: none;
+    }
+
+    .nav-utils {
+        display: flex;
+        align-items: center;
+        padding-top: 10px;
+        margin-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+    }
+}
+
+/* Table improvements - better density for scanning */
+#result_list td,
+#result_list th {
+    padding: 10px 12px;
+    line-height: 1.5;
+}
+
+#result_list tbody tr:hover {
+    background-color: var(--darkened-bg, #f5f5f5);
+}
+
+/* Larger click targets. The height follows the padding: Django fixes some button heights (the delete page's
+   No link, its actions bar), which this padding would clip. The admin changelist's Go button keeps Django's
+   compact size. */
+:is(.button, input[type="submit"], button[type="submit"]):not(#changelist-form .actions *) {
+    padding: 8px 16px !important;
+    height: auto;
+    font-size: 13px !important;
+    min-width: 80px;
+    cursor: pointer;
+}
+
+.button:hover,
+input[type="submit"]:hover,
+button[type="submit"]:hover {
+    opacity: 0.85;
+}
+
+/* Make admin filters more readable */
+#changelist-filter li {
+    padding: 8px 10px;
+}
+
+/* Actions dropdown */
+.actions select {
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+/* Dark mode toggle - uses Django admin's built-in dark mode CSS */
+.dark-mode-toggle {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-right: 15px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.dark-mode-toggle:hover {
+    background: var(--primary-dark, #2e5266);
+}
+
+.dark-mode-toggle .dark-icon {
+    display: none;
+}
+
+.dark-mode-toggle .light-icon {
+    display: inline;
+}
+
+html[data-theme="dark"] .dark-mode-toggle .dark-icon {
+    display: inline;
+}
+
+html[data-theme="dark"] .dark-mode-toggle .light-icon {
+    display: none;
+}
+
+.audio-toggle {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-right: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.audio-toggle:hover {
+    background: var(--primary-dark, #2e5266);
+}
+
+/* Ticket notification badge */
+.notif-count {
+    background: var(--error-fg, #dc3545);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 4px;
+    vertical-align: top;
+}
+
+/* Ticket toast notification */
+.ticket-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--body-bg, #fff);
+    color: var(--body-fg, #333);
+    border: 1px solid var(--hairline-color, #ddd);
+    border-left: 4px solid var(--info-fg, #1976d2);
+    border-radius: 4px;
+    padding: 12px 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    z-index: 9999;
+    max-width: 360px;
+}
+
+.ticket-toast:hover {
+    background: var(--darkened-bg, #f5f5f5);
+}
+
+.toast-line1 {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+}
+
+.toast-line1 strong {
+    white-space: nowrap;
+}
+
+.toast-line1 span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.toast-line2 {
+    font-size: 12px;
+    color: var(--body-quiet-color, #666);
+    margin-top: 2px;
+}
+
+.toast-enter {
+    transition: all 0.3s ease-out;
+}
+
+.toast-enter-start {
+    opacity: 0;
+    transform: translateX(20px);
+}
+
+.toast-enter-end {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.toast-leave {
+    transition: all 0.2s ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .toast-enter,
+    .toast-leave {
+        transition: none;
+    }
+
+    .toast-enter-start {
+        transform: none;
+    }
+
+    .htmx-request {
+        transition: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .ticket-toast {
+        max-width: calc(100vw - 40px);
+        bottom: 12px;
+        right: 12px;
+    }
+}
+
+[x-cloak] {
+    display: none !important;
+}
+
+/* Subtle opacity fade during htmx requests */
+.htmx-request {
+    opacity: 0.5;
+    transition: opacity 200ms ease-in;
+}
+
+/* ============================================
+   PAGE-SPECIFIC STYLES
+   Each serves one page; test_template_vocabulary's PAGE_STYLE_EXCEPTIONS says why no component or utility fits.
+   ============================================ */
+
+/* Create IP pool dialog (scoring/submit_red_finding.html) */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+.modal--open { display: flex; }
+.modal-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+}
+.modal-content {
+    position: relative;
+    background: var(--body-bg, #fff);
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    max-width: 500px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--hairline-color, #e8e8e8);
+}
+.modal-title {
+    margin: 0;
+    font-size: 18px;
+    color: var(--body-fg, #333);
+}
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: var(--body-quiet-color, #666);
+    padding: 4px 8px;
+    min-width: 24px;
+    min-height: 24px;
+    line-height: 1;
+}
+.modal-close:hover {
+    color: var(--body-fg, #333);
+}
+.modal-body {
+    padding: 20px;
+}
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 15px 20px;
+    border-top: 1px solid var(--hairline-color, #e8e8e8);
+}
+
+/* Category form: its checkbox lists (admin/category_form.html) */
+.checkbox-group { display: flex; flex-direction: column; gap: 8px; }
+
+/* Broadcast recipients (admin/broadcast.html) */
+.team-list { columns: 2; list-style: disc inside; padding: 0; }
+@media (min-width: 768px) { .team-list { columns: 3; } }
+@media (min-width: 1024px) { .team-list { columns: 4; } }
+
+/* Ticket comments and playbook (ticket_detail.html, ops_ticket_detail_dynamic.html) */
+.comment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.comment-item {
+    padding: 10px 15px;
+    border-radius: 4px;
+    background: var(--darkened-bg, #f8f8f8);
+    border: 1px solid var(--hairline-color, #ddd);
+}
+
+.comment-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+
+.comment-author {
+    font-weight: 600;
+    color: var(--body-fg, #333);
+}
+
+.comment-time {
+    color: var(--body-quiet-color, #666);
+}
+
+.comment-body {
+    white-space: pre-wrap;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.playbook-steps {
+    margin: 0;
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.playbook-steps li {
+    line-height: 1.5;
+    font-size: 14px;
+}
+
+/* Scoring setup: the weight and maximum fields (scoring/scoring_config.html) */
+.max-points-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 15px;
+}
