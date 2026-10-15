@@ -17,7 +17,6 @@ from .competition import (
     admin_competition,
     admin_competition_action,
     admin_competition_apps,
-    admin_competition_danger,
     admin_competition_guide,
     admin_competition_setup,
 )
@@ -38,7 +37,6 @@ __all__ = [
     "admin_competition",
     "admin_competition_action",
     "admin_competition_apps",
-    "admin_competition_danger",
     "admin_competition_guide",
     "admin_competition_setup",
     "admin_sync_roles",

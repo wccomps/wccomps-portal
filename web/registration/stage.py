@@ -78,10 +78,10 @@ ACTIONS: dict[Action, ActionText] = {
         "Close out the event",
     ),
     Action.CANCEL: ActionText(
-        "To call the event off, use Cancel event on the competition Danger Zone page.", "Cancel the event"
+        "To call the event off, use Cancel event under Advanced on the Competition page.", "Cancel the event"
     ),
     Action.CLEAR: ActionText(
-        "Remove it with Clear leftover data on the competition Danger Zone page, then import the next school list.",
+        "Remove it with Clear leftover data under Advanced on the Competition page, then import the next school list.",
         "Clear leftover data",
     ),
 }

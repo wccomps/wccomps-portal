@@ -31,8 +31,8 @@ from scoring.quotient_sync import sync_quotient_metadata
 
 from core.admin_views.event_panel import event_facts, event_panel
 from core.admin_views.places import (
-    CONTROLS,
     PLACES,
+    Anchor,
     Section,
     SetupSection,
     action_url,
@@ -550,7 +550,6 @@ def _close_out_context(stage: EventStage) -> dict[str, object]:
         # Close Out records scores with no event in the active season; the Seasons page makes one active
         "needs_active_season": stage.event is None and active_season is None,
         "active_season": active_season,
-        "open_event": stage.event,
         "can_close_out": not refusal,
         # Shown when the section offers no button
         "close_out_refusal": refusal,
@@ -569,7 +568,14 @@ SECTION_CONTEXT: dict[Section, Callable[[EventStage], dict[str, object]]] = {
 def admin_competition(request: HttpRequest) -> HttpResponse:
     stage = event_stage()
     panel = event_panel(event_facts(stage))
-    context: dict[str, object] = {"panel": panel, "controls_id": CONTROLS}
+    can_clear = not clear_leftovers_problem(stage)
+    context: dict[str, object] = {
+        "panel": panel,
+        "anchors": ids(Anchor),
+        "can_cancel": not cancel_event_problem(stage),
+        "can_clear": can_clear,
+        "leftovers": _wiped_summary(competition_data_counts()) if can_clear else "",
+    }
     if (section := panel.section) is not None:
         context["section_partial"] = section_partial(section)
         if section in SECTION_CONTEXT:
@@ -625,24 +631,6 @@ def admin_competition_action(request: HttpRequest) -> HttpResponseBase:
     return handler(request, config, user.username)
 
 
-@require_permission("admin", "gold_team")
-def admin_competition_danger(request: HttpRequest) -> HttpResponse:
-    """Danger zone page for destructive competition operations."""
-    config = CompetitionConfig.get_config()
-    stage = event_stage()
-    can_clear = not clear_leftovers_problem(stage)
-    return render(
-        request,
-        "admin/competition_danger.html",
-        {
-            "config": config,
-            "stage": stage,
-            "leftovers": _wiped_summary(competition_data_counts()) if can_clear else "",
-            "can_cancel": not cancel_event_problem(stage),
-        },
-    )
-
-
 def guide_partial(action: Action) -> str:
     """The guide's section of prose for an action, named after it."""
     return f"admin/guide/{action}.html"
@@ -656,6 +644,7 @@ def admin_competition_guide(request: HttpRequest) -> HttpResponse:
             "key": action.value,
             "heading": place.heading,
             "rare": place.rare,
+            "in_advanced": place.in_advanced,
             "url": action_url(action),
             "link_label": ACTIONS[action].link_label,
             "partial": guide_partial(action),

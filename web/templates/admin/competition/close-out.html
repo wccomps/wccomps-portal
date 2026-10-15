@@ -5,7 +5,7 @@
         Before you close out
     </c-slot>
     {% if can_close_out %}
-        {% if not open_event %}
+        {% if not panel.stage.event %}
             <p>
                 The scores are recorded at a new event in season <strong>{{ active_season.name }}</strong>,
                 with the current school list.

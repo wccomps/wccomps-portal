@@ -108,7 +108,7 @@
                 {% endfor %}
             </c-table>
         </c-module>
-        <c-module id="{{ controls_id }}" class="mt-20">
+        <c-module id="{{ anchors.CONTROLS }}" class="mt-20">
             <c-slot name="title">
                 Competition Controls
             </c-slot>
@@ -144,11 +144,11 @@
         {% if section_partial %}
             {% include section_partial %}
         {% endif %}
-        <c-fieldset id="advanced"
+        <c-fieldset id="{{ anchors.ADVANCED }}"
                     class="mt-20"
-                    heading="Advanced: reset team passwords, Danger Zone"
+                    heading="Advanced: reset team passwords{% if can_cancel %}, cancel the event{% endif %}{% if can_clear %}, clear leftover data{% endif %}"
                     collapsible="true"
-                    collapsed="true">
+                    collapsed="{{ panel.advanced_open|yesno:'false,true' }}">
             <p class="help">Tools outside the normal run of an event.</p>
             <c-action_box heading="Reset Team Passwords">
                 <form @submit.prevent="resetPasswords">
@@ -183,20 +183,46 @@
                     </c-action_box>
                 </template>
             </c-action_box>
-            <c-action_box heading="Danger Zone" variant="warning" class="mt-20">
-                <p class="help">
-                    Cancel an event opened by mistake or called off before any team scored, or clear data left over that no
-                    event recorded.
-                </p>
-                <c-link href="{% url 'admin_competition_danger' %}" variant="danger">
-                    Open the Danger Zone
-                </c-link>
-            </c-action_box>
+            {% if can_cancel %}
+                <c-action_box heading="Cancel Event" variant="warning" class="mt-20">
+                    <p class="help">
+                        {{ panel.stage.event }} is open and no team has scores yet. Cancelling calls it off: it closes
+                        the event and removes its team assignments, so it can be deleted unless packets were sent for
+                        it. Nothing is recorded for it. The school list and sent packets stay; Discord links and tickets
+                        are left over for Clear leftover data.
+                    </p>
+                    <c-button_row class="mt-10">
+                        <c-button variant="danger" @click="cancelEvent" ::disabled="loading">
+                            Cancel Event
+                        </c-button>
+                    </c-button_row>
+                </c-action_box>
+            {% endif %}
+            {% if can_clear %}
+                <c-action_box heading="Clear Leftover Data" variant="warning" class="mt-20">
+                    <p class="help">
+                        It is not archived: clearing it deletes it for good. To keep scores, record them with Close Out
+                        Event instead. Closed-out events' results are not touched.
+                    </p>
+                    <p class="help">As of loading this page: {{ leftovers }}.</p>
+                    <c-button_row class="mt-10">
+                        <c-button variant="danger" @click="clearLeftovers" ::disabled="loading">
+                            Clear Leftover Data
+                        </c-button>
+                    </c-button_row>
+                </c-action_box>
+            {% endif %}
         </c-fieldset>
         <c-toast />
     </div>
     <script src="{% static 'js/competition.js' %}"></script>
     <script>
+// Asks for the typed word under the message: the word as typed, or null. The server checks it again.
+function typedConfirm(message) {
+    const response = prompt(message + '\n\nType "yolo" to confirm:');
+    return response && response.toLowerCase() === 'yolo' ? response : null;
+}
+
 document.addEventListener('alpine:init', () => {
     const actionUrl = '{% url "admin_competition_action" %}';
     Alpine.data('competitionAdmin', () => compose(streamMixin(actionUrl), readinessMixin(actionUrl), {
@@ -206,7 +232,7 @@ document.addEventListener('alpine:init', () => {
         closeOutDate: '',
         closeOutType: 'invitational',
         closeOutSeenSeason: '{{ active_season.pk|default_if_none:"" }}',
-        closeOutOpenEvent: '{{ open_event.pk|default_if_none:"" }}',
+        openEvent: '{{ panel.stage.event.pk|default_if_none:"" }}',
         closeOutOffered: {{ can_close_out|yesno:"true,false" }},
         closeOutChecking: false,
         closeOutChecked: false,
@@ -259,22 +285,35 @@ document.addEventListener('alpine:init', () => {
         },
 
         closeOutEvent() {
-            const message = 'CLOSE OUT THE EVENT?\n\n' +
+            const typed = typedConfirm('CLOSE OUT THE EVENT?\n\n' +
                 'This freezes every listed school\'s scorecard as its result, then deletes the live scores, tickets ' +
                 'and blue team Discord links, closes the event and queues the Discord cleanup.\n' +
-                'It cannot be undone: finish grading and email the scorecards first.\n\n' +
-                'Type "yolo" to confirm:';
-            const response = prompt(message);
-            if (response && response.toLowerCase() === 'yolo') {
+                'It cannot be undone: finish grading and email the scorecards first.');
+            if (typed) {
                 this.doStreamAction('close_out_event', {
-                    confirm: response,
-                    open_event: this.closeOutOpenEvent,
+                    confirm: typed,
+                    open_event: this.openEvent,
                     new_name: this.closeOutName,
                     new_date: this.closeOutDate,
                     new_type: this.closeOutType,
                     current_season: this.closeOutSeenSeason,
                 });
             }
+        },
+
+        cancelEvent() {
+            const typed = typedConfirm('CANCEL THE OPEN EVENT?\n\n' +
+                'It closes the event and removes its team assignments. Nothing is recorded for it.\n' +
+                'The school list and sent packets stay.');
+            if (typed) this.doAction('cancel_event', { confirm: typed, open_event: this.openEvent });
+        },
+
+        clearLeftovers() {
+            const typed = typedConfirm('CLEAR LEFTOVER DATA?\n\n' +
+                'This deletes all live data not recorded at any event, including any added since this page loaded.\n' +
+                'It is NOT archived.\n' +
+                'Closed-out events\' results are kept.');
+            if (typed) this.doAction('clear_leftover_data', { confirm: typed });
         },
 
         // The passwords are changed when the CSV arrives: keep it on screen (no reload), it is the only copy

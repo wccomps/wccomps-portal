@@ -522,7 +522,11 @@
             return {
                 expanded: true,
                 init() {
-                    this.expanded = this.$el.dataset.collapsed !== 'true';
+                    // A link to the fieldset's id opens it, on load or on this page
+                    const el = this.$el;
+                    const linked = () => !!el.id && location.hash === '#' + el.id;
+                    this.expanded = el.dataset.collapsed !== 'true' || linked();
+                    window.addEventListener('hashchange', () => { if (linked()) this.expanded = true; });
                 },
                 get iconClass() {
                     return this.expanded ? 'fieldset-toggle-icon--open' : '';

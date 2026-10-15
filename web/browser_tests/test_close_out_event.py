@@ -1,4 +1,5 @@
-"""Close Out Event on the competition page: warnings, the typed confirmation, and the streamed steps."""
+"""Close Out Event on the competition page: warnings, the typed confirmation, and the streamed steps; and the
+rare actions under Advanced."""
 
 from datetime import date
 from decimal import Decimal
@@ -92,7 +93,7 @@ def test_a_failing_check_leaves_close_out_usable(live_server, pw_browser):
         context.close()
 
 
-def test_cancel_event_on_the_danger_page(live_server, pw_browser):
+def test_cancel_event_under_advanced(live_server, pw_browser):
     from registration.models import Event, Season
     from registration.services import set_team_school
 
@@ -110,14 +111,68 @@ def test_cancel_event_on_the_danger_page(live_server, pw_browser):
     page.on("dialog", lambda dialog: dialog.accept("yolo"))
 
     try:
-        page.goto(f"{live_server.url}/ops/admin/competition/danger/")
+        page.goto(f"{live_server.url}/ops/admin/competition/")
+        cancel = page.get_by_role("button", name="Cancel Event", exact=True)
+        assert not cancel.is_visible()
+        page.get_by_role("button", name="Advanced: reset team passwords, cancel the event").click()
         with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):
-            page.get_by_text("Cancel Event", exact=True).last.click()
+            cancel.click()
         page.get_by_text("Invitational cancelled. The school list stays.").wait_for()
 
         event.refresh_from_db()
         assert not event.is_active
         assert not event.team_assignments.exists()
+    finally:
+        context.close()
+
+
+@pytest.mark.parametrize("typed", ["nope", "yolo"])
+def test_clear_leftover_data_opens_under_advanced_and_needs_the_typed_word(live_server, pw_browser, typed):
+    from team.models import Team
+    from ticketing.models import Ticket
+
+    team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    Ticket.objects.create(ticket_number="T001-001", team=team, title="Left")
+    user = _create_role_user("admin", None)
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    page.on("dialog", lambda dialog: dialog.accept(typed))
+
+    try:
+        page.goto(f"{live_server.url}/ops/admin/competition/")
+        # The Leftover data section points at Advanced, which is open while Clear leftover data is next
+        clear = page.get_by_role("button", name="Clear Leftover Data", exact=True)
+        clear.wait_for()
+        if typed == "yolo":
+            with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):
+                clear.click()
+            page.get_by_text("Leftover data cleared.").wait_for()
+            assert not Ticket.objects.exists()
+        else:
+            clear.click()
+            page.wait_for_timeout(500)
+            assert Ticket.objects.exists()
+    finally:
+        context.close()
+
+
+@pytest.mark.parametrize("on_load", [True, False])
+def test_a_link_to_advanced_opens_it(live_server, pw_browser, on_load):
+    user = _create_role_user("admin", None)
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    toggle = page.get_by_role("button", name="Advanced: reset team passwords")
+
+    try:
+        if on_load:
+            page.goto(f"{live_server.url}/ops/admin/competition/#advanced")
+        else:
+            page.goto(f"{live_server.url}/ops/admin/competition/")
+            toggle.wait_for()
+            assert toggle.get_attribute("aria-expanded") == "false"
+            page.evaluate("location.hash = 'advanced'")
+        page.get_by_role("button", name="Reset Passwords").wait_for()
+        assert toggle.get_attribute("aria-expanded") == "true"
     finally:
         context.close()
 
