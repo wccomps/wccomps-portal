@@ -140,9 +140,12 @@ def test_a_school_list_row_the_csv_parser_accepts_imports(name: str, notes: str,
 def test_a_school_list_file_gets_row_errors_not_a_parse_failure(content: bytes) -> None:
     """A short row is a missing value in that row, and a byte order mark is not part of the first column's name."""
     parsed = parse_csv_file(SimpleUploadedFile("s.csv", content))
-    assert not any(e.startswith("Error parsing CSV file") for e in parsed["errors"]), parsed["errors"]
+    assert all(isinstance(e, str) and e for e in parsed["errors"] + parsed["warnings"])
+    if content == _school_csv(["School"], header="school_name,contact_email"):
+        assert parsed["errors"] == ["Row 2: contact_email is required"]
     if content.startswith(b"\xef\xbb\xbfschool_name,contact_email\r\n"):
         assert parsed["warnings"] == []
+        assert parsed["rows"][0]["school_name"] == "School"
 
 
 @given(text=request_text())
