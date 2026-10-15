@@ -11,7 +11,7 @@ Content container (card-like) with optional toolbar.
 ```django
 <c-module>
     <c-slot name="toolbar">
-        <c-link href="/back" variant="history">Back</c-link>
+        <c-link href="/back">Back</c-link>
     </c-slot>
     Main content here
 </c-module>
@@ -76,14 +76,20 @@ Props:
 - `type`: button|submit
 - `class`, `id`, `name`, `value`
 
+#### `<c-toggle_button>`
+A button that stays pressed while its choice is picked; the page's script toggles `box-toggle--selected`.
+```django
+<c-toggle_button data-box="web01">web01</c-toggle_button>
+```
+
 #### `<c-link>`
 Styled links.
 ```django
-<c-link href="/back" variant="history">Back</c-link>
+<c-link href="/back">Back</c-link>
 <c-link href="/add" variant="add">Add New</c-link>
 ```
 
-Props: `href`, `variant` (default|history|add|change)
+Props: `href`, `variant` (default|primary|add|change|danger|cancel)
 
 ### Display
 
@@ -159,8 +165,9 @@ Data table with header and body slots.
 </c-table>
 ```
 
-Props: `id`, `class`, `aria_label`, `role` (e.g. `grid` for a table whose cells are `gridcell`s), `fixed_layout`.
-Slots: `colgroup` (column widths), `headers`.
+Props: `id`, `class`, `aria_label`, `role` (e.g. `grid` for a table whose cells are `gridcell`s), `fixed_layout`,
+`widths` (column widths, space separated: `widths="40px 20% 30%"`; template tags may pick them).
+Slot: `headers`.
 
 #### `<c-table_header>`
 Sortable table column header.
@@ -186,15 +193,17 @@ Page navigation for paginated results.
 3. **Reduced Code**: Less repetition in templates (~40% reduction)
 4. **Type Safety**: Components enforce correct prop usage
 5. **Documentation**: Self-documenting with clear prop names
-6. **Migration Path**: Easy to switch from Django Admin CSS to Bootstrap 5 by updating component internals
 
 ## Styling Vocabulary
 
-A page styles itself only with classes these components render or style, the utilities between
-`BEGIN UTILITIES` and `END UTILITIES` in `static/css/app.css`, and Django admin's classes. Buttons and tables
-go through `<c-button>` and `<c-table>`. `core/tests/test_template_vocabulary.py` enforces this: a class the
-page invents, a class no stylesheet defines, a raw `<button>` or `<table>`, or an app.css rule nothing uses
-fails it, unless its exceptions list says why no component or utility fits.
+A page styles itself only with classes: the ones these components render (with their app.css modifiers, such as
+`alert--error`), the utilities between `BEGIN UTILITIES` and `END UTILITIES` in `static/css/app.css`, and Django
+admin's classes. A class the page's own script adds, or a selector that only mentions a component, is the page's
+own. No `style` attributes or `<style>` blocks: a fixed look is a utility, a choice is a component option (such as
+`<c-table widths="...">`). Markup a component renders goes through the component, a `variant` is one the component
+knows, and a stored status reaches a badge through `|badge_variant:"kind"` (`core/status_variants.py`).
+`core/tests/test_template_vocabulary.py` enforces all of this, and fails on an app.css rule no page uses; each
+check's exceptions list says why no component or utility fits.
 
 ## Migration Strategy
 
@@ -204,4 +213,4 @@ Templates can be gradually refactored to use components:
 3. Replace form rows with `<c-form_field>`
 4. Replace tables with `<c-table>` and `<c-table_header>`
 
-The components currently use Django Admin CSS classes, matching the existing style. In the future, we can update component internals to use Bootstrap 5 without changing templates that use the components.
+The components use Django admin's CSS and app.css.
