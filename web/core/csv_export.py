@@ -22,7 +22,17 @@ def safe_cell(value: object) -> object:
     if value is None or isinstance(value, (bool, int, float, Decimal)):
         return value
     text = str(value)
-    return f"'{text}" if text.startswith(FORMULA_STARTS) else text
+    return f"'{text}" if _starts_a_formula(text) else text
+
+
+def unquote_cell(text: str) -> str:
+    """A cell as it was before safe_cell quoted it, for reading an export back in."""
+    return text[1:] if text.startswith("'") and _starts_a_formula(text) else text
+
+
+def _starts_a_formula(text: str) -> bool:
+    # Quotes already in front count too, so unquote_cell takes off exactly the one safe_cell added
+    return text.lstrip("'").startswith(FORMULA_STARTS)
 
 
 class CsvWriter:

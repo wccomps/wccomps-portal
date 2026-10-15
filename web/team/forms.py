@@ -24,6 +24,7 @@ from registration.services import (
     import_school_list,
 )
 
+from core.csv_export import unquote_cell
 from core.forms import SchoolInfoEditForm
 from team.models import SchoolInfo, Team, default_team_name
 
@@ -235,7 +236,8 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
             row = {header_mapping.get(k, k): v for k, v in raw_row.items()} if header_mapping else raw_row
             # A row is checked as the school info form checks one school: lengths, emails, no NUL characters.
             # A cell missing from a short row is None.
-            form = SchoolInfoEditForm({name: row.get(name) or "" for name in all_headers})
+            # A cell may be the school info export's, so the formula guard's quote comes off first
+            form = SchoolInfoEditForm({name: unquote_cell(row.get(name) or "") for name in all_headers})
             if form.is_valid():
                 rows.append(
                     {

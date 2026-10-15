@@ -9,6 +9,7 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
 from django.urls import reverse
 from hypothesis import example, given
@@ -16,8 +17,10 @@ from hypothesis import strategies as st
 from registration.models import School
 
 from core.authentik_utils import credentials_csv, generate_blueteam_password
-from core.csv_export import FORMULA_STARTS, csv_writer
+from core.csv_export import FORMULA_STARTS, csv_writer, unquote_cell
 from core.tests.strategies import PAYLOADS, request_text, rolled_back
+from core.tests.test_properties_parsers import SCHOOL_HEADERS, school_rows
+from team.forms import parse_csv_file
 from team.models import SchoolInfo, Team
 
 TEXT = st.one_of(request_text(), st.sampled_from(PAYLOADS), st.sampled_from(FORMULA_STARTS).map(lambda c: c + "1+1"))
@@ -35,11 +38,9 @@ def _round_trip(row: list[object]) -> list[str]:
 def test_an_exported_text_cell_never_starts_a_formula_and_reads_back_with_only_the_prefix(cells: list[object]) -> None:
     for written, read in zip(cells, _round_trip(cells), strict=True):
         if isinstance(written, str):
-            if written.startswith(FORMULA_STARTS):
-                assert read == "'" + written
-            else:
-                assert read == written
-                assert not read.startswith(FORMULA_STARTS)
+            assert not read.lstrip("'").startswith(FORMULA_STARTS) or read.startswith("'")
+            assert read == ("'" + written if written.lstrip("'").startswith(FORMULA_STARTS) else written)
+            assert unquote_cell(read) == written
         else:
             assert read == str(written)  # numbers stay numbers, unquoted
 
@@ -78,3 +79,19 @@ def test_every_generated_password_reads_back_from_its_csv_exactly() -> None:
     passwords = [generate_blueteam_password() for _ in range(500)]
     rows = list(csv.reader(io.StringIO(credentials_csv(("team01", p) for p in passwords), newline="")))
     assert [row[1] for row in rows[1:]] == passwords
+
+
+@given(rows=school_rows())
+@example(rows=[{"school_name": "+1 Academy", "contact_email": "-a@b.co", "secondary_email": "", "notes": "- parking"}])
+@example(rows=[{"school_name": "'=x", "contact_email": "a@b.co", "secondary_email": "", "notes": "''@y"}])
+def test_a_school_list_exported_then_imported_comes_back_the_same(rows: list[dict[str, str]]) -> None:
+    """The import reads what the export wrote: the formula guard's quote comes off again, once."""
+    out = io.StringIO()
+    writer = csv_writer(out)
+    writer.writerow(SCHOOL_HEADERS)
+    writer.writerows([row[h] for h in SCHOOL_HEADERS] for row in rows)
+
+    parsed = parse_csv_file(SimpleUploadedFile("s.csv", out.getvalue().encode()))
+
+    assert parsed["errors"] == []
+    assert [dict(r) for r in parsed["rows"]] == rows
