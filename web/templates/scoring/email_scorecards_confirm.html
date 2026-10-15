@@ -1,11 +1,11 @@
 {% extends "admin/base_site.html" %}
-{% load cotton %}
+{% load cotton page_titles %}
 {% block title %}
     Email All Scorecards
 {% endblock title %}
 {% block content %}
     <div id="content-main" x-data="emailScorecards">
-        <c-page_header title="Email All Scorecards"
+        <c-page_header title="{% page_title 'scoring:email_scorecards' %}"
                        parent_url="{% url 'leaderboard_page' %}"
                        parent_label="Leaderboard" />
         <c-module>

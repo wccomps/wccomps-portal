@@ -1,4 +1,4 @@
-"""The event card's steps: which is done and which is current, read from the stage and a few cheap counts."""
+"""The competition page's steps: which is done and which is current, read from the stage and a few cheap counts."""
 
 import itertools
 from datetime import date
@@ -71,25 +71,28 @@ def test_the_next_step_and_the_current_step_are_the_same_action(stage, facts):
 
     current = [row.action for row in panel.steps if row.state == StepState.CURRENT]
     assert current == ([panel.stage.next_action] if panel.stage.next_action in STEPS else [])
-    # The next step's own section is the one the page shows, so its link reaches it
-    assert panel.action_url == action_url(panel.stage.next_action, PLACES[panel.stage.next_action].shows)
-    assert "#" not in panel.action_url or panel.action_url.split("#")[1] in (panel.section, "controls")
+    assert panel.action_url == action_url(panel.stage.next_action)
+    # The next-step button links only a step taken on another page; this page's own controls need none
+    assert panel.action_elsewhere == (panel.stage.next_action not in (Action.START, Action.STOP, Action.CLOSE_OUT))
 
 
 @pytest.mark.parametrize(
-    ("action", "shown", "url"),
+    ("action", "url_name", "anchor"),
     [
+        (Action.IMPORT, "school_info_import", ""),
+        (Action.SEND_PACKETS, "packets_list", ""),
         # Start is taken at the Start/Stop row, which is always there
-        (Action.START, Section.READINESS, "/ops/admin/competition/#controls"),
-        (Action.START, None, "/ops/admin/competition/#controls"),
-        (Action.START, Section.LIVE, "/ops/admin/competition/#controls"),
-        (Action.CLOSE_OUT, Section.CLOSE_OUT, "/ops/admin/competition/#close-out"),
-        (Action.CLOSE_OUT, None, "/ops/admin/competition/"),
-        (Action.STOP, Section.LIVE, "/ops/admin/competition/"),
+        (Action.START, "admin_competition", "#controls"),
+        # Stop and Close Out are on the competition page, in parts shown only while they are next: no anchor
+        (Action.STOP, "admin_competition", ""),
+        (Action.FINISH, "scoring:email_scorecards", ""),
+        (Action.CLOSE_OUT, "admin_competition", ""),
+        (Action.CANCEL, "admin_competition_danger", ""),
+        (Action.CLEAR, "admin_competition_danger", ""),
     ],
 )
-def test_a_link_points_at_a_section_only_while_the_page_shows_it(action, shown, url):
-    assert action_url(action, shown) == url
+def test_a_link_into_the_competition_page_points_only_at_the_start_stop_row(action, url_name, anchor):
+    assert action_url(action) == reverse(url_name) + anchor
 
 
 @pytest.mark.parametrize(
@@ -115,7 +118,7 @@ def test_which_steps_are_done(stage, facts, done):
     assert [row.action for row in panel.steps if row.state == StepState.DONE] == done
 
 
-def test_the_panel_links_the_seasons_page():
+def test_the_event_section_links_the_seasons_page():
     assert _panel(Stage.PLAYED).seasons_url == reverse("registration_season_list")
 
 

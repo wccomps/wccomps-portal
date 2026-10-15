@@ -1,7 +1,8 @@
 """Where each event action is taken, and the sections of the competition pages that links point at.
 
 registration.stage owns the lifecycle (which action is next, which is done); this module says where the portal
-takes each action and how it names it, for the competition page's event card, the guide and other pages' links.
+takes each action and how it names it, for the competition page's Event and Steps sections, the guide and other
+pages' links.
 """
 
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from enum import StrEnum
 
 from django.urls import reverse
 from registration.stage import Action
+
+from core.page_titles import PAGE_TITLES
 
 
 class Section(StrEnum):
@@ -35,9 +38,10 @@ CONTROLS = "controls"
 
 
 class Kind(StrEnum):
-    PAGE = "page"  # On another page, or the top of the competition page: target is its URL name
-    SECTION = "section"  # In a competition page section, there only while shown: target is the Section
-    CONTROLS = "controls"  # At the competition page's Start/Stop row
+    ELSEWHERE = "elsewhere"  # On another page: target is its URL name
+    # On the competition page: target is the id of the always-shown part it is taken at, or empty when it is taken in
+    # a part shown only while it is next (a link there carries no anchor, so it never lands on a missing part)
+    HERE = "here"
 
 
 @dataclass(frozen=True)
@@ -49,40 +53,46 @@ class ActionPlace:
     target: str = ""
     # The section the competition page shows while this is the next action
     shows: Section | None = None
-    # Outside the normal run of an event: not one of the event card's steps
+    # Outside the normal run of an event: not one of the competition page's steps
     rare: bool = False
+
+    @property
+    def elsewhere(self) -> bool:
+        return self.kind == Kind.ELSEWHERE
+
+    @property
+    def page_title(self) -> str:
+        """The title of the other page it is taken on, as that page's header shows it."""
+        return PAGE_TITLES[self.target] if self.elsewhere else ""
 
 
 # In the order of an event (Action's order)
 PLACES: dict[Action, ActionPlace] = {
-    Action.IMPORT: ActionPlace("Import the school list", Kind.PAGE, "school_info_import"),
-    Action.SEND_PACKETS: ActionPlace("Send packets", Kind.PAGE, "packets_list"),
-    Action.START: ActionPlace("Check readiness and start the competition", Kind.CONTROLS, shows=Section.READINESS),
+    Action.IMPORT: ActionPlace("Import the school list", Kind.ELSEWHERE, "school_info_import"),
+    Action.SEND_PACKETS: ActionPlace("Send packets", Kind.ELSEWHERE, "packets_list"),
+    Action.START: ActionPlace("Check readiness and start the competition", Kind.HERE, CONTROLS, Section.READINESS),
     # While it runs Stop is the next-step button at the top of the competition page
-    Action.STOP: ActionPlace("Stop the competition", Kind.PAGE, "admin_competition", shows=Section.LIVE),
+    Action.STOP: ActionPlace("Stop the competition", Kind.HERE, shows=Section.LIVE),
     Action.FINISH: ActionPlace(
-        "Finish scoring and email scorecards", Kind.PAGE, "scoring:email_scorecards", shows=Section.CLOSE_OUT
+        "Finish scoring and email scorecards", Kind.ELSEWHERE, "scoring:email_scorecards", Section.CLOSE_OUT
     ),
-    Action.CLOSE_OUT: ActionPlace("Close Out Event", Kind.SECTION, Section.CLOSE_OUT, shows=Section.CLOSE_OUT),
-    Action.CANCEL: ActionPlace("Cancel event", Kind.PAGE, "admin_competition_danger", rare=True),
+    Action.CLOSE_OUT: ActionPlace("Close Out Event", Kind.HERE, shows=Section.CLOSE_OUT),
+    Action.CANCEL: ActionPlace("Cancel event", Kind.ELSEWHERE, "admin_competition_danger", rare=True),
     Action.CLEAR: ActionPlace(
-        "Clear leftover data", Kind.PAGE, "admin_competition_danger", shows=Section.LEFTOVERS, rare=True
+        "Clear leftover data", Kind.ELSEWHERE, "admin_competition_danger", Section.LEFTOVERS, rare=True
     ),
 }
 
-# The event card's steps, in order
+# The competition page's steps, in order
 STEPS: tuple[Action, ...] = tuple(action for action, place in PLACES.items() if not place.rare)
 
 
-def action_url(action: Action, shown: Section | None = None) -> str:
-    """Where to take the action, given the section the competition page shows now (None: a page with no stage, like
-    the guide). A link never points at a section the page isn't showing."""
+def action_url(action: Action) -> str:
+    """Where to take the action."""
     place = PLACES[action]
-    if place.kind == Kind.CONTROLS:
-        return f"{reverse('admin_competition')}#{CONTROLS}"
-    if place.kind == Kind.SECTION:
-        return reverse("admin_competition") + (f"#{place.target}" if place.target == shown else "")
-    return reverse(place.target)
+    if place.elsewhere:
+        return reverse(place.target)
+    return reverse("admin_competition") + (f"#{place.target}" if place.target else "")
 
 
 def setup_url(section: SetupSection) -> str:

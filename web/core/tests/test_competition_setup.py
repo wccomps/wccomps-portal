@@ -69,7 +69,7 @@ def test_the_page_renders_each_moved_form(admin_client):
         '@submit.prevent="setMaxMembers"',
         'id="max_members"',
         '@submit.prevent="addApp"',
-        'aria-label="Authentik application slug"',
+        'id="new_app"',
         '@click="syncQuotient"',
         '@click="runReadinessChecks"',
     ):
@@ -98,6 +98,25 @@ def test_the_page_shows_what_is_set_now(admin_client):
     assert '<script id="start-message-data" type="application/json">' in page
     assert "</script><b>x</b>" not in page
     assert "Last synced" in page
+
+
+def test_the_current_settings_show_in_detail_grids_and_the_small_forms_like_the_teams_page(admin_client):
+    QuotientMetadataCache.objects.create(boxes=[{"name": "web"}], team_count=3)
+
+    page = _flat(_setup_page(admin_client))
+
+    for label, value in (("Starts", "Not set"), ("Stops", "Not set"), ("Teams", "3"), ("Boxes", "1")):
+        assert re.search(rf'<dl\s+class="detail-list">.*?<dt>{label}</dt><dd>{value}</dd>', page, re.S), label
+    assert re.search(r"<dt>Last synced</dt><dd>\d{4}-\d{2}-\d{2} ", page)
+    # Labelled inputs beside their button, as the Teams page's bulk actions
+    assert re.search(
+        r'class="filter-field"[^>]*><label for="max_members" class="filter-field-label">People per team', page
+    )
+    assert re.search(r'class="filter-field"[^>]*><label for="new_app" class="filter-field-label">Add an app', page)
+    # The apps are a table with a Remove button per row, like a team's linked members
+    assert re.search(r'<table id="apps_list"\s+aria-label="Competition apps"', page)
+    # The visible label names the add field; no aria-label overrides it
+    assert 'aria-label="Authentik application slug"' not in page
 
 
 def test_the_page_says_when_quotient_was_never_synced(admin_client):

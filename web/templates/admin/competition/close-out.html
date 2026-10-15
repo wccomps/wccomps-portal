@@ -78,18 +78,17 @@
         <template x-if="closeOutNothingLeft">
             <p>No unfinished work found, and the scorecards went out with the current scores.</p>
         </template>
-        <c-info_box class="d-flex flex-wrap items-center justify-between gap-20 mt-15">
-            <p class="close-out-text m-0">
-                Close Out saves each listed school's scorecard as its result for the event, then deletes the
-                live data (scores, tickets, orange assignments and check-ins, team Discord links and queued
-                announcements), resets the ticket numbers, closes the event, clears the schedule, the start message
-                and the scoring engine's box list, and queues the Discord cleanup (team channels and roles). Do it
-                after the scorecards are out.
-            </p>
+        <p>
+            Close Out saves each listed school's scorecard as its result for the event, then deletes the live data
+            (scores, tickets, orange assignments and check-ins, team Discord links and queued announcements), resets
+            the ticket numbers, closes the event, clears the schedule, the start message and the scoring engine's box
+            list, and queues the Discord cleanup (team channels and roles). Do it after the scorecards are out.
+        </p>
+        <c-button_row>
             <c-button variant="danger" @click="closeOutEvent" ::disabled="closeOutBlocked">
                 Close Out Event
             </c-button>
-        </c-info_box>
+        </c-button_row>
         <template x-if="closeOutStreaming">
             <c-progress_bar />
         </template>

@@ -12,3 +12,8 @@ if os.environ.get("DJANGO_SECRET_KEY", "") in ("", "your_random_secret_key_here"
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portal.settings")
 
 application = get_wsgi_application()
+
+# Gunicorn's preload_app imports this module in the master before it binds the port, so workers fork warm
+from portal.warmup import warm  # noqa: E402 - needs the settings get_wsgi_application set up
+
+warm()

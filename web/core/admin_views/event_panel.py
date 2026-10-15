@@ -1,5 +1,6 @@
-"""The competition page's event card: the event, its status, the next step and the steps, which are done and which
-is current, read from the stage (registration.stage owns the lifecycle; places says where each action is taken)."""
+"""The competition page's Event and Steps sections: the event, its status, the next step and the steps, which are
+done and which is current, read from the stage (registration.stage owns the lifecycle; places says where each action
+is taken)."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,7 +24,7 @@ class StepState(StrEnum):
     UPCOMING = "upcoming"
 
 
-# Each state's word and badge variant on the event card
+# Each step state's word and badge variant in the Steps section
 STATE_SHOWN: dict[StepState, tuple[str, str]] = {
     StepState.DONE: ("Done", "success"),
     StepState.CURRENT: ("Now", "info"),
@@ -39,7 +40,7 @@ class EventStatus(StrEnum):
     NO_EVENT = "no_event"  # No event is open and the competition isn't running, whether or not teams have scores
 
 
-# Each status's word and badge variant on the event card
+# Each status's word and badge variant in the Event section
 STATUS_SHOWN: dict[EventStatus, tuple[str, str]] = {
     EventStatus.RUNNING: ("Running", "success"),
     EventStatus.STOPPED: ("Stopped", "warning"),
@@ -58,7 +59,7 @@ def _status(stage: EventStage) -> EventStatus:
 
 @dataclass(frozen=True)
 class EventFacts:
-    """The stage, and the counts and schedule the event card shows beyond it."""
+    """The stage, and the counts and schedule the Event and Steps sections show beyond it."""
 
     stage: EventStage
     schools: int
@@ -74,7 +75,7 @@ def _plural(count: int, one: str, many: str) -> str:
 
 
 def _import_detail(facts: EventFacts) -> str:
-    # With an event open, the event card's meta line counts the schools
+    # With an event open, the Event section counts the schools
     if not facts.schools or facts.stage.event is not None:
         return ""
     schools = _plural(facts.schools, "school is", "schools are")
@@ -106,11 +107,22 @@ class ShownStep:
     action: Action
     state: StepState
     detail: str
-    url: str  # Where the step is taken, given the section the page shows
 
     @property
     def heading(self) -> str:
         return PLACES[self.action].heading
+
+    @property
+    def elsewhere(self) -> bool:
+        return PLACES[self.action].elsewhere
+
+    @property
+    def page_title(self) -> str:
+        return PLACES[self.action].page_title
+
+    @property
+    def url(self) -> str:
+        return action_url(self.action)
 
     @property
     def label(self) -> str:
@@ -127,7 +139,7 @@ class ShownStep:
 
 @dataclass(frozen=True)
 class EventPanel:
-    """What the competition page's event card shows, and the one section below it."""
+    """What the competition page's Event and Steps sections show, and the one section below them."""
 
     facts: EventFacts
     steps: list[ShownStep]
@@ -149,17 +161,17 @@ class EventPanel:
         return STATUS_SHOWN[_status(self.stage)][1]
 
     @property
-    def notes(self) -> list[ShownStep]:
-        """The steps with something to say beyond their line (schools on the list, packets not delivered)."""
-        return [row for row in self.steps if row.detail]
-
-    @property
     def seasons_url(self) -> str:
         return reverse("registration_season_list")
 
     @property
+    def action_elsewhere(self) -> bool:
+        """Whether the next action is taken on another page; this page's own controls need no link."""
+        return PLACES[self.stage.next_action].elsewhere
+
+    @property
     def action_url(self) -> str:
-        return action_url(self.stage.next_action, self.section)
+        return action_url(self.stage.next_action)
 
     @property
     def action_label(self) -> str:
@@ -175,21 +187,15 @@ def _state(action: Action, stage: EventStage) -> StepState:
 
 
 def event_panel(facts: EventFacts) -> EventPanel:
-    shown = PLACES[facts.stage.next_action].shows
     steps = [
-        ShownStep(
-            action,
-            _state(action, facts.stage),
-            DETAILS[action](facts) if action in DETAILS else "",
-            action_url(action, shown),
-        )
+        ShownStep(action, _state(action, facts.stage), DETAILS[action](facts) if action in DETAILS else "")
         for action in STEPS
     ]
     return EventPanel(facts, steps)
 
 
 def event_facts(stage: EventStage) -> EventFacts:
-    """The counts and schedule the event card shows, from a fixed number of queries."""
+    """The counts and schedule the Event and Steps sections show, from a fixed number of queries."""
     teams_without_copy = 0
     if stage.packets_sent:
         teams_without_copy = teams_without_delivered_copy(Packet.objects.sent().filter(event=stage.event)).count()

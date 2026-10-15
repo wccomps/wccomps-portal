@@ -23,25 +23,26 @@
                 hand on the Competition page: starting by hand clears the scheduled start, and stopping by hand
                 clears the scheduled stop.
             </p>
-            <p>
-                Starts:
-                {% if config.competition_start_time %}
-                    <span x-data="formatTime"
-                          data-iso="{{ config.competition_start_time|date:'c' }}"
-                          x-text="formatted"></span>
-                {% else %}
-                    not set
-                {% endif %}
-                <br>
-                Stops:
-                {% if config.competition_end_time %}
-                    <span x-data="formatTime"
-                          data-iso="{{ config.competition_end_time|date:'c' }}"
-                          x-text="formatted"></span>
-                {% else %}
-                    not set
-                {% endif %}
-            </p>
+            <c-detail_grid>
+                <c-detail_row label="Starts">
+                    {% if config.competition_start_time %}
+                        <span x-data="formatTime"
+                              data-iso="{{ config.competition_start_time|date:'c' }}"
+                              x-text="formatted"></span>
+                    {% else %}
+                        Not set
+                    {% endif %}
+                </c-detail_row>
+                <c-detail_row label="Stops">
+                    {% if config.competition_end_time %}
+                        <span x-data="formatTime"
+                              data-iso="{{ config.competition_end_time|date:'c' }}"
+                              x-text="formatted"></span>
+                    {% else %}
+                        Not set
+                    {% endif %}
+                </c-detail_row>
+            </c-detail_grid>
             <form @submit.prevent="setSchedule">
                 <div class="grid-2">
                     <div>
@@ -124,64 +125,77 @@
             <c-slot name="title">
                 Team access
             </c-slot>
+            <p class="help">
+                People per team is how many Discord accounts can link to one team. The competition apps are the sign-in
+                apps in Authentik (the portal's login system) that Start opens to the blue teams and Stop closes, also
+                called the controlled apps. Add one by its short name in Authentik (its slug).
+            </p>
             <form @submit.prevent="setMaxMembers"
-                  class="d-flex flex-wrap gap-10 items-center mb-15">
-                <label for="max_members" class="font-semibold text-sm">People per team</label>
-                <input type="number"
-                       name="max_members"
-                       id="max_members"
-                       :value="maxMembers"
-                       @input="setField"
-                       data-field="maxMembers"
-                       min="1"
-                       max="20"
-                       class="vTextField w-80">
+                  class="d-flex gap-10 items-end flex-wrap">
+                <c-filter_field label="People per team" id="max_members">
+                    <input type="number"
+                           name="max_members"
+                           id="max_members"
+                           :value="maxMembers"
+                           @input="setField"
+                           data-field="maxMembers"
+                           min="1"
+                           max="20"
+                           class="vTextField">
+                </c-filter_field>
                 <c-button type="submit" variant="default" ::disabled="loading">
                     Update
                 </c-button>
-                <span class="text-muted text-md">How many Discord accounts can link to one team.</span>
             </form>
-            <div>
-                <label class="font-semibold text-sm d-block mb-5">Apps teams can use during the competition</label>
-                <p class="help">
-                    Sign-in apps in Authentik (the portal's login system) that Start opens to the blue teams and Stop
-                    closes, also called the controlled apps. Add one by its short name in Authentik (its slug).
-                </p>
-                <div class="d-flex gap-10 flex-wrap mb-10">
-                    <template x-for="(app, index) in apps" :key="index">
-                        <c-badge variant="default" class="d-flex items-center gap-10">
-                            <span x-text="app"></span>
-                            <button type="button"
-                                    @click="removeApp"
-                                    :data-app="app"
-                                    class="text-danger btn-reset text-sm">
-                                Remove <span class="sr-only" x-text="app"></span>
-                            </button>
-                        </c-badge>
+            <template x-if="hasApps">
+                <c-table id="apps_list" class="w-full mt-15" aria_label="Competition apps">
+                    <c-slot name="headers">
+                        <tr>
+                            <c-table_header sortable="false">
+                                Competition app
+                            </c-table_header>
+                            <c-table_header sortable="false">
+                                Action
+                            </c-table_header>
+                        </tr>
+                    </c-slot>
+                    <template x-for="row in appRows" :key="row.app">
+                        <tr :class="row.rowClass">
+                            <td x-text="row.app"></td>
+                            <td>
+                                <c-button variant="danger" @click="removeApp" ::data-app="row.app">
+                                    Remove <span class="sr-only" x-text="row.app"></span>
+                                </c-button>
+                            </td>
+                        </tr>
                     </template>
-                    <template x-if="noApps">
-                        <span class="text-muted text-sm">No apps configured</span>
-                    </template>
-                </div>
-                <form @submit.prevent="addApp" class="d-flex gap-10 items-center">
+                </c-table>
+            </template>
+            <template x-if="noApps">
+                <c-empty_state title="No competition apps"
+                               description="Add the apps Start opens to the blue teams." />
+            </template>
+            <form @submit.prevent="addApp"
+                  class="d-flex gap-10 items-end flex-wrap mt-10">
+                <c-filter_field label="Add an app" id="new_app">
                     <input type="text"
+                           id="new_app"
                            list="authentik-apps"
                            :value="newApp"
                            @input="setField"
                            data-field="newApp"
                            placeholder="App short name (slug)"
-                           aria-label="Authentik application slug"
-                           class="vTextField w-200">
+                           class="vTextField">
                     <datalist id="authentik-apps">
                         <template x-for="app in availableApps" :key="app">
                             <option :value="app"></option>
                         </template>
                     </datalist>
-                    <c-button type="submit" variant="default" ::disabled="addDisabled">
-                        Add
-                    </c-button>
-                </form>
-            </div>
+                </c-filter_field>
+                <c-button type="submit" variant="default" ::disabled="addDisabled">
+                    Add
+                </c-button>
+            </form>
         </c-module>
         <c-module class="mt-20" id="{{ sections.SCORING_ENGINE }}">
             <c-slot name="title">
@@ -192,16 +206,24 @@
                 a copy of that list. Start syncs it, and the bot syncs it on its own while Quotient is up.
             </p>
             {% if quotient_metadata %}
-                <div class="d-flex gap-20 items-center flex-wrap">
-                    <span><strong>Last synced:</strong> {{ quotient_metadata.last_synced|date:"Y-m-d H:i:s" }}</span>
+                <c-detail_grid>
+                    <c-detail_row label="Last synced">
+                        {{ quotient_metadata.last_synced|date:"Y-m-d H:i:s" }}
+                    </c-detail_row>
                     {% if quotient_metadata.event_name %}
-                        <span><strong>Event:</strong> {{ quotient_metadata.event_name }}</span>
+                        <c-detail_row label="Event">
+                            {{ quotient_metadata.event_name }}
+                        </c-detail_row>
                     {% endif %}
-                    <span><strong>Teams:</strong> {{ quotient_metadata.team_count }}</span>
-                    <span><strong>Boxes:</strong> {{ quotient_metadata.boxes|length }}</span>
-                </div>
+                    <c-detail_row label="Teams">
+                        {{ quotient_metadata.team_count }}
+                    </c-detail_row>
+                    <c-detail_row label="Boxes">
+                        {{ quotient_metadata.boxes|length }}
+                    </c-detail_row>
+                </c-detail_grid>
             {% else %}
-                <p class="text-muted">Not synced yet.</p>
+                <p>Not synced yet.</p>
             {% endif %}
             <c-button_row>
                 <c-button variant="default" @click="syncQuotient" ::disabled="loading">
@@ -247,6 +269,8 @@ document.addEventListener('alpine:init', () => {
         },
 
         get noApps() { return this.apps.length === 0; },
+        get hasApps() { return this.apps.length > 0; },
+        get appRows() { return this.apps.map((app, i) => ({ app, rowClass: i % 2 ? 'row2' : 'row1' })); },
         get addDisabled() { return this.loading || !this.newApp; },
 
         syncQuotient() {

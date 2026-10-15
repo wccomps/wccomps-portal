@@ -5,86 +5,114 @@
 {% endblock title %}
 {% block admin_content %}
     <div x-data="competitionAdmin">
-        <c-page_header title="Competition">
-            <div class="d-flex justify-end mt-10 text-md">
-                <a href="{% url 'admin_competition_setup' %}">Competition setup</a>
-            </div>
-        </c-page_header>
-        <section id="event-panel" class="event-card mt-10">
-            <div class="event-card__head">
-                <div>
-                    {% if panel.stage.event %}
-                        <div class="event-card__name">{{ panel.stage.event.name }}</div>
-                        <div class="event-card__meta">
-                            Season <a href="{{ panel.seasons_url }}">{{ panel.stage.event.season.name }}</a>
-                            · {{ panel.facts.schools }} school{{ panel.facts.schools|pluralize }}
-                            · {{ panel.facts.members_linked }} team member{{ panel.facts.members_linked|pluralize }} linked
-                            · {{ panel.stage.event.date|date:"M j, Y" }}
-                        </div>
-                    {% else %}
-                        <div class="event-card__name">No event open</div>
-                        <div class="event-card__meta">{{ panel.stage.status }}</div>
-                    {% endif %}
-                </div>
-                <span class="event-card__status">
+        <c-page_header title="Competition" />
+        <c-module>
+            <c-slot name="toolbar">
+                <c-link href="{% url 'admin_competition_setup' %}">Competition setup</c-link>
+            </c-slot>
+        </c-module>
+        <c-module id="event-panel" class="mt-5">
+            <c-slot name="title">
+                Event
+            </c-slot>
+            <c-detail_grid>
+                {% if panel.stage.event %}
+                    <c-detail_row label="Event">
+                        {{ panel.stage.event.name }}
+                    </c-detail_row>
+                    <c-detail_row label="Season">
+                        <a href="{{ panel.seasons_url }}">{{ panel.stage.event.season.name }}</a>
+                    </c-detail_row>
+                    <c-detail_row label="Schools">
+                        {{ panel.facts.schools }}
+                    </c-detail_row>
+                    <c-detail_row label="Team members linked">
+                        {{ panel.facts.members_linked }}
+                    </c-detail_row>
+                    <c-detail_row label="Date">
+                        {{ panel.stage.event.date|date:"M j, Y" }}
+                    </c-detail_row>
+                {% else %}
+                    <c-detail_row label="Event">
+                        No event open
+                    </c-detail_row>
+                {% endif %}
+                <c-detail_row label="Status">
                     <c-badge variant="{{ panel.status_badge }}" aria_label="Status">
                         {{ panel.status_word }}
                     </c-badge>
-                </span>
-            </div>
-            <div class="next-step">
-                <div class="next-step__body">
-                    <div class="next-step__label">Next step</div>
-                    <p class="next-step__text">
-                        {{ panel.stage.next_step }}
-                        {% if panel.stage.running and panel.facts.ends_at %}
-                            The schedule stops it at <span x-data="formatTime"
+                    {% if not panel.stage.event %}{{ panel.stage.status }}{% endif %}
+                </c-detail_row>
+                <c-detail_row label="Next step">
+                    {{ panel.stage.next_step }}
+                    {% if panel.stage.running and panel.facts.ends_at %}
+                        The schedule stops it at <span x-data="formatTime"
        data-iso="{{ panel.facts.ends_at|date:'c' }}"
        x-text="formatted"></span>.
-                        {% endif %}
-                        {{ panel.stage.alternative }}
-                    </p>
-                </div>
-                {% if panel.stage.running %}
-                    <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
-                        Stop Competition
-                    </c-button>
-                {% else %}
-                    <a href="{{ panel.action_url }}" class="button default">{{ panel.action_label }}</a>
-                {% endif %}
-            </div>
-            <ol class="step-grid grid-3">
+                    {% endif %}
+                    {{ panel.stage.alternative }}
+                    {% if panel.stage.running %}
+                        <c-button_row class="mt-10">
+                            <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
+                                Stop Competition
+                            </c-button>
+                        </c-button_row>
+                    {% elif panel.action_elsewhere %}
+                        <c-button_row class="mt-10">
+                            <c-link href="{{ panel.action_url }}" variant="primary">
+                                {{ panel.action_label }}
+                            </c-link>
+                        </c-button_row>
+                    {% endif %}
+                </c-detail_row>
+            </c-detail_grid>
+        </c-module>
+        <c-module id="steps" class="mt-20">
+            <c-slot name="title">
+                Steps
+            </c-slot>
+            <c-table id="steps_list" class="w-full" aria_label="Event steps">
+                <c-slot name="headers">
+                    <tr>
+                        <c-table_header sortable="false">
+                            Step
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Status
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Where
+                        </c-table_header>
+                    </tr>
+                </c-slot>
                 {% for row in panel.steps %}
-                    <li {% if row.is_current %}class="font-semibold" aria-current="step"{% endif %}>
-                        <span class="step-grid__badge">
+                    <tr class="{% cycle 'row1' 'row2' %}"
+                        {% if row.is_current %}aria-current="step"{% endif %}>
+                        <td class="field-step">
+                            {{ forloop.counter }}. {{ row.heading }}
+                            {% if row.detail %}<p class="help">{{ row.detail }}</p>{% endif %}
+                        </td>
+                        <td class="field-status">
                             <c-badge variant="{{ row.badge }}" aria_label="{{ row.label }}">
                                 {{ row.label }}
                             </c-badge>
-                        </span>
-                        <a href="{{ row.url }}">{{ forloop.counter }}. {{ row.heading }}</a>
-                    </li>
+                        </td>
+                        <td class="field-where">
+                            {% if row.elsewhere %}
+                                <a href="{{ row.url }}">{{ row.page_title }}</a>
+                            {% else %}
+                                On this page
+                            {% endif %}
+                        </td>
+                    </tr>
                 {% endfor %}
-            </ol>
-            {% if panel.notes %}
-                <ul class="step-notes list-none">
-                    {% for row in panel.notes %}
-                        <li>
-                            <strong>{{ row.heading }}:</strong> {{ row.detail }}
-                        </li>
-                    {% endfor %}
-                </ul>
-            {% endif %}
-        </section>
-        <section id="{{ controls_id }}" class="d-flex flex-wrap items-center gap-10 mt-20">
-            <c-button variant="primary" @click="startCompetition" ::disabled="loading">
-                Start Competition
-            </c-button>
-            {% if not panel.stage.running %}
-                <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
-                    Stop Competition
-                </c-button>
-            {% endif %}
-            <span class="text-muted text-md">
+            </c-table>
+        </c-module>
+        <c-module id="{{ controls_id }}" class="mt-20">
+            <c-slot name="title">
+                Competition Controls
+            </c-slot>
+            <p class="help">
                 {% if panel.stage.running %}
                     If a start didn't turn everything on, press Start again: it retries the apps and accounts and doesn't
                     post the start message twice.
@@ -94,23 +122,35 @@
                     Start turns on the active teams' accounts and opens the competition apps to them.
                 {% endif %}
                 {% if not panel.stage.running and panel.facts.starts_at %}
-                    The schedule starts it at <span x-data="formatTime" data-iso="{{ panel.facts.starts_at|date:'c' }}" x-text="formatted"></span>.
+                    The schedule starts it at <span x-data="formatTime"
+       data-iso="{{ panel.facts.starts_at|date:'c' }}"
+       x-text="formatted"></span>.
                 {% endif %}
-            </span>
-        </section>
+            </p>
+            <c-button_row>
+                <c-button variant="primary" @click="startCompetition" ::disabled="loading">
+                    Start Competition
+                </c-button>
+                {% if not panel.stage.running %}
+                    <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
+                        Stop Competition
+                    </c-button>
+                {% endif %}
+            </c-button_row>
+        </c-module>
         <template x-if="notCloseOutStreaming">
             <c-progress_bar />
         </template>
         {% if section_partial %}
             {% include section_partial %}
         {% endif %}
-        <details class="advanced mt-20" id="advanced">
-            <summary>Advanced: reset team passwords, Danger Zone</summary>
+        <c-fieldset id="advanced"
+                    class="mt-20"
+                    heading="Advanced: reset team passwords, Danger Zone"
+                    collapsible="true"
+                    collapsed="true">
             <p class="help">Tools outside the normal run of an event.</p>
-            <c-module>
-                <c-slot name="title">
-                    Reset Team Passwords
-                </c-slot>
+            <c-action_box heading="Reset Team Passwords">
                 <form @submit.prevent="resetPasswords">
                     <c-form_field label="Team Numbers"
                                   id="team_numbers"
@@ -142,11 +182,8 @@
                         </c-button_row>
                     </c-action_box>
                 </template>
-            </c-module>
-            <c-module class="mt-20">
-                <c-slot name="title">
-                    Danger Zone
-                </c-slot>
+            </c-action_box>
+            <c-action_box heading="Danger Zone" variant="warning" class="mt-20">
                 <p class="help">
                     Cancel an event opened by mistake or called off before any team scored, or clear data left over that no
                     event recorded.
@@ -154,8 +191,8 @@
                 <c-link href="{% url 'admin_competition_danger' %}" variant="danger">
                     Open the Danger Zone
                 </c-link>
-            </c-module>
-        </details>
+            </c-action_box>
+        </c-fieldset>
         <c-toast />
     </div>
     <script src="{% static 'js/competition.js' %}"></script>

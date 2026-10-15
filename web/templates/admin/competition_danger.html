@@ -1,11 +1,11 @@
 {% extends "admin/base.html" %}
-{% load cotton %}
+{% load cotton page_titles %}
 {% block title %}
     Competition Danger Zone - WCComps Portal
 {% endblock title %}
 {% block admin_content %}
     <div x-data="competitionDanger">
-        <c-page_header title="Competition Danger Zone"
+        <c-page_header title="{% page_title 'admin_competition_danger' %}"
                        parent_url="{% url 'admin_competition' %}"
                        parent_label="Competition" />
         {% if can_cancel %}

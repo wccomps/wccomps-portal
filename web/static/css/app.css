@@ -365,9 +365,7 @@ a.button:active {
 
 /* Widths */
 .w-40 { width: 40px; }
-.w-80 { width: 80px; }
 .w-150 { width: 150px; }
-.w-200 { width: 200px; }
 .min-w-150 { min-width: 150px; }
 .min-w-200 { min-width: 200px; }
 .w-full { width: 100%; }
@@ -540,8 +538,6 @@ a.button:active {
 /* Grid layouts */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
 @media (max-width: 767px) { .grid-2 { grid-template-columns: 1fr; } }
-.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
-@media (max-width: 767px) { .grid-3 { grid-template-columns: 1fr; } }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 
 /* Container widths */
@@ -1046,111 +1042,3 @@ table thead th .text span .school-name {
     display: inline;
 }
 
-
-/* ============================================
-   COMPETITION PAGE (event card, live numbers)
-   ============================================ */
-.event-card {
-    border: 1px solid var(--hairline-color, #ddd);
-    border-radius: 6px;
-    overflow: hidden;
-}
-.event-card__head {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--hairline-color, #ddd);
-}
-.event-card__name {
-    font-size: 18px;
-    font-weight: 600;
-}
-.event-card__meta {
-    margin-top: 4px;
-    font-size: 14px;
-    color: var(--body-quiet-color, #666);
-}
-.event-card__status .badge {
-    font-size: 13px;
-    padding: 6px 12px;
-    border-radius: 999px;
-}
-.next-step {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-    padding: 16px 20px;
-    background: var(--info-bg);
-}
-.next-step__body {
-    flex: 1 1 360px;
-}
-.next-step__label {
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--info-fg);
-}
-/* .module p pads its sides; the bar already does */
-.event-card .next-step__text {
-    margin: 4px 0 0;
-    padding: 0;
-    font-size: 16px;
-}
-/* .module ol indents its items */
-.event-card .step-grid {
-    margin: 0;
-    padding: 10px 20px 14px;
-    gap: 4px 24px;
-}
-.step-grid li {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 6px 0;
-    font-size: 14px;
-}
-.step-grid__badge .badge {
-    min-width: 52px;
-    text-align: center;
-    font-size: 11px;
-}
-.event-card .step-notes {
-    margin: 0;
-    padding: 0 20px 14px;
-    font-size: 13px;
-}
-/* Django admin squares every ul li */
-.event-card .step-notes li {
-    list-style: none;
-}
-.live-number {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 14px 18px;
-    border: 1px solid var(--hairline-color, #ddd);
-    border-radius: 6px;
-}
-.live-number__value {
-    font-size: 24px;
-    font-weight: 600;
-}
-.close-out-text {
-    flex: 1 1 280px;
-}
-details.advanced {
-    border-top: 1px solid var(--hairline-color, #ddd);
-    padding-top: 14px;
-}
-details.advanced > summary {
-    cursor: pointer;
-    font-size: 15px;
-    font-weight: 600;
-}

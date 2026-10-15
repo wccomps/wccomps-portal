@@ -1,5 +1,6 @@
 """The competition page in three stages: no event open, running, and an event played and stopped."""
 
+import re
 from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -27,7 +28,16 @@ def _played_event():
     ServiceScore.objects.create(team=team, service_points=Decimal(100))
 
 
-def test_with_no_event_the_panel_sends_you_to_the_import(live_server, pw_browser):
+def _controls(page):
+    """How many visible buttons and links on the page are named for starting, stopping or closing out."""
+    names = page.locator("[x-data=competitionAdmin]").locator("button:visible, a:visible").all_inner_texts()
+    return {
+        action: sum(1 for name in names if re.match(action, name.strip(), re.IGNORECASE))
+        for action in ("start", "stop", "close out")
+    }
+
+
+def test_with_no_event_the_event_section_sends_you_to_the_import(live_server, pw_browser):
     user = _create_role_user("gold_team", None)
     context = create_session_context(pw_browser, live_server, user)
     manager = MagicMock()
@@ -45,12 +55,13 @@ def test_with_no_event_the_panel_sends_you_to_the_import(live_server, pw_browser
                 "Import the school list",
                 "/ops/school-info/import/",
             )
+            assert _controls(page) == {"start": 1, "stop": 1, "close out": 0}
             assert not errors, errors
     finally:
         context.close()
 
 
-def test_played_and_stopped_the_panel_checks_unfinished_work(live_server, pw_browser):
+def test_played_and_stopped_the_page_checks_unfinished_work(live_server, pw_browser):
     _played_event()
     user = _create_role_user("gold_team", None)
     context = create_session_context(pw_browser, live_server, user)
@@ -65,9 +76,9 @@ def test_played_and_stopped_the_panel_checks_unfinished_work(live_server, pw_bro
             text = panel.inner_text()
             action = panel.locator("a.button").first
             assert status == 200
-            assert "Invitational 1" in text and "Season WCComps 2027" in text
+            assert "Invitational 1" in text and "Season\nWCComps 2027" in text
             assert "STOPPED" in text.upper()
-            assert [s.inner_text().upper() for s in panel.locator(".step-grid__badge").all()] == [
+            assert [s.inner_text().upper() for s in page.locator("#steps_list .badge").all()] == [
                 "DONE",
                 "LATER",
                 "DONE",
@@ -76,8 +87,8 @@ def test_played_and_stopped_the_panel_checks_unfinished_work(live_server, pw_bro
                 "NEXT",
             ]
             assert page.locator("#readiness").count() == 0 and page.locator("#live").count() == 0
-            assert page.get_by_role("button", name="Stop Competition").count() == 1
-            assert page.get_by_role("button", name="Start Competition").count() == 1
+            assert _controls(page) == {"start": 1, "stop": 1, "close out": 1}
+            assert page.locator("#steps_list td a", has_text="Close Out").count() == 0
             assert (action.inner_text(), action.get_attribute("href")) == (
                 "Email scorecards",
                 "/scoring/email-scorecards/",
@@ -100,14 +111,13 @@ def test_while_running_the_page_offers_stop_and_shows_the_live_numbers(live_serv
         assert status == 200
         assert "RUNNING" in panel.inner_text().upper()
         assert panel.get_by_role("button", name="Stop Competition").is_visible()
-        # One Stop, in the next-step bar; Start stays, so an incomplete start can be run again
-        assert page.get_by_role("button", name="Stop Competition").count() == 1
-        assert page.get_by_role("button", name="Start Competition").count() == 1
+        # One Stop, the next-step button; Start stays, so an incomplete start can be run again
+        assert _controls(page) == {"start": 1, "stop": 1, "close out": 0}
         live = page.locator("#live")
         assert "Open or claimed tickets" in live.inner_text()
         assert "Never synced" in live.inner_text()
         assert page.locator("#close-out").count() == 0
-        assert not page.locator("details.advanced").get_attribute("open")
+        assert not page.get_by_role("button", name="Reset Passwords").is_visible()
         assert not errors, errors
     finally:
         context.close()
