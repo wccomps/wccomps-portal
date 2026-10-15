@@ -9,30 +9,50 @@
     </c-button>
 </c-button_row>
 <template x-if="hasReadinessResults">
-    <div class="mt-15">
+    <c-table id="readiness_list"
+             class="w-full mt-15"
+             aria_label="Readiness check results">
+        <c-slot name="headers">
+            <tr>
+                <c-table_header sortable="false">
+                    Check
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Result
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Detail
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Fix
+                </c-table_header>
+            </tr>
+        </c-slot>
         <template x-for="(r, idx) in readinessResults" :key="idx">
-            <div class="d-flex items-center gap-10 py-5 border-bottom">
-                <span x-show="r.isPass" class="text-success font-bold">Pass</span>
-                <span x-show="r.isFail" class="text-danger font-bold">Fail</span>
-                <span x-show="r.isWarn" class="text-warning font-bold">Warning</span>
-                <span class="font-semibold" x-text="r.step"></span>
-                <span class="text-muted text-sm" x-text="r.detail"></span>
-                <template x-if="r.isLinkAction">
-                    <a :href="r.actionUrl"
-                       class="btn btn-sm btn-outline-primary ms-auto"
-                       x-text="r.actionLabel"></a>
-                </template>
-                <template x-if="r.isFixAction">
-                    <button type="button"
-                            class="btn btn-sm btn-outline-warning ms-auto"
-                            @click="doReadinessFix"
-                            :data-fix="r.fixKey"
-                            :disabled="readinessFixing"
-                            x-text="r.actionLabel"></button>
-                </template>
-            </div>
+            <tr :class="r.rowClass">
+                <td x-text="r.step"></td>
+                <td>
+                    <c-badge variant=""
+                             aria_label="Result"
+                             ::class="r.resultClass"
+                             x-text="r.resultLabel" />
+                </td>
+                <td x-text="r.detail"></td>
+                <td>
+                    <template x-if="r.isLinkAction">
+                        <c-link ::href="r.actionUrl" x-text="r.actionLabel" />
+                    </template>
+                    <template x-if="r.isFixAction">
+                        <c-button variant="warning"
+                                  @click="doReadinessFix"
+                                  ::data-fix="r.fixKey"
+                                  ::disabled="readinessFixing"
+                                  x-text="r.actionLabel" />
+                    </template>
+                </td>
+            </tr>
         </template>
-    </div>
+    </c-table>
 </template>
 <template x-if="readinessOk">
     <c-alert variant="success" class="mt-15">

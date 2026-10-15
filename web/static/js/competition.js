@@ -7,6 +7,13 @@
  * The readiness check and its fixes; compose after actionMixin or streamMixin, whose doAction it uses.
  * @param {string} url: the competition action endpoint.
  */
+// Each result's word and badge class (cotton/badge.html's variants)
+const READINESS_RESULTS = {
+    pass: ['Pass', 'badge--success'],
+    warn: ['Warning', 'badge--warning'],
+    fail: ['Fail', 'badge--danger'],
+};
+
 function readinessMixin(url) {
     return {
         readinessResults: [],
@@ -33,13 +40,13 @@ function readinessMixin(url) {
                     (msg) => {
                         const sev = msg.severity || (msg.ok ? 'pass' : 'fail');
                         const act = msg.action || null;
+                        const [resultLabel, resultClass] = READINESS_RESULTS[sev];
                         this.readinessResults.push({
                             step: msg.step,
-                            severity: sev,
+                            resultLabel,
+                            resultClass,
+                            rowClass: this.readinessResults.length % 2 ? 'row2' : 'row1',
                             detail: msg.detail || '',
-                            isPass: sev === 'pass',
-                            isFail: sev === 'fail',
-                            isWarn: sev === 'warn',
                             isLinkAction: act && act.type === 'link',
                             isFixAction: act && act.type === 'fix',
                             actionUrl: act ? act.url : '',
