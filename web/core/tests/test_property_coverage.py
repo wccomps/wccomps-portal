@@ -13,6 +13,7 @@ a property test case for the new entry point (the test module's docstring says h
 import ast
 import importlib
 import pkgutil
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -555,3 +556,23 @@ def test_the_guards_find_csv_readers_and_writers_however_they_are_imported(
     tree = ast.parse(source)
     assert bool(_parser_reasons(tree.body[-1], import_aliases(tree))) is parser
     assert bool(csv_writer_calls(tree)) is writer
+
+
+def test_no_property_test_pins_its_example_count() -> None:
+    """The Hypothesis profile (ci or deep, conftest.py) sets how many examples a test runs; a test that pins
+    max_examples would run the same few under HYPOTHESIS_PROFILE=deep."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z", "*.py"],  # noqa: S607
+        cwd=REPO_DIR,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split("\0")
+    pinned = [
+        f"{path}:{node.lineno}"
+        for path in tracked
+        if path and path != "conftest.py" and (REPO_DIR / path).is_file()
+        for node in ast.walk(ast.parse((REPO_DIR / path).read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call) and any(k.arg == "max_examples" for k in node.keywords)
+    ]
+    assert not pinned, f"Tests that pin max_examples: {pinned}"
