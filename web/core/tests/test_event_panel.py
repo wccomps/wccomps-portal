@@ -1,6 +1,7 @@
 """The competition page's event panel, and the Running an event guide it links to."""
 
 import re
+from contextlib import ExitStack
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
@@ -513,17 +514,26 @@ def test_the_page_is_built_from_the_standard_modules_and_table(client, stage):
         assert custom not in page, custom
 
 
+# The modules that import the standings or the scorecard builder by name
+SCORECARD_MODULES = ("registration.services", "scoring.export", "scoring.views.export", "scoring.views.leaderboard")
+
+
 @pytest.mark.parametrize("stage", ALL_STAGES)
 def test_rendering_the_page_builds_no_scorecard_pdf_or_email(client, stage):
     _arrange(stage)
+    # Every name the scorecards are built through: the standings, the scorecard, its PDF and the email
+    builders = [
+        *(f"{module}.compute_standings" for module in SCORECARD_MODULES),
+        *(f"{module}.build_scorecard_context" for module in SCORECARD_MODULES if module != "scoring.export"),
+        "scoring.calculator.compute_standings",
+        "scoring.scorecard.build_scorecard_context",
+        "weasyprint.HTML",
+        "django.core.mail.EmailMessage.send",
+    ]
 
-    with (
-        patch("weasyprint.HTML", side_effect=AssertionError("PDF rendered")) as pdf,
-        patch("registration.services.compute_standings", side_effect=AssertionError("standings built")) as card,
-        patch("django.core.mail.EmailMessage.send", side_effect=AssertionError("email sent")) as email,
-    ):
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(patch(name, side_effect=AssertionError(name))) for name in builders]
         _page(client)
 
-    pdf.assert_not_called()
-    card.assert_not_called()
-    email.assert_not_called()
+    for name, mock in zip(builders, mocks, strict=True):
+        assert not mock.called, name
