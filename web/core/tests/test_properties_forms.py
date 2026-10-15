@@ -78,7 +78,6 @@ from core.forms import (
     AppSlugForm,
     BroadcastForm,
     CancelEventForm,
-    CategoryForm,
     CloseOutForm,
     LinkConfirmForm,
     ReadinessFixForm,
@@ -107,10 +106,10 @@ from core.tests.strategies import (
 from core.utils import parse_datetime_to_utc, upload_name
 from team.forms import CSVUploadForm, ImportConfirmForm, ImportEventForm, parse_csv_file
 from team.models import DiscordLink, LinkToken, SchoolInfo, Team
-from ticketing.admin import TicketCategoryForm
 from ticketing.forms import (
     CreateTicketForm,
     TicketBulkActionForm,
+    TicketCategoryForm,
     TicketChangeCategoryForm,
     TicketCommentForm,
     TicketReassignForm,
@@ -249,20 +248,7 @@ def _school_info_use(w: World, form: Any) -> None:
 
 
 def _category_use(w: World, form: Any) -> None:
-    cd = form.cleaned_data
-    category = TicketCategory.objects.create(
-        display_name=cd["display_name"],
-        points=cd["points"],
-        playbook=cd.get("playbook") or "",
-        required_fields=cd.get("required_fields") or [],
-        optional_fields=cd.get("optional_fields") or [],
-        variable_points=cd["variable_points"],
-        variable_cost_note=cd.get("variable_cost_note") or "",
-        min_points=cd.get("min_points") or 0,
-        max_points=cd.get("max_points") or 0,
-        user_creatable=cd["user_creatable"],
-        sort_order=cd.get("sort_order") or 0,
-    )
+    category = form.save()
     # The playbook is shown as steps: each one non-empty, stripped, and taken from the playbook's text
     for step in category.steps:
         assert step and step == step.strip() and step in category.playbook
@@ -474,7 +460,6 @@ CASES = [
             )
         ),
     ),
-    FormCase(CategoryForm, use=_category_use, examples=({"display_name": "X", "points": "2147483648"},)),
     FormCase(
         SetMaxMembersForm,
         use=lambda w, f: store((column(CompetitionConfig, "max_team_members"), f.cleaned_data["max_members"])),
@@ -753,8 +738,8 @@ CASES = [
     ),
     FormCase(
         TicketCategoryForm,
-        use=lambda w, f: f.save(),
-        examples=({"display_name": "X", "points": "0", "min_points": "0", "max_points": "0", "sort_order": "0"},),
+        use=_category_use,
+        examples=({"display_name": "X", "points": "2147483648"}, {"display_name": "X", "points": "0"}),
     ),
     FormCase(
         TicketBulkActionForm,

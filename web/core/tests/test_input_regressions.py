@@ -30,7 +30,7 @@ from scoring.models import ScoringTemplate
 from scoring.screenshots import detect_inline_type, read_screenshot
 
 from core.admin_views.competition import TIMEZONE_CHOICES
-from core.forms import AppSlugForm, CategoryForm, ResetPasswordsForm, SchoolInfoEditForm, StartMessageForm
+from core.forms import AppSlugForm, ResetPasswordsForm, SchoolInfoEditForm, StartMessageForm
 from core.tests.strategies import (
     content_types,
     datetime_text,
@@ -46,7 +46,7 @@ from core.tests.strategies import (
 from core.utils import parse_datetime_to_utc
 from team.forms import parse_csv_file
 from team.models import Team
-from ticketing.forms import TicketResolveForm
+from ticketing.forms import TicketCategoryForm, TicketResolveForm
 from ticketing.models import Ticket, TicketAttachment, TicketCategory
 
 
@@ -213,25 +213,22 @@ def test_a_new_ticket_category_gets_an_id_past_the_seeded_ones(name: str) -> Non
 
 
 INTEGER_COLUMN = connection.ops.integer_field_range("IntegerField")
-STORED_INTEGERS = (
-    (CategoryForm, ("points", "min_points", "max_points", "sort_order")),
-    (TicketResolveForm, ("points_override",)),
-)
 
 
+@pytest.mark.django_db
 @given(value=int_text())
 @example(value=str(2**31))
 @example(value=str(-(2**31) - 1))
 def test_an_integer_a_form_stores_fits_its_column(value: str) -> None:
-    for form_class, names in STORED_INTEGERS:
-        for name in names:
-            try:
-                cleaned = form_class.base_fields[name].clean(value)
-            except ValidationError:
-                continue
-            if cleaned is not None:
-                low, high = INTEGER_COLUMN
-                assert low <= cleaned <= high, f"{form_class.__name__}.{name} accepts {cleaned}"
+    """Category points and sort order, and a resolved ticket's points, are stored in integer columns."""
+    low, high = INTEGER_COLUMN
+    for name in ("points", "min_points", "max_points", "sort_order"):
+        form = TicketCategoryForm({"display_name": "Category", "points": "0", name: value})
+        if form.is_valid():
+            assert low <= form.cleaned_data[name] <= high, f"TicketCategoryForm.{name} accepts {value}"
+    form = TicketResolveForm({"points_override": value})
+    if form.is_valid() and form.cleaned_data["points_override"] is not None:
+        assert low <= form.cleaned_data["points_override"] <= high
 
 
 @pytest.fixture

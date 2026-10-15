@@ -6,7 +6,6 @@ from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, validate_school_n
 from registration.services import NewEvent
 
 from core.authentik_utils import parse_team_range
-from core.models import INTEGER_COLUMN_MAX, INTEGER_COLUMN_MIN
 
 
 class SchoolInfoEditForm(forms.Form):
@@ -20,56 +19,6 @@ class SchoolInfoEditForm(forms.Form):
 class BroadcastForm(forms.Form):
     target = forms.CharField()
     message = forms.CharField()
-
-
-class CategoryForm(forms.Form):
-    display_name = forms.CharField(max_length=100)
-    points = forms.IntegerField(initial=0, min_value=INTEGER_COLUMN_MIN, max_value=INTEGER_COLUMN_MAX)
-    required_fields = forms.TypedMultipleChoiceField(
-        coerce=str,
-        required=False,
-        choices=[
-            ("hostname", "Hostname"),
-            ("ip_address", "IP Address"),
-            ("service_name", "Service Name"),
-            ("description", "Description"),
-        ],
-    )
-    optional_fields = forms.TypedMultipleChoiceField(
-        coerce=str,
-        required=False,
-        choices=[
-            ("hostname", "Hostname"),
-            ("ip_address", "IP Address"),
-            ("service_name", "Service Name"),
-            ("description", "Description"),
-        ],
-    )
-    variable_points = forms.BooleanField(required=False)
-    variable_cost_note = forms.CharField(required=False)
-    min_points = forms.IntegerField(
-        initial=0, required=False, min_value=INTEGER_COLUMN_MIN, max_value=INTEGER_COLUMN_MAX
-    )
-    max_points = forms.IntegerField(
-        initial=0, required=False, min_value=INTEGER_COLUMN_MIN, max_value=INTEGER_COLUMN_MAX
-    )
-    user_creatable = forms.BooleanField(required=False)
-    sort_order = forms.IntegerField(
-        initial=0, required=False, min_value=INTEGER_COLUMN_MIN, max_value=INTEGER_COLUMN_MAX
-    )
-    playbook = forms.CharField(required=False, widget=forms.Textarea)
-
-    def clean_min_points(self) -> int:
-        return self.cleaned_data.get("min_points") or 0
-
-    def clean_max_points(self) -> int:
-        return self.cleaned_data.get("max_points") or 0
-
-    def clean_sort_order(self) -> int:
-        return self.cleaned_data.get("sort_order") or 0
-
-    def clean_playbook(self) -> str:
-        return (self.cleaned_data.get("playbook") or "").strip()
 
 
 class SetMaxMembersForm(forms.Form):
