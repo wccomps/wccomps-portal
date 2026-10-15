@@ -8,11 +8,11 @@
         <c-page_header title="Delete Season" />
         <c-module>
             {% if problem %}
-                <c-alert variant="danger">
+                <c-alert variant="error">
                     {{ problem }}
                 </c-alert>
                 <c-button_row class="mt-20 justify-end">
-                    <a href="{% url 'registration_season_list' %}" class="btn btn-secondary">Back</a>
+                    <c-link href="{% url 'registration_season_list' %}" variant="cancel">Back</c-link>
                 </c-button_row>
             {% else %}
                 <c-alert variant="warning">
@@ -22,7 +22,7 @@
                 <form method="post">
                     {% csrf_token %}
                     <c-button_row class="mt-20 justify-end">
-                        <a href="{% url 'registration_season_list' %}" class="btn btn-secondary">Cancel</a>
+                        <c-link href="{% url 'registration_season_list' %}" variant="cancel">Cancel</c-link>
                         <c-button type="submit" variant="danger">
                             Delete Season
                         </c-button>

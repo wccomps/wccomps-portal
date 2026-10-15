@@ -59,13 +59,13 @@
                     </tr>
                 </c-slot>
                 {% for item in teams %}
-                    <tr class="{% cycle 'row1' 'row2' %}">
-                        <th class="field-team_number">
+                    <tr>
+                        <th>
                             <a href="{% url 'admin_team_detail' item.team.team_number %}">{{ item.team.team_number }}</a>
                         </th>
-                        <td class="field-name">Team {{ item.team.team_number }}</td>
-                        <td class="field-members">{{ item.member_count }}/{{ item.team.max_members }}</td>
-                        <td class="field-status">
+                        <td>Team {{ item.team.team_number }}</td>
+                        <td>{{ item.member_count }}/{{ item.team.max_members }}</td>
+                        <td>
                             {% if item.team.is_active %}
                                 <c-badge variant="success">
                                     Active
@@ -76,7 +76,7 @@
                                 </c-badge>
                             {% endif %}
                         </td>
-                        <td class="field-discord">
+                        <td>
                             {% if item.team.discord_role_id %}
                                 <c-badge variant="success">
                                     Configured

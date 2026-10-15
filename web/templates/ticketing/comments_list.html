@@ -1,0 +1,27 @@
+{# A ticket's comments: on the ticket page, and what its 30-second poll swaps in (ops_ticket_detail_dynamic.html) #}
+{% load cotton %}
+<div id="comments-list">
+    {# What this list shows; the poll sends it back and gets 204 while it still matches #}
+    <input type="hidden" name="comments_version" value="{{ comments_version }}">
+    {% if comments %}
+        <div class="comment-list">
+            {% for comment in comments %}
+                <div class="comment-item">
+                    <div class="comment-header">
+                        <span class="comment-author">
+                            {% if comment.author %}
+                                {{ comment.author }}
+                            {% else %}
+                                Unknown
+                            {% endif %}
+                        </span>
+                        <span class="comment-time">{{ comment.posted_at|timesince }} ago</span>
+                    </div>
+                    <div class="comment-body">{{ comment.comment_text }}</div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <c-empty_state title="No comments yet" description="Comments will appear here" />
+    {% endif %}
+</div>

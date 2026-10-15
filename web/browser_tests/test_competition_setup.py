@@ -68,7 +68,6 @@ def test_the_readiness_results_are_a_standard_table_with_result_badges(live_serv
             table.locator("tbody tr").nth(2).wait_for()
 
             rows = table.locator("tbody tr")
-            assert [rows.nth(i).get_attribute("class") for i in range(3)] == ["row1", "row2", "row1"]
             badges = table.locator("tbody .badge")
             assert [b.inner_text().upper() for b in badges.all()] == ["PASS", "WARNING", "FAIL"]
             assert [b.get_attribute("class") for b in badges.all()] == [

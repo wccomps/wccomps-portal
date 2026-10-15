@@ -18,14 +18,14 @@
                 </c-table_header>
             </tr>
         </c-slot>
-        <tr class="row1">
+        <tr>
             <td>Open or claimed tickets</td>
             <td>{{ live.unresolved_tickets }}</td>
             <td>
                 <a href="{% url 'ticket_list' %}">Tickets</a>
             </td>
         </tr>
-        <tr class="row2">
+        <tr>
             <td>Team accounts turned on at start</td>
             <td>
                 {% if live.accounts %}
@@ -38,7 +38,7 @@
                 <a href="{% url 'admin_teams' %}">Teams</a>
             </td>
         </tr>
-        <tr class="row1">
+        <tr>
             <td>Scoring engine (Quotient) last synced</td>
             <td>
                 {% if quotient_metadata %}

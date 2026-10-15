@@ -49,7 +49,7 @@
                 </tr>
             </c-slot>
             {% for incident in page_obj %}
-                <tr class="{% cycle 'row1' 'row2' %}" role="row">
+                <tr role="row">
                     <td class="action-checkbox">
                         {% if not incident.is_approved %}
                             <input type="checkbox"
@@ -60,20 +60,20 @@
                                    @change="toggleItem">
                         {% endif %}
                     </td>
-                    <th class="field-id">
+                    <th>
                         <c-link href="{% url 'scoring:view_incident_report' incident.id %}">#{{ incident.id }}</c-link>
                     </th>
-                    <td class="field-team">Team {{ incident.team.team_number }}</td>
-                    <td class="field-box">
+                    <td>Team {{ incident.team.team_number }}</td>
+                    <td>
                         {{ incident.affected_boxes_display|default:"—" }}
                         <div class="text-sm text-muted">{{ incident.affected_service }}</div>
                     </td>
-                    <td class="field-attack_description">{{ incident.attack_description|truncatechars:50 }}</td>
-                    <td class="field-detected">
+                    <td>{{ incident.attack_description|truncatechars:50 }}</td>
+                    <td>
                         {{ incident.attack_detected_at|timesince }} ago
                         <div class="text-sm text-muted">Submitted: {{ incident.created_at|date:"m/d H:i" }}</div>
                     </td>
-                    <td class="field-evidence">
+                    <td>
                         {% if incident.screenshots.exists %}
                             <c-badge variant="success">
                                 {{ incident.screenshots.count }} files
@@ -82,9 +82,9 @@
                             <span class="text-muted">None</span>
                         {% endif %}
                     </td>
-                    <td class="field-status">
+                    <td>
                         {% if incident.is_approved %}
-                            <c-badge variant="resolved">
+                            <c-badge variant="success">
                                 <span aria-hidden="true">✓</span> Approved
                             </c-badge>
                             {% if incident.points_returned %}
@@ -93,7 +93,7 @@
                                 </div>
                             {% endif %}
                         {% else %}
-                            <c-badge variant="claimed">
+                            <c-badge variant="warning">
                                 <span aria-hidden="true">⏳</span> Pending
                             </c-badge>
                         {% endif %}

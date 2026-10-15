@@ -45,7 +45,6 @@ function readinessMixin(url) {
                             step: msg.step,
                             resultLabel,
                             resultClass,
-                            rowClass: this.readinessResults.length % 2 ? 'row2' : 'row1',
                             detail: msg.detail || '',
                             isLinkAction: act && act.type === 'link',
                             isFixAction: act && act.type === 'fix',

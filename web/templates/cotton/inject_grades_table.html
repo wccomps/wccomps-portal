@@ -8,128 +8,115 @@
           action="{% url 'scoring:inject_grades_bulk_approve' %}"
           x-ref="bulkForm">
         {% csrf_token %}
-        <div class="results">
-            <table id="result_list" role="grid" aria-label="Inject grades list">
-                {# djlint:off H021 #}
-                <colgroup>
-                    <col style="width: 40px;">
-                    <col style="width: 22%;">
-                    <col style="width: 15%;">
-                    <col style="width: 10%;">
-                    <col style="width: 8%;">
-                    <col style="width: 15%;">
-                    <col style="width: 10%;">
-                    <col style="width: 12%;">
-                </colgroup>
-                {# djlint:on #}
-                <thead>
-                    <tr role="row">
-                        <th scope="col" class="action-checkbox-column">
+        <c-table id="result_list"
+                 role="grid"
+                 widths="40px 22% 15% 10% 8% 15% 10% 12%"
+                 aria_label="Inject grades list">
+            <c-slot name="headers">
+                <tr role="row">
+                    <th scope="col" class="action-checkbox-column">
+                        <input type="checkbox"
+                               :checked="allSelected"
+                               :indeterminate="someSelected"
+                               @click="toggleAll"
+                               title="Select all">
+                    </th>
+                    <c-table_header sort_field="inject_name"
+                                    current_sort="{{ sort_by }}"
+                                    query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
+                        Inject
+                    </c-table_header>
+                    <c-table_header sort_field="team__team_number"
+                                    current_sort="{{ sort_by }}"
+                                    query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
+                        Team
+                    </c-table_header>
+                    <c-table_header sort_field="points_awarded"
+                                    current_sort="{{ sort_by }}"
+                                    query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
+                        Points
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Max
+                    </c-table_header>
+                    <c-table_header sort_field="graded_at"
+                                    current_sort="{{ sort_by }}"
+                                    query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
+                        Graded
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Outlier
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Status
+                    </c-table_header>
+                </tr>
+            </c-slot>
+            {% for grade in page_obj %}
+                <tr class="{% if grade.is_outlier %}bg-warning-light{% endif %}"
+                    role="row">
+                    <td class="action-checkbox">
+                        {% if not grade.is_approved %}
                             <input type="checkbox"
-                                   :checked="allSelected"
-                                   :indeterminate="someSelected"
-                                   @click="toggleAll"
-                                   title="Select all">
-                        </th>
-                        <c-table_header sort_field="inject_name"
-                                        current_sort="{{ sort_by }}"
-                                        query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
-                            Inject
-                        </c-table_header>
-                        <c-table_header sort_field="team__team_number"
-                                        current_sort="{{ sort_by }}"
-                                        query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
-                            Team
-                        </c-table_header>
-                        <c-table_header sort_field="points_awarded"
-                                        current_sort="{{ sort_by }}"
-                                        query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
-                            Points
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Max
-                        </c-table_header>
-                        <c-table_header sort_field="graded_at"
-                                        current_sort="{{ sort_by }}"
-                                        query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
-                            Graded
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Outlier
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Status
-                        </c-table_header>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for grade in page_obj %}
-                        <tr class="{% cycle 'row1' 'row2' %}{% if grade.is_outlier %} bg-warning-light{% endif %}"
-                            role="row">
-                            <td class="action-checkbox">
-                                {% if not grade.is_approved %}
-                                    <input type="checkbox"
-                                           name="grade_ids"
-                                           value="{{ grade.id }}"
-                                           data-grade-id="{{ grade.id }}"
-                                           :checked="selectedMap.{{ grade.id|jskey }}"
-                                           @change="toggleItem">
-                                {% endif %}
-                            </td>
-                            <th class="field-inject">
-                                {{ grade.inject_name }}
-                                <div class="text-sm text-muted">{{ grade.inject_id }}</div>
-                            </th>
-                            <td class="field-team">Team {{ grade.team.team_number }}</td>
-                            <td class="field-points">
-                                <strong>{{ grade.points_awarded }}</strong>
-                            </td>
-                            <td class="field-max text-muted">{{ grade.max_points }}</td>
-                            <td class="field-graded">
-                                {{ grade.graded_at|timesince }} ago
-                                <div class="text-sm text-muted">by {{ grade.graded_by.username|default:"Auto" }}</div>
-                            </td>
-                            <td class="field-outlier">
-                                {% if grade.is_outlier %}
-                                    <span class="text-warning font-semibold"><span aria-hidden="true">⚠️</span> {{ grade.std_devs_from_mean|floatformat:1 }}σ</span>
-                                {% else %}
-                                    <span class="text-muted">—</span>
-                                {% endif %}
-                            </td>
-                            <td class="field-status">
-                                {% if grade.is_approved %}
-                                    <c-badge variant="resolved">
-                                        <span aria-hidden="true">✓</span> Approved
-                                    </c-badge>
-                                {% else %}
-                                    <c-badge variant="claimed">
-                                        <span aria-hidden="true">⏳</span> Pending
-                                    </c-badge>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% if grade.notes %}
-                            <tr class="{% cycle 'row1' 'row2' %}">
-                                <td></td>
-                                <td colspan="7" class="bg-light text-sm">
-                                    <strong>Notes:</strong> {{ grade.notes }}
-                                </td>
-                            </tr>
+                                   name="grade_ids"
+                                   value="{{ grade.id }}"
+                                   data-grade-id="{{ grade.id }}"
+                                   :checked="selectedMap.{{ grade.id|jskey }}"
+                                   @change="toggleItem">
                         {% endif %}
-                    {% empty %}
-                        <tr>
-                            <td colspan="8">
-                                {% if selected_inject or selected_team or show_outliers_only or search_query or status_filter != "pending" %}
-                                    No grades match your filters. Try adjusting your filters or <a href="{% url 'scoring:inject_grades_review' %}">clearing all filters</a>
-                                {% else %}
-                                    No pending grades. All inject grades have been approved.
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+                    </td>
+                    <th>
+                        {{ grade.inject_name }}
+                        <div class="text-sm text-muted">{{ grade.inject_id }}</div>
+                    </th>
+                    <td>Team {{ grade.team.team_number }}</td>
+                    <td>
+                        <strong>{{ grade.points_awarded }}</strong>
+                    </td>
+                    <td class="text-muted">{{ grade.max_points }}</td>
+                    <td>
+                        {{ grade.graded_at|timesince }} ago
+                        <div class="text-sm text-muted">by {{ grade.graded_by.username|default:"Auto" }}</div>
+                    </td>
+                    <td>
+                        {% if grade.is_outlier %}
+                            <span class="text-warning font-semibold"><span aria-hidden="true">⚠️</span> {{ grade.std_devs_from_mean|floatformat:1 }}σ</span>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if grade.is_approved %}
+                            <c-badge variant="success">
+                                <span aria-hidden="true">✓</span> Approved
+                            </c-badge>
+                        {% else %}
+                            <c-badge variant="warning">
+                                <span aria-hidden="true">⏳</span> Pending
+                            </c-badge>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% if grade.notes %}
+                    <tr>
+                        <td></td>
+                        <td colspan="7" class="bg-light text-sm">
+                            <strong>Notes:</strong> {{ grade.notes }}
+                        </td>
+                    </tr>
+                {% endif %}
+            {% empty %}
+                <tr>
+                    <td colspan="8">
+                        {% if selected_inject or selected_team or show_outliers_only or search_query or status_filter != "pending" %}
+                            No grades match your filters. Try adjusting your filters or <a href="{% url 'scoring:inject_grades_review' %}">clearing all filters</a>
+                        {% else %}
+                            No pending grades. All inject grades have been approved.
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+        </c-table>
     </form>
     <c-pagination :page_obj="page_obj"
                   query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}&sort={{ sort_by }}" />

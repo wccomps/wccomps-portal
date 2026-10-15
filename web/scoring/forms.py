@@ -32,14 +32,12 @@ class RedTeamIPPoolForm(forms.ModelForm[RedTeamIPPool]):
             "name": forms.TextInput(
                 attrs={
                     "placeholder": "e.g., Rotation Pool A",
-                    "class": "form-control",
                 }
             ),
             "ip_addresses": forms.Textarea(
                 attrs={
                     "rows": 10,
                     "placeholder": "Enter IP addresses, one per line or comma-separated:\n10.0.0.1\n10.0.0.2\n10.0.0.3",
-                    "class": "form-control",
                 }
             ),
         }
@@ -103,7 +101,7 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
             ("pool", "IP Pool"),
         ],
         initial="single",
-        widget=forms.RadioSelect(attrs={"class": "form-check-input"}),
+        widget=forms.RadioSelect(),
         label="Source IP Type",
     )
 
@@ -137,18 +135,17 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
             "notes",
         ]
         widgets = {
-            "attack_type": forms.Select(attrs={"class": "form-select"}),
+            "attack_type": forms.Select(),
             "affected_teams": forms.CheckboxSelectMultiple(),
             "notes": forms.Textarea(
                 attrs={
                     "rows": 4,
                     "placeholder": "Full description of the attack and steps taken...",
-                    "class": "form-control",
                 }
             ),
-            "destination_ip_template": forms.TextInput(attrs={"readonly": "readonly", "class": "form-control"}),
-            "source_ip": forms.TextInput(attrs={"placeholder": "e.g., 10.0.0.5", "class": "form-control"}),
-            "source_ip_pool": forms.Select(attrs={"class": "form-select"}),
+            "destination_ip_template": forms.TextInput(attrs={"readonly": "readonly"}),
+            "source_ip": forms.TextInput(attrs={"placeholder": "e.g., 10.0.0.5"}),
+            "source_ip_pool": forms.Select(),
         }
         labels = {
             "attack_type": "Attack Type",
@@ -205,7 +202,7 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
         self.fields["affected_service"] = forms.ChoiceField(
             required=False,
             choices=service_choices,
-            widget=forms.Select(attrs={"class": "form-select"}),
+            widget=forms.Select(),
             label="Affected Service",
         )
 
@@ -330,7 +327,7 @@ class IncidentReportForm(forms.ModelForm[IncidentReport]):
         self.fields["affected_service"] = forms.ChoiceField(
             required=False,
             choices=service_choices,
-            widget=forms.Select(attrs={"class": "form-select"}),
+            widget=forms.Select(),
             label="Affected Service",
         )
 
@@ -385,7 +382,7 @@ class ScoringTemplateForm(forms.ModelForm[ScoringTemplate]):
             "inject_weight",
             "orange_weight",
         ]
-        weight_attrs = {"min": "0", "max": "100", "step": "1", "class": "form-control"}
+        weight_attrs = {"min": "0", "max": "100", "step": "1"}
         widgets = {
             "service_weight": forms.NumberInput(attrs=weight_attrs),
             "inject_weight": forms.NumberInput(attrs=weight_attrs),

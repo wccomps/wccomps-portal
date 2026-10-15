@@ -190,18 +190,6 @@ a.button:active {
 }
 
 
-/* Team status in mappings page */
-.field-status > div:first-child {
-    font-weight: 700;
-    font-size: 16px;
-}
-
-/* Actions column spacing */
-.field-actions form {
-    display: inline-block;
-    margin-right: 6px;
-}
-
 /* Make checkbox column narrower */
 .action-checkbox-column,
 .action-checkbox {
@@ -210,9 +198,12 @@ a.button:active {
 }
 
 /* ============================================
-   UTILITY CLASSES
-   Use these instead of inline styles
+   UTILITIES
+   Single-purpose classes any page may use, and the few small blocks several pages share (code-block,
+   status-bar). test_template_vocabulary reads the classes between the BEGIN and END markers as the shared
+   vocabulary; a class defined anywhere else in this file belongs to a component or to one page.
    ============================================ */
+/* BEGIN UTILITIES */
 
 /* Text colors */
 .text-dark { color: var(--body-fg, #333); }
@@ -255,7 +246,770 @@ a.button:active {
     white-space: nowrap;
 }
 
-/* Modal styles */
+/* Flex utilities */
+.flex-1 { flex: 1; }
+.flex-grow-1 { flex-grow: 1; }
+.flex-wrap { flex-wrap: wrap; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.items-end { align-items: flex-end; }
+.justify-between { justify-content: space-between; }
+.gap-10 { gap: 10px; }
+.gap-20 { gap: 20px; }
+.justify-end { justify-content: flex-end; }
+
+/* Margins */
+.m-0 { margin: 0; }
+.mt-0 { margin-top: 0; }
+.mt-5 { margin-top: 5px; }
+.mt-10 { margin-top: 10px; }
+.mt-15 { margin-top: 15px; }
+.mt-20 { margin-top: 20px; }
+.mb-0 { margin-bottom: 0; }
+.mb-5 { margin-bottom: 5px; }
+.mb-8 { margin-bottom: 8px; }
+.mb-10 { margin-bottom: 10px; }
+.mb-15 { margin-bottom: 15px; }
+.mb-20 { margin-bottom: 20px; }
+.ml-5 { margin-left: 5px; }
+.ml-20 { margin-left: 20px; }
+/* Padding */
+.p-10 { padding: 10px; }
+.p-15 { padding: 15px; }
+.p-20 { padding: 20px; }
+.py-5 { padding-top: 5px; padding-bottom: 5px; }
+.px-10 { padding-left: 10px; padding-right: 10px; }
+
+/* Widths */
+.w-150 { width: 150px; }
+.w-full { width: 100%; }
+.d-contents { display: contents; }
+.h-120 { height: 120px; }
+
+/* Backgrounds */
+.bg-light { background-color: var(--darkened-bg, #f8f8f8); }
+.bg-warning-light { background-color: var(--warning-alert-bg); }
+
+/* Borders */
+.border { border: 1px solid var(--hairline-color, #ddd); }
+.border-warning { border: 2px solid var(--warning-alert-border); }
+.border-success { border: 2px solid var(--success-fg); }
+.rounded { border-radius: 4px; }
+.whitespace-pre-wrap { white-space: pre-wrap; }
+/* A table row flagged as a problem */
+.row-danger td { background: var(--danger-bg); }
+/* A cell's action forms sit side by side */
+.field-actions form {
+    display: inline-block;
+    margin-right: 6px;
+}
+.max-h-300 { max-height: 300px; }
+.overflow-y-auto { overflow-y: auto; }
+.table-fixed { table-layout: fixed; }
+
+/* Grid layouts */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+@media (max-width: 767px) { .grid-2 { grid-template-columns: 1fr; } }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+
+/* Container widths */
+.max-w-400 { max-width: 400px; margin: 0 auto; }
+.max-w-800 { max-width: 800px; margin: 0 auto; }
+
+/* Print */
+@media print { .no-print { display: none !important; } }
+
+/* Shared blocks */
+.code-block {
+    display: block;
+    padding: 15px;
+    background: var(--darkened-bg, #f5f5f5);
+    border-radius: 4px;
+    margin: 10px 0;
+    overflow-x: auto;
+}
+.status-bar {
+    padding: 10px;
+    margin: 0 0 10px 0;
+    border-radius: 4px;
+    background: var(--darkened-bg, #f8f8f8);
+    border: 1px solid var(--hairline-color, #ddd);
+}
+/* END UTILITIES */
+
+/* Filter toolbar actions (c-filter_toolbar) */
+.filter-actions { padding-top: 22px; }
+
+/* Toast placement (c-toast) */
+.toast-position { position: fixed; bottom: 16px; right: 16px; z-index: 50; }
+
+/* Secondary button */
+.btn-secondary {
+    padding: 5px 10px;
+    font-size: 13px;
+    border: 1px solid var(--hairline-color, #ddd);
+    background: var(--body-bg, white);
+    border-radius: 4px;
+    cursor: pointer;
+}
+.btn-secondary:hover { background: var(--darkened-bg, #f8f8f8); }
+
+/* Toggle button (c-toggle_button): pressed while its choice is picked */
+.box-toggle--selected {
+    background: var(--primary, #417690);
+    border-color: var(--primary, #417690);
+    color: white;
+}
+
+/* Override admin forms.css float clearfix - Cotton components don't use floats */
+.form-row {
+    overflow: visible;
+}
+
+/* Common component patterns */
+.help-text { font-size: 12px; color: var(--body-quiet-color, #666); margin-top: 4px; }
+
+/* Action box patterns */
+.action-box {
+    margin-top: 20px;
+    padding: 20px;
+    border-radius: 6px;
+    border: 2px solid var(--hairline-color, #dee2e6);
+    background: var(--darkened-bg, #f8f9fa);
+}
+
+/* Allow wide content (tables) to scroll horizontally within modules */
+.module {
+    overflow: visible;
+}
+.results {
+    overflow-x: auto;
+}
+.results table {
+    width: 100%;
+}
+.action-box-warning {
+    background: var(--warning-alert-bg);
+    border-color: var(--warning-alert-border);
+}
+.action-box h3, .action-box h4 {
+    margin-top: 0;
+    font-size: 16px;
+    color: var(--body-fg, #333);
+}
+.action-box-warning h3, .action-box-warning h4 {
+    color: var(--warning-alert-fg);
+}
+.action-box label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--body-fg, #333);
+}
+.action-box-warning label,
+.action-box-warning p {
+    color: var(--warning-alert-fg);
+}
+.action-box input[type="text"],
+.action-box input[type="number"],
+.action-box textarea,
+.action-box select {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid var(--hairline-color, #ddd);
+    border-radius: 4px;
+    font-size: 14px;
+}
+.action-box input[type="number"] {
+    width: 200px;
+}
+
+
+/* Info box (highlighted content block) */
+.info-box {
+    border: 1px solid var(--hairline-color, #ddd);
+    border-radius: 4px;
+    padding: 15px;
+    background: var(--darkened-bg, #f8f8f8);
+}
+.info-box-primary {
+    background-color: var(--darkened-bg, #e8f4f8);
+    border-left: 4px solid var(--primary, #417690);
+}
+
+
+
+
+
+/* Detail list - definition list styling */
+.detail-list {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    margin: 0;
+}
+.detail-list dt,
+.detail-list dd {
+    padding: 6px 10px;
+    margin: 0;
+}
+.detail-list dt {
+    font-weight: 600;
+    color: var(--body-quiet-color, #666);
+}
+.detail-list dt:nth-of-type(odd),
+.detail-list dd:nth-of-type(odd) {
+    background: var(--darkened-bg, #f8f8f8);
+}
+
+/* ============================================
+   BADGE COMPONENT STYLES
+   ============================================ */
+.badge {
+    display: inline-block;
+    padding: 4px 10px;
+    font-weight: 600;
+    font-size: 12px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.badge--info {
+    background: var(--info-bg);
+    color: var(--info-fg);
+}
+.badge--warning {
+    background: var(--warning-bg);
+    color: var(--warning-fg);
+}
+.badge--success {
+    background: var(--success-bg);
+    color: var(--success-fg);
+}
+.badge--neutral {
+    background: var(--neutral-bg);
+    color: var(--neutral-fg);
+}
+.badge--danger {
+    background: var(--danger-bg);
+    color: var(--error-fg, #c62828);
+}
+.badge--default {
+    background: var(--darkened-bg, #f5f5f5);
+    color: var(--body-fg, #333);
+    border: 1px solid var(--hairline-color, #ddd);
+}
+
+
+/* ============================================
+   ALERT COMPONENT STYLES
+   ============================================ */
+.alert {
+    display: block;
+    font-weight: 400;
+    font-size: 0.8125rem;
+    padding: 10px 10px 10px 40px;
+    margin: 0 0 10px 0;
+    background: var(--message-success-bg) url(../admin/img/icon-yes.svg) 15px 12px no-repeat;
+    background-size: 16px auto;
+    color: var(--body-fg);
+    word-break: break-word;
+}
+.alert--error {
+    background: var(--message-error-bg) url(../admin/img/icon-no.svg) 15px 12px no-repeat;
+    background-size: 16px auto;
+}
+.alert--warning {
+    background: var(--message-warning-bg) url(../admin/img/icon-alert.svg) 15px 14px no-repeat;
+    background-size: 14px auto;
+}
+.alert--success {}
+.alert--info {}
+.alert--default {}
+
+/* ============================================
+   PROGRESS BAR
+   ============================================ */
+.progress-bar {
+    height: 8px;
+    background: var(--darkened-bg, #e0e0e0);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.progress-bar__fill {
+    height: 100%;
+    background: var(--success-fg);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+.progress-bar__fill--warn {
+    background: var(--warning-fg);
+}
+
+/* ============================================
+   SCORE VALUE COLORS
+   ============================================ */
+.score-positive { color: var(--success-fg); }
+.score-negative { color: var(--error-fg, #dc3545); }
+.score-zero { color: var(--body-quiet-color, #6c757d); }
+
+@media print {
+    nav,
+    header,
+    footer {
+        display: none !important;
+    }
+}
+
+/* ============================================
+   PAGE HEADER SUBTITLE
+   ============================================ */
+.page-header-subtitle {
+    margin: 5px 0 0 0;
+    color: var(--body-quiet-color, #666);
+    font-size: 14px;
+}
+/* ============================================
+   IMAGE GRID COMPONENT
+   ============================================ */
+.image-grid img {
+    width: 100%;
+    border: 1px solid var(--hairline-color, #ddd);
+    border-radius: 4px;
+    display: block;
+}
+
+/* Required field labels (c-form_field) */
+label.required::after {
+    content: " *";
+    color: var(--error-fg, #ba2121);
+}
+
+/* ============================================
+   FILTER FIELD COMPONENT
+   ============================================ */
+.filter-field {
+    display: flex;
+    flex-direction: column;
+    min-width: 140px;
+}
+.filter-field-label {
+    font-weight: 600;
+    margin-bottom: 4px;
+    font-size: 12px;
+    color: var(--body-fg, #333);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .progress-bar__fill {
+        transition: none;
+    }
+}
+
+/* ============================================
+   COLLAPSIBLE FIELDSET
+   ============================================ */
+.fieldset-toggle {
+    user-select: none;
+}
+.fieldset-toggle-btn {
+    background: none;
+    border: none;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    padding: 0;
+    width: 100%;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.fieldset-toggle-btn:hover {
+    opacity: 0.8;
+}
+.fieldset-toggle-icon {
+    font-size: 10px;
+    transition: transform 0.2s ease;
+    display: inline-block;
+}
+.fieldset-toggle-icon--open {
+    transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+    .fieldset-toggle-icon {
+        transition: none;
+    }
+}
+
+/* ============================================
+   BREADCRUMBS
+   ============================================ */
+.breadcrumbs {
+    padding: 8px 15px;
+    font-size: 12px;
+    color: var(--body-quiet-color, #666);
+    background: var(--darkened-bg, #f8f8f8);
+    border-bottom: 1px solid var(--hairline-color, #ddd);
+}
+.breadcrumbs a {
+    color: var(--link-fg, #447e9b);
+    text-decoration: none;
+}
+.breadcrumbs a:hover {
+    text-decoration: underline;
+}
+.breadcrumbs .bc-separator {
+    margin: 0 6px;
+    color: var(--body-quiet-color, #999);
+}
+
+/* ============================================
+   PORTAL CHROME (admin/base_site.html): the nav bar, the new-ticket toast and the page frame every page shares
+   ============================================ */
+#content {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.primary-navigation {
+    background: var(--primary, #417690);
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--primary-dark, #2e5266);
+    display: flex;
+    align-items: center;
+}
+
+.nav-spacer {
+    flex: 1;
+}
+
+.nav-user {
+    color: var(--header-link-color, #c4dde8);
+    font-size: 13px;
+    margin-right: 10px;
+}
+
+.primary-navigation a {
+    color: var(--header-link-color, #fff);
+    text-decoration: none;
+    padding: 8px 15px;
+    margin-right: 5px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+    display: inline-block;
+    transition: background-color 0.2s;
+}
+
+.primary-navigation a:hover {
+    background-color: var(--primary-dark, #2e5266);
+}
+
+.primary-navigation a.current {
+    background-color: var(--primary-dark, #2e5266);
+    font-weight: 600;
+}
+
+.primary-navigation a:focus {
+    outline: 2px solid var(--header-link-color, #fff);
+    outline-offset: 2px;
+}
+
+/* Hamburger toggle - hidden on desktop */
+.nav-toggle {
+    display: none;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    color: var(--header-link-color, #fff);
+    font-size: 20px;
+    padding: 4px 10px;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.nav-toggle:hover {
+    background: var(--primary-dark, #2e5266);
+}
+
+/* Nav menu container - flex row on desktop */
+.nav-menu {
+    display: contents;
+}
+
+.nav-links {
+    display: contents;
+}
+
+.nav-utils {
+    display: contents;
+}
+
+/* Mobile layout */
+@media (max-width: 767px) {
+    #header {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        position: relative;
+    }
+
+    #branding {
+        flex: 1;
+    }
+
+    .primary-navigation {
+        padding: 0;
+        background: transparent;
+        border-bottom: none;
+    }
+
+    .nav-toggle {
+        display: block;
+    }
+
+    .nav-menu {
+        display: none;
+        flex-direction: column;
+        padding-top: 10px;
+    }
+
+    .nav-menu--open {
+        display: flex;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: var(--primary, #417690);
+        padding: 10px 15px;
+        border-bottom: 1px solid var(--primary-dark, #2e5266);
+        z-index: 1000;
+    }
+
+    .nav-links {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .nav-links a {
+        display: block;
+        margin-right: 0;
+        padding: 10px 12px;
+        border-radius: 4px;
+    }
+
+    .nav-spacer {
+        display: none;
+    }
+
+    .nav-utils {
+        display: flex;
+        align-items: center;
+        padding-top: 10px;
+        margin-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+    }
+}
+
+/* Table improvements - better density for scanning */
+#result_list td,
+#result_list th {
+    padding: 10px 12px;
+    line-height: 1.5;
+}
+
+#result_list tbody tr:hover {
+    background-color: var(--darkened-bg, #f5f5f5);
+}
+
+/* Larger click targets. The height follows the padding: Django fixes some button heights (the delete page's
+   No link, its actions bar), which this padding would clip. The admin changelist's Go button keeps Django's
+   compact size. */
+:is(.button, input[type="submit"], button[type="submit"]):not(#changelist-form .actions *) {
+    padding: 8px 16px !important;
+    height: auto;
+    font-size: 13px !important;
+    min-width: 80px;
+    cursor: pointer;
+}
+
+.button:hover,
+input[type="submit"]:hover,
+button[type="submit"]:hover {
+    opacity: 0.85;
+}
+
+/* Make admin filters more readable */
+#changelist-filter li {
+    padding: 8px 10px;
+}
+
+/* Actions dropdown */
+.actions select {
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+/* Dark mode toggle - uses Django admin's built-in dark mode CSS */
+.dark-mode-toggle {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-right: 15px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.dark-mode-toggle:hover {
+    background: var(--primary-dark, #2e5266);
+}
+
+.dark-mode-toggle .dark-icon {
+    display: none;
+}
+
+.dark-mode-toggle .light-icon {
+    display: inline;
+}
+
+html[data-theme="dark"] .dark-mode-toggle .dark-icon {
+    display: inline;
+}
+
+html[data-theme="dark"] .dark-mode-toggle .light-icon {
+    display: none;
+}
+
+.audio-toggle {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-right: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.audio-toggle:hover {
+    background: var(--primary-dark, #2e5266);
+}
+
+/* Ticket notification badge */
+.notif-count {
+    background: var(--error-fg, #dc3545);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 4px;
+    vertical-align: top;
+}
+
+/* Ticket toast notification */
+.ticket-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--body-bg, #fff);
+    color: var(--body-fg, #333);
+    border: 1px solid var(--hairline-color, #ddd);
+    border-left: 4px solid var(--info-fg, #1976d2);
+    border-radius: 4px;
+    padding: 12px 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    z-index: 9999;
+    max-width: 360px;
+}
+
+.ticket-toast:hover {
+    background: var(--darkened-bg, #f5f5f5);
+}
+
+.toast-line1 {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+}
+
+.toast-line1 strong {
+    white-space: nowrap;
+}
+
+.toast-line1 span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.toast-line2 {
+    font-size: 12px;
+    color: var(--body-quiet-color, #666);
+    margin-top: 2px;
+}
+
+.toast-enter {
+    transition: all 0.3s ease-out;
+}
+
+.toast-enter-start {
+    opacity: 0;
+    transform: translateX(20px);
+}
+
+.toast-enter-end {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.toast-leave {
+    transition: all 0.2s ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .toast-enter,
+    .toast-leave {
+        transition: none;
+    }
+
+    .toast-enter-start {
+        transform: none;
+    }
+
+    .htmx-request {
+        transition: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .ticket-toast {
+        max-width: calc(100vw - 40px);
+        bottom: 12px;
+        right: 12px;
+    }
+}
+
+[x-cloak] {
+    display: none !important;
+}
+
+/* Subtle opacity fade during htmx requests */
+.htmx-request {
+    opacity: 0.5;
+    transition: opacity 200ms ease-in;
+}
+
+/* ============================================
+   PAGE-SPECIFIC STYLES
+   Each serves one page; test_template_vocabulary's PAGE_STYLE_EXCEPTIONS says why no component or utility fits.
+   ============================================ */
+
+/* Create IP pool dialog (scoring/submit_red_finding.html) */
 .modal {
     display: none;
     position: fixed;
@@ -323,77 +1077,72 @@ a.button:active {
     border-top: 1px solid var(--hairline-color, #e8e8e8);
 }
 
-/* Flex utilities */
-.flex-column { flex-direction: column; }
-.flex-1 { flex: 1; }
-.flex-grow-1 { flex-grow: 1; }
-.flex-wrap { flex-wrap: wrap; }
-.items-center { align-items: center; }
-.items-start { align-items: flex-start; }
-.items-end { align-items: flex-end; }
-.justify-between { justify-content: space-between; }
-.gap-10 { gap: 10px; }
-.gap-20 { gap: 20px; }
-.justify-end { justify-content: flex-end; }
-
-/* Filter toolbar specific */
-.filter-actions { padding-top: 22px; }
-
-/* Margins */
-.m-0 { margin: 0; }
-.mt-0 { margin-top: 0; }
-.mt-5 { margin-top: 5px; }
-.mt-10 { margin-top: 10px; }
-.mt-15 { margin-top: 15px; }
-.mt-20 { margin-top: 20px; }
-.mb-0 { margin-bottom: 0; }
-.mb-4 { margin-bottom: 4px; }
-.mb-5 { margin-bottom: 5px; }
-.mb-8 { margin-bottom: 8px; }
-.mb-10 { margin-bottom: 10px; }
-.mb-15 { margin-bottom: 15px; }
-.mb-20 { margin-bottom: 20px; }
-.ml-5 { margin-left: 5px; }
-.ml-20 { margin-left: 20px; }
-/* Padding */
-.p-10 { padding: 10px; }
-.p-15 { padding: 15px; }
-.p-20 { padding: 20px; }
-.py-5 { padding-top: 5px; padding-bottom: 5px; }
-.px-10 { padding-left: 10px; padding-right: 10px; }
-.pt-15 { padding-top: 15px; }
-
-/* Widths */
-.w-40 { width: 40px; }
-.w-150 { width: 150px; }
-.min-w-150 { min-width: 150px; }
-.min-w-200 { min-width: 200px; }
-.w-full { width: 100%; }
-.d-contents { display: contents; }
-.h-120 { height: 120px; }
-
-/* Backgrounds */
-.bg-light { background-color: var(--darkened-bg, #f8f8f8); }
-.bg-warning-light { background-color: var(--warning-alert-bg); }
-
-/* Borders */
-.border { border: 1px solid var(--hairline-color, #ddd); }
-.border-top { border-top: 1px solid var(--hairline-color, #ddd); }
-.border-bottom { border-bottom: 1px solid var(--hairline-color, #ddd); }
-.border-warning { border: 2px solid var(--warning-alert-border); }
-.border-success { border: 2px solid var(--success-fg); }
-.rounded { border-radius: 4px; }
+/* Category form: its checkbox lists (admin/category_form.html) */
 .checkbox-group { display: flex; flex-direction: column; gap: 8px; }
-.toast-position { position: fixed; bottom: 16px; right: 16px; z-index: 50; }
-.whitespace-pre-wrap { white-space: pre-wrap; }
-.max-h-300 { max-height: 300px; }
-.overflow-y-auto { overflow-y: auto; }
-.table-fixed { table-layout: fixed; }
+
+/* Broadcast recipients (admin/broadcast.html) */
 .team-list { columns: 2; list-style: disc inside; padding: 0; }
 @media (min-width: 768px) { .team-list { columns: 3; } }
 @media (min-width: 1024px) { .team-list { columns: 4; } }
 
-/* Module header (colored bar at top of module) */
+/* Ticket comments (ticketing/comments_list.html) and playbook (ticket_detail.html) */
+.comment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.comment-item {
+    padding: 10px 15px;
+    border-radius: 4px;
+    background: var(--darkened-bg, #f8f8f8);
+    border: 1px solid var(--hairline-color, #ddd);
+}
+
+.comment-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+
+.comment-author {
+    font-weight: 600;
+    color: var(--body-fg, #333);
+}
+
+.comment-time {
+    color: var(--body-quiet-color, #666);
+}
+
+.comment-body {
+    white-space: pre-wrap;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.playbook-steps {
+    margin: 0;
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.playbook-steps li {
+    line-height: 1.5;
+    font-size: 14px;
+}
+
+/* Scoring setup: the weight and maximum fields (scoring/scoring_config.html) */
+.max-points-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 15px;
+}
+
+/* Match incident: the two panels' title bars (scoring/match_incident.html) */
 .module-header {
     background: var(--primary, #417690);
     color: white;
@@ -402,18 +1151,7 @@ a.button:active {
 }
 .module-header-success { background: var(--success-fg); }
 
-/* Secondary button */
-.btn-secondary {
-    padding: 5px 10px;
-    font-size: 13px;
-    border: 1px solid var(--hairline-color, #ddd);
-    background: var(--body-bg, white);
-    border-radius: 4px;
-    cursor: pointer;
-}
-.btn-secondary:hover { background: var(--darkened-bg, #f8f8f8); }
-
-/* Team selector button */
+/* Red team finding: the team picker (scoring/submit_red_finding.html) */
 .team-btn {
     padding: 8px 16px;
     min-width: 60px;
@@ -438,238 +1176,13 @@ a.button:active {
     background: var(--error-fg, #c82333);
     border-color: var(--error-fg, #c82333);
 }
-
-/* Box toggle buttons */
-.box-toggle--selected {
-    background: var(--primary, #417690);
-    border-color: var(--primary, #417690);
-    color: white;
+@media (prefers-reduced-motion: reduce) {
+    .team-btn:hover {
+        transform: none;
+    }
 }
 
-/* Override admin forms.css float clearfix - Cotton components don't use floats */
-.form-row {
-    overflow: visible;
-}
-
-/* Common component patterns */
-.help-text { font-size: 12px; color: var(--body-quiet-color, #666); margin-top: 4px; }
-
-/* Action box patterns */
-.action-box {
-    margin-top: 20px;
-    padding: 20px;
-    border-radius: 6px;
-    border: 2px solid var(--hairline-color, #dee2e6);
-    background: var(--darkened-bg, #f8f9fa);
-}
-
-/* Allow wide content (tables) to scroll horizontally within modules */
-.module {
-    overflow: visible;
-}
-.results {
-    overflow-x: auto;
-}
-.results table {
-    width: 100%;
-}
-.action-box-warning {
-    background: var(--warning-alert-bg);
-    border-color: var(--warning-alert-border);
-}
-.action-box h3, .action-box h4 {
-    margin-top: 0;
-    font-size: 16px;
-    color: var(--body-fg, #333);
-}
-.action-box-warning h3, .action-box-warning h4 {
-    color: var(--warning-alert-fg);
-}
-.action-box .form-group {
-    margin-bottom: 15px;
-}
-.action-box label {
-    display: block;
-    font-weight: 600;
-    margin-bottom: 8px;
-    color: var(--body-fg, #333);
-}
-.action-box-warning label,
-.action-box-warning p {
-    color: var(--warning-alert-fg);
-}
-.action-box input[type="text"],
-.action-box input[type="number"],
-.action-box textarea,
-.action-box select {
-    width: 100%;
-    padding: 12px;
-    border: 2px solid var(--hairline-color, #ddd);
-    border-radius: 4px;
-    font-size: 14px;
-}
-.action-box input[type="number"] {
-    width: 200px;
-}
-
-
-/* Info box (highlighted content block) */
-.info-box {
-    border: 1px solid var(--hairline-color, #ddd);
-    border-radius: 4px;
-    padding: 15px;
-    background: var(--darkened-bg, #f8f8f8);
-}
-.info-box-primary {
-    background-color: var(--darkened-bg, #e8f4f8);
-    border-left: 4px solid var(--primary, #417690);
-}
-
-/* Code block */
-.code-block {
-    display: block;
-    padding: 15px;
-    background: var(--darkened-bg, #f5f5f5);
-    border-radius: 4px;
-    margin: 10px 0;
-    overflow-x: auto;
-}
-
-/* Grid layouts */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-@media (max-width: 767px) { .grid-2 { grid-template-columns: 1fr; } }
-.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-
-/* Container widths */
-.max-w-400 { max-width: 400px; margin: 0 auto; }
-.max-w-800 { max-width: 800px; margin: 0 auto; }
-
-
-/* Detail list - definition list styling */
-.detail-list {
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    margin: 0;
-}
-.detail-list dt,
-.detail-list dd {
-    padding: 6px 10px;
-    margin: 0;
-}
-.detail-list dt {
-    font-weight: 600;
-    color: var(--body-quiet-color, #666);
-}
-.detail-list dt:nth-of-type(odd),
-.detail-list dd:nth-of-type(odd) {
-    background: var(--darkened-bg, #f8f8f8);
-}
-
-/* ============================================
-   BADGE COMPONENT STYLES
-   ============================================ */
-.badge {
-    display: inline-block;
-    padding: 4px 10px;
-    font-weight: 600;
-    font-size: 12px;
-    border-radius: 3px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-.badge--info {
-    background: var(--info-bg);
-    color: var(--info-fg);
-}
-.badge--warning {
-    background: var(--warning-bg);
-    color: var(--warning-fg);
-}
-.badge--success {
-    background: var(--success-bg);
-    color: var(--success-fg);
-}
-.badge--neutral {
-    background: var(--neutral-bg);
-    color: var(--neutral-fg);
-}
-.badge--danger {
-    background: var(--danger-bg);
-    color: var(--error-fg, #c62828);
-}
-.badge--default {
-    background: var(--darkened-bg, #f5f5f5);
-    color: var(--body-fg, #333);
-    border: 1px solid var(--hairline-color, #ddd);
-}
-
-/* ============================================
-   STATUS BAR (ticket detail neutral header)
-   ============================================ */
-.status-bar {
-    padding: 10px;
-    margin: 0 0 10px 0;
-    border-radius: 4px;
-    background: var(--darkened-bg, #f8f8f8);
-    border: 1px solid var(--hairline-color, #ddd);
-}
-
-/* ============================================
-   ALERT COMPONENT STYLES
-   ============================================ */
-.alert {
-    display: block;
-    font-weight: 400;
-    font-size: 0.8125rem;
-    padding: 10px 10px 10px 40px;
-    margin: 0 0 10px 0;
-    background: var(--message-success-bg) url(../admin/img/icon-yes.svg) 15px 12px no-repeat;
-    background-size: 16px auto;
-    color: var(--body-fg);
-    word-break: break-word;
-}
-.alert--error {
-    background: var(--message-error-bg) url(../admin/img/icon-no.svg) 15px 12px no-repeat;
-    background-size: 16px auto;
-}
-.alert--warning {
-    background: var(--message-warning-bg) url(../admin/img/icon-alert.svg) 15px 14px no-repeat;
-    background-size: 14px auto;
-}
-.alert--success {}
-.alert--info {}
-.alert--default {}
-
-/* ============================================
-   PROGRESS BAR
-   ============================================ */
-.progress-bar {
-    height: 8px;
-    background: var(--darkened-bg, #e0e0e0);
-    border-radius: 4px;
-    overflow: hidden;
-}
-.progress-bar__fill {
-    height: 100%;
-    background: var(--success-fg);
-    border-radius: 4px;
-    transition: width 0.3s ease;
-}
-.progress-bar__fill--warn {
-    background: var(--warning-fg);
-}
-
-/* ============================================
-   SCORE VALUE COLORS
-   ============================================ */
-.score-positive { color: var(--success-fg); }
-.score-negative { color: var(--error-fg, #dc3545); }
-.score-zero { color: var(--body-quiet-color, #6c757d); }
-.row-below-avg td { background: var(--danger-bg); }
-
-/* ============================================
-   SCORECARD
-   ============================================ */
+/* Scorecard (scoring/_scorecard_body.html, scoring/scorecard.html) */
 .neighbors {
     display: flex;
     flex-direction: column;
@@ -698,13 +1211,6 @@ a.button:active {
     background: var(--darkened-bg, #f8f8f8);
 }
 @media print {
-    .no-print,
-    nav,
-    .sidebar,
-    header,
-    footer {
-        display: none !important;
-    }
     .scorecard {
         font-size: 11pt;
     }
@@ -713,67 +1219,7 @@ a.button:active {
     }
 }
 
-/* ============================================
-   PAGE HEADER SUBTITLE
-   ============================================ */
-.page-header-subtitle {
-    margin: 5px 0 0 0;
-    color: var(--body-quiet-color, #666);
-    font-size: 14px;
-}
-/* ============================================
-   IMAGE GRID COMPONENT
-   ============================================ */
-.image-grid img {
-    width: 100%;
-    border: 1px solid var(--hairline-color, #ddd);
-    border-radius: 4px;
-    display: block;
-}
-
-/* ============================================
-   FORM GRID COMPONENT
-   ============================================ */
-.form-grid label {
-    display: block;
-    margin-bottom: 5px;
-    font-weight: 600;
-    font-size: 14px;
-}
-.form-grid input[type="text"],
-.form-grid input[type="email"],
-.form-grid input[type="number"],
-.form-grid select,
-.form-grid textarea {
-    width: 100%;
-    padding: 8px;
-    border: 1px solid var(--hairline-color, #ddd);
-    border-radius: 4px;
-    font-size: 14px;
-}
-label.required::after {
-    content: " *";
-    color: var(--error-fg, #ba2121);
-}
-
-/* ============================================
-   FILTER FIELD COMPONENT
-   ============================================ */
-.filter-field {
-    display: flex;
-    flex-direction: column;
-    min-width: 140px;
-}
-.filter-field-label {
-    font-weight: 600;
-    margin-bottom: 4px;
-    font-size: 12px;
-    color: var(--body-fg, #333);
-}
-
-/* ============================================
-   SCREENSHOT PREVIEW (for file uploads)
-   ============================================ */
+/* Report forms: previews of the screenshots chosen (scoring/submit_incident.html, submit_red_finding.html) */
 .screenshot-preview-img {
     width: 100%;
     height: 150px;
@@ -787,9 +1233,7 @@ label.required::after {
     color: var(--body-quiet-color, #666);
 }
 
-/* ============================================
-   ATTACHMENT GRID (ticket attachments preview)
-   ============================================ */
+/* Ticket attachments (ticket_detail.html) */
 .attachment-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -853,9 +1297,7 @@ label.required::after {
     color: var(--body-quiet-color, #666);
 }
 
-/* ============================================
-   CLICK-TO-EDIT
-   ============================================ */
+/* Inject feedback edited in place (scoring/partials/inject_feedback_table.html) */
 .click-to-edit {
     cursor: pointer;
     padding: 4px 6px;
@@ -882,112 +1324,7 @@ td textarea[x-ref="editor"] {
     font-family: inherit;
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .team-btn:hover {
-        transform: none;
-    }
-    .progress-bar__fill {
-        transition: none;
-    }
-}
-
-/* ============================================
-   COLLAPSIBLE FIELDSET
-   ============================================ */
-.fieldset-toggle {
-    user-select: none;
-}
-.fieldset-toggle-btn {
-    background: none;
-    border: none;
-    font: inherit;
-    color: inherit;
-    cursor: pointer;
-    padding: 0;
-    width: 100%;
-    text-align: left;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-.fieldset-toggle-btn:hover {
-    opacity: 0.8;
-}
-.fieldset-toggle-icon {
-    font-size: 10px;
-    transition: transform 0.2s ease;
-    display: inline-block;
-}
-.fieldset-toggle-icon--open {
-    transform: rotate(90deg);
-}
-@media (prefers-reduced-motion: reduce) {
-    .fieldset-toggle-icon {
-        transition: none;
-    }
-}
-
-/* ============================================
-   TABLE HEADER TOOLTIP INDICATOR
-   ============================================ */
-.th-tooltip-icon {
-    display: inline-block;
-    width: 14px;
-    height: 14px;
-    line-height: 14px;
-    text-align: center;
-    font-size: 10px;
-    font-weight: 700;
-    border-radius: 50%;
-    background: var(--darkened-bg, #e0e0e0);
-    color: var(--body-quiet-color, #666);
-    margin-left: 4px;
-    vertical-align: middle;
-    cursor: help;
-}
-
-/* ============================================
-   ADVANCED FILTERS TOGGLE
-   ============================================ */
-.advanced-filters-wrap {
-    width: 100%;
-    margin-top: 8px;
-}
-.advanced-filters-toggle {
-    font-size: 12px;
-    color: var(--link-fg, #447e9b);
-}
-.advanced-filters-badge {
-    font-size: 10px;
-    padding: 1px 6px;
-    vertical-align: middle;
-}
-
-/* ============================================
-   BREADCRUMBS
-   ============================================ */
-.breadcrumbs {
-    padding: 8px 15px;
-    font-size: 12px;
-    color: var(--body-quiet-color, #666);
-    background: var(--darkened-bg, #f8f8f8);
-    border-bottom: 1px solid var(--hairline-color, #ddd);
-}
-.breadcrumbs a {
-    color: var(--link-fg, #447e9b);
-    text-decoration: none;
-}
-.breadcrumbs a:hover {
-    text-decoration: underline;
-}
-.breadcrumbs .bc-separator {
-    margin: 0 6px;
-    color: var(--body-quiet-color, #999);
-}
-
-/* ============================================
-   RESPONSIVE HISTORY (ticket detail mobile)
-   ============================================ */
+/* Ticket history: a table on wide screens, cards on phones (ticketing/history_list.html) */
 .history-cards {
     display: none;
 }
@@ -1027,9 +1364,7 @@ td textarea[x-ref="editor"] {
     }
 }
 
-/* ============================================
-   LEADERBOARD (Team/School Name Toggle)
-   ============================================ */
+/* Leaderboard: team or school names (scoring/leaderboard.html) */
 #content-main.show-schools .team-name {
     display: none;
 }
@@ -1041,4 +1376,3 @@ table thead th .text span .school-name {
     padding: 0;
     display: inline;
 }
-

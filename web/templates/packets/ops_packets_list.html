@@ -1,5 +1,5 @@
 {% extends "admin/base.html" %}
-{% load cotton page_titles %}
+{% load cotton page_titles status_variants %}
 {% block title %}
     Packets - WCComps Portal
 {% endblock title %}
@@ -16,7 +16,8 @@
                 <div class="status-bar">
                     <div class="d-flex justify-between items-center flex-wrap gap-10">
                         <div class="d-flex items-center gap-10 flex-wrap">
-                            <c-badge variant="{{ active_packet.status }}">
+                            <c-badge variant="{{ active_packet.status|badge_variant:'packet' }}"
+                                     aria_label="{{ active_packet.get_status_display }}">
                                 {{ active_packet.get_status_display }}
                             </c-badge>
                             <strong>{{ active_packet.title }}</strong>
@@ -120,7 +121,8 @@
                                 <small class="text-muted">{{ item.packet.filename }} ({{ item.packet.file_size|filesizeformat }})</small>
                             </td>
                             <td>
-                                <c-badge variant="{{ item.packet.status }}">
+                                <c-badge variant="{{ item.packet.status|badge_variant:'packet' }}"
+                                         aria_label="{{ item.packet.get_status_display }}">
                                     {{ item.packet.get_status_display }}
                                 </c-badge>
                             </td>

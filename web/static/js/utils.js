@@ -79,6 +79,12 @@ async function wcStream(url, data, onProgress, onDone) {
     }
 }
 
+/** Shows a c-toggle_button as pressed or not: its pressed look and, for screen readers, aria-pressed. */
+function setTogglePressed(button, pressed) {
+    button.classList.toggle('box-toggle--selected', pressed);
+    button.setAttribute('aria-pressed', String(pressed));
+}
+
 /* ── Alpine Mixins ───────────────────────────────────────────────── */
 
 /** Toast notification state: message, messageType, alertClass. */

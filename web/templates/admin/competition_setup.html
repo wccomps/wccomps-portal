@@ -159,12 +159,12 @@
                             </c-table_header>
                         </tr>
                     </c-slot>
-                    <template x-for="row in appRows" :key="row.app">
-                        <tr :class="row.rowClass">
-                            <td x-text="row.app"></td>
+                    <template x-for="app in apps" :key="app">
+                        <tr>
+                            <td x-text="app"></td>
                             <td>
-                                <c-button variant="danger" @click="removeApp" ::data-app="row.app">
-                                    Remove <span class="sr-only" x-text="row.app"></span>
+                                <c-button variant="danger" @click="removeApp" ::data-app="app">
+                                    Remove <span class="sr-only" x-text="app"></span>
                                 </c-button>
                             </td>
                         </tr>
@@ -270,7 +270,6 @@ document.addEventListener('alpine:init', () => {
 
         get noApps() { return this.apps.length === 0; },
         get hasApps() { return this.apps.length > 0; },
-        get appRows() { return this.apps.map((app, i) => ({ app, rowClass: i % 2 ? 'row2' : 'row1' })); },
         get addDisabled() { return this.loading || !this.newApp; },
 
         syncQuotient() {

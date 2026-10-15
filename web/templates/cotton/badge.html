@@ -1,9 +1,9 @@
 {# Status badge component - displays ticket/item status with appropriate styling #}
 {# Usage: <c-badge variant="success">Active</c-badge> #}
-{# Props: variant (open|claimed|resolved|cancelled|draft|distributing|completed|pending|sent|failed|success|warning|danger|info|neutral|default|secondary), aria_label (optional) #}
+{# Props: variant (info|warning|success|neutral|danger|default; a stored status maps to one with |badge_variant), aria_label (optional: otherwise the visible text is what's announced) #}
 {# variant="" leaves the badge--* class to the caller: a row rendered in the browser binds it with ::class #}
 <c-vars variant="default" aria_label />
 <span role="status"
-      aria-label="{{ aria_label|default:variant|title }}"
+      {% if aria_label %}aria-label="{{ aria_label }}"{% endif %}
       {{ attrs }}
-      class="badge {% if variant == 'open' or variant == 'info' %}badge--info{% elif variant == 'claimed' or variant == 'warning' or variant == 'draft' or variant == 'distributing' %}badge--warning{% elif variant == 'resolved' or variant == 'success' or variant == 'completed' or variant == 'sent' %}badge--success{% elif variant == 'cancelled' or variant == 'pending' or variant == 'neutral' or variant == 'secondary' %}badge--neutral{% elif variant == 'danger' or variant == 'failed' %}badge--danger{% elif variant %}badge--default{% endif %}">{{ slot }}</span>
+      class="badge {% if variant == 'info' %}badge--info{% elif variant == 'warning' %}badge--warning{% elif variant == 'success' %}badge--success{% elif variant == 'neutral' %}badge--neutral{% elif variant == 'danger' %}badge--danger{% elif variant %}badge--default{% endif %}">{{ slot }}</span>

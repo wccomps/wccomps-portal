@@ -4,7 +4,7 @@
 {% if page_obj %}
     <p class="paginator">
         Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} results
-        <span class="pagination">
+        <span>
             {% if page_obj.has_previous %}
                 <a href="?page=1{{ query_params }}">First</a>
                 <a href="?page={{ page_obj.previous_page_number }}{{ query_params }}">Previous</a>

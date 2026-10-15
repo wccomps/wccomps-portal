@@ -34,33 +34,33 @@
                     </tr>
                 </c-slot>
                 {% for item in teams %}
-                    <tr class="{% cycle 'row1' 'row2' %}">
-                        <th class="field-team">
+                    <tr>
+                        <th>
                             <a href="{% url 'school_info_edit' item.team.team_number %}">Team {{ item.team.team_number }}</a>
                             <div>{{ item.team.team_name }}</div>
                         </th>
-                        <td class="field-school_name">
+                        <td>
                             {% if item.school_info %}
                                 {{ item.school_info.school_name }}
                             {% else %}
                                 Not set
                             {% endif %}
                         </td>
-                        <td class="field-contact_email">
+                        <td>
                             {% if item.school_info %}
                                 {{ item.school_info.contact_email }}
                             {% else %}
                                 Not set
                             {% endif %}
                         </td>
-                        <td class="field-secondary_email">
+                        <td>
                             {% if item.school_info %}
                                 {{ item.school_info.secondary_email|default:"—" }}
                             {% else %}
                                 Not set
                             {% endif %}
                         </td>
-                        <td class="field-updated">
+                        <td>
                             {% if item.school_info %}
                                 {{ item.school_info.updated_at|timesince }} ago
                             {% else %}

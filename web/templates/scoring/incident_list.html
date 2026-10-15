@@ -35,7 +35,7 @@
                         </tr>
                     </c-slot>
                     {% for incident in incidents %}
-                        <tr class="{% cycle 'row1' 'row2' %}">
+                        <tr>
                             <td>
                                 <a href="{% url 'scoring:view_incident_report' incident.id %}">#{{ incident.id }}</a>
                             </td>
@@ -45,11 +45,11 @@
                             <td>{{ incident.attack_description|truncatewords:10 }}</td>
                             <td>
                                 {% if incident.is_approved %}
-                                    <c-badge variant="resolved">
+                                    <c-badge variant="success">
                                         Reviewed
                                     </c-badge>
                                 {% else %}
-                                    <c-badge variant="claimed">
+                                    <c-badge variant="warning">
                                         Pending
                                     </c-badge>
                                 {% endif %}

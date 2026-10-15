@@ -17,7 +17,7 @@
                               error="{{ form.attack_type.errors|join:', ' }}">
                     {{ form.attack_type }}
                 </c-form_field>
-                <fieldset class="source-ip-section">
+                <fieldset>
                     <legend class="font-semibold text-sm d-block mb-5">Source IP</legend>
                     <div class="d-flex gap-20 mb-10">
                         {% for radio in form.source_ip_type %}
@@ -67,9 +67,9 @@
                     {% if form.box_choices %}
                         <div class="d-flex flex-wrap gap-10">
                             {% for value, label in form.box_choices %}
-                                <button type="button"
-                                        class="button box-toggle"
-                                        data-box="{{ value }}">{{ label }}</button>
+                                <c-toggle_button data-box="{{ value }}">
+                                    {{ label }}
+                                </c-toggle_button>
                             {% endfor %}
                         </div>
                     {% endif %}
@@ -515,7 +515,7 @@
         function updateBoxButtons() {
             const selected = getSelectedBoxes();
             document.querySelectorAll('.box-toggle').forEach(btn => {
-                btn.classList.toggle('box-toggle--selected', selected.includes(btn.dataset.box));
+                setTogglePressed(btn, selected.includes(btn.dataset.box));
             });
         }
 

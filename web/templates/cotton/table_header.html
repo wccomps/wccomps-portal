@@ -4,7 +4,6 @@
 <c-vars sort_field current_sort query_params sortable="true" tooltip />
 <th scope="col"
     {{ attrs }}
-    {% if sortable == "true" %}class="sortable"{% endif %}
     {% if tooltip %}title="{{ tooltip }}"{% endif %}>
     <div class="text" {% if tooltip %}style="white-space:nowrap"{% endif %}>
         {% if sortable == "true" and sort_field %}

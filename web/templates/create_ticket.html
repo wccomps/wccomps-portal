@@ -3,18 +3,6 @@
 {% block title %}
     Create Ticket - Team {{ team.team_number }}
 {% endblock title %}
-{% block extrastyle %}
-    {{ block.super }}
-    <style>
-        .dynamic-field {
-            display: none;
-        }
-
-        .dynamic-field.show {
-            display: block;
-        }
-    </style>
-{% endblock extrastyle %}
 {% block content %}
     <div id="content-main">
         <c-page_header title="Create Support Ticket"
@@ -84,15 +72,14 @@
                                value="{{ form_data.title }}"
                                placeholder="Brief summary of the issue">
                     </c-form_field>
-                    <div class="dynamic-field" :class="showHostname" id="field-hostname">
+                    <div x-show="showHostname" x-cloak id="field-hostname">
                         <c-form_field label="Hostname" id="hostname">
                             {% if box_names %}
                                 <div class="d-flex flex-wrap gap-10">
                                     {% for box_name in box_names %}
-                                        <button type="button"
-                                                class="button box-toggle"
-                                                @click="selectHostname"
-                                                data-hostname="{{ box_name }}">{{ box_name }}</button>
+                                        <c-toggle_button @click="selectHostname" data-hostname="{{ box_name }}">
+                                            {{ box_name }}
+                                        </c-toggle_button>
                                     {% endfor %}
                                 </div>
                                 <input type="hidden"
@@ -114,7 +101,7 @@
                             {% endif %}
                         </c-form_field>
                     </div>
-                    <div class="dynamic-field" :class="showIpAddress" id="field-ip_address">
+                    <div x-show="showIpAddress" x-cloak id="field-ip_address">
                         <c-form_field label="IP Address"
                                       id="ip_address"
                                       help_text="{% if box_names %}Auto-filled from hostname selection{% else %}Enter the box's IP address{% endif %}">
@@ -130,9 +117,7 @@
                                    placeholder="{% if box_names %}Select a hostname above{% else %}e.g. 10.0.1.5{% endif %}">
                         </c-form_field>
                     </div>
-                    <div class="dynamic-field"
-                         :class="showServiceName"
-                         id="field-service_name">
+                    <div x-show="showServiceName" x-cloak id="field-service_name">
                         <c-form_field label="Service" id="service_name">
                             {% if service_choices %}
                                 <select name="service_name"
@@ -157,7 +142,7 @@
                             {% endif %}
                         </c-form_field>
                     </div>
-                    <div class="dynamic-field" :class="showDescription" id="field-description">
+                    <div x-show="showDescription" x-cloak id="field-description">
                         <c-form_field label="Description" id="description">
                             <textarea name="description"
                                       id="description"
@@ -196,10 +181,10 @@
                 visibleFields: [],
                 requiredFields: [],
 
-                get showHostname() { return this.visibleFields.includes('hostname') ? 'show' : ''; },
-                get showIpAddress() { return this.visibleFields.includes('ip_address') ? 'show' : ''; },
-                get showServiceName() { return this.visibleFields.includes('service_name') ? 'show' : ''; },
-                get showDescription() { return this.visibleFields.includes('description') ? 'show' : ''; },
+                get showHostname() { return this.visibleFields.includes('hostname'); },
+                get showIpAddress() { return this.visibleFields.includes('ip_address'); },
+                get showServiceName() { return this.visibleFields.includes('service_name'); },
+                get showDescription() { return this.visibleFields.includes('description'); },
                 get hostnameRequired() { return this.requiredFields.includes('hostname'); },
                 get ipRequired() { return this.requiredFields.includes('ip_address'); },
                 get serviceRequired() { return this.requiredFields.includes('service_name'); },
@@ -213,7 +198,7 @@
                     this.onHostnameChange();
                     // Update button styling
                     document.querySelectorAll('.box-toggle').forEach(btn => {
-                        btn.classList.toggle('box-toggle--selected', btn.dataset.hostname === this.selectedHostname);
+                        setTogglePressed(btn, btn.dataset.hostname === this.selectedHostname);
                     });
                 },
 
@@ -228,7 +213,7 @@
                     // Keep button styling in sync
                     this.$watch('selectedHostname', (value) => {
                         document.querySelectorAll('.box-toggle').forEach(btn => {
-                            btn.classList.toggle('box-toggle--selected', btn.dataset.hostname === value);
+                            setTogglePressed(btn, btn.dataset.hostname === value);
                         });
                     });
                 },

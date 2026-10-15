@@ -55,7 +55,7 @@
                     </tr>
                 </c-slot>
                 {% for row in team_rows %}
-                    <tr {% if not row.has_email %}class="row-below-avg"{% endif %}>
+                    <tr {% if not row.has_email %}class="row-danger"{% endif %}>
                         <td>Team {{ row.team.team_number }}</td>
                         <td>{{ row.school_name|default:"—" }}</td>
                         <td>

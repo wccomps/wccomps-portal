@@ -29,7 +29,7 @@
             </tr>
         </c-slot>
         <template x-for="(r, idx) in readinessResults" :key="idx">
-            <tr :class="r.rowClass">
+            <tr>
                 <td x-text="r.step"></td>
                 <td>
                     <c-badge variant=""

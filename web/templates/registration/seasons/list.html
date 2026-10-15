@@ -5,55 +5,66 @@
 {% endblock title %}
 {% block registration_content %}
     <div id="content-main">
-        <c-page_header title="Seasons">
-            <a href="{% url 'registration_season_create' %}" class="btn btn-primary">Create Season</a>
-        </c-page_header>
+        <c-page_header title="Seasons" />
         <c-module>
-            <table class="table">
-                <thead>
+            <c-slot name="toolbar">
+                <c-link href="{% url 'registration_season_create' %}" variant="add">Create Season</c-link>
+            </c-slot>
+            <c-table id="seasons_list" class="w-full" aria_label="Seasons list">
+                <c-slot name="headers">
                     <tr>
-                        <th>Name</th>
-                        <th>Year</th>
-                        <th>Status</th>
-                        <th>Events</th>
-                        <th>Actions</th>
+                        <c-table_header sortable="false">
+                            Name
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Year
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Status
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Events
+                        </c-table_header>
+                        <c-table_header sortable="false">
+                            Actions
+                        </c-table_header>
                     </tr>
-                </thead>
-                <tbody>
-                    {% for season in seasons %}
-                        <tr>
-                            <td>{{ season.name }}</td>
-                            <td>{{ season.year }}</td>
-                            <td>
-                                {% if season.is_active %}
-                                    <c-badge variant="success">
-                                        Active
-                                    </c-badge>
-                                {% else %}
-                                    <c-badge variant="neutral">
-                                        Inactive
-                                    </c-badge>
-                                {% endif %}
-                            </td>
-                            <td>{{ season.events.count }}</td>
-                            <td>
-                                <a href="{% url 'registration_event_list' season_id=season.id %}"
-                                   class="btn btn-sm btn-secondary">Events</a>
-                                <a href="{% url 'registration_season_edit' season_id=season.id %}"
-                                   class="btn btn-sm btn-secondary">Edit</a>
-                                <a href="{% url 'registration_season_delete' season_id=season.id %}"
-                                   class="btn btn-sm btn-danger">Delete</a>
-                            </td>
-                        </tr>
-                    {% empty %}
-                        <tr>
-                            <td colspan="5" class="text-center">
-                                No seasons found. <a href="{% url 'registration_season_create' %}">Create one</a>.
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                </c-slot>
+                {% for season in seasons %}
+                    <tr>
+                        <td>{{ season.name }}</td>
+                        <td>{{ season.year }}</td>
+                        <td>
+                            {% if season.is_active %}
+                                <c-badge variant="success">
+                                    Active
+                                </c-badge>
+                            {% else %}
+                                <c-badge variant="neutral">
+                                    Inactive
+                                </c-badge>
+                            {% endif %}
+                        </td>
+                        <td>{{ season.events.count }}</td>
+                        <td class="field-actions">
+                            <c-link href="{% url 'registration_event_list' season_id=season.id %}">Events</c-link>
+                            <c-link href="{% url 'registration_season_edit' season_id=season.id %}"
+                                    variant="change">Edit</c-link>
+                            <c-link href="{% url 'registration_season_delete' season_id=season.id %}"
+                                    variant="danger">Delete</c-link>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5">
+                            <c-empty_state title="No seasons yet">
+                                <c-link href="{% url 'registration_season_create' %}"
+                                        variant="add">Create Season</c-link>
+                            </c-empty_state>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </c-table>
         </c-module>
     </div>
 {% endblock registration_content %}

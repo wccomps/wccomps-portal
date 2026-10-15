@@ -1,0 +1,10 @@
+{# Toggle button: stays pressed while its choice is picked. The page's script calls setTogglePressed (static/js/utils.js) as the choice changes. #}
+{# Usage: <c-toggle_button data-box="web01">web01</c-toggle_button> #}
+{# Props: pressed (bool, the initial state), class (additional classes) #}
+<c-vars pressed="false" class />
+<button type="button"
+        {{ attrs }}
+        aria-pressed="{% if pressed == 'true' %}true{% else %}false{% endif %}"
+        class="button box-toggle {% if pressed == 'true' %}box-toggle--selected {% endif %}{{ class }}">
+    {{ slot }}
+</button>

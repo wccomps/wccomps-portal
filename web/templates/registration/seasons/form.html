@@ -33,7 +33,7 @@
                     </c-form_field>
                 </c-fieldset>
                 <c-button_row class="mt-20 justify-end">
-                    <a href="{% url 'registration_season_list' %}" class="btn btn-secondary">Cancel</a>
+                    <c-link href="{% url 'registration_season_list' %}" variant="cancel">Cancel</c-link>
                     <c-button type="submit" variant="primary" ::disabled="submitting">
                         Save
                     </c-button>

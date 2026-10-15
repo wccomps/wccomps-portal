@@ -1,4 +1,6 @@
+import hashlib
 import logging
+from collections.abc import Iterable
 from typing import cast
 
 from django.contrib import messages
@@ -15,6 +17,12 @@ from ticketing.forms import TicketCommentForm
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
 logger = logging.getLogger(__name__)
+
+
+def list_version(rows: Iterable[TicketComment | TicketHistory]) -> str:
+    """A short marker of the rows a polled list shows. The page and each poll carry it, and a poll whose marker
+    still matches answers 204, so htmx swaps nothing and the aria-live region stays quiet."""
+    return hashlib.sha256(",".join(str(row.pk) for row in rows).encode()).hexdigest()[:16]
 
 
 def _ticketing_staff_usernames() -> list[str]:
@@ -93,6 +101,7 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
         "ticket": ticket,
         "category_name": cat_info.get("display_name", "Unknown"),
         "comments": comments,
+        "comments_version": list_version(comments),
         "attachments": attachments,
         "status_display": ticket.status.upper().replace("_", " "),
     }
@@ -102,6 +111,7 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
         context["variable_points"] = cat_info.get("variable_points", False)
         context["categories"] = get_all_categories()
         context["history"] = history
+        context["history_version"] = list_version(history)
         context["playbook_steps"] = cat_info.get("playbook_steps", [])
         if is_ticketing_support or is_ticketing_admin:
             context["staff_usernames"] = _ticketing_staff_usernames()
@@ -187,12 +197,13 @@ def ticket_detail_dynamic(request: HttpRequest, ticket_number: str) -> HttpRespo
     # History holds staff notes, points and usernames; the team's own poll must not carry it
     history = TicketHistory.objects.filter(ticket=ticket).order_by("-timestamp")[:20] if _is_ops(user) else []
 
+    versions = {"comments_version": list_version(comments), "history_version": list_version(history)}
+    asked = {name: request.GET[name] for name in versions if name in request.GET}
+    if asked and all(versions[name] == value for name, value in asked.items()):
+        return HttpResponse(status=204)
+
     return render(
         request,
         "ops_ticket_detail_dynamic.html",
-        {
-            "ticket": ticket,
-            "comments": comments,
-            "history": history,
-        },
+        {"ticket": ticket, "comments": comments, "history": history, **versions},
     )

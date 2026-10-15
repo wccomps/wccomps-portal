@@ -86,18 +86,17 @@
                     </tr>
                 </c-slot>
                 {% for row in panel.steps %}
-                    <tr class="{% cycle 'row1' 'row2' %}"
-                        {% if row.is_current %}aria-current="step"{% endif %}>
-                        <td class="field-step">
+                    <tr {% if row.is_current %}aria-current="step"{% endif %}>
+                        <td>
                             {{ forloop.counter }}. {{ row.heading }}
                             {% if row.detail %}<p class="help">{{ row.detail }}</p>{% endif %}
                         </td>
-                        <td class="field-status">
+                        <td>
                             <c-badge variant="{{ row.badge }}" aria_label="{{ row.label }}">
                                 {{ row.label }}
                             </c-badge>
                         </td>
-                        <td class="field-where">
+                        <td>
                             {% if row.elsewhere %}
                                 <a href="{{ row.url }}">{{ row.page_title }}</a>
                             {% else %}

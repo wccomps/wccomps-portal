@@ -11,11 +11,11 @@
         <c-module>
             <c-slot name="toolbar">
                 {% if incident.is_approved %}
-                    <c-badge variant="resolved">
+                    <c-badge variant="success">
                         Reviewed
                     </c-badge>
                 {% else %}
-                    <c-badge variant="claimed">
+                    <c-badge variant="warning">
                         Pending Review
                     </c-badge>
                 {% endif %}
@@ -90,7 +90,7 @@
                                          height="150">
                                 </a>
                             {% else %}
-                                <div class="screenshot-lost">
+                                <div>
                                     <span class="text-muted">{{ screenshot.filename|cut:"scoring/incidents/" }}</span>
                                     <small class="text-danger d-block">(file lost)</small>
                                 </div>

@@ -75,7 +75,7 @@
                 color: #27ae60;
             }
 
-            .row-below-avg td {
+            .row-danger td {
                 background: #fff5f5;
             }
 
@@ -310,9 +310,7 @@
                 <tr class="row-total">
                     <td>Grand Total</td>
                     <td class="text-right">{{ score.total_score|floatformat:0 }}</td>
-                    <td class="text-right">
-                        {% if score.rank %}#{{ score.rank }} of {{ stats.team_count }}{% endif %}
-                    </td>
+                    <td class="text-right">{% if score.rank %}#{{ score.rank }} of {{ stats.team_count }}{% endif %}</td>
                     <td class="text-right">
                         {% if stats.total_delta > 0 %}
                             <span class="score-positive">+{{ stats.total_delta }}</span>
@@ -349,7 +347,7 @@
                 </thead>
                 <tbody>
                     {% for svc in stats.service_stats %}
-                        <tr {% if svc.below_avg %}class="row-below-avg"{% endif %}>
+                        <tr {% if svc.below_avg %}class="row-danger"{% endif %}>
                             <td>{{ svc.name }}</td>
                             <td class="text-right">{{ svc.points|floatformat:0 }}</td>
                             <td class="text-right">{{ svc.sla_violations }}</td>
@@ -426,7 +424,7 @@
                 </thead>
                 <tbody>
                     {% for inj in stats.inject_stats %}
-                        <tr {% if inj.below_avg %}class="row-below-avg"{% endif %}>
+                        <tr {% if inj.below_avg %}class="row-danger"{% endif %}>
                             <td>{{ inj.name }}</td>
                             <td class="text-right">{{ inj.points|floatformat:0 }}</td>
                             <td class="text-right">

@@ -148,10 +148,7 @@
                     </tr>
                 </c-slot>
                 {% for assignment in assignments %}
-                    <tr {% if assignment.has_criteria %}x-data="assignmentRow"
-                        data-score="{{ assignment.score|default:'0' }}"
-                        data-max-score="{{ assignment.orange_check.max_score }}"
-                        data-save-url="{% url 'orange_team:assignment_save' assignment.pk %}"{% endif %}>
+                    <tr {% if assignment.has_criteria %}x-data="assignmentRow" data-score="{{ assignment.score|default:'0' }}" data-max-score="{{ assignment.orange_check.max_score }}" data-save-url="{% url 'orange_team:assignment_save' assignment.pk %}"{% endif %}>
                         <td>Team {{ assignment.team.team_number }}</td>
                         <td>{{ assignment.orange_check.title }}</td>
                         <td>
@@ -164,7 +161,7 @@
                         </td>
                         <td>
                             {% if assignment.status == "submitted" %}
-                                <c-badge variant="claimed">
+                                <c-badge variant="warning">
                                     Submitted
                                 </c-badge>
                             {% elif assignment.orange_check.window_state == "open" %}
@@ -190,7 +187,7 @@
                                 <span x-text="scoreDisplay" aria-live="polite">{{ assignment.score|default:"0" }} / {{ assignment.orange_check.max_score }}</span>
                                 <details>
                                     <summary>Criteria</summary>
-                                    <ul class="plain-list">
+                                    <ul>
                                         {% for result in assignment.results.all %}
                                             <li>
                                                 <label>
@@ -217,7 +214,6 @@
                                            value="{{ assignment.score|default:'' }}"
                                            min="0"
                                            max="{{ assignment.orange_check.max_score }}"
-                                           class="input-sm"
                                            aria-label="Score for Team {{ assignment.team.team_number }}"
                                            {% if assignment.status == "submitted" %}disabled{% endif %}>
                                     <span class="text-muted">/ {{ assignment.orange_check.max_score }}</span>
@@ -251,8 +247,7 @@
                                                name="minutes"
                                                value="15"
                                                min="1"
-                                               max="{{ max_follow_up_minutes }}"
-                                               class="input-sm">
+                                               max="{{ max_follow_up_minutes }}">
                                     </label>
                                     <label>
                                         Note:

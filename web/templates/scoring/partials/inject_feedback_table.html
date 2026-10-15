@@ -77,7 +77,7 @@
                         </td>
                         <td>
                             {% if score.feedback_approved %}
-                                <c-badge variant="resolved">
+                                <c-badge variant="success">
                                     Approved
                                 </c-badge>
                                 {% if score.feedback_approved_by %}
@@ -85,7 +85,7 @@
                                     <small class="text-muted">by {{ score.feedback_approved_by.username }}</small>
                                 {% endif %}
                             {% else %}
-                                <c-badge variant="claimed">
+                                <c-badge variant="warning">
                                     Pending
                                 </c-badge>
                             {% endif %}
