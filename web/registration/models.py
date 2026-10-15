@@ -2,7 +2,6 @@ import secrets
 from datetime import timedelta
 
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 
@@ -22,23 +21,15 @@ def normalize_school_name(name: str) -> str:
     return collapse_whitespace(name).casefold()
 
 
-SCHOOL_NAME_MAX_LENGTH = 255  # School.name and School.name_key
-
-
-def validate_school_name(name: str) -> None:
-    """Refuse a name whose key is longer than School.name_key: case folding lengthens some letters (ß is ss)."""
-    if len(normalize_school_name(name)) > SCHOOL_NAME_MAX_LENGTH:
-        raise ValidationError(
-            f"The school name is too long: at most {SCHOOL_NAME_MAX_LENGTH} characters, counting a letter such as "
-            "ß as the two it matches (ss)."
-        )
+SCHOOL_NAME_MAX_LENGTH = 255  # School.name and the names it is made from
 
 
 class School(models.Model):
     """A school across events, matched by name_key."""
 
     name = models.CharField(max_length=SCHOOL_NAME_MAX_LENGTH)
-    name_key = models.CharField(max_length=SCHOOL_NAME_MAX_LENGTH, unique=True)
+    # Unlimited: case folding lengthens some names (ß matches ss), so a key can be longer than its name
+    name_key = models.TextField(unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -79,7 +70,7 @@ class TeamRegistration(models.Model):
         ("at_large", "At-Large"),
     ]
 
-    school_name = models.CharField(max_length=SCHOOL_NAME_MAX_LENGTH, validators=[validate_school_name])
+    school_name = models.CharField(max_length=SCHOOL_NAME_MAX_LENGTH)
     region = models.CharField(max_length=20, choices=REGION_CHOICES, default="wrccdc")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
 

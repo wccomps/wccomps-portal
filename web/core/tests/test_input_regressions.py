@@ -24,7 +24,7 @@ from packets.forms import PacketResendForm
 from packets.models import SENT_STATUSES, Packet
 from packets.views import _parse_team_extras_csv
 from registration.forms import EventForm, RegistrationForm
-from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, Season, TeamRegistration, normalize_school_name
+from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, School, Season, TeamRegistration, normalize_school_name
 from registration.services import SchoolListRow, import_school_list
 from scoring.models import ScoringTemplate
 from scoring.screenshots import detect_inline_type, read_screenshot
@@ -85,18 +85,33 @@ def test_an_email_a_form_stores_fits_its_column(email: str) -> None:
             )
 
 
-@given(name=request_text(SCHOOL_NAME_MAX_LENGTH))
-@example(name="ß" * 200)
-def test_a_school_name_a_form_accepts_has_a_key_that_fits(name: str) -> None:
-    """School names are matched on their case-folded key, which can be longer than the name. The registration
-    form checks its name with the model field's validators (ModelForm's full_clean)."""
+@pytest.mark.django_db
+@given(name=request_text(255))
+@example(name="ß" * 255)
+def test_a_school_name_a_form_accepts_is_a_school_that_saves(name: str) -> None:
+    """Schools are matched on the case-folded name, which can be longer than the name (ß is ss): the school
+    info form and the registration (its model field's validation) accept any 255-character name, and the
+    school saves. School.for_name is also where an older registration's name becomes a school on approval."""
     registration_field = TeamRegistration._meta.get_field("school_name")
-    for clean in (SchoolInfoEditForm.base_fields["school_name"].clean, lambda n: registration_field.clean(n, None)):
+
+    def registration_clean(value: str) -> object:
+        cleaned = RegistrationForm.base_fields["school_name"].clean(value)
+        registration_field.run_validators(cleaned)
+        return cleaned
+
+    for clean in (SchoolInfoEditForm.base_fields["school_name"].clean, registration_clean):
         try:
             cleaned = clean(name)
         except ValidationError:
             continue
-        assert len(normalize_school_name(cleaned)) <= SCHOOL_NAME_MAX_LENGTH
+        with rolled_back():
+            assert School.for_name(cleaned).name_key == normalize_school_name(cleaned)
+
+
+@pytest.mark.django_db
+def test_a_school_name_of_255_letters_that_fold_longer_is_accepted() -> None:
+    form = SchoolInfoEditForm({"school_name": "ß" * 255, "contact_email": "coach@example.edu"})
+    assert form.is_valid(), form.errors
 
 
 @pytest.fixture
