@@ -396,7 +396,8 @@ def valid_values(field: forms.Field) -> st.SearchStrategy[Any]:
         case forms.IntegerField():
             return st.integers(field.min_value, field.max_value).map(str)
         case forms.DateTimeField():
-            return st.datetimes(min_value=datetime(1900, 1, 1))  # noqa: DTZ001 - a datetime-local input is naive.map(lambda d: d.strftime("%Y-%m-%dT%H:%M"))
+            earliest = datetime(1900, 1, 1)  # noqa: DTZ001 - a datetime-local input is naive
+            return st.datetimes(min_value=earliest).map(lambda d: d.strftime("%Y-%m-%dT%H:%M"))
         case forms.DateField():
             return st.dates().map(date.isoformat)
         case forms.GenericIPAddressField():
