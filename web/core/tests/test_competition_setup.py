@@ -69,7 +69,7 @@ def test_the_page_renders_each_moved_form(admin_client):
         '@submit.prevent="setMaxMembers"',
         'id="max_members"',
         '@submit.prevent="addApp"',
-        'aria-label="Authentik application slug"',
+        'id="new_app"',
         '@click="syncQuotient"',
         '@click="runReadinessChecks"',
     ):
@@ -113,7 +113,10 @@ def test_the_current_settings_show_in_detail_grids_and_the_small_forms_like_the_
         r'class="filter-field"[^>]*><label for="max_members" class="filter-field-label">People per team', page
     )
     assert re.search(r'class="filter-field"[^>]*><label for="new_app" class="filter-field-label">Add an app', page)
-    assert re.search(r"<dt>Competition apps</dt>", page)
+    # The apps are a table with a Remove button per row, like a team's linked members
+    assert re.search(r'<table id="apps_list"\s+aria-label="Competition apps"', page)
+    # The visible label names the add field; no aria-label overrides it
+    assert "aria-label=\"Authentik application slug\"" not in page
 
 
 def test_the_page_says_when_quotient_was_never_synced(admin_client):

@@ -147,26 +147,34 @@
                     Update
                 </c-button>
             </form>
-            <c-detail_grid class="mt-15">
-                <c-detail_row label="Competition apps">
-                    <div class="d-flex gap-10 flex-wrap">
-                        <template x-for="(app, index) in apps" :key="index">
-                            <c-badge variant="default" class="d-flex items-center gap-10">
-                                <span x-text="app"></span>
-                                <button type="button"
-                                        @click="removeApp"
-                                        :data-app="app"
-                                        class="text-danger btn-reset text-sm">
-                                    Remove <span class="sr-only" x-text="app"></span>
-                                </button>
-                            </c-badge>
-                        </template>
-                        <template x-if="noApps">
-                            <span>No apps configured</span>
-                        </template>
-                    </div>
-                </c-detail_row>
-            </c-detail_grid>
+            <template x-if="hasApps">
+                <c-table id="apps_list" class="w-full mt-15" aria_label="Competition apps">
+                    <c-slot name="headers">
+                        <tr>
+                            <c-table_header sortable="false">
+                                Competition app
+                            </c-table_header>
+                            <c-table_header sortable="false">
+                                Action
+                            </c-table_header>
+                        </tr>
+                    </c-slot>
+                    <template x-for="row in appRows" :key="row.app">
+                        <tr :class="row.rowClass">
+                            <td x-text="row.app"></td>
+                            <td>
+                                <c-button variant="danger" @click="removeApp" ::data-app="row.app">
+                                    Remove <span class="sr-only" x-text="row.app"></span>
+                                </c-button>
+                            </td>
+                        </tr>
+                    </template>
+                </c-table>
+            </template>
+            <template x-if="noApps">
+                <c-empty_state title="No competition apps"
+                               description="Add the apps Start opens to the blue teams." />
+            </template>
             <form @submit.prevent="addApp"
                   class="d-flex gap-10 items-end flex-wrap mt-10">
                 <c-filter_field label="Add an app" id="new_app">
@@ -177,7 +185,6 @@
                            @input="setField"
                            data-field="newApp"
                            placeholder="App short name (slug)"
-                           aria-label="Authentik application slug"
                            class="vTextField">
                     <datalist id="authentik-apps">
                         <template x-for="app in availableApps" :key="app">
@@ -262,6 +269,8 @@ document.addEventListener('alpine:init', () => {
         },
 
         get noApps() { return this.apps.length === 0; },
+        get hasApps() { return this.apps.length > 0; },
+        get appRows() { return this.apps.map((app, i) => ({ app, rowClass: i % 2 ? 'row2' : 'row1' })); },
         get addDisabled() { return this.loading || !this.newApp; },
 
         syncQuotient() {

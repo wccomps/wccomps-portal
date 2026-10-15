@@ -36,12 +36,15 @@ def test_stale_page_edit_keeps_apps_added_elsewhere(live_server, pw_browser):
             config.save()
 
             # Add from the stale page
-            page.get_by_label("Authentik application slug").fill("quotient2")
+            page.get_by_label("Add an app").fill("quotient2")
             with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):
                 page.get_by_role("button", name="Add").click()
 
             config.refresh_from_db()
             assert config.controlled_applications == ["scoring", "netbird", "containerssh", "quotient2"]
+            rows = page.locator("#apps_list tbody tr")
+            assert rows.first.locator("td").first.inner_text() == "scoring"
+            assert [rows.nth(i).get_attribute("class") for i in range(2)] == ["row1", "row2"]
 
             # Remove from the (still stale) page
             with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):
@@ -71,7 +74,7 @@ def test_a_slug_missing_from_authentiks_app_list_can_be_typed_in(live_server, pw
     try:
         with patch("core.admin_views.competition.AuthentikManager", return_value=manager):
             page.goto(f"{live_server.url}/ops/admin/competition/setup/")
-            page.get_by_label("Authentik application slug").fill("competitions")
+            page.get_by_label("Add an app").fill("competitions")
             with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):
                 page.get_by_role("button", name="Add").click()
 
