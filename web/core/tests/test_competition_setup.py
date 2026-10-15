@@ -1,5 +1,4 @@
-"""The Competition setup page: the schedule, start message, team access, scoring engine and readiness check, moved
-off the competition page with their actions unchanged."""
+"""The Competition setup page: the schedule, start message, team access, scoring engine and readiness check."""
 
 import re
 from datetime import UTC, datetime
@@ -53,7 +52,7 @@ def test_the_page_has_each_moved_section_in_order_and_links_back(admin_client):
 
     headings = re.findall(r"<h2>([^<]+)</h2>", page)
     assert headings == ["Schedule", "Start message", "Team access", "Scoring engine (Quotient)", "Readiness check"]
-    # The breadcrumb leads back; no second link says the same
+    # The breadcrumb is the only way back
     assert re.search(r'class="breadcrumbs"><a href="' + reverse("admin_competition") + '">Competition</a>', page)
     assert "Back to Competition" not in page
 
@@ -75,7 +74,7 @@ def test_the_page_renders_each_moved_form(admin_client):
         '@click="runReadinessChecks"',
     ):
         assert form in page, form
-    # The forms post to the competition page's action endpoint, as before
+    # The forms post to the competition page's action endpoint
     assert f"'{reverse('admin_competition_action')}'" in page
 
 

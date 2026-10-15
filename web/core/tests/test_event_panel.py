@@ -435,3 +435,19 @@ def test_the_guide_links_the_seasons_page_and_says_where_the_checks_show(client)
     assert f'href="{reverse("registration_season_list")}"' in page
     assert "If you already emailed them, you can close out." in page
     assert "this step and the next" not in page
+
+
+@pytest.mark.parametrize(("end_in_hours", "shown"), [(None, True), (2, True), (-1, False)])
+def test_the_scheduled_start_shows_only_while_the_timer_will_still_fire_it(client, end_in_hours, shown):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    _arrange("start")
+    now = timezone.now()
+    end = now + timedelta(hours=end_in_hours) if end_in_hours is not None else None
+    CompetitionConfig.objects.update_or_create(
+        pk=1, defaults={"competition_start_time": now - timedelta(hours=2), "competition_end_time": end}
+    )
+
+    assert ("The schedule starts it at" in _page(client)) == shown

@@ -1,7 +1,7 @@
 {% extends "admin/base.html" %}
 {% load cotton static %}
 {% block title %}
-    Competition Setup - WCComps Portal
+    Competition setup - WCComps Portal
 {% endblock title %}
 {% block admin_content %}
     <div x-data="competitionSetup">
@@ -20,7 +20,8 @@
             </c-slot>
             <p class="help">
                 Optional: the bot starts and stops the competition at these times. You can also start or stop by
-                hand on the Competition page; that clears the scheduled time.
+                hand on the Competition page: starting by hand clears the scheduled start, and stopping by hand
+                clears the scheduled stop.
             </p>
             <p>
                 Starts:
