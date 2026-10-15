@@ -1,4 +1,5 @@
 {# Registration review table - swappable content for htmx #}
+{% load status_variants %}
 <div {{ attrs }} id="registration-review-content">
     <c-table id="result_list" aria_label="Team registration requests">
         <c-slot name="headers">
@@ -29,17 +30,7 @@
                 <td>{{ registration.contact_email }}</td>
                 <td>{{ registration.phone }}</td>
                 <td>
-                    <c-badge variant="
-                {% if registration.status == 'approved' %}
-                    resolved
-                {% elif registration.status == 'rejected' %}
-                    danger
-                {% elif registration.status == 'credentials_sent' %}
-                    info
-                {% else %}
-                    claimed
-                {% endif %}
-                ">
+                    <c-badge variant="{{ registration.status|badge_variant:'registration' }}">
                         {{ registration.get_status_display }}
                     </c-badge>
                 </td>

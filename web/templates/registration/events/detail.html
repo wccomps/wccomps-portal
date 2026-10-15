@@ -1,5 +1,5 @@
 {% extends "registration/admin_base.html" %}
-{% load cotton %}
+{% load cotton status_variants %}
 {% block title %}
     {{ event.name }} - WCComps Portal
 {% endblock title %}
@@ -88,27 +88,9 @@
                     <tr>
                         <td>{{ item.registration.school_name }}</td>
                         <td>
-                            {% if item.registration.status == "pending" %}
-                                <c-badge variant="warning">
-                                    Pending
-                                </c-badge>
-                            {% elif item.registration.status == "approved" %}
-                                <c-badge variant="info">
-                                    Approved
-                                </c-badge>
-                            {% elif item.registration.status == "paid" %}
-                                <c-badge variant="success">
-                                    Paid
-                                </c-badge>
-                            {% elif item.registration.status == "credentials_sent" %}
-                                <c-badge variant="neutral">
-                                    Credentials Sent
-                                </c-badge>
-                            {% elif item.registration.status == "rejected" %}
-                                <c-badge variant="danger">
-                                    Rejected
-                                </c-badge>
-                            {% endif %}
+                            <c-badge variant="{{ item.registration.status|badge_variant:'registration' }}">
+                                {{ item.registration.get_status_display }}
+                            </c-badge>
                         </td>
                         <td>
                             {% for contact in item.registration.contacts.all %}
