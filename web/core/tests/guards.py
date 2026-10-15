@@ -18,6 +18,8 @@ import pytest
 REPO_DIR = Path(__file__).resolve().parents[3]
 WEB_DIR = REPO_DIR / "web"
 TEMPLATES_DIR = WEB_DIR / "templates"
+# Template and HTML comments, which say <html> without being one
+COMMENTS_RE = re.compile(r"{#.*?#}|{%\s*comment\s*%}.*?{%\s*endcomment\s*%}|<!--.*?-->", re.DOTALL)
 
 
 @cache
@@ -52,7 +54,8 @@ def template_name(path: Path) -> str:
 def is_standalone_document(path: Path) -> bool:
     """A template with an <html> of its own (emails, the print scorecard, the 500 page, the public registration
     form): it carries its own styles and never loads the portal's base template or app.css."""
-    return bool(re.search(r"<html\b", path.read_text(encoding="utf-8"), re.IGNORECASE))
+    content = COMMENTS_RE.sub("", path.read_text(encoding="utf-8"))
+    return bool(re.search(r"<html\b", content, re.IGNORECASE))
 
 
 def fail_with(
