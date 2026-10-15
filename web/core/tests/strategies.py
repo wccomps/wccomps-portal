@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Any
 
 from django import forms
+from django.core.exceptions import SuspiciousFileOperation
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection, models, transaction
 from django.http import QueryDict
@@ -285,10 +286,19 @@ def content_types() -> st.SearchStrategy[str]:
     )
 
 
+def uploaded_file(content: bytes, name: str, content_type: str) -> SimpleUploadedFile:
+    try:
+        return SimpleUploadedFile(name, content, content_type=content_type)
+    except SuspiciousFileOperation:
+        # A name with no base name ("", "/", ".."): impossible in a request, since Django's multipart parser keeps
+        # only the base name and skips a file without one, and UploadedFile itself refuses it
+        return SimpleUploadedFile("unnamed", content, content_type=content_type)
+
+
 def uploaded_files(contents: st.SearchStrategy[bytes] | None = None) -> st.SearchStrategy[SimpleUploadedFile]:
     """An upload as a client can send it: any bytes, any name and any claimed content type."""
     return st.builds(
-        lambda content, name, ctype: SimpleUploadedFile(name or "unnamed", content, content_type=ctype),
+        uploaded_file,
         contents if contents is not None else file_bytes(),
         file_names(),
         content_types(),

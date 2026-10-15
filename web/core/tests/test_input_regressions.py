@@ -41,6 +41,7 @@ from core.tests.strategies import (
     long_email,
     request_text,
     rolled_back,
+    uploaded_file,
 )
 from core.utils import parse_datetime_to_utc
 from team.forms import parse_csv_file
@@ -163,7 +164,7 @@ def test_an_uploaded_packet_is_stored_and_downloads(name: str, content_type: str
     """The client's file name and content type are stored within their columns and sent back as safe headers."""
     client = Client()
     client.force_login(gold_team_user)
-    upload = SimpleUploadedFile(name or "unnamed", b"%PDF-1.7 packet", content_type=content_type)
+    upload = uploaded_file(b"%PDF-1.7 packet", name, content_type)
     with rolled_back():
         response = client.post(reverse("upload_packet"), {"title": "Packet", "packet_file": upload})
         assert response.status_code < 500
@@ -188,7 +189,7 @@ def test_a_ticket_attachment_is_typed_from_its_bytes(
     """A client's claimed type is neither stored (it can be longer than the column) nor trusted to show inline."""
     client = Client()
     client.force_login(ticketing_support_user)
-    upload = SimpleUploadedFile(name or "unnamed", content, content_type=content_type)
+    upload = uploaded_file(content, name, content_type)
     with rolled_back():
         team = Team.objects.create(team_number=1, team_name="Team 01")
         ticket = Ticket.objects.create(team=team, category=TicketCategory.objects.first(), ticket_number="T001-001")
@@ -323,7 +324,7 @@ def test_an_upload_name_is_stored_as_text_without_control_characters(
     """A file name arrives from the client (RFC 2231 can encode a NUL); it is stored, so it must be storable."""
     client = Client()
     client.force_login(ticketing_support_user)
-    upload = SimpleUploadedFile(name or "unnamed", b"\x89PNG\r\n\x1a\n", content_type="image/png")
+    upload = uploaded_file(b"\x89PNG\r\n\x1a\n", name, "image/png")
     with rolled_back():
         team = Team.objects.create(team_number=1, team_name="Team 01")
         ticket = Ticket.objects.create(team=team, category=TicketCategory.objects.first(), ticket_number="T001-001")
