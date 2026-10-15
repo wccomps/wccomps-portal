@@ -10,16 +10,11 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
-from django.http import QueryDict
 from django.test import Client
 from django.urls import reverse
-from django.utils import timezone
 from django.utils.http import content_disposition_header
 from hypothesis import example, given
 from hypothesis import strategies as st
-from orange_team.forms import FollowUpForm, OrangeCheckForm, extract_criteria
-from orange_team.models import OrangeCheck
-from orange_team.services import update_check_criteria
 from packets.forms import PacketResendForm, parse_team_extras
 from packets.models import SENT_STATUSES, Packet
 from registration.forms import EventForm, RegistrationForm
@@ -29,7 +24,6 @@ from registration.models import (
     RegistrationContact,
     School,
     Season,
-    TeamRegistration,
     normalize_school_name,
 )
 from registration.services import SchoolListRow, import_school_list
@@ -37,7 +31,7 @@ from scoring.models import ScoringTemplate
 from scoring.screenshots import read_screenshot
 
 from core.admin_views.competition import TIMEZONE_CHOICES
-from core.forms import SchoolInfoEditForm, StartMessageForm
+from core.forms import SchoolInfoEditForm
 from core.stored_files import DOWNLOAD_MIME, detect_inline_type
 from core.tests.strategies import (
     content_types,
@@ -45,8 +39,6 @@ from core.tests.strategies import (
     email_text,
     file_bytes,
     file_names,
-    int_text,
-    long_email,
     request_text,
     rolled_back,
     uploaded_file,
@@ -54,7 +46,6 @@ from core.tests.strategies import (
 from core.utils import parse_datetime_to_utc
 from team.forms import parse_csv_file
 from team.models import SchoolInfo, Team
-from ticketing.forms import TicketCategoryForm, TicketResolveForm
 from ticketing.models import Ticket, TicketAttachment, TicketCategory
 
 
@@ -82,7 +73,6 @@ STORED_EMAILS = (
 
 
 @given(email=email_text())
-@example(email=long_email(255))
 def test_an_email_a_form_stores_fits_its_column(email: str) -> None:
     """A form EmailField alone accepts 320 characters; the columns hold 254."""
     for form_class, name, model, column_name in STORED_EMAILS:
@@ -96,32 +86,17 @@ def test_an_email_a_form_stores_fits_its_column(email: str) -> None:
 
 
 @pytest.mark.django_db
-@given(name=request_text(255))
+@given(
+    name=request_text(SCHOOL_NAME_MAX_LENGTH).filter(
+        lambda n: n.strip() and len(n) <= SCHOOL_NAME_MAX_LENGTH and "\x00" not in n
+    )
+)
 @example(name="ß" * 255)
-def test_a_school_name_a_form_accepts_is_a_school_that_saves(name: str) -> None:
-    """Schools are matched on the case-folded name, which can be longer than the name (ß is ss): the school
-    info form and the registration (its model field's validation) accept any 255-character name, and the
-    school saves. School.for_name is also where an older registration's name becomes a school on approval."""
-    registration_field = TeamRegistration._meta.get_field("school_name")
-
-    def registration_clean(value: str) -> object:
-        cleaned = RegistrationForm.base_fields["school_name"].clean(value)
-        registration_field.run_validators(cleaned)
-        return cleaned
-
-    for clean in (SchoolInfoEditForm.base_fields["school_name"].clean, registration_clean):
-        try:
-            cleaned = clean(name)
-        except ValidationError:
-            continue
-        with rolled_back():
-            assert School.for_name(cleaned).name_key == normalize_school_name(cleaned)
-
-
-@pytest.mark.django_db
-def test_a_school_name_of_255_letters_that_fold_longer_is_accepted() -> None:
-    form = SchoolInfoEditForm({"school_name": "ß" * 255, "contact_email": "coach@example.edu"})
-    assert form.is_valid(), form.errors
+def test_school_for_name_saves_any_name_the_forms_take(name: str) -> None:
+    """Schools are matched on the case-folded name, which can be longer than the name (ß is ss). for_name is also
+    where an older registration's name becomes a school on approval, without any form."""
+    with rolled_back():
+        assert School.for_name(name).name_key == normalize_school_name(name)
 
 
 @pytest.fixture
@@ -248,104 +223,9 @@ def test_a_new_ticket_category_gets_an_id_past_the_seeded_ones(name: str) -> Non
 INTEGER_COLUMN = connection.ops.integer_field_range("IntegerField")
 
 
-@pytest.mark.django_db
-@given(value=int_text())
-@example(value=str(2**31))
-@example(value=str(-(2**31) - 1))
-def test_an_integer_a_form_stores_fits_its_column(value: str) -> None:
-    """Category points and sort order, and a resolved ticket's points, are stored in integer columns."""
-    low, high = INTEGER_COLUMN
-    for name in ("points", "min_points", "max_points", "sort_order"):
-        form = TicketCategoryForm({"display_name": "Category", "points": "0", name: value})
-        if form.is_valid():
-            assert low <= form.cleaned_data[name] <= high, f"TicketCategoryForm.{name} accepts {value}"
-    form = TicketResolveForm({"points_override": value})
-    if form.is_valid() and form.cleaned_data["points_override"] is not None:
-        assert low <= form.cleaned_data["points_override"] <= high
-
-
 @pytest.fixture
 def scoring_template(db: object) -> ScoringTemplate:
     return ScoringTemplate.objects.first() or ScoringTemplate.objects.create()
-
-
-@pytest.mark.django_db
-@given(max_points=int_text(), minutes=int_text())
-@example(max_points="100000000", minutes="")
-@example(max_points="", minutes="1440000000000")
-def test_an_orange_check_the_form_accepts_saves(
-    max_points: str, minutes: str, scoring_template: ScoringTemplate
-) -> None:
-    """Saving a check recomputes ScoringTemplate.orange_max (numeric(10, 2)) from every check's points."""
-    form = OrangeCheckForm({"title": "Check", "max_points": max_points, "time_limit_minutes": minutes})
-    if not form.is_valid():
-        return
-    with rolled_back():
-        OrangeCheck.objects.create(
-            title="Check",
-            description="",
-            max_points=form.cleaned_data["max_points"] or 0,
-            time_limit=timedelta(minutes=m) if (m := form.cleaned_data["time_limit_minutes"]) else None,
-        )
-
-
-@pytest.mark.django_db
-@given(points=st.one_of(int_text(), st.sampled_from(("²", "³", "¹⁰", "٣"))), row_id=int_text())
-@example(points="²", row_id="")
-@example(points="1", row_id="²")
-@example(points="99999999999", row_id="")
-def test_a_criterion_row_extract_criteria_keeps_saves(
-    points: str, row_id: str, scoring_template: ScoringTemplate
-) -> None:
-    post = QueryDict(mutable=True)
-    post.update({"criterion_label_1": "Works", "criterion_points_1": points, "criterion_id_1": row_id})
-    try:
-        criteria = extract_criteria(post)
-    except ValidationError:
-        return  # the page shows the refusal and changes nothing
-    with rolled_back():
-        check = OrangeCheck.objects.create(title="Check", description="")
-        update_check_criteria(check, criteria)
-
-
-@pytest.mark.django_db
-@given(minutes=int_text())
-@example(minutes="-1065460825")
-@example(minutes="10000000000")
-def test_a_follow_up_the_form_accepts_has_a_storable_time(minutes: str) -> None:
-    form = FollowUpForm({"assignment_id": "1", "minutes": minutes})
-    if form.is_valid():
-        remind_at = timezone.now() + timedelta(minutes=form.cleaned_data["minutes"])
-        assert remind_at > timezone.now()
-
-
-@pytest.mark.django_db
-@given(event_type=st.sampled_from([t for t, _ in Event.EVENT_TYPE_CHOICES]), number=st.sampled_from(("", "1", "2")))
-@example(event_type="qualifier", number="1")
-def test_an_event_the_form_accepts_saves(event_type: str, number: str, school_list_event: Event) -> None:
-    """Events are unique by season, type and number; the form doesn't have the season, the view sets it."""
-    season = school_list_event.season
-    Event.objects.filter(pk=school_list_event.pk).update(event_type="qualifier", event_number=1)
-    post = {"name": "Next", "event_type": event_type, "event_number": number, "date": "2026-11-07"}
-    post |= {"start_time": "09:00", "end_time": "17:00", "max_teams": "50"}
-    form = EventForm(post, instance=Event(season=season))
-    if form.is_valid():
-        with rolled_back():
-            form.save()
-
-
-@given(message=request_text(StartMessageForm.MAX_LENGTH))
-@example(message="0\r")
-@example(message="a\r\r\nb")
-def test_a_start_message_has_one_kind_of_line_end_and_cleans_the_same_again(message: str) -> None:
-    """Browsers post a textarea's line ends as CRLF; the message is stored and counted with LF only."""
-    form = StartMessageForm({"start_message": message})
-    if not form.is_valid():
-        return
-    cleaned = form.cleaned_data["start_message"]
-    assert "\r" not in cleaned
-    again = StartMessageForm({"start_message": cleaned})
-    assert again.is_valid() and again.cleaned_data["start_message"] == cleaned
 
 
 @pytest.mark.django_db

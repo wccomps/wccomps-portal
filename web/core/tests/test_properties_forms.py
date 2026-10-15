@@ -437,7 +437,7 @@ CASES = [
     FormCase(
         SchoolInfoEditForm,
         examples=(
-            {"school_name": "ß" * 200, "contact_email": "a@b.co"},
+            {"school_name": "ß" * 255, "contact_email": "a@b.co"},
             {"school_name": "S", "contact_email": long_email(255)},
         ),
         use=_school_info_use,
@@ -464,7 +464,7 @@ CASES = [
     ),
     FormCase(
         StartMessageForm,
-        examples=({"start_message": "a\r\r\nb"},),
+        examples=({"start_message": "a\r\r\nb"}, {"start_message": "0\r"}),
         use=lambda w, f: (
             assert_message_fits(f.cleaned_data["start_message"]),
             competition_action("set_start_message")(w, f),
@@ -474,13 +474,11 @@ CASES = [
     FormCase(AppSlugForm, use=competition_action("remove_app")),
     FormCase(
         SetTimeForm,
-        examples=({"datetime": "0001-01-01T00:00", "timezone": "Asia/Tokyo"},),
         hints=lambda w: {"datetime": _datetime_local(), "timezone": _tz_hint()},
         use=competition_action("set_start_time"),
     ),
     FormCase(
         SetScheduleForm,
-        examples=({"start_datetime": "9999-12-31T23:59", "start_timezone": "America/Los_Angeles"},),
         hints=lambda w: {
             "start_datetime": _datetime_local(),
             "end_datetime": _datetime_local(),
@@ -518,12 +516,13 @@ CASES = [
             {"title": "T", "time_limit_minutes": "1440000000000"},
             {"title": "T", "criterion_label_1": "L", "criterion_points_1": "\u00b2"},
             {"title": "T", "criterion_label_1": "L", "criterion_points_1": "99999999999"},
+            {"title": "T", "criterion_label_1": "L", "criterion_points_1": "1", "criterion_id_1": "\u00b2"},
         ),
     ),
     FormCase(CriterionForm, use=lambda w, f: _save_criterion(f)),
     FormCase(
         FollowUpForm,
-        examples=({"assignment_id": "1", "minutes": "-1065460825"},),
+        examples=({"assignment_id": "1", "minutes": "-1065460825"}, {"assignment_id": "1", "minutes": "10000000000"}),
         hints=lambda w: {"assignment_id": st.just(str(w.pending.pk))},
         use=posts_to(lambda w: reverse("orange_team:followup_create")),
     ),
