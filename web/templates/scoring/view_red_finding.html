@@ -10,11 +10,11 @@
     <c-module>
         <c-slot name="toolbar">
             {% if finding.is_approved %}
-                <c-badge variant="resolved">
+                <c-badge variant="success">
                     Approved
                 </c-badge>
             {% else %}
-                <c-badge variant="claimed">
+                <c-badge variant="warning">
                     Pending Review
                 </c-badge>
             {% endif %}

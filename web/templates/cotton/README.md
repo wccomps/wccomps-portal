@@ -77,7 +77,8 @@ Props:
 - `class`, `id`, `name`, `value`
 
 #### `<c-toggle_button>`
-A button that stays pressed while its choice is picked; the page's script toggles `box-toggle--selected`.
+A button that stays pressed while its choice is picked (`pressed="true"` for the initial state); the page's
+script calls `setTogglePressed(button, pressed)` from `static/js/utils.js`, which sets its look and `aria-pressed`.
 ```django
 <c-toggle_button data-box="web01">web01</c-toggle_button>
 ```
@@ -96,10 +97,11 @@ Props: `href`, `variant` (default|primary|add|change|danger|cancel)
 #### `<c-badge>`
 Status indicators with color coding.
 ```django
-<c-badge variant="open">Open</c-badge>
-<c-badge variant="claimed">Claimed</c-badge>
-<c-badge variant="resolved">Resolved</c-badge>
-<c-badge variant="cancelled">Cancelled</c-badge>
+<c-badge variant="info">Open</c-badge>
+<c-badge variant="warning">Claimed</c-badge>
+<c-badge variant="success">Resolved</c-badge>
+<c-badge variant="neutral">Cancelled</c-badge>
+<c-badge variant="{{ ticket.status|badge_variant:'ticket' }}">{{ ticket.get_status_display }}</c-badge>
 ```
 
 #### `<c-alert>`

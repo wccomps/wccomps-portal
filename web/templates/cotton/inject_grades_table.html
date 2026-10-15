@@ -87,11 +87,11 @@
                     </td>
                     <td>
                         {% if grade.is_approved %}
-                            <c-badge variant="resolved">
+                            <c-badge variant="success">
                                 <span aria-hidden="true">✓</span> Approved
                             </c-badge>
                         {% else %}
-                            <c-badge variant="claimed">
+                            <c-badge variant="warning">
                                 <span aria-hidden="true">⏳</span> Pending
                             </c-badge>
                         {% endif %}

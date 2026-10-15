@@ -83,12 +83,12 @@
                     <td>{{ item.ticket.resolved_at|timesince }} ago</td>
                     <td>
                         {% if item.ticket.is_approved %}
-                            <c-badge variant="resolved">
+                            <c-badge variant="success">
                                 <span aria-hidden="true">✓</span> Approved
                             </c-badge>
                             <div class="text-sm text-muted">by {{ item.ticket.approved_by.username }}</div>
                         {% else %}
-                            <c-badge variant="claimed">
+                            <c-badge variant="warning">
                                 <span aria-hidden="true">⏳</span> Pending
                             </c-badge>
                         {% endif %}
