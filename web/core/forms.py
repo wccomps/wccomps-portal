@@ -187,10 +187,9 @@ class ResetPasswordsForm(forms.Form):
 
     def clean_team_numbers(self) -> list[int] | None:
         raw = self.cleaned_data.get("team_numbers", "").strip()
-        if not raw:
-            return None
         try:
-            return parse_team_range(raw)
+            # None, every active team, when the field names no team (empty, or only commas)
+            return parse_team_range(raw) or None
         except ValueError as e:
             raise forms.ValidationError(str(e)) from e
 
