@@ -29,7 +29,7 @@ from scoring.models import ScoringTemplate
 from scoring.screenshots import detect_inline_type
 
 from core.admin_views.competition import TIMEZONE_CHOICES
-from core.forms import CategoryForm, SchoolInfoEditForm
+from core.forms import CategoryForm, SchoolInfoEditForm, StartMessageForm
 from core.tests.strategies import (
     content_types,
     datetime_text,
@@ -296,3 +296,17 @@ def test_an_event_the_form_accepts_saves(event_type: str, number: str, school_li
     if form.is_valid():
         with rolled_back():
             form.save()
+
+
+@given(message=request_text(StartMessageForm.MAX_LENGTH))
+@example(message="0\r")
+@example(message="a\r\r\nb")
+def test_a_start_message_has_one_kind_of_line_end_and_cleans_the_same_again(message: str) -> None:
+    """Browsers post a textarea's line ends as CRLF; the message is stored and counted with LF only."""
+    form = StartMessageForm({"start_message": message})
+    if not form.is_valid():
+        return
+    cleaned = form.cleaned_data["start_message"]
+    assert "\r" not in cleaned
+    again = StartMessageForm({"start_message": cleaned})
+    assert again.is_valid() and again.cleaned_data["start_message"] == cleaned

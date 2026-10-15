@@ -1,3 +1,5 @@
+import re
+
 from django import forms
 from registration.forms import NewEventFields
 from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, validate_school_name
@@ -133,8 +135,9 @@ class StartMessageForm(forms.Form):
     start_message = forms.CharField(required=False, strip=False)
 
     def clean_start_message(self) -> str:
-        # Browsers submit textarea newlines as CRLF; the length is checked as the textarea counts it.
-        message: str = self.cleaned_data["start_message"].replace("\r\n", "\n")
+        # Browsers submit textarea newlines as CRLF; any CR (with an LF or alone) is one newline, as the textarea
+        # counts it, and the length is checked that way.
+        message: str = re.sub(r"\r\n?", "\n", self.cleaned_data["start_message"])
         if len(message) > self.MAX_LENGTH:
             raise forms.ValidationError(f"The start message must be at most {self.MAX_LENGTH} characters")
         return message
