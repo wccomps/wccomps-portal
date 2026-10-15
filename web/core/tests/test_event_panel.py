@@ -83,12 +83,13 @@ def test_with_no_event_the_panel_points_at_the_import(client):
     assert ">No event</span>" in _row(panel, "Status")
 
 
-def test_the_toolbar_links_the_setup_page_and_the_guide(client):
+def test_the_toolbar_links_the_setup_page_and_the_section_nav_the_guide(client):
     page = _flat(_page(client))
     toolbar = page[page.index('<div class="toolbar">') : page.index('id="event-panel"')]
 
     assert re.search(f'<a href="{reverse("admin_competition_setup")}"[^>]*>Competition setup</a>', toolbar)
-    assert re.search(f'<a href="{reverse("admin_competition_guide")}"[^>]*>Running an event</a>', toolbar)
+    assert f'href="{reverse("admin_competition_guide")}"' not in toolbar
+    assert re.search(f'<a href="{reverse("admin_competition_guide")}"[^>]*>Running an Event</a>', page)
 
 
 def test_an_open_event_names_its_season_schools_and_date_and_points_at_the_packets(client):
