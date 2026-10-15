@@ -92,6 +92,7 @@ from core.forms import (
     TypedConfirmForm,
 )
 from core.models import AuditLog, CompetitionConfig
+from core.stored_files import clean_name
 from core.tests.strategies import (
     assert_storable,
     column,
@@ -102,7 +103,7 @@ from core.tests.strategies import (
     resubmission,
     rolled_back,
 )
-from core.utils import parse_datetime_to_utc, upload_name
+from core.utils import parse_datetime_to_utc
 from team.forms import CSVUploadForm, ImportConfirmForm, ImportEventForm, parse_csv_file
 from team.models import DiscordLink, LinkToken, SchoolInfo, Team
 from ticketing.forms import (
@@ -350,7 +351,7 @@ def _packet_upload_use(w: World, form: Any) -> None:
         (column(Packet, "title"), cd["title"]),
         (column(Packet, "notes"), cd["notes"]),
         (column(Packet, "file_data"), file_data),
-        (column(Packet, "filename"), upload_name(uploaded, "unnamed")),
+        (column(Packet, "filename"), clean_name(uploaded.name, "unnamed")),
         (column(Packet, "team_extras"), team_extras),
     )
 

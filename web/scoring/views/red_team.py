@@ -8,6 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
+from core.stored_files import file_response
 from team.models import Team
 
 from ..forms import RedTeamScoreForm
@@ -17,7 +18,7 @@ from ..models import (
     RedTeamScreenshot,
 )
 from ..quotient_sync import get_box_metadata, get_cached_team_count
-from ..screenshots import ScreenshotError, read_screenshots, screenshot_response
+from ..screenshots import ScreenshotError, read_screenshots
 
 
 def _normalize_red_score_post(post_data: QueryDict) -> QueryDict:
@@ -379,7 +380,7 @@ def red_screenshot_download(request: HttpRequest, screenshot_id: int) -> HttpRes
     if not screenshot.file_data:
         raise Http404("File data not available (file was lost)")
 
-    return screenshot_response(bytes(screenshot.file_data), screenshot.filename)
+    return file_response(bytes(screenshot.file_data), screenshot.filename, inline=True)
 
 
 @require_permission("red_team", error_message="Only Red Team members can manage IP pools")

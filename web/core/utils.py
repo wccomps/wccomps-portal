@@ -3,14 +3,12 @@ import json
 import logging
 import queue
 import threading
-import unicodedata
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from typing import TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.contrib import messages
-from django.core.files.uploadedfile import UploadedFile
 from django.core.paginator import Page, Paginator
 from django.db import connection
 from django.db.models import Model, QuerySet
@@ -33,13 +31,6 @@ def client_ip(request: HttpRequest) -> str:
         return str(ipaddress.ip_address(header))
     except ValueError:
         return request.META.get("REMOTE_ADDR") or "0.0.0.0"  # noqa: S104 - an address value, not a bind
-
-
-def upload_name(upload: UploadedFile[bytes], default: str) -> str:
-    """The client's name for an uploaded file, as the portal stores it: without control or format characters (a NUL
-    can't be stored; a bidi override disguises the extension), at most 255 characters, else default."""
-    name = "".join(c for c in upload.name or "" if unicodedata.category(c) not in ("Cc", "Cf")).strip()
-    return name[:255] or default
 
 
 class UnknownTimezoneError(ValueError):

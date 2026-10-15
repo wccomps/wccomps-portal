@@ -1,4 +1,3 @@
-import mimetypes
 from collections.abc import Iterator
 from typing import TypedDict, cast
 
@@ -7,11 +6,11 @@ from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.utils.http import content_disposition_header
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from core.auth_utils import get_user_team, require_permission
-from core.utils import ndjson_done, run_detached, upload_name
+from core.stored_files import clean_name, file_response, stored_type
+from core.utils import ndjson_done, run_detached
 from team.models import Team
 
 from .forms import PacketActionForm, PacketResendForm, PacketUploadForm
@@ -69,8 +68,7 @@ def download_packet(request: HttpRequest, packet_id: int) -> HttpResponse:
         distribution.record_download(user.username)
         packet = distribution.packet
 
-    response = HttpResponse(bytes(packet.file_data), content_type=packet.mime_type)
-    response["Content-Disposition"] = str(content_disposition_header(as_attachment=True, filename=packet.filename))
+    response = file_response(bytes(packet.file_data), packet.filename, inline=False)
     response["Content-Length"] = packet.file_size
 
     return response
@@ -131,9 +129,8 @@ def upload_packet(request: HttpRequest) -> HttpResponse:
         uploaded_file = form.cleaned_data["packet_file"]
 
         file_data = uploaded_file.read()
-        filename = upload_name(uploaded_file, "unnamed")
-        # From the name, not the client's claimed type, which can be anything (and longer than the column)
-        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        filename = clean_name(uploaded_file.name, "unnamed")
+        mime_type = stored_type(file_data, filename)
 
         Packet.objects.create(
             title=title,

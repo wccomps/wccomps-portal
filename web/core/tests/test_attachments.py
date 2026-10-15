@@ -217,7 +217,8 @@ class TestTeamAttachmentDownload:
         response = client.get(f"/tickets/{data['ticket1'].ticket_number}/attachment/{attachment.id}/")
 
         assert response.status_code == 200
-        assert response["Content-Type"] == "application/pdf"
+        # Served by its bytes (not a PDF), not the stored type
+        assert response["Content-Type"] == "application/octet-stream"
         assert b"attachment" in response["Content-Disposition"].encode()
         assert b"test.pdf" in response["Content-Disposition"].encode()
         assert response.content == file_content
@@ -381,7 +382,8 @@ class TestOpsAttachmentDownload:
         response = client.get(f"/tickets/{data['ticket1'].ticket_number}/attachment/{attachment.id}/")
 
         assert response.status_code == 200
-        assert response["Content-Type"] == "application/pdf"
+        # Served by its bytes (not a PDF), not the stored type
+        assert response["Content-Type"] == "application/octet-stream"
         assert b"ops_download.pdf" in response["Content-Disposition"].encode()
         assert response.content == file_content
 

@@ -9,8 +9,6 @@ PARSERS maps each parser test_property_coverage finds to the tests here that cov
 
 import csv
 import io
-import mimetypes
-import unicodedata
 from collections.abc import Callable
 from datetime import date
 from typing import Any
@@ -31,17 +29,10 @@ from packets.models import Packet
 from registration.models import Event, Season, normalize_school_name
 from registration.services import ImportBlockedError, SchoolListRow, import_school_list
 from scoring.models import IncidentScreenshot, RedTeamScreenshot, validate_file_size
-from scoring.screenshots import (
-    DOWNLOAD_MIME,
-    MAX_SCREENSHOTS,
-    ScreenshotError,
-    detect_inline_type,
-    read_screenshot,
-    read_screenshots,
-    screenshot_response,
-)
+from scoring.screenshots import MAX_SCREENSHOTS, ScreenshotError, read_screenshot, read_screenshots
 
 from core.forms import SchoolInfoEditForm
+from core.stored_files import clean_name, detect_inline_type, file_response, stored_type
 from core.tests.strategies import (
     PAYLOADS,
     assert_storable,
@@ -52,7 +43,6 @@ from core.tests.strategies import (
     rolled_back,
     uploaded_files,
 )
-from core.utils import upload_name
 from team.forms import parse_csv_file, validate_csv_data
 from team.models import Team
 from ticketing.models import Ticket, TicketAttachment, TicketCategory
@@ -310,23 +300,14 @@ def test_screenshot_is_read_or_refused_and_typed_from_its_bytes(upload: SimpleUp
     except ScreenshotError as refused:
         assert str(refused)
         return
-    assert mime == (detect_inline_type(data) or DOWNLOAD_MIME)
+    assert mime == stored_type(data, name)
     for model in (RedTeamScreenshot, IncidentScreenshot):
         assert_storable(column(model, "filename"), name)
         assert_storable(column(model, "mime_type"), mime)
-    response = screenshot_response(data, name)
+    response = file_response(data, name, inline=True)
     if detect_inline_type(data) is None:
         assert response["Content-Disposition"].startswith("attachment")
         assert "sandbox" in response["Content-Security-Policy"]
-
-
-@given(upload=uploaded_files(), default=st.sampled_from(("", "unnamed")))
-def test_an_upload_name_is_storable_text(upload: SimpleUploadedFile, default: str) -> None:
-    name = upload_name(upload, default)
-    assert len(name) <= 255 and (name or default == "")
-    assert not any(unicodedata.category(c) in ("Cc", "Cf") for c in name)
-    for model in (TicketAttachment, RedTeamScreenshot, IncidentScreenshot, Packet):
-        assert_storable(column(model, "filename"), name or "x")
 
 
 @given(uploads=st.lists(uploaded_files(), max_size=MAX_SCREENSHOTS + 2))
@@ -365,8 +346,8 @@ def test_ticket_attachment_is_saved_or_refused_and_served_safely(
             assert 400 <= refused.status_code < 500
             return
         attachment = TicketAttachment.objects.get(ticket=ticket)
-        assert attachment.filename == upload_name(upload, "")
-        assert attachment.mime_type == (mimetypes.guess_type(attachment.filename)[0] or DOWNLOAD_MIME)
+        assert attachment.filename == clean_name(upload.name, "")
+        assert attachment.mime_type == stored_type(bytes(attachment.file_data), attachment.filename)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -502,5 +483,4 @@ PARSERS: dict[str, list[Callable[..., None]]] = {
         test_ticket_attachment_is_saved_or_refused_and_served_safely
     ],
     "web/ticketing/views/attachments.py:ticket_attachment_upload": [test_ticket_attachment_view_answers_any_file],
-    "web/core/utils.py:upload_name": [test_an_upload_name_is_storable_text],
 }

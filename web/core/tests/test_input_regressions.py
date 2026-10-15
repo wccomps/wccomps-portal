@@ -34,10 +34,11 @@ from registration.models import (
 )
 from registration.services import SchoolListRow, import_school_list
 from scoring.models import ScoringTemplate
-from scoring.screenshots import detect_inline_type, read_screenshot
+from scoring.screenshots import read_screenshot
 
 from core.admin_views.competition import TIMEZONE_CHOICES
 from core.forms import SchoolInfoEditForm, StartMessageForm
+from core.stored_files import DOWNLOAD_MIME, detect_inline_type
 from core.tests.strategies import (
     content_types,
     datetime_text,
@@ -231,7 +232,7 @@ def test_a_ticket_attachment_is_typed_from_its_bytes(
             url = reverse("ticket_attachment_download", args=[ticket.ticket_number, attachment.pk]) + "?inline=1"
             download = client.get(url)
             inline_type = detect_inline_type(content)
-            assert download["Content-Type"] == (inline_type or attachment.mime_type)
+            assert download["Content-Type"] == (inline_type or DOWNLOAD_MIME)
             assert download["Content-Disposition"].startswith("inline" if inline_type else "attachment")
 
 
@@ -351,7 +352,7 @@ def test_a_start_message_has_one_kind_of_line_end_and_cleans_the_same_again(mess
 @given(name=file_names())
 @example(name="a\x00.png")
 @example(name="a\x1f‮.png")
-def test_an_upload_name_is_stored_as_text_without_control_characters(
+def test_an_upload_name_is_stored_without_control_or_bidi_characters(
     name: str, ticketing_support_user: User, red_team_user: User
 ) -> None:
     """A file name arrives from the client (RFC 2231 can encode a NUL); it is stored, so it must be storable."""
@@ -364,10 +365,17 @@ def test_an_upload_name_is_stored_as_text_without_control_characters(
         response = client.post(reverse("ticket_attachment_upload", args=[ticket.ticket_number]), {"attachment": upload})
         assert response.status_code < 500
         for attachment in TicketAttachment.objects.filter(ticket=ticket):
-            assert attachment.filename and not any(unicodedata.category(c) in ("Cc", "Cf") for c in attachment.filename)
+            assert attachment.filename and not _disguising(attachment.filename)
     upload.seek(0)
     _, stored_name, _ = read_screenshot(upload)
-    assert stored_name and not any(unicodedata.category(c) in ("Cc", "Cf") for c in stored_name)
+    assert stored_name and not _disguising(stored_name)
+
+
+def _disguising(name: str) -> bool:
+    """A control character (a NUL can't be stored) or a bidi control (it reorders the shown name)."""
+    return any(
+        unicodedata.category(c) == "Cc" or c in "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069" for c in name
+    )
 
 
 @pytest.mark.django_db
