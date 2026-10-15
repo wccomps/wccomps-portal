@@ -6,6 +6,12 @@ plain grey badges. Templates map a status here instead (|badge_variant:"packet_e
 test_template_vocabulary checks every stored value is mapped to a variant the component knows.
 """
 
+import logging
+
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
 # kind -> (model label, field, {stored value: c-badge variant})
 BADGE_STATUSES: dict[str, tuple[str, str, dict[str, str]]] = {
     "ticket": (
@@ -47,6 +53,14 @@ MESSAGE_ALERTS: dict[str, str] = {
 
 
 def badge_variant(value: str, kind: str) -> str:
+    """The variant for a stored value. An unknown kind is a template mistake: it raises under DEBUG and is logged
+    in production, where the page still renders with the default badge (test_template_vocabulary catches it
+    before then)."""
+    if kind not in BADGE_STATUSES:
+        if settings.DEBUG:
+            raise ValueError(f"No badge status kind {kind!r}; kinds: {', '.join(sorted(BADGE_STATUSES))}")
+        logger.error("No badge status kind %r", kind)
+        return "default"
     return BADGE_STATUSES[kind][2].get(value, "default")
 
 
