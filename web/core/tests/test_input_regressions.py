@@ -7,6 +7,7 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 from packets.forms import PacketResendForm
 from registration.forms import RegistrationForm
+from registration.models import SCHOOL_NAME_MAX_LENGTH, TeamRegistration, normalize_school_name
 
 from core.admin_views.competition import TIMEZONE_CHOICES
 from core.forms import SchoolInfoEditForm
@@ -47,3 +48,17 @@ def test_an_email_a_form_stores_fits_its_column(email: str) -> None:
             assert len(cleaned) <= EMAIL_COLUMN, (
                 f"{form_class.__name__}.{name} accepts a {len(cleaned)}-character email"
             )
+
+
+@given(name=request_text(SCHOOL_NAME_MAX_LENGTH))
+@example(name="ß" * 200)
+def test_a_school_name_a_form_accepts_has_a_key_that_fits(name: str) -> None:
+    """School names are matched on their case-folded key, which can be longer than the name. The registration
+    form checks its name with the model field's validators (ModelForm's full_clean)."""
+    registration_field = TeamRegistration._meta.get_field("school_name")
+    for clean in (SchoolInfoEditForm.base_fields["school_name"].clean, lambda n: registration_field.clean(n, None)):
+        try:
+            cleaned = clean(name)
+        except ValidationError:
+            continue
+        assert len(normalize_school_name(cleaned)) <= SCHOOL_NAME_MAX_LENGTH

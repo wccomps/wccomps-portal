@@ -1,13 +1,13 @@
 from django import forms
 from registration.forms import NewEventFields
-from registration.models import Event
+from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, validate_school_name
 from registration.services import NewEvent
 
 from core.authentik_utils import parse_team_range
 
 
 class SchoolInfoEditForm(forms.Form):
-    school_name = forms.CharField(max_length=255)
+    school_name = forms.CharField(max_length=SCHOOL_NAME_MAX_LENGTH, validators=[validate_school_name])
     # 254: SchoolInfo's email columns (a form EmailField alone accepts 320 characters)
     contact_email = forms.EmailField(max_length=254)
     secondary_email = forms.EmailField(max_length=254, required=False)
