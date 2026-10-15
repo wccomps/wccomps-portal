@@ -1,7 +1,3 @@
-import csv
-import io
-import mimetypes
-import re
 from collections.abc import Iterator
 from typing import TypedDict, cast
 
@@ -13,6 +9,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from core.auth_utils import get_user_team, require_permission
+from core.stored_files import clean_name, file_response, stored_type
 from core.utils import ndjson_done, run_detached
 from team.models import Team
 
@@ -71,8 +68,7 @@ def download_packet(request: HttpRequest, packet_id: int) -> HttpResponse:
         distribution.record_download(user.username)
         packet = distribution.packet
 
-    response = HttpResponse(bytes(packet.file_data), content_type=packet.mime_type)
-    response["Content-Disposition"] = f'attachment; filename="{packet.filename}"'
+    response = file_response(bytes(packet.file_data), packet.filename, inline=False)
     response["Content-Length"] = packet.file_size
 
     return response
@@ -113,40 +109,6 @@ def packets_list(request: HttpRequest) -> HttpResponse:
     return render(request, "packets/ops_packets_list.html", context)
 
 
-def _parse_team_extras_csv(csv_text: str) -> dict[str, dict[str, str]]:
-    """Parse per-team CSV data into a dict keyed by team number.
-
-    Expects a CSV with a 'team' column (e.g. 'Team01', 'Team 3', '5').
-    Returns dict like {"1": {"api_key": "sk-...", ...}, "2": {...}}.
-    """
-    reader = csv.DictReader(io.StringIO(csv_text.strip()))
-    if not reader.fieldnames:
-        return {}
-
-    team_col = None
-    for col in reader.fieldnames:
-        if "team" in col.lower():
-            team_col = col
-            break
-
-    if not team_col:
-        return {}
-
-    result: dict[str, dict[str, str]] = {}
-    other_cols = [c for c in reader.fieldnames if c != team_col]
-
-    for row in reader:
-        raw_team = row.get(team_col, "").strip()
-        # Extract team number: "Team01" -> 1, "Team 3" -> 3, "5" -> 5
-        digits = re.sub(r"[^\d]", "", raw_team)
-        if not digits:
-            continue
-        team_num = str(int(digits))
-        result[team_num] = {col: row.get(col, "").strip() for col in other_cols}
-
-    return result
-
-
 @require_http_methods(["GET", "POST"])
 @require_permission("gold_team")
 def upload_packet(request: HttpRequest) -> HttpResponse:
@@ -163,19 +125,12 @@ def upload_packet(request: HttpRequest) -> HttpResponse:
         notes = form.cleaned_data["notes"]
         send_via_email = form.cleaned_data["send_via_email"]
         web_access_enabled = form.cleaned_data["web_access_enabled"]
-        team_extras_csv = form.cleaned_data["team_extras"]
+        team_extras = form.cleaned_data["team_extras"]
         uploaded_file = form.cleaned_data["packet_file"]
 
         file_data = uploaded_file.read()
-        filename = (uploaded_file.name or "unnamed")[:255]
-        mime_type = uploaded_file.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
-
-        team_extras: dict[str, dict[str, str]] = {}
-        if team_extras_csv:
-            team_extras = _parse_team_extras_csv(team_extras_csv)
-            if not team_extras:
-                messages.error(request, "Could not parse per-team data. Ensure CSV has a 'team' column.")
-                return render(request, "packets/ops_upload_packet.html", form_context)
+        filename = clean_name(uploaded_file.name, "unnamed")
+        mime_type = stored_type(file_data, filename)
 
         Packet.objects.create(
             title=title,

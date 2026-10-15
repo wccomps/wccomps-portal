@@ -8,7 +8,6 @@ from typing import TypedDict, cast
 from django import forms
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
-from django.core.validators import validate_email
 from django.db.models import Count, Q
 from registration.forms import NewEventFields
 from registration.models import Event, School, Season, normalize_school_name
@@ -25,6 +24,8 @@ from registration.services import (
     import_school_list,
 )
 
+from core.csv_export import unquote_cell
+from core.forms import SchoolInfoEditForm
 from team.models import SchoolInfo, Team, default_team_name
 
 
@@ -184,10 +185,12 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
     warnings: list[str] = []
 
     try:
-        content = csv_file.read().decode("utf-8")
+        # utf-8-sig: spreadsheet programs start a UTF-8 CSV with a byte order mark
+        content = csv_file.read().decode("utf-8-sig")
         csv_file.seek(0)
 
-        reader = csv.DictReader(io.StringIO(content))
+        # newline="": the csv module reads line ends itself, so CR alone, LF and CRLF all end a row
+        reader = csv.DictReader(io.StringIO(content, newline=""))
 
         required_headers = {"school_name", "contact_email"}
         optional_headers = {"secondary_email", "notes"}
@@ -219,51 +222,34 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
 
         for row_num, raw_row in enumerate(reader, start=2):  # Start at 2 (header is row 1)
             row = {header_mapping.get(k, k): v for k, v in raw_row.items()} if header_mapping else raw_row
-
-            row_errors: list[str] = []
-            row_data: CSVRowData = {}
-
-            school_name = row.get("school_name", "").strip()
-            if not school_name:
-                row_errors.append(f"Row {row_num}: school_name is required")
+            # A row is checked as the school info form checks one school: lengths, emails, no NUL characters.
+            # A cell missing from a short row is None.
+            # A cell may be the school info export's, so the formula guard's quote comes off first
+            form = SchoolInfoEditForm({name: unquote_cell(row.get(name) or "") for name in all_headers})
+            if form.is_valid():
+                rows.append(
+                    {
+                        "school_name": form.cleaned_data["school_name"],
+                        "contact_email": form.cleaned_data["contact_email"],
+                        "secondary_email": form.cleaned_data["secondary_email"],
+                        "notes": form.cleaned_data["notes"],
+                    }
+                )
             else:
-                row_data["school_name"] = school_name
-
-            contact_email = row.get("contact_email", "").strip()
-            if not contact_email:
-                row_errors.append(f"Row {row_num}: contact_email is required")
-            else:
-                try:
-                    validate_email(contact_email)
-                    row_data["contact_email"] = contact_email
-                except ValidationError:
-                    row_errors.append(f"Row {row_num}: contact_email is not a valid email address")
-
-            secondary_email = row.get("secondary_email", "").strip()
-            if secondary_email:
-                try:
-                    validate_email(secondary_email)
-                    row_data["secondary_email"] = secondary_email
-                except ValidationError:
-                    row_errors.append(f"Row {row_num}: secondary_email is not a valid email address")
-            else:
-                row_data["secondary_email"] = ""
-
-            notes = row.get("notes", "").strip()
-            row_data["notes"] = notes
-
-            if row_errors:
-                errors.extend(row_errors)
-            else:
-                rows.append(row_data)
+                errors += [
+                    f"Row {row_num}: {field}: {error}" for field, messages in form.errors.items() for error in messages
+                ]
 
         if not rows and not errors:
             errors.append("CSV file contains no data rows")
 
     except UnicodeDecodeError:
         errors.append("File encoding error. Please ensure the file is UTF-8 encoded.")
-    except Exception as e:
-        errors.append(f"Error parsing CSV file: {str(e)}")
+    except csv.Error:
+        errors.append(
+            f"The file isn't a CSV the import can read (line {reader.line_num}): save it from your spreadsheet as CSV "
+            "and upload it again."
+        )
 
     return {"rows": rows, "errors": errors, "warnings": warnings}
 

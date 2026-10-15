@@ -81,7 +81,7 @@ University One,invalid-email
         result = parse_csv_file(csv_file)
 
         assert len(result["errors"]) > 0
-        assert "not a valid email" in result["errors"][0]
+        assert result["errors"][0] == "Row 2: contact_email: Enter a valid email address."
 
     def test_parse_empty_csv(self) -> None:
         """Test parsing empty CSV."""

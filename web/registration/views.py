@@ -235,11 +235,9 @@ def event_create(request: HttpRequest, season_id: int) -> HttpResponse:
     season = get_object_or_404(Season, id=season_id)
 
     if request.method == "POST":
-        form = EventForm(request.POST)
+        form = EventForm(request.POST, instance=Event(season=season))
         if form.is_valid():
-            event = form.save(commit=False)
-            event.season = season
-            event.save()
+            event = form.save()
             messages.success(request, f"Event '{event.name}' created successfully.")
             return redirect("registration_event_list", season_id=season.id)
     else:

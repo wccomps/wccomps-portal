@@ -1,8 +1,13 @@
 from datetime import datetime
 
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
+
+# The most a check, or one of its criteria, is worth
+MAX_POINTS = 10_000
 
 
 class OrangeCheckIn(models.Model):
@@ -37,7 +42,9 @@ class OrangeCheck(models.Model):
     scheduled_at = models.DateTimeField(null=True, blank=True, help_text="When assignments go live")
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="created_checks")
     created_at = models.DateTimeField(auto_now_add=True)
-    max_points = models.PositiveIntegerField(default=0, help_text="Max score when the check has no criteria")
+    max_points = models.PositiveIntegerField(
+        default=0, validators=[MaxValueValidator(MAX_POINTS)], help_text="Max score when the check has no criteria"
+    )
     time_limit = models.DurationField(
         null=True, blank=True, help_text="How long the window stays open from scheduled_at"
     )
@@ -48,6 +55,12 @@ class OrangeCheck(models.Model):
 
     def __str__(self) -> str:
         return self.title
+
+    def clean(self) -> None:
+        # Its criteria (when it has any) are what it's worth; their own clean checks a change to them
+        stored = self.criteria.aggregate(total=models.Sum("points"))["total"] if self.pk else None
+        if problem := scores_total_problem(self.pk, self.max_points if stored is None else int(stored)):
+            raise ValidationError(problem)
 
     @property
     def max_score(self) -> int:
@@ -86,17 +99,41 @@ class OrangeCheck(models.Model):
         return "unscheduled"
 
 
+def scores_total_problem(check_pk: int | None, max_score: int) -> str:
+    """Why the checks' scores, with this check (None: a new one) worth max_score, can't all be counted, or ''.
+
+    The scoring sums every check's maximum into ScoringTemplate.orange_max, a numeric column of limited size.
+    """
+    from scoring.models import ScoringTemplate
+
+    field = ScoringTemplate._meta.get_field("orange_max")
+    capacity = 10 ** (getattr(field, "max_digits", 0) - getattr(field, "decimal_places", 0)) - 1
+    others = OrangeCheck.objects.all() if check_pk is None else OrangeCheck.objects.exclude(pk=check_pk)
+    others = others.annotate(criteria_total=models.Sum("criteria__points"))
+    total = max_score + sum(t if t is not None else m for m, t in others.values_list("max_points", "criteria_total"))
+    if total > capacity:
+        return f"All checks together would be worth {total} points; the scoring can count at most {capacity}."
+    return ""
+
+
 class OrangeCheckCriterion(models.Model):
     """A rubric line item for a check."""
 
     orange_check = models.ForeignKey(OrangeCheck, on_delete=models.CASCADE, related_name="criteria")
     label = models.CharField(max_length=200)
-    points = models.PositiveIntegerField()
+    points = models.PositiveIntegerField(validators=[MinValueValidator(1), MaxValueValidator(MAX_POINTS)])
     sort_order = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "orange_check_criterion"
         ordering = ["sort_order", "id"]
+
+    def clean(self) -> None:
+        if not self.orange_check_id:  # a rubric row the check form checks before the check exists
+            return
+        others = self.orange_check.criteria.exclude(pk=self.pk).aggregate(total=models.Sum("points"))["total"] or 0
+        if problem := scores_total_problem(self.orange_check_id, int(others) + self.points):
+            raise ValidationError(problem)
 
     def __str__(self) -> str:
         return f"{self.label} ({self.points} pts)"

@@ -1,65 +1,27 @@
+import re
+
 from django import forms
 from registration.forms import NewEventFields
-from registration.models import Event
+from registration.models import SCHOOL_NAME_MAX_LENGTH, Event
 from registration.services import NewEvent
 
 from core.authentik_utils import parse_team_range
+from team.models import SchoolInfo
 
 
 class SchoolInfoEditForm(forms.Form):
-    school_name = forms.CharField(max_length=255)
-    contact_email = forms.EmailField()
-    secondary_email = forms.EmailField(required=False)
+    school_name = forms.CharField(max_length=SCHOOL_NAME_MAX_LENGTH)
+    # The columns' lengths: a form EmailField alone accepts 320 characters
+    contact_email = forms.EmailField(max_length=SchoolInfo._meta.get_field("contact_email").max_length)
+    secondary_email = forms.EmailField(
+        max_length=SchoolInfo._meta.get_field("secondary_email").max_length, required=False
+    )
     notes = forms.CharField(required=False)
 
 
 class BroadcastForm(forms.Form):
     target = forms.CharField()
     message = forms.CharField()
-
-
-class CategoryForm(forms.Form):
-    display_name = forms.CharField(max_length=100)
-    points = forms.IntegerField(initial=0)
-    required_fields = forms.TypedMultipleChoiceField(
-        coerce=str,
-        required=False,
-        choices=[
-            ("hostname", "Hostname"),
-            ("ip_address", "IP Address"),
-            ("service_name", "Service Name"),
-            ("description", "Description"),
-        ],
-    )
-    optional_fields = forms.TypedMultipleChoiceField(
-        coerce=str,
-        required=False,
-        choices=[
-            ("hostname", "Hostname"),
-            ("ip_address", "IP Address"),
-            ("service_name", "Service Name"),
-            ("description", "Description"),
-        ],
-    )
-    variable_points = forms.BooleanField(required=False)
-    variable_cost_note = forms.CharField(required=False)
-    min_points = forms.IntegerField(initial=0, required=False)
-    max_points = forms.IntegerField(initial=0, required=False)
-    user_creatable = forms.BooleanField(required=False)
-    sort_order = forms.IntegerField(initial=0, required=False)
-    playbook = forms.CharField(required=False, widget=forms.Textarea)
-
-    def clean_min_points(self) -> int:
-        return self.cleaned_data.get("min_points") or 0
-
-    def clean_max_points(self) -> int:
-        return self.cleaned_data.get("max_points") or 0
-
-    def clean_sort_order(self) -> int:
-        return self.cleaned_data.get("sort_order") or 0
-
-    def clean_playbook(self) -> str:
-        return (self.cleaned_data.get("playbook") or "").strip()
 
 
 class SetMaxMembersForm(forms.Form):
@@ -125,21 +87,19 @@ class StartMessageForm(forms.Form):
     start_message = forms.CharField(required=False, strip=False)
 
     def clean_start_message(self) -> str:
-        # Browsers submit textarea newlines as CRLF; the length is checked as the textarea counts it.
-        message: str = self.cleaned_data["start_message"].replace("\r\n", "\n")
+        # Count newlines as the textarea does: CRLF or a lone CR is one LF
+        message: str = re.sub(r"\r\n?", "\n", self.cleaned_data["start_message"])
         if len(message) > self.MAX_LENGTH:
             raise forms.ValidationError(f"The start message must be at most {self.MAX_LENGTH} characters")
         return message
 
 
 class AppSlugForm(forms.Form):
-    app_slug = forms.CharField(max_length=100)
+    # An Authentik application slug: ASCII letters, digits, - and _ (so lowercasing keeps its length)
+    app_slug = forms.SlugField(max_length=100)
 
     def clean_app_slug(self) -> str:
-        slug: str = self.cleaned_data["app_slug"].strip().lower()
-        if not slug:
-            raise forms.ValidationError("App slug is required")
-        return slug
+        return str(self.cleaned_data["app_slug"]).lower()
 
 
 class SetTimeForm(forms.Form):

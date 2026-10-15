@@ -21,11 +21,15 @@ def normalize_school_name(name: str) -> str:
     return collapse_whitespace(name).casefold()
 
 
+SCHOOL_NAME_MAX_LENGTH = 255  # School.name and the names it is made from
+
+
 class School(models.Model):
     """A school across events, matched by name_key."""
 
-    name = models.CharField(max_length=255)
-    name_key = models.CharField(max_length=255, unique=True)
+    name = models.CharField(max_length=SCHOOL_NAME_MAX_LENGTH)
+    # Unlimited: case folding lengthens some names (ß matches ss), so a key can be longer than its name
+    name_key = models.TextField(unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -66,7 +70,7 @@ class TeamRegistration(models.Model):
         ("at_large", "At-Large"),
     ]
 
-    school_name = models.CharField(max_length=255)
+    school_name = models.CharField(max_length=SCHOOL_NAME_MAX_LENGTH)
     region = models.CharField(max_length=20, choices=REGION_CHOICES, default="wrccdc")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
 
@@ -181,6 +185,7 @@ class Event(models.Model):
             models.UniqueConstraint(
                 fields=["season", "event_type", "event_number"],
                 name="unique_event_per_season",
+                violation_error_message="This season already has an event of this type with this number.",
             ),
             models.UniqueConstraint(fields=["is_active"], condition=models.Q(is_active=True), name="one_open_event"),
         ]

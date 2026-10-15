@@ -1,4 +1,3 @@
-import csv
 import json
 import zipfile
 from collections.abc import Callable
@@ -7,6 +6,8 @@ from io import BytesIO, StringIO
 
 from django.http import HttpResponse
 from django.utils import timezone
+
+from core.csv_export import csv_writer
 
 from .calculator import compute_standings
 from .models import (
@@ -19,7 +20,7 @@ from .models import (
 
 def _serialize_red_scores_csv() -> str:
     output = StringIO()
-    writer = csv.writer(output)
+    writer = csv_writer(output)
     writer.writerow(
         [
             "ID",
@@ -98,7 +99,7 @@ def _serialize_red_scores_json() -> str:
 
 def _serialize_incidents_csv() -> str:
     output = StringIO()
-    writer = csv.writer(output)
+    writer = csv_writer(output)
     writer.writerow(
         [
             "ID",
@@ -177,7 +178,7 @@ def _serialize_incidents_json() -> str:
 
 def _serialize_orange_adjustments_csv() -> str:
     output = StringIO()
-    writer = csv.writer(output)
+    writer = csv_writer(output)
     writer.writerow(
         [
             "ID",
@@ -231,7 +232,7 @@ def _serialize_orange_adjustments_json() -> str:
 
 def _serialize_inject_grades_csv() -> str:
     output = StringIO()
-    writer = csv.writer(output)
+    writer = csv_writer(output)
     writer.writerow(
         [
             "Team",
@@ -294,7 +295,7 @@ def _serialize_inject_grades_json() -> str:
 
 def _serialize_final_scores_csv() -> str:
     output = StringIO()
-    writer = csv.writer(output)
+    writer = csv_writer(output)
     writer.writerow(
         [
             "Rank",
@@ -357,7 +358,7 @@ def _serialize_tickets_csv() -> str:
     from ticketing.models import Ticket
 
     output = StringIO()
-    writer = csv.writer(output)
+    writer = csv_writer(output)
     writer.writerow(
         [
             "Ticket Number",

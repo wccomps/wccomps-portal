@@ -8,13 +8,14 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import get_user_team, has_permission, require_permission
+from core.stored_files import file_response
 from team.models import Team
 
 from ..calculator import calculate_suggested_recovery_points, suggest_red_score_matches
 from ..forms import IncidentMatchForm, IncidentReportForm
 from ..models import IncidentReport, IncidentScreenshot
 from ..quotient_sync import get_box_metadata
-from ..screenshots import ScreenshotError, read_screenshots, screenshot_response
+from ..screenshots import ScreenshotError, read_screenshots
 
 
 @transaction.atomic
@@ -155,7 +156,7 @@ def incident_screenshot_download(request: HttpRequest, screenshot_id: int) -> Ht
     if not screenshot.file_data:
         raise Http404("File data not available (file was lost)")
 
-    return screenshot_response(bytes(screenshot.file_data), screenshot.filename)
+    return file_response(bytes(screenshot.file_data), screenshot.filename, inline=True)
 
 
 @require_permission(

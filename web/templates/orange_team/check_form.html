@@ -29,7 +29,7 @@
                            id="id_title"
                            name="title"
                            maxlength="200"
-                           value="{{ orange_check.title|default:'' }}"
+                           value="{{ values.title }}"
                            required>
                 </c-form_field>
                 <c-form_field label="Description"
@@ -38,7 +38,7 @@
                     <textarea class="vLargeTextField"
                               id="id_description"
                               name="description"
-                              rows="4">{{ orange_check.description|default:'' }}</textarea>
+                              rows="4">{{ values.description }}</textarea>
                 </c-form_field>
                 <c-form_field label="Scheduled At"
                               id="id_scheduled_at"
@@ -47,7 +47,7 @@
                            class="vTextField"
                            id="id_scheduled_at"
                            name="scheduled_at"
-                           {% if orange_check.scheduled_at %}value="{{ orange_check.scheduled_at|date:'Y-m-d\TH:i' }}"{% endif %}>
+                           value="{{ values.scheduled_at }}">
                 </c-form_field>
                 <c-form_field label="Time limit (minutes)"
                               id="id_time_limit_minutes"
@@ -57,7 +57,8 @@
                            id="id_time_limit_minutes"
                            name="time_limit_minutes"
                            min="1"
-                           value="{{ time_limit_minutes|default:'' }}">
+                           max="{{ max_minutes }}"
+                           value="{{ values.time_limit_minutes }}">
                 </c-form_field>
                 <c-form_field label="Max points"
                               id="id_max_points"
@@ -67,7 +68,8 @@
                            id="id_max_points"
                            name="max_points"
                            min="0"
-                           value="{{ orange_check.max_points|default:'0' }}">
+                           max="{{ max_points }}"
+                           value="{{ values.max_points }}">
                 </c-form_field>
             </c-fieldset>
             <c-fieldset heading="Rubric Criteria (optional)">
@@ -84,6 +86,7 @@
                                    @input="setCriterionField"
                                    :data-index="index"
                                    data-prop="label"
+                                   maxlength="200"
                                    required>
                         </div>
                         <div class="input-sm-wrap">
@@ -97,6 +100,7 @@
                                    :data-index="index"
                                    data-prop="points"
                                    min="1"
+                                   max="{{ max_points }}"
                                    required>
                         </div>
                         <div class="mb-5">
@@ -135,7 +139,7 @@
             </c-button_row>
         </form>
     </c-module>
-    {% if existing_criteria %}{{ existing_criteria|json_script:"criteria-data" }}{% endif %}
+    {{ criteria|json_script:"criteria-data" }}
     <script>
     document.addEventListener('alpine:init', () => {
         Alpine.data('criteriaForm', () => {

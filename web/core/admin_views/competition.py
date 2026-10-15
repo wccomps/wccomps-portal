@@ -1,5 +1,3 @@
-import csv
-import io
 import json
 import logging
 from collections.abc import Callable, Iterator
@@ -42,7 +40,7 @@ from core.admin_views.places import (
 )
 from core.admin_views.readiness import action_readiness_check, action_readiness_fix
 from core.authentik_manager import AuthentikManager
-from core.authentik_utils import reset_team_credentials
+from core.authentik_utils import credentials_csv, reset_team_credentials
 from core.competition_utils import WipedData, competition_data_counts
 from core.discord_tasks import LogToChannel
 from core.forms import (
@@ -385,13 +383,7 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
         else:
             failed_resets.append((username, error))
 
-    csv_buffer = io.StringIO()
-    writer = csv.writer(csv_buffer)
-    writer.writerow(["Username", "Password"])
-    for _team_num, username, password in password_list:
-        writer.writerow([username, password])
-
-    csv_content = csv_buffer.getvalue()
+    csv_content = credentials_csv((username, password) for _num, username, password in password_list)
 
     AuditLog.objects.create(
         action="blueteam_passwords_reset",

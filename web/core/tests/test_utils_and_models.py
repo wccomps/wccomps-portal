@@ -6,7 +6,6 @@ import pytest
 from django.contrib.auth.models import User
 from django.utils import timezone
 from hypothesis import given
-from hypothesis import settings as hypothesis_settings
 from hypothesis import strategies as st
 
 from core.auth_utils import get_authentik_groups, get_authentik_id, team_for_groups
@@ -237,7 +236,6 @@ class TestTeamModelProperties:
         team_number=st.integers(min_value=1, max_value=50),
         max_members=st.integers(min_value=1, max_value=100),
     )
-    @hypothesis_settings(max_examples=20, deadline=None)
     def test_team_creation_with_valid_numbers(self, team_number: int, max_members: int):
         """Team can be created with valid team numbers, and its member limit is the competition's."""
         CompetitionConfig.objects.update_or_create(pk=1, defaults={"max_team_members": max_members})
@@ -256,7 +254,6 @@ class TestTeamModelProperties:
         assert team.is_full() is False
 
     @given(max_members=st.integers(min_value=1, max_value=20))
-    @hypothesis_settings(max_examples=10, deadline=None)
     def test_team_is_full_with_varying_capacity(self, max_members: int):
         """Team.is_full() returns correct result based on member count vs capacity."""
         # Use a unique team number for each test
@@ -281,7 +278,6 @@ class TestTeamModelProperties:
     @given(
         team_number=st.integers(min_value=51, max_value=100),
     )
-    @hypothesis_settings(max_examples=10, deadline=None)
     def test_team_rejects_invalid_team_numbers(self, team_number: int):
         """Team creation should fail for team numbers outside 1-50 range."""
         from django.core.exceptions import ValidationError

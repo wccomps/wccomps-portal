@@ -320,3 +320,29 @@ class TestAdminCategoryDelete:
         client.force_login(blue_team_user)
         response = client.get(reverse("admin_category_delete", kwargs={"category_id": category.pk}))
         assert response.status_code == 302
+
+
+def test_the_category_page_and_the_admin_edit_categories_with_one_model_form():
+    """One form for TicketCategory, so its limits (the integer columns') come from the model, not a copy."""
+    from django.contrib import admin
+    from django.forms import ModelForm
+
+    from core.admin_views import categories
+    from ticketing.forms import TicketCategoryForm
+    from ticketing.models import TicketCategory
+
+    assert issubclass(TicketCategoryForm, ModelForm) and TicketCategoryForm._meta.model is TicketCategory
+    assert admin.site._registry[TicketCategory].form is TicketCategoryForm
+    assert categories.TicketCategoryForm is TicketCategoryForm
+
+
+@pytest.mark.django_db
+def test_post_refuses_points_its_column_cannot_hold(gold_team_user):
+    from ticketing.models import TicketCategory
+
+    client = Client()
+    client.force_login(gold_team_user)
+    before = TicketCategory.objects.count()
+    response = client.post("/ops/admin/categories/create/", {"display_name": "Huge", "points": str(2**31)})
+    assert response.status_code == 200
+    assert TicketCategory.objects.count() == before

@@ -1,19 +1,23 @@
 from django import forms
+from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from .models import Event, RegistrationContact, Season, TeamRegistration
 from .services import NewEvent, NewSeason, new_event_problem
+
+CONTACT_EMAIL_MAX_LENGTH = RegistrationContact._meta.get_field("email").max_length
 
 
 class RegistrationForm(forms.ModelForm[TeamRegistration]):
     """Combined form for registration with captain, coach, events, and rules."""
 
     captain_name = forms.CharField(max_length=255, label="Full Name")
-    captain_email = forms.EmailField(label="Email Address")
+    # The column's length: a form EmailField alone accepts 320 characters
+    captain_email = forms.EmailField(max_length=CONTACT_EMAIL_MAX_LENGTH, label="Email Address")
     captain_phone = forms.CharField(max_length=50, label="Phone Number")
 
     coach_name = forms.CharField(max_length=255, label="Full Name")
-    coach_email = forms.EmailField(label="Email Address")
+    coach_email = forms.EmailField(max_length=CONTACT_EMAIL_MAX_LENGTH, label="Email Address")
     coach_phone = forms.CharField(max_length=50, label="Phone Number", required=False)
 
     events = forms.ModelMultipleChoiceField(
@@ -158,6 +162,16 @@ class EventForm(forms.ModelForm[Event]):
             "end_time": forms.TimeInput(attrs={"type": "time"}),
             "registration_deadline": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
         }
+
+    def validate_constraints(self) -> None:
+        """Check the model's constraints with the instance's season: it isn't a field (the view sets it), so
+        ModelForm's own check would leave out every constraint on it. A clash shows on the event number."""
+        if {"event_type", "event_number"} & set(self.errors):
+            return
+        try:
+            self.instance.validate_constraints()
+        except ValidationError as clash:
+            self.add_error("event_number", clash.messages)
 
 
 class RejectRegistrationForm(forms.Form):

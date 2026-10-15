@@ -1,8 +1,8 @@
-from django import forms
 from django.contrib import admin
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 
+from .forms import TicketCategoryForm
 from .models import (
     CommentRateLimit,
     Ticket,
@@ -11,68 +11,6 @@ from .models import (
     TicketComment,
     TicketHistory,
 )
-
-TICKET_FIELD_CHOICES = [
-    ("hostname", "Hostname"),
-    ("ip_address", "IP Address"),
-    ("service_name", "Service Name"),
-    ("description", "Description"),
-]
-
-
-class CheckboxSelectMultipleJSON(forms.CheckboxSelectMultiple):
-    """Checkbox widget that stores values as a JSON list."""
-
-
-class TicketCategoryForm(forms.ModelForm[TicketCategory]):
-    """Custom form for TicketCategory with checkbox widgets for JSON fields."""
-
-    required_fields = forms.MultipleChoiceField(
-        choices=TICKET_FIELD_CHOICES,
-        widget=CheckboxSelectMultipleJSON,
-        required=False,
-        help_text="Fields the user must fill in when creating a ticket.",
-    )
-    optional_fields = forms.MultipleChoiceField(
-        choices=TICKET_FIELD_CHOICES,
-        widget=CheckboxSelectMultipleJSON,
-        required=False,
-        help_text="Fields shown but not required.",
-    )
-
-    class Meta:
-        model = TicketCategory
-        fields = "__all__"
-        widgets = {
-            "variable_cost_note": forms.Textarea(
-                attrs={
-                    "placeholder": 'e.g. "If consultation exceeded 45 minutes, '
-                    'ticket lead will manually adjust to 300 points"',
-                }
-            ),
-            "playbook": forms.Textarea(
-                attrs={
-                    "rows": 4,
-                    "placeholder": "1. Verify service status\n2. Check credentials\n3. Restart daemon",
-                }
-            ),
-        }
-
-    def clean_required_fields(self) -> list[str]:
-        """Return the selected values as a list for JSON storage."""
-        return list(self.cleaned_data.get("required_fields", []))
-
-    def clean_optional_fields(self) -> list[str]:
-        """Return the selected values as a list for JSON storage."""
-        return list(self.cleaned_data.get("optional_fields", []))
-
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
-        if self.instance and self.instance.pk:
-            if self.instance.required_fields:
-                self.initial["required_fields"] = self.instance.required_fields
-            if self.instance.optional_fields:
-                self.initial["optional_fields"] = self.instance.optional_fields
 
 
 class TicketAttachmentInline(admin.TabularInline[TicketAttachment, Ticket]):
@@ -225,12 +163,12 @@ class TicketAdmin(admin.ModelAdmin[Ticket]):
 
     @admin.action(description="Export selected tickets as CSV")
     def export_as_csv(self, request: HttpRequest, queryset: QuerySet[Ticket]) -> HttpResponse:
-        import csv
+        from core.csv_export import csv_writer
 
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="tickets.csv"'
 
-        writer = csv.writer(response)
+        writer = csv_writer(response)
         writer.writerow(
             [
                 "Ticket Number",

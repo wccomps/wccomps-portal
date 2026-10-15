@@ -85,3 +85,24 @@ class TestFollowUpDismiss:
         client.login(username="orange2", password="test")
         response = client.post(f"/orange-team/followups/{followup.pk}/dismiss/")
         assert response.status_code == 404
+
+
+def test_the_follow_up_input_allows_what_the_form_allows() -> None:
+    from orange_team.forms import FollowUpForm
+    from orange_team.models import OrangeCheckIn
+
+    user = User.objects.create_user(username="orange1", password="test")
+    UserGroups.objects.create(user=user, authentik_id="o1", groups=["WCComps_OrangeTeam"])
+    OrangeCheckIn.objects.create(user=user)
+    team = Team.objects.create(team_number=1, team_name="T1")
+    check = OrangeCheck.objects.create(title="Test", description="Desc", scheduled_at=timezone.now())
+    OrangeAssignment.objects.create(orange_check=check, user=user, team=team)
+    client = Client()
+    client.force_login(user)
+
+    page = client.get("/orange-team/").content.decode()
+
+    limit = FollowUpForm.base_fields["minutes"].max_value
+    assert 'name="minutes"' in page
+    assert f'max="{limit}"' in page
+    assert not FollowUpForm({"assignment_id": "1", "minutes": str(limit + 1)}).is_valid()

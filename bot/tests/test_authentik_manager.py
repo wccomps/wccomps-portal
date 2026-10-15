@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 import httpx
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
@@ -37,7 +37,6 @@ class TestAuthentikAPIError:
         message=st.text(min_size=1, max_size=100),
         status_code=st.integers(min_value=100, max_value=599),
     )
-    @settings(max_examples=50, suppress_health_check=[HealthCheck.too_slow])
     def test_error_message_property(self, message: str, status_code: int) -> None:
         """Property: error message always contains the original message."""
         error = AuthentikAPIError(message=message, status_code=status_code)
@@ -100,7 +99,6 @@ class TestAuthentikManager:
         assert "Resource not found" in str(error)
 
     @given(status_code=st.integers(min_value=500, max_value=599))
-    @settings(max_examples=20)
     def test_handle_response_error_5xx(self, status_code: int) -> None:
         """Property: 5xx errors are handled consistently."""
         with patch("core.authentik_manager.settings") as mock_settings:
