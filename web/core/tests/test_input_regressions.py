@@ -5,22 +5,38 @@ import io
 from datetime import date, timedelta
 
 import pytest
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import Client
+from django.urls import reverse
+from django.utils.http import content_disposition_header
 from hypothesis import example, given
 from hypothesis import strategies as st
 from packets.forms import PacketResendForm
+from packets.models import SENT_STATUSES, Packet
 from packets.views import _parse_team_extras_csv
 from registration.forms import RegistrationForm
 from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, Season, TeamRegistration, normalize_school_name
 from registration.services import SchoolListRow, import_school_list
+from scoring.screenshots import detect_inline_type
 
 from core.admin_views.competition import TIMEZONE_CHOICES
 from core.forms import SchoolInfoEditForm
-from core.tests.strategies import datetime_text, email_text, long_email, request_text, rolled_back
+from core.tests.strategies import (
+    content_types,
+    datetime_text,
+    email_text,
+    file_bytes,
+    file_names,
+    long_email,
+    request_text,
+    rolled_back,
+)
 from core.utils import parse_datetime_to_utc
 from team.forms import parse_csv_file
 from team.models import Team
+from ticketing.models import Ticket, TicketAttachment, TicketCategory
 
 
 @given(when=datetime_text(), tz=st.one_of(st.sampled_from([tz for tz, _ in TIMEZONE_CHOICES]), request_text(40)))
@@ -127,3 +143,50 @@ def test_a_packets_per_team_csv_parses_or_gives_nothing(text: str) -> None:
     for team, values in _parse_team_extras_csv(text).items():
         assert team == str(int(team))
         assert all(isinstance(v, str) for v in values.values())
+
+
+@pytest.mark.django_db
+@given(name=file_names(), content_type=content_types())
+@example(name="a.pdf", content_type="application/" + "x" * 100)
+@example(name='a"b.pdf', content_type="application/pdf")
+def test_an_uploaded_packet_is_stored_and_downloads(name: str, content_type: str, gold_team_user: User) -> None:
+    """The client's file name and content type are stored within their columns and sent back as safe headers."""
+    client = Client()
+    client.force_login(gold_team_user)
+    upload = SimpleUploadedFile(name or "unnamed", b"%PDF-1.7 packet", content_type=content_type)
+    with rolled_back():
+        response = client.post(reverse("upload_packet"), {"title": "Packet", "packet_file": upload})
+        assert response.status_code < 500
+        packet = Packet.objects.order_by("-pk").first()
+        if packet is None:
+            return
+        Packet.objects.filter(pk=packet.pk).update(status=SENT_STATUSES[0], web_access_enabled=True)
+        download = client.get(reverse("download_packet", args=[packet.pk]))
+        assert download.status_code == 200
+        assert download["Content-Disposition"] == content_disposition_header(
+            as_attachment=True, filename=packet.filename
+        )
+
+
+@pytest.mark.django_db
+@given(name=file_names(), content_type=content_types(), content=file_bytes())
+@example(name="a.png", content_type="image/" + "x" * 100, content=b"\x89PNG\r\n\x1a\n")
+@example(name="a.png", content_type="image/png", content=b"<script>alert(1)</script>")
+def test_a_ticket_attachment_is_typed_from_its_bytes(
+    name: str, content_type: str, content: bytes, ticketing_support_user: User
+) -> None:
+    """A client's claimed type is neither stored (it can be longer than the column) nor trusted to show inline."""
+    client = Client()
+    client.force_login(ticketing_support_user)
+    upload = SimpleUploadedFile(name or "unnamed", content, content_type=content_type)
+    with rolled_back():
+        team = Team.objects.create(team_number=1, team_name="Team 01")
+        ticket = Ticket.objects.create(team=team, category=TicketCategory.objects.first(), ticket_number="T001-001")
+        response = client.post(reverse("ticket_attachment_upload", args=[ticket.ticket_number]), {"attachment": upload})
+        assert response.status_code < 500
+        for attachment in TicketAttachment.objects.filter(ticket=ticket):
+            url = reverse("ticket_attachment_download", args=[ticket.ticket_number, attachment.pk]) + "?inline=1"
+            download = client.get(url)
+            inline_type = detect_inline_type(content)
+            assert download["Content-Type"] == (inline_type or attachment.mime_type)
+            assert download["Content-Disposition"].startswith("inline" if inline_type else "attachment")

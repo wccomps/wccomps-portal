@@ -1,4 +1,5 @@
 import logging
+import mimetypes
 from typing import cast
 
 from django.contrib.auth.models import User
@@ -6,6 +7,7 @@ from django.core.files.uploadedfile import UploadedFile
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils.http import content_disposition_header
+from scoring.screenshots import DOWNLOAD_MIME, detect_inline_type
 
 from core.auth_utils import get_user_team, has_permission
 from ticketing.models import Ticket, TicketAttachment
@@ -13,15 +15,6 @@ from ticketing.models import Ticket, TicketAttachment
 logger = logging.getLogger(__name__)
 
 MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10MB
-
-# MIME types safe for inline viewing (no XSS risk)
-INLINE_SAFE_MIME_TYPES = {
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-    "application/pdf",
-}
 
 
 def _save_attachment(
@@ -44,7 +37,8 @@ def _save_attachment(
             ticket=ticket,
             file_data=uploaded_file.read(),
             filename=uploaded_file.name[:255],
-            mime_type=uploaded_file.content_type or "application/octet-stream",
+            # From the name, not the client's claimed type, which can be anything (and longer than the column)
+            mime_type=mimetypes.guess_type(uploaded_file.name)[0] or DOWNLOAD_MIME,
             uploaded_by=uploaded_by,
         )
     finally:
@@ -102,12 +96,13 @@ def ticket_attachment_download(
     if not is_ops and attachment.ticket.team != team:
         return HttpResponse("Access denied", status=403)
 
-    # Only images and PDFs render inline; anything else downloads, to prevent XSS via HTML/SVG
-    inline_requested = request.GET.get("inline") == "1"
-    is_safe_for_inline = attachment.mime_type in INLINE_SAFE_MIME_TYPES
-    as_attachment = not (inline_requested and is_safe_for_inline)
+    # Only files whose bytes are a raster image or PDF render inline; anything else downloads, to prevent XSS via
+    # HTML/SVG. Decided from the bytes: the stored type of older rows is the client's claim.
+    data = bytes(attachment.file_data)
+    inline_type = detect_inline_type(data) if request.GET.get("inline") == "1" else None
+    as_attachment = inline_type is None
 
-    response = HttpResponse(bytes(attachment.file_data), content_type=attachment.mime_type)
+    response = HttpResponse(data, content_type=inline_type or attachment.mime_type)
     response["Content-Disposition"] = str(
         content_disposition_header(as_attachment=as_attachment, filename=attachment.filename)
     )
