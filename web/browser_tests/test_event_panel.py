@@ -76,6 +76,8 @@ def test_played_and_stopped_the_panel_checks_unfinished_work(live_server, pw_bro
                 "NEXT",
             ]
             assert page.locator("#readiness").count() == 0 and page.locator("#live").count() == 0
+            assert page.get_by_role("button", name="Stop Competition").count() == 1
+            assert page.get_by_role("button", name="Start Competition").count() == 1
             assert (action.inner_text(), action.get_attribute("href")) == (
                 "Email scorecards",
                 "/scoring/email-scorecards/",
@@ -98,9 +100,9 @@ def test_while_running_the_page_offers_stop_and_shows_the_live_numbers(live_serv
         assert status == 200
         assert "RUNNING" in panel.inner_text().upper()
         assert panel.get_by_role("button", name="Stop Competition").is_visible()
-        # One Stop, in the next-step bar, as the approved running mockup shows; no Start while running
+        # One Stop, in the next-step bar; Start stays, so an incomplete start can be run again
         assert page.get_by_role("button", name="Stop Competition").count() == 1
-        assert page.get_by_role("button", name="Start Competition").count() == 0
+        assert page.get_by_role("button", name="Start Competition").count() == 1
         live = page.locator("#live")
         assert "Open or claimed tickets" in live.inner_text()
         assert "Never synced" in live.inner_text()

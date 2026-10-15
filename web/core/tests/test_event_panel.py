@@ -198,9 +198,10 @@ def test_the_page_shows_only_the_next_steps_section(client, stage, section):
 
     shown = [key for key, heading in SECTION_HEADINGS.items() if heading in page and f'id="{key}"' in page]
     assert shown == ([section] if section else [])
-    # Stop is in one place: the next-step button while running, the Start/Stop row otherwise
+    # Stop is in one place: the next-step button while running, the Start/Stop row otherwise. Start is always there,
+    # so an incomplete start can be run again
     assert page.count('@click="stopCompetition"') == 1
-    assert ('@click="startCompetition"' in page) == (stage != "running")
+    assert page.count('@click="startCompetition"') == 1
     assert "<summary>Advanced: reset team passwords, Danger Zone</summary>" in page
 
 

@@ -75,28 +75,29 @@
                 </ul>
             {% endif %}
         </section>
-        {% if not panel.stage.running %}
-            <section id="controls" class="d-flex flex-wrap items-center gap-10 mt-20">
-                <c-button variant="primary" @click="startCompetition" ::disabled="loading">
-                    Start Competition
-                </c-button>
+        <section id="controls" class="d-flex flex-wrap items-center gap-10 mt-20">
+            <c-button variant="primary" @click="startCompetition" ::disabled="loading">
+                Start Competition
+            </c-button>
+            {% if not panel.stage.running %}
                 <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
                     Stop Competition
                 </c-button>
-                <span class="text-muted text-md">
-                    {% if panel.stage.played %}
-                        Teams can't sign in while stopped. Scores stay, so grading goes on.
-                    {% else %}
-                        Start turns on the active teams' accounts and opens the competition apps to them.
-                    {% endif %}
-                    {% if panel.facts.starts_at %}
-                        The schedule starts it at <span x-data="formatTime"
-       data-iso="{{ panel.facts.starts_at|date:'c' }}"
-       x-text="formatted"></span>.
-                    {% endif %}
-                </span>
-            </section>
-        {% endif %}
+            {% endif %}
+            <span class="text-muted text-md">
+                {% if panel.stage.running %}
+                    If a start didn't turn everything on, press Start again: it retries the apps and accounts and doesn't
+                    post the start message twice.
+                {% elif panel.stage.played %}
+                    Teams can't sign in while stopped. Scores stay, so grading goes on.
+                {% else %}
+                    Start turns on the active teams' accounts and opens the competition apps to them.
+                {% endif %}
+                {% if not panel.stage.running and panel.facts.starts_at %}
+                    The schedule starts it at <span x-data="formatTime" data-iso="{{ panel.facts.starts_at|date:'c' }}" x-text="formatted"></span>.
+                {% endif %}
+            </span>
+        </section>
         <template x-if="notCloseOutStreaming">
             <c-progress_bar />
         </template>
