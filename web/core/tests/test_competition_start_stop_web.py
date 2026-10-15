@@ -173,12 +173,13 @@ def _leftovers():
     return Event.objects.get(pk=event.pk)
 
 
-def test_the_danger_page_offers_leftovers_with_their_counts(admin_client):
+def test_advanced_offers_leftovers_with_their_counts(admin_client):
     _leftovers()
 
-    page = " ".join(admin_client.get(reverse("admin_competition_danger")).content.decode().split())
+    page = " ".join(admin_client.get(reverse("admin_competition")).content.decode().split())
+    page = page[page.index('id="advanced"') :]
 
-    assert "Clear Leftover Data" in page
+    assert page.count('@click="clearLeftovers"') == 1
     assert "1 ServiceScore" in page
     assert "not recorded at any event yet" in page
     assert "It is not archived" in page
@@ -207,10 +208,10 @@ def test_without_a_finalized_event_leftovers_are_hidden_and_refused(admin_client
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     ServiceScore.objects.create(team=Team.objects.create(team_number=1, team_name="Team 1"), service_points=3)
 
-    page = admin_client.get(reverse("admin_competition_danger")).content.decode()
+    page = admin_client.get(reverse("admin_competition")).content.decode()
     response = _post(admin_client, "clear_leftover_data", confirm="YOLO")
 
-    assert "Clear Leftover Data" not in page
+    assert '@click="clearLeftovers"' not in page
     assert response.status_code == 400
     assert response.json()["error"] == (
         "These scores are not recorded at any event yet and no event was ever closed out. Finish grading, then email "
@@ -256,7 +257,7 @@ def test_scores_after_a_close_out_can_still_be_recorded_with_close_out(admin_cli
     assert '@click="closeOutEvent"' in page
 
 
-def test_live_data_without_scores_points_at_the_danger_page(admin_client, admin_user):
+def test_live_data_without_scores_points_at_advanced(admin_client, admin_user):
     from team.models import DiscordLink
 
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
@@ -265,7 +266,8 @@ def test_live_data_without_scores_points_at_the_danger_page(admin_client, admin_
 
     page = admin_client.get(reverse("admin_competition")).content.decode()
 
-    assert "Clear leftover data on the competition Danger Zone page" in page
+    assert "Clear leftover data under Advanced on the Competition page" in page
+    assert page.count('@click="clearLeftovers"') == 1
     assert '@click="closeOutEvent"' not in page
 
 
@@ -301,20 +303,22 @@ def _scoreless_open_event():
     return event
 
 
-def test_the_danger_page_offers_cancel_only_for_an_open_event_with_no_scores(admin_client):
+def test_advanced_offers_cancel_only_for_an_open_event_with_no_scores(admin_client):
     from scoring.models import ServiceScore
 
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
-    _scoreless_open_event()
-    offered = admin_client.get(reverse("admin_competition_danger")).content.decode()
+    event = _scoreless_open_event()
+    offered = admin_client.get(reverse("admin_competition")).content.decode()
     ServiceScore.objects.create(team_id=_team_with_school().pk, service_points=1)
-    scored = admin_client.get(reverse("admin_competition_danger")).content.decode()
+    scored = admin_client.get(reverse("admin_competition")).content.decode()
 
-    assert '@click.prevent="guardedCancelEvent"' in offered
-    assert '@click.prevent="guardedCancelEvent"' not in scored
+    assert offered.count('@click="cancelEvent"') == 1
+    assert offered.index('@click="cancelEvent"') > offered.index('id="advanced"')
+    assert f"cancelOpenEvent: '{event.pk}'" in offered
+    assert '@click="cancelEvent"' not in scored
 
 
-def test_cancelling_from_the_danger_page(admin_client):
+def test_cancelling_the_open_event(admin_client):
     from core.models import AuditLog
 
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})

@@ -144,11 +144,11 @@
         {% if section_partial %}
             {% include section_partial %}
         {% endif %}
-        <c-fieldset id="advanced"
+        <c-fieldset id="{{ advanced_id }}"
                     class="mt-20"
-                    heading="Advanced: reset team passwords, Danger Zone"
+                    heading="Advanced: reset team passwords{% if can_cancel %}, cancel the event{% endif %}{% if leftovers %}, clear leftover data{% endif %}"
                     collapsible="true"
-                    collapsed="true">
+                    collapsed="{{ advanced_open|yesno:'false,true' }}">
             <p class="help">Tools outside the normal run of an event.</p>
             <c-action_box heading="Reset Team Passwords">
                 <form @submit.prevent="resetPasswords">
@@ -183,15 +183,36 @@
                     </c-action_box>
                 </template>
             </c-action_box>
-            <c-action_box heading="Danger Zone" variant="warning" class="mt-20">
-                <p class="help">
-                    Cancel an event opened by mistake or called off before any team scored, or clear data left over that no
-                    event recorded.
-                </p>
-                <c-link href="{% url 'admin_competition_danger' %}" variant="danger">
-                    Open the Danger Zone
-                </c-link>
-            </c-action_box>
+            {% if can_cancel %}
+                <c-action_box heading="Cancel Event" variant="warning" class="mt-20">
+                    <p class="help">
+                        {{ panel.stage.event }} is open and no team has scores yet. Cancelling calls it off: it closes
+                        the event and removes its team assignments, so it can be deleted unless packets were sent for
+                        it. Nothing is recorded for it. The school list and sent packets stay; Discord links and tickets
+                        are left over for Clear leftover data.
+                    </p>
+                    <c-button_row class="mt-10">
+                        <c-button variant="warning" @click="cancelEvent" ::disabled="loading">
+                            Cancel Event
+                        </c-button>
+                    </c-button_row>
+                </c-action_box>
+            {% endif %}
+            {% if leftovers %}
+                <c-action_box heading="Clear Leftover Data" variant="warning" class="mt-20">
+                    <p class="help">{{ panel.stage.status }}</p>
+                    <p class="help">
+                        It is not archived: clearing it deletes it for good. To keep scores, record them with Close Out
+                        Event instead. Closed-out events' results are not touched.
+                    </p>
+                    <p class="help">As of loading this page: {{ leftovers }}.</p>
+                    <c-button_row class="mt-10">
+                        <c-button variant="warning" @click="clearLeftovers" ::disabled="loading">
+                            Clear Leftover Data
+                        </c-button>
+                    </c-button_row>
+                </c-action_box>
+            {% endif %}
         </c-fieldset>
         <c-toast />
     </div>
@@ -207,6 +228,7 @@ document.addEventListener('alpine:init', () => {
         closeOutType: 'invitational',
         closeOutSeenSeason: '{{ active_season.pk|default_if_none:"" }}',
         closeOutOpenEvent: '{{ open_event.pk|default_if_none:"" }}',
+        cancelOpenEvent: '{{ panel.stage.event.pk|default_if_none:"" }}',
         closeOutOffered: {{ can_close_out|yesno:"true,false" }},
         closeOutChecking: false,
         closeOutChecked: false,
@@ -274,6 +296,29 @@ document.addEventListener('alpine:init', () => {
                     new_type: this.closeOutType,
                     current_season: this.closeOutSeenSeason,
                 });
+            }
+        },
+
+        cancelEvent() {
+            const message = 'CANCEL THE OPEN EVENT?\n\n' +
+                'It closes the event and removes its team assignments. Nothing is recorded for it.\n' +
+                'The school list and sent packets stay.\n\n' +
+                'Type "yolo" to confirm:';
+            const response = prompt(message);
+            if (response && response.toLowerCase() === 'yolo') {
+                this.doAction('cancel_event', { confirm: response, open_event: this.cancelOpenEvent });
+            }
+        },
+
+        clearLeftovers() {
+            const message = 'CLEAR LEFTOVER DATA?\n\n' +
+                'This deletes all live data not recorded at any event, including any added since this page loaded.\n' +
+                'It is NOT archived.\n' +
+                'Closed-out events\' results are kept.\n\n' +
+                'Type "yolo" to confirm:';
+            const response = prompt(message);
+            if (response && response.toLowerCase() === 'yolo') {
+                this.doAction('clear_leftover_data', { confirm: response });
             }
         },
 

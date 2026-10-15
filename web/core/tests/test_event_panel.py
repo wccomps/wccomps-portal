@@ -239,7 +239,10 @@ def test_the_page_shows_only_the_next_steps_section(client, stage, section):
     assert page.count('@click="closeOutEvent"') == (1 if section == "close-out" else 0)
     for label in ("Close out the event", "Check readiness and start"):
         assert f">{label}</a>" not in page, label
-    assert 'id="advanced"' in page and "Advanced: reset team passwords, Danger Zone" in page
+    assert 'id="advanced"' in page and "Advanced: reset team passwords" in page
+    # Cancel and Clear are in Advanced, once each, and only while allowed
+    assert page.count('@click="cancelEvent"') == (1 if stage in ("packets", "start") else 0)
+    assert page.count('@click="clearLeftovers"') == (1 if stage == "leftovers" else 0)
 
 
 ALL_STAGES = ["idle", "packets", "start", "running", "played", "unrecorded", "leftovers"]
@@ -351,16 +354,38 @@ def test_running_with_no_recorded_start_or_sync_says_so(client):
     assert "Never synced" in live
 
 
-def test_leftovers_point_at_the_danger_zone(client):
+def test_leftovers_open_advanced_where_clear_leftover_data_is(client):
     from ticketing.models import Ticket
 
     team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     Ticket.objects.create(ticket_number="T001-001", team=team, title="Left")
 
-    panel = _event_section(_page(client))
+    page = _page(client)
+    panel = _flat(_event_section(page))
 
-    assert "Clear leftover data" in panel
-    assert f'href="{reverse("admin_competition_danger")}"' in panel
+    assert "Clear leftover data under Advanced on the Competition page" in panel
+    assert "<a " not in _row(panel, "Next step")
+    assert "under Advanced below" in _flat(page[page.index('id="leftovers"') :])
+    advanced = page[page.index('id="advanced"') :]
+    assert 'data-collapsed="false"' in advanced[: advanced.index(">")]
+    assert page.index('@click="clearLeftovers"') > page.index('id="advanced"')
+    assert "1 Ticket" in _flat(advanced)
+
+
+def test_advanced_stays_collapsed_outside_the_leftovers_stage(client):
+    _event(is_active=True)
+    _teams(1)
+
+    page = _page(client)
+    advanced = page[page.index('id="advanced"') :]
+
+    assert 'data-collapsed="true"' in advanced[: advanced.index(">")]
+
+
+def test_the_danger_page_is_gone(client):
+    assert client.get("/ops/admin/competition/danger/").status_code == 404
+    with pytest.raises(NoReverseMatch):
+        reverse("admin_competition_danger")
 
 
 def test_a_failing_close_out_check_does_not_break_the_page(client):
@@ -380,10 +405,17 @@ def test_the_rarely_used_tools_sit_under_advanced_below_the_normal_flow(client):
     _teams(1, score=True)
     page = _page(client)
 
-    advanced = page.index("Advanced")
+    advanced = page.index('id="advanced"')
     assert page.index('id="close-out"') < advanced
-    assert page.index(f'href="{reverse("admin_competition_danger")}"', advanced) > advanced
     assert page.index('@submit.prevent="resetPasswords"') > advanced
+
+
+def test_cancel_sits_under_advanced_below_the_normal_flow(client):
+    _event(is_active=True)
+    _teams(1)
+    page = _page(client)
+
+    assert page.index('@click="cancelEvent"') > page.index('id="advanced"')
 
 
 def _queries(client):
@@ -432,7 +464,8 @@ def test_the_guide_walks_the_steps_in_order_with_their_links(client):
     hrefs = set(re.findall(r'href="([^"]*)"', page))
     for action in PLACES:
         assert action_url(action) in hrefs, action
-    assert reverse("admin_competition_danger") in hrefs
+    assert f"{reverse('admin_competition')}#advanced" in hrefs
+    assert "Danger Zone" not in page
     assert "\u2014" not in page and "\u2013" not in page
 
 

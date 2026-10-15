@@ -31,6 +31,7 @@ from scoring.quotient_sync import sync_quotient_metadata
 
 from core.admin_views.event_panel import event_facts, event_panel
 from core.admin_views.places import (
+    ADVANCED,
     CONTROLS,
     PLACES,
     Section,
@@ -569,7 +570,16 @@ SECTION_CONTEXT: dict[Section, Callable[[EventStage], dict[str, object]]] = {
 def admin_competition(request: HttpRequest) -> HttpResponse:
     stage = event_stage()
     panel = event_panel(event_facts(stage))
-    context: dict[str, object] = {"panel": panel, "controls_id": CONTROLS}
+    can_clear = not clear_leftovers_problem(stage)
+    context: dict[str, object] = {
+        "panel": panel,
+        "controls_id": CONTROLS,
+        "advanced_id": ADVANCED,
+        # Advanced opens while Clear leftover data is the next step: the Leftover data section points at it
+        "advanced_open": stage.next_action == Action.CLEAR,
+        "can_cancel": not cancel_event_problem(stage),
+        "leftovers": _wiped_summary(competition_data_counts()) if can_clear else "",
+    }
     if (section := panel.section) is not None:
         context["section_partial"] = section_partial(section)
         if section in SECTION_CONTEXT:
@@ -623,24 +633,6 @@ def admin_competition_action(request: HttpRequest) -> HttpResponseBase:
 
     config = CompetitionConfig.get_config()
     return handler(request, config, user.username)
-
-
-@require_permission("admin", "gold_team")
-def admin_competition_danger(request: HttpRequest) -> HttpResponse:
-    """Danger zone page for destructive competition operations."""
-    config = CompetitionConfig.get_config()
-    stage = event_stage()
-    can_clear = not clear_leftovers_problem(stage)
-    return render(
-        request,
-        "admin/competition_danger.html",
-        {
-            "config": config,
-            "stage": stage,
-            "leftovers": _wiped_summary(competition_data_counts()) if can_clear else "",
-            "can_cancel": not cancel_event_problem(stage),
-        },
-    )
 
 
 def guide_partial(action: Action) -> str:

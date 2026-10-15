@@ -73,7 +73,9 @@ def test_the_next_step_and_the_current_step_are_the_same_action(stage, facts):
     assert current == ([panel.stage.next_action] if panel.stage.next_action in STEPS else [])
     assert panel.action_url == action_url(panel.stage.next_action)
     # The next-step button links only a step taken on another page; this page's own controls need none
-    assert panel.action_elsewhere == (panel.stage.next_action not in (Action.START, Action.STOP, Action.CLOSE_OUT))
+    assert panel.action_elsewhere == (
+        panel.stage.next_action not in (Action.START, Action.STOP, Action.CLOSE_OUT, Action.CLEAR)
+    )
 
 
 @pytest.mark.parametrize(
@@ -87,11 +89,12 @@ def test_the_next_step_and_the_current_step_are_the_same_action(stage, facts):
         (Action.STOP, "admin_competition", ""),
         (Action.FINISH, "scoring:email_scorecards", ""),
         (Action.CLOSE_OUT, "admin_competition", ""),
-        (Action.CANCEL, "admin_competition_danger", ""),
-        (Action.CLEAR, "admin_competition_danger", ""),
+        # Cancel and Clear are under Advanced, which is always there
+        (Action.CANCEL, "admin_competition", "#advanced"),
+        (Action.CLEAR, "admin_competition", "#advanced"),
     ],
 )
-def test_a_link_into_the_competition_page_points_only_at_the_start_stop_row(action, url_name, anchor):
+def test_a_link_into_the_competition_page_points_only_at_an_always_shown_part(action, url_name, anchor):
     assert action_url(action) == reverse(url_name) + anchor
 
 

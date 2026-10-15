@@ -264,7 +264,7 @@ def test_the_pages_no_longer_offer_finalize_clear_or_cleanup(client):
     _open_event()
     _team_with_school()
 
-    page = _page(client) + client.get(reverse("admin_competition_danger")).content.decode()
+    page = _page(client)
 
     for gone in ("finalize_event", "Finalize Results", "clear_event", "Clear Event", "cleanup_competition"):
         assert gone not in page

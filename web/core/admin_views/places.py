@@ -35,6 +35,8 @@ class SetupSection(StrEnum):
 
 # The competition page's Start/Stop row, always shown
 CONTROLS = "controls"
+# The competition page's Advanced section, always shown (collapsed unless Clear leftover data is next)
+ADVANCED = "advanced"
 
 
 class Kind(StrEnum):
@@ -77,10 +79,8 @@ PLACES: dict[Action, ActionPlace] = {
         "Finish scoring and email scorecards", Kind.ELSEWHERE, "scoring:email_scorecards", Section.CLOSE_OUT
     ),
     Action.CLOSE_OUT: ActionPlace("Close Out Event", Kind.HERE, shows=Section.CLOSE_OUT),
-    Action.CANCEL: ActionPlace("Cancel event", Kind.ELSEWHERE, "admin_competition_danger", rare=True),
-    Action.CLEAR: ActionPlace(
-        "Clear leftover data", Kind.ELSEWHERE, "admin_competition_danger", Section.LEFTOVERS, rare=True
-    ),
+    Action.CANCEL: ActionPlace("Cancel event", Kind.HERE, ADVANCED, rare=True),
+    Action.CLEAR: ActionPlace("Clear leftover data", Kind.HERE, ADVANCED, Section.LEFTOVERS, rare=True),
 }
 
 # The competition page's steps, in order
