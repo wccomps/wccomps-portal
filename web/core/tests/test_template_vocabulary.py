@@ -183,8 +183,10 @@ PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
     "scoring/scoring_config.html:max-points-grid": (
         "The weight and maximum fields side by side, wrapping below 200px each; grid-2 and grid-4 have fixed columns"
     ),
-    "scoring/submit_incident.html:screenshot-preview-*": "Previews of the screenshots chosen for upload",
-    "scoring/submit_red_finding.html:screenshot-preview-*": "Previews of the screenshots chosen for upload",
+    "scoring/submit_incident.html:screenshot-preview-img": "A chosen screenshot's preview image",
+    "scoring/submit_incident.html:screenshot-preview-name": "A chosen screenshot's file name",
+    "scoring/submit_red_finding.html:screenshot-preview-img": "A chosen screenshot's preview image",
+    "scoring/submit_red_finding.html:screenshot-preview-name": "A chosen screenshot's file name",
     "scoring/submit_red_finding.html:team-btn": "The team picker's buttons, outlined",
     "scoring/submit_red_finding.html:team-btn--selected": "A picked team's button, red",
     "scoring/submit_red_finding.html:modal": MODAL,
@@ -259,6 +261,12 @@ CLASS_NAME_RE = re.compile(r"-?[A-Za-z_][\w-]*")
 CYCLE_RE = re.compile(r"{%\s*cycle\b(.*?)%}", re.DOTALL)
 QUOTED_RE = re.compile(r"""(["'])(.*?)\1""")
 STRING_LITERAL_RE = re.compile(r"""(["'`])((?:\\.|(?!\1)[^\\\n])*)\1""")
+BINDING_ATTRS = {":class", "::class", "x-bind:class"}
+PROPERTY_PATH_RE = re.compile(r"[\w$]+(?:\.[\w$]+)*")
+# A string a getter returns, or a ternary branch or property value yields
+RESULT_LITERAL_RE = re.compile(r"""(?:return|\?|:|\|\|)\s*(["'])([^"']*)\1""")
+LENGTH_RE = re.compile(r"\d+(?:\.\d+)?(?:px|%|rem|ch)|auto")
+VARIANT_FILTER_RE = re.compile(r"""^{{\s*(?P<expr>[\w.]+)\s*\|\s*badge_variant\s*:\s*(["'])(?P<kind>\w+)\2\s*}}$""")
 CLASSLIST_RE = re.compile(
     r"""classList\.(?:add|remove|toggle|replace)\(\s*(["'])([^"']+)\1(?:\s*,\s*(["'])([^"']+)\3)?"""
 )
@@ -373,6 +381,42 @@ def scripted_classes(path: Path) -> set[str]:
     return found
 
 
+def bound_names(path: Path) -> set[str]:
+    """The properties the template's :class bindings read (r.rowClass reads rowClass)."""
+    return {
+        value.split(".")[-1]
+        for tag in tags(path)
+        for attr, value in tag.attrs.items()
+        if attr in BINDING_ATTRS and PROPERTY_PATH_RE.fullmatch(value)
+    }
+
+
+@cache
+def portal_scripts() -> tuple[str, ...]:
+    """Every script the portal runs: the non-standalone templates' scripts and static/js."""
+    found = [
+        script for p in tracked_templates() if not is_standalone_document(p) for script in SCRIPT_RE.findall(text(p))
+    ]
+    return tuple(found + [path.read_text(encoding="utf-8") for path in static_scripts().values()])
+
+
+@cache
+def getter_classes(name: str) -> frozenset[str]:
+    """The class names a getter or property called `name` can return, in any of the portal's scripts."""
+    found: set[str] = set()
+    for script in portal_scripts():
+        bodies = re.findall(rf"\bget\s+{re.escape(name)}\s*\(\)\s*\{{(.*?)\}}", script, re.DOTALL)
+        bodies += [":" + value for value in re.findall(rf"\b{re.escape(name)}\s*:\s*([^,\n]+)", script)]
+        for body in bodies:
+            found |= {c for m in RESULT_LITERAL_RE.finditer(body) for c in literal_classes(m.group(2))}
+    return frozenset(found)
+
+
+def bound_classes(path: Path) -> set[str]:
+    """Classes the template's :class bindings can apply, read from the getters they name."""
+    return {c for name in bound_names(path) for c in getter_classes(name)}
+
+
 @cache
 def shared_component_paths() -> tuple[Path, ...]:
     return tuple(p for p in tracked_templates() if p.parent == COTTON_DIR and p.name in SHARED_COMPONENTS)
@@ -415,10 +459,21 @@ def page_uses() -> dict[str, set[str]]:
 
 @cache
 def component_uses() -> dict[str, set[str]]:
-    """Class -> the shared components that render it."""
+    """Class -> the shared components that render it, in their markup or through the getters their :class
+    bindings read (fieldset's iconClass)."""
     found: dict[str, set[str]] = {}
     for path in shared_component_paths():
-        add(found, template_name(path), written_classes(path))
+        add(found, template_name(path), written_classes(path) | bound_classes(path))
+    return found
+
+
+@cache
+def bound_page_uses() -> dict[str, set[str]]:
+    """Class -> the pages whose :class bindings can apply it. Only the undefined-class check reads this: a getter
+    returning a mistyped class (alert--sucess) renders an unstyled element."""
+    found: dict[str, set[str]] = {}
+    for path in checked_templates():
+        add(found, template_name(path), bound_classes(path))
     return found
 
 
@@ -462,11 +517,9 @@ def utility_classes() -> frozenset[str]:
 
 @cache
 def component_classes() -> frozenset[str]:
-    """The classes the shared components render, plus app.css's modifiers of them (alert--error,
-    progress-bar__fill--warn): the component's own family, whatever selector styles it."""
-    rendered = set(component_uses())
-    family = {name for name in app_css_classes() for root in rendered if name.startswith((f"{root}--", f"{root}__"))}
-    return frozenset(rendered | family)
+    """The classes the shared components render. A modifier counts only when a component renders it too: a page
+    can't add .alert--purple to app.css and call it the alert's."""
+    return frozenset(component_uses())
 
 
 @cache
@@ -510,7 +563,11 @@ def test_utilities_section_is_marked() -> None:
 def test_every_class_is_defined() -> None:
     """A class no stylesheet defines does nothing (no Bootstrap is loaded), unless script reads it as a hook."""
     defined = app_css_classes() | admin_css_classes() | hooks()
-    found = by_use(page_uses(), set(page_uses()) - defined) | by_use(component_uses(), set(component_uses()) - defined)
+    found = (
+        by_use(page_uses(), set(page_uses()) - defined)
+        | by_use(bound_page_uses(), set(bound_page_uses()) - defined)
+        | by_use(component_uses(), set(component_uses()) - defined)
+    )
     fail_with(
         "Classes no stylesheet defines: define it in app.css, use a component or utility, or drop it",
         found,
@@ -571,9 +628,39 @@ def test_variants_are_ones_the_component_knows() -> None:
             if "{{" in variant:
                 if f"|{VARIANT_FILTERS.get(name)}" not in variant.replace(" ", ""):
                     found[key] = f"line {tag.line}: map the status with |{VARIANT_FILTERS.get(name, '...')}"
+                elif name == "badge" and (problem := badge_kind_problem(variant)):
+                    found[key] = f"line {tag.line}: {problem}"
             elif variant not in known[name]:
                 found[key] = f"line {tag.line}: known: {', '.join(sorted(known[name]))}"
     fail_with("Unknown component variant", found, VARIANT_EXCEPTIONS)
+
+
+def badge_kind_problem(variant: str) -> str:
+    """Why a |badge_variant use is wrong: a kind core.status_variants doesn't have, or a field the kind isn't for."""
+    m = VARIANT_FILTER_RE.match(variant.strip())
+    if not m:
+        return 'write it as {{ object.field|badge_variant:"kind" }}'
+    kind, field = m.group("kind"), m.group("expr").split(".")[-1]
+    if kind not in status_variants.BADGE_STATUSES:
+        return f"no status kind {kind!r}; kinds: {', '.join(sorted(status_variants.BADGE_STATUSES))}"
+    label, field_name, _ = status_variants.BADGE_STATUSES[kind]
+    if field != field_name:
+        return f"kind {kind!r} maps {label}.{field_name}, not {field}"
+    return ""
+
+
+def test_table_widths_are_lengths() -> None:
+    """c-table's widths become inline styles, so each one must be a plain length, not CSS of the page's own."""
+    found: dict[str, str] = {}
+    for path in checked_templates():
+        for tag in tags(path):
+            if tag.name != "c-table" or "widths" not in tag.attrs:
+                continue
+            tokens = re.sub(r"{%.*?%}", " ", tag.attrs["widths"]).split()
+            bad = [t for t in tokens if not LENGTH_RE.fullmatch(t)]
+            if bad:
+                found[f"{template_name(path)}:widths"] = f"line {tag.line}: not a length: {' '.join(bad)}"
+    fail_with("c-table widths that are not lengths (px, %, rem, ch or auto)", found, {})
 
 
 def test_every_stored_status_maps_to_a_known_variant() -> None:
