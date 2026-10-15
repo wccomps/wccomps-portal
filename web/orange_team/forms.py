@@ -37,6 +37,8 @@ class SubmitScoreForm(forms.Form):
 
 
 ROW_NUMBER = re.compile(r"[0-9]{1,9}")
+# A rubric row's field as the check page names it: criterion_label_3, criterion_points_3, criterion_id_3
+CRITERION_KEY = re.compile(r"criterion_(label|points|id)_([0-9]{1,9})")
 
 
 class CriterionForm(forms.ModelForm[OrangeCheckCriterion]):
@@ -67,9 +69,7 @@ def criterion_rows(post_data: QueryDict) -> list[CriterionRow]:
 
     n can skip values: the form keeps a row's number when an earlier row is removed.
     """
-    numbers = sorted(
-        {int(m.group(2)) for key in post_data if (m := re.fullmatch(r"criterion_(label|points|id)_(\d+)", key))}
-    )
+    numbers = sorted({int(m.group(2)) for key in post_data if (m := CRITERION_KEY.fullmatch(key))})
     return [
         {
             "id": post_data.get(f"criterion_id_{n}", "").strip(),
@@ -88,6 +88,8 @@ def extract_criteria(post_data: QueryDict) -> list[CriterionInput]:
     """
     criteria: list[CriterionInput] = []
     problems: list[str] = []
+    if any(key.startswith("criterion_") and not CRITERION_KEY.fullmatch(key) for key in post_data):
+        problems.append("The page sent rubric fields it doesn't have; reload the page and enter the rubric again.")
     for position, row in enumerate(criterion_rows(post_data), start=1):
         if not (row["id"] or row["label"].strip() or row["points"]):
             continue

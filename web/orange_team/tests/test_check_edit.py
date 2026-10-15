@@ -164,3 +164,13 @@ def test_extract_criteria_refuses_a_row_it_cannot_keep(row):
     with pytest.raises(ValidationError) as refused:
         extract_criteria(post)
     assert refused.value.messages[0].startswith("Criterion 2 (")
+
+
+@pytest.mark.parametrize("key", ["criterion_label_" + "9" * 5000, "criterion_label_٣", "criterion_name_1"])
+def test_extract_criteria_refuses_a_row_key_it_does_not_know(key):
+    """Row numbers are ASCII digits the page makes; any other criterion field is refused, not dropped or a 500."""
+    post = QueryDict(mutable=True)
+    post.update({"criterion_label_0": "A", "criterion_points_0": "1", key: "B"})
+
+    with pytest.raises(ValidationError):
+        extract_criteria(post)
