@@ -41,8 +41,8 @@
             </div>
         </div>
     {% endif %}
-    <div class="results">
-        <table id="result_list" role="grid" aria-label="Tickets list">
+    <c-table id="result_list" role="grid" aria_label="Tickets list">
+        <c-slot name="colgroup">
             {# djlint:off H021 #}
             {% if is_ops %}
                 <colgroup>
@@ -66,179 +66,175 @@
                 </colgroup>
             {% endif %}
             {# djlint:on #}
-            <thead>
-                <tr role="row">
+        </c-slot>
+        <c-slot name="headers">
+            <tr role="row">
+                {% if is_ops %}
+                    <th scope="col" class="action-checkbox-column" role="columnheader">
+                        <input type="checkbox"
+                               :checked="allSelected"
+                               :indeterminate="someSelected"
+                               @click="toggleAll"
+                               aria-label="Select all tickets" />
+                    </th>
+                {% endif %}
+                {% if is_ops %}
+                    <c-table_header sortable="false">
+                        Ticket
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Title
+                    </c-table_header>
+                    <c-table_header sort_field="team__team_number"
+                                    current_sort="{{ sort_by }}"
+                                    query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
+                        Team
+                    </c-table_header>
+                    <c-table_header sort_field="category"
+                                    current_sort="{{ sort_by }}"
+                                    query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
+                        Category
+                    </c-table_header>
+                    <c-table_header sort_field="status"
+                                    current_sort="{{ sort_by }}"
+                                    query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
+                        Status
+                    </c-table_header>
+                    <c-table_header sort_field="assigned_to__username"
+                                    current_sort="{{ sort_by }}"
+                                    query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
+                        Assigned
+                    </c-table_header>
+                    <c-table_header sort_field="created_at"
+                                    current_sort="{{ sort_by }}"
+                                    query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
+                        Created
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Actions
+                    </c-table_header>
+                {% else %}
+                    <c-table_header sortable="false">
+                        Ticket
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Title
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Category
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Status
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Created
+                    </c-table_header>
+                {% endif %}
+            </tr>
+        </c-slot>
+        {% for item in page_obj %}
+            <tr role="row">
+                {% if is_ops %}
+                    <td class="action-checkbox" role="gridcell">
+                        <input type="checkbox"
+                               @change="toggleItem"
+                               :checked="selectedMap.{{ item.ticket.ticket_number|jskey }}"
+                               value="{{ item.ticket.ticket_number }}"
+                               data-ticket-id="{{ item.ticket.ticket_number }}"
+                               aria-label="Select ticket {{ item.ticket.ticket_number }}" />
+                    </td>
+                {% endif %}
+                <th role="gridcell">
                     {% if is_ops %}
-                        <th scope="col" class="action-checkbox-column" role="columnheader">
-                            <input type="checkbox"
-                                   :checked="allSelected"
-                                   :indeterminate="someSelected"
-                                   @click="toggleAll"
-                                   aria-label="Select all tickets" />
-                        </th>
-                    {% endif %}
-                    {% if is_ops %}
-                        <c-table_header sortable="false">
-                            Ticket
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Title
-                        </c-table_header>
-                        <c-table_header sort_field="team__team_number"
-                                        current_sort="{{ sort_by }}"
-                                        query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
-                            Team
-                        </c-table_header>
-                        <c-table_header sort_field="category"
-                                        current_sort="{{ sort_by }}"
-                                        query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
-                            Category
-                        </c-table_header>
-                        <c-table_header sort_field="status"
-                                        current_sort="{{ sort_by }}"
-                                        query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
-                            Status
-                        </c-table_header>
-                        <c-table_header sort_field="assigned_to__username"
-                                        current_sort="{{ sort_by }}"
-                                        query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
-                            Assigned
-                        </c-table_header>
-                        <c-table_header sort_field="created_at"
-                                        current_sort="{{ sort_by }}"
-                                        query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
-                            Created
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Actions
-                        </c-table_header>
+                        <a href="{% url 'ticket_detail' ticket_number=item.ticket.ticket_number %}?status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&sort={{ sort_by }}&page={{ page_obj.number }}&page_size={{ page_size }}">
+                            {{ item.ticket.ticket_number }}
+                        </a>
+                        {% if item.is_stale %}<c-badge variant="danger">STALE</c-badge>{% endif %}
                     {% else %}
-                        <c-table_header sortable="false">
-                            Ticket
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Title
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Category
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Status
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Created
-                        </c-table_header>
+                        <c-link href="{% url 'ticket_detail' ticket_number=item.ticket.ticket_number %}">{{ item.ticket.ticket_number }}</c-link>
                     {% endif %}
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in page_obj %}
-                    <tr class="{% cycle 'row1' 'row2' %}" role="row">
-                        {% if is_ops %}
-                            <td class="action-checkbox" role="gridcell">
-                                <input type="checkbox"
-                                       @change="toggleItem"
-                                       :checked="selectedMap.{{ item.ticket.ticket_number|jskey }}"
-                                       value="{{ item.ticket.ticket_number }}"
-                                       data-ticket-id="{{ item.ticket.ticket_number }}"
-                                       aria-label="Select ticket {{ item.ticket.ticket_number }}" />
-                            </td>
-                        {% endif %}
-                        <th class="field-ticket_number" role="gridcell">
-                            {% if is_ops %}
-                                <a href="{% url 'ticket_detail' ticket_number=item.ticket.ticket_number %}?status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&sort={{ sort_by }}&page={{ page_obj.number }}&page_size={{ page_size }}">
-                                    {{ item.ticket.ticket_number }}
-                                </a>
-                                {% if item.is_stale %}<c-badge variant="danger">STALE</c-badge>{% endif %}
-                            {% else %}
-                                <c-link href="{% url 'ticket_detail' ticket_number=item.ticket.ticket_number %}">{{ item.ticket.ticket_number }}</c-link>
+                    {% if item.ticket.comment_count > 0 or item.ticket.attachment_count > 0 %}
+                        <div class="text-xs text-muted">
+                            {% if item.ticket.comment_count > 0 %}
+                                {{ item.ticket.comment_count }} comment{{ item.ticket.comment_count|pluralize }}
                             {% endif %}
-                            {% if item.ticket.comment_count > 0 or item.ticket.attachment_count > 0 %}
-                                <div class="text-xs text-muted">
-                                    {% if item.ticket.comment_count > 0 %}
-                                        {{ item.ticket.comment_count }} comment{{ item.ticket.comment_count|pluralize }}
-                                    {% endif %}
-                                    {% if item.ticket.comment_count > 0 and item.ticket.attachment_count > 0 %},{% endif %}
-                                    {% if item.ticket.attachment_count > 0 %}
-                                        {{ item.ticket.attachment_count }} file{{ item.ticket.attachment_count|pluralize }}
-                                    {% endif %}
-                                </div>
+                            {% if item.ticket.comment_count > 0 and item.ticket.attachment_count > 0 %},{% endif %}
+                            {% if item.ticket.attachment_count > 0 %}
+                                {{ item.ticket.attachment_count }} file{{ item.ticket.attachment_count|pluralize }}
                             {% endif %}
-                        </th>
-                        <td role="gridcell">{{ item.ticket.title|truncatechars:50 }}</td>
-                        {% if is_ops %}<td class="field-team"
-    role="gridcell">Team {{ item.ticket.team.team_number }}</td>{% endif %}
-                        <td class="field-category" role="gridcell">{{ item.category_name }}</td>
-                        <td class="field-status" role="gridcell">
-                            <c-badge variant="{{ item.ticket.status }}"
-                                     aria_label="Status: {{ item.status_display }}">
-                                {{ item.status_display }}
-                            </c-badge>
-                        </td>
-                        {% if is_ops %}
-                            <td class="field-assigned" role="gridcell">
-                                {% if item.ticket.assigned_to %}
-                                    {{ item.ticket.assigned_to }}
-                                {% else %}
-                                    Unassigned
-                                {% endif %}
-                            </td>
+                        </div>
+                    {% endif %}
+                </th>
+                <td role="gridcell">{{ item.ticket.title|truncatechars:50 }}</td>
+                {% if is_ops %}<td role="gridcell">Team {{ item.ticket.team.team_number }}</td>{% endif %}
+                <td role="gridcell">{{ item.category_name }}</td>
+                <td role="gridcell">
+                    <c-badge variant="{{ item.ticket.status }}"
+                             aria_label="Status: {{ item.status_display }}">
+                        {{ item.status_display }}
+                    </c-badge>
+                </td>
+                {% if is_ops %}
+                    <td role="gridcell">
+                        {% if item.ticket.assigned_to %}
+                            {{ item.ticket.assigned_to }}
+                        {% else %}
+                            Unassigned
                         {% endif %}
-                        <td class="field-created" role="gridcell">{{ item.ticket.created_at|timesince }} ago</td>
-                        {% if is_ops %}
-                            <td class="field-actions" role="gridcell">
-                                {% if item.ticket.status == "open" %}
-                                    <form method="post"
-                                          action="{% url 'ticket_claim' item.ticket.ticket_number %}"
-                                          class="d-inline">
-                                        {% csrf_token %}
-                                        <c-button type="submit" variant="primary">
-                                            Claim
-                                        </c-button>
-                                    </form>
-                                {% elif item.ticket.status == "claimed" %}
-                                    <form method="post"
-                                          action="{% url 'ticket_resolve' item.ticket.ticket_number %}"
-                                          class="d-inline">
-                                        {% csrf_token %}
-                                        <c-button type="submit" variant="primary">
-                                            Resolve
-                                        </c-button>
-                                    </form>
-                                    {% if item.ticket.assigned_to.username == authentik_username or is_ticketing_admin %}
-                                        <form method="post"
-                                              action="{% url 'ticket_unclaim' item.ticket.ticket_number %}"
-                                              class="d-inline">
-                                            {% csrf_token %}
-                                            <c-button type="submit" variant="default">
-                                                Unclaim
-                                            </c-button>
-                                        </form>
-                                    {% endif %}
-                                {% endif %}
-                            </td>
-                        {% endif %}
-                    </tr>
-                {% empty %}
-                    <tr>
-                        <td colspan="{% if is_ops %}9{% else %}5{% endif %}">
-                            {% if search_query or status_filter != "all" or category_filter != "all" or team_filter or assignee_filter %}
-                                <c-empty_state title="No tickets match your filters">
-                                    Try <c-link href="{% url 'ticket_list' %}">clearing all filters</c-link> or <c-link href="{% url 'create_ticket' %}" variant="add">create a new ticket</c-link>
-                                </c-empty_state>
-                            {% else %}
-                                <c-empty_state title="No tickets yet"
-                                               description="Either everything is working perfectly, or nobody knows how to ask for help.">
-                                    <c-link href="{% url 'create_ticket' %}"
-                                            variant="add">Create your first ticket</c-link>
-                                </c-empty_state>
+                    </td>
+                {% endif %}
+                <td role="gridcell">{{ item.ticket.created_at|timesince }} ago</td>
+                {% if is_ops %}
+                    <td class="field-actions" role="gridcell">
+                        {% if item.ticket.status == "open" %}
+                            <form method="post"
+                                  action="{% url 'ticket_claim' item.ticket.ticket_number %}"
+                                  class="d-inline">
+                                {% csrf_token %}
+                                <c-button type="submit" variant="primary">
+                                    Claim
+                                </c-button>
+                            </form>
+                        {% elif item.ticket.status == "claimed" %}
+                            <form method="post"
+                                  action="{% url 'ticket_resolve' item.ticket.ticket_number %}"
+                                  class="d-inline">
+                                {% csrf_token %}
+                                <c-button type="submit" variant="primary">
+                                    Resolve
+                                </c-button>
+                            </form>
+                            {% if item.ticket.assigned_to.username == authentik_username or is_ticketing_admin %}
+                                <form method="post"
+                                      action="{% url 'ticket_unclaim' item.ticket.ticket_number %}"
+                                      class="d-inline">
+                                    {% csrf_token %}
+                                    <c-button type="submit" variant="default">
+                                        Unclaim
+                                    </c-button>
+                                </form>
                             {% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+                        {% endif %}
+                    </td>
+                {% endif %}
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="{% if is_ops %}9{% else %}5{% endif %}">
+                    {% if search_query or status_filter != "all" or category_filter != "all" or team_filter or assignee_filter %}
+                        <c-empty_state title="No tickets match your filters">
+                            Try <c-link href="{% url 'ticket_list' %}">clearing all filters</c-link> or <c-link href="{% url 'create_ticket' %}" variant="add">create a new ticket</c-link>
+                        </c-empty_state>
+                    {% else %}
+                        <c-empty_state title="No tickets yet"
+                                       description="Either everything is working perfectly, or nobody knows how to ask for help.">
+                            <c-link href="{% url 'create_ticket' %}" variant="add">Create your first ticket</c-link>
+                        </c-empty_state>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+    </c-table>
     <c-pagination :page_obj="page_obj"
                   query_params="&status={{ status_filter }}&category={{ category_filter }}&search={{ search_query }}&sort={{ sort_by }}&page_size={{ page_size }}
     {% if is_ops %}&team={{ team_filter }}&assignee={{ assignee_filter }}{% endif %}

@@ -190,7 +190,7 @@
                                 <span x-text="scoreDisplay" aria-live="polite">{{ assignment.score|default:"0" }} / {{ assignment.orange_check.max_score }}</span>
                                 <details>
                                     <summary>Criteria</summary>
-                                    <ul class="plain-list">
+                                    <ul>
                                         {% for result in assignment.results.all %}
                                             <li>
                                                 <label>
@@ -217,7 +217,6 @@
                                            value="{{ assignment.score|default:'' }}"
                                            min="0"
                                            max="{{ assignment.orange_check.max_score }}"
-                                           class="input-sm"
                                            aria-label="Score for Team {{ assignment.team.team_number }}"
                                            {% if assignment.status == "submitted" %}disabled{% endif %}>
                                     <span class="text-muted">/ {{ assignment.orange_check.max_score }}</span>
@@ -251,8 +250,7 @@
                                                name="minutes"
                                                value="15"
                                                min="1"
-                                               max="{{ max_follow_up_minutes }}"
-                                               class="input-sm">
+                                               max="{{ max_follow_up_minutes }}">
                                     </label>
                                     <label>
                                         Note:

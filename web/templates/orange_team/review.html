@@ -65,10 +65,7 @@
                                           action="{% url 'orange_team:assignment_reject' assignment.pk %}"
                                           onsubmit="return confirm('Reject this assignment?')">
                                         {% csrf_token %}
-                                        <input type="text"
-                                               name="notes"
-                                               placeholder="Reason (optional)"
-                                               class="input-sm">
+                                        <input type="text" name="notes" placeholder="Reason (optional)">
                                         <c-button type="submit" variant="danger">
                                             Reject
                                         </c-button>

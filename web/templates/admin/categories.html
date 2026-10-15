@@ -44,21 +44,21 @@
                 </tr>
             </c-slot>
             {% for category in categories %}
-                <tr class="{% cycle 'row1' 'row2' %}">
-                    <td class="field-order">{{ category.sort_order }}</td>
-                    <th class="field-name">
+                <tr>
+                    <td>{{ category.sort_order }}</td>
+                    <th>
                         <a href="{% url 'admin_category_edit' category.pk %}">{{ category.display_name }}</a>
                     </th>
-                    <td class="field-points">{{ category.points }}</td>
-                    <td class="field-playbook">
+                    <td>{{ category.points }}</td>
+                    <td>
                         {% if category.steps %}
                             <span>{{ category.steps|length }} step{{ category.steps|length|pluralize }}</span>
                         {% else %}
                             <span class="text-muted">None</span>
                         {% endif %}
                     </td>
-                    <td class="field-required_fields">{{ category.required_fields|join:", " }}</td>
-                    <td class="field-variable">
+                    <td>{{ category.required_fields|join:", " }}</td>
+                    <td>
                         {% if category.variable_points %}
                             <c-badge variant="success">
                                 Yes
@@ -69,7 +69,7 @@
                             </c-badge>
                         {% endif %}
                     </td>
-                    <td class="field-user_creatable">
+                    <td>
                         {% if category.user_creatable %}
                             <c-badge variant="success">
                                 Yes
@@ -80,7 +80,7 @@
                             </c-badge>
                         {% endif %}
                     </td>
-                    <td class="field-tickets">{{ category.tickets.count }}</td>
+                    <td>{{ category.tickets.count }}</td>
                     <td class="field-actions">
                         <c-link href="{% url 'admin_category_delete' category.pk %}" variant="danger">Delete</c-link>
                     </td>

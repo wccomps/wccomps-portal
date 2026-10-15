@@ -8,105 +8,101 @@
           action="{% url 'scoring:bulk_approve_orange_adjustments' %}"
           x-ref="bulkForm">
         {% csrf_token %}
-        <div class="results">
-            <table id="result_list" role="grid" aria-label="Orange team checks list">
-                <thead>
-                    <tr role="row">
-                        <th scope="col" class="action-checkbox-column">
+        <c-table id="result_list" role="grid" aria_label="Orange team checks list">
+            <c-slot name="headers">
+                <tr role="row">
+                    <th scope="col" class="action-checkbox-column">
+                        <input type="checkbox"
+                               :checked="allSelected"
+                               :indeterminate="someSelected"
+                               @click="toggleAll"
+                               title="Select all">
+                    </th>
+                    <c-table_header sortable="false">
+                        ID
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Check
+                    </c-table_header>
+                    <c-table_header sort_field="team__team_number"
+                                    current_sort="{{ sort_by }}"
+                                    query_params="&status={{ status_filter }}&team={{ selected_team }}&check={{ selected_check }}&search={{ search_query }}">
+                        Team
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Description
+                    </c-table_header>
+                    <c-table_header sort_field="points_awarded"
+                                    current_sort="{{ sort_by }}"
+                                    query_params="&status={{ status_filter }}&team={{ selected_team }}&check={{ selected_check }}&search={{ search_query }}">
+                        Points
+                    </c-table_header>
+                    <c-table_header sort_field="created_at"
+                                    current_sort="{{ sort_by }}"
+                                    query_params="&status={{ status_filter }}&team={{ selected_team }}&check={{ selected_check }}&search={{ search_query }}">
+                        Submitted
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Status
+                    </c-table_header>
+                </tr>
+            </c-slot>
+            {% for check in page_obj %}
+                <tr role="row">
+                    <td class="action-checkbox">
+                        {% if not check.is_approved %}
                             <input type="checkbox"
-                                   :checked="allSelected"
-                                   :indeterminate="someSelected"
-                                   @click="toggleAll"
-                                   title="Select all">
-                        </th>
-                        <c-table_header sortable="false">
-                            ID
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Check
-                        </c-table_header>
-                        <c-table_header sort_field="team__team_number"
-                                        current_sort="{{ sort_by }}"
-                                        query_params="&status={{ status_filter }}&team={{ selected_team }}&check={{ selected_check }}&search={{ search_query }}">
-                            Team
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Description
-                        </c-table_header>
-                        <c-table_header sort_field="points_awarded"
-                                        current_sort="{{ sort_by }}"
-                                        query_params="&status={{ status_filter }}&team={{ selected_team }}&check={{ selected_check }}&search={{ search_query }}">
-                            Points
-                        </c-table_header>
-                        <c-table_header sort_field="created_at"
-                                        current_sort="{{ sort_by }}"
-                                        query_params="&status={{ status_filter }}&team={{ selected_team }}&check={{ selected_check }}&search={{ search_query }}">
-                            Submitted
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Status
-                        </c-table_header>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for check in page_obj %}
-                        <tr class="{% cycle 'row1' 'row2' %}" role="row">
-                            <td class="action-checkbox">
-                                {% if not check.is_approved %}
-                                    <input type="checkbox"
-                                           name="adjustment_ids"
-                                           value="{{ check.id }}"
-                                           data-check-id="{{ check.id }}"
-                                           :checked="selectedMap.{{ check.id|jskey }}"
-                                           @change="toggleItem">
-                                {% endif %}
-                            </td>
-                            <th class="field-id">
-                                <strong>#{{ check.id }}</strong>
-                            </th>
-                            <td class="field-check">
-                                {% if check.orange_check %}
-                                    {{ check.orange_check.title }}
-                                {% else %}
-                                    <span class="text-muted">Manual</span>
-                                {% endif %}
-                            </td>
-                            <td class="field-team">Team {{ check.team.team_number }}</td>
-                            <td class="field-description">{{ check.description|truncatechars:60 }}</td>
-                            <td class="field-points text-right">
-                                <c-score_value :value="check.points_awarded" format="signed" />
-                            </td>
-                            <td class="field-submitted">
-                                {{ check.created_at|timesince }} ago
-                                <div class="text-sm text-muted">by {{ check.submitted_by.username }}</div>
-                            </td>
-                            <td class="field-status">
-                                {% if check.is_approved %}
-                                    <c-badge variant="resolved">
-                                        <span aria-hidden="true">✓</span> Approved
-                                    </c-badge>
-                                    {% if check.approved_by %}<div class="text-sm text-muted">by {{ check.approved_by.username }}</div>{% endif %}
-                                {% else %}
-                                    <c-badge variant="claimed">
-                                        <span aria-hidden="true">⏳</span> Pending
-                                    </c-badge>
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% empty %}
-                        <tr>
-                            <td colspan="8" class="text-center p-20">
-                                {% if selected_team or selected_check or search_query or status_filter != "pending" %}
-                                    No checks match your filters. Try <a href="{% url 'scoring:review_orange' %}">clearing all filters</a>
-                                {% else %}
-                                    No pending checks. All orange team checks have been approved.
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+                                   name="adjustment_ids"
+                                   value="{{ check.id }}"
+                                   data-check-id="{{ check.id }}"
+                                   :checked="selectedMap.{{ check.id|jskey }}"
+                                   @change="toggleItem">
+                        {% endif %}
+                    </td>
+                    <th>
+                        <strong>#{{ check.id }}</strong>
+                    </th>
+                    <td>
+                        {% if check.orange_check %}
+                            {{ check.orange_check.title }}
+                        {% else %}
+                            <span class="text-muted">Manual</span>
+                        {% endif %}
+                    </td>
+                    <td>Team {{ check.team.team_number }}</td>
+                    <td>{{ check.description|truncatechars:60 }}</td>
+                    <td class="text-right">
+                        <c-score_value :value="check.points_awarded" format="signed" />
+                    </td>
+                    <td>
+                        {{ check.created_at|timesince }} ago
+                        <div class="text-sm text-muted">by {{ check.submitted_by.username }}</div>
+                    </td>
+                    <td>
+                        {% if check.is_approved %}
+                            <c-badge variant="resolved">
+                                <span aria-hidden="true">✓</span> Approved
+                            </c-badge>
+                            {% if check.approved_by %}<div class="text-sm text-muted">by {{ check.approved_by.username }}</div>{% endif %}
+                        {% else %}
+                            <c-badge variant="claimed">
+                                <span aria-hidden="true">⏳</span> Pending
+                            </c-badge>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="8" class="text-center p-20">
+                        {% if selected_team or selected_check or search_query or status_filter != "pending" %}
+                            No checks match your filters. Try <a href="{% url 'scoring:review_orange' %}">clearing all filters</a>
+                        {% else %}
+                            No pending checks. All orange team checks have been approved.
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+        </c-table>
     </form>
     <c-pagination :page_obj="page_obj"
                   query_params="&status={{ status_filter }}&team={{ selected_team }}&check={{ selected_check }}&search={{ search_query }}&sort={{ sort_by }}" />

@@ -1,9 +1,14 @@
 {# Table component - data table with sortable columns #}
 {# Usage: <c-table id="results"><c-slot name="headers">...</c-slot>rows go here</c-table> #}
-{# Props: id, class, aria_label, fixed_layout (bool) #}
-<c-vars id="result_list" class aria_label="Data table" fixed_layout="false" />
+{# Props: id, class, aria_label, role (e.g. grid), fixed_layout (bool); slots: colgroup, headers #}
+<c-vars id="result_list"
+        class
+        aria_label="Data table"
+        role
+        fixed_layout="false" />
 <div {{ attrs }} class="results">
     <table id="{{ id }}"
+           {% if role %}role="{{ role }}"{% endif %}
            aria-label="{{ aria_label }}"
            class="{{ class }}{% if fixed_layout == 'true' %} table-fixed{% endif %}">
         {% if colgroup %}{{ colgroup }}{% endif %}

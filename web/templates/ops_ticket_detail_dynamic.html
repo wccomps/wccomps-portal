@@ -43,7 +43,7 @@
                     </tr>
                 </c-slot>
                 {% for event in history %}
-                    <tr class="{% cycle 'row1' 'row2' %}">
+                    <tr>
                         <td>{{ event.timestamp|timesince }} ago</td>
                         <td>{{ event.action }}</td>
                         <td>

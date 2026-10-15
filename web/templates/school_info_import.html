@@ -81,7 +81,7 @@
                                 </tr>
                             </c-slot>
                             {% for row in preview_data.teams_to_create %}
-                                <tr class="{% cycle 'row1' 'row2' %}">
+                                <tr>
                                     <td>Team {{ row.team_number }}</td>
                                     <td>{{ row.school_name }}</td>
                                     <td>{% if row.returning_events is None %}New{% else %}Returning ({{ row.returning_events }} past event{{ row.returning_events|pluralize }}){% endif %}</td>

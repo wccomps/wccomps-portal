@@ -8,18 +8,18 @@
                 {% if stats.neighbors %}
                     {% for n in stats.neighbors %}
                         {% if n.rank < score.rank %}
-                            <span class="neighbor-entry">#{{ n.rank }} — {{ n.total_score|floatformat:0 }} <span class="score-positive">(+{{ n.gap|floatformat:0 }} ahead)</span></span>
+                            <span>#{{ n.rank }} — {{ n.total_score|floatformat:0 }} <span class="score-positive">(+{{ n.gap|floatformat:0 }} ahead)</span></span>
                         {% endif %}
                     {% endfor %}
                 {% endif %}
-                <span class="neighbor-entry neighbor-current">
+                <span class="neighbor-current">
                     {% if score.rank %}#{{ score.rank }} of {{ stats.team_count }} —{% endif %}
                     {{ score.total_score|floatformat:0 }} (you)
                 </span>
                 {% if stats.neighbors %}
                     {% for n in stats.neighbors %}
                         {% if n.rank > score.rank %}
-                            <span class="neighbor-entry">#{{ n.rank }} — {{ n.total_score|floatformat:0 }} <span class="score-negative">({{ n.gap|floatformat:0 }} behind)</span></span>
+                            <span>#{{ n.rank }} — {{ n.total_score|floatformat:0 }} <span class="score-negative">({{ n.gap|floatformat:0 }} behind)</span></span>
                         {% endif %}
                     {% endfor %}
                 {% endif %}
@@ -347,9 +347,9 @@
                             <td class="text-right">#{{ inj.rank }}</td>
                         </tr>
                         {% if inj.feedback %}
-                            <tr class="feedback-row">
+                            <tr>
                                 <td colspan="4">
-                                    <p class="inject-feedback">{{ inj.feedback }}</p>
+                                    <p>{{ inj.feedback }}</p>
                                 </td>
                             </tr>
                         {% endif %}

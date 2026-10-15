@@ -35,7 +35,7 @@
                         </tr>
                     </c-slot>
                     {% for incident in incidents %}
-                        <tr class="{% cycle 'row1' 'row2' %}">
+                        <tr>
                             <td>
                                 <a href="{% url 'scoring:view_incident_report' incident.id %}">#{{ incident.id }}</a>
                             </td>

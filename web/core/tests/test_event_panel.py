@@ -45,8 +45,8 @@ def _event_section(page):
 def _steps(page):
     """The Steps table's rows as (step cell, status cell, where cell), whitespace around tags removed."""
     start = page.index('id="steps"')
-    table = _flat(page[start : page.index("</table>", start)])
-    rows = re.findall(r'<tr class="row[12]"[^>]*>(.*?)</tr>', table, re.S)
+    body = _flat(page[page.index("<tbody>", start) : page.index("</table>", start)])
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", body, re.S)
     return [tuple(re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)) for row in rows]
 
 
@@ -560,9 +560,8 @@ def test_the_page_is_built_from_the_standard_modules_and_table(client, stage):
 
     for title in ("Event", "Steps", "Competition Controls"):
         assert re.search(rf'<div[^>]*class="module[^"]*"[^>]*><h2>{title}</h2>', page), title
-    # The table component and row striping the Teams list uses
+    # The table component the Teams list uses
     assert re.search(r'<div\s+class="results"><table id="steps_list"\s+aria-label="[^"]+"\s+class="w-full">', page)
-    assert page.count('<tr class="row1"') + page.count('<tr class="row2"') >= len(STEPS)
     for custom in ("event-card", "step-grid", "next-step", "step-notes", "live-number", "grid-3", "details"):
         assert custom not in page, custom
 
