@@ -178,19 +178,6 @@ class ImportConfirmForm(forms.Form):
     preview = forms.CharField(max_length=64)
 
 
-def _row_errors(row_num: int, form: SchoolInfoEditForm) -> list[str]:
-    errors = []
-    for field, field_errors in form.errors.as_data().items():
-        for error in field_errors:
-            if error.code == "required":
-                errors.append(f"Row {row_num}: {field} is required")
-            elif error.code == "invalid" and field.endswith("email"):
-                errors.append(f"Row {row_num}: {field} is not a valid email address")
-            else:
-                errors.append(f"Row {row_num}: {field}: {' '.join(error.messages)}")
-    return errors
-
-
 def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
     """Parse CSV file and validate contents."""
     rows: list[CSVRowData] = []
@@ -249,7 +236,9 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
                     }
                 )
             else:
-                errors.extend(_row_errors(row_num, form))
+                errors += [
+                    f"Row {row_num}: {field}: {error}" for field, messages in form.errors.items() for error in messages
+                ]
 
         if not rows and not errors:
             errors.append("CSV file contains no data rows")

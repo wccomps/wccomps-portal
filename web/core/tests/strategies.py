@@ -5,9 +5,8 @@ surrogates; `any_str` adds them for functions that take a str from anywhere. Eve
 cases into ordinary values, so a property sees both the inputs that pass validation and the ones that shouldn't.
 """
 
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -104,15 +103,6 @@ def request_text(max_length: int | None = None) -> st.SearchStrategy[str]:
         st.integers(max(limit - 2, 0), limit + 2).map(lambda n: "x" * n),
         st.tuples(st.sampled_from(EXPANDING), st.integers(max(limit - 2, 1), limit)).map(lambda t: t[0] * t[1]),
         st.just("y" * max(limit * 4, 5000)),
-    )
-
-
-def any_str(max_length: int | None = None) -> st.SearchStrategy[str]:
-    """request_text plus lone surrogates, for functions that take a str from any source (JSON allows them)."""
-    return st.one_of(
-        request_text(max_length),
-        _chars(st.characters(categories=["Cs"]), min_size=1, max_size=5),
-        st.tuples(st.text(max_size=10), st.characters(categories=["Cs"])).map(lambda t: t[0] + t[1]),
     )
 
 
@@ -511,14 +501,3 @@ def column(model: type[models.Model], name: str) -> models.Field[Any, Any]:
     field = model._meta.get_field(name)
     assert isinstance(field, models.Field)
     return field
-
-
-@dataclass(frozen=True)
-class Stored:
-    """A value a view writes to a model field from a form's cleaned data."""
-
-    field: models.Field[Any, Any]
-    value: object
-
-
-WritesFn = Callable[[dict[str, Any]], list[Stored]]

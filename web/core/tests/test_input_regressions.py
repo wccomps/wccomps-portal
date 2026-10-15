@@ -142,7 +142,7 @@ def test_a_school_list_file_gets_row_errors_not_a_parse_failure(content: bytes) 
     parsed = parse_csv_file(SimpleUploadedFile("s.csv", content))
     assert all(isinstance(e, str) and e for e in parsed["errors"] + parsed["warnings"])
     if content == _school_csv(["School"], header="school_name,contact_email"):
-        assert parsed["errors"] == ["Row 2: contact_email is required"]
+        assert parsed["errors"] == ["Row 2: contact_email: This field is required."]
     if content.startswith(b"\xef\xbb\xbfschool_name,contact_email\r\n"):
         assert parsed["warnings"] == []
         assert parsed["rows"][0]["school_name"] == "School"

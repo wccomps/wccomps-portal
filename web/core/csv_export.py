@@ -8,18 +8,17 @@ OWASP rule); numbers are written as numbers. test_property_coverage fails on a C
 import csv
 from collections.abc import Iterable
 from decimal import Decimal
-from typing import Protocol
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from _typeshed import SupportsWrite
 
 FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
 
 
-class _Writable(Protocol):
-    def write(self, text: str, /) -> object: ...
-
-
 def safe_cell(value: object) -> object:
     """The value as a cell a spreadsheet won't run: text that starts like a formula is prefixed with '."""
-    if value is None or isinstance(value, (bool, int, float, Decimal)):
+    if value is None or isinstance(value, (int, float, Decimal)):  # bool is an int
         return value
     text = str(value)
     return f"'{text}" if _starts_a_formula(text) else text
@@ -38,7 +37,7 @@ def _starts_a_formula(text: str) -> bool:
 class CsvWriter:
     """csv.writer that writes every cell through safe_cell."""
 
-    def __init__(self, out: _Writable) -> None:
+    def __init__(self, out: SupportsWrite[str]) -> None:
         self._writer = csv.writer(out)
 
     def writerow(self, row: Iterable[object]) -> None:
@@ -49,5 +48,5 @@ class CsvWriter:
             self.writerow(row)
 
 
-def csv_writer(out: _Writable) -> CsvWriter:
+def csv_writer(out: SupportsWrite[str]) -> CsvWriter:
     return CsvWriter(out)
