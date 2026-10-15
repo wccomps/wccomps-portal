@@ -2,6 +2,7 @@
 
 import csv
 import io
+import unicodedata
 from datetime import date, timedelta
 
 import pytest
@@ -26,7 +27,7 @@ from registration.forms import EventForm, RegistrationForm
 from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, Season, TeamRegistration, normalize_school_name
 from registration.services import SchoolListRow, import_school_list
 from scoring.models import ScoringTemplate
-from scoring.screenshots import detect_inline_type
+from scoring.screenshots import detect_inline_type, read_screenshot
 
 from core.admin_views.competition import TIMEZONE_CHOICES
 from core.forms import CategoryForm, SchoolInfoEditForm, StartMessageForm
@@ -310,3 +311,26 @@ def test_a_start_message_has_one_kind_of_line_end_and_cleans_the_same_again(mess
     assert "\r" not in cleaned
     again = StartMessageForm({"start_message": cleaned})
     assert again.is_valid() and again.cleaned_data["start_message"] == cleaned
+
+
+@pytest.mark.django_db
+@given(name=file_names())
+@example(name="a\x00.png")
+@example(name="a\x1f‮.png")
+def test_an_upload_name_is_stored_as_text_without_control_characters(
+    name: str, ticketing_support_user: User, red_team_user: User
+) -> None:
+    """A file name arrives from the client (RFC 2231 can encode a NUL); it is stored, so it must be storable."""
+    client = Client()
+    client.force_login(ticketing_support_user)
+    upload = SimpleUploadedFile(name or "unnamed", b"\x89PNG\r\n\x1a\n", content_type="image/png")
+    with rolled_back():
+        team = Team.objects.create(team_number=1, team_name="Team 01")
+        ticket = Ticket.objects.create(team=team, category=TicketCategory.objects.first(), ticket_number="T001-001")
+        response = client.post(reverse("ticket_attachment_upload", args=[ticket.ticket_number]), {"attachment": upload})
+        assert response.status_code < 500
+        for attachment in TicketAttachment.objects.filter(ticket=ticket):
+            assert attachment.filename and not any(unicodedata.category(c) in ("Cc", "Cf") for c in attachment.filename)
+    upload.seek(0)
+    _, stored_name, _ = read_screenshot(upload)
+    assert stored_name and not any(unicodedata.category(c) in ("Cc", "Cf") for c in stored_name)

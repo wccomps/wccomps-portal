@@ -14,7 +14,7 @@ from django.utils.http import content_disposition_header
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from core.auth_utils import get_user_team, require_permission
-from core.utils import ndjson_done, run_detached
+from core.utils import ndjson_done, run_detached, upload_name
 from team.models import Team
 
 from .forms import PacketActionForm, PacketResendForm, PacketUploadForm
@@ -162,7 +162,7 @@ def upload_packet(request: HttpRequest) -> HttpResponse:
         uploaded_file = form.cleaned_data["packet_file"]
 
         file_data = uploaded_file.read()
-        filename = (uploaded_file.name or "unnamed")[:255]
+        filename = upload_name(uploaded_file, "unnamed")
         # From the name, not the client's claimed type, which can be anything (and longer than the column)
         mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 

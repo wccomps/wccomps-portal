@@ -10,6 +10,8 @@ from django.core.files.uploadedfile import UploadedFile
 from django.http import HttpResponse
 from django.utils.http import content_disposition_header
 
+from core.utils import upload_name
+
 MAX_SCREENSHOT_SIZE = 50 * 1024 * 1024  # largest real upload so far was ~31MB (a .tar.gz)
 MAX_SCREENSHOTS = 20  # per submission
 
@@ -43,7 +45,7 @@ def read_screenshot(upload: UploadedFile[bytes]) -> tuple[bytes, str, str]:
 
     The stored MIME type comes from the file's bytes, never from the client.
     """
-    name = upload.name or "screenshot.png"
+    name = upload_name(upload, "screenshot.png")
     too_big = f"{name} is larger than {MAX_SCREENSHOT_SIZE // (1024 * 1024)} MB"
     if upload.size is not None and upload.size > MAX_SCREENSHOT_SIZE:
         raise ScreenshotError(too_big)

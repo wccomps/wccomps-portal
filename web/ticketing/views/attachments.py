@@ -10,6 +10,7 @@ from django.utils.http import content_disposition_header
 from scoring.screenshots import DOWNLOAD_MIME, detect_inline_type
 
 from core.auth_utils import get_user_team, has_permission
+from core.utils import upload_name
 from ticketing.models import Ticket, TicketAttachment
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,8 @@ def _save_attachment(
         uploaded_file.close()
         return HttpResponse("File too large (max 10MB)", status=400)
 
-    if not uploaded_file.name:
+    filename = upload_name(uploaded_file, "")
+    if not filename:
         uploaded_file.close()
         return HttpResponse("File must have a name", status=400)
 
@@ -36,9 +38,9 @@ def _save_attachment(
         TicketAttachment.objects.create(
             ticket=ticket,
             file_data=uploaded_file.read(),
-            filename=uploaded_file.name[:255],
+            filename=filename,
             # From the name, not the client's claimed type, which can be anything (and longer than the column)
-            mime_type=mimetypes.guess_type(uploaded_file.name)[0] or DOWNLOAD_MIME,
+            mime_type=mimetypes.guess_type(filename)[0] or DOWNLOAD_MIME,
             uploaded_by=uploaded_by,
         )
     finally:
