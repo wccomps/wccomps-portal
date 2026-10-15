@@ -1,5 +1,6 @@
 """Gunicorn settings, loaded automatically from the working directory (/app/web)."""
 
+import logging
 import os
 
 bind = "0.0.0.0:8000"
@@ -39,4 +40,9 @@ def when_ready(_server: object) -> None:
     engine = engines["django"]
     for directory in (*engine.engine.dirs, *get_app_template_dirs("templates")):
         for path in Path(directory).rglob("*.html"):
-            engine.get_template(path.relative_to(directory).as_posix())
+            name = path.relative_to(directory).as_posix()
+            # A template that fails to compile breaks only its own page, as it would without warming; the pod starts
+            try:
+                engine.get_template(name)
+            except Exception:
+                logging.getLogger("gunicorn.error").exception("Could not warm template %s", name)
