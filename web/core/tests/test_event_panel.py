@@ -160,7 +160,7 @@ def test_no_step_name_is_a_link_and_where_links_only_other_pages(client, stage):
     ]
     assert all("<a " not in step for step, _, _ in steps)
     wheres = [where for _, _, where in steps]
-    assert wheres[0] == f'<a href="{reverse("school_info_import")}">Import School Information</a>'
+    assert wheres[0] == f'<a href="{reverse("school_info_import")}">Import School Information from CSV</a>'
     assert wheres[1] == f'<a href="{reverse("packets_list")}">Packets</a>'
     assert wheres[2:4] == ["On this page", "On this page"]
     assert wheres[4] == f'<a href="{reverse("scoring:email_scorecards")}">Email All Scorecards</a>'
@@ -402,6 +402,21 @@ def test_the_page_query_count_does_not_grow_with_the_teams(client, running):
 
     assert _queries(client) == one
     assert one <= 40
+
+
+@pytest.mark.parametrize("action", [action for action, place in PLACES.items() if place.elsewhere])
+def test_a_page_a_step_links_names_itself_with_the_title_the_step_shows(admin_client, action):
+    """The Where link and the linked page's header read one title."""
+    place = PLACES[action]
+    _teams(1, score=True)  # Email Scorecards sends you to the leaderboard with no scores
+
+    response = admin_client.get(action_url(action))
+
+    assert response.status_code == 200
+    page = _flat(response.content.decode())
+
+    parent = r"(<a [^>]*>[^<]*</a><span[^>]*>[^<]*</span>)?"
+    assert re.search(rf'class="breadcrumbs">{parent}{re.escape(place.page_title)}<', page)
 
 
 def test_the_guide_walks_the_panels_steps_in_order_with_their_links(client):

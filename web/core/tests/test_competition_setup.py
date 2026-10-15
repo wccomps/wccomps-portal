@@ -116,7 +116,7 @@ def test_the_current_settings_show_in_detail_grids_and_the_small_forms_like_the_
     # The apps are a table with a Remove button per row, like a team's linked members
     assert re.search(r'<table id="apps_list"\s+aria-label="Competition apps"', page)
     # The visible label names the add field; no aria-label overrides it
-    assert "aria-label=\"Authentik application slug\"" not in page
+    assert 'aria-label="Authentik application slug"' not in page
 
 
 def test_the_page_says_when_quotient_was_never_synced(admin_client):

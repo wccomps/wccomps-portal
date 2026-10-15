@@ -1,11 +1,11 @@
 {% extends "admin/base.html" %}
-{% load static cotton %}
+{% load static cotton page_titles %}
 {% block title %}
     Import School Information - WCComps Portal
 {% endblock title %}
 {% block admin_content %}
     <div id="content-main">
-        <c-page_header title="Import School Information from CSV"
+        <c-page_header title="{% page_title 'school_info_import' %}"
                        parent_url="{% url 'school_info' %}"
                        parent_label="Schools" />
         <c-module>

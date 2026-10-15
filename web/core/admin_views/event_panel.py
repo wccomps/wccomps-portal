@@ -106,15 +106,22 @@ class ShownStep:
     action: Action
     state: StepState
     detail: str
-    url: str  # Where the step is taken, given the section the page shows
 
     @property
     def heading(self) -> str:
         return PLACES[self.action].heading
 
     @property
-    def page(self) -> str:
-        return PLACES[self.action].page
+    def elsewhere(self) -> bool:
+        return PLACES[self.action].elsewhere
+
+    @property
+    def page_title(self) -> str:
+        return PLACES[self.action].page_title
+
+    @property
+    def url(self) -> str:
+        return action_url(self.action)
 
     @property
     def label(self) -> str:
@@ -153,22 +160,17 @@ class EventPanel:
         return STATUS_SHOWN[_status(self.stage)][1]
 
     @property
-    def notes(self) -> list[ShownStep]:
-        """The steps with something to say beyond their line (schools on the list, packets not delivered)."""
-        return [row for row in self.steps if row.detail]
-
-    @property
     def seasons_url(self) -> str:
         return reverse("registration_season_list")
 
     @property
-    def action_page(self) -> str:
-        """The page the next action is taken on, when it isn't this one (whose controls need no link)."""
-        return PLACES[self.stage.next_action].page
+    def action_elsewhere(self) -> bool:
+        """Whether the next action is taken on another page; this page's own controls need no link."""
+        return PLACES[self.stage.next_action].elsewhere
 
     @property
     def action_url(self) -> str:
-        return action_url(self.stage.next_action, self.section)
+        return action_url(self.stage.next_action)
 
     @property
     def action_label(self) -> str:
@@ -184,14 +186,8 @@ def _state(action: Action, stage: EventStage) -> StepState:
 
 
 def event_panel(facts: EventFacts) -> EventPanel:
-    shown = PLACES[facts.stage.next_action].shows
     steps = [
-        ShownStep(
-            action,
-            _state(action, facts.stage),
-            DETAILS[action](facts) if action in DETAILS else "",
-            action_url(action, shown),
-        )
+        ShownStep(action, _state(action, facts.stage), DETAILS[action](facts) if action in DETAILS else "")
         for action in STEPS
     ]
     return EventPanel(facts, steps)

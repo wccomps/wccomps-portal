@@ -1,11 +1,11 @@
 {% extends "admin/base.html" %}
-{% load cotton %}
+{% load cotton page_titles %}
 {% block title %}
     Packets - WCComps Portal
 {% endblock title %}
 {% block admin_content %}
     <div x-data="packetAdmin">
-        <c-page_header title="Packets" />
+        <c-page_header title="{% page_title 'packets_list' %}" />
         <c-module>
             <c-slot name="toolbar">
                 <c-link href="{% url 'upload_packet' %}" variant="add">Upload New Packet</c-link>
