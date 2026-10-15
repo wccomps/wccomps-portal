@@ -9,11 +9,12 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
     """Combined form for registration with captain, coach, events, and rules."""
 
     captain_name = forms.CharField(max_length=255, label="Full Name")
-    captain_email = forms.EmailField(label="Email Address")
+    # 254: RegistrationContact.email's column (a form EmailField alone accepts 320 characters)
+    captain_email = forms.EmailField(max_length=254, label="Email Address")
     captain_phone = forms.CharField(max_length=50, label="Phone Number")
 
     coach_name = forms.CharField(max_length=255, label="Full Name")
-    coach_email = forms.EmailField(label="Email Address")
+    coach_email = forms.EmailField(max_length=254, label="Email Address")
     coach_phone = forms.CharField(max_length=50, label="Phone Number", required=False)
 
     events = forms.ModelMultipleChoiceField(

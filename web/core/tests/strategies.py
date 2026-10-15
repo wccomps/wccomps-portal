@@ -167,7 +167,7 @@ def decimal_text(max_digits: int | None = None, decimal_places: int | None = Non
     )
 
 
-def _long_email(n: int) -> str:
+def long_email(n: int) -> str:
     """A valid address n characters long: a 64-character local part and 63-character domain labels."""
     local = "u" * 64
     labels: list[str] = []
@@ -181,7 +181,7 @@ def email_text() -> st.SearchStrategy[str]:
     """Valid emails (including ones longer than a 254-character column), near-misses and hostile text."""
     return st.one_of(
         st.emails(),
-        st.integers(240, 330).map(_long_email),
+        st.integers(240, 330).map(long_email),
         st.emails().map(lambda e: f" {e.upper()} "),
         st.sampled_from(
             (
@@ -358,7 +358,7 @@ def valid_values(field: forms.Field) -> st.SearchStrategy[Any]:
     max_length = getattr(field, "max_length", None)
     match field:
         case forms.EmailField():
-            return st.one_of(st.emails(), st.integers(240, field.max_length or 320).map(_long_email))
+            return st.one_of(st.emails(), st.integers(240, field.max_length or 320).map(long_email))
         case forms.BooleanField():
             return st.sampled_from(("on", ""))
         case forms.ModelMultipleChoiceField():

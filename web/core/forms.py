@@ -8,8 +8,9 @@ from core.authentik_utils import parse_team_range
 
 class SchoolInfoEditForm(forms.Form):
     school_name = forms.CharField(max_length=255)
-    contact_email = forms.EmailField()
-    secondary_email = forms.EmailField(required=False)
+    # 254: SchoolInfo's email columns (a form EmailField alone accepts 320 characters)
+    contact_email = forms.EmailField(max_length=254)
+    secondary_email = forms.EmailField(max_length=254, required=False)
     notes = forms.CharField(required=False)
 
 

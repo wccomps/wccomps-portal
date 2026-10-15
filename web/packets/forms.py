@@ -33,5 +33,6 @@ class PacketActionForm(forms.Form):
 
 
 class PacketResendForm(forms.Form):
-    primary_email = forms.EmailField()
-    secondary_email = forms.EmailField(required=False)
+    # 254: SchoolInfo's email columns, where a resend saves them
+    primary_email = forms.EmailField(max_length=254)
+    secondary_email = forms.EmailField(max_length=254, required=False)
