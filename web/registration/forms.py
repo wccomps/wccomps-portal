@@ -1,4 +1,5 @@
 from django import forms
+from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from .models import Event, RegistrationContact, Season, TeamRegistration
@@ -160,18 +161,15 @@ class EventForm(forms.ModelForm[Event]):
             "registration_deadline": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
         }
 
-    def clean(self) -> dict[str, object]:
-        """An event is unique in its season by type and number. The season is the instance's (the view sets it), not
-        a field, so ModelForm's own unique check leaves that constraint out."""
-        cleaned = super().clean() or {}
-        number = cleaned.get("event_number")
-        event_type = cleaned.get("event_type")
-        if number is not None and event_type and self.instance.season_id is not None:
-            taken = Event.objects.filter(season_id=self.instance.season_id, event_type=event_type, event_number=number)
-            if taken.exclude(pk=self.instance.pk).exists():
-                label = dict(Event.EVENT_TYPE_CHOICES)[str(event_type)]
-                self.add_error("event_number", f"This season already has {label} {number}.")
-        return cleaned
+    def validate_constraints(self) -> None:
+        """Check the model's constraints with the instance's season: it isn't a field (the view sets it), so
+        ModelForm's own check would leave out every constraint on it. A clash shows on the event number."""
+        if {"event_type", "event_number"} & set(self.errors):
+            return
+        try:
+            self.instance.validate_constraints()
+        except ValidationError as clash:
+            self.add_error("event_number", clash.messages)
 
 
 class RejectRegistrationForm(forms.Form):

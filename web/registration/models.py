@@ -185,6 +185,7 @@ class Event(models.Model):
             models.UniqueConstraint(
                 fields=["season", "event_type", "event_number"],
                 name="unique_event_per_season",
+                violation_error_message="This season already has an event of this type with this number.",
             ),
             models.UniqueConstraint(fields=["is_active"], condition=models.Q(is_active=True), name="one_open_event"),
         ]

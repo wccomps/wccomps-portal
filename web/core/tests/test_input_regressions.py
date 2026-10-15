@@ -358,3 +358,14 @@ def test_an_upload_name_is_stored_as_text_without_control_characters(
     upload.seek(0)
     _, stored_name, _ = read_screenshot(upload)
     assert stored_name and not any(unicodedata.category(c) in ("Cc", "Cf") for c in stored_name)
+
+
+@pytest.mark.django_db
+def test_a_clashing_event_is_refused_with_the_constraints_message(school_list_event: Event) -> None:
+    """The model's constraint decides a clash, with its own message, on the event number."""
+    Event.objects.filter(pk=school_list_event.pk).update(event_type="qualifier", event_number=1)
+    post = {"name": "Next", "event_type": "qualifier", "event_number": "1", "date": "2026-11-07"}
+    post |= {"start_time": "09:00", "end_time": "17:00", "max_teams": "50"}
+    form = EventForm(post, instance=Event(season=school_list_event.season))
+    assert not form.is_valid()
+    assert form.errors["event_number"] == ["This season already has an event of this type with this number."]
