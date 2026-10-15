@@ -31,7 +31,7 @@
             </h2>
             <p>
                 <strong>Where:</strong> <a href="{{ row.url }}">{{ row.link_label }}</a>
-                {% if row.rare %}under Advanced on the Competition page{% endif %}.
+                {% if row.in_advanced %}under Advanced on the Competition page{% endif %}.
             </p>
             {% include row.partial %}
         {% endfor %}

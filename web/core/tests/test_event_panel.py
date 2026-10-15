@@ -240,7 +240,6 @@ def test_the_page_shows_only_the_next_steps_section(client, stage, section):
     for label in ("Close out the event", "Check readiness and start"):
         assert f">{label}</a>" not in page, label
     assert 'id="advanced"' in page and "Advanced: reset team passwords" in page
-    # Cancel and Clear are in Advanced, once each, and only while allowed
     assert page.count('@click="cancelEvent"') == (1 if stage in ("packets", "start") else 0)
     assert page.count('@click="clearLeftovers"') == (1 if stage == "leftovers" else 0)
 
@@ -366,6 +365,9 @@ def test_leftovers_open_advanced_where_clear_leftover_data_is(client):
     assert "Clear leftover data under Advanced on the Competition page" in panel
     assert "<a " not in _row(panel, "Next step")
     assert "under Advanced below" in _flat(page[page.index('id="leftovers"') :])
+    # The status sentence shows once, in the Event section
+    assert _flat(page).count("there is live data with no scores") == 1
+    assert "Live data no event recorded is still here" not in page
     advanced = page[page.index('id="advanced"') :]
     assert 'data-collapsed="false"' in advanced[: advanced.index(">")]
     assert page.index('@click="clearLeftovers"') > page.index('id="advanced"')
@@ -424,16 +426,30 @@ def _queries(client):
     return len(queries)
 
 
-@pytest.mark.parametrize("running", [False, True])
-def test_the_page_query_count_does_not_grow_with_the_teams(client, running):
-    _event(is_active=True)
-    _teams(1, score=True)
-    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": running})
+def _leftover_tickets(count):
+    from ticketing.models import Ticket
+
+    for number in range(1, count + 1):
+        team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
+        Ticket.objects.create(ticket_number=f"T{number:03d}-001", team=team, title="Left")
+
+
+@pytest.mark.parametrize("stage", ["played", "running", "leftovers"])
+def test_the_page_query_count_does_not_grow_with_the_teams(client, stage):
+    if stage == "leftovers":
+        _leftover_tickets(1)
+    else:
+        _event(is_active=True)
+        _teams(1, score=True)
+        CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": stage == "running"})
     _page(client)  # The first request also loads the session and caches
     one = _queries(client)
 
     Team.objects.all().delete()
-    _teams(20, score=True)
+    if stage == "leftovers":
+        _leftover_tickets(20)
+    else:
+        _teams(20, score=True)
 
     assert _queries(client) == one
     assert one <= 40
@@ -465,6 +481,8 @@ def test_the_guide_walks_the_steps_in_order_with_their_links(client):
     for action in PLACES:
         assert action_url(action) in hrefs, action
     assert f"{reverse('admin_competition')}#advanced" in hrefs
+    # Where each action under Advanced is taken, and only those
+    assert _flat(page).count("under Advanced on the Competition page") == sum(p.in_advanced for p in PLACES.values())
     assert "Danger Zone" not in page
     assert "\u2014" not in page and "\u2013" not in page
 

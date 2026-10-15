@@ -76,6 +76,12 @@ def test_the_next_step_and_the_current_step_are_the_same_action(stage, facts):
     assert panel.action_elsewhere == (
         panel.stage.next_action not in (Action.START, Action.STOP, Action.CLOSE_OUT, Action.CLEAR)
     )
+    # Advanced opens when the next step is taken there
+    assert panel.advanced_open == (panel.stage.next_action == Action.CLEAR)
+
+
+def test_cancel_and_clear_are_the_actions_taken_under_advanced():
+    assert [action for action, place in PLACES.items() if place.in_advanced] == [Action.CANCEL, Action.CLEAR]
 
 
 @pytest.mark.parametrize(

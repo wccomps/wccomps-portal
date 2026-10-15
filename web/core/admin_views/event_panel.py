@@ -170,6 +170,11 @@ class EventPanel:
         return PLACES[self.stage.next_action].elsewhere
 
     @property
+    def advanced_open(self) -> bool:
+        """Whether the next action is taken under Advanced, which then shows open."""
+        return PLACES[self.stage.next_action].in_advanced
+
+    @property
     def action_url(self) -> str:
         return action_url(self.stage.next_action)
 

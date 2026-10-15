@@ -108,7 +108,7 @@
                 {% endfor %}
             </c-table>
         </c-module>
-        <c-module id="{{ controls_id }}" class="mt-20">
+        <c-module id="{{ anchors.CONTROLS }}" class="mt-20">
             <c-slot name="title">
                 Competition Controls
             </c-slot>
@@ -144,11 +144,11 @@
         {% if section_partial %}
             {% include section_partial %}
         {% endif %}
-        <c-fieldset id="{{ advanced_id }}"
+        <c-fieldset id="{{ anchors.ADVANCED }}"
                     class="mt-20"
-                    heading="Advanced: reset team passwords{% if can_cancel %}, cancel the event{% endif %}{% if leftovers %}, clear leftover data{% endif %}"
+                    heading="Advanced: reset team passwords{% if can_cancel %}, cancel the event{% endif %}{% if can_clear %}, clear leftover data{% endif %}"
                     collapsible="true"
-                    collapsed="{{ advanced_open|yesno:'false,true' }}">
+                    collapsed="{{ panel.advanced_open|yesno:'false,true' }}">
             <p class="help">Tools outside the normal run of an event.</p>
             <c-action_box heading="Reset Team Passwords">
                 <form @submit.prevent="resetPasswords">
@@ -192,22 +192,21 @@
                         are left over for Clear leftover data.
                     </p>
                     <c-button_row class="mt-10">
-                        <c-button variant="warning" @click="cancelEvent" ::disabled="loading">
+                        <c-button variant="danger" @click="cancelEvent" ::disabled="loading">
                             Cancel Event
                         </c-button>
                     </c-button_row>
                 </c-action_box>
             {% endif %}
-            {% if leftovers %}
+            {% if can_clear %}
                 <c-action_box heading="Clear Leftover Data" variant="warning" class="mt-20">
-                    <p class="help">{{ panel.stage.status }}</p>
                     <p class="help">
                         It is not archived: clearing it deletes it for good. To keep scores, record them with Close Out
                         Event instead. Closed-out events' results are not touched.
                     </p>
                     <p class="help">As of loading this page: {{ leftovers }}.</p>
                     <c-button_row class="mt-10">
-                        <c-button variant="warning" @click="clearLeftovers" ::disabled="loading">
+                        <c-button variant="danger" @click="clearLeftovers" ::disabled="loading">
                             Clear Leftover Data
                         </c-button>
                     </c-button_row>
@@ -218,6 +217,12 @@
     </div>
     <script src="{% static 'js/competition.js' %}"></script>
     <script>
+// Asks for the typed word under the message: the word as typed, or null. The server checks it again.
+function typedConfirm(message) {
+    const response = prompt(message + '\n\nType "yolo" to confirm:');
+    return response && response.toLowerCase() === 'yolo' ? response : null;
+}
+
 document.addEventListener('alpine:init', () => {
     const actionUrl = '{% url "admin_competition_action" %}';
     Alpine.data('competitionAdmin', () => compose(streamMixin(actionUrl), readinessMixin(actionUrl), {
@@ -227,8 +232,7 @@ document.addEventListener('alpine:init', () => {
         closeOutDate: '',
         closeOutType: 'invitational',
         closeOutSeenSeason: '{{ active_season.pk|default_if_none:"" }}',
-        closeOutOpenEvent: '{{ open_event.pk|default_if_none:"" }}',
-        cancelOpenEvent: '{{ panel.stage.event.pk|default_if_none:"" }}',
+        openEvent: '{{ panel.stage.event.pk|default_if_none:"" }}',
         closeOutOffered: {{ can_close_out|yesno:"true,false" }},
         closeOutChecking: false,
         closeOutChecked: false,
@@ -281,16 +285,14 @@ document.addEventListener('alpine:init', () => {
         },
 
         closeOutEvent() {
-            const message = 'CLOSE OUT THE EVENT?\n\n' +
+            const typed = typedConfirm('CLOSE OUT THE EVENT?\n\n' +
                 'This freezes every listed school\'s scorecard as its result, then deletes the live scores, tickets ' +
                 'and blue team Discord links, closes the event and queues the Discord cleanup.\n' +
-                'It cannot be undone: finish grading and email the scorecards first.\n\n' +
-                'Type "yolo" to confirm:';
-            const response = prompt(message);
-            if (response && response.toLowerCase() === 'yolo') {
+                'It cannot be undone: finish grading and email the scorecards first.');
+            if (typed) {
                 this.doStreamAction('close_out_event', {
-                    confirm: response,
-                    open_event: this.closeOutOpenEvent,
+                    confirm: typed,
+                    open_event: this.openEvent,
                     new_name: this.closeOutName,
                     new_date: this.closeOutDate,
                     new_type: this.closeOutType,
@@ -300,26 +302,18 @@ document.addEventListener('alpine:init', () => {
         },
 
         cancelEvent() {
-            const message = 'CANCEL THE OPEN EVENT?\n\n' +
+            const typed = typedConfirm('CANCEL THE OPEN EVENT?\n\n' +
                 'It closes the event and removes its team assignments. Nothing is recorded for it.\n' +
-                'The school list and sent packets stay.\n\n' +
-                'Type "yolo" to confirm:';
-            const response = prompt(message);
-            if (response && response.toLowerCase() === 'yolo') {
-                this.doAction('cancel_event', { confirm: response, open_event: this.cancelOpenEvent });
-            }
+                'The school list and sent packets stay.');
+            if (typed) this.doAction('cancel_event', { confirm: typed, open_event: this.openEvent });
         },
 
         clearLeftovers() {
-            const message = 'CLEAR LEFTOVER DATA?\n\n' +
+            const typed = typedConfirm('CLEAR LEFTOVER DATA?\n\n' +
                 'This deletes all live data not recorded at any event, including any added since this page loaded.\n' +
                 'It is NOT archived.\n' +
-                'Closed-out events\' results are kept.\n\n' +
-                'Type "yolo" to confirm:';
-            const response = prompt(message);
-            if (response && response.toLowerCase() === 'yolo') {
-                this.doAction('clear_leftover_data', { confirm: response });
-            }
+                'Closed-out events\' results are kept.');
+            if (typed) this.doAction('clear_leftover_data', { confirm: typed });
         },
 
         // The passwords are changed when the CSV arrives: keep it on screen (no reload), it is the only copy

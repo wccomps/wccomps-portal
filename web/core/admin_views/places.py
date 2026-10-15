@@ -33,15 +33,17 @@ class SetupSection(StrEnum):
     READINESS = "readiness"
 
 
-# The competition page's Start/Stop row, always shown
-CONTROLS = "controls"
-# The competition page's Advanced section, always shown (collapsed unless Clear leftover data is next)
-ADVANCED = "advanced"
+class Anchor(StrEnum):
+    """A part of the competition page that is always shown, so a link can point at it; the value is its id."""
+
+    CONTROLS = "controls"  # The Start/Stop row
+    # Collapsed unless the next action is taken there, or a link points at it
+    ADVANCED = "advanced"
 
 
 class Kind(StrEnum):
     ELSEWHERE = "elsewhere"  # On another page: target is its URL name
-    # On the competition page: target is the id of the always-shown part it is taken at, or empty when it is taken in
+    # On the competition page: target is the Anchor it is taken at, or empty when it is taken in
     # a part shown only while it is next (a link there carries no anchor, so it never lands on a missing part)
     HERE = "here"
 
@@ -63,6 +65,10 @@ class ActionPlace:
         return self.kind == Kind.ELSEWHERE
 
     @property
+    def in_advanced(self) -> bool:
+        return self.kind == Kind.HERE and self.target == Anchor.ADVANCED
+
+    @property
     def page_title(self) -> str:
         """The title of the other page it is taken on, as that page's header shows it."""
         return PAGE_TITLES[self.target] if self.elsewhere else ""
@@ -72,15 +78,17 @@ class ActionPlace:
 PLACES: dict[Action, ActionPlace] = {
     Action.IMPORT: ActionPlace("Import the school list", Kind.ELSEWHERE, "school_info_import"),
     Action.SEND_PACKETS: ActionPlace("Send packets", Kind.ELSEWHERE, "packets_list"),
-    Action.START: ActionPlace("Check readiness and start the competition", Kind.HERE, CONTROLS, Section.READINESS),
+    Action.START: ActionPlace(
+        "Check readiness and start the competition", Kind.HERE, Anchor.CONTROLS, Section.READINESS
+    ),
     # While it runs Stop is the next-step button at the top of the competition page
     Action.STOP: ActionPlace("Stop the competition", Kind.HERE, shows=Section.LIVE),
     Action.FINISH: ActionPlace(
         "Finish scoring and email scorecards", Kind.ELSEWHERE, "scoring:email_scorecards", Section.CLOSE_OUT
     ),
     Action.CLOSE_OUT: ActionPlace("Close Out Event", Kind.HERE, shows=Section.CLOSE_OUT),
-    Action.CANCEL: ActionPlace("Cancel event", Kind.HERE, ADVANCED, rare=True),
-    Action.CLEAR: ActionPlace("Clear leftover data", Kind.HERE, ADVANCED, Section.LEFTOVERS, rare=True),
+    Action.CANCEL: ActionPlace("Cancel event", Kind.HERE, Anchor.ADVANCED, rare=True),
+    Action.CLEAR: ActionPlace("Clear leftover data", Kind.HERE, Anchor.ADVANCED, Section.LEFTOVERS, rare=True),
 }
 
 # The competition page's steps, in order

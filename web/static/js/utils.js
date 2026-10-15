@@ -115,8 +115,6 @@ function progressMixin() {
 function actionMixin(url) {
     return compose(toastMixin(), {
         loading: false,
-        get notLoading() { return !this.loading; },
-        get disabledClass() { return this.loading ? 'disabled' : ''; },
 
         setField(e) {
             this[e.target.dataset.field] = e.target.value;

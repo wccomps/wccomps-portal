@@ -31,9 +31,8 @@ from scoring.quotient_sync import sync_quotient_metadata
 
 from core.admin_views.event_panel import event_facts, event_panel
 from core.admin_views.places import (
-    ADVANCED,
-    CONTROLS,
     PLACES,
+    Anchor,
     Section,
     SetupSection,
     action_url,
@@ -551,7 +550,6 @@ def _close_out_context(stage: EventStage) -> dict[str, object]:
         # Close Out records scores with no event in the active season; the Seasons page makes one active
         "needs_active_season": stage.event is None and active_season is None,
         "active_season": active_season,
-        "open_event": stage.event,
         "can_close_out": not refusal,
         # Shown when the section offers no button
         "close_out_refusal": refusal,
@@ -573,11 +571,9 @@ def admin_competition(request: HttpRequest) -> HttpResponse:
     can_clear = not clear_leftovers_problem(stage)
     context: dict[str, object] = {
         "panel": panel,
-        "controls_id": CONTROLS,
-        "advanced_id": ADVANCED,
-        # Advanced opens while Clear leftover data is the next step: the Leftover data section points at it
-        "advanced_open": stage.next_action == Action.CLEAR,
+        "anchors": ids(Anchor),
         "can_cancel": not cancel_event_problem(stage),
+        "can_clear": can_clear,
         "leftovers": _wiped_summary(competition_data_counts()) if can_clear else "",
     }
     if (section := panel.section) is not None:
@@ -648,6 +644,7 @@ def admin_competition_guide(request: HttpRequest) -> HttpResponse:
             "key": action.value,
             "heading": place.heading,
             "rare": place.rare,
+            "in_advanced": place.in_advanced,
             "url": action_url(action),
             "link_label": ACTIONS[action].link_label,
             "partial": guide_partial(action),

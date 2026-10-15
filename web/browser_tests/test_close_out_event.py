@@ -156,17 +156,23 @@ def test_clear_leftover_data_opens_under_advanced_and_needs_the_typed_word(live_
         context.close()
 
 
-def test_a_link_to_advanced_opens_it(live_server, pw_browser):
+@pytest.mark.parametrize("on_load", [True, False])
+def test_a_link_to_advanced_opens_it(live_server, pw_browser, on_load):
     user = _create_role_user("admin", None)
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
+    toggle = page.get_by_role("button", name="Advanced: reset team passwords")
 
     try:
-        page.goto(f"{live_server.url}/ops/admin/competition/#advanced")
+        if on_load:
+            page.goto(f"{live_server.url}/ops/admin/competition/#advanced")
+        else:
+            page.goto(f"{live_server.url}/ops/admin/competition/")
+            toggle.wait_for()
+            assert toggle.get_attribute("aria-expanded") == "false"
+            page.evaluate("location.hash = 'advanced'")
         page.get_by_role("button", name="Reset Passwords").wait_for()
-        assert (
-            page.get_by_role("button", name="Advanced: reset team passwords").get_attribute("aria-expanded") == "true"
-        )
+        assert toggle.get_attribute("aria-expanded") == "true"
     finally:
         context.close()
 
