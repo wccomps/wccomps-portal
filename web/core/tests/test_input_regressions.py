@@ -8,6 +8,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import Client
 from django.urls import reverse
 from django.utils.http import content_disposition_header
@@ -22,13 +23,14 @@ from registration.services import SchoolListRow, import_school_list
 from scoring.screenshots import detect_inline_type
 
 from core.admin_views.competition import TIMEZONE_CHOICES
-from core.forms import SchoolInfoEditForm
+from core.forms import CategoryForm, SchoolInfoEditForm
 from core.tests.strategies import (
     content_types,
     datetime_text,
     email_text,
     file_bytes,
     file_names,
+    int_text,
     long_email,
     request_text,
     rolled_back,
@@ -36,6 +38,7 @@ from core.tests.strategies import (
 from core.utils import parse_datetime_to_utc
 from team.forms import parse_csv_file
 from team.models import Team
+from ticketing.forms import TicketResolveForm
 from ticketing.models import Ticket, TicketAttachment, TicketCategory
 
 
@@ -199,3 +202,25 @@ def test_a_new_ticket_category_gets_an_id_past_the_seeded_ones(name: str) -> Non
     """Migration 0009 seeds categories 1 to 6 with explicit ids, which doesn't move the id sequence on."""
     with rolled_back():
         assert TicketCategory.objects.create(display_name=name).pk > 6
+
+
+INTEGER_COLUMN = connection.ops.integer_field_range("IntegerField")
+STORED_INTEGERS = (
+    (CategoryForm, ("points", "min_points", "max_points", "sort_order")),
+    (TicketResolveForm, ("points_override",)),
+)
+
+
+@given(value=int_text())
+@example(value=str(2**31))
+@example(value=str(-(2**31) - 1))
+def test_an_integer_a_form_stores_fits_its_column(value: str) -> None:
+    for form_class, names in STORED_INTEGERS:
+        for name in names:
+            try:
+                cleaned = form_class.base_fields[name].clean(value)
+            except ValidationError:
+                continue
+            if cleaned is not None:
+                low, high = INTEGER_COLUMN
+                assert low <= cleaned <= high, f"{form_class.__name__}.{name} accepts {cleaned}"

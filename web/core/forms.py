@@ -4,6 +4,7 @@ from registration.models import SCHOOL_NAME_MAX_LENGTH, Event, validate_school_n
 from registration.services import NewEvent
 
 from core.authentik_utils import parse_team_range
+from core.models import INTEGER_COLUMN_MAX, INTEGER_COLUMN_MIN
 
 
 class SchoolInfoEditForm(forms.Form):
@@ -21,7 +22,7 @@ class BroadcastForm(forms.Form):
 
 class CategoryForm(forms.Form):
     display_name = forms.CharField(max_length=100)
-    points = forms.IntegerField(initial=0)
+    points = forms.IntegerField(initial=0, min_value=INTEGER_COLUMN_MIN, max_value=INTEGER_COLUMN_MAX)
     required_fields = forms.TypedMultipleChoiceField(
         coerce=str,
         required=False,
@@ -44,10 +45,16 @@ class CategoryForm(forms.Form):
     )
     variable_points = forms.BooleanField(required=False)
     variable_cost_note = forms.CharField(required=False)
-    min_points = forms.IntegerField(initial=0, required=False)
-    max_points = forms.IntegerField(initial=0, required=False)
+    min_points = forms.IntegerField(
+        initial=0, required=False, min_value=INTEGER_COLUMN_MIN, max_value=INTEGER_COLUMN_MAX
+    )
+    max_points = forms.IntegerField(
+        initial=0, required=False, min_value=INTEGER_COLUMN_MIN, max_value=INTEGER_COLUMN_MAX
+    )
     user_creatable = forms.BooleanField(required=False)
-    sort_order = forms.IntegerField(initial=0, required=False)
+    sort_order = forms.IntegerField(
+        initial=0, required=False, min_value=INTEGER_COLUMN_MIN, max_value=INTEGER_COLUMN_MAX
+    )
     playbook = forms.CharField(required=False, widget=forms.Textarea)
 
     def clean_min_points(self) -> int:

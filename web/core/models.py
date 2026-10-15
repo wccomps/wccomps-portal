@@ -7,6 +7,11 @@ from django.utils import timezone
 
 from core import discord_tasks
 
+# An IntegerField column's range on PostgreSQL. A plain form IntegerField accepts any integer, so one whose value
+# is stored in such a column stops there.
+INTEGER_COLUMN_MIN = -(2**31)
+INTEGER_COLUMN_MAX = 2**31 - 1
+
 
 class UserGroups(models.Model):
     """

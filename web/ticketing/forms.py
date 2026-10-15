@@ -1,5 +1,7 @@
 from django import forms
 
+from core.models import INTEGER_COLUMN_MAX, INTEGER_COLUMN_MIN
+
 
 class CreateTicketForm(forms.Form):
     title = forms.CharField(max_length=255)
@@ -21,7 +23,7 @@ class TicketReassignForm(forms.Form):
 
 class TicketResolveForm(forms.Form):
     resolution_notes = forms.CharField(required=False)
-    points_override = forms.IntegerField(required=False)
+    points_override = forms.IntegerField(required=False, min_value=INTEGER_COLUMN_MIN, max_value=INTEGER_COLUMN_MAX)
 
 
 class TicketReopenForm(forms.Form):
