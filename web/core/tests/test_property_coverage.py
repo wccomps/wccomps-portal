@@ -470,21 +470,37 @@ def test_every_bot_entry_point_is_covered_or_left_for_pr_c() -> None:
 
 CSV_EXPORT_MODULE = "web/core/csv_export.py"
 RAW_CSV_WRITERS = {"csv.writer", "csv.DictWriter"}
+# Writers that may stay plain, each with why its cells can't carry a formula
+CSV_WRITER_EXCEPTIONS = {
+    "web/core/authentik_utils.py:credentials_csv": "generated usernames and passwords, not user text; a password "
+    "starting with @ or + must read back exactly, without the formula guard's quote",
+}
+
+
+def _nodes_in_scope(node: ast.AST, scope: str = "<module>", prefix: str = "") -> Iterator[tuple[str, ast.AST]]:
+    """Every node under node, with the qualified name of the function (or class) it sits in."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            name = f"{prefix}{child.name}"
+            yield from _nodes_in_scope(child, name, f"{name}.")
+        else:
+            yield scope, child
+            yield from _nodes_in_scope(child, scope, prefix)
 
 
 def raw_csv_writers() -> dict[str, str]:
-    """CSV writers source builds itself instead of through core.csv_export (found by what it calls or imports)."""
+    """csv.writer/DictWriter calls or imports outside core.csv_export, keyed by the function they are in."""
     found: dict[str, str] = {}
     for path, tree in python_trees().items():
         if path == CSV_EXPORT_MODULE:
             continue
-        for node in ast.walk(tree):
+        for scope, node in _nodes_in_scope(tree):
             if isinstance(node, ast.Call) and ast.unparse(node.func) in RAW_CSV_WRITERS:
-                found[f"{path}:{node.lineno}"] = ast.unparse(node.func)
+                found[f"{path}:{scope}"] = ast.unparse(node.func)
             elif isinstance(node, ast.ImportFrom) and node.module == "csv":
                 for alias in node.names:
                     if alias.name in {"writer", "DictWriter"}:
-                        found[f"{path}:{node.lineno}"] = f"from csv import {alias.name}"
+                        found[f"{path}:{scope}"] = f"from csv import {alias.name}"
     return found
 
 
@@ -493,5 +509,5 @@ def test_every_csv_writer_neutralises_formulas() -> None:
     fail_with(
         "CSV writers that don't go through core.csv_export.csv_writer",
         [Unused(key, call) for key, call in raw_csv_writers().items()],
-        {},
+        CSV_WRITER_EXCEPTIONS,
     )

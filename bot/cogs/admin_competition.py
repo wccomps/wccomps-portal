@@ -12,8 +12,7 @@ from django.conf import settings
 from bot.competition_actions import run_competition_cleanup
 from bot.permissions import permission_check
 from bot.utils import ConfirmView, log_to_ops_channel, team_chat_channel
-from core.authentik_utils import parse_team_range, reset_team_credentials
-from core.csv_export import csv_writer
+from core.authentik_utils import credentials_csv, parse_team_range, reset_team_credentials
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.utils import UnknownTimezoneError, parse_datetime_to_utc
 from team.models import Team, active_team_numbers, team_username
@@ -128,11 +127,8 @@ class AdminCompetitionCog(commands.Cog):
             await interaction.followup.send(result_msg, ephemeral=True)
             return
 
-        csv_buffer = io.StringIO()
-        writer = csv_writer(csv_buffer)
-        writer.writerow(["Username", "Password"])
-        writer.writerows((username, password) for _num, username, password in password_list)
-        file = discord.File(fp=io.BytesIO(csv_buffer.getvalue().encode("utf-8")), filename="blueteam_passwords.csv")
+        csv_content = credentials_csv((username, password) for _num, username, password in password_list)
+        file = discord.File(fp=io.BytesIO(csv_content.encode("utf-8")), filename="blueteam_passwords.csv")
         await interaction.followup.send(
             result_msg + "\nCSV attached with the new credentials.", file=file, ephemeral=True
         )

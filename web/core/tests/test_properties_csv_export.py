@@ -15,6 +15,7 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 from registration.models import School
 
+from core.authentik_utils import credentials_csv, generate_blueteam_password
 from core.csv_export import FORMULA_STARTS, csv_writer
 from core.tests.strategies import PAYLOADS, request_text, rolled_back
 from team.models import SchoolInfo, Team
@@ -57,3 +58,23 @@ def test_a_team_name_in_the_school_list_export_is_not_a_formula(team_name: str, 
         rows = list(csv.reader(io.StringIO(response.content.decode(), newline="")))
     exported = rows[1][1]
     assert exported == ("'" + team_name if team_name.startswith(FORMULA_STARTS) else team_name)
+
+
+@given(
+    accounts=st.lists(
+        st.tuples(st.from_regex(r"team[0-9]{2}", fullmatch=True), st.sampled_from(("!", "@", "#", "+", "=", "-", "a"))),
+        max_size=5,
+    ).map(lambda rows: [(user, start + "123-Correct-Horse") for user, start in rows])
+)
+@example(accounts=[("team01", "@123-Apple-Banana"), ("team02", "+456-Pear-Plum")])
+def test_new_passwords_read_back_from_their_csv_exactly(accounts: list[tuple[str, str]]) -> None:
+    """The credentials CSV holds generated passwords, not user text: a quote added in front would hand out a
+    wrong password."""
+    rows = list(csv.reader(io.StringIO(credentials_csv(accounts), newline="")))
+    assert rows == [["Username", "Password"], *[[user, password] for user, password in accounts]]
+
+
+def test_every_generated_password_reads_back_from_its_csv_exactly() -> None:
+    passwords = [generate_blueteam_password() for _ in range(500)]
+    rows = list(csv.reader(io.StringIO(credentials_csv(("team01", p) for p in passwords), newline="")))
+    assert [row[1] for row in rows[1:]] == passwords

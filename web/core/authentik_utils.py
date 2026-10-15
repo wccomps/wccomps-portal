@@ -1,5 +1,8 @@
+import csv
+import io
 import logging
 import secrets
+from collections.abc import Iterable
 
 from team.models import MAX_TEAMS, team_username
 
@@ -122,3 +125,16 @@ def parse_team_range(range_str: str) -> list[int]:
             team_numbers.add(num)
 
     return sorted(team_numbers)
+
+
+def credentials_csv(accounts: Iterable[tuple[str, str]]) -> str:
+    """A Username,Password CSV of team accounts' new passwords.
+
+    A plain csv.writer, not core.csv_export: the cells are generated, not user text, and a password such as
+    "@123-Apple-Banana" must read back exactly, not with a formula guard's leading quote.
+    """
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["Username", "Password"])
+    writer.writerows(accounts)
+    return out.getvalue()
