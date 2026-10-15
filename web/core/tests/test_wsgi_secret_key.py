@@ -2,6 +2,7 @@
 
 import importlib
 import sys
+from unittest.mock import patch
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
@@ -9,7 +10,9 @@ from django.core.exceptions import ImproperlyConfigured
 
 def _import_wsgi():
     sys.modules.pop("portal.wsgi", None)
-    return importlib.import_module("portal.wsgi")
+    # Warming (tested in test_warm_start) would freeze the test process's objects
+    with patch("portal.warmup.warm"):
+        return importlib.import_module("portal.wsgi")
 
 
 @pytest.mark.parametrize("value", [None, "", "your_random_secret_key_here"])
