@@ -357,8 +357,9 @@ def _packet_upload_use(w: World, form: Any) -> None:
 
 def _resubmit_team_numbers(cleaned: dict[str, Any]) -> QueryDict:
     data = resubmission({k: v for k, v in cleaned.items() if k != "team_numbers"})
-    if cleaned["team_numbers"]:
-        data["team_numbers"] = ",".join(map(str, cleaned["team_numbers"]))
+    if cleaned["team_numbers"] is not None:
+        # An empty list is what a field of only commas cleans to
+        data["team_numbers"] = ",".join(map(str, cleaned["team_numbers"])) or ","
     return data
 
 

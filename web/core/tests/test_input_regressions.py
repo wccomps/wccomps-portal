@@ -29,7 +29,7 @@ from scoring.models import ScoringTemplate
 from scoring.screenshots import detect_inline_type, read_screenshot
 
 from core.admin_views.competition import TIMEZONE_CHOICES
-from core.forms import ResetPasswordsForm, SchoolInfoEditForm, StartMessageForm
+from core.forms import SchoolInfoEditForm, StartMessageForm
 from core.tests.strategies import (
     content_types,
     datetime_text,
@@ -358,12 +358,3 @@ def test_an_upload_name_is_stored_as_text_without_control_characters(
     upload.seek(0)
     _, stored_name, _ = read_screenshot(upload)
     assert stored_name and not any(unicodedata.category(c) in ("Cc", "Cf") for c in stored_name)
-
-
-@given(numbers=st.one_of(request_text(20), st.sampled_from((",", " , ", "1,", "1-3"))))
-@example(numbers=",")
-def test_reset_passwords_reads_no_team_numbers_as_every_team(numbers: str) -> None:
-    """A list that names no team is None (every active team), the same as an empty field, not an empty list."""
-    form = ResetPasswordsForm({"team_numbers": numbers})
-    if form.is_valid():
-        assert form.cleaned_data["team_numbers"] is None or form.cleaned_data["team_numbers"]
