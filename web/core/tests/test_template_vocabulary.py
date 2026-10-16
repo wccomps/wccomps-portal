@@ -199,9 +199,6 @@ RAW_MARKUP_EXCEPTIONS: dict[str, str] = {
         "The chrome's menu, dark mode and sound toggles; c-button would put Django's filled .button on the nav bar"
     ),
     "admin/index.html:<c-module>": "Django admin's own index page: its recent actions box, kept as Django writes it",
-    "create_ticket.html:<c-form>": (
-        "Its own ticketForm component checks the fields on submit; a c-form needs that component moved around the form"
-    ),
     "orange_team/check_form.html:<c-form_field>": (
         "Rubric rows Alpine repeats (x-for); c-form_field takes a fixed label and id, these are bound per row"
     ),
