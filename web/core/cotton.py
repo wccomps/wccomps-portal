@@ -8,10 +8,15 @@ closes its attribute. escape_component_attrs makes every value an escaped, doubl
 - a literal in the template's source (name="text", ::name="text") is HTML the template author wrote, so an
   entity in it (&quot;, &amp;) stays the character it stands for.
 In the last two, only `"` is encoded, so the value can't close its attribute.
+
+A :name the page's context doesn't have, which cotton would silently leave out, fails to render instead, unless
+the component declares it (then its <c-vars> default applies). That is how an Alpine binding written :name
+rather than ::name shows up.
 """
 
 import re
 
+from django.template import TemplateSyntaxError
 from django.utils.html import escape
 from django.utils.safestring import SafeData, SafeString, mark_safe
 from django_cotton.templatetags import Attrs, _component
@@ -41,6 +46,13 @@ def attribute(name: str, value: object) -> str:
 
 
 def attrs_html(attrs: Attrs) -> SafeString:
+    # cotton leaves out a :name it can't resolve; one the component doesn't declare would just vanish
+    dropped = [name for name in attrs._unprocessable if name not in attrs._exclude_from_str]
+    if dropped:
+        raise TemplateSyntaxError(
+            f":{dropped[0]} isn't in the page's context, so the component would leave it out; "
+            f"an Alpine binding is written ::{dropped[0]}"
+        )
     return mark_safe(" ".join(attribute(name, value) for name, value in attrs.attrs_dict().items()))  # noqa: S308
 
 

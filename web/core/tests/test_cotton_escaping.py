@@ -8,7 +8,7 @@ the template engine; it fails if an upgrade or a change to core.cotton lets a va
 from html.parser import HTMLParser
 
 import pytest
-from django.template import Context, Template
+from django.template import Context, Template, TemplateSyntaxError
 from django_cotton.compiler_regex import CottonCompiler
 from hypothesis import example, given
 from hypothesis import strategies as st
@@ -89,3 +89,16 @@ def test_an_attribute_name_that_would_add_markup_fails_to_render() -> None:
     template = Template(CottonCompiler().process('<c-button :attrs="spread">Go</c-button>'))
     with pytest.raises(ValueError, match="attribute name"):
         template.render(Context({"spread": {"x onload=alert(1)": "1"}}))
+
+
+def test_a_dynamic_attribute_that_is_not_in_the_context_fails_to_render() -> None:
+    template = Template(CottonCompiler().process('<c-button :disabled="loading">Go</c-button>'))
+    with pytest.raises(TemplateSyntaxError, match="::disabled"):
+        template.render(Context({}))
+
+
+def test_an_alpine_binding_and_an_unset_declared_attribute_render() -> None:
+    source = '<c-button ::disabled="loading">Go</c-button><c-badge :aria_label="missing">New</c-badge>'
+    html = Template(CottonCompiler().process(source)).render(Context({}))
+    assert ':disabled="loading"' in html
+    assert "aria-label" not in html
