@@ -194,14 +194,7 @@ def review_incidents(request: HttpRequest) -> HttpResponse:
     result = filter_sort_paginate(
         request,
         base_query,
-        valid_sort_fields=[
-            "created_at",
-            "-created_at",
-            "team__team_number",
-            "-team__team_number",
-            "attack_detected_at",
-            "-attack_detected_at",
-        ],
+        sort_fields=["created_at", "team__team_number", "attack_detected_at"],
         default_sort="-created_at",
     )
     page_obj = result["page_obj"]

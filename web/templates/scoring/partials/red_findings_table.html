@@ -149,10 +149,12 @@
             <tr>
                 <td colspan="{% if is_gold_team %}11{% else %}9{% endif %}"
                     class="text-center p-20">
-                    {% if selected_team or selected_attack_type or selected_submitter or status_filter != "pending" %}
-                        No findings match your filters. Try <a href="{% url 'scoring:red_team_findings' %}">clearing all filters</a>
-                    {% else %}
+                    {% if filtered %}
+                        No findings match your filters. Try <a href="{{ request.path }}">clearing all filters</a>
+                    {% elif status_filter == "pending" %}
                         No pending findings. All red team findings have been approved.
+                    {% else %}
+                        No findings yet.
                     {% endif %}
                 </td>
             </tr>

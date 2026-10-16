@@ -98,18 +98,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     result = filter_sort_paginate(
         request,
         query,
-        valid_sort_fields=[
-            "created_at",
-            "-created_at",
-            "status",
-            "-status",
-            "team__team_number",
-            "-team__team_number",
-            "category",
-            "-category",
-            "assigned_to__username",
-            "-assigned_to__username",
-        ],
+        sort_fields=["created_at", "status", "team__team_number", "category", "assigned_to__username"],
         default_sort="-created_at",
         page_size=page_size,
     )

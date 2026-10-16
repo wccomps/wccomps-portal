@@ -51,14 +51,7 @@ def review_orange(request: HttpRequest) -> HttpResponse:
     result = filter_sort_paginate(
         request,
         base_query,
-        valid_sort_fields=[
-            "created_at",
-            "-created_at",
-            "team__team_number",
-            "-team__team_number",
-            "points_awarded",
-            "-points_awarded",
-        ],
+        sort_fields=["created_at", "team__team_number", "points_awarded"],
         default_sort="-created_at",
     )
     page_obj = result["page_obj"]

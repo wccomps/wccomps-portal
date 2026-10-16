@@ -3,7 +3,7 @@ import json
 import logging
 import queue
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from datetime import datetime
 from typing import TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -100,27 +100,25 @@ class FilterSortPage[M: Model](TypedDict):
     current_sort: str
 
 
+def requested_sort(request: HttpRequest, sort_fields: Collection[str], default_sort: str) -> str:
+    """The list's ?sort=: one of sort_fields, with a leading - for descending; "default" means no ordering, and any
+    other value the default."""
+    sort_by = request.GET.get("sort", default_sort)
+    if sort_by == "default":
+        return ""
+    return sort_by if sort_by.removeprefix("-") in sort_fields else default_sort
+
+
 def filter_sort_paginate[M: Model](
     request: HttpRequest,
     queryset: QuerySet[M],
     *,
-    valid_sort_fields: list[str],
+    sort_fields: Collection[str],
     default_sort: str = "-created_at",
     page_size: int = 50,
 ) -> FilterSortPage[M]:
-    """Validate sort field, apply ordering, and paginate a queryset.
-
-    Reads ``sort`` and ``page`` from ``request.GET``.  The caller is
-    responsible for applying all domain-specific filters to *queryset*
-    before calling this helper.
-    """
-    sort_by = request.GET.get("sort", default_sort)
-
-    if sort_by == "default":
-        sort_by = ""
-
-    if sort_by and sort_by not in valid_sort_fields:
-        sort_by = default_sort
+    """Order a filtered queryset by requested_sort and paginate it by ?page=."""
+    sort_by = requested_sort(request, sort_fields, default_sort)
 
     if sort_by:
         queryset = queryset.order_by(sort_by)

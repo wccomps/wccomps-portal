@@ -55,16 +55,7 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
     result = filter_sort_paginate(
         request,
         query,
-        valid_sort_fields=[
-            "resolved_at",
-            "-resolved_at",
-            "points_charged",
-            "-points_charged",
-            "team__team_number",
-            "-team__team_number",
-            "category",
-            "-category",
-        ],
+        sort_fields=["resolved_at", "points_charged", "team__team_number", "category"],
         default_sort="-resolved_at",
     )
     page_obj = result["page_obj"]
