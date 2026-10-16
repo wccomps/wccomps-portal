@@ -52,13 +52,16 @@ def test_a_refusal_that_mails_or_calls_out_fails() -> None:
 
 def test_every_skipped_browser_role_is_one_the_page_lets_in() -> None:
     """A page's skip_roles entry for a role its row refuses is stale (the role was never going to be visited)."""
-    from browser_tests.page_registry import BROWSER_ROLES, PAGES, _view_rows_allowed
+    from browser_tests.page_registry import PAGES
+
+    from core.tests.roles import BROWSER_ROLES
+    from core.tests.view_rows import allowed_roles
 
     stale = [
         f"{page.url_name}: {role}"
         for page in PAGES
         for role in page.skip_roles
-        if role not in BROWSER_ROLES or role not in _view_rows_allowed()[page.url_name]
+        if role not in BROWSER_ROLES or role not in allowed_roles(page.url_name)
     ]
     assert not stale, f"skip_roles entries for roles the page's row refuses: {stale}"
 

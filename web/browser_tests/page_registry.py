@@ -4,26 +4,8 @@ Each page is rendered as every browser role its view property row lets in (core.
 roles it skips with a reason; which roles a page refuses is checked there for every URL pattern."""
 
 from dataclasses import dataclass, field
-from functools import cache
 
-# The roles the role-wide browser tests visit as
-BROWSER_ROLES = [
-    "blue_team",
-    "red_team",
-    "gold_team",
-    "orange_team",
-    "white_team",
-    "ticketing_support",
-    "ticketing_admin",
-    "admin",
-]
-
-
-@cache
-def _view_rows_allowed() -> dict[str, frozenset[str]]:
-    from core.tests.test_property_coverage import VIEW_MODULES
-
-    return {case.name: case.allowed for module in VIEW_MODULES for case in module.CASES}
+from core.tests.roles import BROWSER_ROLES
 
 
 @dataclass
@@ -40,7 +22,9 @@ class PageDef:
     @property
     def allowed_roles(self) -> list[str]:
         """The browser roles its view row lets in, less the skipped ones."""
-        allowed = _view_rows_allowed()[self.url_name]
+        from core.tests.view_rows import allowed_roles
+
+        allowed = allowed_roles(self.url_name)
         return [role for role in BROWSER_ROLES if role in allowed and role not in self.skip_roles]
 
 

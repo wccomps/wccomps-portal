@@ -32,6 +32,18 @@ def groups_of(role: str) -> list[str]:
     return groups
 
 
+# The roles the role-wide browser tests (and the nav tests) visit as
+BROWSER_ROLES = [
+    "blue_team",
+    "red_team",
+    "gold_team",
+    "orange_team",
+    "white_team",
+    "ticketing_support",
+    "ticketing_admin",
+    "admin",
+]
+
 # Discord ids are unique; a test's rows roll back, so a process-wide counter never collides
 _discord_ids = itertools.count(7_000_000_000)
 

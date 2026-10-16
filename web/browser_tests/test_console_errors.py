@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.tests.roles import role_user
+from core.tests.roles import BROWSER_ROLES, role_user
 
 from .conftest import (
     create_session_context,
@@ -10,7 +10,7 @@ from .conftest import (
     resolve_url,
     visit_and_capture_errors,
 )
-from .page_registry import BROWSER_ROLES, PAGES
+from .page_registry import PAGES
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 

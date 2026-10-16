@@ -24,18 +24,9 @@ from django.apps import apps
 from django.contrib import admin
 from django.urls import URLPattern, URLResolver, get_resolver
 
-from core.tests import (
-    test_properties_forms,
-    test_properties_parsers,
-    test_properties_views_admin_site,
-    test_properties_views_core,
-    test_properties_views_orange,
-    test_properties_views_packets,
-    test_properties_views_registration,
-    test_properties_views_scoring,
-    test_properties_views_ticketing,
-)
+from core.tests import test_properties_forms, test_properties_parsers
 from core.tests.test_no_unused_code import REPO_DIR, Unused, fail_with, python_trees
+from core.tests.view_rows import VIEW_MODULES
 
 WEB_DIR = REPO_DIR / "web"
 
@@ -291,18 +282,6 @@ def test_every_upload_and_csv_parser_has_property_tests() -> None:
         if not getattr(test, "is_hypothesis_test", False)
     ]
     assert not not_properties, f"PARSERS lists tests that aren't Hypothesis property tests: {not_properties}"
-
-
-# Each runs its properties for every row of its module's CASES, so a row covers its URL pattern (or admin model)
-VIEW_MODULES = (
-    test_properties_views_admin_site,
-    test_properties_views_core,
-    test_properties_views_orange,
-    test_properties_views_packets,
-    test_properties_views_registration,
-    test_properties_views_scoring,
-    test_properties_views_ticketing,
-)
 
 
 def view_cases() -> dict[str, str]:
