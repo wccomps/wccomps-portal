@@ -20,18 +20,22 @@ from scoring.forms import (
 )
 from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeamScore, ScoringTemplate
 
+from core.tests.strategies import rolled_back
 from core.tests.views_harness import (
     SIGNED_IN,
     Fields,
     ViewCase,
     World,
     any_request_is_answered_safely,
+    build,
+    check_answer,
     echo_sweep,
     every_allowed_role_gets_in,
     form_fields,
     hostile_text,
     may,
     repeated_post_changes_nothing_more,
+    send,
     uploads,
 )
 
@@ -87,6 +91,16 @@ def _injects(w: World) -> ExitStack:
 def _feedback(form: Any) -> Any:
     return lambda w: form_fields(form, {"score_id": st.sampled_from([str(g) for g in w.ids("grade_id")])})
 
+
+EXPORTS = [
+    ViewCase(
+        f"scoring:export_{dataset}",
+        GOLD,
+        query=lambda w: {"format": st.sampled_from(["csv", "json", "CSV"])},
+        json_sometimes="answers JSON for ?format=json and CSV otherwise; it is a download, not a JSON endpoint",
+    )
+    for dataset in ("red_scores", "incidents", "orange_adjustments", "inject_grades", "final_scores", "tickets")
+]
 
 CASES = [
     ViewCase("leaderboard_page", STAFF, query=lambda w: {"schools": hostile_text(), "names": hostile_text()}),
@@ -182,10 +196,7 @@ CASES = [
     ViewCase("scoring:api_scores", may("gold_team", "white_team", "ticketing_admin"), json=True),
     ViewCase("scoring:export_index", GOLD),
     ViewCase("scoring:export_all", GOLD, methods=("GET",)),
-    *(
-        ViewCase(f"scoring:export_{dataset}", GOLD, query=lambda w: {"format": st.sampled_from(["csv", "json", "CSV"])})
-        for dataset in ("red_scores", "incidents", "orange_adjustments", "inject_grades", "final_scores", "tickets")
-    ),
+    *EXPORTS,
     ViewCase("scoring:export_scorecards", GOLD, methods=("GET",)),
     ViewCase("scoring:email_scorecards", GOLD),
     ViewCase("scoring:stream_email_scorecards", GOLD, post=lambda w: form_fields(ScorecardEmailForm())),
@@ -214,3 +225,11 @@ IDEMPOTENT = [case for case in CASES if case.idempotent]
 @pytest.mark.parametrize("case", IDEMPOTENT, ids=[c.name for c in IDEMPOTENT])
 def test_repeated_post_changes_nothing_more(case: ViewCase, view_world: World) -> None:
     repeated_post_changes_nothing_more(case, view_world)
+
+
+@pytest.mark.parametrize("case", EXPORTS, ids=[c.name for c in EXPORTS])
+def test_an_export_answers_json_for_format_json(case: ViewCase, view_world: World) -> None:
+    """The one view that reads a format parameter: ?format=json is its JSON answer (CI drew it first)."""
+    drawn = build(case, role="admin", method="GET", name=case.name, kwargs={}, query={"format": ["json"]}, fields={})
+    with rolled_back():
+        check_answer(case, drawn, send(view_world, drawn))
