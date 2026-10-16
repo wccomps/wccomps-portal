@@ -230,7 +230,7 @@ def test_repeated_post_changes_nothing_more(case: ViewCase, view_world: World) -
 
 @pytest.mark.parametrize("case", EXPORTS, ids=[c.name for c in EXPORTS])
 def test_an_export_answers_json_for_format_json(case: ViewCase, view_world: World) -> None:
-    """The one view that reads a format parameter: ?format=json is its JSON answer (CI drew it first)."""
+    """The one view that reads a format parameter: ?format=json is its JSON answer."""
     drawn = build(case, role="admin", method="GET", name=case.name, kwargs={}, query={"format": ["json"]}, fields={})
     with rolled_back():
         answer = send(view_world, drawn)

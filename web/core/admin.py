@@ -29,12 +29,10 @@ class AuthentikAdminSite(admin.AdminSite):
     site_url = "/ops/tickets/"
 
     def has_permission(self, request: HttpRequest) -> bool:
-        # The one rule for the Django admin: the admin permission (PERMISSION_MAP)
         return request.user.is_active and has_permission(request.user, "admin")
 
     def _refused(self, request: HttpRequest) -> HttpResponse | None:
-        """A 403 for a signed-in visitor the site refuses: its login form would be no use (signing in is Authentik's;
-        the sign-in gate sends an anonymous visitor there first)."""
+        """A 403 for a signed-in non-admin: the login form is no use, signing in is Authentik's."""
         if request.user.is_authenticated and not self.has_permission(request):
             return HttpResponseForbidden("Forbidden")
         return None
@@ -50,7 +48,7 @@ class AuthentikAdminSite(admin.AdminSite):
         def refusing(request: HttpRequest, *args: object, **kwargs: object) -> HttpResponseBase:
             # Django refuses a _to_field it can't reference with a 400, but its change and delete pages look an empty
             # one up as a field named "" and fail with a 500. Read as Django reads it: POST, then GET.
-            # test_view_regressions' canary fails once Django fixes it; then drop this override.
+            # test_view_regressions' canary fails once Django fixes it; then drop the _to_field check.
             if refused := self._refused(request):
                 return refused
             if request.POST.get(TO_FIELD_VAR, request.GET.get(TO_FIELD_VAR)) == "":

@@ -1,6 +1,6 @@
 """Central registry of pages the browser tests render, and element expectations.
 
-Each page is rendered as every browser role its view property row lets in (core.tests.views_harness), less the
+Each page is rendered as every browser role its view property row lets in (core.tests.view_rows), less the
 roles it skips with a reason; which roles a page refuses is checked there for every URL pattern."""
 
 from dataclasses import dataclass, field

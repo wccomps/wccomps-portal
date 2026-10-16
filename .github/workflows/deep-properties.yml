@@ -3,10 +3,9 @@ name: Nightly deep property tests
 # The ci profile runs the same few Hypothesis examples on every PR; this runs the deep profile (many random
 # examples, conftest.py) on main every night and on demand. When a run doesn't pass (a test fails, an earlier step
 # fails, or the job times out) it opens one issue, or comments on the open one; when a run passes, it closes it. A
-# run someone cancels reports nothing. GitHub cancels a job that runs past its timeout-minutes, which is the job's
-# result, not the run's (cancelled() stays false), so a timeout is reported as a failure.
-# A PR that edits this workflow, tests.yml or the report script runs it with the ci profile and prints the issue
-# body it would send instead of sending it.
+# run cancelled by someone or by the concurrency group reports nothing. A job that hits timeout-minutes is
+# cancelled, but the run isn't, so the report still runs and files it.
+# A PR touching the paths below runs it with the ci profile and prints the issue body it would send instead.
 
 on:
   schedule:

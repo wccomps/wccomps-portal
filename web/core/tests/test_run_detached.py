@@ -52,7 +52,6 @@ def test_a_failing_operation_ends_the_stream_with_an_error():
 
 
 def _threads_of(lines: Iterator[str]) -> list[str]:
-    """Each line's thread name, as the operation saw it."""
     return [line.strip() for line in lines]
 
 

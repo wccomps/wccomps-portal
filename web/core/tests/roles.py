@@ -49,9 +49,8 @@ _discord_ids = itertools.count(7_000_000_000)
 
 
 def make_user(username: str, groups: list[str]) -> User:
-    """A user with these Authentik groups and an active Discord link (bot-side checks look users up through it). The
-    portal finds a team member's team by the Team whose Authentik group it holds (blue_team's is Team 1's); the link
-    carries no team, which the bot would read (DiscordLink.team)."""
+    """A user with these Authentik groups and an active Discord link with no team; the portal finds its team by
+    Authentik group, the bot by the link."""
     user = User.objects.create_user(username=username, password="testpass123")
     UserGroups.objects.create(user=user, authentik_id=f"{username}-uid", groups=groups)
     DiscordLink.objects.create(user=user, discord_id=next(_discord_ids), discord_username=username, is_active=True)

@@ -40,9 +40,10 @@ Runs on the deoxys Kubernetes cluster, deployed by Argo CD from `wccomps/wccomps
 ## Python 3.14
 
 This project targets Python 3.14+ (`requires-python = ">=3.14"`). One patch version runs everywhere:
-`.python-version` (uv reads it locally, CI's setup-python reads it) and the Dockerfile's base image name the same
-one; change them together (a test can pass on one patch and fail on another). PEP 758 re-enables
-`except A, B:` syntax without parentheses. Do NOT change these to `except (A, B):` —
+`.python-version` (uv reads it locally and in the image build, CI's setup-python reads it) and the Dockerfile's base
+image name the same one; change them together (a test can pass on one patch and fail on another). The build refuses
+a mismatch and `test_python_pin` checks the tag. PEP 758 re-enables
+`except A, B:` syntax without parentheses. Do NOT change these to `except (A, B):`:
 the unparenthesized form is used intentionally throughout.
 
 ## Key Conventions

@@ -83,7 +83,7 @@ class TestTicketViewsPermissions:
         ],
     )
     def test_ops_tickets_unauthorized_roles_denied(self, user_fixture, request):
-        """Non-ticketing users should get 403 on ops tickets."""
+        """Non-ticketing users (and a blue team member whose team doesn't exist) get 403 on the ticket list."""
         user = request.getfixturevalue(user_fixture)
         client = Client()
         client.force_login(user)

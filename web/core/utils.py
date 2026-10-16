@@ -76,10 +76,8 @@ def run_detached(lines: Iterator[str]) -> Iterator[str]:
     A streaming view's generator stops at its next line once the client goes away (a closed tab, a proxy
     timeout), leaving the operation half done. Here the client only stops the relay; the work finishes.
 
-    Inside an open transaction the operation runs inline instead: a thread's own connection can't see the
-    transaction's uncommitted rows. That is decided when the stream is first read, after the view returned; a
-    production request is in no transaction then (Django's response streaming runs outside any atomic block), a
-    test is.
+    Inside an open transaction (a test's: this is checked at the stream's first read, after the view's own atomic
+    block has closed) the operation runs inline: a thread's connection can't see uncommitted rows.
     """
     if connection.in_atomic_block:
         yield from _inline(lines)

@@ -66,10 +66,8 @@ class RejectNulMiddleware:
     read.
 
     PostgreSQL text can't hold NUL, so a query that looks such text up or stores it fails: a session key with one
-    failed every signed-in page with a 500. Forms refuse it field by field (Django's CharField validator); this
-    covers what is read without a form. It reads no body: a signed-in request's form fields are checked after the
-    sign-in gate (RejectNulFieldsMiddleware). JSON bodies and other headers aren't checked; the one view that reads a
-    JSON body reads typed values only.
+    failed every signed-in page with a 500. Form fields: RejectNulFieldsMiddleware; JSON bodies and other headers
+    aren't checked.
     """
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:

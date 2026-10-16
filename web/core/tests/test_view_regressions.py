@@ -394,7 +394,7 @@ def test_an_htmx_request_with_a_nul_gets_a_plain_refusal(admin_client: Client) -
 
 
 def test_the_admin_site_alone_decides_who_gets_into_the_django_admin(gold_team_user: User) -> None:
-    """The sign-in gate refuses the Django admin's pages by asking the admin site, with no rule of its own."""
+    """The admin site alone refuses the Django admin's pages; patching its has_permission lets the user in."""
     from django.contrib import admin
 
     client = signed_in(gold_team_user)
@@ -404,7 +404,8 @@ def test_the_admin_site_alone_decides_who_gets_into_the_django_admin(gold_team_u
 
 
 def test_an_incident_report_refuses_a_role_it_doesnt_let_in_with_a_403(red_team_user: User) -> None:
-    """A refusal by role answered with a redirect home-but-elsewhere and a message looked like a page let in."""
+    """A refusal by role answered with an error redirect to the leaderboard, which the role check took for a page
+    that let the role in."""
     client = signed_in(red_team_user)
     team = Team.objects.create(team_number=2, team_name="Team 02")
     incident = IncidentReport.objects.create(

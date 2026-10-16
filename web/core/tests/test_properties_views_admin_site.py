@@ -21,7 +21,7 @@ from core.tests.views_harness import (
     may,
 )
 
-ADMINS = may("admin")  # the admin site and the sign-in gate let in only the admin permission
+ADMINS = may("admin")  # the admin site lets in only the admin permission
 
 
 def _list_filters(model_admin: admin.ModelAdmin[Any]) -> list[str]:
@@ -79,8 +79,6 @@ def _model_case(model: type[models.Model], model_admin: admin.ModelAdmin[Any]) -
         params={"object_id": f"pk:{model._meta.label}"},
         query=_changelist_query(model_admin),
         post=_admin_post(model, model_admin),
-        # The portal's gate is the admin site, which every page shares; the add and delete pages a model admin turns
-        # off are its own choice, checked only for refusing non-admins and never failing
         gate_names=(f"{prefix}_changelist",),
     )
 

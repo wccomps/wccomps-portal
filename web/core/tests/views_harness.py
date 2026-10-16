@@ -442,7 +442,8 @@ class ViewCase:
     idempotent: tuple[type[models.Model], ...] = ()
     idempotent_as: str = "admin"  # the role that sends the repeated POST
     # The URL names every_allowed_role_gets_in drives, when not all of them: the ones behind the portal's own gate
-    # (a model admin's add and delete pages are its own choice; the random requests check those never fail)
+    # (an admin model's changelist, behind the admin site; a model admin's other pages are its own choice, which the
+    # random requests check only for refusing non-admins and never failing)
     gate_names: tuple[str, ...] = ()
     # A query a role let in needs to get past the view's own checks (every_allowed_role_gets_in)
     entry_query: Callable[[World], dict[str, list[str]]] | None = None
@@ -481,7 +482,7 @@ class Drawn:
     method: str
     path: str
     query: dict[str, list[str]]
-    data: dict[str, Any]  # the form fields sent (multipart for a POST, urlencoded for PUT and DELETE)
+    data: dict[str, Any]  # the form fields sent (multipart for a POST, urlencoded for another method)
     body: bytes | None  # a JSON body
     headers: dict[str, str]
     tz: str | None
@@ -497,7 +498,7 @@ class Drawn:
 
     def carries_nul(self) -> bool:
         """A NUL where core.middleware's NUL refusals look: the path, query and cookies, and a signed-in POST's form
-        fields (not upload names, a PUT's body or a JSON body)."""
+        fields (not upload names, another method's body or a JSON body)."""
         posted = self.method == "POST" and self.role != "anonymous"
         fields = _texts({k: v for k, v in self.data.items() if not _is_upload(v)}) if posted else []
         return any("\x00" in text for text in (unquote(self.path), *self._query_texts(), *fields, self.tz or ""))
@@ -680,9 +681,8 @@ def client_for(world: World, role: str, tz: str | None = None) -> Client:
     """A fresh client for the role, sending its session's cookie (unless anonymous) and the tz cookie. A sign-out
     deletes the session row only inside the example's rolled-back savepoint, so every request starts signed in again.
 
-    The cookies go as a raw Cookie header, as a browser (or anyone) sends them, which Django parses itself: the test
-    client's own cookie jar refuses a control character in a value (CPython 3.14.8 and later), so a hostile tz value
-    couldn't be sent through it."""
+    Cookies go as a raw header: the test client's jar refuses a control character in a value, so a hostile tz
+    couldn't be sent."""
     cookies = {"sessionid": world.sessions[role]} if role in world.sessions else {}
     if tz is not None:
         cookies["tz"] = tz

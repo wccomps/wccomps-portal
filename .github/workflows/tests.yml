@@ -19,7 +19,7 @@ on:
         type: string
         default: ""
       timeout-minutes:
-        description: How long the job may run (a deep run takes hours; a PR's run, minutes)
+        description: How long the job may run (a deep run takes hours; a CI run, minutes)
         type: number
         default: 30
     outputs:

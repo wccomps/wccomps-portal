@@ -41,7 +41,7 @@ def invisible_characters() -> list[Unused]:
         if not path.endswith(CHECKED_SUFFIXES) or not (REPO_DIR / path).is_file():
             continue
         text = (REPO_DIR / path).read_text(encoding="utf-8", errors="replace")
-        # Split on newlines only: splitlines() also splits on U+2028 and U+2029, which would hide them
+        # Split on newlines only: splitlines() also splits on several characters this guard flags, hiding them
         for line_number, line in enumerate(text.split("\n"), start=1):
             if hidden := [f"U+{ord(c):04X}" for c in line if _hidden(c)]:
                 found.append(Unused(f"{path}:{line_number}", ", ".join(hidden)))
