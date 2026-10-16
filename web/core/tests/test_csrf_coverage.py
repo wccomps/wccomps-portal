@@ -5,6 +5,7 @@ PR #41 fixed ops pages that posted via wcPost but never set the csrftoken cookie
 """
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
 from django.conf import settings
@@ -14,11 +15,13 @@ from core.tests.guards import (
     REPO_DIR,
     TEMPLATES_DIR,
     elements,
+    extends_chain,
     fail_with,
-    template_name,
+    scripts,
     text,
     tracked_files,
     tracked_templates,
+    without_js_comments,
 )
 
 # Renders the token in <meta name="csrf-token">, which also sets the csrftoken cookie
@@ -27,7 +30,6 @@ TOKEN_BASE_TEMPLATE = "admin/base_site.html"
 # View callbacks allowed to skip CSRF, with the reason. Keep empty unless unavoidable.
 CSRF_EXEMPT_ALLOWLIST: dict[str, str] = {}
 
-EXTENDS_RE = re.compile(r"""{%\s*extends\s+["']([^"']+)["']\s*%}""")
 JS_POST_RE = re.compile(r"\b(wcPost|wcStream)\s*\(|method\s*:\s*['\"]POST['\"]", re.IGNORECASE)
 # Whole fetch(...) statement, so headers after `method` are seen; filtered to POSTs below
 FETCH_CALL_RE = re.compile(r"fetch\([^;]*;", re.DOTALL)
@@ -37,10 +39,10 @@ POST_METHOD_RE = re.compile(r"method\s*:\s*['\"]POST['\"]", re.IGNORECASE)
 POST_FORM_EXCEPTIONS = {"cotton/form.html:*": "the component itself; its callers put the token in its slot"}
 
 
-def missing_form_tokens(templates: list[tuple[str, Path]]) -> dict[str, str]:
+def missing_form_tokens(paths: Iterable[Path], root: Path = TEMPLATES_DIR) -> dict[str, str]:
     """Each POST form (<form method="post">, or <c-form>, which always posts) whose body has no {% csrf_token %}."""
     missing = {}
-    for name, path in templates:
+    for path in paths:
         lines = text(path).splitlines()
         open_forms: list[tuple[str, int, bool]] = []
         for tag in elements(path):
@@ -55,46 +57,30 @@ def missing_form_tokens(templates: list[tuple[str, Path]]) -> dict[str, str]:
                 opened, line, posts = open_forms.pop()
                 if opened == tag.name:
                     if posts and "csrf_token" not in "\n".join(lines[line - 1 : tag.line]):
-                        missing[f"{name}:{line}"] = "POST form without {% csrf_token %}"
+                        missing[f"{path.relative_to(root).as_posix()}:{line}"] = "POST form without {% csrf_token %}"
                     break
     return missing
 
 
-def all_templates() -> list[tuple[str, Path]]:
-    """Every tracked template, the standalone documents included (the public registration form posts too)."""
-    return [(template_name(path), path) for path in tracked_templates()]
-
-
-def _extends_chain(name: str, files: dict[str, str]) -> list[str]:
-    chain = [name]
-    while (source := files.get(chain[-1])) and (match := EXTENDS_RE.search(source)):
-        parent = match.group(1)
-        if parent in chain:
-            break
-        chain.append(parent)
-    return chain
-
-
-def _js_post_problems(files: dict[str, str]) -> list[str]:
-    problems = []
-    for name, source in files.items():
-        if not JS_POST_RE.search(source):
+def js_post_problems(paths: Iterable[Path], root: Path = TEMPLATES_DIR) -> dict[str, str]:
+    """Each template whose scripts post but that doesn't extend the token's base template, and each fetch POST in a
+    script without an X-CSRFToken header."""
+    problems = {}
+    for path in paths:
+        name = path.relative_to(root).as_posix()
+        if not any(JS_POST_RE.search(js) for _, js in scripts(path)):
             continue
-        if TOKEN_BASE_TEMPLATE not in _extends_chain(name, files):
-            problems.append(f"{name}: posts from JavaScript but doesn't extend {TOKEN_BASE_TEMPLATE}")
-        for match in _fetch_posts(source):
-            if "X-CSRFToken" not in match.group(0):
-                line = source.count("\n", 0, match.start()) + 1
-                problems.append(f"{name}:{line}: fetch POST without an X-CSRFToken header")
+        if TOKEN_BASE_TEMPLATE not in extends_chain(path, root):
+            problems[name] = f"posts from JavaScript but doesn't extend {TOKEN_BASE_TEMPLATE}"
+        for line, js in scripts(path):
+            for match in fetch_posts(js):
+                if "X-CSRFToken" not in match.group(0):
+                    problems[f"{name}:{line + js.count(chr(10), 0, match.start())}"] = "fetch POST without X-CSRFToken"
     return problems
 
 
-def _fetch_posts(source: str) -> list[re.Match[str]]:
+def fetch_posts(source: str) -> list[re.Match[str]]:
     return [m for m in FETCH_CALL_RE.finditer(source) if POST_METHOD_RE.search(m.group(0))]
-
-
-def _load_templates() -> dict[str, str]:
-    return {name: text(path) for name, path in all_templates()}
 
 
 def _all_patterns(resolver: URLResolver, prefix: str = "") -> list[tuple[str, URLPattern]]:
@@ -111,11 +97,12 @@ def _all_patterns(resolver: URLResolver, prefix: str = "") -> list[tuple[str, UR
 
 
 def test_every_post_form_has_csrf_token():
-    fail_with("POST forms without {% csrf_token %}", missing_form_tokens(all_templates()), POST_FORM_EXCEPTIONS)
+    # The standalone documents too: the public registration form posts
+    fail_with("POST forms without {% csrf_token %}", missing_form_tokens(tracked_templates()), POST_FORM_EXCEPTIONS)
 
 
 def test_javascript_posts_can_find_the_token():
-    fail_with("Pages posting from JavaScript", dict.fromkeys(_js_post_problems(_load_templates()), ""), {})
+    fail_with("Pages posting from JavaScript", js_post_problems(tracked_templates()), {})
 
 
 def test_static_js_fetch_posts_send_csrf_header():
@@ -123,8 +110,8 @@ def test_static_js_fetch_posts_send_csrf_header():
     problems = {
         f"{path.name}:{js.count(chr(10), 0, m.start()) + 1}": "fetch POST without X-CSRFToken"
         for path in js_files
-        for js in [path.read_text()]
-        for m in _fetch_posts(js)
+        for js in [without_js_comments(path.read_text())]
+        for m in fetch_posts(js)
         if "X-CSRFToken" not in m.group(0)
     }
     fail_with("Static JavaScript posts", problems, {})
@@ -150,10 +137,11 @@ def test_csrf_middleware_enabled():
 # --- The checks must catch what they claim to --------------------------------------------------
 
 
-def plant(tmp_path: Path, files: dict[str, str]) -> list[tuple[str, Path]]:
+def plant(tmp_path: Path, files: dict[str, str]) -> list[Path]:
     for name, source in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(source)
-    return [(name, tmp_path / name) for name in files]
+    return [tmp_path / name for name in files]
 
 
 def test_checker_flags_form_without_token(tmp_path: Path):
@@ -162,38 +150,47 @@ def test_checker_flags_form_without_token(tmp_path: Path):
         "y.html": "<c-form><input></c-form>",
         "z.html": '<form {% if n > 0 %}class="a"{% endif %} method="post"><input name="a"></form>',
     }
-    assert list(missing_form_tokens(plant(tmp_path, files))) == ["x.html:1", "y.html:1", "z.html:1"]
+    assert list(missing_form_tokens(plant(tmp_path, files), tmp_path)) == ["x.html:1", "y.html:1", "z.html:1"]
 
 
 def test_checker_accepts_form_with_token_and_ignores_get_forms(tmp_path: Path):
     files = {"x.html": '<form method="POST">{% csrf_token %}</form><form method="get"></form>'}
-    assert missing_form_tokens(plant(tmp_path, files)) == {}
+    assert missing_form_tokens(plant(tmp_path, files), tmp_path) == {}
 
 
-def test_checker_flags_js_post_page_outside_token_base():
+def test_checker_flags_js_post_page_outside_token_base(tmp_path: Path):
     files = {
         "admin/base_site.html": "{{ csrf_token }}",
-        "ok.html": '{% extends "mid.html" %} wcPost(url, {})',
+        "ok.html": '{% extends "mid.html" %}<script>wcPost(url, {})</script>',
         "mid.html": '{% extends "admin/base_site.html" %}',
-        "bad.html": '{% extends "standalone.html" %} wcPost(url, {})',
+        "bad.html": '{% extends "standalone.html" %}<script>wcPost(url, {})</script>',
         "standalone.html": "<html></html>",
     }
-    assert _js_post_problems(files) == ["bad.html: posts from JavaScript but doesn't extend admin/base_site.html"]
+    assert list(js_post_problems(plant(tmp_path, files), tmp_path)) == ["bad.html"]
 
 
-def test_checker_flags_raw_fetch_post_without_header():
+def test_checker_ignores_a_post_in_a_comment_or_outside_a_script(tmp_path: Path):
+    files = {
+        "a.html": "<script>// wcPost(url, {})\n/* fetch(u, { method: 'POST' }); */</script>",
+        "b.html": "<p>wcPost(url, {})</p>",
+        "c.html": "<script>const u = 'https://example.org/'; wcPost(u, {})</script>",
+    }
+    assert list(js_post_problems(plant(tmp_path, files), tmp_path)) == ["c.html"]
+
+
+def test_checker_flags_raw_fetch_post_without_header(tmp_path: Path):
     files = {
         "admin/base_site.html": "",
-        "p.html": '{% extends "admin/base_site.html" %} fetch(u, { method: "POST", body: b });',
+        "p.html": '{% extends "admin/base_site.html" %}\n<script>\nfetch(u, { method: "POST", body: b });</script>',
     }
-    assert _js_post_problems(files) == ["p.html:1: fetch POST without an X-CSRFToken header"]
+    assert list(js_post_problems(plant(tmp_path, files), tmp_path)) == ["p.html:3"]
 
 
-def test_checker_sees_header_after_method():
+def test_checker_sees_header_after_method(tmp_path: Path):
     """Real pages put headers after `method`; the check must read the whole call."""
     files = {
         "admin/base_site.html": "",
-        "p.html": '{% extends "admin/base_site.html" %}\n'
-        "fetch(u, {\n method: 'POST',\n headers: {'X-CSRFToken': getCSRFToken()},\n body: b\n});",
+        "p.html": '{% extends "admin/base_site.html" %}<script>\n'
+        "fetch(u, {\n method: 'POST',\n headers: {'X-CSRFToken': getCSRFToken()},\n body: b\n});</script>",
     }
-    assert _js_post_problems(files) == []
+    assert js_post_problems(plant(tmp_path, files), tmp_path) == {}
