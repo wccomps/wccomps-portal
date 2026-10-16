@@ -46,7 +46,9 @@ def test_a_finding_without_an_attack_type_shows_its_vector_or_unknown(
     assert f"<td>{shown}</td>" in html
 
 
-def test_a_finding_page_without_an_attack_type_says_unknown_and_shows_its_vector(client: Client, red_team_user: User) -> None:
+def test_a_finding_page_without_an_attack_type_says_unknown_and_shows_its_vector(
+    client: Client, red_team_user: User
+) -> None:
     from decimal import Decimal
 
     from scoring.models import RedTeamScore
