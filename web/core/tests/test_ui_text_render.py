@@ -68,7 +68,6 @@ def sparse(admin_user: User) -> dict:
 
 
 def test_staff_pages_read_without_their_missing_values(admin_user: User, sparse: dict) -> None:
-    User.objects.filter(pk=admin_user.pk).update(is_staff=True, is_superuser=True)  # Django admin's changelists
     client = Client()
     client.force_login(admin_user)
     pages = [

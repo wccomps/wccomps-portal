@@ -3,7 +3,6 @@
 from datetime import date
 
 import pytest
-from django.contrib.auth.models import User
 from django.db import IntegrityError
 
 from ..models import (
@@ -14,12 +13,6 @@ from ..models import (
     Season,
     TeamRegistration,
 )
-
-
-@pytest.fixture
-def admin_user(db):
-    """Create admin user for tests."""
-    return User.objects.create_user(username="admin", password="admin123")
 
 
 @pytest.fixture

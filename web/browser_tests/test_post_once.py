@@ -14,13 +14,11 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 
 def test_an_admin_action_after_a_csv_export_reaches_the_server(live_server, pw_browser):
-    from django.contrib.auth.models import User
 
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
 
     user = role_user("admin")
-    User.objects.filter(pk=user.pk).update(is_staff=True, is_superuser=True)
     team = Team.objects.create(team_number=4, team_name="Team 04")
     Ticket.objects.create(ticket_number="T004-001", team=team, category=TicketCategory.objects.first(), title="t")
     context = create_session_context(pw_browser, live_server, user)

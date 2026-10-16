@@ -1,5 +1,7 @@
 """Tests for auth_utils.py permission functions."""
 
+import re
+
 import pytest
 from django.contrib.auth.models import AnonymousUser, User
 from django.http import HttpResponse
@@ -17,6 +19,7 @@ from core.auth_utils import (
     has_permission,
     require_permission,
 )
+from core.tests.guards import REPO_DIR, fail_with, tracked_files
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
@@ -305,3 +308,21 @@ class TestCheckGroupsForPermissionProperties:
         for perm in ["admin", "blue_team", "gold_team", "nonexistent", ""]:
             # Should not raise
             check_groups_for_permission(groups, perm)
+
+
+# A patch of the permission functions where they're defined is seen by a module that looks them up at each call,
+# but a module first imported during the patch binds the mock by name and keeps it for the rest of its worker.
+# Sign in a role user (core.tests.roles) instead.
+PERMISSION_SOURCE_PATCH = re.compile(r"""patch\(\s*["'](core\.(?:auth_utils|permission_constants)\.\w+)""")
+PERMISSION_SOURCE_PATCH_EXCEPTIONS: dict[str, str] = {}
+
+
+def test_no_test_patches_the_permission_functions_where_they_are_defined() -> None:
+    found = {
+        f"{path}:{text[: match.start()].count(chr(10)) + 1}": match.group(1)
+        for path in tracked_files()
+        if path.endswith(".py") and path.rsplit("/", 1)[-1].startswith(("test_", "conftest"))
+        for text in [(REPO_DIR / path).read_text(encoding="utf-8")]
+        for match in PERMISSION_SOURCE_PATCH.finditer(text)
+    }
+    fail_with("Tests patching a permission function where it's defined", found, PERMISSION_SOURCE_PATCH_EXCEPTIONS)
