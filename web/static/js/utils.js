@@ -244,6 +244,24 @@ document.addEventListener('htmx:beforeRequest', (e) => {
     if ([...e.detail.elt.querySelectorAll('form')].some(form => guardOf(form).submitting)) e.preventDefault();
 });
 
+/* The ticket list a tab last showed: its ticket pages' way back */
+
+function rememberTicketList() {
+    try { sessionStorage.setItem('ticketListQuery', location.search); } catch (e) { /* storage blocked: plain list */ }
+}
+
+// On a ticket page's breadcrumb (c-page_header x-data="ticketListLink"): its list link gets the tab's list query
+function ticketListLink() {
+    return {
+        init() {
+            let query = '';
+            try { query = sessionStorage.getItem('ticketListQuery') || ''; } catch (e) { /* storage blocked */ }
+            const link = this.$el.querySelector('a');
+            if (link && query) link.search = query;
+        },
+    };
+}
+
 /**
  * Bulk selection for a review table whose rows carry data-<dataAttr>="<id>" checkboxes. approveQuestion is the
  * bulk form's data-confirm (::data-confirm="approveQuestion"): it counts the checked rows, and with none checked

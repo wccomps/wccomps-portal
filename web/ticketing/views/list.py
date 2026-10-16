@@ -16,7 +16,6 @@ from ticketing.models import Ticket
 logger = logging.getLogger(__name__)
 
 VALID_PAGE_SIZES = [25, 50, 100, 200]
-LIST_QUERY_SESSION_KEY = "ticket_list_query"
 STALE_TICKET_MINUTES = 30
 
 
@@ -36,11 +35,6 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         return HttpResponseForbidden("You do not have permission to view tickets.")
 
     from core.utils import filter_sort_paginate
-
-    # The ticket page's way back returns to the list as it was last opened; the 30 s refresh of a list in another
-    # tab isn't opening one
-    if "X-Ticket-List-Poll" not in request.headers:
-        request.session[LIST_QUERY_SESSION_KEY] = request.GET.urlencode()
 
     # Several statuses allowed (#37): checkboxes send ?status=a&status=b; a comma-separated value
     # (an older link's) works too. Unknown values are ignored; none selected means all.

@@ -9,6 +9,11 @@
 {% endblock title %}
 {% block extrastyle %}
     {{ block.super }}
+    <script>
+    // This tab's ticket pages lead back to the list as it is now (sessionStorage is per tab)
+    rememberTicketList();
+    document.addEventListener('htmx:pushedIntoHistory', rememberTicketList);
+    </script>
     {% if is_ops %}
         <script>
         document.addEventListener('alpine:init', () => {

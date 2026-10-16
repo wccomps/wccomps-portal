@@ -1,5 +1,5 @@
-"""The ticket list's refresh keeps the query the list was opened with, and the ticket page's way back returns to
-the list as it was last shown, after any action on the ticket."""
+"""The ticket list's refresh keeps the query the list was opened with (the ticket page's way back is per tab, in
+the browser: browser_tests/test_ticket_back_link.py)."""
 
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlsplit
@@ -54,39 +54,9 @@ def test_the_refresh_keeps_the_page_and_filters(client: Client, ticket: Ticket) 
     html = client.get(reverse("ticket_list"), QUERY).content.decode()
     refresh = next(a for a in attributes(html) if a.get("id") == "ticket-list-content")
     assert query_of(refresh["hx-get"]) == QUERY
-    assert refresh["hx-headers"] == '{"X-Ticket-List-Poll": "true"}'
-
-
-def list_link_queries(client: Client, ticket: Ticket) -> list[dict[str, list[str]]]:
-    """The queries of the ticket page's links to the list: the menu's, and the breadcrumb's way back."""
-    html = client.get(reverse("ticket_detail", kwargs={"ticket_number": ticket.ticket_number})).content.decode()
-    return [
-        query_of(a["href"]) for a in attributes(html) if urlsplit(a.get("href") or "").path == reverse("ticket_list")
-    ]
-
-
-def test_after_filtering_opening_and_claiming_the_back_link_returns_to_the_same_list(
-    client: Client, ticket: Ticket
-) -> None:
-    query = {**QUERY, "page": ["1"]}
-    client.get(reverse("ticket_list"), query)
-    assert query in list_link_queries(client, ticket)
-    response = client.post(reverse("ticket_claim", kwargs={"ticket_number": ticket.ticket_number}))
-    assert response.status_code == 302
-    ticket.refresh_from_db()
-    assert ticket.status == "claimed"
-    assert query in list_link_queries(client, ticket)
 
 
 def test_a_ticket_link_carries_no_list_query(client: Client, ticket: Ticket) -> None:
     html = client.get(reverse("ticket_list"), QUERY).content.decode()
     detail_url = reverse("ticket_detail", kwargs={"ticket_number": ticket.ticket_number})
-    links = [a["href"] for a in attributes(html) if (a.get("href") or "").startswith(detail_url)]
-    assert links == [detail_url]
-
-
-def test_another_tabs_refresh_does_not_change_the_way_back(client: Client, ticket: Ticket) -> None:
-    query = {**QUERY, "page": ["1"]}
-    client.get(reverse("ticket_list"), query)  # tab A shows a filtered list
-    client.get(reverse("ticket_list"), headers={"HX-Request": "true", "X-Ticket-List-Poll": "true"})  # tab B refreshes
-    assert query in list_link_queries(client, ticket)
+    assert [a["href"] for a in attributes(html) if (a.get("href") or "").startswith(detail_url)] == [detail_url]

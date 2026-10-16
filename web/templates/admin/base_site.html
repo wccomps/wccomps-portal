@@ -160,6 +160,7 @@
             go() { window.location.href = this.$store.ticketNotifs.toastUrl; }
         }));
         Alpine.data('submitGuard', submitGuardMixin);
+        Alpine.data('ticketListLink', ticketListLink);
         Alpine.data('audioToggle', () => ({
             enabled: false,
             get disabled() { return !this.enabled; },
