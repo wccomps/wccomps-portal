@@ -23,7 +23,17 @@ from django.apps import apps
 from django.contrib import admin
 from django.urls import URLPattern, URLResolver, get_resolver
 
-from core.tests import test_properties_forms, test_properties_parsers
+from core.tests import (
+    test_properties_forms,
+    test_properties_parsers,
+    test_properties_views_admin_site,
+    test_properties_views_core,
+    test_properties_views_orange,
+    test_properties_views_packets,
+    test_properties_views_registration,
+    test_properties_views_scoring,
+    test_properties_views_ticketing,
+)
 from core.tests.test_no_unused_code import REPO_DIR, Unused, fail_with, python_trees
 
 WEB_DIR = REPO_DIR / "web"
@@ -184,198 +194,8 @@ FORM_TESTS = (
     test_properties_forms.test_valid_post_fits_its_fields_is_stored_and_cleans_the_same,
 )
 
-PR_B = "covered in PR B (web views and JSON endpoints)"
 PR_C = "covered in PR C (the Discord bot)"
 
-URLS_FOR_PR_B = [
-    "admin:core.AuditLog",
-    "admin:core.BotState",
-    "admin:core.CompetitionConfig",
-    "admin:core.DiscordTask",
-    "admin:core.UserGroups",
-    "admin:orange_team.OrangeAssignment",
-    "admin:orange_team.OrangeCheck",
-    "admin:orange_team.OrangeCheckIn",
-    "admin:orange_team.OrangeFollowUp",
-    "admin:packets.Packet",
-    "admin:packets.PacketDistribution",
-    "admin:registration.Event",
-    "admin:registration.RegistrationContact",
-    "admin:registration.Season",
-    "admin:registration.TeamRegistration",
-    "admin:scoring.AttackType",
-    "admin:scoring.IncidentReport",
-    "admin:scoring.InjectScore",
-    "admin:scoring.OrangeTeamScore",
-    "admin:scoring.QuotientMetadataCache",
-    "admin:scoring.RedTeamIPPool",
-    "admin:scoring.RedTeamScore",
-    "admin:scoring.ScoringExclusion",
-    "admin:scoring.ScoringTemplate",
-    "admin:scoring.ServiceScore",
-    "admin:team.DiscordLink",
-    "admin:team.LinkAttempt",
-    "admin:team.LinkRateLimit",
-    "admin:team.LinkToken",
-    "admin:team.SchoolInfo",
-    "admin:team.Team",
-    "admin:ticketing.CommentRateLimit",
-    "admin:ticketing.Ticket",
-    "admin:ticketing.TicketAttachment",
-    "admin:ticketing.TicketCategory",
-    "admin:ticketing.TicketComment",
-    "admin:ticketing.TicketHistory",
-    "url:",
-    "url:admin/",
-    "url:auth/callback/",
-    "url:auth/link",
-    "url:auth/link-callback",
-    "url:auth/login/",
-    "url:auth/logout/",
-    "url:health/",
-    "url:leaderboard/",
-    "url:leaderboard/team/<int:team_number>/",
-    "url:leaderboard/team/<int:team_number>/pdf/",
-    "url:livez/",
-    "url:ops/admin/broadcast/",
-    "url:ops/admin/broadcast/action/",
-    "url:ops/admin/categories/",
-    "url:ops/admin/categories/<int:category_id>/delete/",
-    "url:ops/admin/categories/<int:category_id>/edit/",
-    "url:ops/admin/categories/create/",
-    "url:ops/admin/competition/",
-    "url:ops/admin/competition/action/",
-    "url:ops/admin/competition/apps/",
-    "url:ops/admin/competition/guide/",
-    "url:ops/admin/competition/setup/",
-    "url:ops/admin/sync-roles/",
-    "url:ops/admin/sync-roles/action/",
-    "url:ops/admin/task/<int:task_id>/status/",
-    "url:ops/admin/teams/",
-    "url:ops/admin/teams/<int:team_number>/",
-    "url:ops/admin/teams/<int:team_number>/action/",
-    "url:ops/admin/teams/bulk/",
-    "url:ops/review-tickets/",
-    "url:ops/school-info/",
-    "url:ops/school-info/<int:team_number>/",
-    "url:ops/school-info/<int:team_number>/remove/",
-    "url:ops/school-info/clear/",
-    "url:ops/school-info/export/",
-    "url:ops/school-info/import/",
-    "url:ops/ticket/<str:ticket_number>/",
-    "url:ops/tickets/",
-    "url:ops/tickets/batch-verify-points/",
-    "url:orange-team/",
-    "url:orange-team/assignments/<int:assignment_id>/approve/",
-    "url:orange-team/assignments/<int:assignment_id>/reassign/",
-    "url:orange-team/assignments/<int:assignment_id>/reject/",
-    "url:orange-team/assignments/<int:assignment_id>/save/",
-    "url:orange-team/assignments/<int:assignment_id>/submit/",
-    "url:orange-team/check-in/",
-    "url:orange-team/check-in/<int:user_id>/",
-    "url:orange-team/checks/",
-    "url:orange-team/checks/<int:check_id>/",
-    "url:orange-team/checks/<int:check_id>/assign/",
-    "url:orange-team/checks/<int:check_id>/auto-assign/",
-    "url:orange-team/checks/<int:check_id>/duplicate/",
-    "url:orange-team/checks/<int:check_id>/edit/",
-    "url:orange-team/checks/<int:check_id>/rebalance/",
-    "url:orange-team/checks/auto-assign/",
-    "url:orange-team/checks/create/",
-    "url:orange-team/export/",
-    "url:orange-team/followups/<int:followup_id>/dismiss/",
-    "url:orange-team/followups/create/",
-    "url:orange-team/review/",
-    "url:packet/",
-    "url:packet/download/<int:packet_id>/",
-    "url:packets/",
-    "url:packets/<int:packet_id>/",
-    "url:packets/<int:packet_id>/action/",
-    "url:packets/<int:packet_id>/resend/<int:team_id>/",
-    "url:packets/upload/",
-    "url:register/",
-    "url:register/approve/<int:registration_id>/",
-    "url:register/assignments/<int:assignment_id>/unassign/",
-    "url:register/edit/<str:token>/",
-    "url:register/events/<int:event_id>/",
-    "url:register/events/<int:event_id>/assign-teams/",
-    "url:register/events/<int:event_id>/delete/",
-    "url:register/events/<int:event_id>/edit/",
-    "url:register/reject/<int:registration_id>/",
-    "url:register/review/",
-    "url:register/seasons/",
-    "url:register/seasons/<int:season_id>/delete/",
-    "url:register/seasons/<int:season_id>/edit/",
-    "url:register/seasons/<int:season_id>/events/",
-    "url:register/seasons/<int:season_id>/events/create/",
-    "url:register/seasons/create/",
-    "url:scoring/",
-    "url:scoring/admin/config/",
-    "url:scoring/admin/sync-scores/",
-    "url:scoring/api/scores/",
-    "url:scoring/email-scorecards/",
-    "url:scoring/email-scorecards/send/",
-    "url:scoring/export/",
-    "url:scoring/export/all/",
-    "url:scoring/export/final-scores/",
-    "url:scoring/export/incidents/",
-    "url:scoring/export/inject-grades/",
-    "url:scoring/export/orange-adjustments/",
-    "url:scoring/export/red-scores/",
-    "url:scoring/export/scorecards/",
-    "url:scoring/export/tickets/",
-    "url:scoring/gold-team/inject-feedback/",
-    "url:scoring/gold-team/inject-feedback/approve/",
-    "url:scoring/gold-team/inject-feedback/bulk-approve/",
-    "url:scoring/gold-team/inject-feedback/save/",
-    "url:scoring/incident/<int:incident_id>/",
-    "url:scoring/incident/<int:incident_id>/delete/",
-    "url:scoring/incident/list/",
-    "url:scoring/incident/screenshot/<int:screenshot_id>/",
-    "url:scoring/incident/submit/",
-    "url:scoring/incidents/",
-    "url:scoring/incidents/<int:incident_id>/match/",
-    "url:scoring/incidents/bulk-approve/",
-    "url:scoring/injects/",
-    "url:scoring/injects/bulk-approve/",
-    "url:scoring/injects/grading/",
-    "url:scoring/orange-team/",
-    "url:scoring/orange-team/bulk-approve/",
-    "url:scoring/orange-team/submit/",
-    "url:scoring/orange/",
-    "url:scoring/red-team/",
-    "url:scoring/red-team/<int:finding_id>/delete/",
-    "url:scoring/red-team/<int:finding_id>/leave/",
-    "url:scoring/red-team/bulk-approve/",
-    "url:scoring/red-team/ip-pools/",
-    "url:scoring/red-team/ip-pools/<int:pool_id>/delete/",
-    "url:scoring/red-team/ip-pools/<int:pool_id>/edit/",
-    "url:scoring/red-team/ip-pools/create/",
-    "url:scoring/red-team/score/<int:finding_id>/",
-    "url:scoring/red-team/scores/",
-    "url:scoring/red-team/screenshot/<int:screenshot_id>/",
-    "url:scoring/red/",
-    "url:scoring/team/<int:team_number>/scorecard/",
-    "url:scoring/team/<int:team_number>/scorecard/email/",
-    "url:scoring/team/<int:team_number>/scorecard/pdf/",
-    "url:tickets/",
-    "url:tickets/<str:ticket_number>/",
-    "url:tickets/<str:ticket_number>/attachment/<int:attachment_id>/",
-    "url:tickets/<str:ticket_number>/attachment/upload/",
-    "url:tickets/<str:ticket_number>/cancel/",
-    "url:tickets/<str:ticket_number>/change-category/",
-    "url:tickets/<str:ticket_number>/claim/",
-    "url:tickets/<str:ticket_number>/comment/",
-    "url:tickets/<str:ticket_number>/dynamic/",
-    "url:tickets/<str:ticket_number>/reassign/",
-    "url:tickets/<str:ticket_number>/reopen/",
-    "url:tickets/<str:ticket_number>/resolve/",
-    "url:tickets/<str:ticket_number>/unclaim/",
-    "url:tickets/bulk-claim/",
-    "url:tickets/bulk-resolve/",
-    "url:tickets/create/",
-    "url:tickets/notifications/",
-]
 
 BOT_FOR_PR_C = [
     "bot:button:bot/cogs/help_panels.py:LinkButton",
@@ -434,7 +254,6 @@ BOT_FOR_PR_C = [
 ]
 
 EXCEPTIONS: dict[str, str] = {
-    **dict.fromkeys(URLS_FOR_PR_B, PR_B),
     **dict.fromkeys(BOT_FOR_PR_C, PR_C),
     # The bot's ticket thread listener reads an attachment's bytes to copy it to the web ticket
     "bot/cogs/ticketing.py:TicketingCog.on_message": PR_C,
@@ -473,13 +292,37 @@ def test_every_upload_and_csv_parser_has_property_tests() -> None:
     assert not not_properties, f"PARSERS lists tests that aren't Hypothesis property tests: {not_properties}"
 
 
-def test_every_url_pattern_is_covered_or_left_for_pr_b() -> None:
+# Each runs its properties for every row of its module's CASES, so a row covers its URL pattern (or admin model)
+VIEW_MODULES = (
+    test_properties_views_admin_site,
+    test_properties_views_core,
+    test_properties_views_orange,
+    test_properties_views_packets,
+    test_properties_views_registration,
+    test_properties_views_scoring,
+    test_properties_views_ticketing,
+)
+
+
+def view_cases() -> dict[str, str]:
+    """Each URL pattern or admin model a view property test row covers, with the module it is in."""
+    return {case.entry_point: module.__name__ for module in VIEW_MODULES for case in module.CASES}
+
+
+def test_every_url_pattern_has_property_tests() -> None:
     found = url_entry_points()
+    covered = view_cases()
     fail_with(
-        "URL patterns and admin pages without property tests",
-        [Unused(key, where) for key, where in found.items()],
+        "URL patterns and admin pages without a property test row (add one to a test_properties_views_* module)",
+        [Unused(key, where) for key, where in found.items() if key not in covered],
         {k: v for k, v in EXCEPTIONS.items() if k.startswith(("url:", "admin:"))},
     )
+    stale = sorted(set(covered) - set(found))
+    assert not stale, f"View property rows for URL patterns that no longer exist: {stale}"
+    for module in VIEW_MODULES:
+        test = module.test_any_request_is_answered_safely
+        cases = [m.args[1] for m in getattr(test, "pytestmark", []) if m.name == "parametrize"]
+        assert cases == [module.CASES], f"{module.__name__}: the property test must run every row of CASES"
 
 
 def test_every_bot_entry_point_is_covered_or_left_for_pr_c() -> None:

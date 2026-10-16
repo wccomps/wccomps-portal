@@ -15,4 +15,8 @@ settings.register_profile(
 )
 # deep: many random examples, for a search before a release or after changing input handling
 settings.register_profile("deep", max_examples=2000, deadline=None, suppress_health_check=_SUPPRESSED)
+# The view property tests (web/core/tests/views_harness.py) send a whole request per example and run for every URL
+# pattern: ci keeps them to fewer examples, deep to fewer than its 2000 (about 45 minutes)
+settings.register_profile("ci-views", parent=settings.get_profile("ci"), max_examples=10)
+settings.register_profile("deep-views", parent=settings.get_profile("deep"), max_examples=500)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci"))
