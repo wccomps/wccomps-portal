@@ -1,11 +1,13 @@
 {# Unified ticket list table - swappable content for htmx #}
 {% load cotton status_variants %}
-<div id="ticket-list-content"
-     {% if is_ops %}x-data="ticketBulkSelect"{% endif %}
-     hx-get="{% url 'ticket_list' %}{% querystring %}"
-     hx-trigger="every 30s"
-     hx-select="#ticket-list-content"
-     hx-swap="outerHTML">
+<div id="ticket-list-content" {% if is_ops %}x-data="ticketBulkSelect"{% endif %}>
+    {# The 30 s refresh swaps only the rows: the selection and the bulk forms outside them stay as they are #}
+    <div hidden
+         hx-get="{% url 'ticket_list' %}{% querystring %}"
+         hx-trigger="every 30s"
+         hx-select="#result_list > tbody"
+         hx-target="#result_list > tbody"
+         hx-swap="outerHTML"></div>
     {% if is_ops %}
         <div class="actions"
              x-show="selectedCount"

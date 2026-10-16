@@ -256,13 +256,11 @@ window.addEventListener('pageshow', (e) => {
     });
 });
 
-// A refresh (an element reloading itself, like the ticket list's 30 s poll) replaces what it covers, so it skips its
-// turn while a form there is posting (the swap would reset its guard) or a row there is checked (the selection
-// would go). A request the person made, such as a filter change, goes ahead.
+// A poll (a request no event triggered, like the ticket list's 30 s refresh) replaces what it targets, so it skips its
+// turn while a form there is posting: the swap would reset its guard. A request the person made goes ahead.
 document.addEventListener('htmx:beforeRequest', (e) => {
-    const area = e.detail.target;
-    if (e.detail.elt !== area) return;
-    if (area.querySelector('form[data-posting], input[type="checkbox"]:checked')) e.preventDefault();
+    if (e.detail.requestConfig && e.detail.requestConfig.triggeringEvent) return;
+    if (e.detail.target.querySelector('form[data-posting]')) e.preventDefault();
 });
 
 /* The ticket list a tab last showed: its ticket pages' way back */
@@ -299,11 +297,16 @@ function bulkSelectMixin(dataAttr, noun) {
         selectedMap: {},
         selectableIds: [],
         init() {
+            this.readRows();
+            // A refresh that swaps the rows (the ticket list's) keeps what is still listed checked
+            this.$el.addEventListener('htmx:afterSettle', () => this.readRows());
+        },
+        readRows() {
             this.selectableIds = Array.from(
                 this.$el.querySelectorAll('[data-' + dataAttr + ']'),
             ).map(el => el.dataset[camel]);
             const map = {};
-            this.selectableIds.forEach(id => { map[jsKey(id)] = false; });
+            this.selectableIds.forEach(id => { map[jsKey(id)] = Boolean(this.selectedMap[jsKey(id)]); });
             this.selectedMap = map;
         },
         get selected() {
