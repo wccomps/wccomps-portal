@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from core.tests.guards import TEMPLATES_DIR, fail_with, tags, template_name, tracked_templates
+from core.tests.guards import TEMPLATES_DIR, Tag, fail_with, tags, template_name, tracked_templates
 
 
 def get_all_template_files() -> list[Path]:
@@ -245,7 +245,20 @@ def test_no_confirm_in_an_inline_handler() -> None:
     fail_with("Inline handlers that call confirm()", found, {})
 
 
-def test_no_template_data_in_an_inline_handler() -> None:
+PAGE_VALUE_RE = re.compile(r"[A-Za-z_][\w.]*")
+
+
+def page_value_in_handler(tag: Tag, name: str, value: str) -> bool:
+    """An on* attribute that carries a page value: written {{ }} or {% %}, bound with :on*, or, on a component, an
+    unquoted name cotton reads from the context (a bare name like that is no handler)."""
+    if not name.lstrip(":").lower().startswith("on"):
+        return False
+    if name.startswith(":") or "{{" in value or "{%" in value:
+        return True
+    return tag.name.startswith("c-") and bool(PAGE_VALUE_RE.fullmatch(value))
+
+
+def test_no_page_value_in_an_inline_handler() -> None:
     """An on* attribute is script, which HTML escaping doesn't make safe: a page value goes in a data-* attribute
     that an Alpine.data component reads as text."""
     found = {
@@ -253,11 +266,6 @@ def test_no_template_data_in_an_inline_handler() -> None:
         for path in tracked_templates()
         for tag in tags(path)
         for name, value in tag.attrs.items()
-        if name.lower().startswith("on") and ("{{" in value or "{%" in value)
+        if page_value_in_handler(tag, name, value)
     }
-    exceptions = {
-        "cotton/button.html:*:button:onclick": (
-            "c-button prints its onclick prop; a caller that puts {{ }} in it is caught at the caller's c-button"
-        )
-    }
-    fail_with("Template data inside inline handlers", found, exceptions)
+    fail_with("Page values inside inline handlers", found, {})
