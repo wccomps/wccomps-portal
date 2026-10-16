@@ -26,6 +26,11 @@
                     <c-detail_row label="Attack Type">
                         {{ finding.attack_type.name|default:"Unknown" }}
                     </c-detail_row>
+                    {% if not finding.attack_type and finding.attack_vector %}
+                        <c-detail_row label="Attack Vector">
+                            {{ finding.attack_vector }}
+                        </c-detail_row>
+                    {% endif %}
                     <c-detail_row label="Affected Boxes">
                         {{ finding.affected_boxes_display }}
                     </c-detail_row>

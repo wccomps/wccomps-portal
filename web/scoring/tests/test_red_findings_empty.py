@@ -1,6 +1,7 @@
 """The findings table on both pages that show it: the empty state says filters hide rows only when the page has
 filters set and its clear-filters link stays on the page, and a finding without an attack type names its vector,
-or Unknown. A finding's own page says Unknown, since it shows the vector already."""
+or Unknown. A finding's own page says Unknown for the attack type and shows a legacy finding's vector in a row of
+its own."""
 
 import pytest
 from django.contrib.auth.models import User
@@ -45,7 +46,7 @@ def test_a_finding_without_an_attack_type_shows_its_vector_or_unknown(
     assert f"<td>{shown}</td>" in html
 
 
-def test_a_finding_page_without_an_attack_type_says_unknown(client: Client, red_team_user: User) -> None:
+def test_a_finding_page_without_an_attack_type_says_unknown_and_shows_its_vector(client: Client, red_team_user: User) -> None:
     from decimal import Decimal
 
     from scoring.models import RedTeamScore
@@ -56,4 +57,5 @@ def test_a_finding_page_without_an_attack_type_says_unknown(client: Client, red_
     html = client.get(reverse("scoring:view_red_score", args=[finding.pk])).content.decode()
     attack_type_row = html.split("Attack Type", 1)[1].split("</dd>", 1)[0]
     assert "Unknown" in attack_type_row
-    assert "a long description" not in attack_type_row
+    vector_row = html.split("Attack Vector", 1)[1].split("</dd>", 1)[0]
+    assert "a long description of the attack" in vector_row
