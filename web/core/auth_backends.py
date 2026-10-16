@@ -4,7 +4,7 @@ from django.contrib.auth.backends import BaseBackend
 from django.contrib.auth.models import AnonymousUser, User
 from django.db.models import Model
 
-from .auth_utils import has_permission
+from . import auth_utils
 
 
 class AuthentikAdminBackend(BaseBackend):
@@ -15,7 +15,12 @@ class AuthentikAdminBackend(BaseBackend):
     """
 
     def has_perm(self, user_obj: User | AnonymousUser, perm: str, obj: Model | None = None) -> bool:
-        return user_obj.is_active and has_permission(user_obj, "admin")
+        return self._is_admin(user_obj)
 
     def has_module_perms(self, user_obj: User | AnonymousUser, app_label: str) -> bool:
-        return user_obj.is_active and has_permission(user_obj, "admin")
+        return self._is_admin(user_obj)
+
+    @staticmethod
+    def _is_admin(user_obj: User | AnonymousUser) -> bool:
+        # Looked up through the module at each check, so a test's patch of has_permission is seen whenever it applies
+        return user_obj.is_active and auth_utils.has_permission(user_obj, "admin")

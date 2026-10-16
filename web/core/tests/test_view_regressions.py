@@ -483,3 +483,13 @@ def test_an_inactive_admin_holds_no_model_permission(admin_user: User) -> None:
 def test_an_admin_whose_admin_group_was_removed_holds_no_model_permission(admin_user: User) -> None:
     UserGroups.objects.filter(user=admin_user).update(groups=[])
     assert not _holds_any_model_permission(User.objects.get(pk=admin_user.pk))
+
+
+def test_the_permission_backend_reads_has_permission_when_asked(admin_user: User) -> None:
+    """The backend looks has_permission up at each check: holding the function it imported, a backend first loaded
+    while a test patched it kept that test's MagicMock (truthy) for its worker, and gave every user every permission."""
+    assert User.objects.get(pk=admin_user.pk).has_perm("core.view_botstate")  # the backend is loaded
+    with patch("core.auth_utils.has_permission", return_value=False):
+        assert not User.objects.get(pk=admin_user.pk).has_perm("core.view_botstate")
+    with patch("core.auth_utils.has_permission", return_value=True):
+        assert User.objects.get(pk=admin_user.pk).has_perm("core.view_botstate")
