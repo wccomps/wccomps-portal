@@ -475,23 +475,24 @@ class Drawn:
     method: str
     path: str
     query: dict[str, list[str]]
-    data: dict[str, Any]
-    body: bytes | None
+    data: dict[str, Any]  # the form fields sent (multipart for a POST, urlencoded for PUT and DELETE)
+    body: bytes | None  # a JSON body
     headers: dict[str, str]
     tz: str | None
 
     @property
     def texts(self) -> list[str]:
-        """Every piece of text the request carries, from what is sent: for the escaping and NUL checks."""
+        """Every piece of text the request sends (upload names included): for the escaping check."""
         query = [text for key, values in self.query.items() for text in (key, *values)]
         body = [self.body.decode("utf-8", "replace")] if self.body is not None else []
         return [unquote(self.path), *query, *_texts(self.data), *body]
 
     def carries_nul(self) -> bool:
-        """A NUL where core.middleware's NUL refusals look: the path, query and cookies, and a signed-in request's
-        form fields (not a JSON body)."""
+        """A NUL where core.middleware's NUL refusals look: the path, query and cookies, and a signed-in POST's form
+        fields (not upload names, a PUT's body or a JSON body)."""
         query = [text for key, values in self.query.items() for text in (key, *values)]
-        fields = _texts(self.data) if self.role != "anonymous" else []
+        posted = self.method == "POST" and self.role != "anonymous"
+        fields = _texts({k: v for k, v in self.data.items() if not _is_upload(v)}) if posted else []
         return any("\x00" in text for text in (unquote(self.path), *query, *fields, self.tz or ""))
 
 
@@ -545,8 +546,9 @@ def build(
     headers: dict[str, str] | None = None,
     tz: str | None = None,
 ) -> Drawn:
-    """The request a row sends: its path, its transport (a JSON body for a JSON-body row, form fields otherwise) and
-    the fetch header a JSON endpoint is called with."""
+    """The request a row sends: its path, its transport (a JSON body for a JSON-body row; else form fields, multipart
+    for a POST, urlencoded without uploads for another method with a body, none for GET, HEAD and OPTIONS) and the
+    fetch header a JSON endpoint is called with."""
     path = reverse(name, kwargs=kwargs) if kwargs else reverse(name)
     headers = dict(headers or {})
     if case.json:
@@ -554,6 +556,10 @@ def build(
     if case.json_body:
         body = body if body is not None else json.dumps(fields).encode()
         fields = {}
+    elif method in ("GET", "HEAD", "OPTIONS"):
+        fields = {}
+    elif method != "POST":
+        fields = {name: value for name, value in fields.items() if not _is_upload(value)}
     return Drawn(role, method, path, query, fields, body, headers, tz)
 
 
@@ -697,11 +703,10 @@ def send(world: World, drawn: Drawn) -> Answer:
     else:
         from urllib.parse import urlencode
 
-        plain = {k: v for k, v in drawn.data.items() if k not in files}
         response = client.generic(
             drawn.method,
             drawn.path,
-            data=urlencode(plain, doseq=True),
+            data=urlencode(drawn.data, doseq=True),
             content_type="application/x-www-form-urlencoded",
             headers=drawn.headers,
             query_params=drawn.query,
@@ -874,10 +879,7 @@ def echo_sweep(case: ViewCase, world: World) -> None:
         kwargs = {param: world.ids(kind)[0] for _, param, kind in route_params(case, name)}
         for role in sorted(case.allowed):
             for method in case.methods:
-                drawn = build(
-                    case, role=role, method=method, name=name, kwargs=kwargs, query=query,
-                    fields=fields if method == "POST" else {},
-                )  # fmt: skip
+                drawn = build(case, role=role, method=method, name=name, kwargs=kwargs, query=query, fields=fields)
                 with rolled_back(), case.patches(world) if case.patches else ExitStack():
                     check_answer(case, drawn, send(world, drawn))
 

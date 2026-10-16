@@ -10,6 +10,7 @@ from core.tests.views_harness import (
     Answer,
     Drawn,
     ViewCase,
+    build,
     check_answer,
     may,
 )
@@ -74,3 +75,16 @@ def test_a_stream_whose_operation_raised_fails() -> None:
     response = StreamingHttpResponse(iter([line]), content_type="application/x-ndjson")
     with pytest.raises(AssertionError, match="the streamed operation raised"):
         check_answer(case, drawn, Answer(response, line.encode(), [], []))
+
+
+def test_a_nul_counts_only_where_the_refusals_look() -> None:
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    case = ViewCase("ticket_list", frozenset({"admin"}))
+    in_upload_name = {"attachment": SimpleUploadedFile("a\x00.png", b"x")}
+    assert not build(case, role="red_team", method="POST", name="ticket_list", kwargs={}, query={},
+                     fields=in_upload_name).carries_nul()  # fmt: skip
+    assert not build(case, role="red_team", method="GET", name="ticket_list", kwargs={}, query={},
+                     fields={"search": "\x00"}).carries_nul()  # fmt: skip
+    assert build(case, role="red_team", method="POST", name="ticket_list", kwargs={}, query={},
+                 fields={"search": "\x00"}).carries_nul()  # fmt: skip
