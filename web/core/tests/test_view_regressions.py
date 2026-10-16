@@ -5,6 +5,7 @@ import json
 import re
 from collections.abc import Callable
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
@@ -379,3 +380,14 @@ def test_an_htmx_request_with_a_nul_gets_a_plain_refusal(admin_client: Client) -
     response = admin_client.get(reverse("ops_review_tickets"), {"search": "\x00"}, headers=headers)
     assert response.status_code == 400
     assert response["Content-Type"].startswith("text/plain")
+
+
+def test_the_admin_site_alone_decides_who_gets_into_the_django_admin(gold_team_user: User) -> None:
+    """The sign-in gate refuses the Django admin's pages by asking the admin site, with no rule of its own."""
+    from django.contrib import admin
+
+    client = signed_in(gold_team_user)
+    assert client.get(reverse("admin:index")).status_code == 403
+    User.objects.filter(pk=gold_team_user.pk).update(is_staff=True, is_superuser=True)
+    with patch.object(type(admin.site), "has_permission", lambda self, request: True):
+        assert client.get(reverse("admin:index")).status_code == 200
