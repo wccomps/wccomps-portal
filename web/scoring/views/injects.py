@@ -10,6 +10,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
+from core.utils import filter_number
 from team.models import Team
 
 from ..forms import ApproveInjectFeedbackForm, SaveInjectFeedbackForm
@@ -186,8 +187,8 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
     if inject_filter:
         base_query = base_query.filter(inject_id=inject_filter)
 
-    if team_filter:
-        base_query = base_query.filter(team__id=team_filter)
+    if (team_id := filter_number(team_filter)) is not None:
+        base_query = base_query.filter(team__id=team_id)
 
     if search_query:
         from django.db.models import Q

@@ -9,6 +9,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
 from core.stored_files import file_response
+from core.utils import filter_number
 from team.models import Team
 
 from ..forms import RedTeamScoreForm
@@ -69,14 +70,14 @@ def red_team_findings(request: HttpRequest) -> HttpResponse:
     elif status_filter == "approved":
         base_query = base_query.filter(is_approved=True)
 
-    if team_filter:
-        base_query = base_query.filter(affected_teams__id=team_filter)
+    if (team_id := filter_number(team_filter)) is not None:
+        base_query = base_query.filter(affected_teams__id=team_id)
 
-    if attack_type_filter:
-        base_query = base_query.filter(attack_type_id=int(attack_type_filter))
+    if (attack_type_id := filter_number(attack_type_filter)) is not None:
+        base_query = base_query.filter(attack_type_id=attack_type_id)
 
-    if submitter_filter:
-        base_query = base_query.filter(submitted_by__id=submitter_filter)
+    if (submitter_id := filter_number(submitter_filter)) is not None:
+        base_query = base_query.filter(submitted_by__id=submitter_id)
 
     if search_query:
         from django.db.models import Q
@@ -160,14 +161,14 @@ def red_team_scores(request: HttpRequest) -> HttpResponse:
         base_query = base_query.filter(is_approved=True)
     # "all" shows everything
 
-    if team_filter:
-        base_query = base_query.filter(affected_teams__id=team_filter)
+    if (team_id := filter_number(team_filter)) is not None:
+        base_query = base_query.filter(affected_teams__id=team_id)
 
-    if attack_type_filter:
-        base_query = base_query.filter(attack_type_id=int(attack_type_filter))
+    if (attack_type_id := filter_number(attack_type_filter)) is not None:
+        base_query = base_query.filter(attack_type_id=attack_type_id)
 
-    if submitter_filter:
-        base_query = base_query.filter(submitted_by_id=int(submitter_filter))
+    if (submitter_id := filter_number(submitter_filter)) is not None:
+        base_query = base_query.filter(submitted_by_id=submitter_id)
 
     result = filter_sort_paginate(
         request,
