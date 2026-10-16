@@ -78,12 +78,12 @@
                     <td>
                         {% if check.is_approved %}
                             <c-badge variant="success">
-                                <span aria-hidden="true">✓</span> Approved
+                                Approved
                             </c-badge>
                             {% if check.approved_by %}<div class="text-sm text-muted">by {{ check.approved_by.username }}</div>{% endif %}
                         {% else %}
                             <c-badge variant="warning">
-                                <span aria-hidden="true">⏳</span> Pending
+                                Pending
                             </c-badge>
                         {% endif %}
                     </td>

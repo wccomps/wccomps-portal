@@ -63,7 +63,7 @@
                     </th>
                     <td>Team {{ incident.team.team_number }}</td>
                     <td>
-                        {{ incident.affected_boxes_display|default:"—" }}
+                        {{ incident.affected_boxes_display }}
                         <div class="text-sm text-muted">{{ incident.affected_service }}</div>
                     </td>
                     <td>{{ incident.attack_description|truncatechars:50 }}</td>
@@ -83,7 +83,7 @@
                     <td>
                         {% if incident.is_approved %}
                             <c-badge variant="success">
-                                <span aria-hidden="true">✓</span> Approved
+                                Approved
                             </c-badge>
                             {% if incident.points_returned %}
                                 <div class="text-sm">
@@ -92,7 +92,7 @@
                             {% endif %}
                         {% else %}
                             <c-badge variant="warning">
-                                <span aria-hidden="true">⏳</span> Pending
+                                Pending
                             </c-badge>
                         {% endif %}
                     </td>

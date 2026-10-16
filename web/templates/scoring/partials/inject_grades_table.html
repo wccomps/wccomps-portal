@@ -77,18 +77,16 @@
                     <td>
                         {% if grade.is_outlier %}
                             <span class="text-warning font-semibold"><span aria-hidden="true">⚠️</span> {{ grade.std_devs_from_mean|floatformat:1 }}σ</span>
-                        {% else %}
-                            <span class="text-muted">—</span>
                         {% endif %}
                     </td>
                     <td>
                         {% if grade.is_approved %}
                             <c-badge variant="success">
-                                <span aria-hidden="true">✓</span> Approved
+                                Approved
                             </c-badge>
                         {% else %}
                             <c-badge variant="warning">
-                                <span aria-hidden="true">⏳</span> Pending
+                                Pending
                             </c-badge>
                         {% endif %}
                     </td>
