@@ -1,23 +1,17 @@
 """The view property harness's own checks: its oracle refuses what it should, and its tables stay in step with the
 code they stand for."""
 
-import ast
-import importlib
-
 import pytest
 from django.http import HttpResponse
 
 from core.permission_constants import PERMISSION_MAP
 from core.tests.roles import ROLE_GROUPS
-from core.tests.test_no_unused_code import python_trees
 from core.tests.views_harness import (
-    RUN_DETACHED,
     Answer,
     Drawn,
     ViewCase,
     check_answer,
     may,
-    offline,
 )
 
 
@@ -46,42 +40,6 @@ def test_every_permission_group_has_a_role() -> None:
     assert all(may(permission) for permission in PERMISSION_MAP), "a permission no role holds"
 
 
-def _run_detached_users() -> dict[str, set[str]]:
-    """From the source, not from what is loaded: each project module that names run_detached (an import of it, under
-    any name, or an attribute call), with the names it binds it to."""
-    users: dict[str, set[str]] = {}
-    for path, tree in python_trees().items():
-        if not path.startswith("web/") or "/tests/" in path or path == "web/core/utils.py":
-            continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module in ("core.utils", "utils"):
-                names = {a.asname or a.name for a in node.names if a.name == "run_detached"}
-            elif isinstance(node, ast.Attribute) and node.attr == "run_detached":
-                names = {""}
-            else:
-                continue
-            module = path.removeprefix("web/").removesuffix(".py").replace("/", ".")
-            users.setdefault(module, set()).update(names)
-    return users
-
-
-def test_offline_patches_every_run_detached_caller() -> None:
-    """A streaming view whose run_detached isn't patched runs in a thread that sees none of the test's rows."""
-    from core import utils
-
-    users = _run_detached_users()
-    assert users, "no module uses run_detached: the scan is broken"
-    with offline():
-        assert utils.run_detached is not RUN_DETACHED, "offline() left core.utils.run_detached unpatched"
-        unpatched = [
-            f"{module}.{name}"
-            for module, names in users.items()
-            for name in names - {""}
-            if getattr(importlib.import_module(module), name) is RUN_DETACHED
-        ]
-    assert not unpatched, f"offline() left run_detached unpatched in {unpatched}"
-
-
 def test_a_refusal_that_mails_or_calls_out_fails() -> None:
     case = ViewCase("ticket_list", frozenset({"admin"}))
     drawn = Drawn("red_team", "GET", "/tickets/", {}, {}, None, {}, None)
@@ -102,3 +60,17 @@ def test_every_skipped_browser_role_is_one_the_page_lets_in() -> None:
         if role not in BROWSER_ROLES or role not in _view_rows_allowed()[page.url_name]
     ]
     assert not stale, f"skip_roles entries for roles the page's row refuses: {stale}"
+
+
+def test_a_stream_whose_operation_raised_fails() -> None:
+    """run_detached turns an operation's exception into a "Failed: ..." line with a 200, inline or threaded."""
+    from django.http import StreamingHttpResponse
+
+    from core.utils import ndjson_done
+
+    case = ViewCase("admin_competition_action", frozenset({"admin"}))
+    drawn = Drawn("admin", "POST", "/ops/admin/competition/action/", {}, {}, None, {}, None)
+    line = ndjson_done("Failed: boom", success=False)
+    response = StreamingHttpResponse(iter([line]), content_type="application/x-ndjson")
+    with pytest.raises(AssertionError, match="the streamed operation raised"):
+        check_answer(case, drawn, Answer(response, line.encode(), [], []))

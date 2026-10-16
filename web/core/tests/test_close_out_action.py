@@ -17,8 +17,7 @@ from core.admin_views.competition import CLOSE_OUT_CHECK_FAILED
 from core.models import CompetitionConfig, DiscordTask
 from team.models import Team
 
-# The close-out streams from its own thread (core.utils.run_detached), which needs committed rows
-pytestmark = pytest.mark.django_db(transaction=True)
+pytestmark = pytest.mark.django_db
 
 BUTTON = '@click="closeOutEvent"'
 

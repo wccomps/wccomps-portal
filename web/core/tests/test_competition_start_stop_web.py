@@ -10,8 +10,7 @@ from django.urls import reverse
 
 from core.models import CompetitionConfig, DiscordTask
 
-# The run streams from its own thread (core.utils.run_detached), which needs committed rows
-pytestmark = pytest.mark.django_db(transaction=True)
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
@@ -65,6 +64,8 @@ def _join_detached_runs() -> None:
             thread.join(timeout=10)
 
 
+# This one tests the detached thread itself, which runs only outside a transaction (core.utils.run_detached)
+@pytest.mark.django_db(transaction=True)
 def test_start_finishes_after_the_browser_disconnects(admin_client):
     """A closed tab or a proxy timeout used to stop the start partway: some accounts enabled, state not saved."""
     import threading

@@ -61,21 +61,37 @@ def ndjson_done(message: str, success: bool = True) -> str:
     return json.dumps({"done": True, "success": success, "message": message}) + "\n"
 
 
+def _in_transaction() -> bool:
+    return connection.in_atomic_block
+
+
+def _inline(lines: Iterator[str]) -> Iterator[str]:
+    """The operation's lines, ending with a failure line if it raises."""
+    try:
+        yield from lines
+    except Exception as e:
+        logger.exception("Streamed operation failed")
+        yield ndjson_done(f"Failed: {e}", success=False)
+
+
 def run_detached(lines: Iterator[str]) -> Iterator[str]:
     """Run a streamed operation to the end in its own thread, relaying its lines while the client listens.
 
     A streaming view's generator stops at its next line once the client goes away (a closed tab, a proxy
     timeout), leaving the operation half done. Here the client only stops the relay; the work finishes.
+
+    Inside an open transaction the operation runs inline instead: a thread's own connection can't see the
+    transaction's uncommitted rows. Production requests aren't atomic (no ATOMIC_REQUESTS); tests are.
     """
+    if _in_transaction():
+        yield from _inline(lines)
+        return
     relay: queue.Queue[str | None] = queue.Queue()
 
     def run() -> None:
         try:
-            for line in lines:
+            for line in _inline(lines):
                 relay.put(line)
-        except Exception as e:
-            logger.exception("Streamed operation failed")
-            relay.put(ndjson_done(f"Failed: {e}", success=False))
         finally:
             # This thread's own DB connection; nothing else would close it
             connection.close()

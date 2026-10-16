@@ -140,8 +140,7 @@ class TestBulkEmailScorecardsGET:
         assert response.status_code == 302
 
 
-# The sends stream from their own thread (core.utils.run_detached), which needs committed rows
-@pytest.mark.django_db(transaction=True)
+@pytest.mark.django_db
 class TestStreamEmailScorecards:
     """Test the streaming bulk email endpoint."""
 

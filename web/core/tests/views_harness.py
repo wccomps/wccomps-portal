@@ -13,12 +13,10 @@ test_property_coverage fails when a URL pattern has no row (and isn't excepted w
 import json
 import os
 import re
-import sys
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from types import ModuleType
 from typing import Any
 from unittest.mock import patch
 from urllib.parse import unquote, urlsplit
@@ -778,6 +776,10 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
         error = json.loads(answer.content).get("error")
         assert isinstance(error, str) and error, f"{where}: a JSON {status} without an error message"
         assert status in (400, 401, 403, 404, 405, 409, 413, 429), f"{where}: JSON error status {status}"
+    if response.streaming and content_type.startswith("application/x-ndjson"):
+        # run_detached turns an operation's exception into a "Failed: ..." line: the stream raised
+        failed = [line for line in answer.content.decode().splitlines() if '"Failed: ' in line]
+        assert not failed, f"{where}: the streamed operation raised: {failed}"
     if content_type.startswith("application/json") and has_body:
         json.loads(answer.content)
         if 200 <= status < 300:
@@ -812,26 +814,10 @@ def _offline(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Respons
     raise httpx.ConnectError("offline: property tests reach no other service", request=request)
 
 
-def _real_run_detached() -> Callable[[Iterator[str]], Iterator[str]]:
-    from core.utils import run_detached
-
-    return run_detached
-
-
-RUN_DETACHED = _real_run_detached()  # taken before any offline() patches it
-# The project's own packages, whose modules can call run_detached
-PROJECT_PACKAGES = {"core", "packets", "scoring", "orange_team", "registration", "team", "ticketing", "quotient"}
-
-
-def _inline(lines: Iterator[str]) -> Iterator[str]:
-    """run_detached without its thread: the thread's own connection would see none of the test's rows."""
-    yield from lines
-
-
 @contextmanager
 def offline() -> Iterator[None]:
-    """Every other service down (Authentik, Quotient, Discord webhooks), configured as in production; streamed
-    operations run in the request's own connection."""
+    """Every other service down (Authentik, Quotient, Discord webhooks), configured as in production. (Streamed
+    operations run inline in the test's transaction: core.utils.run_detached.)"""
     from django.test import override_settings
 
     with ExitStack() as stack:
@@ -844,27 +830,7 @@ def offline() -> Iterator[None]:
                 QUOTIENT_PASSWORD="property",
             )
         )
-        for module, name in run_detached_bindings():
-            stack.enter_context(patch.object(module, name, _inline))
         yield
-
-
-def _is_project_code(name: str) -> bool:
-    return name.split(".")[0] in PROJECT_PACKAGES and ".tests" not in name
-
-
-def run_detached_bindings() -> list[tuple[ModuleType, str]]:
-    """Every (module, name) bound to the real core.utils.run_detached, under any name, core.utils's own included.
-    Patching core.utils covers a call through it (utils.run_detached(...)) and an import inside a function; the
-    others imported the function before the patch (the URLconf loads every view first)."""
-    get_resolver().url_patterns  # noqa: B018 - loads every view module
-    return [
-        (module, name)
-        for module in list(sys.modules.values())
-        if _is_project_code(getattr(module, "__name__", "") or "")
-        for name, value in list(vars(module).items())
-        if value is RUN_DETACHED
-    ]
 
 
 def uploads(max_files: int = 1) -> st.SearchStrategy[Any]:
