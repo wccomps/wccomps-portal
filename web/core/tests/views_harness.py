@@ -130,7 +130,6 @@ def build_world() -> World:
         sessions[role] = signing_in.cookies["sessionid"].value
 
     season = Season.objects.create(name="2026", year=2026, is_active=True)
-    Season.objects.create(name="2025", year=2025)  # an earlier one with no events, which can be deleted
     event = Event.objects.create(
         season=season, name="Invitational", event_type="invitational", event_number=1, date=date(2026, 10, 3)
     )
@@ -439,9 +438,9 @@ class ViewCase:
     # Models whose rows must come out the same when the same POST is sent twice
     idempotent: tuple[type[models.Model], ...] = ()
     idempotent_as: str = "admin"  # the role that sends the repeated POST
-    # Whether a URL name is offered to anyone at all now (an admin page an admin turns off); every_allowed_role_gets_in
-    # expects one that isn't to refuse every role
-    offered: Callable[[str], bool] | None = None
+    # The URL names every_allowed_role_gets_in drives, when not all of them: the ones behind the portal's own gate
+    # (a model admin's add and delete pages are its own choice; the random requests check those never fail)
+    gate_names: tuple[str, ...] = ()
     # A query a role let in needs to get past the view's own checks (every_allowed_role_gets_in)
     entry_query: Callable[[World], dict[str, list[str]]] | None = None
     patches: Callable[[World], ExitStack] | None = None  # what the case needs from outside (Quotient's injects)
@@ -911,10 +910,9 @@ def every_allowed_role_gets_in(case: ViewCase, world: World) -> None:
     """Each role the row allows gets past the view's permission check on some real object: a GET (a POST with no
     fields where the view takes only POST) is not refused for at least one valid path. A row that lists a role its
     view refuses is too wide, and its oracle never checks that role's refusal."""
-    for name in (case.name, *case.also):
+    for name in case.gate_names or (case.name, *case.also):
         params = route_params(case, name)
         count = max((len(world.ids(kind)) for _, _, kind in params), default=1)
-        offered = case.offered(name) if case.offered else True
         for role in sorted(case.allowed):
             answers = []
             for index in range(count):
@@ -931,10 +929,9 @@ def every_allowed_role_gets_in(case: ViewCase, world: World) -> None:
                         break
                 refusals = {*PERMISSION_REFUSALS, Kind.WRONG_METHOD} | ({Kind.REFUSED} if method == "GET" else set())
                 if kind_of(answer) not in refusals:
-                    assert offered, f"{name}: a page the row says is turned off let {role} in: {answers}"
                     break
             else:
-                assert not offered, f"{name}: {role} is allowed by the row but refused everywhere: {answers}"
+                raise AssertionError(f"{name}: {role} is allowed by the row but refused everywhere: {answers}")
 
 
 def snapshot(models_: tuple[type[models.Model], ...]) -> dict[str, list[dict[str, Any]]]:

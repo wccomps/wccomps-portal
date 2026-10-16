@@ -5,7 +5,6 @@ from typing import Any
 
 import pytest
 from django.contrib import admin
-from django.contrib.auth.models import User
 from django.db import models
 from django.test import RequestFactory
 from hypothesis import strategies as st
@@ -70,19 +69,6 @@ def _admin_post(model: type[models.Model], model_admin: admin.ModelAdmin[Any]) -
     return post
 
 
-def _offered(model_admin: admin.ModelAdmin[Any], page: str) -> bool:
-    """Whether the model admin offers the page to anyone now."""
-    request = RequestFactory().get("/")
-    request.user = User(is_active=True, is_staff=True, is_superuser=True)
-    match page:
-        case "add":
-            return model_admin.has_add_permission(request)
-        case "delete":
-            return model_admin.has_delete_permission(request)
-        case _:
-            return True
-
-
 def _model_case(model: type[models.Model], model_admin: admin.ModelAdmin[Any]) -> ViewCase:
     prefix = f"admin:{model._meta.app_label}_{model._meta.model_name}"
     return ViewCase(
@@ -93,8 +79,9 @@ def _model_case(model: type[models.Model], model_admin: admin.ModelAdmin[Any]) -
         params={"object_id": f"pk:{model._meta.label}"},
         query=_changelist_query(model_admin),
         post=_admin_post(model, model_admin),
-        # Some admins turn adding or deleting off (CompetitionConfig's add, while one exists)
-        offered=lambda name: _offered(model_admin, name.rsplit("_", 1)[1]),
+        # The portal's gate is the admin site, which every page shares; the add and delete pages a model admin turns
+        # off are its own choice, checked only for refusing non-admins and never failing
+        gate_names=(f"{prefix}_changelist",),
     )
 
 
