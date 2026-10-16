@@ -73,8 +73,8 @@
                 <th>
                     <c-link href="{% url 'scoring:view_red_score' finding.id %}">#{{ finding.id }}</c-link>
                 </th>
-                <td>{{ finding.attack_type.name|default:"—" }}</td>
-                <td>{{ finding.affected_boxes_display|default:"—" }}</td>
+                <td>{{ finding.attack_type.name|default:"None" }}</td>
+                <td>{{ finding.affected_boxes_display|default:"None" }}</td>
                 <td>{{ finding.affected_service }}</td>
                 <td>
                     <c-badge>
@@ -115,11 +115,11 @@
                 <td>
                     {% if finding.is_approved %}
                         <c-badge variant="success">
-                            <span aria-hidden="true">✓</span> Approved
+                            Approved
                         </c-badge>
                     {% else %}
                         <c-badge variant="warning">
-                            <span aria-hidden="true">⏳</span> Pending
+                            Pending
                         </c-badge>
                     {% endif %}
                 </td>
@@ -149,7 +149,7 @@
                             </c-button>
                         </form>
                     {% else %}
-                        <span class="text-muted">—</span>
+                        <span class="text-muted">None</span>
                     {% endif %}
                 </td>
             </tr>
