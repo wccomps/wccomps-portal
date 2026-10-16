@@ -118,14 +118,12 @@
                                            value="{{ dist.team.school_info.secondary_email|default:'' }}"
                                            aria-label="Secondary email for Team {{ dist.team.team_number }}">
                                 </td>
-                                <td>{{ dist.email_sent_at|date:"Y-m-d H:i"|default:"-" }}</td>
+                                <td>{{ dist.email_sent_at|date:"Y-m-d H:i" }}</td>
                                 <td>
                                     {% if dist.downloaded_at %}
                                         <c-badge variant="success">
                                             {{ dist.download_count }}x
                                         </c-badge>
-                                    {% else %}
-                                        <span class="text-muted">-</span>
                                     {% endif %}
                                 </td>
                                 <td>

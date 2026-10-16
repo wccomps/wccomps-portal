@@ -86,8 +86,8 @@
                                     <td>{{ row.school_name }}</td>
                                     <td>{% if row.returning_events is None %}New{% else %}Returning ({{ row.returning_events }} past event{{ row.returning_events|pluralize }}){% endif %}</td>
                                     <td>{{ row.contact_email }}</td>
-                                    <td>{{ row.secondary_email|default:"—" }}</td>
-                                    <td>{{ row.notes|default:"—" }}</td>
+                                    <td>{{ row.secondary_email }}</td>
+                                    <td>{{ row.notes }}</td>
                                 </tr>
                             {% endfor %}
                         </c-table>

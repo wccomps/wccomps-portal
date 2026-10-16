@@ -1,6 +1,6 @@
 {# Empty state component - displays consistent empty state messages #}
-{# Usage: <c-empty_state icon="📋" title="No items found" description="Optional help text"><action button></c-empty_state> #}
-{# Props: icon (optional emoji/character), title (required), description (optional secondary text) #}
+{# Usage: <c-empty_state title="No items found" description="Optional help text"><action button></c-empty_state> #}
+{# Props: icon (optional character), title (required), description (optional secondary text) #}
 <c-vars icon title description />
 <div {{ attrs }} class="text-center p-20 text-muted">
     {% if icon %}<div class="text-xl mb-15">{{ icon }}</div>{% endif %}

@@ -68,8 +68,7 @@
                     <td>
                         {{ item.ticket.points_charged }}
                         {% if item.ticket.points_charged != item.expected_points %}
-                            <span title="Expected: {{ item.expected_points }}"
-                                  class="text-warning"><span aria-hidden="true">⚠️</span></span>
+                            <span class="text-warning">expected {{ item.expected_points }}</span>
                         {% endif %}
                     </td>
                     <td>{{ item.ticket.resolved_at|timesince }} ago</td>

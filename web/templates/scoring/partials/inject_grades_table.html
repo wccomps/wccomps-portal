@@ -72,7 +72,7 @@
                     </td>
                     <td>
                         {% if grade.is_outlier %}
-                            <span class="text-warning font-semibold"><span aria-hidden="true">⚠️</span> {{ grade.std_devs_from_mean|floatformat:1 }}σ</span>
+                            <span class="text-warning font-semibold">{{ grade.std_devs_from_mean|floatformat:1 }}σ</span>
                         {% endif %}
                     </td>
                     <td>

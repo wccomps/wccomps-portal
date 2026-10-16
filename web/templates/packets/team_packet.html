@@ -40,7 +40,7 @@
                                     <br>
                                     <small>{{ packet.file_size|filesizeformat }}</small>
                                 </td>
-                                <td>{{ packet.actual_distribution_time|date:"Y-m-d H:i"|default:"-" }}</td>
+                                <td>{{ packet.actual_distribution_time|date:"Y-m-d H:i" }}</td>
                                 <td>
                                     <c-link href="{% url 'download_packet' packet.id %}"
                                             variant="default">Download</c-link>
@@ -97,7 +97,7 @@
                             <td>
                                 {% if dist.downloaded_at %}
                                     <c-badge variant="success">
-                                        ✓
+                                        Downloaded
                                     </c-badge>
                                     {{ dist.download_count }} time(s)
                                     <br>

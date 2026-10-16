@@ -24,13 +24,13 @@
                 <h3>Attack Details</h3>
                 <c-detail_grid>
                     <c-detail_row label="Attack Type">
-                        {{ finding.attack_type.name|default:"—" }}
+                        {{ finding.attack_type.name|default:finding.attack_vector|default:"Unknown" }}
                     </c-detail_row>
                     <c-detail_row label="Affected Boxes">
-                        {{ finding.affected_boxes_display|default:"—" }}
+                        {{ finding.affected_boxes_display }}
                     </c-detail_row>
                     <c-detail_row label="Affected Service">
-                        {{ finding.affected_service|default:"—" }}
+                        {{ finding.affected_service }}
                     </c-detail_row>
                     <c-detail_row label="Source IP">
                         <code>{{ finding.source_ip_display }}</code>

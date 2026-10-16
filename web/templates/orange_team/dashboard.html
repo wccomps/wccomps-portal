@@ -105,7 +105,7 @@
                         <td>{{ followup.assignment.orange_check.title }}</td>
                         <td>Team {{ followup.assignment.team.team_number }}</td>
                         <td>{{ followup.remind_at|date:"m/d H:i" }}</td>
-                        <td>{{ followup.note|default:"—" }}</td>
+                        <td>{{ followup.note }}</td>
                         <td>
                             <c-form action="{% url 'orange_team:followup_dismiss' followup.pk %}"
                                     data-confirm="Dismiss this reminder?">
@@ -152,9 +152,9 @@
                         <td>
                             {% if assignment.orange_check.scheduled_at %}
                                 {{ assignment.orange_check.scheduled_at|date:"H:i" }}
-                                {% if assignment.orange_check.window_end %}–{{ assignment.orange_check.window_end|date:"H:i" }}{% endif %}
+                                {% if assignment.orange_check.window_end %}to {{ assignment.orange_check.window_end|date:"H:i" }}{% endif %}
                             {% else %}
-                                <span class="text-muted">—</span>
+                                
                             {% endif %}
                         </td>
                         <td>
