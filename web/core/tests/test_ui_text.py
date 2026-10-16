@@ -5,6 +5,7 @@ An empty value is left blank. Page titles keep their "Page - WCComps Portal" sep
 A symbol that is the control itself (a menu toggle, a sort arrow) is listed in SYMBOL_EXCEPTIONS with why.
 """
 
+import ast
 import re
 import unicodedata
 from pathlib import Path
@@ -82,3 +83,39 @@ def test_ui_text_has_no_dashes() -> None:
                     if TEXT_DASH_RE.search(words_line) and not any(number in lines for lines in titles):
                         found[f"{name}:{number}"] = f"a hyphen used as a dash or for no value: {words_line.strip()!r}"
     fail_with("Dashes in UI text", found, {})
+
+
+# Python modules whose strings reach a page: the web app (not its tests or migrations), and the bot's role sync,
+# whose change list the Sync Roles page shows. The rest of the bot writes Discord messages, outside this rule.
+PYTHON_UI_FILES_RE = re.compile(r"web/(?!.*/tests/|.*/migrations/|browser_tests/).*\.py|bot/role_sync\.py")
+
+
+def string_constants(path: Path) -> list[tuple[int, str]]:
+    """Every string literal in a module but its docstrings."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+    }
+    return [
+        (node.lineno, node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings
+    ]
+
+
+def test_ui_text_built_in_python_has_no_symbol_marks_or_dashes() -> None:
+    """Messages, form errors, admin columns and other strings a page shows follow the same rule as templates."""
+    found = {}
+    for name in tracked_files():
+        if not PYTHON_UI_FILES_RE.fullmatch(name) or name.startswith("web/core/tests"):
+            continue
+        for number, value in string_constants(REPO_DIR / name):
+            marks = sorted({c for c in value if c in DASHES or is_symbol(c)})
+            if marks or re.search(r"(^|\s)--(\s|$)", value):
+                found[f"{name}:{number}"] = f"{''.join(marks) or '--'} in {value.strip()[:60]!r}"
+    fail_with("Symbols or dashes in UI text built in Python", found, {})

@@ -58,8 +58,8 @@ class CompetitionRunResult:
         verb = "enabled" if self.enable else "disabled"
         lines = [f"Applications {verb}: {len(self.apps_ok)}/{len(self.controlled_apps)}"]
         if self.apps_ok:
-            lines.append(f"✓ {', '.join(self.apps_ok)}")
-        lines.extend(f"✗ {app}: {error}" for app, error in self.apps_failed)
+            lines.append(f"Done: {', '.join(self.apps_ok)}")
+        lines.extend(f"Failed: {app}: {error}" for app, error in self.apps_failed)
         accounts = f"Accounts {verb}: {self.accounts_ok}/{self.accounts_total}"
         if self.accounts_failed:
             accounts += f" ({self.accounts_failed} failed)"

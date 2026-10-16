@@ -116,12 +116,12 @@ async def _reconcile(
         except discord.HTTPException as e:
             logger.warning(f"Could not update roles for {who}: {e}")
             stats["errors"] += 1
-            stats["changes"].append(f"⚠ Could not update roles for {who}: {e}")
+            stats["changes"].append(f"Could not update roles for {who}: {e}")
             continue
         stats["roles_added"] += len(add)
         stats["roles_removed"] += len(remove)
-        stats["changes"] += [f"{prefix}✓ Added {role.name} to {who}" for role in add]
-        stats["changes"] += [f"{prefix}✗ Removed {role.name} from {who} ({reason})" for role in remove]
+        stats["changes"] += [f"{prefix}Added {role.name} to {who}" for role in add]
+        stats["changes"] += [f"{prefix}Removed {role.name} from {who} ({reason})" for role in remove]
     return stats
 
 
@@ -151,7 +151,7 @@ def _manageable_roles(
 def _report(stats: SyncRolesResult, problem: str) -> None:
     logger.warning(problem)
     stats["errors"] += 1
-    stats["changes"].append(f"⚠ {problem}")
+    stats["changes"].append(problem)
 
 
 def _changes(

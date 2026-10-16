@@ -12,7 +12,7 @@ def format_history_details(details: dict[str, object]) -> str:
     parts = []
 
     if "old_category_name" in details and "new_category_name" in details:
-        parts.append(f"{details['old_category_name']} → {details['new_category_name']}")
+        parts.append(f"{details['old_category_name']} to {details['new_category_name']}")
 
     if "points_charged" in details:
         parts.append(f"{details['points_charged']} pts")

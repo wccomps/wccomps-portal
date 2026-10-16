@@ -222,13 +222,13 @@ def finalize_link(
 
     if team:
         DiscordTask.enqueue(
-            LogToChannel(message=f"User Linked: <@{discord_id}> ({discord_username}) → **{team.team_name}**")
+            LogToChannel(message=f"User Linked: <@{discord_id}> ({discord_username}) to **{team.team_name}**")
         )
         logger.info(f"Successfully linked {discord_username} ({discord_id}) to {team.team_name}")
     else:
         DiscordTask.enqueue(
             LogToChannel(
-                message=f"User Linked: <@{discord_id}> ({discord_username}) \u2192 **{authentik_username}** (non-team)"
+                message=f"User Linked: <@{discord_id}> ({discord_username}) to **{authentik_username}** (non-team)"
             )
         )
         logger.info(f"Successfully linked {discord_username} ({discord_id}) to {authentik_username}")

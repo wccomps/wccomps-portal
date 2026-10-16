@@ -250,7 +250,7 @@ class RegistrationEventEnrollment(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.registration.school_name} → {self.event.name}"
+        return f"{self.registration.school_name} in {self.event.name}"
 
 
 class EventTeamAssignment(models.Model):
@@ -273,7 +273,7 @@ class EventTeamAssignment(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.school.name} → Team {self.team.team_number:02d} ({self.event.name})"
+        return f"{self.school.name} as Team {self.team.team_number:02d} ({self.event.name})"
 
 
 class EventResult(models.Model):

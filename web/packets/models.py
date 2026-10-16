@@ -171,7 +171,7 @@ class PacketDistribution(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.packet.title} → Team {self.team.team_number} ({self.email_status})"
+        return f"{self.packet.title} for Team {self.team.team_number} ({self.email_status})"
 
     def mark_as_sent(self, email: str) -> None:
         self.email_status = "sent"

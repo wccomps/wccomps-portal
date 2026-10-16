@@ -154,7 +154,7 @@ def test_a_partial_start_is_reported_incomplete_not_success(admin_client):
 
     assert done["success"] is False
     assert done["message"].startswith("Incomplete: run Start again.")
-    assert "✗ scoring: HTTP 502" in done["message"]
+    assert "Failed: scoring: HTTP 502" in done["message"]
     log = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
     assert log.startswith("**Competition Started (incomplete)**")
 
