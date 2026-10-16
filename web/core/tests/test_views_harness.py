@@ -2,6 +2,7 @@
 code they stand for."""
 
 import re
+import sys
 
 from browser_tests.page_registry import PAGES
 from django.http import HttpResponse
@@ -9,7 +10,19 @@ from django.http import HttpResponse
 from core.permission_constants import PERMISSION_MAP
 from core.tests.guards import fail_with
 from core.tests.test_property_coverage import VIEW_MODULES
-from core.tests.views_harness import ROLES, ROUTES, Answer, Drawn, ViewCase, World, check_answer, may, path_params
+from core.tests.views_harness import (
+    ROLES,
+    ROUTES,
+    Answer,
+    Drawn,
+    ViewCase,
+    World,
+    check_answer,
+    may,
+    offline,
+    path_params,
+    run_detached_callers,
+)
 
 
 def _answer(status: int) -> Answer:
@@ -69,3 +82,18 @@ def test_every_path_parameter_has_a_valid_value(view_world: World) -> None:
                     if not view_world.rows.get(kind):
                         found[kind] = f"{name}'s {param}"
     fail_with("Path parameters with no valid value in the world (seed one in build_world)", found, EMPTY_KINDS)
+
+
+def test_offline_patches_every_run_detached_caller() -> None:
+    """A streaming view whose run_detached isn't patched runs in a thread that sees none of the test's rows."""
+    from core import utils
+
+    callers = {module.__name__ for module in run_detached_callers()}
+    assert {"core.admin_views.competition", "packets.views", "scoring.views.export"} <= callers
+    with offline():
+        unpatched = [
+            name
+            for name, module in list(sys.modules.items())
+            if getattr(module, "run_detached", None) is utils.run_detached and module is not utils
+        ]
+    assert not unpatched, f"offline() left run_detached unpatched in {unpatched}"

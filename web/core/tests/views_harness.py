@@ -12,10 +12,12 @@ test_property_coverage fails when a URL pattern has no row (and isn't excepted w
 import json
 import os
 import re
+import sys
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from types import ModuleType
 from typing import Any
 from unittest.mock import patch
 from urllib.parse import urlsplit
@@ -742,9 +744,22 @@ def offline() -> Iterator[None]:
                 QUOTIENT_PASSWORD="property",
             )
         )
-        for module in ("core.admin_views.competition", "packets.views", "scoring.views.export"):
-            stack.enter_context(patch(f"{module}.run_detached", _inline))
+        for module in run_detached_callers():
+            stack.enter_context(patch.object(module, "run_detached", _inline))
         yield
+
+
+def run_detached_callers() -> list[ModuleType]:
+    """Every loaded module that imported core.utils.run_detached (the URLconf loads every view): each binds the name
+    at import, so each is patched where it calls it."""
+    from core import utils
+
+    get_resolver().url_patterns  # noqa: B018 - loads every view module
+    return [
+        module
+        for module in list(sys.modules.values())
+        if module is not utils and getattr(module, "run_detached", None) is utils.run_detached
+    ]
 
 
 def uploads(max_files: int = 1) -> st.SearchStrategy[Any]:
