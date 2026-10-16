@@ -251,6 +251,7 @@ def request_for(user: User) -> Any:
 # One case per form
 # ---------------------------------------------------------------------------------------------------------------
 
+Post = dict[str, str | list[str]]
 Factory = Callable[[QueryDict, dict[str, SimpleUploadedFile]], Any]
 # How the view builds the form, as a factory of bound forms; it may draw the view's variant (an admin or not)
 Make = Callable[[World, st.DataObject | None], Factory]  # None: the view's usual variant
@@ -268,7 +269,8 @@ class FormCase:
     not_idempotent: str = ""
     resubmit: Callable[[dict[str, Any]], QueryDict] = field(default=resubmission)
     # POSTs that once broke the form's use: each runs through the valid-form property before the generated ones
-    examples: tuple[dict[str, str | list[str]], ...] = ()
+    # (or a function of the world, for a POST that names its rows)
+    examples: tuple[Post | Callable[[World], Post], ...] = ()
 
     @property
     def key(self) -> str:
@@ -672,6 +674,9 @@ CASES = [
         },
         use=_new_event_use,
         not_idempotent="the season the page showed is not posted; the view passes it",
+        # One valid post, so the valid branch is reached whatever the generated examples are: Hypothesis draws text
+        # from string constants in the loaded code, so a change anywhere can change them
+        examples=(lambda w: {"event": str(w.open_event.pk), "current_season": str(w.season.pk)},),
     ),
     FormCase(ImportConfirmForm),
     FormCase(
@@ -788,7 +793,8 @@ def test_valid_post_fits_its_fields_is_stored_and_cleans_the_same(case: FormCase
         if case.use is not None:
             case.use(world, form)
 
-    for pinned in case.examples:
+    for example in case.examples:
+        pinned = example(world) if callable(example) else example
         post = QueryDict(mutable=True)
         for key, value in pinned.items():
             post.setlist(key, value if isinstance(value, list) else [value])
