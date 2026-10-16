@@ -30,7 +30,7 @@ def pytest_configure(config: pytest.Config) -> None:
         sock.close()
 
 
-from core.tests.roles import groups_of, make_user
+from core.tests.roles import make_user, role_user
 
 
 @pytest.fixture
@@ -45,8 +45,8 @@ def unauthenticated_client() -> Client:
 
 
 @pytest.fixture
-def blue_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("blueteam01", groups_of("blue_team"))
+def blue_team_user(db: Any) -> User:
+    return role_user("blue_team", username="blueteam01")
 
 
 @pytest.fixture
@@ -55,38 +55,38 @@ def blue_team_02_user(create_user_with_groups: Callable[..., User]) -> User:
 
 
 @pytest.fixture
-def red_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("redteam", groups_of("red_team"))
+def red_team_user(db: Any) -> User:
+    return role_user("red_team", username="redteam")
 
 
 @pytest.fixture
-def gold_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("goldteam", groups_of("gold_team"))
+def gold_team_user(db: Any) -> User:
+    return role_user("gold_team", username="goldteam")
 
 
 @pytest.fixture
-def white_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("whiteteam", groups_of("white_team"))
+def white_team_user(db: Any) -> User:
+    return role_user("white_team", username="whiteteam")
 
 
 @pytest.fixture
-def orange_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("orangeteam", groups_of("orange_team"))
+def orange_team_user(db: Any) -> User:
+    return role_user("orange_team", username="orangeteam")
 
 
 @pytest.fixture
-def ticketing_support_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("support", groups_of("ticketing_support"))
+def ticketing_support_user(db: Any) -> User:
+    return role_user("ticketing_support", username="support")
 
 
 @pytest.fixture
-def ticketing_admin_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("ticketing_admin", groups_of("ticketing_admin"))
+def ticketing_admin_user(db: Any) -> User:
+    return role_user("ticketing_admin", username="ticketing_admin")
 
 
 @pytest.fixture
-def admin_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("admin", groups_of("admin"))
+def admin_user(db: Any) -> User:
+    return role_user("admin", username="admin")
 
 
 @pytest.fixture

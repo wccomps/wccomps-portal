@@ -19,7 +19,7 @@ from core.middleware import NUL_MESSAGE
 from core.models import BotState
 from core.tests.roles import role_user
 from core.tests.strategies import request_text, rolled_back
-from team.models import DiscordLink, Team
+from team.models import Team
 from ticketing.models import Ticket
 
 pytestmark = pytest.mark.django_db
@@ -104,10 +104,10 @@ def test_a_nul_character_in_a_form_field_is_refused(admin_client: Client, text: 
 
 
 @pytest.fixture
-def tickets(blue_team_user: User, default_category: Any) -> dict[str, Any]:
+def tickets(db: Any, default_category: Any) -> dict[str, Any]:
+    """Team 1's ticket (the blue_team role's, by its Authentik group) and team 2's."""
     own = Team.objects.create(team_number=1, team_name="Team 01")
     other = Team.objects.create(team_number=2, team_name="Team 02")
-    DiscordLink.objects.filter(user=blue_team_user).update(team=own)
     return {
         "own": Ticket.objects.create(team=own, category=default_category, ticket_number="T001-001", title="Ours"),
         "other": Ticket.objects.create(team=other, category=default_category, ticket_number="T002-001", title="X"),
@@ -126,15 +126,14 @@ def test_a_missing_ticket_is_a_404(admin_client: Client, tickets: dict[str, Any]
 @pytest.mark.parametrize(
     ("role", "method", "url", "status"),
     [
-        ("support", "get", lambda t: reverse("create_ticket"), 403),
+        ("ticketing_support", "get", lambda t: reverse("create_ticket"), 403),
         ("admin", "post", lambda t: reverse("ticket_cancel", args=[t["own"].ticket_number]), 403),
-        ("blue", "post", lambda t: reverse("ticket_cancel", args=[t["other"].ticket_number]), 404),
+        ("blue_team", "post", lambda t: reverse("ticket_cancel", args=[t["other"].ticket_number]), 404),
         ("admin", "get", lambda t: reverse("school_info_edit", args=[99]), 404),
         ("admin", "get", lambda t: reverse("admin_team_detail", args=[99]), 404),
     ],
 )
 def test_a_refusal_page_carries_its_status(
-    request: pytest.FixtureRequest,
     tickets: dict[str, Any],
     role: str,
     method: str,
@@ -142,8 +141,7 @@ def test_a_refusal_page_carries_its_status(
     status: int,
 ) -> None:
     """These pages said "Access denied" or "not found" with a 200, so nothing could tell them from a success."""
-    users = {"support": "ticketing_support_user", "admin": "admin_user", "blue": "blue_team_user"}
-    client = signed_in(request.getfixturevalue(users[role]))
+    client = signed_in(role_user(role, username=f"refused-{role}"))
     response = getattr(client, method)(url(tickets))
     assert response.status_code == status
     tickets["own"].refresh_from_db()
@@ -373,3 +371,11 @@ def test_the_setup_page_writes_app_names_into_its_script_as_strings(admin_client
         config.save()
         response = admin_client.get(reverse("admin_competition_setup"))
     assert JS_STRING_LIST.search(response.content.decode()), "an app name broke the script's list of strings"
+
+
+def test_an_htmx_request_with_a_nul_gets_a_plain_refusal(admin_client: Client) -> None:
+    """htmx swaps in the answer as markup, so a JSON error is for a fetch() only."""
+    headers = {"HX-Request": "true", "Sec-Fetch-Mode": "cors"}
+    response = admin_client.get(reverse("ops_review_tickets"), {"search": "\x00"}, headers=headers)
+    assert response.status_code == 400
+    assert response["Content-Type"].startswith("text/plain")

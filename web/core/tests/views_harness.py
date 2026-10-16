@@ -75,17 +75,16 @@ from scoring.models import (
 
 from core.models import AuditLog, BotState, CompetitionConfig, DiscordTask
 from core.permission_constants import check_groups_for_permission
-from core.tests.roles import ROLE_GROUPS, make_user
+from core.tests.roles import ROLE_GROUPS, role_user
 from core.tests.strategies import PAYLOADS, field_values, request_text, rolled_back, uploaded_files, valid_values
-from team.models import DiscordLink, LinkAttempt, LinkRateLimit, LinkToken, Team
+from team.models import LinkAttempt, LinkRateLimit, LinkToken, Team
 from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
 
 # ---------------------------------------------------------------------------------------------------------------
 # Roles
 # ---------------------------------------------------------------------------------------------------------------
 
-ROLES = ROLE_GROUPS
-EVERYONE = frozenset(ROLES)
+EVERYONE = frozenset(ROLE_GROUPS)
 SIGNED_IN = EVERYONE - {"anonymous"}
 
 
@@ -93,7 +92,7 @@ def may(*permissions: str) -> frozenset[str]:
     """The roles whose groups grant any of these permissions (core.permission_constants)."""
     return frozenset(
         role
-        for role, groups in ROLES.items()
+        for role, groups in ROLE_GROUPS.items()
         if groups is not None and any(check_groups_for_permission(groups, p) for p in permissions)
     )
 
@@ -121,7 +120,9 @@ class World:
 
 
 def build_world() -> World:
-    users = {role: make_user(f"prop-{role}", groups) for role, groups in ROLES.items() if groups is not None}
+    users = {
+        role: role_user(role, username=f"prop-{role}") for role, groups in ROLE_GROUPS.items() if groups is not None
+    }
     # The Django admin also wants a superuser (each model page checks Django's own permissions)
     User.objects.filter(pk=users["admin"].pk).update(is_staff=True, is_superuser=True)
     clients = {"anonymous": Client()}
@@ -143,7 +144,6 @@ def build_world() -> World:
         registration_open=True,
     )
     teams = [Team.objects.create(team_number=n, team_name=f"Team {n:02d}") for n in (1, 2, 3)]
-    DiscordLink.objects.filter(user=users["blue_team"]).update(team=teams[0])
     set_team_school(teams[0], "School One", contact_email="coach@example.edu")
     set_team_school(teams[1], "School Two", contact_email="coach2@example.edu")
 
@@ -549,7 +549,7 @@ def requests(
     draw: st.DrawFn, case: ViewCase, world: World, *, role: str | None = None, method: str | None = None
 ) -> Drawn:
     """A request for the case's URL pattern: any role, method, path values, query, body, headers and cookies."""
-    role = role or draw(st.sampled_from(sorted(ROLES)), label="role")
+    role = role or draw(st.sampled_from(sorted(ROLE_GROUPS)), label="role")
     method = method or draw(st.one_of(st.sampled_from(case.methods), st.sampled_from(METHODS)), label="method")
     name = draw(st.sampled_from((case.name, *case.also)), label="url name")
     kwargs: dict[str, Any] = {}
@@ -667,7 +667,7 @@ def _send(client: Client, drawn: Drawn) -> Answer:
     else:
         client.cookies["tz"] = drawn.tz
     before = table_writes()
-    mail_before, outbound_before = len(getattr(mail, "outbox", [])), len(OUTBOUND)
+    mail_before, outbound_before = len(mail.outbox), len(OUTBOUND)
     files = {k: v for k, v in drawn.data.items() if _is_upload(v)}
     for upload in (u for v in files.values() for u in (v if isinstance(v, list) else [v])):
         upload.seek(0)
@@ -704,7 +704,7 @@ def _send(client: Client, drawn: Drawn) -> Answer:
     storage = getattr(response.wsgi_request, "_messages", None)  # type: ignore[attr-defined]
     queued = getattr(storage, "_queued_messages", [])
     errors = [str(m) for m in queued if m.level >= message_levels.ERROR]
-    mailed = len(getattr(mail, "outbox", [])) - mail_before
+    mailed = len(mail.outbox) - mail_before
     return Answer(response, content, written, errors, mailed, len(OUTBOUND) - outbound_before)
 
 

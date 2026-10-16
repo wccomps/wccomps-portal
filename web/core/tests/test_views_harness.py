@@ -4,14 +4,15 @@ code they stand for."""
 import ast
 import importlib
 
+import pytest
 from browser_tests.page_registry import PAGES
 from django.http import HttpResponse
 
 from core.permission_constants import PERMISSION_MAP
+from core.tests.roles import ROLE_GROUPS
 from core.tests.test_no_unused_code import python_trees
 from core.tests.test_property_coverage import VIEW_MODULES
 from core.tests.views_harness import (
-    ROLES,
     RUN_DETACHED,
     Answer,
     Drawn,
@@ -30,12 +31,8 @@ def test_a_400_to_a_refused_role_passes_only_for_a_nul() -> None:
     """A view that validates its input before its permission check would answer a refused role 400."""
     case = ViewCase("ticket_list", frozenset({"admin"}))
     plain = Drawn("red_team", "GET", "/tickets/", {"search": ["x"]}, {}, None, {}, None)
-    try:
+    with pytest.raises(AssertionError, match="a role the page refuses got 400"):
         check_answer(case, plain, _answer(400))
-    except AssertionError:
-        pass
-    else:
-        raise AssertionError("a 400 without a NUL passed as a refusal")
     with_nul = Drawn("red_team", "GET", "/tickets/", {"search": ["\x00"]}, {}, None, {}, None)
     check_answer(case, with_nul, _answer(400))
 
@@ -43,7 +40,7 @@ def test_a_400_to_a_refused_role_passes_only_for_a_nul() -> None:
 def test_every_permission_group_has_a_role() -> None:
     """A group added to PERMISSION_MAP with no role would leave may() empty for the pages it gates, and "everyone
     refused" would pass."""
-    held = {group for groups in ROLES.values() if groups for group in groups}
+    held = {group for groups in ROLE_GROUPS.values() if groups for group in groups}
     missing = sorted({group for groups in PERMISSION_MAP.values() for group in groups} - held)
     assert not missing, (
         f"Authentik groups in PERMISSION_MAP no test role holds (add them to core.tests.roles): {missing}"
@@ -101,12 +98,7 @@ def test_offline_patches_every_run_detached_caller() -> None:
 def test_a_refusal_that_mails_or_calls_out_fails() -> None:
     case = ViewCase("ticket_list", frozenset({"admin"}))
     drawn = Drawn("red_team", "GET", "/tickets/", {}, {}, None, {}, None)
-    for answer in (
-        Answer(HttpResponse(status=403), b"", [], [], mailed=1),
-        Answer(HttpResponse(status=403), b"", [], [], outbound=1),
-    ):
-        try:
-            check_answer(case, drawn, answer)
-        except AssertionError:
-            continue
-        raise AssertionError(f"a refusal that sent mail or called out passed: {answer}")
+    with pytest.raises(AssertionError, match="sent 1 email"):
+        check_answer(case, drawn, Answer(HttpResponse(status=403), b"", [], [], mailed=1))
+    with pytest.raises(AssertionError, match="called another service 1 time"):
+        check_answer(case, drawn, Answer(HttpResponse(status=403), b"", [], [], outbound=1))

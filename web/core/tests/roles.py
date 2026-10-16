@@ -6,7 +6,7 @@ import itertools
 from django.contrib.auth.models import User
 
 from core.models import UserGroups
-from team.models import DiscordLink, Team
+from team.models import DiscordLink
 
 # Each role's Authentik groups; None is a visitor who isn't signed in
 ROLE_GROUPS: dict[str, list[str] | None] = {
@@ -36,25 +36,15 @@ def groups_of(role: str) -> list[str]:
 _discord_ids = itertools.count(7_000_000_000)
 
 
-def make_user(username: str, groups: list[str], *, team: Team | None = None) -> User:
-    """A user with these Authentik groups and an active Discord link (bot-side checks look users up through it)."""
+def make_user(username: str, groups: list[str]) -> User:
+    """A user with these Authentik groups and an active Discord link (bot-side checks look users up through it). A
+    team member's team is the Team whose Authentik group it holds (blue_team's is Team 1's), not the link."""
     user = User.objects.create_user(username=username, password="testpass123")
     UserGroups.objects.create(user=user, authentik_id=f"{username}-uid", groups=groups)
-    DiscordLink.objects.create(
-        user=user, discord_id=next(_discord_ids), discord_username=username, team=team, is_active=True
-    )
+    DiscordLink.objects.create(user=user, discord_id=next(_discord_ids), discord_username=username, is_active=True)
     return user
 
 
-def team_one() -> Team:
-    """Team 1, whose Authentik group the blue_team role holds."""
-    team, _ = Team.objects.get_or_create(
-        team_number=1,
-        defaults={"team_name": "Team 01", "authentik_group": "WCComps_BlueTeam01", "is_active": True},
-    )
-    return team
-
-
 def role_user(role: str, *, username: str = "") -> User:
-    """A signed-in user for the role; blue_team's is linked to team 1."""
-    return make_user(username or f"role-{role}", groups_of(role), team=team_one() if role == "blue_team" else None)
+    """A signed-in user for the role."""
+    return make_user(username or f"role-{role}", groups_of(role))
