@@ -2,12 +2,15 @@ name: Nightly deep property tests
 
 # The ci profile runs the same few Hypothesis examples on every PR; this runs the deep profile (many random
 # examples, conftest.py) on main every night, and on failure opens or updates one issue with the failing tests and
-# their examples.
+# their examples. A PR that edits this file runs it once with the ci profile, and opens no issue.
 
 on:
   schedule:
     - cron: "17 9 * * *"
   workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/deep-properties.yml
 
 permissions:
   contents: read
@@ -39,13 +42,14 @@ jobs:
       DB_USER: wccomps
       DB_PASSWORD: wccomps
       DB_NAME: wccomps_test
-      HYPOTHESIS_PROFILE: deep
+      HYPOTHESIS_PROFILE: ${{ github.event_name == 'pull_request' && 'ci' || 'deep' }}
       ISSUE_TITLE: "Nightly deep property tests failed"
 
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: main
+          # The night's run tests main; a PR's run tests the PR
+          ref: ${{ github.event_name == 'pull_request' && github.sha || 'main' }}
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -65,7 +69,7 @@ jobs:
         env:
           DJANGO_SECRET_KEY: test-secret-key-for-ci
 
-      - name: Run the tests under the deep profile (every Hypothesis test)
+      - name: Run the tests under the deep profile (every Hypothesis test; ci for a PR)
         id: tests
         continue-on-error: true
         run: |
@@ -75,7 +79,7 @@ jobs:
           DJANGO_SECRET_KEY: test-secret-key-for-ci
 
       - name: Open or update the failure issue
-        if: steps.tests.outcome == 'failure'
+        if: steps.tests.outcome == 'failure' && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
