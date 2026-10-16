@@ -344,3 +344,20 @@ class TestEventTeamAssignment:
         )
         assert school.name in str(assignment)
         assert "Team 01" in str(assignment)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("first", ["approve", "reject"])
+@pytest.mark.parametrize("second", ["approve", "reject"])
+def test_only_the_first_of_two_reviews_of_a_pending_registration_takes(admin_user, first, second):
+    """Two reviewers on the same pending registration (two tabs, a double click): the second sees it decided."""
+    registration = TeamRegistration.objects.create(school_name="Test School")
+    one, two = TeamRegistration.objects.get(pk=registration.pk), TeamRegistration.objects.get(pk=registration.pk)
+
+    def review(copy, how):
+        return copy.approve(admin_user) if how == "approve" else copy.reject("Late")
+
+    assert review(one, first) is True
+    decided = TeamRegistration.objects.filter(pk=registration.pk).values().get()
+    assert review(two, second) is False
+    assert TeamRegistration.objects.filter(pk=registration.pk).values().get() == decided

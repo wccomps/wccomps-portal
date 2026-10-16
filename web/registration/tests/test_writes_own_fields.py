@@ -23,7 +23,7 @@ def _updates(queries, table):
 
 @pytest.mark.parametrize("change", ["approve", "reject"])
 def test_a_stale_registration_keeps_the_school_set_meanwhile(change):
-    registration = TeamRegistration.objects.create(school_name="Example University", status="paid")
+    registration = TeamRegistration.objects.create(school_name="Example University")
     stale = TeamRegistration.objects.get(pk=registration.pk)
     school = School.for_name("Example University")
     TeamRegistration.objects.filter(pk=registration.pk).update(school=school)

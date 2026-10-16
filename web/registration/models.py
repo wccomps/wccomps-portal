@@ -94,16 +94,21 @@ class TeamRegistration(models.Model):
     def __str__(self) -> str:
         return f"{self.school_name} ({self.status})"
 
-    def approve(self, user: User) -> None:
-        self.status = "approved"
-        self.approved_at = timezone.now()
-        self.approved_by = user
-        self.save(update_fields=["status", "approved_at", "approved_by"])
+    def approve(self, user: User) -> bool:
+        """Approve it if it is still pending; False when a review (or a payment) got there first."""
+        return self._decide(status="approved", approved_at=timezone.now(), approved_by=user)
 
-    def reject(self, reason: str) -> None:
-        self.status = "rejected"
-        self.rejection_reason = reason
-        self.save(update_fields=["status", "rejection_reason"])
+    def reject(self, reason: str) -> bool:
+        """Reject it if it is still pending; False when a review (or a payment) got there first."""
+        return self._decide(status="rejected", rejection_reason=reason)
+
+    def _decide(self, **fields: object) -> bool:
+        # One conditional update, so two reviews racing on the same registration can't both take
+        decided = TeamRegistration.objects.filter(pk=self.pk, status="pending").update(**fields) == 1
+        if decided:
+            for name, value in fields.items():
+                setattr(self, name, value)
+        return decided
 
 
 class SeasonManager(models.Manager["Season"]):
