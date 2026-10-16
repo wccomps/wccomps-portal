@@ -484,20 +484,21 @@ class Drawn:
     headers: dict[str, str]
     tz: str | None
 
+    def _query_texts(self) -> list[str]:
+        return [text for key, values in self.query.items() for text in (key, *values)]
+
     @property
     def texts(self) -> list[str]:
         """Every piece of text the request sends (upload names included): for the escaping check."""
-        query = [text for key, values in self.query.items() for text in (key, *values)]
         body = [self.body.decode("utf-8", "replace")] if self.body is not None else []
-        return [unquote(self.path), *query, *_texts(self.data), *body]
+        return [unquote(self.path), *self._query_texts(), *_texts(self.data), *body]
 
     def carries_nul(self) -> bool:
         """A NUL where core.middleware's NUL refusals look: the path, query and cookies, and a signed-in POST's form
         fields (not upload names, a PUT's body or a JSON body)."""
-        query = [text for key, values in self.query.items() for text in (key, *values)]
         posted = self.method == "POST" and self.role != "anonymous"
         fields = _texts({k: v for k, v in self.data.items() if not _is_upload(v)}) if posted else []
-        return any("\x00" in text for text in (unquote(self.path), *query, *fields, self.tz or ""))
+        return any("\x00" in text for text in (unquote(self.path), *self._query_texts(), *fields, self.tz or ""))
 
 
 def _optional(strategy: st.SearchStrategy[Any]) -> st.SearchStrategy[Any]:
@@ -880,9 +881,10 @@ def any_request_is_answered_safely(case: ViewCase, world: World) -> None:
 
 
 def echo_sweep(case: ViewCase, world: World) -> None:
-    """Every query and POST field the row declares, set to markup and template syntax at once, on each of its URL
-    names (with the first valid value for each path parameter): each of the row's methods as each role allowed in
-    (pages, and what a POST re-renders, differ by role). check_answer then fails on any field echoed raw.
+    """Every query and POST field the row declares, set to markup and template syntax at once (query fields on every
+    request, POST fields where build sends them), on each of its URL names with the first valid value for each path
+    parameter: each of the row's methods as each role allowed in (pages, and what a POST re-renders, differ by role).
+    check_answer then fails on any field echoed raw.
 
     Deterministic, so CI checks every declared field every run: the random search rarely pairs an allowed role, the
     method a field is read on, and markup in that one field (the cotton attrs XSS passed ci-views)."""

@@ -53,7 +53,7 @@ PAGES: list[PageDef] = [
     ),
     PageDef(
         url_name="ticket_detail",
-        skip_roles={"ticketing_admin": "the same staff page ticketing_support is rendered with"},
+        skip_roles={"ticketing_admin": "the same staff page admin is rendered with"},
         needs_data="ticket",
     ),
     PageDef(
@@ -203,10 +203,11 @@ PAGES: list[PageDef] = [
     # =========================================================================
     PageDef(
         url_name="home",
+        # Home only redirects to a role's landing page: each landing page once
         skip_roles={
-            "orange_team": "home only redirects to a role's landing page, rendered on that page's own row",
-            "ticketing_support": "home only redirects to a role's landing page, rendered on that page's own row",
-            "ticketing_admin": "home only redirects to a role's landing page, rendered on that page's own row",
+            "white_team": "lands on the leaderboard, as gold_team does",
+            "ticketing_support": "lands on the ticket list, as blue_team and admin do",
+            "ticketing_admin": "lands on the ticket list, as blue_team and admin do",
         },
         expect_redirect=True,
     ),

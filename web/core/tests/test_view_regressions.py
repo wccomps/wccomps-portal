@@ -321,7 +321,8 @@ def test_a_nul_character_in_a_cookie_is_refused(name: str, text: str) -> None:
 @pytest.mark.parametrize("path", ["/tickets/", "/livez/", "/health/", "/static/nope", "/auth/link"])
 def test_an_anonymous_post_body_is_not_parsed_for_a_nul(path: str) -> None:
     """Only a signed-in request's form fields are parsed for a NUL; the sign-in gate lets anonymous POSTs through
-    to the health checks, /static/ and /auth/*, whose bodies nothing reads."""
+    to the health checks, /static/ and the sign-in and link paths (/auth/login/, /auth/callback/, /auth/logout/,
+    /auth/link), whose bodies nothing reads."""
     response = Client().post(path, {"search": "\x00"})
     assert NUL_MESSAGE.encode() not in response.content
 
@@ -363,7 +364,8 @@ JS_STRING_LIST = re.compile(r"apps: \[((?:'(?:[^'\\\n\r\u2028\u2029]|\\.)*'(?:, 
 @given(names=st.lists(request_text(30).filter(lambda n: "\x00" not in n), min_size=1, max_size=3))
 @example(names=["a'b", "c\\d", "e\nf"])
 def test_the_setup_page_writes_app_names_into_its_script_as_strings(admin_client: Client, names: list[str]) -> None:
-    """App names come from the admin's JSON field too, where a quote, backslash or line break broke the script."""
+    """App names come from the admin's JSON field too: a backslash or line break broke the script (and a quote showed as
+    &#x27;)."""
     from core.models import CompetitionConfig
 
     with rolled_back():
@@ -375,7 +377,8 @@ def test_the_setup_page_writes_app_names_into_its_script_as_strings(admin_client
 
 
 def test_an_htmx_request_with_a_nul_gets_a_plain_refusal(admin_client: Client) -> None:
-    """htmx swaps in the answer as markup, so a JSON error is for a fetch() only."""
+    """htmx doesn't read JSON (it doesn't swap an error answer; base_site.html alerts), so a JSON error is for a
+    fetch() only."""
     headers = {"HX-Request": "true", "Sec-Fetch-Mode": "cors"}
     response = admin_client.get(reverse("ops_review_tickets"), {"search": "\x00"}, headers=headers)
     assert response.status_code == 400

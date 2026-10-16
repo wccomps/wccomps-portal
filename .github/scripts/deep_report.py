@@ -9,7 +9,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-LIMIT = 60_000  # GitHub's issue and comment bodies stop at 65536 characters
+LIMIT = 60_000  # GitHub refuses an issue or comment body over 65536 characters
 
 
 def failures(results: Path) -> list[str]:

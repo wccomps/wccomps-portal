@@ -43,8 +43,8 @@ class SecurityHeadersMiddleware:
 
 
 def wants_json_error(request: HttpRequest) -> bool:
-    """A background fetch gets a JSON error it can show; a page navigation, and htmx (which swaps in the answer as
-    markup), get a page or text."""
+    """A background fetch() gets a JSON error it can show; a navigation gets a page, and htmx (which doesn't swap in
+    an error answer; base_site.html alerts) gets text."""
     return (
         request.headers.get("HX-Request") != "true" and request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate"
     )
@@ -86,7 +86,7 @@ class RejectNulMiddleware:
 
 class RejectNulFieldsMiddleware:
     """Refuse a signed-in request's form whose fields hold a NUL character, with a 400. An anonymous body isn't
-    parsed here: the public forms (registration, linking) refuse a NUL field by field as every form does."""
+    parsed here: the public forms (registration) refuse a NUL field by field as every form does."""
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
