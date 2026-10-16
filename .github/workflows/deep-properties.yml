@@ -22,10 +22,11 @@ permissions:
   contents: read
   issues: write
 
-# One run at a time, so two runs can't both open an issue
+# The nightly and manual runs (from any ref) one at a time, so two can't both open an issue. A PR's dry run sends
+# nothing, so it has a group of its own, where a newer push cancels the older run.
 concurrency:
-  # One name for every ref: a manual run from a branch waits for the nightly instead of opening a second issue
-  group: deep-properties
+  group: ${{ github.event_name == 'pull_request' && format('deep-properties-pr-{0}', github.event.pull_request.number) || 'deep-properties' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   tests:
