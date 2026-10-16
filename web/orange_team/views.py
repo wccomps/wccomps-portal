@@ -112,7 +112,7 @@ def admin_toggle_checkin(request: HttpRequest, user_id: int) -> HttpResponse:
     """Toggle check-in/out for another user (lead only)."""
     if request.method != "POST":
         return redirect("orange_team:check_list")
-    target_user = User.objects.get(pk=user_id)
+    target_user = get_object_or_404(User, pk=user_id)
     active = OrangeCheckIn.objects.filter(user=target_user, is_active=True).first()
     if active:
         active.is_active = False

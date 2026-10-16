@@ -218,3 +218,17 @@ def test_only_a_pending_registration_is_approved_or_rejected(admin_client: Clien
         before = TeamRegistration.objects.filter(pk=registration.pk).values().get()
         admin_client.post(reverse(action, args=[registration.pk]), {"reason": "Late"})
         assert TeamRegistration.objects.filter(pk=registration.pk).values().get() == before
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# A lead checking in a missing volunteer gets a 404
+# ---------------------------------------------------------------------------------------------------------------
+
+
+@given(user_id=st.integers(0, 2**63 - 1))
+@example(user_id=0)
+@example(user_id=2**31)
+def test_checking_in_a_missing_volunteer_is_a_404(admin_client: Client, user_id: int) -> None:
+    assume(not User.objects.filter(pk=user_id).exists())
+    response = admin_client.post(reverse("orange_team:admin_toggle_checkin", args=[user_id]))
+    assert response.status_code == 404
