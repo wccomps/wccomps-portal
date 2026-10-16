@@ -36,6 +36,7 @@ from core.tests.views_harness import (
     ViewCase,
     World,
     any_request_is_answered_safely,
+    client_for,
     echo_sweep,
     every_allowed_role_gets_in,
     form_fields,
@@ -202,7 +203,7 @@ def test_sign_in_carries_only_a_same_site_next(view_world: World, next_url: str)
     from django.core import signing
     from django.utils.http import url_has_allowed_host_and_scheme
 
-    response = view_world.clients["anonymous"].get(reverse("oauth_login"), {"next": next_url})
+    response = client_for(view_world, "anonymous").get(reverse("oauth_login"), {"next": next_url})
     if "\x00" in next_url:
         assert response.status_code == 400  # refused before the view (core.middleware.RejectNulMiddleware)
         return

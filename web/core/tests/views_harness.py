@@ -18,7 +18,6 @@ from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from http.cookies import SimpleCookie
 from types import ModuleType
 from typing import Any
 from unittest.mock import patch
@@ -105,7 +104,7 @@ def may(*permissions: str) -> frozenset[str]:
 @dataclass
 class World:
     users: dict[str, User]  # signed-in roles
-    clients: dict[str, Client]  # every role's, signed in as its user (anonymous's isn't)
+    sessions: dict[str, str]  # each signed-in role's session key
     season: Season
     event: Event  # the open event
     teams: list[Team]  # teams 1-3; the blue_team role's is team 1 (it holds that team's Authentik group)
@@ -125,10 +124,11 @@ def build_world() -> World:
     }
     # The Django admin also wants a superuser (each model page checks Django's own permissions)
     User.objects.filter(pk=users["admin"].pk).update(is_staff=True, is_superuser=True)
-    clients = {"anonymous": Client()}
+    sessions = {}
     for role, user in users.items():
-        clients[role] = Client()
-        clients[role].force_login(user)
+        signing_in = Client()
+        signing_in.force_login(user)
+        sessions[role] = signing_in.cookies["sessionid"].value
 
     season = Season.objects.create(name="2026", year=2026, is_active=True)
     Season.objects.create(name="2025", year=2025)  # an earlier one with no events, which can be deleted
@@ -305,7 +305,7 @@ def build_world() -> World:
         expires_at=timezone.now() + timedelta(minutes=15),
     )
 
-    world = World(users=users, clients=clients, season=season, event=event, teams=teams)
+    world = World(users=users, sessions=sessions, season=season, event=event, teams=teams)
     world.rows = {
         "team_number": [t.team_number for t in teams],
         "team_id": [t.pk for t in teams],
@@ -664,23 +664,19 @@ class Answer:
     outbound: int = 0  # requests it tried to make to another service
 
 
+def client_for(world: World, role: str, tz: str | None = None) -> Client:
+    """A fresh client for the role: its session's cookie (unless anonymous) and the tz cookie. A sign-out deletes the
+    session row only inside the example's rolled-back savepoint, so every request starts signed in again."""
+    client = Client()
+    if role in world.sessions:
+        client.cookies["sessionid"] = world.sessions[role]
+    if tz is not None:
+        client.cookies["tz"] = tz
+    return client
+
+
 def send(world: World, drawn: Drawn) -> Answer:
-    """Send the request on its role's shared client, and give the client back its cookies afterwards: a sign-out
-    (oauth_logout, admin:logout) would otherwise leave the role signed out for the rest of the module. The session
-    row it deletes comes back with the example's rolled-back savepoint."""
-    client = world.clients[drawn.role]
-    cookies = SimpleCookie(client.cookies)
-    try:
-        return _send(client, drawn)
-    finally:
-        client.cookies = cookies
-
-
-def _send(client: Client, drawn: Drawn) -> Answer:
-    if drawn.tz is None:
-        client.cookies.pop("tz", None)
-    else:
-        client.cookies["tz"] = drawn.tz
+    client = client_for(world, drawn.role, drawn.tz)
     before = table_writes()
     mail_before, outbound_before = len(mail.outbox), len(OUTBOUND)
     files = {k: v for k, v in drawn.data.items() if _is_upload(v)}
