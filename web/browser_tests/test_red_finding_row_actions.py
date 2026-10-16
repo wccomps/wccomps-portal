@@ -1,4 +1,4 @@
-"""A finding's own Delete button, in a row of the findings table, deletes that finding."""
+"""In the findings table, a row's Delete deletes that finding, and Approve Selected approves the checked rows."""
 
 from decimal import Decimal
 
