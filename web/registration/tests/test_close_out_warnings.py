@@ -160,6 +160,7 @@ def test_sends_with_no_event_open_never_count(event):
     ]
 
 
+@pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
 def test_warnings_never_block_a_close_out(event):
     InjectScore.objects.create(team=_team(), inject_id="1", inject_name="Memo", points_awarded=Decimal(5))
 

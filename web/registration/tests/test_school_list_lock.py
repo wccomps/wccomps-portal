@@ -146,6 +146,7 @@ def test_closing_an_event_takes_the_lock():
     assert not event.is_active
 
 
+@pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
 def test_closing_out_takes_the_lock_before_reading_the_open_event(team):
     event = _event()
     set_team_school(team, "Example University", contact_email="c@example.edu")
@@ -157,6 +158,7 @@ def test_closing_out_takes_the_lock_before_reading_the_open_event(team):
     _assert_locks_before_reading_the_open_event(queries)
 
 
+@pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
 def test_opening_an_event_for_the_current_schools_takes_the_lock(team):
     Season.objects.create(name="2026", year=2026, is_active=True)
     set_team_school(team, "Example University", contact_email="c@example.edu")

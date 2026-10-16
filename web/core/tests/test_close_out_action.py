@@ -17,8 +17,8 @@ from core.admin_views.competition import CLOSE_OUT_CHECK_FAILED
 from core.models import CompetitionConfig, DiscordTask
 from team.models import Team
 
-# Outside a transaction, as production runs it: close_out_event then takes the school list lock and REPEATABLE READ,
-# and run_detached its own thread (test_transaction_branches)
+# Outside a transaction, as production runs it: run_detached runs the close-out in its own thread, and close_out_event
+# must be the outermost transaction
 pytestmark = pytest.mark.django_db(transaction=True)
 
 BUTTON = '@click="closeOutEvent"'
