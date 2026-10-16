@@ -14,11 +14,7 @@ pytestmark = pytest.mark.django_db
 def team_with_tickets(blue_team_user):
     """Create a team with tickets that matches blue_team_user's group."""
     # Team 1 matches WCComps_BlueTeam01 group
-    team = Team.objects.create(
-        team_number=1,
-        team_name="Blue Team 01",
-        ticket_counter=3,
-    )
+    team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Blue Team 01", "ticket_counter": 3})[0]
     box_reset = TicketCategory.objects.get(pk=2)
     scoring_check = TicketCategory.objects.get(pk=3)
     other = TicketCategory.objects.get(pk=6)

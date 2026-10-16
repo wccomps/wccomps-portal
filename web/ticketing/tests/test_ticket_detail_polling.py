@@ -14,7 +14,9 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def tickets():
-    own = Team.objects.create(team_number=1, team_name="Team 01", authentik_group="WCComps_BlueTeam01")
+    own = Team.objects.update_or_create(
+        team_number=1, defaults={"team_name": "Team 01", "authentik_group": "WCComps_BlueTeam01"}
+    )[0]
     other = Team.objects.create(team_number=2, team_name="Team 02", authentik_group="WCComps_BlueTeam02")
     category = TicketCategory.objects.get(pk=6)
     return (

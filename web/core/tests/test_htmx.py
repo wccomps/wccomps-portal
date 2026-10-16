@@ -40,7 +40,7 @@ class TestCreateTicketTemplate:
         This is a regression test for the Alpine.js bug where <template> elements
         inside <select> don't work in browsers.
         """
-        team = Team.objects.create(team_number=1, team_name="Test Team", is_active=True)
+        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team", "is_active": True})[0]
         DiscordLink.objects.create(
             discord_id=123456789,
             discord_username="blueteam01",
@@ -68,7 +68,7 @@ class TestCreateTicketTemplate:
 
     def test_create_ticket_passes_categories_to_template(self, blue_team_user, mock_quotient):
         """Create ticket view should pass categories to template."""
-        team = Team.objects.create(team_number=1, team_name="Test Team", is_active=True)
+        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team", "is_active": True})[0]
         DiscordLink.objects.create(
             discord_id=123456789,
             discord_username="blueteam01",
@@ -92,7 +92,7 @@ class TestCreateTicketTemplate:
 @pytest.fixture
 def team_with_link(blue_team_user):
     """Create a team with DiscordLink for blue_team_user."""
-    team = Team.objects.create(team_number=1, team_name="Test Team", is_active=True)
+    team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team", "is_active": True})[0]
     DiscordLink.objects.create(
         discord_id=123456789,
         discord_username="blueteam01",

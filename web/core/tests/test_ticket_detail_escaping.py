@@ -15,7 +15,7 @@ PAYLOAD = '<script>alert("x")</script>'
 @pytest.mark.parametrize("user_fixture", ["blue_team_user", "ticketing_support_user"])
 def test_title_description_and_comment_are_escaped(request, user_fixture):
     user = request.getfixturevalue(user_fixture)
-    team = Team.objects.create(team_number=1, team_name="Blue Team 01")
+    team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Blue Team 01"})[0]
     ticket = Ticket.objects.create(
         ticket_number="T001-001",
         team=team,

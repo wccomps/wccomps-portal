@@ -75,7 +75,7 @@ class TestTicketViewsPermissions:
     @pytest.mark.parametrize(
         "user_fixture",
         [
-            "blue_team_user",
+            "blue_group_member_without_team",
             "red_team_user",
             "gold_team_user",
             "white_team_user",

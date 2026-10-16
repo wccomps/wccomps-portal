@@ -25,7 +25,7 @@ def _no_quotient():
 @pytest.fixture
 def teams():
     return (
-        Team.objects.create(team_number=1, team_name="Team 01"),
+        Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01"})[0],
         Team.objects.create(team_number=7, team_name="Team 07"),
     )
 

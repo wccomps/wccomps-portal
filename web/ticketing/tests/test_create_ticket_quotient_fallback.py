@@ -27,7 +27,7 @@ def _quotient(boxes: dict[str, str], services: list[dict[str, str]]) -> MagicMoc
 
 @pytest.fixture
 def team(blue_team_user):
-    return Team.objects.create(team_number=1, team_name="Blue Team 01")
+    return Team.objects.update_or_create(team_number=1, defaults={"team_name": "Blue Team 01"})[0]
 
 
 @pytest.fixture

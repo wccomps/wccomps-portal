@@ -18,7 +18,9 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 
 def _team_with_school(number):
-    team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
+    team = Team.objects.update_or_create(
+        team_number=number, defaults={"team_name": f"Team {number:02d}", "is_active": True}
+    )[0]  # Team 1 may already be the blue_team user's
     SchoolInfo.objects.create(
         team=team, school=School.for_name(f"School {number}"), contact_email=f"team{number}@example.edu", password="pw"
     )

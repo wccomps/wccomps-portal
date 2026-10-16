@@ -12,7 +12,9 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def team_1(db):
     """Create test team 1 for blue_team_user."""
-    return Team.objects.create(team_number=1, team_name="Test Team 1", authentik_group="WCComps_BlueTeam01")
+    return Team.objects.update_or_create(
+        team_number=1, defaults={"team_name": "Test Team 1", "authentik_group": "WCComps_BlueTeam01"}
+    )[0]
 
 
 class TestTeamPacketPermissions:

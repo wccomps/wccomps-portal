@@ -355,6 +355,8 @@ def test_every_template_is_used() -> None:
 
 # URL name (with namespace) -> who requests it without the portal linking to it by name
 URL_EXCEPTIONS = {
+    "admin:login": "The Django admin's own login page: Django links it (AuthentikAdminSite overrides the view to "
+    "refuse a signed-in non-admin)",
     "health_check": "The Kubernetes readiness probe and the uptime probe request /health/ by path",
     "livez": "Liveness probe (docker-compose.yml healthcheck, the Kubernetes deployment), requested by path",
     "oauth_callback": "Authentik redirects here after login (core/oauth.py sends the path as redirect_uri)",

@@ -80,7 +80,7 @@ class TestScorecardPermissions:
 
     @pytest.fixture
     def test_team(self):
-        return Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
+        return Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 1", "is_active": True})[0]
 
     def test_unauthenticated_redirects_to_login(self, unauthenticated_client, test_team):
         """Unauthenticated users should be redirected to login."""
@@ -245,10 +245,10 @@ class TestIncidentSubmissionPermissions:
         assert response.status_code == 302
         assert "/accounts/" in response.url or "login" in response.url
 
-    def test_blue_team_denied_without_team(self, blue_team_user):
+    def test_blue_team_denied_without_team(self, blue_group_member_without_team):
         """Blue Team user without a team should be denied."""
         client = Client()
-        client.force_login(blue_team_user)
+        client.force_login(blue_group_member_without_team)
         response = client.get(reverse("scoring:submit_incident_report"))
         assert response.status_code == 403
 

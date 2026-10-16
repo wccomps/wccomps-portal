@@ -59,8 +59,8 @@ def make_user(username: str, groups: list[str]) -> User:
 
 
 def role_user(role: str, *, username: str = "") -> User:
-    """A signed-in user for the role. A team role's team (Team 1 for blue_team, whose Authentik group it holds) is
-    made too if it doesn't exist, so the user is a team member, not a user with a group and no team."""
+    """A user for the role (sign it in with force_login or its session). For blue_team, Team 1 (whose Authentik group
+    the role holds) is made if it doesn't exist, so the user is a member of a team."""
     if role == "blue_team":
         Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01"})
     return make_user(username or f"role-{role}", groups_of(role))

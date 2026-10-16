@@ -46,9 +46,14 @@ def unauthenticated_client() -> Client:
 
 @pytest.fixture
 def blue_team_user(db: Any) -> User:
-    """The blue_team role's groups with no team made for it: these tests build their own Team 1, or test a group
-    member whose team doesn't exist. role_user("blue_team") is the team member."""
-    return make_user("blueteam01", groups_of("blue_team"))
+    """The blue_team role's user, a member of Team 1 (core.tests.roles.role_user)."""
+    return role_user("blue_team", username="blueteam01")
+
+
+@pytest.fixture
+def blue_group_member_without_team(db: Any) -> User:
+    """A user holding the blue_team role's group whose team doesn't exist (no Team 1)."""
+    return make_user("blueteam01-noteam", groups_of("blue_team"))
 
 
 @pytest.fixture
@@ -179,6 +184,8 @@ def mock_quotient_client():
         instance = MagicMock()
         instance.get_infrastructure.return_value = None
         instance.get_injects.return_value = []
+        instance.get_service_choices.return_value = []
+        instance.get_box_names.return_value = []
         mock_client.return_value = instance
         yield instance
 
