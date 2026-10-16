@@ -357,7 +357,8 @@ def test_the_ticket_form_writes_posted_text_into_its_script_as_a_string(
 
 @pytest.mark.parametrize(("role", "let_in"), [("admin", True), ("ticketing_admin", False), ("gold_team", False)])
 def test_the_django_admin_lets_in_only_the_admin_permission(role: str, let_in: bool) -> None:
-    """One rule for /admin/, the sign-in gate's: the admin site let Ticketing Admins in where the gate didn't."""
+    """One rule for the Django admin, the admin permission: the admin site let Ticketing Admins in where the sign-in
+    gate (which then also guarded /admin/) didn't."""
     from django.contrib import admin
     from django.test import RequestFactory
 

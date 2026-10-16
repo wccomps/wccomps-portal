@@ -203,7 +203,8 @@ PAGES: list[PageDef] = [
     # =========================================================================
     PageDef(
         url_name="home",
-        # Home only redirects to a role's landing page: each landing page once
+        # Home only redirects to a role's landing page: one visit per landing page, except that blue_team and admin
+        # both land on the ticket list (its team and staff views)
         skip_roles={
             "white_team": "lands on the leaderboard, as gold_team does",
             "ticketing_support": "lands on the ticket list, as blue_team and admin do",

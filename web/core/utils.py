@@ -61,10 +61,6 @@ def ndjson_done(message: str, success: bool = True) -> str:
     return json.dumps({"done": True, "success": success, "message": message}) + "\n"
 
 
-def _in_transaction() -> bool:
-    return connection.in_atomic_block
-
-
 def _inline(lines: Iterator[str]) -> Iterator[str]:
     """The operation's lines, ending with a failure line if it raises."""
     try:
@@ -81,9 +77,11 @@ def run_detached(lines: Iterator[str]) -> Iterator[str]:
     timeout), leaving the operation half done. Here the client only stops the relay; the work finishes.
 
     Inside an open transaction the operation runs inline instead: a thread's own connection can't see the
-    transaction's uncommitted rows. Production requests aren't atomic (no ATOMIC_REQUESTS); tests are.
+    transaction's uncommitted rows. That is decided when the stream is first read, after the view returned; a
+    production request is in no transaction then (Django's response streaming runs outside any atomic block), a
+    test is.
     """
-    if _in_transaction():
+    if connection.in_atomic_block:
         yield from _inline(lines)
         return
     relay: queue.Queue[str | None] = queue.Queue()

@@ -3,12 +3,10 @@
 import json
 import threading
 from collections.abc import Iterator
-from unittest.mock import patch
 
 import pytest
 from django.db import transaction
 
-from core import utils
 from core.utils import run_detached
 
 
@@ -64,8 +62,8 @@ def _which_thread() -> Iterator[str]:
 
 @pytest.mark.django_db
 def test_inside_an_open_transaction_it_runs_inline_and_sees_the_transaction():
-    """A thread's own connection can't see the transaction's uncommitted rows (a request in ATOMIC_REQUESTS, a test),
-    so inside one the operation runs in the caller's thread."""
+    """A thread's own connection can't see the transaction's uncommitted rows (a test's), so inside one the operation
+    runs in the caller's thread."""
     from team.models import Team
 
     Team.objects.create(team_number=7, team_name="Uncommitted")
@@ -79,12 +77,13 @@ def test_inside_an_open_transaction_it_runs_inline_and_sees_the_transaction():
     assert lines == [threading.current_thread().name, "True"]
 
 
+@pytest.mark.django_db
 def test_a_failing_inline_operation_ends_the_stream_with_an_error():
     def operation() -> Iterator[str]:
         yield "started\n"
         raise RuntimeError("Authentik is down")
 
-    with patch.object(utils, "_in_transaction", return_value=True):
+    with transaction.atomic():
         lines = list(run_detached(operation()))
     assert json.loads(lines[-1]) == {"done": True, "success": False, "message": "Failed: Authentik is down"}
 

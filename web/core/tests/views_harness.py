@@ -843,7 +843,8 @@ def _offline(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Respons
 @contextmanager
 def offline() -> Iterator[None]:
     """Every other service down (Authentik, Quotient, Discord webhooks), configured as in production. (Streamed
-    operations run inline in the test's transaction: core.utils.run_detached.)"""
+    operations run inline in the test's transaction, core.utils.run_detached; packet emails still go out from worker
+    threads, packets.services, with connections of their own.)"""
     from django.test import override_settings
 
     with ExitStack() as stack:

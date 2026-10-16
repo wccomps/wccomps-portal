@@ -15,7 +15,7 @@ from core.tests.test_property_coverage import _functions
 # "path:function" that reads in_atomic_block -> the test module that runs it outside a transaction
 OUTSIDE_TRANSACTION_TESTS = {
     "web/registration/services.py:close_out_event": "web/core/tests/test_close_out_action.py",
-    "web/core/utils.py:_in_transaction": "web/core/tests/test_competition_start_stop_web.py",
+    "web/core/utils.py:run_detached": "web/core/tests/test_competition_start_stop_web.py",
 }
 
 
