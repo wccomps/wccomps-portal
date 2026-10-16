@@ -8,7 +8,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AnonymousUser, User
 from django.db.models import Model
 from django.test import Client
 from django.urls import reverse
@@ -20,7 +20,7 @@ from registration.models import TeamRegistration
 from scoring.models import IncidentReport
 
 from core.middleware import NUL_MESSAGE
-from core.models import BotState
+from core.models import BotState, UserGroups
 from core.tests.roles import role_user
 from core.tests.strategies import request_text, rolled_back
 from team.models import Team
@@ -449,11 +449,37 @@ def test_an_admin_who_isnt_a_superuser_can_use_every_admin_model(admin_user: Use
 
 
 def test_a_superuser_without_the_admin_permission_cant_get_into_the_admin(gold_team_user: User) -> None:
-    client = signed_in(gold_team_user)
+    """Django's own flags grant a superuser every model permission (has_perm), so the admin site's rule is the only
+    thing keeping one without the admin permission out."""
+    User.objects.filter(pk=gold_team_user.pk).update(is_staff=True, is_superuser=True)
+    user = User.objects.get(pk=gold_team_user.pk)
+    assert user.is_superuser and user.is_staff
+    client = signed_in(user)
     assert client.get(reverse("admin:index")).status_code == 403
     assert client.get(reverse("admin:core_botstate_changelist")).status_code == 403
 
 
+def _holds_any_model_permission(user: User | AnonymousUser) -> bool:
+    return any(
+        user.has_perm(f"{m._meta.app_label}.{action}_{m._meta.model_name}") or user.has_module_perms(m._meta.app_label)
+        for m in _registered_models()
+        for action in ("view", "add", "change", "delete")
+    )
+
+
 def test_the_admin_permission_grants_nothing_to_a_user_without_it(gold_team_user: User) -> None:
-    user = User.objects.get(pk=gold_team_user.pk)
-    assert not any(user.has_perm(f"{m._meta.app_label}.view_{m._meta.model_name}") for m in _registered_models())
+    assert not _holds_any_model_permission(User.objects.get(pk=gold_team_user.pk))
+
+
+def test_an_anonymous_visitor_holds_no_model_permission() -> None:
+    assert not _holds_any_model_permission(AnonymousUser())
+
+
+def test_an_inactive_admin_holds_no_model_permission(admin_user: User) -> None:
+    User.objects.filter(pk=admin_user.pk).update(is_active=False)
+    assert not _holds_any_model_permission(User.objects.get(pk=admin_user.pk))
+
+
+def test_an_admin_whose_admin_group_was_removed_holds_no_model_permission(admin_user: User) -> None:
+    UserGroups.objects.filter(user=admin_user).update(groups=[])
+    assert not _holds_any_model_permission(User.objects.get(pk=admin_user.pk))
