@@ -220,9 +220,9 @@ document.addEventListener('submit', (e) => {
 }, true);
 
 /**
- * Double-submit protection for a POST form (c-form's submitGuard; bind @submit="onSubmit"): the first submit goes
- * through and later ones are blocked until the page is left. A page brought back by Back, or an htmx request that
- * finished, frees its forms again (releaseForms below).
+ * Double-submit protection for a POST form (c-form's submitGuard, bound @submit="onSubmit"): the first submit goes
+ * through and later ones are blocked until the page is left. A page brought back by Back frees its forms again; a
+ * POST that fails without leaving the page (offline, Stop) keeps its form blocked until a reload.
  */
 function submitGuardMixin() {
     return {
@@ -234,12 +234,15 @@ function submitGuardMixin() {
     };
 }
 
-function releaseForms(root) {
-    const forms = root.tagName === 'FORM' ? [root] : root.querySelectorAll('form');
-    forms.forEach(form => { const guard = guardOf(form); if (guard.submitting) guard.submitting = false; });
-}
-window.addEventListener('pageshow', (e) => { if (e.persisted) releaseForms(document); });
-document.addEventListener('htmx:afterRequest', (e) => releaseForms(e.detail.elt.closest('form') || e.detail.elt));
+window.addEventListener('pageshow', (e) => {
+    if (!e.persisted) return;
+    document.querySelectorAll('form').forEach(form => { const guard = guardOf(form); if (guard.submitting) guard.submitting = false; });
+});
+
+// An htmx refresh would replace a posting form with a fresh, unguarded one, so it waits for the page to be left
+document.addEventListener('htmx:beforeRequest', (e) => {
+    if ([...e.detail.elt.querySelectorAll('form')].some(form => guardOf(form).submitting)) e.preventDefault();
+});
 
 /**
  * Bulk selection for a review table whose rows carry data-<dataAttr>="<id>" checkboxes. approveQuestion is the

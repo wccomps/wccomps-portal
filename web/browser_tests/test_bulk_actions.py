@@ -95,3 +95,37 @@ def test_a_form_whose_post_is_slow_posts_once(live_server, pw_browser):
         assert page.evaluate("window.posted") == 1
     finally:
         context.close()
+
+
+def test_the_ticket_lists_refresh_waits_while_a_bulk_claim_is_posting(live_server, pw_browser):
+    """A refresh would replace the list's forms with fresh ones mid-POST, so it doesn't run while one is posting."""
+    from team.models import Team
+    from ticketing.models import Ticket, TicketCategory
+
+    user = _create_role_user("admin", None)
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    Ticket.objects.create(ticket_number="T004-001", team=team, category=TicketCategory.objects.first(), title="t")
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    page.clock.install()
+    page.on("dialog", lambda dialog: dialog.accept())
+    try:
+        page.goto(f"{live_server.url}{reverse('ticket_list')}")
+        page.evaluate(
+            """() => {
+                window.posted = 0;
+                window.addEventListener('submit', (e) => {
+                    if (!e.defaultPrevented) window.posted++;
+                    e.preventDefault();
+                });
+            }"""
+        )
+        page.locator('tbody input[type="checkbox"]').first.check()
+        page.get_by_role("button", name="Claim Selected").click()
+        page.clock.fast_forward(31_000)  # the refresh's turn
+        page.wait_for_load_state("networkidle")
+        # The list's own Claim form, whichever one the page holds now (it may be hidden with nothing selected)
+        page.evaluate("[...document.forms].find((form) => form.action.endsWith('/bulk-claim/')).requestSubmit()")
+        assert page.evaluate("window.posted") == 1
+    finally:
+        context.close()
