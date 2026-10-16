@@ -7,7 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -35,7 +37,7 @@ def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_bro
     from core.models import DiscordTask
 
     event = _open_event_with_a_score()
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept(typed))
@@ -73,7 +75,7 @@ def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_bro
 
 def test_a_failing_check_leaves_close_out_usable(live_server, pw_browser):
     _open_event_with_a_score()
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     manager = MagicMock()
@@ -105,7 +107,7 @@ def test_cancel_event_under_advanced(live_server, pw_browser):
     )
     team, _ = Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01", "is_active": True})
     set_team_school(team, "Example University", contact_email="coach@example.edu")
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept("yolo"))
@@ -133,7 +135,7 @@ def test_clear_leftover_data_opens_under_advanced_and_needs_the_typed_word(live_
 
     team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     Ticket.objects.create(ticket_number="T001-001", team=team, title="Left")
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept(typed))
@@ -158,7 +160,7 @@ def test_clear_leftover_data_opens_under_advanced_and_needs_the_typed_word(live_
 
 @pytest.mark.parametrize("on_load", [True, False])
 def test_a_link_to_advanced_opens_it(live_server, pw_browser, on_load):
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     toggle = page.get_by_role("button", name="Advanced: reset team passwords")
@@ -182,7 +184,7 @@ def test_a_blocking_problem_comes_first_and_the_warnings_never_say_go_ahead(live
 
     _open_event_with_a_score()
     Team.objects.filter(team_number=1).update(is_active=False)
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     manager = MagicMock()

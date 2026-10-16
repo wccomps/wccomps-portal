@@ -11,14 +11,11 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def team_with_tickets(blue_team_user):
+def team_with_tickets(blue_team_user, blue_team):
     """Create a team with tickets that matches blue_team_user's group."""
     # Team 1 matches WCComps_BlueTeam01 group
-    team = Team.objects.create(
-        team_number=1,
-        team_name="Blue Team 01",
-        ticket_counter=3,
-    )
+    team = blue_team
+    Team.objects.filter(pk=team.pk).update(ticket_counter=3)
     box_reset = TicketCategory.objects.get(pk=2)
     scoring_check = TicketCategory.objects.get(pk=3)
     other = TicketCategory.objects.get(pk=6)

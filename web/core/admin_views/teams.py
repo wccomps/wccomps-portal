@@ -44,7 +44,9 @@ def admin_team_detail(request: HttpRequest, team_number: int) -> HttpResponse:
     try:
         team = Team.objects.get(team_number=team_number)
     except Team.DoesNotExist:
-        return render(request, "error.html", {"error": "Not found", "message": f"Team {team_number} not found."})
+        return render(
+            request, "error.html", {"error": "Not found", "message": f"Team {team_number} not found."}, status=404
+        )
 
     members = DiscordLink.objects.filter(team=team, is_active=True).order_by("linked_at")
 
@@ -60,7 +62,7 @@ def admin_team_detail(request: HttpRequest, team_number: int) -> HttpResponse:
 
 def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
     if request.method != "POST":
-        return HttpResponse("Method not allowed", status=405)
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
     user = cast(User, request.user)
     authentik_username = user.username
@@ -225,7 +227,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
 
 def admin_teams_bulk_action(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
-        return HttpResponse("Method not allowed", status=405)
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
     user = cast(User, request.user)
     authentik_username = user.username

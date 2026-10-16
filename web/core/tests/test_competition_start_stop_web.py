@@ -10,8 +10,7 @@ from django.urls import reverse
 
 from core.models import CompetitionConfig, DiscordTask
 
-# The run streams from its own thread (core.utils.run_detached), which needs committed rows
-pytestmark = pytest.mark.django_db(transaction=True)
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
@@ -65,6 +64,8 @@ def _join_detached_runs() -> None:
             thread.join(timeout=10)
 
 
+# This one tests the detached thread itself, which runs only outside a transaction (core.utils.run_detached)
+@pytest.mark.django_db(transaction=True)
 def test_start_finishes_after_the_browser_disconnects(admin_client):
     """A closed tab or a proxy timeout used to stop the start partway: some accounts enabled, state not saved."""
     import threading
@@ -174,6 +175,7 @@ def _leftovers():
     return Event.objects.get(pk=event.pk)
 
 
+@pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
 def test_advanced_offers_leftovers_with_their_counts(admin_client):
     _leftovers()
 
@@ -185,6 +187,7 @@ def test_advanced_offers_leftovers_with_their_counts(admin_client):
     assert "It is not archived" in page
 
 
+@pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
 def test_clearing_leftovers_deletes_them(admin_client):
     from scoring.models import ServiceScore
 
@@ -221,6 +224,7 @@ def test_without_a_finalized_event_leftovers_are_hidden_and_refused(admin_client
     assert ServiceScore.objects.exists()
 
 
+@pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
 def test_clearing_leftovers_needs_admin_or_gold_access(client, create_user_with_groups):
     from scoring.models import ServiceScore
 
@@ -233,6 +237,7 @@ def test_clearing_leftovers_needs_admin_or_gold_access(client, create_user_with_
     assert ServiceScore.objects.exists()
 
 
+@pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
 def test_clearing_leftovers_is_refused_while_running(admin_client):
     from scoring.models import ServiceScore
 
@@ -247,6 +252,7 @@ def test_clearing_leftovers_is_refused_while_running(admin_client):
     assert ServiceScore.objects.exists()
 
 
+@pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
 def test_scores_after_a_close_out_can_still_be_recorded_with_close_out(admin_client):
     """An event that ran without an import after the first close-out is not leftovers to delete unrecorded."""
     _leftovers()
@@ -271,6 +277,7 @@ def test_live_data_without_scores_points_at_advanced(admin_client, admin_user):
     assert '@click="closeOutEvent"' not in page
 
 
+@pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
 @pytest.mark.parametrize("typed", [None, "", "no"])
 def test_clearing_leftovers_needs_the_typed_confirmation(admin_client, typed):
     from scoring.models import ServiceScore
@@ -284,6 +291,7 @@ def test_clearing_leftovers_needs_the_typed_confirmation(admin_client, typed):
     assert ServiceScore.objects.exists()
 
 
+@pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
 def test_clearing_leftovers_keeps_the_schedule(admin_client):
     from django.utils import timezone
 

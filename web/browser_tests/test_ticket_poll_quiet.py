@@ -2,7 +2,9 @@
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context, make_test_data
+from core.tests.roles import role_user
+
+from .conftest import create_session_context, make_test_data
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -19,7 +21,7 @@ WATCH = """region => {
 def test_the_comment_poll_swaps_only_when_a_comment_arrives(live_server, pw_browser):
     from ticketing.models import TicketComment
 
-    viewer = _create_role_user("ticketing_support", None)
+    viewer = role_user("ticketing_support")
     ticket = make_test_data()["ticket"]
     context = create_session_context(pw_browser, live_server, viewer)
     page = context.new_page()

@@ -112,7 +112,7 @@ def admin_toggle_checkin(request: HttpRequest, user_id: int) -> HttpResponse:
     """Toggle check-in/out for another user (lead only)."""
     if request.method != "POST":
         return redirect("orange_team:check_list")
-    target_user = User.objects.get(pk=user_id)
+    target_user = get_object_or_404(User, pk=user_id)
     active = OrangeCheckIn.objects.filter(user=target_user, is_active=True).first()
     if active:
         active.is_active = False
@@ -425,6 +425,20 @@ def reassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
     return redirect("orange_team:check_assign", check_id=check_id)
 
 
+def _criterion_result(body: bytes) -> tuple[int, bool] | None:
+    """The criterion id and whether it was met, from the dashboard's JSON body; None for anything else."""
+    try:
+        data = json.loads(body)
+    except ValueError:  # not JSON, or not UTF-8
+        return None
+    if not isinstance(data, dict):
+        return None
+    criterion_id, met = data.get("criterion_id"), data.get("met")
+    if type(criterion_id) is not int or not isinstance(met, bool):
+        return None
+    return criterion_id, met
+
+
 def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
     """Autosave a criterion result for an assignment."""
     if not (has_permission(request.user, "orange_team") or has_permission(request.user, "orange_team_lead")):
@@ -433,19 +447,21 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
         return JsonResponse({"error": "POST required"}, status=405)
 
     user = cast(User, request.user)
-    assignment = get_object_or_404(OrangeAssignment, pk=assignment_id, user=user)
+    assignment = OrangeAssignment.objects.filter(pk=assignment_id, user=user).first()
+    if assignment is None:
+        return JsonResponse({"error": "Assignment not found"}, status=404)
 
     if assignment.status in ("submitted", "approved"):
         return JsonResponse({"error": "Assignment already submitted"}, status=400)
 
-    try:
-        data = json.loads(request.body)
-        criterion_id = data["criterion_id"]
-        met = data["met"]
-    except json.JSONDecodeError, KeyError:
+    posted = _criterion_result(request.body)
+    if posted is None:
         return JsonResponse({"error": "Invalid data"}, status=400)
+    criterion_id, met = posted
 
-    result = get_object_or_404(OrangeAssignmentResult, assignment=assignment, criterion_id=criterion_id)
+    result = OrangeAssignmentResult.objects.filter(assignment=assignment, criterion_id=criterion_id).first()
+    if result is None:
+        return JsonResponse({"error": "Criterion not found"}, status=404)
     result.met = met
     result.save()
 

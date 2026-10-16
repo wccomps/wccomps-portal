@@ -262,6 +262,9 @@ CODE_EXCEPTIONS = {
     "*/urls*.py:urlpatterns": "Django reads urlpatterns from each URLconf",
     "web/core/admin.py:site_*": "Django admin reads site_header, site_title and site_url off the AdminSite",
     "web/core/admin.py:index_title": "Django admin reads index_title off the AdminSite",
+    "web/core/auth_backends.py:*has_*": "Django asks each AUTHENTICATION_BACKENDS backend has_perm and "
+    "has_module_perms, and their async forms",
+    "web/core/auth_backends.py:app_label": "has_module_perms's argument, named as in Django's backend signature",
     "web/core/views.py:modified": "Setting request.session.modified tells Django to save the session",
     "web/gunicorn.conf.py:*": "gunicorn reads every top-level name in its config file",
     # Project code kept on purpose
@@ -355,6 +358,8 @@ def test_every_template_is_used() -> None:
 
 # URL name (with namespace) -> who requests it without the portal linking to it by name
 URL_EXCEPTIONS = {
+    "admin:login": "The Django admin's own login page: Django links it (AuthentikAdminSite overrides the view to "
+    "refuse a signed-in non-admin)",
     "health_check": "The Kubernetes readiness probe and the uptime probe request /health/ by path",
     "livez": "Liveness probe (docker-compose.yml healthcheck, the Kubernetes deployment), requested by path",
     "oauth_callback": "Authentik redirects here after login (core/oauth.py sends the path as redirect_uri)",

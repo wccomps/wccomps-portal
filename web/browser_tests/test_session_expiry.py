@@ -3,7 +3,9 @@
 import pytest
 from playwright.sync_api import Dialog
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -11,7 +13,7 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 def test_ticket_list_poll_after_the_session_expires_goes_to_login(live_server, pw_browser):
     from django.contrib.sessions.models import Session
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     dialogs: list[str] = []
@@ -38,7 +40,7 @@ def test_ticket_list_poll_after_the_session_expires_goes_to_login(live_server, p
 
 def test_a_poll_that_cannot_reach_the_server_does_not_alert(live_server, pw_browser):
     """A tab waking from sleep polls before the network is back; the next poll retries on its own."""
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     dialogs: list[str] = []

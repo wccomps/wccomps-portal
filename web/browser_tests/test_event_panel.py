@@ -7,7 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context, visit_and_capture_errors
+from core.tests.roles import role_user
+
+from .conftest import create_session_context, visit_and_capture_errors
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -38,7 +40,7 @@ def _controls(page):
 
 
 def test_with_no_event_the_event_section_sends_you_to_the_import(live_server, pw_browser):
-    user = _create_role_user("gold_team", None)
+    user = role_user("gold_team")
     context = create_session_context(pw_browser, live_server, user)
     manager = MagicMock()
     manager.list_applications.return_value = []
@@ -63,7 +65,7 @@ def test_with_no_event_the_event_section_sends_you_to_the_import(live_server, pw
 
 def test_played_and_stopped_the_page_checks_unfinished_work(live_server, pw_browser):
     _played_event()
-    user = _create_role_user("gold_team", None)
+    user = role_user("gold_team")
     context = create_session_context(pw_browser, live_server, user)
     manager = MagicMock()
     manager.list_applications.return_value = []
@@ -103,7 +105,7 @@ def test_while_running_the_page_offers_stop_and_shows_the_live_numbers(live_serv
 
     _played_event()
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
-    user = _create_role_user("gold_team", None)
+    user = role_user("gold_team")
     context = create_session_context(pw_browser, live_server, user)
     try:
         page, status, errors = visit_and_capture_errors(context, f"{live_server.url}/ops/admin/competition/")

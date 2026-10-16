@@ -130,9 +130,10 @@ def approve_registration(request: HttpRequest, registration_id: int) -> HttpResp
         return redirect("registration_review_list")
 
     registration = get_object_or_404(TeamRegistration, id=registration_id)
-    if request.user.is_authenticated:
-        registration.approve(request.user)
-    messages.success(request, f"Registration for {registration.school_name} has been approved.")
+    if request.user.is_authenticated and registration.approve(request.user):
+        messages.success(request, f"Registration for {registration.school_name} has been approved.")
+    else:
+        messages.error(request, f"Registration for {registration.school_name} is no longer pending.")
 
     return redirect("registration_review_list")
 
@@ -148,10 +149,10 @@ def reject_registration(request: HttpRequest, registration_id: int) -> HttpRespo
         if not form.is_valid():
             messages.error(request, "Please provide a reason for rejection.")
             return render(request, "registration/reject_confirm.html", context)
-        reason = form.cleaned_data["reason"]
-
-        registration.reject(reason)
-        messages.success(request, f"Registration for {registration.school_name} has been rejected.")
+        if registration.reject(form.cleaned_data["reason"]):
+            messages.success(request, f"Registration for {registration.school_name} has been rejected.")
+        else:
+            messages.error(request, f"Registration for {registration.school_name} is no longer pending.")
         return redirect("registration_review_list")
 
     return render(request, "registration/reject_confirm.html", context)

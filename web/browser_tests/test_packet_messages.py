@@ -5,7 +5,9 @@ from unittest.mock import patch
 import pytest
 from django.urls import reverse
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -19,7 +21,7 @@ def test_failed_test_email_shows_a_red_message_that_stays(live_server, pw_browse
     packet = Packet.objects.create(
         title="Packet", file_data=b"x", filename="p.pdf", mime_type="application/pdf", file_size=1, uploaded_by="gold"
     )
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
 

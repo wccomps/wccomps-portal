@@ -1,6 +1,11 @@
-"""Central registry of pages to test, with role access and element expectations."""
+"""Central registry of pages the browser tests render, and element expectations.
+
+Each page is rendered as every browser role its view property row lets in (core.tests.view_rows), less the
+roles it skips with a reason; which roles a page refuses is checked there for every URL pattern."""
 
 from dataclasses import dataclass, field
+
+from core.tests.roles import BROWSER_ROLES
 
 
 @dataclass
@@ -8,11 +13,19 @@ class PageDef:
     url_name: str
     url_kwargs: dict[str, str | int] = field(default_factory=dict)
     needs_data: str | None = None  # "ticket", "team", "orange_check", "packet" — keys into test_data dict
-    allowed_roles: list[str] = field(default_factory=list)
-    denied_roles: list[str] = field(default_factory=list)
+    # A browser role the view row lets in that the page isn't rendered as -> why
+    skip_roles: dict[str, str] = field(default_factory=dict)
     expect_redirect: bool = False  # True if page redirects (e.g., home)
     checks: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     # checks format: {"role": {"present": ["css selectors"], "absent": ["css selectors"]}}
+
+    @property
+    def allowed_roles(self) -> list[str]:
+        """The browser roles its view row lets in, less the skipped ones."""
+        from core.tests.view_rows import allowed_roles
+
+        allowed = allowed_roles(self.url_name)
+        return [role for role in BROWSER_ROLES if role in allowed and role not in self.skip_roles]
 
 
 # Pages to test. Add new entries here to expand coverage.
@@ -22,8 +35,6 @@ PAGES: list[PageDef] = [
     # =========================================================================
     PageDef(
         url_name="ticket_list",
-        allowed_roles=["blue_team", "ticketing_support", "ticketing_admin", "admin"],
-        denied_roles=["red_team", "gold_team", "orange_team", "unauthenticated"],
         checks={
             "blue_team": {"present": ["table"], "absent": [".bulk-claim-form"]},
             "admin": {"present": ["table"]},
@@ -31,8 +42,10 @@ PAGES: list[PageDef] = [
     ),
     PageDef(
         url_name="create_ticket",
-        allowed_roles=["blue_team", "admin"],
-        denied_roles=["red_team", "unauthenticated"],
+        skip_roles={
+            "gold_team": "the same staff form admin is rendered with",
+            "ticketing_admin": "the same staff form admin is rendered with",
+        },
         checks={
             "blue_team": {"present": ["form", "select[name='category']"]},
             "admin": {"present": ["form"]},
@@ -40,120 +53,75 @@ PAGES: list[PageDef] = [
     ),
     PageDef(
         url_name="ticket_detail",
+        skip_roles={"ticketing_admin": "the same staff page admin is rendered with"},
         needs_data="ticket",
-        allowed_roles=["blue_team", "ticketing_support", "admin"],
-        denied_roles=["unauthenticated"],
     ),
     PageDef(
         url_name="ops_review_tickets",
-        allowed_roles=["ticketing_admin", "gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "ticketing_support", "unauthenticated"],
     ),
     # =========================================================================
     # Admin / Ops
     # =========================================================================
     PageDef(
         url_name="admin_competition",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "ticketing_support", "unauthenticated"],
     ),
     PageDef(
         url_name="admin_competition_setup",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "ticketing_support", "unauthenticated"],
     ),
     PageDef(
         url_name="admin_competition_guide",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "ticketing_support", "unauthenticated"],
     ),
     PageDef(
         url_name="admin_teams",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "unauthenticated"],
     ),
     PageDef(
         url_name="admin_team_detail",
         needs_data="team",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "unauthenticated"],
     ),
     PageDef(
         url_name="admin_broadcast",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "ticketing_support", "unauthenticated"],
     ),
     PageDef(
         url_name="admin_sync_roles",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "ticketing_support", "unauthenticated"],
     ),
     PageDef(
         url_name="admin_categories",
-        allowed_roles=["gold_team", "ticketing_admin", "admin"],
-        denied_roles=["blue_team", "red_team", "ticketing_support", "unauthenticated"],
     ),
     PageDef(
         url_name="admin_category_create",
-        allowed_roles=["gold_team", "ticketing_admin", "admin"],
-        denied_roles=["blue_team", "red_team", "ticketing_support", "unauthenticated"],
     ),
     # =========================================================================
     # School Info / Core Ops
     # =========================================================================
     PageDef(
         url_name="school_info",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "ticketing_support", "unauthenticated"],
     ),
     # =========================================================================
     # Scoring — Leaderboard & Config
     # =========================================================================
     PageDef(
         url_name="leaderboard_page",
-        allowed_roles=[
-            "gold_team",
-            "white_team",
-            "red_team",
-            "ticketing_admin",
-            "orange_team",
-            "ticketing_support",
-            "admin",
-        ],
-        denied_roles=["blue_team", "unauthenticated"],
     ),
     PageDef(
         url_name="scoring:scoring_config",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "unauthenticated"],
     ),
     # =========================================================================
     # Scoring — Red Team
     # =========================================================================
     PageDef(
         url_name="scoring:submit_red_score",
-        allowed_roles=["red_team", "admin"],
-        denied_roles=["blue_team", "unauthenticated"],
     ),
     PageDef(
         url_name="scoring:red_team_scores",
-        allowed_roles=["red_team", "gold_team", "admin"],
-        denied_roles=["blue_team", "unauthenticated"],
     ),
     PageDef(
         url_name="scoring:red_team_findings",
-        allowed_roles=["red_team", "gold_team", "admin"],
-        denied_roles=["blue_team", "unauthenticated"],
     ),
     PageDef(
         url_name="scoring:ip_pool_list",
-        allowed_roles=["red_team", "admin"],
-        denied_roles=["blue_team", "gold_team", "unauthenticated"],
     ),
     PageDef(
         url_name="scoring:ip_pool_create",
-        allowed_roles=["red_team", "admin"],
-        denied_roles=["blue_team", "gold_team", "unauthenticated"],
     ),
     # =========================================================================
     # Scoring — Incidents (Blue Team)
@@ -161,21 +129,15 @@ PAGES: list[PageDef] = [
     # scoring:submit_incident_report removed — depends on Quotient API
     PageDef(
         url_name="scoring:incident_list",
-        allowed_roles=["blue_team", "white_team", "gold_team", "admin"],
-        denied_roles=["unauthenticated"],
     ),
     PageDef(
         url_name="scoring:review_incidents",
-        allowed_roles=["gold_team", "white_team", "admin"],
-        denied_roles=["blue_team", "red_team", "unauthenticated"],
     ),
     # =========================================================================
     # Scoring — Orange Team
     # =========================================================================
     PageDef(
         url_name="scoring:review_orange",
-        allowed_roles=["orange_team", "gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "unauthenticated"],
     ),
     # =========================================================================
     # Scoring — Injects (White Team)
@@ -183,102 +145,72 @@ PAGES: list[PageDef] = [
     # scoring:inject_grading removed — depends on Quotient API
     PageDef(
         url_name="scoring:inject_grades_review",
-        allowed_roles=["white_team", "gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "unauthenticated"],
     ),
     PageDef(
         url_name="scoring:review_inject_feedback",
-        allowed_roles=["gold_team", "white_team", "admin"],
-        denied_roles=["blue_team", "red_team", "unauthenticated"],
     ),
     # =========================================================================
     # Scoring — Export & Email
     # =========================================================================
     PageDef(
         url_name="scoring:export_index",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "unauthenticated"],
     ),
     PageDef(
         url_name="scoring:email_scorecards",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "unauthenticated"],
     ),
     PageDef(
         url_name="scoring:scorecard",
         needs_data="team",
-        allowed_roles=[
-            "gold_team",
-            "white_team",
-            "red_team",
-            "ticketing_admin",
-            "orange_team",
-            "ticketing_support",
-            "admin",
-        ],
-        denied_roles=["blue_team", "unauthenticated"],
     ),
     # =========================================================================
     # Orange Team
     # =========================================================================
     PageDef(
         url_name="orange_team:dashboard",
-        allowed_roles=["orange_team", "gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "unauthenticated"],
     ),
     PageDef(
         url_name="orange_team:check_list",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "orange_team", "unauthenticated"],
     ),
     PageDef(
         url_name="orange_team:check_create",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "orange_team", "unauthenticated"],
     ),
     PageDef(
         url_name="orange_team:review_queue",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "orange_team", "unauthenticated"],
     ),
     PageDef(
         url_name="orange_team:check_detail",
         needs_data="orange_check",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "orange_team", "unauthenticated"],
     ),
     # =========================================================================
     # Packets
     # =========================================================================
     PageDef(
         url_name="team_packet",
-        allowed_roles=["blue_team", "admin"],
-        denied_roles=["red_team", "unauthenticated"],
+        skip_roles={"gold_team": "the same every-packet list admin is rendered with"},
     ),
     PageDef(
         url_name="packets_list",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "unauthenticated"],
     ),
     PageDef(
         url_name="packet_detail",
         needs_data="packet",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "unauthenticated"],
     ),
     PageDef(
         url_name="upload_packet",
-        allowed_roles=["gold_team", "admin"],
-        denied_roles=["blue_team", "red_team", "unauthenticated"],
     ),
     # =========================================================================
     # Home (redirects based on role)
     # =========================================================================
     PageDef(
         url_name="home",
+        # Home only redirects to a role's landing page: one visit per landing page, except that blue_team and admin
+        # both land on the ticket list (its team and staff views)
+        skip_roles={
+            "white_team": "lands on the leaderboard, as gold_team does",
+            "ticketing_support": "lands on the ticket list, as blue_team and admin do",
+            "ticketing_admin": "lands on the ticket list, as blue_team and admin do",
+        },
         expect_redirect=True,
-        allowed_roles=["blue_team", "red_team", "gold_team", "white_team", "admin"],
-        denied_roles=[],
     ),
 ]
 
@@ -286,11 +218,6 @@ PAGES: list[PageDef] = [
 def get_allowed_test_cases() -> list[tuple[PageDef, str]]:
     """Generate (page_def, role) pairs for pages each role CAN access."""
     return [(page, role) for page in PAGES for role in page.allowed_roles]
-
-
-def get_denied_test_cases() -> list[tuple[PageDef, str]]:
-    """Generate (page_def, role) pairs for pages each role should be DENIED."""
-    return [(page, role) for page in PAGES for role in page.denied_roles]
 
 
 def get_element_check_cases() -> list[tuple[PageDef, str]]:

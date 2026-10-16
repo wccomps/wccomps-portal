@@ -29,7 +29,7 @@ def admin_broadcast(request: HttpRequest) -> HttpResponse:
 
 def admin_broadcast_action(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
-        return HttpResponse("Method not allowed", status=405)
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
     user = cast(User, request.user)
     authentik_username = user.username
@@ -72,7 +72,7 @@ def admin_sync_roles(request: HttpRequest) -> HttpResponse:
 
 def admin_sync_roles_action(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
-        return HttpResponse("Method not allowed", status=405)
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
     user = cast(User, request.user)
     authentik_username = user.username

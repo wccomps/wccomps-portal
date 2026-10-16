@@ -32,7 +32,8 @@ from registration.stage import Stage, event_stage
 from registration.tests.shown import new_event
 from team.models import DiscordLink, SchoolInfo, Team
 
-pytestmark = pytest.mark.django_db
+# close_out_event must be the outermost transaction, as in production
+pytestmark = pytest.mark.django_db(transaction=True)
 
 
 def _oct_3():
@@ -437,7 +438,6 @@ def test_scores_never_recorded_point_the_import_at_close_out_and_cannot_be_clear
     assert ServiceScore.objects.count() == 2
 
 
-@pytest.mark.django_db(transaction=True)
 def test_two_close_outs_at_once_close_it_out_once(event):
     errors: list[Exception] = []
 
@@ -482,7 +482,6 @@ def _while_closing_out(change):
     return patch("registration.services.wipe_competition_data", wipe)
 
 
-@pytest.mark.django_db(transaction=True)
 def test_a_score_changed_while_closing_out_refuses_and_writes_nothing(event):
     """At READ COMMITTED the wipe would delete the new points without their being frozen."""
     with (
@@ -495,7 +494,6 @@ def test_a_score_changed_while_closing_out_refuses_and_writes_nothing(event):
     assert ServiceScore.objects.get(team__team_number=2).service_points == 400
 
 
-@pytest.mark.django_db(transaction=True)
 def test_a_row_created_while_closing_out_stays_as_live_data(event):
     def grade():
         InjectScore.objects.create(

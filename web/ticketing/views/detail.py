@@ -78,6 +78,7 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
                 "error": "Ticket not found",
                 "message": f"Ticket {ticket_number} does not exist.",
             },
+            status=404,
         )
 
     if not _can_access(user, ticket):

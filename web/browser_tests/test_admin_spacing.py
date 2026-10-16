@@ -2,7 +2,9 @@
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -12,7 +14,7 @@ def test_admin_add_button_sits_below_the_breadcrumb_bar(live_server, pw_browser)
 
     from core.models import UserGroups
 
-    admin = User.objects.create(username="adminspacing", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="adminspacing")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     context = create_session_context(pw_browser, live_server, admin)
     page = context.new_page()
@@ -28,7 +30,7 @@ def test_admin_add_button_sits_below_the_breadcrumb_bar(live_server, pw_browser)
 
 
 def test_portal_page_breadcrumbs_stay_flush(live_server, pw_browser):
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     try:

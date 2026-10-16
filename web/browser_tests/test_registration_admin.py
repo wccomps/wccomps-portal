@@ -4,7 +4,9 @@ from datetime import date
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context, visit_and_capture_errors
+from core.tests.roles import role_user
+
+from .conftest import create_session_context, visit_and_capture_errors
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -12,7 +14,7 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 def test_seasons_and_events_pages(live_server, pw_browser):
     from registration.models import Event, Season
 
-    viewer = _create_role_user("gold_team", None)
+    viewer = role_user("gold_team")
     season = Season.objects.create(name="Example Season", year=2026, is_active=True)
     event = Event.objects.create(season=season, name="Invitational", event_type="invitational", date=date(2026, 11, 7))
 

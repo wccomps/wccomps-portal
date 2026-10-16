@@ -68,7 +68,7 @@ def test_the_edit_page_cannot_deactivate_the_active_season(gold_client):
 
 
 def test_the_admin_shows_is_active_read_only_and_activates_through_its_action():
-    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="admin")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     client = Client()
     client.force_login(admin)

@@ -17,8 +17,8 @@ from team.models import SchoolInfo, Team
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def _team_with_school(number):
-    team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
+def _team_with_school(number, team=None):
+    team = team or Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
     SchoolInfo.objects.create(
         team=team, school=School.for_name(f"School {number}"), contact_email=f"team{number}@example.edu", password="pw"
     )
@@ -108,8 +108,8 @@ def test_a_draft_packet_is_distributed_instead(current_event):
     assert not PacketDistribution.objects.exists()
 
 
-def test_the_new_team_can_download_it(current_event, blue_team_user):
-    _team_with_school(1)
+def test_the_new_team_can_download_it(current_event, blue_team_user, blue_team):
+    _team_with_school(1, blue_team)
     packet = _packet(current_event)
     list(PacketDistributionService().stream_send_to_new_teams(packet))
     client = Client()

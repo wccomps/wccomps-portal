@@ -14,10 +14,14 @@ WCComps Portal is a competition management platform for WRCCDC. Three components
 # From web/ pytest ignores testpaths and skips bot/tests.
 PYTHONPATH="$(pwd)/web:$(pwd)" DB_HOST=localhost DB_PORT=5433 DB_USER=test_user DB_PASSWORD=test_password DB_NAME=wccomps_test uv run pytest -m "not browser"
 # Browser tests (Playwright): same env, `-m browser -n0`
-# Hypothesis runs the "ci" profile (25 fixed examples per test); HYPOTHESIS_PROFILE=deep runs 2000 random ones per
-# test, for every Hypothesis test (none pins its own count). The property files take about 40 minutes that way.
+# Hypothesis runs the "ci" profile: 25 fixed examples per test (10 for the view tests). HYPOTHESIS_PROFILE=deep runs
+# 2000 random ones (500 for the view tests), and runs nightly on main (deep-properties.yml keeps one issue open
+# while it fails, closed when it passes). No test pins its own count. GitHub turns a public repo's schedule off after
+# 60 days with no repo activity (it emails first): turn it back on under Actions, "Nightly deep property tests",
+# "Enable workflow" (or `gh workflow enable deep-properties.yml`).
 # User-input property tests: web/core/tests/test_properties_*.py; test_property_coverage.py fails on any input
-# without one (or an exceptions entry with a reason).
+# without one (or an exceptions entry with a reason). A new URL pattern needs a row in its test_properties_views_*
+# table (views_harness.ViewCase).
 
 # Lint and type checks (CI runs these plus the tests on every PR)
 uv run ruff check . && uv run djlint web/templates --lint && DJANGO_SETTINGS_MODULE=portal.settings uv run mypy
@@ -35,8 +39,11 @@ Runs on the deoxys Kubernetes cluster, deployed by Argo CD from `wccomps/wccomps
 
 ## Python 3.14
 
-This project targets Python 3.14+ (`requires-python = ">=3.14"`). PEP 758 re-enables
-`except A, B:` syntax without parentheses. Do NOT change these to `except (A, B):` —
+This project targets Python 3.14+ (`requires-python = ">=3.14"`). One patch version runs everywhere:
+`.python-version` (uv reads it locally and in the image build, CI's setup-python reads it) and the Dockerfile's base
+image name the same one; change them together (a test can pass on one patch and fail on another). The build refuses
+a mismatch and `test_python_pin` checks the tag. PEP 758 re-enables
+`except A, B:` syntax without parentheses. Do NOT change these to `except (A, B):`:
 the unparenthesized form is used intentionally throughout.
 
 ## Key Conventions

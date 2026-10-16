@@ -1,7 +1,7 @@
 import logging
 import time
 import zoneinfo
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 from urllib.parse import quote
 
@@ -38,6 +38,62 @@ class SecurityHeadersMiddleware:
             )
 
         return response
+
+
+def wants_json_error(request: HttpRequest) -> bool:
+    """A background fetch() gets a JSON error it can show; a navigation gets a page, and htmx (which doesn't swap in
+    an error answer; base_site.html alerts) gets text."""
+    return (
+        request.headers.get("HX-Request") != "true" and request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate"
+    )
+
+
+NUL_MESSAGE = "The request contains a NUL character."
+
+
+def _nul_refusal(request: HttpRequest) -> HttpResponse:
+    if wants_json_error(request):
+        return JsonResponse({"error": NUL_MESSAGE}, status=400)
+    return HttpResponse(NUL_MESSAGE, status=400, content_type="text/plain; charset=utf-8")
+
+
+def _holds_nul(pairs: Iterable[tuple[str, str]]) -> bool:
+    return any("\x00" in key or "\x00" in value for key, value in pairs)
+
+
+class RejectNulMiddleware:
+    """Refuse a request whose path, query string or cookies hold a NUL character, with a 400, before the session is
+    read.
+
+    PostgreSQL text can't hold NUL, so a query that looks such text up or stores it fails: a session key with one
+    failed every signed-in page with a 500. Form fields: RejectNulFieldsMiddleware; JSON bodies and other headers
+    aren't checked.
+    """
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        query = ((key, value) for key, values in request.GET.lists() for value in values)
+        if "\x00" in request.path or _holds_nul(query) or _holds_nul(request.COOKIES.items()):
+            return _nul_refusal(request)
+        return self.get_response(request)
+
+
+class RejectNulFieldsMiddleware:
+    """Refuse a signed-in request's form whose fields hold a NUL character, with a 400. An anonymous body isn't
+    parsed here: the public forms (registration) refuse a NUL field by field as every form does."""
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        # request.POST holds a form's fields (and nothing for another method or body); uploaded files aren't fields
+        if request.user.is_authenticated and _holds_nul(
+            (key, value) for key, values in request.POST.lists() for value in values
+        ):
+            return _nul_refusal(request)
+        return self.get_response(request)
 
 
 class UserTimezoneMiddleware:
@@ -144,7 +200,7 @@ class AuthentikRequiredMiddleware:
             # navigates through login; any other background request gets an error it can show.
             if request.headers.get("HX-Request") == "true":
                 return HttpResponse(status=204, headers={"HX-Refresh": "true"})
-            if request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate":
+            if wants_json_error(request):
                 return JsonResponse({"error": "Your session expired. Reload the page to sign in again."}, status=401)
             # Validate and sanitize the next parameter to prevent open redirect
             next_url = request.path
@@ -152,13 +208,6 @@ class AuthentikRequiredMiddleware:
                 next_url = "/"
             safe_next = quote(next_url, safe="")
             return redirect(f"/auth/login/?next={safe_next}")
-
-        # Django admin requires Authentik admin permission
-        if request.path.startswith("/admin/"):
-            from .auth_utils import has_permission
-
-            if not has_permission(request.user, "admin"):
-                return HttpResponse("Forbidden", status=403)
 
         return self.get_response(request)
 

@@ -37,6 +37,7 @@ dev = [
     "djlint>=1.36.4",
     "pytest-xdist>=3.8.0",
     "vulture>=2.16",
+    "pyyaml>=6.0",
 ]
 
 [tool.mypy]

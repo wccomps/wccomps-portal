@@ -5,7 +5,9 @@ from unittest.mock import patch
 import pytest
 from django.urls import reverse
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -14,7 +16,7 @@ def test_reset_password_shows_the_new_password_without_reloading(live_server, pw
     from team.models import Team
 
     Team.objects.create(team_number=8, team_name="Team 08", is_active=True)
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
@@ -43,7 +45,7 @@ def test_reset_team_keeps_the_password_up_and_hides_the_unlinked_members(live_se
     DiscordLink.objects.create(
         user=member, discord_id=4444, discord_username="memberdiscord", team=team, is_active=True
     )
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
@@ -83,7 +85,7 @@ def test_django_admin_team_pages_have_reset_password(live_server, pw_browser, pa
     school = SchoolInfo.objects.create(
         team=team, school=School.for_name("Example School"), contact_email="captain@example.com"
     )
-    admin = User.objects.create(username="adminreset", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="adminreset")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     context = create_session_context(pw_browser, live_server, admin)
     page = context.new_page()
@@ -106,7 +108,7 @@ def test_competition_reset_passwords_keeps_the_csv_and_its_download(live_server,
     from team.models import Team
 
     Team.objects.create(team_number=3, team_name="Team 03", is_active=True)
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())

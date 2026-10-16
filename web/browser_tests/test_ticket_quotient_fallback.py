@@ -4,7 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -27,7 +29,7 @@ def _unavailable_quotient() -> MagicMock:
 def test_ticket_filed_with_typed_fields(category, fields, live_server, pw_browser):
     from ticketing.models import Ticket
 
-    user = _create_role_user("blue_team", None)
+    user = role_user("blue_team")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     console_errors: list[str] = []

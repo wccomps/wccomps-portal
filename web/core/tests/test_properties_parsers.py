@@ -401,9 +401,8 @@ def test_packet_upload_view_answers_any_file(post: dict[str, Any], gold_team_use
 
 @given(files=st.lists(uploaded_files(), max_size=3), source_ip=st.one_of(st.ip_addresses().map(str), request_text(45)))
 def test_incident_report_view_answers_any_screenshots(
-    files: list[SimpleUploadedFile], source_ip: str, blue_team_user: User
+    files: list[SimpleUploadedFile], source_ip: str, blue_team_user: User, blue_team: Team
 ) -> None:
-    Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01"})
     client = _client_for(blue_team_user)
     post = {
         "source_ip": source_ip,

@@ -17,7 +17,7 @@ def test_admin_save_leaves_the_stored_password_alone():
     info = SchoolInfo.objects.create(
         team=team, school=School.for_name("Example University"), contact_email="c@example.com", password="Real-Pass-1!"
     )
-    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="admin")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     client = Client()
     client.force_login(admin)
@@ -42,7 +42,7 @@ def test_admin_save_leaves_the_stored_password_alone():
 
 
 def _admin_client(username="admin"):
-    admin = User.objects.create(username=username, is_staff=True, is_superuser=True)
+    admin = User.objects.create(username=username)
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     client = Client()
     client.force_login(admin)
@@ -97,7 +97,7 @@ def test_admin_cannot_add_school_info():
 @pytest.mark.django_db
 @pytest.mark.parametrize("path", ["/admin/team/team/add/"])
 def test_add_pages_render_without_a_reset_button(path):
-    admin = User.objects.create(username="adminadd", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="adminadd")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     client = Client()
     client.force_login(admin)

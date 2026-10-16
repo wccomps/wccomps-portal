@@ -2,7 +2,9 @@
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -13,7 +15,7 @@ def test_delete_confirmation_buttons_match(live_server, pw_browser):
 
     from core.models import UserGroups
 
-    admin = User.objects.create(username="admindelete", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="admindelete")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     season = Season.objects.create(name="Spare", year=2090)
     context = create_session_context(pw_browser, live_server, admin)
@@ -34,7 +36,7 @@ def test_changelist_action_go_button_fits_its_label(live_server, pw_browser):
 
     from core.models import UserGroups
 
-    admin = User.objects.create(username="admingo", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="admingo")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     Season.objects.create(name="Spare", year=2092)
     context = create_session_context(pw_browser, live_server, admin)
@@ -53,7 +55,7 @@ def test_changelist_action_go_button_fits_its_label(live_server, pw_browser):
 
 
 def test_ticket_bulk_action_buttons_fit_their_labels(live_server, pw_browser):
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     try:
