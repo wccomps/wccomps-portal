@@ -1,6 +1,14 @@
+from functools import wraps
+from typing import TYPE_CHECKING, cast
+
 from django.contrib import admin
+from django.contrib.admin.exceptions import DisallowedModelAdminToField
+from django.contrib.admin.options import TO_FIELD_VAR
 from django.db.models import QuerySet
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponseBase
+
+if TYPE_CHECKING:
+    from django.contrib.admin.sites import _ViewType
 
 from .auth_utils import get_authentik_groups
 from .models import (
@@ -26,6 +34,20 @@ class AuthentikAdminSite(admin.AdminSite):
 
         groups = get_authentik_groups(request.user)
         return "WCComps_Discord_Admin" in groups or "WCComps_Ticketing_Admin" in groups
+
+    # Django's stubs type a view as Callable[..., Any]; the override keeps their signature
+    def admin_view(self, view: _ViewType, cacheable: bool = False) -> _ViewType:  # type: ignore[explicit-any]
+        inner = super().admin_view(view, cacheable)
+
+        @wraps(inner)
+        def refusing_empty_to_field(request: HttpRequest, *args: object, **kwargs: object) -> HttpResponseBase:
+            # Django refuses a _to_field it can't reference with a 400, but looks an empty one up as a field named ""
+            # and fails with a 500 (a change page's ?_to_field=)
+            if "" in (request.GET.get(TO_FIELD_VAR), request.POST.get(TO_FIELD_VAR)):
+                raise DisallowedModelAdminToField("The field  cannot be referenced.")
+            return inner(request, *args, **kwargs)
+
+        return cast("_ViewType", refusing_empty_to_field)  # type: ignore[explicit-any]
 
 
 admin.site = AuthentikAdminSite()

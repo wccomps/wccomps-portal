@@ -14,6 +14,7 @@ from hypothesis import strategies as st
 from orange_team.models import OrangeAssignment, OrangeAssignmentResult, OrangeCheck, OrangeCheckCriterion
 from registration.models import TeamRegistration
 
+from core.models import BotState
 from core.tests.strategies import request_text, rolled_back
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket
@@ -232,3 +233,26 @@ def test_checking_in_a_missing_volunteer_is_a_404(admin_client: Client, user_id:
     assume(not User.objects.filter(pk=user_id).exists())
     response = admin_client.post(reverse("orange_team:admin_toggle_checkin", args=[user_id]))
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# The Django admin
+# ---------------------------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def superuser_client(admin_user: User) -> Client:
+    User.objects.filter(pk=admin_user.pk).update(is_staff=True, is_superuser=True)
+    return signed_in(admin_user)
+
+
+@pytest.mark.parametrize("page", ["change", "delete", "history"])
+@given(method=st.sampled_from(["get", "post"]))
+@example(method="get")
+def test_the_admin_refuses_an_empty_to_field(superuser_client: Client, page: str, method: str) -> None:
+    """Django looks an empty _to_field up as a field named "" and fails with a 500."""
+    url = reverse(f"admin:core_botstate_{page}", args=[1])
+    with rolled_back():
+        BotState.objects.create(pk=1, key="k", value="v")
+        response = getattr(superuser_client, method)(f"{url}?_to_field=", {"_to_field": ""})
+    assert response.status_code == 400
