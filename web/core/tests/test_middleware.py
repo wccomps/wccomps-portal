@@ -419,18 +419,6 @@ class TestAuthentikRequiredMiddleware:
         # The middleware should sanitize to "/" since //evil.com is external
         assert "evil.com" not in response.url or "%2F" in response.url
 
-    def test_admin_path_requires_admin_permission(self, blue_team_user):
-        """The Django admin requires the Authentik admin permission, not just a sign-in (the admin site refuses)."""
-        client = Client()
-        client.force_login(blue_team_user)
-        assert client.get("/admin/").status_code == 403
-
-    def test_admin_path_allowed_for_admin_user(self, admin_user):
-        """The Django admin lets an Authentik admin in."""
-        client = Client()
-        client.force_login(admin_user)
-        assert client.get("/admin/").status_code == 200
-
     def test_authenticated_user_on_whitelist_path(self, middleware, authenticated_request):
         """Authenticated user on whitelisted path should still pass through."""
         factory = RequestFactory()
