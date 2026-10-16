@@ -57,3 +57,30 @@ def test_without_a_list_shown_the_way_back_is_the_plain_list(live_server, pw_bro
         assert page.locator(".breadcrumbs a").first.get_attribute("href") == reverse("ticket_list")
     finally:
         context.close()
+
+
+def test_after_going_back_between_filters_the_way_back_is_the_list_shown(live_server, pw_browser):
+    from team.models import Team
+    from ticketing.models import Ticket, TicketCategory
+
+    user = _create_role_user("admin", None)
+    ticket = Ticket.objects.create(
+        ticket_number="T004-001",
+        team=Team.objects.create(team_number=4, team_name="Team 04"),
+        category=TicketCategory.objects.first(),
+        title="t",
+    )
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    try:
+        page.goto(f"{live_server.url}{reverse('ticket_list')}?search=first")
+        page.fill("#id_search", "second")
+        with page.expect_response(lambda r: "search=second" in r.url):
+            page.locator("#id_search").press("Enter")
+        page.wait_for_load_state("networkidle")
+        page.go_back()  # htmx restores the first filter's list
+        page.wait_for_function("location.search.includes('search=first')")
+        page.goto(f"{live_server.url}{reverse('ticket_detail', kwargs={'ticket_number': ticket.ticket_number})}")
+        assert back_link_query(page)["search"] == ["first"]
+    finally:
+        context.close()

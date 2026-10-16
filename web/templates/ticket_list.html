@@ -10,9 +10,11 @@
 {% block extrastyle %}
     {{ block.super }}
     <script>
-    // This tab's ticket pages lead back to the list as it is now (sessionStorage is per tab)
+    // This tab's ticket pages lead back to the list as it was when the tab left it (sessionStorage is per tab): the
+    // address at pagehide follows filter changes and Back or Forward between them. Saved on load too, for a ticket
+    // opened in a new tab, which starts from a copy of this tab's storage.
     rememberTicketList();
-    document.addEventListener('htmx:pushedIntoHistory', rememberTicketList);
+    window.addEventListener('pagehide', rememberTicketList);
     </script>
     {% if is_ops %}
         <script>
