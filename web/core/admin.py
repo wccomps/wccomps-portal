@@ -35,16 +35,17 @@ class AuthentikAdminSite(admin.AdminSite):
         groups = get_authentik_groups(request.user)
         return "WCComps_Discord_Admin" in groups or "WCComps_Ticketing_Admin" in groups
 
-    # Django's stubs type a view as Callable[..., Any]; the override keeps their signature
+    # The stubs bound _ViewType by Callable[..., HttpResponseBase], whose ... mypy counts as explicit Any
     def admin_view(self, view: _ViewType, cacheable: bool = False) -> _ViewType:  # type: ignore[explicit-any]
         inner = super().admin_view(view, cacheable)
 
         @wraps(inner)
         def refusing_empty_to_field(request: HttpRequest, *args: object, **kwargs: object) -> HttpResponseBase:
-            # Django refuses a _to_field it can't reference with a 400, but looks an empty one up as a field named ""
-            # and fails with a 500 (a change page's ?_to_field=)
-            if "" in (request.GET.get(TO_FIELD_VAR), request.POST.get(TO_FIELD_VAR)):
-                raise DisallowedModelAdminToField("The field  cannot be referenced.")
+            # Django refuses a _to_field it can't reference with a 400, but its change and delete pages look an empty
+            # one up as a field named "" and fail with a 500. Read as Django reads it: POST, then GET.
+            # test_view_regressions' canary fails once Django fixes it; then drop this override.
+            if request.POST.get(TO_FIELD_VAR, request.GET.get(TO_FIELD_VAR)) == "":
+                raise DisallowedModelAdminToField("An empty _to_field cannot be referenced.")
             return inner(request, *args, **kwargs)
 
         return cast("_ViewType", refusing_empty_to_field)  # type: ignore[explicit-any]

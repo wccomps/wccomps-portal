@@ -246,16 +246,43 @@ def superuser_client(admin_user: User) -> Client:
     return signed_in(admin_user)
 
 
-@pytest.mark.parametrize("page", ["change", "delete", "history"])
+@pytest.mark.parametrize("page", ["change", "delete"])
 @given(method=st.sampled_from(["get", "post"]))
 @example(method="get")
 def test_the_admin_refuses_an_empty_to_field(superuser_client: Client, page: str, method: str) -> None:
-    """Django looks an empty _to_field up as a field named "" and fails with a 500."""
+    """Django's change and delete pages look an empty _to_field up as a field named "" and fail with a 500."""
     url = reverse(f"admin:core_botstate_{page}", args=[1])
     with rolled_back():
         BotState.objects.create(pk=1, key="k", value="v")
         response = getattr(superuser_client, method)(f"{url}?_to_field=", {"_to_field": ""})
     assert response.status_code == 400
+
+
+def test_the_admin_reads_to_field_as_django_does(superuser_client: Client) -> None:
+    """Django reads the POSTed _to_field before the query's: a POSTed one stands even with an empty query one."""
+    url = reverse("admin:core_botstate_change", args=[1])
+    with rolled_back():
+        BotState.objects.create(pk=1, key="k", value="v")
+        response = superuser_client.post(f"{url}?_to_field=", {"_to_field": "id", "key": "k", "value": "v"})
+    assert response.status_code != 400
+
+
+@pytest.mark.parametrize("page", ["change", "delete"])
+def test_django_still_fails_on_an_empty_to_field(admin_user: User, page: str) -> None:
+    """The canary for AuthentikAdminSite.admin_view's empty _to_field refusal: Django's own page, without the
+    portal's wrapper, still fails. When this fails, Django has fixed it: drop the override in core/admin.py."""
+    from django.contrib import admin
+    from django.core.exceptions import FieldDoesNotExist
+    from django.test import RequestFactory
+
+    BotState.objects.create(pk=1, key="k", value="v")
+    User.objects.filter(pk=admin_user.pk).update(is_staff=True, is_superuser=True)
+    request = RequestFactory().get("/", {"_to_field": ""})
+    request.user = User.objects.get(pk=admin_user.pk)
+    model_admin = admin.site._registry[BotState]
+    view = model_admin.change_view if page == "change" else model_admin.delete_view
+    with pytest.raises(FieldDoesNotExist):
+        view(request, "1")
 
 
 @given(param=st.text(min_size=1, max_size=20).filter(lambda p: "\x00" not in p))
