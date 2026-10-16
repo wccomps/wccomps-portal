@@ -20,7 +20,7 @@ from datetime import date, timedelta
 from enum import StrEnum
 from typing import Any
 from unittest.mock import patch
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urlencode, urlsplit
 
 import httpx
 from django import forms
@@ -33,6 +33,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection, models
 from django.http import HttpResponseBase
 from django.test import Client
+from django.test.client import BOUNDARY, MULTIPART_CONTENT, encode_multipart
 from django.urls import URLPattern, URLResolver, get_resolver, reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -689,38 +690,26 @@ def raw_cookie_header(cookies: dict[str, str]) -> str:
     return "; ".join(f"{name}={value}" for name, value in cookies.items())
 
 
+def encoded(drawn: Drawn) -> tuple[bytes, str]:
+    """The request's body as sent, and its content type: the JSON body, a POST's form fields as multipart, another
+    method's as urlencoded (build drops them for GET, HEAD and OPTIONS)."""
+    if drawn.body is not None:
+        return drawn.body, "application/json"
+    if drawn.method == "POST":
+        for upload in (u for v in drawn.data.values() if _is_upload(v) for u in (v if isinstance(v, list) else [v])):
+            upload.seek(0)
+        return encode_multipart(BOUNDARY, drawn.data), MULTIPART_CONTENT
+    return urlencode(drawn.data, doseq=True).encode(), "application/x-www-form-urlencoded"
+
+
 def send(world: World, drawn: Drawn) -> Answer:
     client = client_for(world, drawn.role, drawn.tz)
     before = table_writes()
     mail_before, outbound_before = len(mail.outbox), len(OUTBOUND)
-    files = {k: v for k, v in drawn.data.items() if _is_upload(v)}
-    for upload in (u for v in files.values() for u in (v if isinstance(v, list) else [v])):
-        upload.seek(0)
-    if drawn.body is not None:
-        response = client.generic(
-            drawn.method,
-            drawn.path,
-            data=drawn.body,
-            content_type="application/json",
-            headers=drawn.headers,
-            query_params=drawn.query,
-        )
-    elif drawn.method == "POST":
-        response = client.post(drawn.path, drawn.data, headers=drawn.headers, query_params=drawn.query)
-    elif drawn.method in ("GET", "HEAD", "OPTIONS"):
-        call = {"GET": client.get, "HEAD": client.head, "OPTIONS": client.options}[drawn.method]
-        response = call(drawn.path, drawn.query, headers=drawn.headers)
-    else:
-        from urllib.parse import urlencode
-
-        response = client.generic(
-            drawn.method,
-            drawn.path,
-            data=urlencode(drawn.data, doseq=True),
-            content_type="application/x-www-form-urlencoded",
-            headers=drawn.headers,
-            query_params=drawn.query,
-        )
+    body, content_type = encoded(drawn)
+    response = client.generic(
+        drawn.method, drawn.path, data=body, content_type=content_type, headers=drawn.headers, query_params=drawn.query
+    )
     # A stream is read to the end, as a browser would: any failure in it fails the property
     content = b"".join(response.streaming_content) if response.streaming else response.content
     after = table_writes()
