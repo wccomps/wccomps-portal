@@ -143,7 +143,10 @@ def build_world() -> World:
         date=date(2026, 11, 7),
         registration_open=True,
     )
-    teams = [Team.objects.create(team_number=n, team_name=f"Team {n:02d}") for n in (1, 2, 3)]
+    teams = [
+        Team.objects.get(team_number=1),  # role_user made it, for the blue_team role
+        *(Team.objects.create(team_number=n, team_name=f"Team {n:02d}") for n in (2, 3)),
+    ]
     set_team_school(teams[0], "School One", contact_email="coach@example.edu")
     set_team_school(teams[1], "School Two", contact_email="coach2@example.edu")
 

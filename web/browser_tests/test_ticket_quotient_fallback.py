@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from core.tests.roles import role_user
-from team.models import Team
 
 from .conftest import create_session_context
 
@@ -30,7 +29,6 @@ def _unavailable_quotient() -> MagicMock:
 def test_ticket_filed_with_typed_fields(category, fields, live_server, pw_browser):
     from ticketing.models import Ticket
 
-    Team.objects.create(team_number=1, team_name="Team 01")  # the blue_team role's team, by its Authentik group
     user = role_user("blue_team")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()

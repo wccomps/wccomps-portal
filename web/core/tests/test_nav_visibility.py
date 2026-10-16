@@ -15,15 +15,8 @@ import pytest
 from django.test import Client
 
 from core.tests.roles import BROWSER_ROLES, role_user
-from team.models import Team
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture(autouse=True)
-def team_one(db: object) -> None:
-    """The blue_team role's team (Team 1, whose Authentik group it holds), for its pages."""
-    Team.objects.create(team_number=1, team_name="Team 01")
 
 
 # A page each browser role (core.tests.roles.BROWSER_ROLES) can open, which renders the primary nav.

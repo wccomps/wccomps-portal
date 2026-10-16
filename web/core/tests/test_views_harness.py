@@ -91,3 +91,12 @@ def test_a_nul_counts_only_where_the_refusals_look() -> None:
                      fields={"search": "\x00"}).carries_nul()  # fmt: skip
     assert build(case, role="red_team", method="POST", name="ticket_list", kwargs={}, query={},
                  fields={"search": "\x00"}).carries_nul()  # fmt: skip
+
+
+def test_the_blue_team_role_user_is_a_team_member(db: object) -> None:
+    """role_user("blue_team") makes Team 1 when it doesn't exist: without it, the user holds a group and no team."""
+    from core.auth_utils import get_user_team
+    from core.tests.roles import role_user
+
+    team = get_user_team(role_user("blue_team"))
+    assert team is not None and team.team_number == 1

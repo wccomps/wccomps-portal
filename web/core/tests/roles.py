@@ -6,7 +6,7 @@ import itertools
 from django.contrib.auth.models import User
 
 from core.models import UserGroups
-from team.models import DiscordLink
+from team.models import DiscordLink, Team
 
 # Each role's Authentik groups; None is a visitor who isn't signed in
 ROLE_GROUPS: dict[str, list[str] | None] = {
@@ -58,5 +58,8 @@ def make_user(username: str, groups: list[str]) -> User:
 
 
 def role_user(role: str, *, username: str = "") -> User:
-    """A signed-in user for the role."""
+    """A signed-in user for the role. A team role's team (Team 1 for blue_team, whose Authentik group it holds) is
+    made too if it doesn't exist, so the user is a team member, not a user with a group and no team."""
+    if role == "blue_team":
+        Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01"})
     return make_user(username or f"role-{role}", groups_of(role))

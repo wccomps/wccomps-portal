@@ -30,7 +30,7 @@ def pytest_configure(config: pytest.Config) -> None:
         sock.close()
 
 
-from core.tests.roles import make_user, role_user
+from core.tests.roles import groups_of, make_user, role_user
 
 
 @pytest.fixture
@@ -46,7 +46,9 @@ def unauthenticated_client() -> Client:
 
 @pytest.fixture
 def blue_team_user(db: Any) -> User:
-    return role_user("blue_team", username="blueteam01")
+    """The blue_team role's groups with no team made for it: these tests build their own Team 1, or test a group
+    member whose team doesn't exist. role_user("blue_team") is the team member."""
+    return make_user("blueteam01", groups_of("blue_team"))
 
 
 @pytest.fixture
