@@ -14,7 +14,7 @@
                 This category has {{ ticket_count }} ticket(s). Deleting it will set their category to null.
             {% endif %}
         </c-alert>
-        <form method="post">
+        <c-form>
             {% csrf_token %}
             <c-button_row class="mt-20 justify-end">
                 <c-link href="{% url 'admin_categories' %}" variant="cancel">Cancel</c-link>
@@ -22,6 +22,6 @@
                     Delete Category
                 </c-button>
             </c-button_row>
-        </form>
+        </c-form>
     </c-module>
 {% endblock admin_content %}

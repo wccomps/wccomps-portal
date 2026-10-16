@@ -10,8 +10,16 @@ from pathlib import Path
 from django.conf import settings
 from django.urls import URLPattern, URLResolver, get_resolver
 
-TEMPLATES_DIR = Path(settings.BASE_DIR) / "templates"
-STATIC_JS_DIR = Path(settings.BASE_DIR) / "static" / "js"
+from core.tests.guards import (
+    REPO_DIR,
+    TEMPLATES_DIR,
+    elements,
+    fail_with,
+    template_name,
+    text,
+    tracked_files,
+    tracked_templates,
+)
 
 # Renders the token in <meta name="csrf-token">, which also sets the csrftoken cookie
 TOKEN_BASE_TEMPLATE = "admin/base_site.html"
@@ -26,39 +34,35 @@ FETCH_CALL_RE = re.compile(r"fetch\([^;]*;", re.DOTALL)
 POST_METHOD_RE = re.compile(r"method\s*:\s*['\"]POST['\"]", re.IGNORECASE)
 
 
-def _templates() -> list[Path]:
-    return sorted(TEMPLATES_DIR.rglob("*.html"))
+POST_FORM_EXCEPTIONS = {"cotton/form.html:*": "the component itself; its callers put the token in its slot"}
 
 
-def _rel(path: Path) -> str:
-    return path.relative_to(TEMPLATES_DIR).as_posix()
-
-
-def _post_form_blocks(source: str) -> list[tuple[int, str]]:
-    """(line, body) for each <form method="post"> and <c-form> (always POST) in a template."""
-    blocks = []
-    for opening_re, close in (
-        (re.compile(r"<form\b[^>]*>", re.IGNORECASE), "</form>"),
-        (re.compile(r"<c-form\b[^>]*>", re.IGNORECASE), "</c-form>"),
-    ):
-        for match in opening_re.finditer(source):
-            if close == "</form>" and not re.search(r"""method\s*=\s*["']post""", match.group(0), re.IGNORECASE):
+def missing_form_tokens(templates: list[tuple[str, Path]]) -> dict[str, str]:
+    """Each POST form (<form method="post">, or <c-form>, which always posts) whose body has no {% csrf_token %}."""
+    missing = {}
+    for name, path in templates:
+        lines = text(path).splitlines()
+        open_forms: list[tuple[str, int, bool]] = []
+        for tag in elements(path):
+            if tag.name not in ("form", "c-form"):
                 continue
-            end = source.find(close, match.end())
-            body = source[match.end() : end if end != -1 else len(source)]
-            blocks.append((source.count("\n", 0, match.start()) + 1, body))
-    return blocks
-
-
-def _missing_form_tokens(files: dict[str, str]) -> list[str]:
-    missing = []
-    for name, source in files.items():
-        if name == "cotton/form.html":  # component definition; callers put the token in its slot
-            continue
-        for line, body in _post_form_blocks(source):
-            if "csrf_token" not in body:
-                missing.append(f"{name}:{line}")
+            if not tag.closing:
+                open_forms.append(
+                    (tag.name, tag.line, tag.name == "c-form" or tag.attrs.get("method", "").lower() == "post")
+                )
+                continue
+            while open_forms:
+                opened, line, posts = open_forms.pop()
+                if opened == tag.name:
+                    if posts and "csrf_token" not in "\n".join(lines[line - 1 : tag.line]):
+                        missing[f"{name}:{line}"] = "POST form without {% csrf_token %}"
+                    break
     return missing
+
+
+def all_templates() -> list[tuple[str, Path]]:
+    """Every tracked template, the standalone documents included (the public registration form posts too)."""
+    return [(template_name(path), path) for path in tracked_templates()]
 
 
 def _extends_chain(name: str, files: dict[str, str]) -> list[str]:
@@ -90,7 +94,7 @@ def _fetch_posts(source: str) -> list[re.Match[str]]:
 
 
 def _load_templates() -> dict[str, str]:
-    return {_rel(path): path.read_text() for path in _templates()}
+    return {name: text(path) for name, path in all_templates()}
 
 
 def _all_patterns(resolver: URLResolver, prefix: str = "") -> list[tuple[str, URLPattern]]:
@@ -107,24 +111,23 @@ def _all_patterns(resolver: URLResolver, prefix: str = "") -> list[tuple[str, UR
 
 
 def test_every_post_form_has_csrf_token():
-    missing = _missing_form_tokens(_load_templates())
-    assert not missing, f"POST forms without {{% csrf_token %}}: {missing}"
+    fail_with("POST forms without {% csrf_token %}", missing_form_tokens(all_templates()), POST_FORM_EXCEPTIONS)
 
 
 def test_javascript_posts_can_find_the_token():
-    problems = _js_post_problems(_load_templates())
-    assert not problems, problems
+    fail_with("Pages posting from JavaScript", dict.fromkeys(_js_post_problems(_load_templates()), ""), {})
 
 
 def test_static_js_fetch_posts_send_csrf_header():
-    problems = [
-        f"{path.name}:{js.count(chr(10), 0, m.start()) + 1}"
-        for path in STATIC_JS_DIR.glob("*.js")
+    js_files = [REPO_DIR / p for p in tracked_files() if p.startswith("web/static/js/") and p.endswith(".js")]
+    problems = {
+        f"{path.name}:{js.count(chr(10), 0, m.start()) + 1}": "fetch POST without X-CSRFToken"
+        for path in js_files
         for js in [path.read_text()]
         for m in _fetch_posts(js)
         if "X-CSRFToken" not in m.group(0)
-    ]
-    assert not problems, f"fetch POST without X-CSRFToken: {problems}"
+    }
+    fail_with("Static JavaScript posts", problems, {})
 
 
 def test_token_base_template_renders_token():
@@ -137,8 +140,7 @@ def test_no_unexpected_csrf_exempt_views():
         callback = pattern.callback
         if getattr(callback, "csrf_exempt", False):
             exempt[f"{callback.__module__}.{getattr(callback, '__qualname__', callback)}"] = route
-    unexpected = {view: route for view, route in exempt.items() if view not in CSRF_EXEMPT_ALLOWLIST}
-    assert not unexpected, f"csrf_exempt views not in CSRF_EXEMPT_ALLOWLIST: {unexpected}"
+    fail_with("csrf_exempt views", exempt, CSRF_EXEMPT_ALLOWLIST)
 
 
 def test_csrf_middleware_enabled():
@@ -148,14 +150,24 @@ def test_csrf_middleware_enabled():
 # --- The checks must catch what they claim to --------------------------------------------------
 
 
-def test_checker_flags_form_without_token():
-    files = {"x.html": '<form method="post"><input name="a"></form>', "y.html": "<c-form><input></c-form>"}
-    assert _missing_form_tokens(files) == ["x.html:1", "y.html:1"]
+def plant(tmp_path: Path, files: dict[str, str]) -> list[tuple[str, Path]]:
+    for name, source in files.items():
+        (tmp_path / name).write_text(source)
+    return [(name, tmp_path / name) for name in files]
 
 
-def test_checker_accepts_form_with_token_and_ignores_get_forms():
+def test_checker_flags_form_without_token(tmp_path: Path):
+    files = {
+        "x.html": '<form method="post"><input name="a"></form>',
+        "y.html": "<c-form><input></c-form>",
+        "z.html": '<form {% if n > 0 %}class="a"{% endif %} method="post"><input name="a"></form>',
+    }
+    assert list(missing_form_tokens(plant(tmp_path, files))) == ["x.html:1", "y.html:1", "z.html:1"]
+
+
+def test_checker_accepts_form_with_token_and_ignores_get_forms(tmp_path: Path):
     files = {"x.html": '<form method="POST">{% csrf_token %}</form><form method="get"></form>'}
-    assert _missing_form_tokens(files) == []
+    assert missing_form_tokens(plant(tmp_path, files)) == {}
 
 
 def test_checker_flags_js_post_page_outside_token_base():

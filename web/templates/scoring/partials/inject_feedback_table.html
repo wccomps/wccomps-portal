@@ -1,10 +1,10 @@
 {% load cotton %}
 <div id="inject-feedback-content">
     {% if scores %}
-        <form id="bulk-approve-form"
-              method="post"
-              action="{% url 'scoring:bulk_approve_inject_feedback' %}"
-              x-data="feedbackBulkSelect">
+        <c-form id="bulk-approve-form"
+                action="{% url 'scoring:bulk_approve_inject_feedback' %}"
+                x-data="feedbackBulkSelect"
+                ::data-confirm="approveQuestion">
             {% csrf_token %}
             <c-table id="inject_feedback" aria_label="Inject feedback review">
                 <c-slot name="headers">
@@ -103,27 +103,29 @@
                     </tr>
                 {% endfor %}
             </c-table>
-        </form>
+        </c-form>
         {% for score in scores %}
-            <form id="save-{{ score.id }}"
-                  method="post"
-                  action="{% url 'scoring:save_inject_feedback' %}"
-                  hidden>
+            <c-form id="save-{{ score.id }}"
+                    action="{% url 'scoring:save_inject_feedback' %}"
+                    hidden>
                 {% csrf_token %}
                 <input type="hidden" name="score_id" value="{{ score.id }}">
-            </form>
+            </c-form>
             {% if not score.feedback_approved %}
-                <form id="approve-{{ score.id }}"
-                      method="post"
-                      action="{% url 'scoring:approve_inject_feedback' %}"
-                      hidden>
+                <c-form id="approve-{{ score.id }}"
+                        action="{% url 'scoring:approve_inject_feedback' %}"
+                        hidden>
                     {% csrf_token %}
                     <input type="hidden" name="score_id" value="{{ score.id }}">
-                </form>
+                </c-form>
             {% endif %}
         {% endfor %}
     {% else %}
-        <c-empty_state title="No feedback to review"
-                       description="No inject scores with comments found matching the current filters" />
+        {% if filtered %}
+            <c-empty_state title="No feedback to review"
+                           description="No inject scores with comments match the current filters" />
+        {% else %}
+            <c-empty_state title="No feedback to review" description="No approved inject scores have comments yet" />
+        {% endif %}
     {% endif %}
 </div>

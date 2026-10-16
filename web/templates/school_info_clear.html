@@ -12,7 +12,7 @@
         <c-alert variant="warning">
             Are you sure you want to clear all school information? This deletes {{ count }} school info record(s). Schools and their past-event history are kept; the open event's team assignments are removed with the list. This cannot be undone.
         </c-alert>
-        <form method="post">
+        <c-form>
             {% csrf_token %}
             <c-button_row class="mt-20 justify-end">
                 <c-link href="{% url 'school_info' %}" variant="cancel">Cancel</c-link>
@@ -20,6 +20,6 @@
                     Clear All
                 </c-button>
             </c-button_row>
-        </form>
+        </c-form>
     </c-module>
 {% endblock admin_content %}

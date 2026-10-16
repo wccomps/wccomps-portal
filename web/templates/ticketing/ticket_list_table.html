@@ -1,11 +1,8 @@
 {# Unified ticket list table - swappable content for htmx #}
 {% load cotton status_variants %}
-{# Declared, so cotton leaves them out of attrs: it writes attrs unescaped #}
-<c-vars page_obj status_filter category_filter search_query sort_by page_size team_filter assignee_filter authentik_username is_ticketing_admin is_ops />
-<div {{ attrs }}
-     id="ticket-list-content"
+<div id="ticket-list-content"
      {% if is_ops %}x-data="ticketBulkSelect"{% endif %}
-     hx-get="{% url 'ticket_list' %}?status={{ status_filter }}&category={{ category_filter }}&search={{ search_query }}&sort={{ sort_by }}&page_size={{ page_size }} {% if is_ops %}&team={{ team_filter }}&assignee={{ assignee_filter }}{% endif %} "
+     hx-get="{% url 'ticket_list' %}{% querystring %}"
      hx-trigger="every 30s"
      hx-select="#ticket-list-content"
      hx-swap="outerHTML">
@@ -20,26 +17,24 @@
                 <span>
                     <strong x-text="selectedCount" aria-live="polite">0</strong> tickets selected
                 </span>
-                <form method="post"
-                      action="{% url 'tickets_bulk_claim' %}"
-                      class="d-inline"
-                      x-ref="bulkClaimForm">
+                <c-form action="{% url 'tickets_bulk_claim' %}"
+                        class="d-inline"
+                        ::data-confirm="claimQuestion">
                     {% csrf_token %}
                     <input type="hidden" name="ticket_numbers" :value="selectedTickets" />
                     <c-button type="submit" variant="primary">
                         Claim Selected
                     </c-button>
-                </form>
-                <form method="post"
-                      action="{% url 'tickets_bulk_resolve' %}"
-                      class="d-inline"
-                      x-ref="bulkResolveForm">
+                </c-form>
+                <c-form action="{% url 'tickets_bulk_resolve' %}"
+                        class="d-inline"
+                        ::data-confirm="resolveQuestion">
                     {% csrf_token %}
                     <input type="hidden" name="ticket_numbers" :value="selectedTickets" />
                     <c-button type="submit" variant="primary">
                         Resolve Selected
                     </c-button>
-                </form>
+                </c-form>
             </div>
         </div>
     {% endif %}
@@ -65,29 +60,19 @@
                     <c-table_header sortable="false">
                         Title
                     </c-table_header>
-                    <c-table_header sort_field="team__team_number"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
+                    <c-table_header sort_field="team__team_number" current_sort="{{ sort_by }}">
                         Team
                     </c-table_header>
-                    <c-table_header sort_field="category"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
+                    <c-table_header sort_field="category" current_sort="{{ sort_by }}">
                         Category
                     </c-table_header>
-                    <c-table_header sort_field="status"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
+                    <c-table_header sort_field="status" current_sort="{{ sort_by }}">
                         Status
                     </c-table_header>
-                    <c-table_header sort_field="assigned_to__username"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
+                    <c-table_header sort_field="assigned_to__username" current_sort="{{ sort_by }}">
                         Assigned
                     </c-table_header>
-                    <c-table_header sort_field="created_at"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&page_size={{ page_size }}">
+                    <c-table_header sort_field="created_at" current_sort="{{ sort_by }}">
                         Created
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -126,7 +111,7 @@
                 {% endif %}
                 <th role="gridcell">
                     {% if is_ops %}
-                        <a href="{% url 'ticket_detail' ticket_number=item.ticket.ticket_number %}?status={{ status_filter }}&category={{ category_filter }}&team={{ team_filter }}&assignee={{ assignee_filter }}&search={{ search_query }}&sort={{ sort_by }}&page={{ page_obj.number }}&page_size={{ page_size }}">
+                        <a href="{% url 'ticket_detail' ticket_number=item.ticket.ticket_number %}">
                             {{ item.ticket.ticket_number }}
                         </a>
                         {% if item.is_stale %}<c-badge variant="danger">STALE</c-badge>{% endif %}
@@ -167,32 +152,29 @@
                 {% if is_ops %}
                     <td class="field-actions" role="gridcell">
                         {% if item.ticket.status == "open" %}
-                            <form method="post"
-                                  action="{% url 'ticket_claim' item.ticket.ticket_number %}"
-                                  class="d-inline">
+                            <c-form action="{% url 'ticket_claim' item.ticket.ticket_number %}"
+                                    class="d-inline">
                                 {% csrf_token %}
                                 <c-button type="submit" variant="primary">
                                     Claim
                                 </c-button>
-                            </form>
+                            </c-form>
                         {% elif item.ticket.status == "claimed" %}
-                            <form method="post"
-                                  action="{% url 'ticket_resolve' item.ticket.ticket_number %}"
-                                  class="d-inline">
+                            <c-form action="{% url 'ticket_resolve' item.ticket.ticket_number %}"
+                                    class="d-inline">
                                 {% csrf_token %}
                                 <c-button type="submit" variant="primary">
                                     Resolve
                                 </c-button>
-                            </form>
+                            </c-form>
                             {% if item.ticket.assigned_to.username == authentik_username or is_ticketing_admin %}
-                                <form method="post"
-                                      action="{% url 'ticket_unclaim' item.ticket.ticket_number %}"
-                                      class="d-inline">
+                                <c-form action="{% url 'ticket_unclaim' item.ticket.ticket_number %}"
+                                        class="d-inline">
                                     {% csrf_token %}
                                     <c-button type="submit" variant="default">
                                         Unclaim
                                     </c-button>
-                                </form>
+                                </c-form>
                             {% endif %}
                         {% endif %}
                     </td>
@@ -201,7 +183,7 @@
         {% empty %}
             <tr>
                 <td colspan="{% if is_ops %}9{% else %}5{% endif %}">
-                    {% if search_query or status_filter != "all" or category_filter != "all" or team_filter or assignee_filter %}
+                    {% if filtered %}
                         <c-empty_state title="No tickets match your filters">
                             Try <c-link href="{% url 'ticket_list' %}">clearing all filters</c-link> or <c-link href="{% url 'create_ticket' %}" variant="add">create a new ticket</c-link>
                         </c-empty_state>
@@ -215,8 +197,5 @@
             </tr>
         {% endfor %}
     </c-table>
-    <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter }}&category={{ category_filter }}&search={{ search_query }}&sort={{ sort_by }}&page_size={{ page_size }}
-    {% if is_ops %}&team={{ team_filter }}&assignee={{ assignee_filter }}{% endif %}
-    " />
+    <c-pagination :page_obj="page_obj" />
 </div>

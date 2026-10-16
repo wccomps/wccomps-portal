@@ -9,7 +9,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
 from core.stored_files import file_response
-from core.utils import filter_number
+from core.utils import optional_int
 from team.models import Team
 
 from ..forms import RedTeamScoreForm
@@ -48,6 +48,54 @@ def _normalize_red_score_post(post_data: QueryDict) -> QueryDict:
     return normalized
 
 
+def findings_list(request: HttpRequest, *, default_status: str, page_size: int) -> dict[str, object]:
+    """The filtered, sorted page of findings and the filter state for the table both findings pages show."""
+    from django.db.models import Q
+
+    from core.utils import filter_sort_paginate, list_filters
+
+    filters, filtered = list_filters(
+        request, {"status": default_status, "team": "", "attack_type": "", "submitter": "", "search": ""}
+    )
+
+    findings = RedTeamScore.objects.prefetch_related("affected_teams", "screenshots").select_related("submitted_by")
+    if filters["status"] == "pending":
+        findings = findings.filter(is_approved=False)
+    elif filters["status"] == "approved":
+        findings = findings.filter(is_approved=True)
+    if (team_id := optional_int(filters["team"])) is not None:
+        findings = findings.filter(affected_teams__id=team_id)
+    if (attack_type_id := optional_int(filters["attack_type"])) is not None:
+        findings = findings.filter(attack_type_id=attack_type_id)
+    if (submitter_id := optional_int(filters["submitter"])) is not None:
+        findings = findings.filter(submitted_by_id=submitter_id)
+    if filters["search"]:
+        findings = findings.filter(
+            Q(attack_type__name__icontains=filters["search"])
+            | Q(notes__icontains=filters["search"])
+            | Q(affected_service__icontains=filters["search"])
+        )
+
+    # distinct: the team filter joins the many-to-many affected_teams
+    result = filter_sort_paginate(
+        request,
+        findings.distinct(),
+        sort_fields=("attack_type__name", "created_at"),  # the findings table's sortable columns
+        default_sort="-created_at",
+        page_size=page_size,
+    )
+    return {
+        "findings": result["page_obj"],
+        "page_obj": result["page_obj"],
+        "sort_by": result["current_sort"],
+        "filters": filters,
+        "filtered": filtered,
+        "available_teams": Team.objects.filter(red_team_scores__isnull=False).distinct().order_by("team_number"),
+        "available_attack_types": AttackType.objects.filter(findings__isnull=False).distinct().order_by("name"),
+        "available_submitters": User.objects.filter(red_scores_submitted__isnull=False).distinct().order_by("username"),
+    }
+
+
 @require_permission(
     "red_team",
     "gold_team",
@@ -55,88 +103,18 @@ def _normalize_red_score_post(post_data: QueryDict) -> QueryDict:
 )
 def red_team_findings(request: HttpRequest) -> HttpResponse:
     """Gold team review page for red team findings."""
-    from core.utils import filter_sort_paginate
-
-    status_filter = request.GET.get("status", "pending") or "pending"
-    team_filter = request.GET.get("team", "")
-    attack_type_filter = request.GET.get("attack_type", "")
-    submitter_filter = request.GET.get("submitter", "")
-    search_query = request.GET.get("search", "").strip()
-
-    base_query = RedTeamScore.objects.prefetch_related("affected_teams", "screenshots").select_related("submitted_by")
-
-    if status_filter == "pending":
-        base_query = base_query.filter(is_approved=False)
-    elif status_filter == "approved":
-        base_query = base_query.filter(is_approved=True)
-
-    if (team_id := filter_number(team_filter)) is not None:
-        base_query = base_query.filter(affected_teams__id=team_id)
-
-    if (attack_type_id := filter_number(attack_type_filter)) is not None:
-        base_query = base_query.filter(attack_type_id=attack_type_id)
-
-    if (submitter_id := filter_number(submitter_filter)) is not None:
-        base_query = base_query.filter(submitted_by__id=submitter_id)
-
-    if search_query:
-        from django.db.models import Q
-
-        base_query = base_query.filter(
-            Q(attack_type__name__icontains=search_query)
-            | Q(notes__icontains=search_query)
-            | Q(affected_service__icontains=search_query)
-        )
-
-    # Apply distinct to avoid duplicates from M2M joins
-    base_query = base_query.distinct()
-
-    result = filter_sort_paginate(
-        request,
-        base_query,
-        valid_sort_fields=["created_at", "-created_at", "attack_type__name", "-attack_type__name"],
-        default_sort="-created_at",
-    )
-    page_obj = result["page_obj"]
-    sort_by = result["current_sort"]
-
-    # Stats (unfiltered counts)
     total_findings = RedTeamScore.objects.count()
     pending_count = RedTeamScore.objects.filter(is_approved=False).count()
-    approved_count = total_findings - pending_count
-
-    available_teams = Team.objects.filter(red_team_scores__isnull=False).distinct().order_by("team_number")
-    available_attack_types = AttackType.objects.filter(findings__isnull=False).distinct().order_by("name")
-    available_submitters = User.objects.filter(red_scores_submitted__isnull=False).distinct().order_by("username")
-
-    user = cast(User, request.user)
-    is_gold_team = has_permission(user, "gold_team")
-
-    pending_findings = pending_count > 0
-
     context = {
-        "findings": page_obj,
-        "page_obj": page_obj,
-        "pending_findings": pending_findings,
+        **findings_list(request, default_status="pending", page_size=50),
+        "pending_findings": pending_count > 0,
         "total_findings": total_findings,
         "pending_count": pending_count,
-        "approved_count": approved_count,
-        "search_query": search_query,
-        "available_teams": available_teams,
-        "available_attack_types": available_attack_types,
-        "available_submitters": available_submitters,
-        "selected_team": team_filter,
-        "selected_attack_type": attack_type_filter,
-        "selected_submitter": submitter_filter,
-        "status_filter": status_filter,
-        "sort_by": sort_by,
-        "is_gold_team": is_gold_team,
-        "current_user": user,
+        "approved_count": total_findings - pending_count,
+        "is_gold_team": has_permission(cast(User, request.user), "gold_team"),
     }
-
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/red_findings_table.html", context)
-
+        return render(request, "scoring/partials/red_findings_table.html", context)
     return render(request, "scoring/review_red_findings.html", context)
 
 
@@ -146,66 +124,9 @@ def red_team_findings(request: HttpRequest) -> HttpResponse:
 )
 def red_team_scores(request: HttpRequest) -> HttpResponse:
     """Red team view of all findings (read-only, can delete/leave own)."""
-    from core.utils import filter_sort_paginate
-
-    status_filter = request.GET.get("status", "all") or "all"
-    team_filter = request.GET.get("team", "")
-    attack_type_filter = request.GET.get("attack_type", "")
-    submitter_filter = request.GET.get("submitter", "")
-
-    base_query = RedTeamScore.objects.prefetch_related("affected_teams", "screenshots").select_related("submitted_by")
-
-    if status_filter == "pending":
-        base_query = base_query.filter(is_approved=False)
-    elif status_filter == "approved":
-        base_query = base_query.filter(is_approved=True)
-    # "all" shows everything
-
-    if (team_id := filter_number(team_filter)) is not None:
-        base_query = base_query.filter(affected_teams__id=team_id)
-
-    if (attack_type_id := filter_number(attack_type_filter)) is not None:
-        base_query = base_query.filter(attack_type_id=attack_type_id)
-
-    if (submitter_id := filter_number(submitter_filter)) is not None:
-        base_query = base_query.filter(submitted_by_id=submitter_id)
-
-    result = filter_sort_paginate(
-        request,
-        base_query.distinct(),
-        valid_sort_fields=[
-            "created_at",
-            "-created_at",
-            "points_per_team",
-            "-points_per_team",
-        ],
-        default_sort="-created_at",
-        page_size=25,
-    )
-    page_obj = result["page_obj"]
-    sort_by = result["current_sort"]
-
-    available_teams = Team.objects.filter(red_team_scores__isnull=False).distinct().order_by("team_number")
-    available_attack_types = AttackType.objects.filter(findings__isnull=False).distinct().order_by("name")
-    available_submitters = User.objects.filter(red_scores_submitted__isnull=False).distinct().order_by("username")
-
-    context = {
-        "findings": page_obj,
-        "page_obj": page_obj,
-        "status_filter": status_filter,
-        "selected_team": team_filter,
-        "selected_attack_type": attack_type_filter,
-        "selected_submitter": submitter_filter,
-        "sort_by": sort_by,
-        "available_teams": available_teams,
-        "available_attack_types": available_attack_types,
-        "available_submitters": available_submitters,
-        "is_gold_team": False,  # Red team view - no approval actions
-    }
-
+    context = {**findings_list(request, default_status="all", page_size=25), "is_gold_team": False}
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/red_findings_table.html", context)
-
+        return render(request, "scoring/partials/red_findings_table.html", context)
     return render(request, "scoring/red_team_findings.html", context)
 
 

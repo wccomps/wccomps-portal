@@ -350,7 +350,7 @@ class TestRedTeamSortCycle:
         assert response.context["sort_by"] == ""
 
     def test_sort_cycle_no_arrow_after_unsort(self, create_user_with_groups: Callable[..., User]) -> None:
-        """After unsort (sort=default), no column header should show ▲ or ▼."""
+        """After unsort (sort=default), no column header shows a sort arrow."""
         gold_user = create_user_with_groups("gold_user", ["WCComps_GoldTeam"])
         self._create_findings(gold_user)
 

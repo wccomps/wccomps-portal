@@ -1,14 +1,8 @@
 {# Review incidents table - swappable content for htmx #}
-{# Declared, so cotton leaves them out of attrs: it writes attrs unescaped #}
-<c-vars page_obj status_filter selected_team selected_box search_query sort_by />
-<div {{ attrs }}
-     id="review-incidents-content"
-     x-data="incidentsBulkSelect"
-     @bulk-approve-incidents.document="submitBulk">
-    <form id="bulk-approve-form"
-          method="post"
-          action="{% url 'scoring:bulk_approve_incidents' %}"
-          x-ref="bulkForm">
+{% load cotton %}
+<div id="review-incidents-content"
+     x-data="incidentsBulkSelect">
+    <c-form id="bulk-approve-form" action="{% url 'scoring:bulk_approve_incidents' %}" ::data-confirm="approveQuestion">
         {% csrf_token %}
         <c-table id="result_list" aria_label="Incident reports list">
             <c-slot name="headers">
@@ -24,8 +18,7 @@
                         ID
                     </c-table_header>
                     <c-table_header sort_field="team__team_number"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&team={{ selected_team }}&box={{ selected_box }}&search={{ search_query }}">
+                                    current_sort="{{ sort_by }}">
                         Team
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -35,8 +28,7 @@
                         Description
                     </c-table_header>
                     <c-table_header sort_field="attack_detected_at"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&team={{ selected_team }}&box={{ selected_box }}&search={{ search_query }}">
+                                    current_sort="{{ sort_by }}">
                         Detected
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -67,7 +59,7 @@
                     </th>
                     <td>Team {{ incident.team.team_number }}</td>
                     <td>
-                        {{ incident.affected_boxes_display|default:"—" }}
+                        {{ incident.affected_boxes_display }}
                         <div class="text-sm text-muted">{{ incident.affected_service }}</div>
                     </td>
                     <td>{{ incident.attack_description|truncatechars:50 }}</td>
@@ -81,13 +73,13 @@
                                 {{ incident.screenshots.count }} files
                             </c-badge>
                         {% else %}
-                            <span class="text-muted">None</span>
+                            <span class="text-muted">No screenshots</span>
                         {% endif %}
                     </td>
                     <td>
                         {% if incident.is_approved %}
                             <c-badge variant="success">
-                                <span aria-hidden="true">✓</span> Approved
+                                Approved
                             </c-badge>
                             {% if incident.points_returned %}
                                 <div class="text-sm">
@@ -96,7 +88,7 @@
                             {% endif %}
                         {% else %}
                             <c-badge variant="warning">
-                                <span aria-hidden="true">⏳</span> Pending
+                                Pending
                             </c-badge>
                         {% endif %}
                     </td>
@@ -112,7 +104,7 @@
             {% empty %}
                 <tr>
                     <td colspan="9">
-                        {% if selected_team or selected_box or search_query or status_filter != "pending" %}
+                        {% if filtered %}
                             No incidents match your filters. Try <a href="{% url 'scoring:review_incidents' %}">clearing all filters</a>
                         {% else %}
                             No pending incidents. All incident reports have been approved.
@@ -121,7 +113,6 @@
                 </tr>
             {% endfor %}
         </c-table>
-    </form>
-    <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter }}&team={{ selected_team }}&box={{ selected_box }}&search={{ search_query }}&sort={{ sort_by }}" />
+    </c-form>
+    <c-pagination :page_obj="page_obj" />
 </div>

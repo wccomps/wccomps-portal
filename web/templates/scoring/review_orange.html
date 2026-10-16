@@ -6,14 +6,7 @@
 {% block scoring_content %}
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('orangeBulkSelect', () => compose(bulkSelectMixin('check-id'), {
-            init() { this.initBulkSelect(); },
-            submitBulk() {
-                if (this.submitting) return;
-                if (this.selected.length === 0) { alert('Please select at least one check to approve'); return; }
-                if (confirm('Approve ' + this.selected.length + ' check(s)? This action cannot be undone.')) { this.submitting = true; this.$refs.bulkForm.submit(); }
-            }
-        }));
+        Alpine.data('orangeBulkSelect', () => bulkSelectMixin('check-id', 'check'));
     });
     </script>
     <c-page_header title="Review Orange Team Checks" />
@@ -25,9 +18,7 @@
                           hx_push_url="true">
             {% if has_pending %}
                 <c-slot name="actions">
-                    <c-button type="button"
-                              onclick="document.dispatchEvent(new CustomEvent('bulk-approve-orange'))"
-                              variant="primary">
+                    <c-button type="submit" form="bulk-approve-form" variant="primary">
                         Approve Selected
                     </c-button>
                 </c-slot>
@@ -35,10 +26,10 @@
             <c-filter_field label="Status" id="id_status">
                 <select name="status" id="id_status" aria-label="Filter by status">
                     <option value="pending"
-                            {% if status_filter == 'pending' %}selected{% endif %}>Pending Only</option>
+                            {% if filters.status == 'pending' %}selected{% endif %}>Pending Only</option>
                     <option value="approved"
-                            {% if status_filter == 'approved' %}selected{% endif %}>Approved Only</option>
-                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                            {% if filters.status == 'approved' %}selected{% endif %}>Approved Only</option>
+                    <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
                 </select>
             </c-filter_field>
             <c-filter_field label="Team" id="id_team">
@@ -46,7 +37,7 @@
                     <option value="">All Teams</option>
                     {% for team in available_teams %}
                         <option value="{{ team.id }}"
-                                {% if selected_team == team.id|stringformat:"s" %}selected{% endif %}>
+                                {% if filters.team == team.id|stringformat:"s" %}selected{% endif %}>
                             Team {{ team.team_number }}
                         </option>
                     {% endfor %}
@@ -55,10 +46,10 @@
             <c-filter_field label="Check" id="id_check">
                 <select name="check" id="id_check" aria-label="Filter by check">
                     <option value="">All Checks</option>
-                    <option value="manual" {% if selected_check == 'manual' %}selected{% endif %}>Manual</option>
+                    <option value="manual" {% if filters.check == 'manual' %}selected{% endif %}>Manual</option>
                     {% for check in available_checks %}
                         <option value="{{ check.id }}"
-                                {% if selected_check == check.id|stringformat:"s" %}selected{% endif %}>{{ check.title }}</option>
+                                {% if filters.check == check.id|stringformat:"s" %}selected{% endif %}>{{ check.title }}</option>
                     {% endfor %}
                 </select>
             </c-filter_field>
@@ -66,16 +57,11 @@
                 <input type="text"
                        name="search"
                        id="id_search"
-                       value="{{ search_query }}"
+                       value="{{ filters.search }}"
                        placeholder="Search..."
                        aria-label="Search checks">
             </c-filter_field>
         </c-filter_toolbar>
-        <c-review_orange_table :page_obj="page_obj"
-                               :status_filter="status_filter"
-                               :selected_team="selected_team"
-                               :selected_check="selected_check"
-                               :search_query="search_query"
-                               :sort_by="sort_by" />
+        {% include "scoring/partials/review_orange_table.html" %}
     </c-module>
 {% endblock scoring_content %}

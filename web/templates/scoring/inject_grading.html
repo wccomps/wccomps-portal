@@ -3,13 +3,7 @@
     <script>
     document.addEventListener('alpine:init', () => {
         Alpine.data('clearableForm', () => ({
-            submitting: false,
-            onSubmit(e) {
-                if (this.submitting) { e.preventDefault(); return; }
-                this.submitting = true;
-                setTimeout(() => { this.submitting = false; }, 10000);
-            },
-            clearForm() { this.$el.querySelectorAll("input[name^='points_team_']").forEach(i => i.value = ''); }
+            clearForm() { this.$root.querySelectorAll("input[name^='points_team_']").forEach(i => i.value = ''); }
         }));
     });
     </script>
@@ -32,17 +26,14 @@
                         hx-push-url="true"
                         hx-include="this"
                         name="inject">
-                    <option value="">-- Select an inject to grade --</option>
+                    <option value="">Select an inject to grade</option>
                     {% for id, title in inject_choices %}
                         <option value="{{ id }}"
                                 {% if id == selected_inject_id %}selected{% endif %}>{{ title }}</option>
                     {% endfor %}
                 </select>
             </c-form_field>
-            <c-inject_grading_content :selected_inject="selected_inject"
-                                      :selected_inject_id="selected_inject_id"
-                                      :team_data="team_data"
-                                      :inject_choices="inject_choices" />
+            {% include "scoring/partials/inject_grading_content.html" %}
         {% endif %}
     </c-module>
 {% endblock white_team_content %}

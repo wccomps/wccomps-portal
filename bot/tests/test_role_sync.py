@@ -220,7 +220,7 @@ async def test_without_manage_roles_nothing_is_touched_and_it_is_reported_once(t
     for member in members:
         member.remove_roles.assert_not_awaited()
     assert stats["errors"] == 1
-    assert stats["changes"] == ["⚠ Bot lacks the Manage Roles permission, so no roles were synced"]
+    assert stats["changes"] == ["Bot lacks the Manage Roles permission, so no roles were synced"]
 
 
 async def test_syncing_one_member_gives_their_grant_and_takes_the_rest(teams) -> None:

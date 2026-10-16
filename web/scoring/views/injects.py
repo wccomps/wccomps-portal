@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
-from core.utils import filter_number
+from core.utils import list_filters, optional_int, requested_sort, stable_order
 from team.models import Team
 
 from ..forms import ApproveInjectFeedbackForm, SaveInjectFeedbackForm
@@ -154,7 +154,7 @@ def inject_grading(request: HttpRequest) -> HttpResponse:
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/inject_grading_content.html", context)
+        return render(request, "scoring/partials/inject_grading_content.html", context)
 
     return render(request, "scoring/inject_grading.html", context)
 
@@ -167,33 +167,35 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
 
     from django.core.paginator import Paginator
 
-    status_filter = request.GET.get("status", "pending") or "pending"
-    inject_filter = request.GET.get("inject", "")
-    team_filter = request.GET.get("team", "")
-    show_outliers_only = request.GET.get("outliers") == "1"
-    search_query = request.GET.get("search", "").strip()
-    sort_by = request.GET.get("sort", "inject_name")
-    if sort_by == "default":
-        sort_by = ""
-    page = request.GET.get("page", "1")
+    filters, filtered = list_filters(
+        request, {"status": "pending", "inject": "", "team": "", "outliers": "", "search": ""}
+    )
+    # The inject grades table's sortable columns
+    sort_by = requested_sort(
+        request, ("inject_name", "team__team_number", "points_awarded", "graded_at"), "inject_name"
+    )
 
     base_query = InjectScore.objects.select_related("team", "graded_by")
 
-    if status_filter == "pending":
+    if filters["status"] == "pending":
         base_query = base_query.filter(is_approved=False)
-    elif status_filter == "approved":
+    elif filters["status"] == "approved":
         base_query = base_query.filter(is_approved=True)
 
-    if inject_filter:
-        base_query = base_query.filter(inject_id=inject_filter)
+    if filters["inject"]:
+        base_query = base_query.filter(inject_id=filters["inject"])
 
-    if (team_id := filter_number(team_filter)) is not None:
+    if (team_id := optional_int(filters["team"])) is not None:
         base_query = base_query.filter(team__id=team_id)
 
-    if search_query:
+    if filters["search"]:
         from django.db.models import Q
 
-        base_query = base_query.filter(Q(inject_name__icontains=search_query) | Q(inject_id__icontains=search_query))
+        base_query = base_query.filter(
+            Q(inject_name__icontains=filters["search"]) | Q(inject_id__icontains=filters["search"])
+        )
+
+    base_query = stable_order(base_query, sort_by)
 
     # Outliers are computed among the grades that match the current filters
     # Dynamically add is_outlier and std_devs_from_mean attrs to grade objects
@@ -222,41 +224,10 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
                 grade.is_outlier = False
                 grade.std_devs_from_mean = 0
 
-    if show_outliers_only:
+    if filters["outliers"] == "1":
         all_grades_for_outlier_calc = [g for g in all_grades_for_outlier_calc if g.is_outlier]
 
-    valid_sort_fields = [
-        "inject_name",
-        "-inject_name",
-        "team__team_number",
-        "-team__team_number",
-        "points_awarded",
-        "-points_awarded",
-        "graded_at",
-        "-graded_at",
-    ]
-    if sort_by and sort_by not in valid_sort_fields:
-        sort_by = "inject_name"
-
-    # Sort in Python since we already have the list
-    if sort_by:
-        reverse = sort_by.startswith("-")
-        sort_key = sort_by.lstrip("-")
-        if sort_key == "team__team_number":
-            all_grades_for_outlier_calc.sort(key=lambda g: g.team.team_number, reverse=reverse)
-        elif sort_key == "inject_name":
-            all_grades_for_outlier_calc.sort(key=lambda g: g.inject_name, reverse=reverse)
-        elif sort_key == "points_awarded":
-            all_grades_for_outlier_calc.sort(key=lambda g: float(g.points_awarded), reverse=reverse)
-        elif sort_key == "graded_at":
-            all_grades_for_outlier_calc.sort(key=lambda g: g.graded_at, reverse=reverse)
-
-    paginator = Paginator(all_grades_for_outlier_calc, 50)
-    try:
-        page_num = int(page)
-    except ValueError:
-        page_num = 1
-    page_obj = paginator.get_page(page_num)
+    page_obj = Paginator(all_grades_for_outlier_calc, 50).get_page(request.GET.get("page"))
 
     # Stats (unfiltered counts)
     total_grades = InjectScore.objects.count()
@@ -274,16 +245,13 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
         "has_unapproved": unapproved_count > 0,
         "available_injects": available_injects,
         "available_teams": available_teams,
-        "selected_inject": inject_filter,
-        "selected_team": team_filter,
-        "show_outliers_only": show_outliers_only,
-        "status_filter": status_filter,
-        "search_query": search_query,
+        "filters": filters,
+        "filtered": filtered,
         "sort_by": sort_by,
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/inject_grades_table.html", context)
+        return render(request, "scoring/partials/inject_grades_table.html", context)
 
     return render(request, "scoring/review_inject_grades.html", context)
 
@@ -309,8 +277,7 @@ def inject_grades_bulk_approve(request: HttpRequest) -> HttpResponse:
 @require_permission("gold_team", "white_team", error_message="Only Gold/White Team members can review inject feedback")
 def review_inject_feedback(request: HttpRequest) -> HttpResponse:
     """Gold/White team review of inject feedback before showing to teams."""
-    inject_filter = request.GET.get("inject", "")
-    status_filter = request.GET.get("status", "all")
+    filters, filtered = list_filters(request, {"inject": "", "status": "all"})
 
     scores = (
         InjectScore.objects.filter(is_approved=True)
@@ -320,11 +287,11 @@ def review_inject_feedback(request: HttpRequest) -> HttpResponse:
         .order_by("inject_name", "team__team_number")
     )
 
-    if inject_filter:
-        scores = scores.filter(inject_id=inject_filter)
-    if status_filter == "pending":
+    if filters["inject"]:
+        scores = scores.filter(inject_id=filters["inject"])
+    if filters["status"] == "pending":
         scores = scores.filter(feedback_approved=False)
-    elif status_filter == "approved":
+    elif filters["status"] == "approved":
         scores = scores.filter(feedback_approved=True)
 
     inject_choices = (
@@ -341,8 +308,8 @@ def review_inject_feedback(request: HttpRequest) -> HttpResponse:
     context = {
         "scores": scores,
         "inject_choices": inject_choices,
-        "inject_filter": inject_filter,
-        "status_filter": status_filter,
+        "filters": filters,
+        "filtered": filtered,
         "has_unapproved": has_unapproved,
     }
 

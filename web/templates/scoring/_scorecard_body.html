@@ -8,18 +8,18 @@
         {% if stats.neighbors %}
             {% for n in stats.neighbors %}
                 {% if n.rank < score.rank %}
-                    <span>#{{ n.rank }} — {{ n.total_score|floatformat:0 }} <span class="score-positive">(+{{ n.gap|floatformat:0 }} ahead)</span></span>
+                    <span>#{{ n.rank }}: {{ n.total_score|floatformat:0 }} <span class="score-positive">(+{{ n.gap|floatformat:0 }} ahead)</span></span>
                 {% endif %}
             {% endfor %}
         {% endif %}
         <span class="neighbor-current">
-            {% if score.rank %}#{{ score.rank }} of {{ stats.team_count }} —{% endif %}
+            {% if score.rank %}#{{ score.rank }} of {{ stats.team_count }}:{% endif %}
             {{ score.total_score|floatformat:0 }} (you)
         </span>
         {% if stats.neighbors %}
             {% for n in stats.neighbors %}
                 {% if n.rank > score.rank %}
-                    <span>#{{ n.rank }} — {{ n.total_score|floatformat:0 }} <span class="score-negative">({{ n.gap|floatformat:0 }} behind)</span></span>
+                    <span>#{{ n.rank }}: {{ n.total_score|floatformat:0 }} <span class="score-negative">({{ n.gap|floatformat:0 }} behind)</span></span>
                 {% endif %}
             {% endfor %}
         {% endif %}
@@ -65,9 +65,9 @@
                     </td>
                     <td class="text-right">{{ svc_rank.max|floatformat:0 }}</td>
                 {% else %}
-                    <td class="text-right">—</td>
-                    <td class="text-right">—</td>
-                    <td class="text-right">—</td>
+                    <td class="text-right"></td>
+                    <td class="text-right"></td>
+                    <td class="text-right"></td>
                 {% endif %}
             </tr>
         {% endwith %}
@@ -82,9 +82,9 @@
                     </td>
                     <td class="text-right">{{ inj_rank.max|floatformat:0 }}</td>
                 {% else %}
-                    <td class="text-right">—</td>
-                    <td class="text-right">—</td>
-                    <td class="text-right">—</td>
+                    <td class="text-right"></td>
+                    <td class="text-right"></td>
+                    <td class="text-right"></td>
                 {% endif %}
             </tr>
         {% endwith %}
@@ -99,9 +99,9 @@
                     </td>
                     <td class="text-right">{{ ora_rank.max|floatformat:0 }}</td>
                 {% else %}
-                    <td class="text-right">—</td>
-                    <td class="text-right">—</td>
-                    <td class="text-right">—</td>
+                    <td class="text-right"></td>
+                    <td class="text-right"></td>
+                    <td class="text-right"></td>
                 {% endif %}
             </tr>
         {% endwith %}
@@ -118,9 +118,9 @@
                     </td>
                     <td class="text-right">{{ red_rank.max|floatformat:0 }}</td>
                 {% else %}
-                    <td class="text-right">—</td>
-                    <td class="text-right">—</td>
-                    <td class="text-right">—</td>
+                    <td class="text-right"></td>
+                    <td class="text-right"></td>
+                    <td class="text-right"></td>
                 {% endif %}
             </tr>
         {% endwith %}
@@ -138,9 +138,9 @@
                         </td>
                         <td class="text-right">{{ sla_rank.max|floatformat:0 }}</td>
                     {% else %}
-                        <td class="text-right">—</td>
-                        <td class="text-right">—</td>
-                        <td class="text-right">—</td>
+                        <td class="text-right"></td>
+                        <td class="text-right"></td>
+                        <td class="text-right"></td>
                     {% endif %}
                 </tr>
             {% endwith %}
@@ -159,9 +159,9 @@
                         </td>
                         <td class="text-right">{{ rec_rank.max|floatformat:0 }}</td>
                     {% else %}
-                        <td class="text-right">—</td>
-                        <td class="text-right">—</td>
-                        <td class="text-right">—</td>
+                        <td class="text-right"></td>
+                        <td class="text-right"></td>
+                        <td class="text-right"></td>
                     {% endif %}
                 </tr>
             {% endwith %}
@@ -180,9 +180,9 @@
                         </td>
                         <td class="text-right">{{ adj_rank.max|floatformat:0 }}</td>
                     {% else %}
-                        <td class="text-right">—</td>
-                        <td class="text-right">—</td>
-                        <td class="text-right">—</td>
+                        <td class="text-right"></td>
+                        <td class="text-right"></td>
+                        <td class="text-right"></td>
                     {% endif %}
                 </tr>
             {% endwith %}

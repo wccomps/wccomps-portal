@@ -1,14 +1,8 @@
 {# Review tickets table - swappable content for htmx #}
-{# Declared, so cotton leaves them out of attrs: it writes attrs unescaped #}
-<c-vars page_obj status_filter team_filter category_filter search_query sort_by />
-<div {{ attrs }}
-     id="review-tickets-content"
-     x-data="ticketsBulkSelect"
-     @bulk-approve-tickets.document="submitBulk">
-    <form id="bulk-approve-form"
-          method="post"
-          action="{% url 'ops_batch_verify_tickets' %}"
-          x-ref="bulkForm">
+{% load cotton %}
+<div id="review-tickets-content"
+     x-data="ticketsBulkSelect">
+    <c-form id="bulk-approve-form" action="{% url 'ops_batch_verify_tickets' %}" ::data-confirm="approveQuestion">
         {% csrf_token %}
         <c-table id="result_list" role="grid" aria_label="Resolved tickets list">
             <c-slot name="headers">
@@ -24,26 +18,22 @@
                         Ticket
                     </c-table_header>
                     <c-table_header sort_field="team__team_number"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&team={{ team_filter }}&category={{ category_filter }}&search={{ search_query }}">
+                                    current_sort="{{ sort_by }}">
                         Team
                     </c-table_header>
                     <c-table_header sort_field="category"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&team={{ team_filter }}&category={{ category_filter }}&search={{ search_query }}">
+                                    current_sort="{{ sort_by }}">
                         Category
                     </c-table_header>
                     <c-table_header sortable="false">
                         Resolved By
                     </c-table_header>
                     <c-table_header sort_field="points_charged"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&team={{ team_filter }}&category={{ category_filter }}&search={{ search_query }}">
+                                    current_sort="{{ sort_by }}">
                         Points
                     </c-table_header>
                     <c-table_header sort_field="resolved_at"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&team={{ team_filter }}&category={{ category_filter }}&search={{ search_query }}">
+                                    current_sort="{{ sort_by }}">
                         Resolved
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -78,20 +68,19 @@
                     <td>
                         {{ item.ticket.points_charged }}
                         {% if item.ticket.points_charged != item.expected_points %}
-                            <span title="Expected: {{ item.expected_points }}"
-                                  class="text-warning"><span aria-hidden="true">⚠️</span></span>
+                            <span class="text-warning">expected {{ item.expected_points }}</span>
                         {% endif %}
                     </td>
                     <td>{{ item.ticket.resolved_at|timesince }} ago</td>
                     <td>
                         {% if item.ticket.is_approved %}
                             <c-badge variant="success">
-                                <span aria-hidden="true">✓</span> Approved
+                                Approved
                             </c-badge>
                             <div class="text-sm text-muted">by {{ item.ticket.approved_by.username }}</div>
                         {% else %}
                             <c-badge variant="warning">
-                                <span aria-hidden="true">⏳</span> Pending
+                                Pending
                             </c-badge>
                         {% endif %}
                     </td>
@@ -99,7 +88,7 @@
             {% empty %}
                 <tr>
                     <td colspan="8">
-                        {% if search_query or status_filter != "pending" or team_filter or category_filter %}
+                        {% if filtered %}
                             No tickets match your filters. Try <a href="{% url 'ops_review_tickets' %}">clearing all filters</a>
                         {% else %}
                             No pending tickets. All resolved tickets have been approved.
@@ -108,7 +97,6 @@
                 </tr>
             {% endfor %}
         </c-table>
-    </form>
-    <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter }}&team={{ team_filter }}&category={{ category_filter }}&search={{ search_query }}&sort={{ sort_by }}" />
+    </c-form>
+    <c-pagination :page_obj="page_obj" />
 </div>

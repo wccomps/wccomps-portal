@@ -16,12 +16,12 @@
                         <option value="">All Statuses</option>
                         {% for value, label in status_choices %}
                             <option value="{{ value }}"
-                                    {% if value == status_filter %}selected{% endif %}>{{ label }}</option>
+                                    {% if value == filters.status %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>
                 </c-filter_field>
             </c-filter_toolbar>
-            <c-registration_review_table :registrations="registrations" />
+            {% include "registration/review_table.html" %}
         </c-module>
     </div>
 {% endblock registration_content %}

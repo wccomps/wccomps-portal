@@ -230,6 +230,7 @@ CODE_EXCEPTIONS = {
     # Django
     "@admin.register": "Django admin registers the class through its decorator",
     "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",
+    "web/core/cotton.py:__str__": "str() calls it when a component writes {{ attrs }}",
     "*/management/commands/*:Command": "manage.py runs a command by its file name",
     "*/management/commands/*:handle": "manage.py calls Command.handle",
     "*/management/commands/*:help": "manage.py help prints a command's help text",
@@ -238,7 +239,6 @@ CODE_EXCEPTIONS = {
     "*:label_from_instance": "Django model choice fields call it for each option",
     "*:get_readonly_fields": "Django admin calls it on the change form",
     "*:abstract": DJANGO_MODEL_OPTION,
-    "*:ordering": DJANGO_MODEL_OPTION,
     "*:db_table": DJANGO_MODEL_OPTION,
     "*:verbose_name": DJANGO_MODEL_OPTION,
     "*:verbose_name_plural": DJANGO_MODEL_OPTION,

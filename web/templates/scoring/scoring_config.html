@@ -58,7 +58,7 @@
             </c-fieldset>
             <c-button_row>
                 <c-link href="{% url 'leaderboard_page' %}" variant="cancel">Cancel</c-link>
-                <c-button type="submit" variant="primary" ::disabled="submitting">
+                <c-button type="submit" variant="primary">
                     Save Scoring Setup
                 </c-button>
             </c-button_row>
@@ -69,7 +69,7 @@
         <c-button_row>
             <c-form action="{% url 'scoring:sync_scores' %}" class="m-0">
                 {% csrf_token %}
-                <c-button type="submit" variant="default" ::disabled="submitting">
+                <c-button type="submit" variant="default">
                     Sync Service Scores
                 </c-button>
             </c-form>

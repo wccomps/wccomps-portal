@@ -37,7 +37,7 @@
             {% if pool %}<p class="text-muted mb-20">This pool is used by {{ pool.findings.count }} finding(s).</p>{% endif %}
             <c-button_row class="justify-end">
                 <c-link href="{% url 'scoring:ip_pool_list' %}" variant="cancel">Cancel</c-link>
-                <c-button type="submit" variant="primary" ::disabled="submitting">
+                <c-button type="submit" variant="primary">
                     {{ action }} Pool
                 </c-button>
             </c-button_row>

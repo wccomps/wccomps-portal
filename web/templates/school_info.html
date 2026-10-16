@@ -55,7 +55,7 @@
                         </td>
                         <td>
                             {% if item.school_info %}
-                                {{ item.school_info.secondary_email|default:"—" }}
+                                {{ item.school_info.secondary_email }}
                             {% else %}
                                 Not set
                             {% endif %}
@@ -64,7 +64,7 @@
                             {% if item.school_info %}
                                 {{ item.school_info.updated_at|timesince }} ago
                             {% else %}
-                                —
+                                Never
                             {% endif %}
                         </td>
                     </tr>

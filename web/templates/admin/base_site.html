@@ -159,14 +159,7 @@
             },
             go() { window.location.href = this.$store.ticketNotifs.toastUrl; }
         }));
-        Alpine.data('submitGuard', () => ({
-            submitting: false,
-            onSubmit(e) {
-                if (this.submitting) { e.preventDefault(); return; }
-                this.submitting = true;
-                setTimeout(() => { this.submitting = false; }, 10000);
-            }
-        }));
+        Alpine.data('ticketListLink', ticketListLink);
         Alpine.data('audioToggle', () => ({
             enabled: false,
             get disabled() { return !this.enabled; },

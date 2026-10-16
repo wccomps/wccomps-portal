@@ -204,7 +204,7 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
         if header_mapping:
             mapped_names = set(header_mapping.values())
             warnings.append(
-                "Columns auto-detected: " + ", ".join(f"{raw} \u2192 {canon}" for raw, canon in header_mapping.items())
+                "Columns auto-detected: " + ", ".join(f"{raw} as {canon}" for raw, canon in header_mapping.items())
             )
         else:
             mapped_names = set(reader.fieldnames)

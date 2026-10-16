@@ -30,9 +30,13 @@ from core.tests.guards import (
     REPO_DIR,
     TEMPLATES_DIR,
     WEB_DIR,
+    Tag,
     fail_with,
-    is_standalone_document,
+    page_templates,
+    portal_templates,
+    tags,
     template_name,
+    text,
     tracked_files,
     tracked_templates,
 )
@@ -42,7 +46,7 @@ APP_CSS = WEB_DIR / "static/css/app.css"
 ADMIN_CSS = Path(django.__file__).parent / "contrib/admin/static/admin/css"
 UTILITIES_RE = re.compile(r"/\* BEGIN UTILITIES \*/(.*?)/\* END UTILITIES \*/", re.DOTALL)
 
-# The shared components: the portal's building blocks. Every .html in cotton/ is here or in PAGE_PARTIALS.
+# The shared components: the portal's building blocks. Every .html in cotton/ is here.
 SHARED_COMPONENTS = {
     "action_box.html",
     "alert.html",
@@ -73,18 +77,6 @@ SHARED_COMPONENTS = {
     "toast.html",
     "toggle_button.html",
 }
-# One page's markup kept in cotton/, not shared; checked like pages
-PAGE_PARTIALS = {
-    "inject_grades_table.html",
-    "inject_grading_content.html",
-    "red_findings_table.html",
-    "registration_review_table.html",
-    "review_incidents_table.html",
-    "review_orange_table.html",
-    "review_tickets_table.html",
-    "ticket_list_table.html",
-}
-
 # Markup a page writes by hand that a shared component renders: (element, class or None, component)
 RAW_MARKUP = [
     ("button", None, "<c-button>"),
@@ -99,6 +91,7 @@ RAW_MARKUP = [
     ("div", "form-row", "<c-form_field>"),
     ("div", "filter-field", "<c-filter_field>"),
     ("dl", "detail-list", "<c-detail_grid>"),
+    ("form", None, "<c-form>"),
 ]
 
 # Filters that turn a stored status into a variant the component knows (core.status_variants)
@@ -247,13 +240,6 @@ UNUSED_CSS_EXCEPTIONS: dict[str, str] = {
 # Reading templates, scripts and stylesheets
 # ---------------------------------------------------------------------------------------------------------------
 
-COMMENT_RE = re.compile(r"{#.*?#}|{%\s*comment\s*%}.*?{%\s*endcomment\s*%}", re.DOTALL)
-TEMPLATE_TAG_RE = re.compile(r"{%.*?%}|{{.*?}}", re.DOTALL)
-PLACEHOLDER_RE = re.compile("\x01(\\d+)\x02")
-TAG_RE = re.compile(
-    r"""<(?P<name>[A-Za-z][\w:.-]*)(?=[\s/>])(?P<attrs>(?:\s*[^\s=>/"']+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+))?)*)\s*/?>"""
-)
-ATTR_RE = re.compile(r"""([^\s=>/"']+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>"']+))?""")
 SCRIPT_RE = re.compile(r"<script\b[^>]*>(.*?)</script>", re.DOTALL | re.IGNORECASE)
 STYLE_BLOCK_RE = re.compile(r"<style\b", re.IGNORECASE)
 STATIC_JS_RE = re.compile(r"""{%\s*static\s+["'](js/[\w.-]+\.js)["']\s*%}""")
@@ -277,49 +263,6 @@ CSS_RULE_RE = re.compile(r"([^{}]+)\{[^{}]*\}")
 CSS_CLASS_RE = re.compile(r"\.(-?[A-Za-z_][\w-]*)")
 TRANSITION_ATTRS = {f"x-transition:{phase}{part}" for phase in ("enter", "leave") for part in ("", "-start", "-end")}
 STYLE_ATTRS = {"style", ":style", "::style", "x-bind:style"}
-
-
-class Tag:
-    """An element or component tag, with template tags in its attribute values kept as written."""
-
-    def __init__(self, name: str, attrs: dict[str, str], line: int) -> None:
-        self.name = name
-        self.attrs = attrs
-        self.line = line
-
-
-@cache
-def text(path: Path) -> str:
-    """The file without template comments, keeping their line breaks so line numbers still match."""
-    return COMMENT_RE.sub(lambda m: "\n" * m.group().count("\n"), path.read_text(encoding="utf-8"))
-
-
-@cache
-def tags(path: Path) -> tuple[Tag, ...]:
-    """Every tag in the template. Template tags are set aside first, so a ">" or quote inside one ({% if n > 0 %})
-    neither ends the tag nor its attribute."""
-    content = text(path)
-    kept: list[str] = []
-
-    def hide(match: re.Match[str]) -> str:
-        kept.append(match.group())
-        return f"\x01{len(kept) - 1}\x02"
-
-    hidden = TEMPLATE_TAG_RE.sub(hide, content)
-
-    def restore(value: str) -> str:
-        return PLACEHOLDER_RE.sub(lambda m: kept[int(m.group(1))], value)
-
-    found = []
-    for match in TAG_RE.finditer(hidden):
-        attrs = {}
-        for name, value in ATTR_RE.findall(match.group("attrs")):
-            # An attribute inside {% if %}...{% endif %} reads as the attribute itself
-            name = PLACEHOLDER_RE.sub("", name)
-            if name:
-                attrs[name] = restore(value[1:-1] if value[:1] in "\"'" else value)
-        found.append(Tag(match.group("name").lower(), attrs, hidden.count("\n", 0, match.start()) + 1))
-    return tuple(found)
 
 
 def literal_classes(literal: str) -> set[str]:
@@ -394,9 +337,7 @@ def bound_names(path: Path) -> set[str]:
 @cache
 def portal_scripts() -> tuple[str, ...]:
     """Every script the portal runs: the non-standalone templates' scripts and static/js."""
-    found = [
-        script for p in tracked_templates() if not is_standalone_document(p) for script in SCRIPT_RE.findall(text(p))
-    ]
+    found = [script for p in portal_templates() for script in SCRIPT_RE.findall(text(p))]
     return tuple(found + [path.read_text(encoding="utf-8") for path in static_scripts().values()])
 
 
@@ -423,13 +364,6 @@ def shared_component_paths() -> tuple[Path, ...]:
 
 
 @cache
-def checked_templates() -> tuple[Path, ...]:
-    """Pages and page partials: not the shared components, not standalone documents."""
-    shared = set(shared_component_paths())
-    return tuple(p for p in tracked_templates() if p not in shared and not is_standalone_document(p))
-
-
-@cache
 def python_sources() -> tuple[Path, ...]:
     not_source = re.compile(r"/(tests|migrations|browser_tests|integration_tests)/|/test_[^/]*\.py$|/conftest\.py$")
     return tuple(
@@ -446,13 +380,13 @@ def add(found: dict[str, set[str]], where: str, names: Iterable[str]) -> None:
 def page_uses() -> dict[str, set[str]]:
     """Class -> the pages (and Python files) that put it on a page."""
     found: dict[str, set[str]] = {}
-    for path in checked_templates():
+    for path in page_templates():
         add(found, template_name(path), written_classes(path) | scripted_classes(path))
     for path in python_sources():
         add(
             found,
             path.relative_to(WEB_DIR).as_posix(),
-            (n for v in DICT_CLASS_RE.findall(path.read_text()) for n in literal_classes(v)),
+            (n for v in DICT_CLASS_RE.findall(text(path)) for n in literal_classes(v)),
         )
     return found
 
@@ -472,7 +406,7 @@ def bound_page_uses() -> dict[str, set[str]]:
     """Class -> the pages whose :class bindings can apply it. Only the undefined-class check reads this: a getter
     returning a mistyped class (alert--sucess) renders an unstyled element."""
     found: dict[str, set[str]] = {}
-    for path in checked_templates():
+    for path in page_templates():
         add(found, template_name(path), bound_classes(path))
     return found
 
@@ -481,7 +415,7 @@ def bound_page_uses() -> dict[str, set[str]]:
 def hooks() -> frozenset[str]:
     """Classes the portal's script reads to find elements (querySelector('.box-toggle')). Such a class counts as
     defined even with no rule of its own."""
-    portal = [p for p in tracked_templates() if not is_standalone_document(p)]
+    portal = portal_templates()
     return frozenset(
         name
         for path in portal
@@ -527,11 +461,11 @@ def known_variants() -> dict[str, set[str]]:
     """Component -> the variants its template compares `variant` with, plus its default."""
     known = {}
     for path in shared_component_paths():
-        content = path.read_text()
+        content = text(path)
         compared = set(re.findall(r"variant\s*==\s*['\"]([^'\"]*)['\"]", content))
         if compared:
-            default = re.search(r'<c-vars\b[^>]*\bvariant="([^"]*)"', content)
-            known[path.stem] = compared | ({default.group(1)} if default else set())
+            defaults = {tag.attrs["variant"] for tag in tags(path) if tag.name == "c-vars" and "variant" in tag.attrs}
+            known[path.stem] = compared | defaults
     return known
 
 
@@ -545,13 +479,12 @@ def by_use(uses: dict[str, set[str]], names: Iterable[str]) -> dict[str, str]:
 
 
 def test_all_components_registered() -> None:
-    """Every component is either shared (part of the vocabulary) or one page's partial (checked like a page)."""
+    """Every component is a shared one (part of the vocabulary); one page's markup is an include beside the page."""
     actual = {p.name for p in tracked_templates() if p.parent == COTTON_DIR}
-    registered = SHARED_COMPONENTS | PAGE_PARTIALS
-    unknown = sorted(actual - registered)
-    deleted = sorted(registered - actual)
-    assert not unknown, f"Add these cotton files to SHARED_COMPONENTS or PAGE_PARTIALS: {unknown}"
-    assert not deleted, f"These are in SHARED_COMPONENTS or PAGE_PARTIALS but not in cotton/: {deleted}"
+    unknown = sorted(actual - SHARED_COMPONENTS)
+    deleted = sorted(SHARED_COMPONENTS - actual)
+    assert not unknown, f"Add these cotton files to SHARED_COMPONENTS: {unknown}"
+    assert not deleted, f"These are in SHARED_COMPONENTS but not in cotton/: {deleted}"
 
 
 def test_utilities_section_is_marked() -> None:
@@ -585,13 +518,18 @@ def test_classes_come_from_the_shared_vocabulary() -> None:
     )
 
 
+def get_form(tag: Tag, component: str) -> bool:
+    """A GET form (a filter toolbar): c-form is a POST form."""
+    return component == "<c-form>" and tag.attrs.get("method", "get").lower() != "post"
+
+
 def test_no_hand_written_component_markup() -> None:
     lines: dict[str, list[str]] = {}
-    for path in checked_templates():
+    for path in page_templates():
         for tag in tags(path):
             classes = attribute_classes(tag.attrs.get("class", ""))
             for element, cls, component in RAW_MARKUP:
-                if tag.name == element and (cls is None or cls in classes):
+                if tag.name == element and (cls is None or cls in classes) and not get_form(tag, component):
                     lines.setdefault(f"{template_name(path)}:{component}", []).append(str(tag.line))
     found = {key: f"line {', '.join(ln)}" for key, ln in lines.items()}
     fail_with("Markup a shared component renders, written by hand", found, RAW_MARKUP_EXCEPTIONS)
@@ -600,7 +538,7 @@ def test_no_hand_written_component_markup() -> None:
 def test_no_inline_styles() -> None:
     """A page's look comes from classes: a style attribute or <style> block is styling the vocabulary can't see."""
     lines: dict[str, list[str]] = {}
-    for path in checked_templates():
+    for path in page_templates():
         where = f"{template_name(path)}:style"
         for tag in tags(path):
             if STYLE_ATTRS & set(tag.attrs):
@@ -616,9 +554,7 @@ def test_variants_are_ones_the_component_knows() -> None:
     variant="danger" rendered green). A variant from a stored status goes through the status's mapping."""
     known = known_variants()
     found: dict[str, str] = {}
-    for path in tracked_templates():
-        if is_standalone_document(path):
-            continue
+    for path in portal_templates():
         for tag in tags(path):
             name = tag.name.removeprefix("c-")
             if not tag.name.startswith("c-") or name not in known or "variant" not in tag.attrs:
@@ -652,7 +588,7 @@ def badge_kind_problem(variant: str) -> str:
 def test_table_widths_are_lengths() -> None:
     """c-table's widths become inline styles, so each one must be a plain length, not CSS of the page's own."""
     found: dict[str, str] = {}
-    for path in checked_templates():
+    for path in page_templates():
         for tag in tags(path):
             if tag.name != "c-table" or "widths" not in tag.attrs:
                 continue

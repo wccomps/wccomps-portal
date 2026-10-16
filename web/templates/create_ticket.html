@@ -9,10 +9,7 @@
                        subtitle="Team {{ team.team_number }}"
                        parent_url="{% url 'ticket_list' %}"
                        parent_label="Tickets" />
-        <form method="post"
-              id="ticketForm"
-              x-data="ticketForm"
-              @submit="validateForm">
+        <c-form id="ticketForm" x-data="ticketForm">
             {% csrf_token %}
             <c-module>
                 {% if error %}<c-alert variant="error">{{ error }}</c-alert>{% endif %}
@@ -155,12 +152,12 @@
                 </c-fieldset>
                 <c-button_row class="justify-end">
                     <c-link href="{% url 'ticket_list' %}" variant="cancel">Cancel</c-link>
-                    <c-button type="submit" variant="primary" ::disabled="submitting">
+                    <c-button type="submit" variant="primary">
                         Create Ticket
                     </c-button>
                 </c-button_row>
             </c-module>
-        </form>
+        </c-form>
     </div>
     {{ categories|json_script:"categories-data" }}
     {{ box_ip_map|json_script:"box-ip-map-data" }}
@@ -173,7 +170,6 @@
             const allServiceChoices = JSON.parse(document.getElementById('service-choices-data').textContent);
 
             return {
-                submitting: false,
                 selectedCategory: '{{ form_data.category|default:""|escapejs }}',
                 selectedHostname: '{{ form_data.hostname|default:""|escapejs }}',
                 selectedService: '{{ form_data.service_name|default:""|escapejs }}',
@@ -287,13 +283,6 @@
                         }
                     }
                 },
-
-                validateForm(event) {
-                    if (this.submitting) { event.preventDefault(); return false; }
-                    this.submitting = true;
-                    setTimeout(() => { this.submitting = false; }, 10000);
-                    return true;
-                }
             };
         });
     });

@@ -1,4 +1,3 @@
-import contextlib
 import logging
 from datetime import timedelta
 from typing import cast
@@ -11,6 +10,7 @@ from django.utils import timezone
 
 from core.auth_utils import get_user_team, has_permission
 from core.tickets_config import get_all_categories, get_category_config
+from core.utils import list_filters, optional_int
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -36,23 +36,17 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
 
     from core.utils import filter_sort_paginate
 
-    # Several statuses allowed (#37): checkboxes send ?status=a&status=b, and sort/page links carry
-    # them as one comma-separated value. Unknown values are ignored; none selected means all.
+    # Several statuses allowed (#37): checkboxes send ?status=a&status=b; a comma-separated value
+    # (an older link's) works too. Unknown values are ignored; none selected means all.
     requested = {part for value in request.GET.getlist("status") for part in value.split(",")}
     selected_statuses = [s for s, _label in Ticket.STATUS_CHOICES if s in requested]
-    status_filter = ",".join(selected_statuses) or "all"
-    category_filter = request.GET.get("category", "all") or "all"
-    search_query = request.GET.get("search", "").strip()
+    filters, filtered = list_filters(
+        request, {"category": "all", "search": ""} | ({"team": "", "assignee": ""} if is_ops else {})
+    )
+    filtered = filtered or bool(selected_statuses)
 
-    team_filter = request.GET.get("team", "") if is_ops else ""
-    assignee_filter = request.GET.get("assignee", "") if is_ops else ""
-
-    page_size_str = request.GET.get("page_size", "50")
-    try:
-        page_size = int(page_size_str)
-        if page_size not in VALID_PAGE_SIZES:
-            page_size = 50
-    except ValueError:
+    page_size = optional_int(request.GET.get("page_size", ""))
+    if page_size not in VALID_PAGE_SIZES:
         page_size = 50
 
     if is_ops:
@@ -79,45 +73,30 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     if selected_statuses:
         query = query.filter(status__in=selected_statuses)
 
-    if category_filter != "all":
-        with contextlib.suppress(ValueError):
-            query = query.filter(category_id=int(category_filter))
+    if (category_id := optional_int(filters["category"])) is not None:
+        query = query.filter(category_id=category_id)
 
-    if search_query:
+    if filters["search"]:
         query = query.filter(
-            Q(title__icontains=search_query)
-            | Q(description__icontains=search_query)
-            | Q(ticket_number__icontains=search_query)
-            | Q(hostname__icontains=search_query)
-            | Q(service_name__icontains=search_query)
+            Q(title__icontains=filters["search"])
+            | Q(description__icontains=filters["search"])
+            | Q(ticket_number__icontains=filters["search"])
+            | Q(hostname__icontains=filters["search"])
+            | Q(service_name__icontains=filters["search"])
         )
 
-    if is_ops and team_filter:
-        with contextlib.suppress(ValueError):
-            query = query.filter(team__team_number=int(team_filter))
+    if (team_number := optional_int(filters.get("team", ""))) is not None:
+        query = query.filter(team__team_number=team_number)
 
-    if is_ops and assignee_filter:
-        if assignee_filter == "unassigned":
-            query = query.filter(assigned_to__isnull=True)
-        else:
-            with contextlib.suppress(ValueError):
-                query = query.filter(assigned_to_id=int(assignee_filter))
+    if filters.get("assignee", "") == "unassigned":
+        query = query.filter(assigned_to__isnull=True)
+    elif (assignee_id := optional_int(filters.get("assignee", ""))) is not None:
+        query = query.filter(assigned_to_id=assignee_id)
 
     result = filter_sort_paginate(
         request,
         query,
-        valid_sort_fields=[
-            "created_at",
-            "-created_at",
-            "status",
-            "-status",
-            "team__team_number",
-            "-team__team_number",
-            "category",
-            "-category",
-            "assigned_to__username",
-            "-assigned_to__username",
-        ],
+        sort_fields=["created_at", "status", "team__team_number", "category", "assigned_to__username"],
         default_sort="-created_at",
         page_size=page_size,
     )
@@ -155,21 +134,18 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         "team": team,
         "authentik_username": authentik_username,
         "page_obj": page_obj,
-        "status_filter": status_filter,
         "selected_statuses": selected_statuses,
         "status_choices": Ticket.STATUS_CHOICES,
-        "category_filter": category_filter,
-        "search_query": search_query,
+        "filters": filters,
+        "filtered": filtered,
         "sort_by": sort_by,
         "page_size": page_size,
-        "team_filter": team_filter,
-        "assignee_filter": assignee_filter,
         "assignees": assignees,
         "categories": get_all_categories(),
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/ticket_list_table.html", context)
+        return render(request, "ticketing/ticket_list_table.html", context)
 
     return render(request, "ticket_list.html", context)
 
@@ -184,10 +160,7 @@ def ticket_notifications(request: HttpRequest) -> JsonResponse:
     ):
         return JsonResponse({"error": "forbidden"}, status=403)
 
-    try:
-        since_id = int(request.GET.get("since_id", "0"))
-    except ValueError, TypeError:
-        since_id = 0
+    since_id = optional_int(request.GET.get("since_id", "")) or 0
 
     open_count = Ticket.objects.filter(status="open").count()
     raw_tickets = (

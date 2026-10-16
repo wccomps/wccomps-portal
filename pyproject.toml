@@ -8,7 +8,7 @@ dependencies = [
     "discord.py>=2.4.0",
     # Django web app
     "django>=5.1.14,<6.2",
-    "django-cotton>=0.9",
+    "django-cotton>=2.7",
     # settings.py calls django_stubs_ext.monkeypatch() so generic Django classes subscript at runtime
     "django-stubs-ext>=5.1.1",
     "gunicorn>=21.2",
@@ -95,6 +95,10 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "*.migrations.*"
 ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "django_cotton.*"
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "weasyprint"

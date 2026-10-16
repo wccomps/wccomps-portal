@@ -131,8 +131,8 @@ class DiscordLink(models.Model):
 
     def __str__(self) -> str:
         if self.team:
-            return f"{self.discord_username} → Team {self.team.team_number}"
-        return f"{self.discord_username} → {self.user.username}"
+            return f"{self.discord_username} on Team {self.team.team_number}"
+        return f"{self.discord_username} as {self.user.username}"
 
     @classmethod
     def deactivate_previous_links(cls, discord_id: int, exclude_pk: int | None = None) -> int:
@@ -199,7 +199,7 @@ class LinkAttempt(models.Model):
 
     def __str__(self) -> str:
         status = "Success" if self.success else "Failed"
-        return f"{self.discord_username} → {self.authentik_username} ({status})"
+        return f"{self.discord_username} to {self.authentik_username} ({status})"
 
 
 class LinkRateLimit(models.Model):

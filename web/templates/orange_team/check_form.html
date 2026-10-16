@@ -17,10 +17,7 @@
     "
                    subtitle="Define a check with a max, a window, and optional criteria" />
     <c-module>
-        <form method="post"
-              {% if mode == "edit" %}action="{% url 'orange_team:check_edit' orange_check.pk %}"{% endif %}
-              x-data="criteriaForm"
-              @submit="onSubmit">
+        <c-form x-data="criteriaForm" action="{% if mode == 'edit' %}{% url 'orange_team:check_edit' orange_check.pk %}{% endif %}">
             {% csrf_token %}
             <c-fieldset heading="Check Details">
                 <c-form_field label="Title" required="true" id="id_title">
@@ -108,7 +105,7 @@
                                       variant="danger"
                                       x-show="canRemove"
                                       x-on:click="removeCriterion"
-                                      :data-index="index">
+                                      ::data-index="index">
                                 Remove
                             </c-button>
                         </div>
@@ -129,7 +126,7 @@
         {% endif %}
         "
                         variant="cancel">Cancel</c-link>
-                <c-button type="submit" variant="primary" ::disabled="submitting">
+                <c-button type="submit" variant="primary">
                     {% if mode == "create" %}
                         Create Check
                     {% else %}
@@ -137,7 +134,7 @@
                     {% endif %}
                 </c-button>
             </c-button_row>
-        </form>
+        </c-form>
     </c-module>
     {{ criteria|json_script:"criteria-data" }}
     <script>
@@ -157,18 +154,12 @@
             var saved = data ? JSON.parse(data.textContent) : [];
             if (!saved.length) saved = [];
             return {
-                submitting: false,
                 criteria: saved.map(function(c, i) { return row(i, c); }),
                 _nextN: saved.length,
                 get canRemove() { return this.criteria.length > 1; },
                 setCriterionField(e) {
                     var idx = parseInt(e.target.dataset.index);
                     this.criteria[idx][e.target.dataset.prop] = e.target.value;
-                },
-                onSubmit(e) {
-                    if (this.submitting) { e.preventDefault(); return; }
-                    this.submitting = true;
-                    setTimeout(() => { this.submitting = false; }, 10000);
                 },
                 addCriterion() {
                     this.criteria.push(row(this._nextN++, {id: '', label: '', points: ''}));

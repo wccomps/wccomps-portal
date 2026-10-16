@@ -60,7 +60,7 @@ class RedTeamScoreAdmin(admin.ModelAdmin[RedTeamScore]):
 
     @admin.display(description="Boxes")
     def affected_boxes_display(self, obj: RedTeamScore) -> str:
-        return format_boxes_display(obj.affected_boxes) or "—"
+        return format_boxes_display(obj.affected_boxes)
 
     filter_horizontal = ["affected_teams", "contributors"]
     inlines = [RedTeamScreenshotInline]
@@ -173,12 +173,12 @@ class IncidentReportAdmin(admin.ModelAdmin[IncidentReport]):
 
     @admin.display(description="Affected Boxes")
     def affected_boxes_display(self, obj: IncidentReport) -> str:
-        return format_boxes_display(obj.affected_boxes) or "—"
+        return format_boxes_display(obj.affected_boxes)
 
     @admin.display(description="Status")
     def reviewed_status(self, obj: IncidentReport) -> str:
         if obj.is_approved:
-            return format_html('<span style="color: {};">{}</span>', "green", "✓ Reviewed")
+            return format_html('<span style="color: {};">{}</span>', "green", "Reviewed")
         return format_html('<span style="color: {};">{}</span>', "orange", "Pending")
 
 

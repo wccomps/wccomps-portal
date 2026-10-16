@@ -36,7 +36,7 @@ def test_status_returns_summary_and_changes(admin_client):
             "roles_added": 2,
             "roles_removed": 1,
             "errors": 0,
-            "changes": ["[DRY RUN] ✗ Removed Gold Team from bob (Bob) (not linked)"],
+            "changes": ["[DRY RUN] Removed Gold Team from bob (Bob) (not linked)"],
         },
     )
 

@@ -3,7 +3,7 @@ import json
 import logging
 import queue
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator, Mapping
 from datetime import datetime
 from typing import TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -100,8 +100,8 @@ def run_detached(lines: Iterator[str]) -> Iterator[str]:
         yield line
 
 
-def filter_number(value: str) -> int | None:
-    """A list filter's number as the URL carries it, or None when it isn't one: the page then ignores that filter."""
+def optional_int(value: str) -> int | None:
+    """The integer in request text, or None when the text isn't one."""
     try:
         return int(value)
     except ValueError:
@@ -113,39 +113,40 @@ class FilterSortPage[M: Model](TypedDict):
     current_sort: str
 
 
+def list_filters(request: HttpRequest, defaults: Mapping[str, str]) -> tuple[dict[str, str], bool]:
+    """A list page's filters from the request, each its default when absent or blank (values trimmed), and whether
+    any is set to something else: the page's empty state then says its filters hide rows."""
+    values = {name: request.GET.get(name, "").strip() or default for name, default in defaults.items()}
+    return values, any(values[name] != default for name, default in defaults.items())
+
+
+def requested_sort(request: HttpRequest, sort_fields: Collection[str], default_sort: str) -> str:
+    """The list's ?sort=: one of sort_fields, with a leading - for descending; "default" means the model's default
+    ordering (an empty sort), and any other value the list's default sort."""
+    sort_by = request.GET.get("sort", default_sort)
+    if sort_by == "default":
+        return ""
+    return sort_by if sort_by.removeprefix("-") in sort_fields else default_sort
+
+
+def stable_order[M: Model](queryset: QuerySet[M], sort_by: str) -> QuerySet[M]:
+    """The queryset ordered by sort_by, then its model's default ordering and pk, so rows that tie keep one order
+    and a page boundary never splits them differently from one request to the next."""
+    default_ordering = list(queryset.model._meta.ordering or ())
+    return queryset.order_by(*([sort_by] if sort_by else []), *default_ordering, "pk")
+
+
 def filter_sort_paginate[M: Model](
     request: HttpRequest,
     queryset: QuerySet[M],
     *,
-    valid_sort_fields: list[str],
+    sort_fields: Collection[str],
     default_sort: str = "-created_at",
     page_size: int = 50,
 ) -> FilterSortPage[M]:
-    """Validate sort field, apply ordering, and paginate a queryset.
-
-    Reads ``sort`` and ``page`` from ``request.GET``.  The caller is
-    responsible for applying all domain-specific filters to *queryset*
-    before calling this helper.
-    """
-    sort_by = request.GET.get("sort", default_sort)
-
-    if sort_by == "default":
-        sort_by = ""
-
-    if sort_by and sort_by not in valid_sort_fields:
-        sort_by = default_sort
-
-    if sort_by:
-        queryset = queryset.order_by(sort_by)
-
-    page_str = request.GET.get("page", "1")
-    try:
-        page_num = int(page_str)
-    except TypeError, ValueError:
-        page_num = 1
-
-    paginator = Paginator(queryset, page_size)
-    page_obj = paginator.get_page(page_num)
+    """Order a filtered queryset by requested_sort and paginate it by ?page=."""
+    sort_by = requested_sort(request, sort_fields, default_sort)
+    page_obj = Paginator(stable_order(queryset, sort_by), page_size).get_page(request.GET.get("page"))
 
     return FilterSortPage(page_obj=page_obj, current_sort=sort_by)
 
@@ -170,12 +171,7 @@ def bulk_approve(  # type: ignore[explicit-any]
         messages.info(request, f"No {item_label}s selected for approval")
         return redirect(redirect_url)
 
-    valid_ids: list[int] = []
-    for raw_id in raw_ids:
-        try:
-            valid_ids.append(int(raw_id))
-        except ValueError, TypeError:
-            continue
+    valid_ids = [number for raw_id in raw_ids if (number := optional_int(raw_id)) is not None]
 
     if not valid_ids:
         messages.warning(request, f"No valid {item_label} IDs provided")

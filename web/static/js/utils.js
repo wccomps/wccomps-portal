@@ -5,7 +5,7 @@
  * Combine mixins with a component's own fields using compose(): Alpine.data('x', () => compose(toastMixin(), { ... })).
  */
 
-/* ── Helpers ─────────────────────────────────────────────────────── */
+/* Helpers */
 
 /**
  * Merge objects into one, keeping getters live: object spread evaluates each getter once and copies
@@ -85,7 +85,7 @@ function setTogglePressed(button, pressed) {
     button.setAttribute('aria-pressed', String(pressed));
 }
 
-/* ── Alpine Mixins ───────────────────────────────────────────────── */
+/* Alpine Mixins */
 
 /** Toast notification state: message, messageType, alertClass. */
 function toastMixin() {
@@ -196,26 +196,93 @@ function streamMixin(url) {
     });
 }
 
-/**
- * Bulk selection mixin for review/list pages.
- * @param {string} dataAttr — HTML data attribute suffix (e.g. 'incident-id').
- * Call this.initBulkSelect() from your init() method.
- */
 function jsKey(id) {
     // Mirror of the `jskey` template filter: a valid JS identifier for a row id.
     return 'k' + String(id).replace(/\W/g, '_');
 }
 
-function bulkSelectMixin(dataAttr) {
+/* Forms: asking first, and posting once */
+
+// A c-form (data-post-once) posts once: the first submit marks it data-posting and disables its submit buttons until
+// the page is left, and a later submit is dropped. Before that, any form's data-confirm question is asked, read as
+// text. Capture runs before the form's own handlers, so a dropped or cancelled submit stops them too. Other forms,
+// Django admin's among them (an action that only downloads a file leaves the page as it was), aren't guarded.
+document.addEventListener('submit', (e) => {
+    const form = e.target;
+    const question = form.dataset.confirm;
+    if (form.dataset.posting || (question && !confirm(question))) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+    }
+}, true);
+
+// Marked last (window, bubbling), so a form whose own handler cancels the submit (one that posts by fetch) isn't
+// marked
+window.addEventListener('submit', (e) => {
+    const form = e.target;
+    if (e.defaultPrevented || !('postOnce' in form.dataset)) return;
+    form.dataset.posting = 'true';
+    // Disabled after the browser has read the form, so the button pressed still sends its name and value
+    // (form.elements: also a button outside the form that joins it with form=)
+    setTimeout(() => [...form.elements]
+        .filter(control => control.type === 'submit' && !control.disabled)
+        .forEach(button => { button.disabled = true; button.dataset.postingDisabled = 'true'; }));
+});
+
+// A page brought back by Back posts again. A POST that fails without leaving the page (offline, Stop) keeps its
+// form blocked until a reload, and a refresh covering that form keeps skipping its turns until then too.
+window.addEventListener('pageshow', (e) => {
+    if (!e.persisted) return;
+    document.querySelectorAll('form[data-posting]').forEach(form => delete form.dataset.posting);
+    document.querySelectorAll('[data-posting-disabled]').forEach(button => {
+        button.disabled = false;
+        delete button.dataset.postingDisabled;
+    });
+});
+
+// A refresh (an element reloading itself, like the ticket list's 30 s poll) replaces what it covers, so it skips its
+// turn while a form there is posting (the swap would reset its guard) or a row there is checked (the selection
+// would go). A request the person made, such as a filter change, goes ahead.
+document.addEventListener('htmx:beforeRequest', (e) => {
+    const area = e.detail.target;
+    if (e.detail.elt !== area) return;
+    if (area.querySelector('form[data-posting], input[type="checkbox"]:checked')) e.preventDefault();
+});
+
+/* The ticket list a tab last showed: its ticket pages' way back */
+
+function rememberTicketList() {
+    try { sessionStorage.setItem('ticketListQuery', location.search); } catch (e) { /* storage blocked: plain list */ }
+}
+
+// On a ticket page's breadcrumb (c-page_header x-data="ticketListLink"): its list link gets the tab's list query
+function ticketListLink() {
+    return {
+        init() {
+            let query = '';
+            try { query = sessionStorage.getItem('ticketListQuery') || ''; } catch (e) { /* storage blocked */ }
+            const link = this.$el.querySelector('a');
+            if (link && query) link.search = query;
+        },
+    };
+}
+
+/**
+ * Bulk selection for a review table whose rows carry data-<dataAttr>="<id>" checkboxes. approveQuestion is the
+ * bulk form's data-confirm (::data-confirm="approveQuestion"): it counts the checked rows, and with none checked
+ * asks nothing, so the server says nothing was selected.
+ * @param {string} dataAttr  the rows' data attribute suffix (e.g. 'incident-id')
+ * @param {string} noun      what a row is, for the question (e.g. 'incident')
+ */
+function bulkSelectMixin(dataAttr, noun) {
     const camel = dataAttr.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
     return {
         // Reactive map keyed by jsKey(id). Each row binds :checked="selectedMap.<key>",
-        // so Alpine owns the checkbox state — the CSP build cannot evaluate selected.includes(id),
+        // so Alpine owns the checkbox state: the CSP build cannot evaluate selected.includes(id),
         // and an imperative sync was being clobbered by Alpine's render pass.
         selectedMap: {},
         selectableIds: [],
-        submitting: false,
-        initBulkSelect() {
+        init() {
             this.selectableIds = Array.from(
                 this.$el.querySelectorAll('[data-' + dataAttr + ']'),
             ).map(el => el.dataset[camel]);
@@ -225,6 +292,10 @@ function bulkSelectMixin(dataAttr) {
         },
         get selected() {
             return this.selectableIds.filter(id => this.selectedMap[jsKey(id)]);
+        },
+        get approveQuestion() {
+            const count = this.selected.length;
+            return count ? `Approve ${count} ${noun}(s)? This cannot be undone.` : '';
         },
         get allSelected() {
             return this.selectableIds.length > 0

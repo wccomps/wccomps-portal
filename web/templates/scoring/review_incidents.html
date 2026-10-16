@@ -6,14 +6,7 @@
 {% block scoring_content %}
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('incidentsBulkSelect', () => compose(bulkSelectMixin('incident-id'), {
-            init() { this.initBulkSelect(); },
-            submitBulk() {
-                if (this.submitting) return;
-                if (this.selected.length === 0) { alert('Please select at least one incident to approve'); return; }
-                if (confirm('Approve ' + this.selected.length + ' incident(s)? This action cannot be undone.')) { this.submitting = true; this.$refs.bulkForm.submit(); }
-            }
-        }));
+        Alpine.data('incidentsBulkSelect', () => bulkSelectMixin('incident-id', 'incident'));
     });
     </script>
     <c-page_header title="Review Incident Reports" />
@@ -25,9 +18,7 @@
                           hx_push_url="true">
             {% if has_pending %}
                 <c-slot name="actions">
-                    <c-button type="button"
-                              onclick="document.dispatchEvent(new CustomEvent('bulk-approve-incidents'))"
-                              variant="primary">
+                    <c-button type="submit" form="bulk-approve-form" variant="primary">
                         Approve Selected
                     </c-button>
                 </c-slot>
@@ -35,10 +26,10 @@
             <c-filter_field label="Status" id="id_status">
                 <select name="status" id="id_status" aria-label="Filter by status">
                     <option value="pending"
-                            {% if status_filter == 'pending' %}selected{% endif %}>Pending Only</option>
+                            {% if filters.status == 'pending' %}selected{% endif %}>Pending Only</option>
                     <option value="approved"
-                            {% if status_filter == 'approved' %}selected{% endif %}>Approved Only</option>
-                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                            {% if filters.status == 'approved' %}selected{% endif %}>Approved Only</option>
+                    <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
                 </select>
             </c-filter_field>
             <c-filter_field label="Team" id="id_team">
@@ -46,7 +37,7 @@
                     <option value="">All Teams</option>
                     {% for team in available_teams %}
                         <option value="{{ team.id }}"
-                                {% if selected_team == team.id|stringformat:"s" %}selected{% endif %}>
+                                {% if filters.team == team.id|stringformat:"s" %}selected{% endif %}>
                             Team {{ team.team_number }}
                         </option>
                     {% endfor %}
@@ -56,7 +47,7 @@
                 <input type="text"
                        name="box"
                        id="id_box"
-                       value="{{ selected_box|default:'' }}"
+                       value="{{ filters.box|default:'' }}"
                        placeholder="Box name..."
                        aria-label="Filter by box">
             </c-filter_field>
@@ -64,16 +55,11 @@
                 <input type="text"
                        name="search"
                        id="id_search"
-                       value="{{ search_query }}"
+                       value="{{ filters.search }}"
                        placeholder="Search..."
                        aria-label="Search incidents">
             </c-filter_field>
         </c-filter_toolbar>
-        <c-review_incidents_table :page_obj="page_obj"
-                                  :status_filter="status_filter"
-                                  :selected_team="selected_team"
-                                  :selected_box="selected_box"
-                                  :search_query="search_query"
-                                  :sort_by="sort_by" />
+        {% include "scoring/partials/review_incidents_table.html" %}
     </c-module>
 {% endblock scoring_content %}

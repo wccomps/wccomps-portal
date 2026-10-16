@@ -17,7 +17,7 @@ from .models import (
 
 def _password_reset_button(team: Team) -> str:
     if team._state.adding:  # the add page has no team yet
-        return "-"
+        return ""
     return render_to_string("admin/includes/team_password_reset.html", {"team_number": team.team_number})
 
 
@@ -143,7 +143,7 @@ class SchoolInfoAdmin(admin.ModelAdmin[SchoolInfo]):
     @admin.display(description="Password")
     def password_with_reset(self, obj: SchoolInfo) -> str:
         if obj._state.adding:
-            return "-"
+            return ""
         return format_html("<p>{}</p>{}", obj.password or "Not set yet", _password_reset_button(obj.team))
 
     @admin.action(description="Export as CSV")

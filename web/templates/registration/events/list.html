@@ -46,7 +46,7 @@
                         </td>
                         <td>{{ event.get_event_type_display }}</td>
                         <td>{{ event.date|date:"M d, Y" }}</td>
-                        <td>{{ event.start_time|time:"g:i A" }} - {{ event.end_time|time:"g:i A" }}</td>
+                        <td>{{ event.start_time|time:"g:i A" }} to {{ event.end_time|time:"g:i A" }}</td>
                         <td>{{ event.enrollment_count|default:0 }} / {{ event.max_teams }}</td>
                         <td>
                             {% if event.is_finalized %}

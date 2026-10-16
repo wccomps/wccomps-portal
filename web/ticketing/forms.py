@@ -109,4 +109,7 @@ class TicketBulkActionForm(forms.Form):
 
     def clean_ticket_numbers(self) -> list[str]:
         raw = self.cleaned_data["ticket_numbers"]
-        return [tn.strip() for tn in raw.split(",") if tn.strip()]
+        numbers = [tn.strip() for tn in raw.split(",") if tn.strip()]
+        if not numbers:
+            raise forms.ValidationError("No tickets selected")
+        return numbers

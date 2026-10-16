@@ -173,7 +173,7 @@
                 {% if category %}
                     <c-link href="{% url 'admin_category_delete' category.pk %}" variant="danger">Delete</c-link>
                 {% endif %}
-                <c-button type="submit" variant="primary" ::disabled="submitting">
+                <c-button type="submit" variant="primary">
                     Save
                 </c-button>
             </c-button_row>

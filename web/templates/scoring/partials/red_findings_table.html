@@ -1,0 +1,162 @@
+{# Red team findings table - swappable content for htmx #}
+{% load cotton %}
+<div id="red-findings-content"
+     {% if is_gold_team %}x-data="redFindingsBulkSelect"{% endif %}>
+    {% if is_gold_team %}
+        {# The row checkboxes join this form with form=, so a row's own Delete or Leave form isn't nested in it #}
+        <c-form id="bulk-approve-form" action="{% url 'scoring:bulk_approve_red_scores' %}" ::data-confirm="approveQuestion">
+            {% csrf_token %}
+        </c-form>
+    {% endif %}
+    <c-table id="result_list"
+             role="grid"
+             widths="{% if is_gold_team %}40px {% endif %}6% 23% 9% 9% 14% 11% 7% {% if is_gold_team %}7% {% endif %}7% 7%"
+             aria_label="Red team findings list">
+        <c-slot name="headers">
+            <tr role="row">
+                {% if is_gold_team %}
+                    <th scope="col" class="action-checkbox-column">
+                        <input type="checkbox"
+                               :checked="allSelected"
+                               :indeterminate="someSelected"
+                               @click="toggleAll"
+                               title="Select all">
+                    </th>
+                {% endif %}
+                <c-table_header sortable="false">
+                    ID
+                </c-table_header>
+                <c-table_header sort_field="attack_type__name" current_sort="{{ sort_by }}">
+                    Attack Type
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Box
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Service
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Teams
+                </c-table_header>
+                <c-table_header sort_field="created_at" current_sort="{{ sort_by }}">
+                    Submitted
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Evidence
+                </c-table_header>
+                {% if is_gold_team %}<c-table_header sortable="false">Points</c-table_header>{% endif %}
+                <c-table_header sortable="false">
+                    Status
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Actions
+                </c-table_header>
+            </tr>
+        </c-slot>
+        {% for finding in findings %}
+            <tr role="row">
+                {% if is_gold_team %}
+                    <td class="action-checkbox">
+                        {% if not finding.is_approved %}
+                            <input type="checkbox"
+                                   form="bulk-approve-form"
+                                   name="finding_ids"
+                                   value="{{ finding.id }}"
+                                   data-finding-id="{{ finding.id }}"
+                                   :checked="selectedMap.{{ finding.id|jskey }}"
+                                   @change="toggleItem">
+                        {% endif %}
+                    </td>
+                {% endif %}
+                <th>
+                    <c-link href="{% url 'scoring:view_red_score' finding.id %}">#{{ finding.id }}</c-link>
+                </th>
+                <td>{{ finding.attack_type.name|default:finding.attack_vector|default:"Unknown" }}</td>
+                <td>{{ finding.affected_boxes_display }}</td>
+                <td>{{ finding.affected_service }}</td>
+                <td>
+                    <c-badge>
+                        {{ finding.affected_teams.count }} teams
+                    </c-badge>
+                    <div class="text-sm text-muted">
+                        {% for team in finding.affected_teams.all|slice:":3" %}
+                            Team {{ team.team_number }}
+                            {% if not forloop.last %},{% endif %}
+                        {% endfor %}
+                        {% if finding.affected_teams.count > 3 %}...{% endif %}
+                    </div>
+                </td>
+                <td>
+                    {{ finding.created_at|timesince }} ago
+                    <div class="text-sm text-muted">by {{ finding.submitted_by.username }}</div>
+                </td>
+                <td>
+                    {% if finding.screenshots.exists %}
+                        <c-badge variant="success">
+                            {{ finding.screenshots.count }} files
+                        </c-badge>
+                    {% else %}
+                        <span class="text-muted">No screenshots</span>
+                    {% endif %}
+                </td>
+                {% if is_gold_team %}
+                    <td>
+                        <span class="score-negative">-{{ finding.points_per_team }}</span>
+                        {% if finding.outcomes_display %}
+                            <div class="text-xs text-muted"
+                                 title="{{ finding.outcomes_display|join:', ' }}">
+                                {{ finding.outcomes_display|length }} outcomes
+                            </div>
+                        {% endif %}
+                    </td>
+                {% endif %}
+                <td>
+                    {% if finding.is_approved %}
+                        <c-badge variant="success">
+                            Approved
+                        </c-badge>
+                    {% else %}
+                        <c-badge variant="warning">
+                            Pending
+                        </c-badge>
+                    {% endif %}
+                </td>
+                <td class="field-actions">
+                    {% if finding.submitted_by == user and not finding.is_approved %}
+                        <c-form action="{% url 'scoring:delete_red_score' finding.id %}"
+                                class="d-inline"
+                                data-confirm="Delete this finding?">
+                            {% csrf_token %}
+                            <c-button type="submit" variant="danger">
+                                Delete
+                            </c-button>
+                        </c-form>
+                    {% elif user in finding.contributors.all and finding.submitted_by != user and not finding.is_approved %}
+                        <c-form action="{% url 'scoring:leave_red_score' finding.id %}"
+                                class="d-inline"
+                                data-confirm="Remove yourself from this finding?">
+                            {% csrf_token %}
+                            <c-button type="submit" variant="danger">
+                                Leave
+                            </c-button>
+                        </c-form>
+                    {% endif %}
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="{% if is_gold_team %}11{% else %}9{% endif %}"
+                    class="text-center p-20">
+                    {% if filtered %}
+                        No findings match your filters. Try <a href="{{ request.path }}">clearing all filters</a>
+                    {% elif filters.status == "pending" %}
+                        No pending findings. All red team findings have been approved.
+                    {% else %}
+                        No findings yet.
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+    </c-table>
+    <c-pagination :page_obj="page_obj" />
+</div>

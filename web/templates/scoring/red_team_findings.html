@@ -4,18 +4,6 @@
     All Findings - Red Team
 {% endblock title %}
 {% block red_content %}
-    <script>
-    document.addEventListener('alpine:init', () => {
-        Alpine.data('redFindingsBulkSelect', () => compose(bulkSelectMixin('finding-id'), {
-            init() { this.initBulkSelect(); },
-            submitBulk() {
-                if (this.submitting) return;
-                if (this.selected.length === 0) { alert('Please select at least one finding to approve'); return; }
-                if (confirm('Approve ' + this.selected.length + ' finding(s)?')) { this.submitting = true; this.$refs.bulkForm.submit(); }
-            }
-        }));
-    });
-    </script>
     <c-page_header title="All Findings" />
     <c-module filtered="true" id="changelist">
         <c-filter_toolbar form_id="changelist-filter"
@@ -23,23 +11,13 @@
                           hx_target="#red-findings-content"
                           hx_swap="outerHTML"
                           hx_push_url="true">
-            {% if is_gold_team and pending_findings %}
-                <c-slot name="actions">
-                    <c-button type="button"
-                              id="bulk-approve-btn"
-                              onclick="document.dispatchEvent(new CustomEvent('bulk-approve'))"
-                              variant="primary">
-                        Approve Selected
-                    </c-button>
-                </c-slot>
-            {% endif %}
             <c-filter_field label="Status" id="id_status">
                 <select name="status" id="id_status" aria-label="Filter by status">
                     <option value="pending"
-                            {% if status_filter == 'pending' %}selected{% endif %}>Pending Only</option>
+                            {% if filters.status == 'pending' %}selected{% endif %}>Pending Only</option>
                     <option value="approved"
-                            {% if status_filter == 'approved' %}selected{% endif %}>Approved Only</option>
-                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                            {% if filters.status == 'approved' %}selected{% endif %}>Approved Only</option>
+                    <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
                 </select>
             </c-filter_field>
             <c-filter_field label="Target Team" id="id_team">
@@ -47,7 +25,7 @@
                     <option value="">All Teams</option>
                     {% for team in available_teams %}
                         <option value="{{ team.id }}"
-                                {% if selected_team == team.id|stringformat:"s" %}selected{% endif %}>
+                                {% if filters.team == team.id|stringformat:"s" %}selected{% endif %}>
                             Team {{ team.team_number }}
                         </option>
                     {% endfor %}
@@ -60,7 +38,7 @@
                     <option value="">All Attack Types</option>
                     {% for attack_type in available_attack_types %}
                         <option value="{{ attack_type.id }}"
-                                {% if selected_attack_type == attack_type.id|stringformat:"s" %}selected{% endif %}>
+                                {% if filters.attack_type == attack_type.id|stringformat:"s" %}selected{% endif %}>
                             {{ attack_type.name }}
                         </option>
                     {% endfor %}
@@ -71,20 +49,13 @@
                     <option value="">All Submitters</option>
                     {% for user in available_submitters %}
                         <option value="{{ user.id }}"
-                                {% if selected_submitter == user.id|stringformat:"s" %}selected{% endif %}>
+                                {% if filters.submitter == user.id|stringformat:"s" %}selected{% endif %}>
                             {{ user.username }}
                         </option>
                     {% endfor %}
                 </select>
             </c-filter_field>
         </c-filter_toolbar>
-        <c-red_findings_table :findings="findings"
-                              :page_obj="page_obj"
-                              :status_filter="status_filter"
-                              :selected_team="selected_team"
-                              :selected_attack_type="selected_attack_type"
-                              :selected_submitter="selected_submitter"
-                              :sort_by="sort_by"
-                              :is_gold_team="is_gold_team" />
+        {% include "scoring/partials/red_findings_table.html" %}
     </c-module>
 {% endblock red_content %}

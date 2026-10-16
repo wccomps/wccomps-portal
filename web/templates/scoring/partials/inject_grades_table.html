@@ -1,14 +1,8 @@
 {# Inject grades review table - swappable content for htmx #}
-{# Declared, so cotton leaves them out of attrs: it writes attrs unescaped #}
-<c-vars page_obj status_filter selected_inject selected_team show_outliers_only search_query sort_by />
-<div {{ attrs }}
-     id="inject-grades-content"
-     x-data="injectGradesBulkSelect"
-     @bulk-approve-grades.document="submitBulk">
-    <form id="bulk-approve-form"
-          method="post"
-          action="{% url 'scoring:inject_grades_bulk_approve' %}"
-          x-ref="bulkForm">
+{% load cotton %}
+<div id="inject-grades-content"
+     x-data="injectGradesBulkSelect">
+    <c-form id="bulk-approve-form" action="{% url 'scoring:inject_grades_bulk_approve' %}" ::data-confirm="approveQuestion">
         {% csrf_token %}
         <c-table id="result_list"
                  role="grid"
@@ -24,26 +18,22 @@
                                title="Select all">
                     </th>
                     <c-table_header sort_field="inject_name"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
+                                    current_sort="{{ sort_by }}">
                         Inject
                     </c-table_header>
                     <c-table_header sort_field="team__team_number"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
+                                    current_sort="{{ sort_by }}">
                         Team
                     </c-table_header>
                     <c-table_header sort_field="points_awarded"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
+                                    current_sort="{{ sort_by }}">
                         Points
                     </c-table_header>
                     <c-table_header sortable="false">
                         Max
                     </c-table_header>
                     <c-table_header sort_field="graded_at"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
+                                    current_sort="{{ sort_by }}">
                         Graded
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -82,19 +72,17 @@
                     </td>
                     <td>
                         {% if grade.is_outlier %}
-                            <span class="text-warning font-semibold"><span aria-hidden="true">⚠️</span> {{ grade.std_devs_from_mean|floatformat:1 }}σ</span>
-                        {% else %}
-                            <span class="text-muted">—</span>
+                            <span class="text-warning font-semibold">{{ grade.std_devs_from_mean|floatformat:1 }}σ</span>
                         {% endif %}
                     </td>
                     <td>
                         {% if grade.is_approved %}
                             <c-badge variant="success">
-                                <span aria-hidden="true">✓</span> Approved
+                                Approved
                             </c-badge>
                         {% else %}
                             <c-badge variant="warning">
-                                <span aria-hidden="true">⏳</span> Pending
+                                Pending
                             </c-badge>
                         {% endif %}
                     </td>
@@ -110,7 +98,7 @@
             {% empty %}
                 <tr>
                     <td colspan="8">
-                        {% if selected_inject or selected_team or show_outliers_only or search_query or status_filter != "pending" %}
+                        {% if filtered %}
                             No grades match your filters. Try adjusting your filters or <a href="{% url 'scoring:inject_grades_review' %}">clearing all filters</a>
                         {% else %}
                             No pending grades. All inject grades have been approved.
@@ -119,7 +107,6 @@
                 </tr>
             {% endfor %}
         </c-table>
-    </form>
-    <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}&sort={{ sort_by }}" />
+    </c-form>
+    <c-pagination :page_obj="page_obj" />
 </div>

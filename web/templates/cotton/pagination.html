@@ -1,18 +1,18 @@
-{# Usage: <c-pagination page_obj=page_obj query_params="&status=open" /> #}
-{# Props: page_obj (Django Paginator), query_params (url params to preserve) #}
-<c-vars page_obj query_params />
+{# Usage: <c-pagination :page_obj="page_obj" /> #}
+{# Props: page_obj (Django Paginator). Each link keeps the page's query and changes only page #}
+<c-vars page_obj />
 {% if page_obj %}
     <p class="paginator">
         Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} results
         <span>
             {% if page_obj.has_previous %}
-                <a href="?page=1{{ query_params }}">First</a>
-                <a href="?page={{ page_obj.previous_page_number }}{{ query_params }}">Previous</a>
+                <a href="{% querystring page=1 %}">First</a>
+                <a href="{% querystring page=page_obj.previous_page_number %}">Previous</a>
             {% endif %}
             <span class="this-page">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
             {% if page_obj.has_next %}
-                <a href="?page={{ page_obj.next_page_number }}{{ query_params }}">Next</a>
-                <a href="?page={{ page_obj.paginator.num_pages }}{{ query_params }}">Last</a>
+                <a href="{% querystring page=page_obj.next_page_number %}">Next</a>
+                <a href="{% querystring page=page_obj.paginator.num_pages %}">Last</a>
             {% endif %}
         </span>
     </p>

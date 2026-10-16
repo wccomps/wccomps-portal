@@ -6,9 +6,7 @@
 {% block white_team_content %}
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('feedbackBulkSelect', () => compose(bulkSelectMixin('feedback-id'), {
-            init() { this.selectableIds = Array.from(this.$el.querySelectorAll('input[name="score_ids"]')).map(el => el.value); }
-        }));
+        Alpine.data('feedbackBulkSelect', () => bulkSelectMixin('feedback-id', 'feedback item'));
         Alpine.data('editableCell', () => ({
             editing: false,
             originalValue: '',
@@ -55,17 +53,17 @@
                     <option value="">All Injects</option>
                     {% for inject_id, inject_name in inject_choices %}
                         <option value="{{ inject_id }}"
-                                {% if inject_filter == inject_id %}selected{% endif %}>{{ inject_name }}</option>
+                                {% if filters.inject == inject_id %}selected{% endif %}>{{ inject_name }}</option>
                     {% endfor %}
                 </select>
             </c-filter_field>
             <c-filter_field label="Status" id="id_status">
                 <select name="status" id="id_status" aria-label="Filter by status">
                     <option value="pending"
-                            {% if status_filter == 'pending' %}selected{% endif %}>Pending</option>
+                            {% if filters.status == 'pending' %}selected{% endif %}>Pending</option>
                     <option value="approved"
-                            {% if status_filter == 'approved' %}selected{% endif %}>Approved</option>
-                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                            {% if filters.status == 'approved' %}selected{% endif %}>Approved</option>
+                    <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
                 </select>
             </c-filter_field>
         </c-filter_toolbar>

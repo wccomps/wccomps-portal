@@ -6,14 +6,7 @@
 {% block scoring_content %}
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('ticketsBulkSelect', () => compose(bulkSelectMixin('ticket-id'), {
-            init() { this.initBulkSelect(); },
-            submitBulk() {
-                if (this.submitting) return;
-                if (this.selected.length === 0) { alert('Please select at least one ticket to approve'); return; }
-                if (confirm('Approve ' + this.selected.length + ' ticket(s)? This action cannot be undone.')) { this.submitting = true; this.$refs.bulkForm.submit(); }
-            }
-        }));
+        Alpine.data('ticketsBulkSelect', () => bulkSelectMixin('ticket-id', 'ticket'));
     });
     </script>
     <c-page_header title="Review Tickets" />
@@ -25,9 +18,7 @@
                           hx_push_url="true">
             {% if has_pending %}
                 <c-slot name="actions">
-                    <c-button type="button"
-                              onclick="document.dispatchEvent(new CustomEvent('bulk-approve-tickets'))"
-                              variant="primary">
+                    <c-button type="submit" form="bulk-approve-form" variant="primary">
                         Approve Selected
                     </c-button>
                 </c-slot>
@@ -35,17 +26,17 @@
             <c-filter_field label="Status" id="id_status">
                 <select name="status" id="id_status" aria-label="Filter by status">
                     <option value="pending"
-                            {% if status_filter == 'pending' %}selected{% endif %}>Pending Only</option>
+                            {% if filters.status == 'pending' %}selected{% endif %}>Pending Only</option>
                     <option value="approved"
-                            {% if status_filter == 'approved' %}selected{% endif %}>Approved Only</option>
-                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                            {% if filters.status == 'approved' %}selected{% endif %}>Approved Only</option>
+                    <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
                 </select>
             </c-filter_field>
             <c-filter_field label="Team" id="id_team">
                 <input type="number"
                        name="team"
                        id="id_team"
-                       value="{{ team_filter }}"
+                       value="{{ filters.team }}"
                        placeholder="Team #"
                        aria-label="Filter by team number">
             </c-filter_field>
@@ -54,7 +45,7 @@
                     <option value="">All Categories</option>
                     {% for cat in categories %}
                         <option value="{{ cat.id }}"
-                                {% if category_filter == cat.id %}selected{% endif %}>{{ cat.display_name }}</option>
+                                {% if filters.category == cat.id %}selected{% endif %}>{{ cat.display_name }}</option>
                     {% endfor %}
                 </select>
             </c-filter_field>
@@ -62,16 +53,11 @@
                 <input type="text"
                        name="search"
                        id="id_search"
-                       value="{{ search_query }}"
+                       value="{{ filters.search }}"
                        placeholder="Search..."
                        aria-label="Search tickets">
             </c-filter_field>
         </c-filter_toolbar>
-        <c-review_tickets_table :page_obj="page_obj"
-                                :status_filter="status_filter"
-                                :team_filter="team_filter"
-                                :category_filter="category_filter"
-                                :search_query="search_query"
-                                :sort_by="sort_by" />
+        {% include "ticketing/review_tickets_table.html" %}
     </c-module>
 {% endblock scoring_content %}

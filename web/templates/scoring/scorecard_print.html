@@ -114,7 +114,7 @@
             <h1>Team {{ team.team_number|stringformat:"02d" }} Scorecard</h1>
         </div>
         <div class="rank-hero">
-            {% if score.rank %}#{{ score.rank }} of {{ stats.team_count }} teams —{% endif %}
+            {% if score.rank %}#{{ score.rank }} of {{ stats.team_count }} teams:{% endif %}
             {{ score.total_score|floatformat:0 }} points
         </div>
         {% if stats.insights %}
@@ -151,9 +151,9 @@
                             </td>
                             <td class="text-right">{{ svc_rank.max|floatformat:0 }}</td>
                         {% else %}
-                            <td class="text-right">—</td>
-                            <td class="text-right">—</td>
-                            <td class="text-right">—</td>
+                            <td class="text-right"></td>
+                            <td class="text-right"></td>
+                            <td class="text-right"></td>
                         {% endif %}
                     </tr>
                 {% endwith %}
@@ -174,9 +174,9 @@
                             </td>
                             <td class="text-right">{{ inj_rank.max|floatformat:0 }}</td>
                         {% else %}
-                            <td class="text-right">—</td>
-                            <td class="text-right">—</td>
-                            <td class="text-right">—</td>
+                            <td class="text-right"></td>
+                            <td class="text-right"></td>
+                            <td class="text-right"></td>
                         {% endif %}
                     </tr>
                 {% endwith %}
@@ -197,9 +197,9 @@
                             </td>
                             <td class="text-right">{{ ora_rank.max|floatformat:0 }}</td>
                         {% else %}
-                            <td class="text-right">—</td>
-                            <td class="text-right">—</td>
-                            <td class="text-right">—</td>
+                            <td class="text-right"></td>
+                            <td class="text-right"></td>
+                            <td class="text-right"></td>
                         {% endif %}
                     </tr>
                 {% endwith %}
@@ -222,9 +222,9 @@
                             </td>
                             <td class="text-right">{{ red_rank.max|floatformat:0 }}</td>
                         {% else %}
-                            <td class="text-right">—</td>
-                            <td class="text-right">—</td>
-                            <td class="text-right">—</td>
+                            <td class="text-right"></td>
+                            <td class="text-right"></td>
+                            <td class="text-right"></td>
                         {% endif %}
                     </tr>
                 {% endwith %}
@@ -248,9 +248,9 @@
                                 </td>
                                 <td class="text-right">{{ sla_rank.max|floatformat:0 }}</td>
                             {% else %}
-                                <td class="text-right">—</td>
-                                <td class="text-right">—</td>
-                                <td class="text-right">—</td>
+                                <td class="text-right"></td>
+                                <td class="text-right"></td>
+                                <td class="text-right"></td>
                             {% endif %}
                         </tr>
                     {% endwith %}
@@ -275,9 +275,9 @@
                                 </td>
                                 <td class="text-right">{{ rec_rank.max|floatformat:0 }}</td>
                             {% else %}
-                                <td class="text-right">—</td>
-                                <td class="text-right">—</td>
-                                <td class="text-right">—</td>
+                                <td class="text-right"></td>
+                                <td class="text-right"></td>
+                                <td class="text-right"></td>
                             {% endif %}
                         </tr>
                     {% endwith %}
@@ -300,9 +300,9 @@
                                 </td>
                                 <td class="text-right">{{ adj_rank.max|floatformat:0 }}</td>
                             {% else %}
-                                <td class="text-right">—</td>
-                                <td class="text-right">—</td>
-                                <td class="text-right">—</td>
+                                <td class="text-right"></td>
+                                <td class="text-right"></td>
+                                <td class="text-right"></td>
                             {% endif %}
                         </tr>
                     {% endwith %}

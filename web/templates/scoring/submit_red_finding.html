@@ -201,13 +201,14 @@
                 <!-- Visual team selector buttons -->
                 <div class="border rounded">
                     <div class="p-15">
-                        <div id="teamButtons" class="d-flex flex-wrap gap-10">
+                        <div id="teamButtons" class="d-flex flex-wrap gap-10" x-data="teamPicker">
                             {% for checkbox in form.affected_teams %}
                                 <button type="button"
                                         class="team-btn"
                                         data-team-id="{{ checkbox.data.value }}"
                                         data-team-label="{{ checkbox.choice_label }}"
-                                        onclick="toggleTeam(this, '{{ checkbox.id_for_label }}')">
+                                        data-checkbox-id="{{ checkbox.id_for_label }}"
+                                        @click="toggle">
                                     {{ checkbox.choice_label }}
                                 </button>
                             {% endfor %}
@@ -216,7 +217,7 @@
                 </div>
                 <div class="mt-10" aria-live="polite">
                     <small class="text-muted">
-                        <span id="selectedCount">0</span> teams selected - Click teams to toggle selection
+                        <span id="selectedCount">0</span> teams selected. Click teams to toggle selection
                     </small>
                 </div>
                 {% if form.affected_teams.errors %}<div class="text-danger mt-10">{{ form.affected_teams.errors }}</div>{% endif %}
@@ -254,7 +255,7 @@
             </c-fieldset>
             <c-button_row class="justify-end">
                 <c-link href="{% url 'scoring:red_team_scores' %}" variant="cancel">Cancel</c-link>
-                <c-button type="submit" variant="primary" ::disabled="submitting">
+                <c-button type="submit" variant="primary">
                     Submit Finding
                 </c-button>
             </c-button_row>
@@ -269,7 +270,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h3 class="modal-title" id="pool-modal-title">Create IP Pool</h3>
-                <button type="button" class="modal-close" onclick="closeCreatePoolModal()">×</button>
+                <button type="button" class="modal-close" onclick="closeCreatePoolModal()">Close</button>
             </div>
             <div class="modal-body">
                 <form id="createPoolForm">
@@ -460,14 +461,18 @@
             document.getElementById('selectedCount').textContent = checked;
         }
 
-        function toggleTeam(button, checkboxId) {
-            const checkbox = document.getElementById(checkboxId);
-            if (checkbox) {
-                checkbox.checked = !checkbox.checked;
-                updateTeamButton(button, checkbox.checked);
-                updateSelectedCount();
-            }
-        }
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('teamPicker', () => ({
+                toggle(e) {
+                    const button = e.currentTarget;
+                    const checkbox = document.getElementById(button.dataset.checkboxId);
+                    if (!checkbox) return;
+                    checkbox.checked = !checkbox.checked;
+                    updateTeamButton(button, checkbox.checked);
+                    updateSelectedCount();
+                }
+            }));
+        });
 
         function updateTeamButton(button, isSelected) {
             if (isSelected) {

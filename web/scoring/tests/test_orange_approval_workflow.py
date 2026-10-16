@@ -210,7 +210,7 @@ class ReviewOrangePageTests(TestCase):
         response = self.client.get(reverse("scoring:review_orange"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["status_filter"], "pending")
+        self.assertEqual(response.context["filters"]["status"], "pending")
         self.assertEqual(len(response.context["page_obj"]), 1)
 
     def test_review_page_htmx_returns_table_only(self) -> None:
@@ -222,4 +222,4 @@ class ReviewOrangePageTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         # HTMX response should use the table template, not the full page
-        self.assertTemplateUsed(response, "cotton/review_orange_table.html")
+        self.assertTemplateUsed(response, "scoring/partials/review_orange_table.html")

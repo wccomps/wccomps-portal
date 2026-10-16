@@ -19,7 +19,7 @@
                     {{ event.date|date:"F d, Y" }}
                 </c-detail_row>
                 <c-detail_row label="Time">
-                    {{ event.start_time|time:"g:i A" }} - {{ event.end_time|time:"g:i A" }}
+                    {{ event.start_time|time:"g:i A" }} to {{ event.end_time|time:"g:i A" }}
                 </c-detail_row>
                 <c-detail_row label="Type">
                     {{ event.get_event_type_display }}
@@ -55,14 +55,13 @@
                 <p class="text-success">Packets sent for this event, so its teams can no longer be unassigned here.</p>
             {% endif %}
             {% if assignable_count > 0 %}
-                <form method="post"
-                      action="{% url 'registration_assign_teams' event_id=event.id %}"
-                      class="mb-20">
+                <c-form action="{% url 'registration_assign_teams' event_id=event.id %}"
+                        class="mb-20">
                     {% csrf_token %}
                     <c-button type="submit" variant="primary">
                         Assign Team Numbers ({{ assignable_count }})
                     </c-button>
-                </form>
+                </c-form>
             {% endif %}
             <c-table id="enrollments_list" class="w-full" aria_label="Team enrollments">
                 <c-slot name="headers">
@@ -112,16 +111,15 @@
                         </td>
                         <td class="field-actions">
                             {% if item.assignment and can_unassign %}
-                                <form method="post"
-                                      action="{% url 'registration_unassign_team' assignment_id=item.assignment.id %}"
-                                      class="d-inline"
-                                      onsubmit="return confirm('Remove team assignment?')">
+                                <c-form action="{% url 'registration_unassign_team' assignment_id=item.assignment.id %}"
+                                        class="d-inline"
+                                        data-confirm="Remove team assignment?">
                                     {% csrf_token %}
                                     <input type="hidden" name="school" value="{{ item.assignment.school_id }}">
                                     <c-button type="submit" variant="danger">
                                         Unassign
                                     </c-button>
-                                </form>
+                                </c-form>
                             {% endif %}
                         </td>
                     </tr>

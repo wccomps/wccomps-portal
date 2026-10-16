@@ -10,7 +10,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import require_permission
 from core.tickets_config import get_all_categories, get_category_config
-from core.utils import filter_number
+from core.utils import list_filters, optional_int
 from team.models import Team
 from ticketing.models import Ticket, TicketHistory
 from ticketing.scoring_sync import recompute_team_ticket_adjustment
@@ -25,50 +25,34 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
     """Review resolved tickets for point approval."""
     from core.utils import filter_sort_paginate
 
-    status_filter = request.GET.get("status", "pending") or "pending"
-    team_filter = request.GET.get("team", "")
-    search_query = request.GET.get("search", "").strip()
-    category_filter = request.GET.get("category", "")
+    filters, filtered = list_filters(request, {"status": "pending", "team": "", "search": "", "category": ""})
 
     query = Ticket.objects.filter(status="resolved").select_related("team", "approved_by")
 
-    if status_filter == "approved":
+    if filters["status"] == "approved":
         query = query.filter(is_approved=True)
-    elif status_filter == "pending":
+    elif filters["status"] == "pending":
         query = query.filter(is_approved=False)
 
-    if (category_id := filter_number(category_filter)) is not None:
+    if (category_id := optional_int(filters["category"])) is not None:
         query = query.filter(category_id=category_id)
 
-    if team_filter:
-        try:
-            team_number = int(team_filter)
-            query = query.filter(team__team_number=team_number)
-        except ValueError:
-            pass
+    if (team_number := optional_int(filters["team"])) is not None:
+        query = query.filter(team__team_number=team_number)
 
-    if search_query:
+    if filters["search"]:
         query = query.filter(
-            Q(title__icontains=search_query)
-            | Q(description__icontains=search_query)
-            | Q(ticket_number__icontains=search_query)
-            | Q(hostname__icontains=search_query)
-            | Q(service_name__icontains=search_query)
+            Q(title__icontains=filters["search"])
+            | Q(description__icontains=filters["search"])
+            | Q(ticket_number__icontains=filters["search"])
+            | Q(hostname__icontains=filters["search"])
+            | Q(service_name__icontains=filters["search"])
         )
 
     result = filter_sort_paginate(
         request,
         query,
-        valid_sort_fields=[
-            "resolved_at",
-            "-resolved_at",
-            "points_charged",
-            "-points_charged",
-            "team__team_number",
-            "-team__team_number",
-            "category",
-            "-category",
-        ],
+        sort_fields=["resolved_at", "points_charged", "team__team_number", "category"],
         default_sort="-resolved_at",
     )
     page_obj = result["page_obj"]
@@ -89,10 +73,8 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
 
     context = {
         "page_obj": page_obj,
-        "status_filter": status_filter,
-        "team_filter": team_filter,
-        "category_filter": category_filter,
-        "search_query": search_query,
+        "filters": filters,
+        "filtered": filtered,
         "sort_by": sort_by,
         "categories": get_all_categories(),
         "has_pending": Ticket.objects.filter(status="resolved", is_approved=False).exists(),
@@ -100,7 +82,7 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/review_tickets_table.html", context)
+        return render(request, "ticketing/review_tickets_table.html", context)
 
     return render(request, "ops_review_tickets.html", context)
 

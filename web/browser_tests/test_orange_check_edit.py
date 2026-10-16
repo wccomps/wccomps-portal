@@ -46,3 +46,23 @@ def test_remove_first_criterion_and_save(live_server, pw_browser):
         assert not errors, errors
     finally:
         context.close()
+
+
+def test_remove_deletes_the_row_clicked(live_server, pw_browser):
+    from orange_team.models import OrangeCheck, OrangeCheckCriterion
+
+    user = role_user("gold_team")
+    check = OrangeCheck.objects.create(title="Phones", description="", created_by=user)
+    for order, label in enumerate(["First", "Second", "Third"]):
+        OrangeCheckCriterion.objects.create(orange_check=check, label=label, points=1, sort_order=order)
+
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    page.on("dialog", lambda dialog: dialog.accept())
+    try:
+        page.goto(f"{live_server.url}/orange-team/checks/{check.pk}/edit/")
+        page.get_by_role("button", name="Remove").nth(1).click()
+        labels = page.locator('input[name^="criterion_label_"]')
+        assert [labels.nth(i).input_value() for i in range(labels.count())] == ["First", "Third"]
+    finally:
+        context.close()

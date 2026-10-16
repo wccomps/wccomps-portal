@@ -135,9 +135,7 @@ Color mapping:
 Empty state display for when no data is available.
 ```django
 <c-empty_state title="No incidents found" />
-<c-empty_state icon="📋" title="No results" />
 <c-empty_state
-    icon="🔍"
     title="No search results"
     description="Try adjusting your filters.">
     <a href="/reset/" class="button">Clear Filters</a>
@@ -145,7 +143,6 @@ Empty state display for when no data is available.
 ```
 
 Props:
-- `icon` (optional): Emoji or icon character displayed above title
 - `title` (required): Main heading text
 - `description` (optional): Secondary explanatory text in muted color
 - Slot: Optional action button or link
@@ -176,8 +173,7 @@ Sortable table column header.
 ```django
 <c-table_header
     sort_field="team__team_number"
-    current_sort="{{ sort_by }}"
-    query_params="&status=open">
+    current_sort="{{ sort_by }}">
     Team Number
 </c-table_header>
 ```
@@ -185,16 +181,44 @@ Sortable table column header.
 #### `<c-pagination>`
 Page navigation for paginated results.
 ```django
-<c-pagination page_obj=page_obj query_params="&status=open&team=1" />
+<c-pagination :page_obj="page_obj" />
 ```
+
+Both build their links with Django's `{% querystring %}`, so a link keeps the page's query (its filters) and changes
+only `sort` or `page`. A list's own refresh does the same (`hx-get="{% url 'ticket_list' %}{% querystring %}"`); a
+link from another page back to a list doesn't, since it would carry that page's query.
 
 ## Benefits
 
 1. **Consistency**: UI elements look and behave the same across pages
 2. **Maintainability**: Update styling in one place, affects all uses
 3. **Reduced Code**: Less repetition in templates (~40% reduction)
-4. **Type Safety**: Components enforce correct prop usage
-5. **Documentation**: Self-documenting with clear prop names
+4. **Documentation**: Self-documenting with clear prop names
+
+## Attributes and Escaping
+
+A component writes the attributes it doesn't declare in `<c-vars>` with `{{ attrs }}`. django-cotton doesn't escape
+them; `core/cotton.py` does, for every component:
+- a safe string only has `"` encoded: a value with template tags (`title="{{ search }}"`, which the engine already
+  escaped, or `href="?a=1&amp;b={{ x }}"`), a quoted literal (`:title="'text'"`, template source, which Django marks
+  safe as it does `{{ "text" }}`), or a value a view marked safe;
+- any other value is escaped: from the page's context (`:title="search"`, `title=search`, `:attrs="dict"`) or a
+  plain literal (`title="Tom & Jerry"`). In a plain literal write the character, not an entity (a template lint
+  fails on `&amp;` or `&quot;` there); quote the attribute with `'` when the value holds `"`.
+
+An Alpine binding on a component is written `::name` (cotton passes it through as `:name`). A `:name` that isn't in
+the page's context (and isn't a Python literal such as `0`) fails the render under DEBUG and in tests
+(`STRICT_COMPONENT_ATTRS`), on any component; in production it is reported and the component renders as if it
+wasn't passed (its `<c-vars>` default, if it has one).
+
+`core/tests/test_cotton_escaping.py` renders components with values built to break out of their attribute and fails
+if one comes out raw; run it after any django-cotton upgrade, since `core/cotton.py` replaces three of its internals
+(`Attrs.__str__`, `Attrs.unprocessable` and the component node's `render`). Escaping makes a value safe as attribute text, not as a URL or code: request text reaches an `href` only as
+a query value `{% querystring %}` encodes, or as the browser's own `location.search` (the ticket page's way back),
+and never an `on*` or Alpine attribute.
+
+One page's markup that htmx also refreshes (a list's table) is a template beside the page that the page
+`{% include %}`s and the view renders on its own, not a component.
 
 ## Styling Vocabulary
 

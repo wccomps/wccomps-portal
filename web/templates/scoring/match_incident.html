@@ -12,7 +12,7 @@
                     Team {{ incident.team.team_number }}
                 </c-detail_row>
                 <c-detail_row label="Affected Boxes">
-                    {{ incident.affected_boxes_display|default:"—" }}
+                    {{ incident.affected_boxes_display }}
                 </c-detail_row>
                 <c-detail_row label="Affected Service">
                     {{ incident.affected_service }}
@@ -58,7 +58,7 @@
             <h2 class="module-header module-header-success">Review & Match</h2>
             {% if suggested_findings %}
                 <p class="mb-5">
-                    <strong>Suggested Matches ({{ suggested_findings|length }})</strong> <span class="text-muted text-sm">— based on source IP, affected box, and service</span>
+                    <strong>Suggested Matches ({{ suggested_findings|length }})</strong> <span class="text-muted text-sm">(based on source IP, affected box, and service)</span>
                 </p>
                 <div class="mb-15">
                     <h3 class="text-md mt-0">Potential Red Team Findings:</h3>
@@ -71,7 +71,10 @@
                                     <br>
                                     <small>{{ finding.attack_vector|truncatechars:60 }}</small>
                                     <br>
-                                    <small class="text-muted">{{ finding.affected_boxes_display|default:"—" }} / {{ finding.affected_service }}</small>
+                                    <small class="text-muted">
+                                        {% if finding.affected_boxes_display %}{{ finding.affected_boxes_display }} /{% endif %}
+                                        {{ finding.affected_service }}
+                                    </small>
                                     <br>
                                     <small class="{% if finding.source_ip == incident.source_ip %}text-success font-bold{% else %}text-muted{% endif %}">
                                         Source IP: <code>{{ finding.source_ip }}</code>
@@ -87,7 +90,7 @@
                 </div>
             {% else %}
                 <p class="text-muted">
-                    <strong>No Automatic Matches Found</strong> — No red team findings match this incident's source IP, box, or service for this team.
+                    <strong>No Automatic Matches Found.</strong> No red team findings match this incident's source IP, box, or service for this team.
                 </p>
             {% endif %}
             <c-form>
@@ -143,7 +146,7 @@
                 </div>
                 <c-button_row class="mt-20 justify-end">
                     <c-link href="{% url 'scoring:review_incidents' %}" variant="cancel">Cancel</c-link>
-                    <c-button type="submit" variant="primary" ::disabled="submitting">
+                    <c-button type="submit" variant="primary">
                         Complete Review
                     </c-button>
                 </c-button_row>

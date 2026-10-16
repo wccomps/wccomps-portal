@@ -766,7 +766,7 @@ class ServiceDetail(models.Model):
         max_digits=6,
         decimal_places=4,
         default=Decimal("0"),
-        help_text="Uptime percentage (0.0000–1.0000)",
+        help_text="Uptime percentage (0.0000 to 1.0000)",
     )
     sla_violations = models.IntegerField(
         default=0,

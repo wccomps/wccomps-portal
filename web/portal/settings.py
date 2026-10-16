@@ -14,6 +14,9 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", secrets.token_urlsafe(50))
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "False") == "True"
 
+# A component attribute that cotton would drop (core.cotton) fails the render when True, else logs a warning
+STRICT_COMPONENT_ATTRS = DEBUG
+
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
 CSRF_TRUSTED_ORIGINS = [

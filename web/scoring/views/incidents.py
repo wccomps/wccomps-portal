@@ -9,7 +9,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import get_user_team, has_permission, require_permission
 from core.stored_files import file_response
-from core.utils import filter_number
+from core.utils import list_filters, optional_int
 from team.models import Team
 
 from ..calculator import calculate_suggested_recovery_points, suggest_red_score_matches
@@ -101,7 +101,6 @@ def incident_list(request: HttpRequest) -> HttpResponse:
 
     context = {
         "incidents": incidents,
-        "current_user": user,
     }
     return render(request, "scoring/incident_list.html", context)
 
@@ -175,42 +174,32 @@ def review_incidents(request: HttpRequest) -> HttpResponse:
     """Review and match incident reports (gold team)."""
     from core.utils import filter_sort_paginate
 
-    status_filter = request.GET.get("status", "pending") or "pending"
-    team_filter = request.GET.get("team", "")
-    box_filter = request.GET.get("box", "")
-    search_query = request.GET.get("search", "").strip()
+    filters, filtered = list_filters(request, {"status": "pending", "team": "", "box": "", "search": ""})
 
     base_query = IncidentReport.objects.select_related("team").prefetch_related("screenshots")
 
-    if status_filter == "pending":
+    if filters["status"] == "pending":
         base_query = base_query.filter(is_approved=False)
-    elif status_filter == "approved":
+    elif filters["status"] == "approved":
         base_query = base_query.filter(is_approved=True)
 
-    if (team_id := filter_number(team_filter)) is not None:
+    if (team_id := optional_int(filters["team"])) is not None:
         base_query = base_query.filter(team__id=team_id)
 
-    if box_filter:
-        base_query = base_query.filter(affected_boxes__contains=[box_filter])
+    if filters["box"]:
+        base_query = base_query.filter(affected_boxes__contains=[filters["box"]])
 
-    if search_query:
+    if filters["search"]:
         from django.db.models import Q
 
         base_query = base_query.filter(
-            Q(attack_description__icontains=search_query) | Q(affected_service__icontains=search_query)
+            Q(attack_description__icontains=filters["search"]) | Q(affected_service__icontains=filters["search"])
         )
 
     result = filter_sort_paginate(
         request,
         base_query,
-        valid_sort_fields=[
-            "created_at",
-            "-created_at",
-            "team__team_number",
-            "-team__team_number",
-            "attack_detected_at",
-            "-attack_detected_at",
-        ],
+        sort_fields=["created_at", "team__team_number", "attack_detected_at"],
         default_sort="-created_at",
     )
     page_obj = result["page_obj"]
@@ -229,16 +218,14 @@ def review_incidents(request: HttpRequest) -> HttpResponse:
         "approved_count": approved_count,
         "pending_count": pending_count,
         "available_teams": available_teams,
-        "selected_team": team_filter,
-        "selected_box": box_filter,
-        "search_query": search_query,
-        "status_filter": status_filter,
+        "filters": filters,
+        "filtered": filtered,
         "sort_by": sort_by,
         "has_pending": pending_count > 0,
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/review_incidents_table.html", context)
+        return render(request, "scoring/partials/review_incidents_table.html", context)
 
     return render(request, "scoring/review_incidents.html", context)
 

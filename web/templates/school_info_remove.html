@@ -12,15 +12,16 @@
         <c-alert variant="warning">
             Remove {{ school_info.school_name }} from Team {{ school_info.team.team_number }}? The team leaves the school list and the open event; the school and its past-event history are kept.
         </c-alert>
-        <form method="post">
+        <c-form>
             {% csrf_token %}
             <input type="hidden" name="school" value="{{ school_info.school_id }}">
             <c-button_row class="mt-20 justify-end">
-                <c-link href="{% url 'school_info_edit' school_info.team.team_number %}" variant="cancel">Cancel</c-link>
+                <c-link href="{% url 'school_info_edit' school_info.team.team_number %}"
+                        variant="cancel">Cancel</c-link>
                 <c-button type="submit" variant="danger">
                     Remove
                 </c-button>
             </c-button_row>
-        </form>
+        </c-form>
     </c-module>
 {% endblock admin_content %}

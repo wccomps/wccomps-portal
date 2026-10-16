@@ -11,7 +11,7 @@
                 Status: <strong>{{ registration.get_status_display }}</strong>
             </p>
             <p>Submitted: {{ registration.submitted_at|date:"F d, Y g:i A" }}</p>
-            <form method="post">
+            <c-form>
                 {% csrf_token %}
                 <c-fieldset heading="School Information" aligned="true">
                     <c-form_field label="{{ form.school_name.label }}"
@@ -54,7 +54,7 @@
                         Save Changes
                     </c-button>
                 </c-button_row>
-            </form>
+            </c-form>
         </c-module>
     </div>
 {% endblock content %}

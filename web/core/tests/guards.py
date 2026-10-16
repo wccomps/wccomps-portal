@@ -9,8 +9,9 @@ go stale.
 import fnmatch
 import re
 import subprocess
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from functools import cache
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -18,8 +19,6 @@ import pytest
 REPO_DIR = Path(__file__).resolve().parents[3]
 WEB_DIR = REPO_DIR / "web"
 TEMPLATES_DIR = WEB_DIR / "templates"
-# Template and HTML comments, which say <html> without being one
-COMMENTS_RE = re.compile(r"{#.*?#}|{%\s*comment\s*%}.*?{%\s*endcomment\s*%}|<!--.*?-->", re.DOTALL)
 
 
 @cache
@@ -45,6 +44,25 @@ def tracked_templates() -> tuple[Path, ...]:
     )
 
 
+@cache
+def component_templates() -> tuple[Path, ...]:
+    """The shared components, templates/cotton/."""
+    return tuple(p for p in tracked_templates() if p.is_relative_to(TEMPLATES_DIR / "cotton"))
+
+
+@cache
+def portal_templates() -> tuple[Path, ...]:
+    """Every template the portal frames: all but the standalone documents (components included)."""
+    return tuple(p for p in tracked_templates() if not is_standalone_document(p))
+
+
+@cache
+def page_templates() -> tuple[Path, ...]:
+    """Pages and the includes beside them: every template but the components and the standalone documents."""
+    components = set(component_templates())
+    return tuple(p for p in tracked_templates() if p not in components and not is_standalone_document(p))
+
+
 def template_name(path: Path) -> str:
     """The path Django loads a template by (admin/base_site.html)."""
     return path.relative_to(TEMPLATES_DIR).as_posix()
@@ -54,8 +72,7 @@ def template_name(path: Path) -> str:
 def is_standalone_document(path: Path) -> bool:
     """A template with an <html> of its own (emails, the print scorecard, the 500 page, the public registration
     form): it carries its own styles and never loads the portal's base template or app.css."""
-    content = COMMENTS_RE.sub("", path.read_text(encoding="utf-8"))
-    return bool(re.search(r"<html\b", content, re.IGNORECASE))
+    return any(tag.name == "html" for tag in elements(path))
 
 
 def fail_with(
@@ -85,3 +102,109 @@ def fail_with(
     ]
     if problems:
         pytest.fail(f"{title} ({len(problems)}):\n" + "\n".join(f"  {p}" for p in problems), pytrace=False)
+
+
+# HTML and component tags, with any {{ }} or {% %} in an attribute kept as written
+COMMENT_RE = re.compile(r"{#.*?#}|{%\s*comment\s*%}.*?{%\s*endcomment\s*%}", re.DOTALL)
+TEMPLATE_TAG_RE = re.compile(r"{%.*?%}|{{.*?}}", re.DOTALL)
+PLACEHOLDER_RE = re.compile("\x01(\\d+)\x02")
+# HTMLParser decodes entities in attribute values; this stands in for & so values come back as written
+AMPERSAND = "\x03"
+
+
+class Tag:
+    """A start or end tag of an element or component, with template tags in its attribute values kept as written."""
+
+    def __init__(self, name: str, attrs: dict[str, str], line: int, closing: bool = False) -> None:
+        self.name = name
+        self.attrs = attrs
+        self.line = line
+        self.closing = closing
+
+
+@cache
+def text(path: Path) -> str:
+    """The file without template comments, keeping their line breaks so line numbers still match."""
+    return COMMENT_RE.sub(lambda m: "\n" * m.group().count("\n"), path.read_text(encoding="utf-8"))
+
+
+class TagReader(HTMLParser):
+    def __init__(self, kept: list[str]) -> None:
+        super().__init__(convert_charrefs=False)
+        self.kept = kept
+        self.found: list[Tag] = []
+        self.texts: list[tuple[int, str]] = []
+
+    def restore(self, value: str) -> str:
+        return PLACEHOLDER_RE.sub(lambda m: self.kept[int(m.group(1))], value.replace(AMPERSAND, "&"))
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = {}
+        for name, value in attrs:
+            # An attribute inside {% if %}...{% endif %} reads as the attribute itself
+            name = PLACEHOLDER_RE.sub("", name)
+            if name:
+                values[name] = self.restore(value or "")
+        self.found.append(Tag(tag, values, self.getpos()[0]))
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag: str) -> None:
+        self.found.append(Tag(tag, {}, self.getpos()[0], closing=True))
+
+    def handle_data(self, data: str) -> None:
+        # cdata_elem: inside a raw text element (script, style, xmp, iframe, noembed, noframes, title, textarea);
+        # of those, a title's and a textarea's text is shown
+        if self.cdata_elem in (None, "title", "textarea") and data.strip():
+            self.texts.append((self.getpos()[0], self.restore(data)))
+
+
+@cache
+def read(path: Path) -> TagReader:
+    """The template read by HTMLParser. Template tags are set aside first, so a ">" or quote inside one
+    ({% if n > 0 %}) neither ends a tag nor its attribute."""
+    kept: list[str] = []
+
+    def hide(match: re.Match[str]) -> str:
+        kept.append(match.group())
+        return f"\x01{len(kept) - 1}\x02"
+
+    reader = TagReader(kept)
+    reader.feed(TEMPLATE_TAG_RE.sub(hide, text(path)).replace("&", AMPERSAND))
+    reader.close()
+    return reader
+
+
+def elements(path: Path) -> tuple[Tag, ...]:
+    """Every start and end tag in the template, in order. A self-closing or void tag has no end tag."""
+    return tuple(read(path).found)
+
+
+def text_nodes(path: Path) -> tuple[tuple[int, str], ...]:
+    """The text a page shows, with its line: between tags, titles and textareas included, the other raw text
+    elements (scripts, styles, xmp, iframe, noembed, noframes) left out, template tags kept as written."""
+    return tuple(read(path).texts)
+
+
+@cache
+def tags(path: Path) -> tuple[Tag, ...]:
+    """Every start tag in the template (see elements)."""
+    return tuple(tag for tag in elements(path) if not tag.closing)
+
+
+VOID = {"input", "br", "img", "hr", "meta", "link", "source", "col", "wbr", "area", "base", "embed", "track"}
+
+
+def with_open_elements(path: Path) -> Iterator[tuple[Tag, list[Tag]]]:
+    """Each start tag with the elements open around it, outermost first."""
+    open_tags: list[Tag] = []
+    for tag in elements(path):
+        if tag.closing:
+            names = [t.name for t in open_tags]
+            if tag.name in names:
+                del open_tags[len(names) - 1 - names[::-1].index(tag.name) :]
+            continue
+        yield tag, open_tags
+        if tag.name not in VOID:
+            open_tags.append(tag)

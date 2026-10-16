@@ -4,26 +4,25 @@
     {% if is_ops %}
         Tickets
     {% else %}
-        Team {{ team.team_number }} — Tickets
+        Team {{ team.team_number }} Tickets
     {% endif %}
 {% endblock title %}
 {% block extrastyle %}
     {{ block.super }}
+    <script>
+    // This tab's ticket pages lead back to the list as it was when the tab left it (sessionStorage is per tab): the
+    // address at pagehide follows filter changes and Back or Forward between them. A ticket opened in a new tab
+    // leads back to the plain list.
+    window.addEventListener('pagehide', rememberTicketList);
+    </script>
     {% if is_ops %}
         <script>
         document.addEventListener('alpine:init', () => {
-            Alpine.data('ticketBulkSelect', () => compose(bulkSelectMixin('ticket-id'), {
-                init() { this.initBulkSelect(); },
+            Alpine.data('ticketBulkSelect', () => compose(bulkSelectMixin('ticket-id', 'ticket'), {
                 get selectedCount() { return this.selected.length; },
                 get selectedTickets() { return this.selected.join(','); },
-                bulkClaim() {
-                    if (this.selected.length === 0) { alert('Please select at least one ticket'); return; }
-                    this.$refs.bulkClaimForm.submit();
-                },
-                bulkResolve() {
-                    if (this.selected.length === 0) { alert('Please select at least one ticket'); return; }
-                    this.$refs.bulkResolveForm.submit();
-                }
+                get claimQuestion() { return this.selected.length ? `Claim ${this.selected.length} ticket(s)?` : ''; },
+                get resolveQuestion() { return this.selected.length ? `Resolve ${this.selected.length} ticket(s)?` : ''; },
             }));
         });
         </script>
@@ -35,7 +34,7 @@
         {% if is_ops %}
             Support Tickets
         {% else %}
-            Team {{ team.team_number }} - Tickets
+            Team {{ team.team_number }} Tickets
         {% endif %}
         " />
         <c-module filtered="true" id="changelist">
@@ -51,7 +50,7 @@
                     <input type="text"
                            name="search"
                            id="id_search"
-                           value="{{ search_query }}"
+                           value="{{ filters.search }}"
                            placeholder="Search... (press / to focus)"
                            aria-label="Search tickets"
                            accesskey="/">
@@ -73,10 +72,10 @@
                 </c-filter_field>
                 <c-filter_field label="Category" id="id_category">
                     <select name="category" id="id_category" aria-label="Filter by category">
-                        <option value="all" {% if category_filter == 'all' %}selected{% endif %}>All Categories</option>
+                        <option value="all" {% if filters.category == 'all' %}selected{% endif %}>All Categories</option>
                         {% for cat_id, cat_info in categories.items %}
                             <option value="{{ cat_id }}"
-                                    {% if category_filter == cat_id|stringformat:"i" %}selected{% endif %}>
+                                    {% if filters.category == cat_id|stringformat:"i" %}selected{% endif %}>
                                 {{ cat_info.display_name }}
                             </option>
                         {% endfor %}
@@ -87,7 +86,7 @@
                         <input type="number"
                                name="team"
                                id="id_team"
-                               value="{{ team_filter }}"
+                               value="{{ filters.team }}"
                                placeholder="Team #"
                                aria-label="Filter by team number">
                     </c-filter_field>
@@ -95,10 +94,10 @@
                         <select name="assignee" id="id_assignee" aria-label="Filter by assignee">
                             <option value="">All Assignees</option>
                             <option value="unassigned"
-                                    {% if assignee_filter == 'unassigned' %}selected{% endif %}>Unassigned</option>
+                                    {% if filters.assignee == 'unassigned' %}selected{% endif %}>Unassigned</option>
                             {% for person in assignees %}
                                 <option value="{{ person.id }}"
-                                        {% if assignee_filter == person.id|stringformat:"i" %}selected{% endif %}>
+                                        {% if filters.assignee == person.id|stringformat:"i" %}selected{% endif %}>
                                     {{ person }}
                                 </option>
                             {% endfor %}
@@ -114,17 +113,7 @@
                     </c-filter_field>
                 {% endif %}
             </c-filter_toolbar>
-            <c-ticket_list_table :page_obj="page_obj"
-                                 :status_filter="status_filter"
-                                 :category_filter="category_filter"
-                                 :search_query="search_query"
-                                 :sort_by="sort_by"
-                                 :page_size="page_size"
-                                 :team_filter="team_filter"
-                                 :assignee_filter="assignee_filter"
-                                 :authentik_username="authentik_username"
-                                 :is_ticketing_admin="is_ticketing_admin"
-                                 :is_ops="is_ops" />
+            {% include "ticketing/ticket_list_table.html" %}
         </c-module>
     </div>
 {% endblock content %}

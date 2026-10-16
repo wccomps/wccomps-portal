@@ -24,13 +24,18 @@
                 <h3>Attack Details</h3>
                 <c-detail_grid>
                     <c-detail_row label="Attack Type">
-                        {{ finding.attack_type.name|default:"—" }}
+                        {{ finding.attack_type.name|default:"Unknown" }}
                     </c-detail_row>
+                    {% if not finding.attack_type and finding.attack_vector %}
+                        <c-detail_row label="Attack Vector">
+                            {{ finding.attack_vector }}
+                        </c-detail_row>
+                    {% endif %}
                     <c-detail_row label="Affected Boxes">
-                        {{ finding.affected_boxes_display|default:"—" }}
+                        {{ finding.affected_boxes_display }}
                     </c-detail_row>
                     <c-detail_row label="Affected Service">
-                        {{ finding.affected_service|default:"—" }}
+                        {{ finding.affected_service }}
                     </c-detail_row>
                     <c-detail_row label="Source IP">
                         <code>{{ finding.source_ip_display }}</code>
@@ -155,9 +160,9 @@
             {% if can_delete %}
                 <c-form action="{% url 'scoring:delete_red_score' finding.id %}"
                         class="d-inline"
-                        onsubmit="return confirm('Are you sure you want to delete this finding? This cannot be undone.');">
+                        data-confirm="Are you sure you want to delete this finding? This cannot be undone.">
                     {% csrf_token %}
-                    <c-button type="submit" variant="danger" ::disabled="submitting">
+                    <c-button type="submit" variant="danger">
                         Delete Finding
                     </c-button>
                 </c-form>

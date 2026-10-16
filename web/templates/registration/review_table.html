@@ -1,8 +1,6 @@
 {# Registration review table - swappable content for htmx #}
-{% load status_variants %}
-{# Declared, so cotton leaves them out of attrs: it writes attrs unescaped #}
-<c-vars registrations />
-<div {{ attrs }} id="registration-review-content">
+{% load cotton status_variants %}
+<div id="registration-review-content">
     <c-table id="result_list" aria_label="Team registration requests">
         <c-slot name="headers">
             <tr>
@@ -39,14 +37,13 @@
                 <td>{{ registration.submitted_at|date:"Y-m-d H:i" }}</td>
                 <td>
                     {% if registration.status == "pending" %}
-                        <form method="post"
-                              action="{% url 'registration_approve' registration.id %}"
-                              class="d-inline">
+                        <c-form action="{% url 'registration_approve' registration.id %}"
+                                class="d-inline">
                             {% csrf_token %}
                             <c-button type="submit" variant="primary">
                                 Approve
                             </c-button>
-                        </form>
+                        </c-form>
                         <c-link href="{% url 'registration_reject' registration.id %}"
                                 class="deletelink">Reject</c-link>
                     {% endif %}
@@ -55,8 +52,13 @@
         {% empty %}
             <tr>
                 <td colspan="6">
-                    <c-empty_state title="No registrations found"
-                                   description="Registration requests will appear here" />
+                    {% if filtered %}
+                        <c-empty_state title="No registrations found"
+                                       description="No registration requests have the selected status" />
+                    {% else %}
+                        <c-empty_state title="No registrations found"
+                                       description="Registration requests will appear here" />
+                    {% endif %}
                 </td>
             </tr>
         {% endfor %}

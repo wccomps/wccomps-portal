@@ -1,18 +1,16 @@
 {# Usage: <c-button variant="primary" type="submit">Save</c-button> #}
-{# Props: variant (default|primary|danger|warning|cancel), type (button|submit), class (additional classes), id, name, value, onclick #}
+{# Props: variant (default|primary|danger|warning|cancel), type (button|submit), class (additional classes), id, name, value, form #}
 <c-vars variant="default"
         type="button"
         class
         id
         name=""
         value=""
-        onclick=""
         form="" />
 <button type="{{ type }}"
         {% if id %}id="{{ id }}"{% endif %}
         {% if name %}name="{{ name }}"{% endif %}
         {% if value %}value="{{ value }}"{% endif %}
-        {% if onclick %}onclick="{{ onclick }}"{% endif %}
         {% if form %}form="{{ form }}"{% endif %}
         {{ attrs }}
         class="button {{ class }} {% if variant == 'primary' %}default {% elif variant == 'danger' %}warning{% elif variant == 'warning' %}warning {% elif variant == 'cancel' %}cancel-link {% endif %}">

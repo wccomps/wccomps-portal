@@ -20,7 +20,7 @@
                 </c-detail_row>
                 {% if is_team_account %}<c-detail_row label="Team">{{ team_name }}</c-detail_row>{% endif %}
             </c-detail_grid>
-            <form method="post" action="{% url 'link_callback' %}">
+            <c-form action="{% url 'link_callback' %}">
                 {% csrf_token %}
                 <input type="hidden" name="token" value="{{ token }}">
                 <c-button_row>
@@ -28,7 +28,7 @@
                         Link {{ discord_username }}
                     </c-button>
                 </c-button_row>
-            </form>
+            </c-form>
         </c-module>
     </div>
 {% endblock content %}
