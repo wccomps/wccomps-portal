@@ -2,6 +2,9 @@
 it, for each way the portal passes one, rendered through the real template engine."""
 
 import logging
+import os
+import subprocess
+import sys
 from html.parser import HTMLParser
 
 import pytest
@@ -138,3 +141,20 @@ def test_a_dynamic_attribute_not_in_the_context_fails_on_any_component(source: s
 def test_an_alpine_binding_renders() -> None:
     html = Template(CottonCompiler().process('<c-button ::disabled="loading">Go</c-button>')).render(Context({}))
     assert ':disabled="loading"' in html
+
+
+def test_django_setup_installs_the_escaping_before_anything_can_render() -> None:
+    """core.cotton patches render-time code (Attrs), so it holds for every template if django.setup(), which every
+    entry point (wsgi, manage.py, the bot) runs before rendering, installs it. A fresh interpreter checks that."""
+    script = (
+        "import django\n"
+        "from django_cotton.templatetags import Attrs\n"
+        "unpatched = Attrs.__str__\n"
+        "django.setup()\n"
+        "from core import cotton\n"
+        "assert unpatched is not cotton.attrs_html\n"
+        "assert Attrs.__str__ is cotton.attrs_html and Attrs.unprocessable is cotton.unresolved\n"
+    )
+    env = {**os.environ, "DJANGO_SETTINGS_MODULE": "portal.test_settings"}
+    result = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, check=False)  # noqa: S603
+    assert result.returncode == 0, result.stderr
