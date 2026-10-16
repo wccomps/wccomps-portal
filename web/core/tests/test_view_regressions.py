@@ -15,6 +15,7 @@ from hypothesis import strategies as st
 from orange_team.models import OrangeAssignment, OrangeAssignmentResult, OrangeCheck, OrangeCheckCriterion
 from registration.models import TeamRegistration
 
+from core.middleware import NUL_MESSAGE
 from core.models import BotState
 from core.tests.roles import role_user
 from core.tests.strategies import request_text, rolled_back
@@ -318,11 +319,12 @@ def test_a_nul_character_in_a_cookie_is_refused(name: str, text: str) -> None:
     assert response.status_code == 400
 
 
-def test_an_anonymous_post_body_is_not_read_before_the_sign_in_gate() -> None:
-    """Only signed-in requests (and the public pages) get their form fields parsed for a NUL."""
-    response = Client().post(reverse("ticket_list"), {"search": "\x00"})
-    assert response.status_code == 302
-    assert response["Location"].startswith("/auth/login/")
+@pytest.mark.parametrize("path", ["/tickets/", "/livez/", "/health/", "/static/nope", "/auth/link"])
+def test_an_anonymous_post_body_is_not_parsed_for_a_nul(path: str) -> None:
+    """Only a signed-in request's form fields are parsed for a NUL; the sign-in gate lets anonymous POSTs through
+    to the health checks, /static/ and /auth/*, whose bodies nothing reads."""
+    response = Client().post(path, {"search": "\x00"})
+    assert NUL_MESSAGE.encode() not in response.content
 
 
 # ---------------------------------------------------------------------------------------------------------------

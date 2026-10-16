@@ -81,15 +81,15 @@ class RejectNulMiddleware:
 
 
 class RejectNulFieldsMiddleware:
-    """Refuse a form whose fields hold a NUL character, with a 400. It runs after the sign-in gate, so an anonymous
-    body is parsed only on the public pages."""
+    """Refuse a signed-in request's form whose fields hold a NUL character, with a 400. An anonymous body isn't
+    parsed here: the public forms (registration, linking) refuse a NUL field by field as every form does."""
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        # request.POST holds a form's fields (and nothing for other bodies); uploaded files aren't fields
-        if request.method == "POST" and _holds_nul(
+        # request.POST holds a form's fields (and nothing for another method or body); uploaded files aren't fields
+        if request.user.is_authenticated and _holds_nul(
             (key, value) for key, values in request.POST.lists() for value in values
         ):
             return _nul_refusal(request)
