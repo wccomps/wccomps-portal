@@ -74,3 +74,23 @@ def test_a_dismissed_category_change_keeps_the_category(live_server, pw_browser)
         assert ticket.category_id == first.pk
     finally:
         context.close()
+
+
+def test_cancelling_a_ticket_asks_first(live_server, pw_browser):
+    from ticketing.models import Ticket
+
+    user = _create_role_user("blue_team", None)
+    ticket = Ticket.objects.create(ticket_number="T001-009", team=user.discord_links.first().team, title="t")
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    questions: list[str] = []
+    page.on("dialog", lambda dialog: (questions.append(dialog.message), dialog.dismiss()))
+    try:
+        page.goto(f"{live_server.url}{reverse('ticket_detail', kwargs={'ticket_number': ticket.ticket_number})}")
+        page.get_by_role("button", name="Cancel Ticket").click()
+        page.wait_for_load_state("networkidle")
+        assert questions == ["Are you sure you want to cancel this ticket?"]
+        ticket.refresh_from_db()
+        assert ticket.status == "open"
+    finally:
+        context.close()

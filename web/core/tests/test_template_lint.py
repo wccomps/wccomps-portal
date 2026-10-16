@@ -226,3 +226,18 @@ def test_no_page_value_in_an_inline_handler() -> None:
         if page_value_in_handler(tag, name, value)
     }
     fail_with("Page values inside inline handlers", found, {})
+
+
+HX_REQUEST_ATTRS = {f"hx-{verb}" for verb in ("get", "post", "put", "patch", "delete")} | {"hx_get", "hx_post"}
+
+
+def test_hx_confirm_sits_on_an_htmx_request() -> None:
+    """htmx asks hx-confirm only before a request it makes; on a plain submit button it asks nothing (a form asks
+    with data-confirm)."""
+    found = {
+        f"{template_name(path)}:{tag.line}:{tag.name}": tag.attrs["hx-confirm"]
+        for path in tracked_templates()
+        for tag in tags(path)
+        if "hx-confirm" in tag.attrs and not HX_REQUEST_ATTRS & set(tag.attrs)
+    }
+    fail_with("hx-confirm with no htmx request on the same element", found, {})

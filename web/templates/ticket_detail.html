@@ -271,12 +271,10 @@
     </c-fieldset>
     {% if not is_ops and ticket.status == "open" %}
         <c-action_box heading="Cancel Ticket" variant="warning">
-            <c-form action="{% url 'ticket_cancel' ticket.ticket_number %}">
+            <c-form action="{% url 'ticket_cancel' ticket.ticket_number %}"
+                    data-confirm="Are you sure you want to cancel this ticket?">
                 {% csrf_token %}
-                <c-button type="submit"
-                          variant="danger"
-                          hx-confirm="Are you sure you want to cancel this ticket?"
-                          ::disabled="submitting">
+                <c-button type="submit" variant="danger" ::disabled="submitting">
                     Cancel Ticket
                 </c-button>
             </c-form>
