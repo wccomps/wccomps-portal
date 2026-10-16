@@ -462,20 +462,17 @@
         }
 
         document.addEventListener('alpine:init', () => {
-            // A team button toggles the hidden checkbox its data-checkbox-id names
             Alpine.data('teamPicker', () => ({
-                toggle(e) { toggleTeam(e.currentTarget, e.currentTarget.dataset.checkboxId); }
+                toggle(e) {
+                    const button = e.currentTarget;
+                    const checkbox = document.getElementById(button.dataset.checkboxId);
+                    if (!checkbox) return;
+                    checkbox.checked = !checkbox.checked;
+                    updateTeamButton(button, checkbox.checked);
+                    updateSelectedCount();
+                }
             }));
         });
-
-        function toggleTeam(button, checkboxId) {
-            const checkbox = document.getElementById(checkboxId);
-            if (checkbox) {
-                checkbox.checked = !checkbox.checked;
-                updateTeamButton(button, checkbox.checked);
-                updateSelectedCount();
-            }
-        }
 
         function updateTeamButton(button, isSelected) {
             if (isSelected) {

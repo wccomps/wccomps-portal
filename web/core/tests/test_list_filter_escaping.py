@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from django.contrib.auth.models import User
+from django.db.models import Model
 from django.test import Client
 from django.urls import reverse
 from hypothesis import example, given
@@ -164,12 +165,15 @@ def three_of_each(admin_user: User) -> None:
 
 
 def sort_key(row: object, field: str) -> object:
-    """The value a row sorts by for an order_by field: a__b follows the relation; a related row sorts by its pk.
-    The ticket pages list {"ticket": ticket, ...} rows."""
+    """The value a row sorts by for an order_by field, as the database orders it: a__b follows the relation, and a
+    related row sorts by its model's default ordering, or its pk without one. The ticket pages list
+    {"ticket": ticket, ...} rows."""
     value = row["ticket"] if isinstance(row, dict) else row
     for part in field.split("__"):
         value = getattr(value, part)
-    return getattr(value, "pk", value)
+    if not isinstance(value, Model):
+        return value
+    return tuple(getattr(value, name) for name in value._meta.ordering) or value.pk
 
 
 @pytest.mark.parametrize("name", LIST_PAGES)

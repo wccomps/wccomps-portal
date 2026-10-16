@@ -159,10 +159,6 @@ def inject_grading(request: HttpRequest) -> HttpResponse:
     return render(request, "scoring/inject_grading.html", context)
 
 
-# The columns the inject grades table sorts by
-INJECT_GRADE_SORTS = ("inject_name", "team__team_number", "points_awarded", "graded_at")
-
-
 @require_permission("white_team", error_message="Only White Team or Gold Team members can review inject grades")
 def inject_grades_review(request: HttpRequest) -> HttpResponse:
     """Review and approve inject grades (Gold Team)."""
@@ -176,7 +172,10 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
     )
     status_filter, inject_filter, team_filter, outliers, search_query = filters.values()
     show_outliers_only = outliers == "1"
-    sort_by = requested_sort(request, INJECT_GRADE_SORTS, "inject_name")
+    # The inject grades table's sortable columns
+    sort_by = requested_sort(
+        request, ("inject_name", "team__team_number", "points_awarded", "graded_at"), "inject_name"
+    )
 
     base_query = InjectScore.objects.select_related("team", "graded_by")
 

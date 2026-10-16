@@ -48,10 +48,6 @@ def _normalize_red_score_post(post_data: QueryDict) -> QueryDict:
     return normalized
 
 
-# The columns the findings table (scoring/partials/red_findings_table.html) sorts by
-RED_FINDING_SORTS = ("attack_type__name", "created_at")
-
-
 def findings_list(request: HttpRequest, *, default_status: str, page_size: int) -> dict[str, object]:
     """The filtered, sorted page of findings and the filter state for the table both findings pages show."""
     from django.db.models import Q
@@ -83,7 +79,11 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
 
     # distinct: the team filter joins the many-to-many affected_teams
     result = filter_sort_paginate(
-        request, findings.distinct(), sort_fields=RED_FINDING_SORTS, default_sort="-created_at", page_size=page_size
+        request,
+        findings.distinct(),
+        sort_fields=("attack_type__name", "created_at"),  # the findings table's sortable columns
+        default_sort="-created_at",
+        page_size=page_size,
     )
     return {
         "findings": result["page_obj"],

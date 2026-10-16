@@ -188,8 +188,8 @@ Page navigation for paginated results.
 ```
 
 Both build their links with Django's `{% querystring %}`, so a link keeps the page's query (its filters) and changes
-only `sort` or `page`. Another link that should keep the list's filters does the same:
-`{% url 'ticket_list' %}{% querystring %}`.
+only `sort` or `page`. A list's own refresh does the same (`hx-get="{% url 'ticket_list' %}{% querystring %}"`); a
+link from another page back to a list doesn't, since it would carry that page's query.
 
 ## Benefits
 
@@ -217,7 +217,8 @@ wasn't passed (its `<c-vars>` default, if it has one).
 `core/tests/test_cotton_escaping.py` renders components with values built to break out of their attribute and fails
 if one comes out raw; run it after any django-cotton upgrade, since `core/cotton.py` replaces two methods of its
 `Attrs`. Escaping makes a value safe as attribute text, not as a URL or code: request text reaches an `href` only as
-a query value `{% querystring %}` encodes, and never an `on*` or Alpine attribute.
+a query value `{% querystring %}` or `QueryDict.urlencode()` encoded (the ticket page's way back), and never an
+`on*` or Alpine attribute.
 
 One page's markup that htmx also refreshes (a list's table) is a template beside the page that the page
 `{% include %}`s and the view renders on its own, not a component.
