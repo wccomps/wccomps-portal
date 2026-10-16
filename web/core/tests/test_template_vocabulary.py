@@ -198,8 +198,8 @@ RAW_MARKUP_EXCEPTIONS: dict[str, str] = {
         "The chrome's menu, dark mode and sound toggles; c-button would put Django's filled .button on the nav bar"
     ),
     "admin/index.html:<c-module>": "Django admin's own index page: its recent actions box, kept as Django writes it",
-    "packets/ops_packet_detail.html:<c-form>": (
-        "Each row's resend form wraps the row's cells; a c-form there would add a component inside the table row"
+    "create_ticket.html:<c-form>": (
+        'Another branch is rewriting the ticket form; it becomes a c-form (x_data="ticketForm") after that merges'
     ),
     "orange_team/check_form.html:<c-form_field>": (
         "Rubric rows Alpine repeats (x-for); c-form_field takes a fixed label and id, these are bound per row"
@@ -529,14 +529,9 @@ def test_classes_come_from_the_shared_vocabulary() -> None:
     )
 
 
-def own_form(tag: Tag, component: str) -> bool:
-    """A form c-form doesn't render: a GET form (c-form posts), or one whose own Alpine component (x-data, or an
-    x-ref its page's component submits) would be replaced by the submitGuard c-form brings."""
-    if component != "<c-form>":
-        return False
-    if tag.attrs.get("method", "get").lower() != "post":
-        return True
-    return "x-ref" in tag.attrs or tag.attrs.get("x-data", "submitGuard") != "submitGuard"
+def get_form(tag: Tag, component: str) -> bool:
+    """A GET form (a filter toolbar): c-form is a POST form."""
+    return component == "<c-form>" and tag.attrs.get("method", "get").lower() != "post"
 
 
 def test_no_hand_written_component_markup() -> None:
@@ -545,7 +540,7 @@ def test_no_hand_written_component_markup() -> None:
         for tag in tags(path):
             classes = attribute_classes(tag.attrs.get("class", ""))
             for element, cls, component in RAW_MARKUP:
-                if tag.name == element and (cls is None or cls in classes) and not own_form(tag, component):
+                if tag.name == element and (cls is None or cls in classes) and not get_form(tag, component):
                     lines.setdefault(f"{template_name(path)}:{component}", []).append(str(tag.line))
     found = {key: f"line {', '.join(ln)}" for key, ln in lines.items()}
     fail_with("Markup a shared component renders, written by hand", found, RAW_MARKUP_EXCEPTIONS)

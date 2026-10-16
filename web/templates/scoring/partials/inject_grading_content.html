@@ -4,7 +4,7 @@
     {% if selected_inject %}
         <c-fieldset heading="{{ selected_inject.title }}">
             {% if selected_inject.description %}<p class="text-muted mb-15">{{ selected_inject.description }}</p>{% endif %}
-            <form method="post" x-data="clearableForm" @submit="onSubmit">
+            <c-form x_data="clearableForm">
                 {% csrf_token %}
                 <input type="hidden" name="inject_id" value="{{ selected_inject_id }}">
                 <c-table aria_label="Team grades">
@@ -68,7 +68,7 @@
                         Save Grades
                     </c-button>
                 </c-button_row>
-            </form>
+            </c-form>
         </c-fieldset>
     {% elif inject_choices %}
         <c-empty_state title="No inject selected"

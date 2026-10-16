@@ -96,12 +96,6 @@
                     </c-slot>
                     {% for dist in distributions %}
                         <tr>
-                            <form method="post"
-                                  action="{% url 'packet_resend_team' packet.id dist.team.id %}"
-                                  x-data="submitGuard"
-                                  @submit="onSubmit"
-                                  class="m-0">
-                                {% csrf_token %}
                                 <td>Team {{ dist.team.team_number }}</td>
                                 <td>
                                     <c-badge variant="{{ dist.email_status|badge_variant:'packet_email' }}"
@@ -111,6 +105,7 @@
                                 </td>
                                 <td>
                                     <input type="email"
+                                           form="resend-{{ dist.team.id }}"
                                            name="primary_email"
                                            value="{{ dist.team.school_info.contact_email|default:'' }}"
                                            aria-label="Primary email for Team {{ dist.team.team_number }}"
@@ -118,6 +113,7 @@
                                 </td>
                                 <td>
                                     <input type="email"
+                                           form="resend-{{ dist.team.id }}"
                                            name="secondary_email"
                                            value="{{ dist.team.school_info.secondary_email|default:'' }}"
                                            aria-label="Secondary email for Team {{ dist.team.team_number }}">
@@ -133,11 +129,16 @@
                                     {% endif %}
                                 </td>
                                 <td>
-                                    <c-button type="submit" variant="default" ::disabled="submitting">
-                                        Resend
-                                    </c-button>
+                                    {# The row's email inputs join this form with form=: a form can't wrap table cells #}
+                                    <c-form id="resend-{{ dist.team.id }}"
+                                            action="{% url 'packet_resend_team' packet.id dist.team.id %}"
+                                            class="m-0">
+                                        {% csrf_token %}
+                                        <c-button type="submit" variant="default" ::disabled="submitting">
+                                            Resend
+                                        </c-button>
+                                    </c-form>
                                 </td>
-                            </form>
                         </tr>
                     {% endfor %}
                 </c-table>

@@ -17,13 +17,11 @@
                     {# djlint:on #}
                     {% if is_ops %}
                         {% if ticket.status == "claimed" and ticket.assigned_to.username == authentik_username or is_ticketing_admin %}
-                            <form method="post"
-                                  action="{% url 'ticket_change_category' ticket.ticket_number %}"
-                                  class="d-inline-block m-0"
-                                  x-data="categoryChanger"
-                                  data-initial-cat="{{ ticket.category_id }}"
-                                  data-confirm="Change category? This may change points charged."
-                                  @submit="onSubmit">
+                            <c-form action="{% url 'ticket_change_category' ticket.ticket_number %}"
+                                    class="d-inline-block m-0"
+                                    x_data="categoryChanger"
+                                    data-initial-cat="{{ ticket.category_id }}"
+                                    data-confirm="Change category? This may change points charged.">
                                 {% csrf_token %}
                                 <select name="new_category"
                                         :value="newCat"
@@ -37,7 +35,7 @@
                                         </option>
                                     {% endfor %}
                                 </select>
-                            </form>
+                            </c-form>
                         {% else %}
                             <span>{{ category_name }}</span>
                         {% endif %}
