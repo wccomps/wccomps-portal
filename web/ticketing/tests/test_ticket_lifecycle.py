@@ -15,11 +15,9 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def team(db):
+def team(db, blue_team):
     """Create a team for ticket tests."""
-    return Team.objects.update_or_create(
-        team_number=1, defaults={"team_name": "Test Team", "authentik_group": "WCComps_BlueTeam01"}
-    )[0]
+    return blue_team
 
 
 @pytest.fixture

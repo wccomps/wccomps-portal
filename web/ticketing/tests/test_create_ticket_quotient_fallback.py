@@ -7,7 +7,6 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from team.models import Team
 from ticketing.models import Ticket, TicketCategory
 
 pytestmark = pytest.mark.django_db
@@ -26,8 +25,8 @@ def _quotient(boxes: dict[str, str], services: list[dict[str, str]]) -> MagicMoc
 
 
 @pytest.fixture
-def team(blue_team_user):
-    return Team.objects.update_or_create(team_number=1, defaults={"team_name": "Blue Team 01"})[0]
+def team(blue_team_user, blue_team):
+    return blue_team
 
 
 @pytest.fixture

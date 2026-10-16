@@ -330,7 +330,7 @@ def test_file_size_validator_passes_or_refuses_any_upload(upload: SimpleUploaded
 
 @pytest.fixture
 def ticket(db: Any) -> Ticket:
-    team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01"})[0]
+    team = Team.objects.create(team_number=1, team_name="Team 01")
     return Ticket.objects.create(
         team=team, category=TicketCategory.objects.first(), ticket_number="T001-001", title="Help"
     )

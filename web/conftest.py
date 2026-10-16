@@ -31,6 +31,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 from core.tests.roles import groups_of, make_user, role_user
+from team.models import Team
 
 
 @pytest.fixture
@@ -48,6 +49,12 @@ def unauthenticated_client() -> Client:
 def blue_team_user(db: Any) -> User:
     """The blue_team role's user, a member of Team 1 (core.tests.roles.role_user)."""
     return role_user("blue_team", username="blueteam01")
+
+
+@pytest.fixture
+def blue_team(blue_team_user: User) -> Team:
+    """Team 1, the blue_team_user's team."""
+    return Team.objects.get(team_number=1)
 
 
 @pytest.fixture

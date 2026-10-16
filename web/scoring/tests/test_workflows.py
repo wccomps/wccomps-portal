@@ -17,9 +17,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def team(db):
     """Create a team for scoring tests."""
-    return Team.objects.update_or_create(
-        team_number=1, defaults={"team_name": "Test Team", "authentik_group": "WCComps_BlueTeam01"}
-    )[0]
+    return Team.objects.create(team_number=1, team_name="Test Team", authentik_group="WCComps_BlueTeam01")
 
 
 class TestIncidentReportFlow:

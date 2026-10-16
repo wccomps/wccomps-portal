@@ -5,7 +5,6 @@ from django.test import Client
 from django.urls import reverse
 
 from core.models import DiscordTask
-from team.models import Team
 from ticketing.lifecycle import cancel_ticket, reopen_ticket
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 from ticketing.utils import change_ticket_category_atomic
@@ -14,10 +13,8 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def team():
-    return Team.objects.update_or_create(
-        team_number=1, defaults={"team_name": "Team 01", "authentik_group": "WCComps_BlueTeam01"}
-    )[0]
+def team(blue_team):
+    return blue_team
 
 
 def _ticket(team, status, **extra):

@@ -108,9 +108,9 @@ def test_a_nul_character_in_a_form_field_is_refused(admin_client: Client, text: 
 
 
 @pytest.fixture
-def tickets(db: Any, default_category: Any) -> dict[str, Any]:
+def tickets(db: Any, default_category: Any, blue_team) -> dict[str, Any]:
     """Team 1's ticket (the blue_team role's, by its Authentik group) and team 2's."""
-    own = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01"})[0]
+    own = blue_team
     other = Team.objects.create(team_number=2, team_name="Team 02")
     return {
         "own": Ticket.objects.create(team=own, category=default_category, ticket_number="T001-001", title="Ours"),
@@ -158,10 +158,10 @@ def test_a_refusal_page_carries_its_status(
 
 
 @pytest.fixture
-def rubric(orange_team_user: User) -> dict[str, Any]:
+def rubric(orange_team_user: User, blue_team) -> dict[str, Any]:
     check = OrangeCheck.objects.create(title="Phones", description="", max_points=5)
     criterion = OrangeCheckCriterion.objects.create(orange_check=check, label="Answered", points=5, sort_order=1)
-    team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01"})[0]
+    team = blue_team
     assignment = OrangeAssignment.objects.create(orange_check=check, user=orange_team_user, team=team)
     OrangeAssignmentResult.objects.create(assignment=assignment, criterion=criterion)
     return {"client": signed_in(orange_team_user), "assignment": assignment, "criterion": criterion}

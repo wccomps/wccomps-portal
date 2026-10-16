@@ -6,7 +6,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from team.models import DiscordLink, Team
+from team.models import DiscordLink
 
 pytestmark = pytest.mark.django_db
 
@@ -33,14 +33,16 @@ class TestCreateTicketTemplate:
         with patch("quotient.client.get_quotient_client", return_value=mock_client):
             yield mock_client
 
-    def test_create_ticket_renders_service_dropdown_without_template_tag(self, blue_team_user, mock_quotient):
+    def test_create_ticket_renders_service_dropdown_without_template_tag(
+        self, blue_team_user, mock_quotient, blue_team
+    ):
         """
         Service dropdown should NOT use <template x-for> inside <select>.
 
         This is a regression test for the Alpine.js bug where <template> elements
         inside <select> don't work in browsers.
         """
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team", "is_active": True})[0]
+        team = blue_team
         DiscordLink.objects.create(
             discord_id=123456789,
             discord_username="blueteam01",
@@ -66,9 +68,9 @@ class TestCreateTicketTemplate:
         # Verify Alpine.js setup is present (rebuildServiceOptions method)
         assert "rebuildServiceOptions" in content
 
-    def test_create_ticket_passes_categories_to_template(self, blue_team_user, mock_quotient):
+    def test_create_ticket_passes_categories_to_template(self, blue_team_user, mock_quotient, blue_team):
         """Create ticket view should pass categories to template."""
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team", "is_active": True})[0]
+        team = blue_team
         DiscordLink.objects.create(
             discord_id=123456789,
             discord_username="blueteam01",
@@ -90,9 +92,9 @@ class TestCreateTicketTemplate:
 
 
 @pytest.fixture
-def team_with_link(blue_team_user):
+def team_with_link(blue_team_user, blue_team):
     """Create a team with DiscordLink for blue_team_user."""
-    team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team", "is_active": True})[0]
+    team = blue_team
     DiscordLink.objects.create(
         discord_id=123456789,
         discord_username="blueteam01",

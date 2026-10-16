@@ -46,7 +46,7 @@ class ScoringFormulaTests(TestCase):
     def setUp(self) -> None:
         """Set up test data."""
         self.user = User.objects.create_user(username="testuser", password="test123")
-        self.team1 = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team 1"})[0]
+        self.team1 = Team.objects.create(team_number=1, team_name="Test Team 1")
         self.team2 = Team.objects.create(team_number=2, team_name="Test Team 2")
 
         # Weights proportional to maxes → all modifiers = 1.0 for easy math
@@ -325,7 +325,7 @@ class TestLeaderboardAccess:
 
     def test_discord_admin_can_toggle_school_names(self, create_user_with_groups) -> None:
         """Discord admin sees the school names toggle button and school name markup."""
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 1"})[0]
+        team = Team.objects.create(team_number=1, team_name="Team 1")
         SchoolInfo.objects.create(
             team=team, school=School.for_name("Test University"), contact_email="test@example.edu"
         )
@@ -356,7 +356,7 @@ class TestLeaderboardAccess:
 
     def test_non_admin_cannot_toggle_school_names(self, create_user_with_groups) -> None:
         """Non-admin roles should not see the toggle button or school names."""
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 1"})[0]
+        team = Team.objects.create(team_number=1, team_name="Team 1")
         SchoolInfo.objects.create(
             team=team, school=School.for_name("Test University"), contact_email="test@example.edu"
         )
@@ -379,7 +379,7 @@ class TestLeaderboardAccess:
         from scoring.models import OrangeTeamScore, ScoringTemplate
 
         ScoringTemplate.objects.create(service_max=Decimal("40"), inject_max=Decimal("40"), orange_max=Decimal("20"))
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 1"})[0]
+        team = Team.objects.create(team_number=1, team_name="Team 1")
         OrangeTeamScore.objects.create(team=team, points_awarded=Decimal("25"), description="test", is_approved=True)
 
         admin_user = create_user_with_groups("admin_user", ["WCComps_Discord_Admin"])
@@ -447,7 +447,7 @@ class InjectScoreApprovalTests(TestCase):
         """Set up test data."""
         self.grader = User.objects.create_user(username="grader", password="test123")
         self.approver = User.objects.create_user(username="approver", password="test123")
-        self.team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team"})[0]
+        self.team = Team.objects.create(team_number=1, team_name="Test Team")
 
     def test_new_inject_grade_defaults_to_not_approved(self) -> None:
         """New InjectScore should have is_approved=False by default."""
@@ -606,7 +606,7 @@ class TestIncidentFindingMatching:
     def test_incident_can_be_matched_to_finding(self, create_user_with_groups) -> None:
         """Incident can be matched to a red team finding."""
         user = create_user_with_groups("gold_user", ["WCComps_GoldTeam"])
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team"})[0]
+        team = Team.objects.create(team_number=1, team_name="Test Team")
 
         red_finding = RedTeamScore.objects.create(
             attack_vector="SQL Injection",
@@ -647,7 +647,7 @@ class TestIncidentFindingMatching:
     def test_incident_can_be_rejected_without_match(self, create_user_with_groups) -> None:
         """Incident can be rejected (reviewed but not matched to finding)."""
         user = create_user_with_groups("gold_user", ["WCComps_GoldTeam"])
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team"})[0]
+        team = Team.objects.create(team_number=1, team_name="Test Team")
 
         incident = IncidentReport.objects.create(
             team=team,
@@ -676,7 +676,7 @@ class TestIncidentFindingMatching:
     def test_only_reviewed_incidents_count_for_scoring(self, create_user_with_groups) -> None:
         """Only reviewed incidents contribute to incident recovery points."""
         user = create_user_with_groups("gold_user", ["WCComps_GoldTeam"])
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team"})[0]
+        team = Team.objects.create(team_number=1, team_name="Test Team")
 
         # Create template with equal weights (modifier=1.0 when weight ∝ max)
         ScoringTemplate.objects.create(
@@ -720,7 +720,7 @@ class TestIncidentFindingMatching:
     def test_suggest_red_score_matches_by_source_ip(self, create_user_with_groups) -> None:
         """Finding suggestion algorithm matches by source IP."""
         user = create_user_with_groups("gold_user", ["WCComps_GoldTeam"])
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team"})[0]
+        team = Team.objects.create(team_number=1, team_name="Test Team")
 
         matching_finding = RedTeamScore.objects.create(
             attack_vector="RCE",
@@ -755,7 +755,7 @@ class TestIncidentFindingMatching:
     def test_suggest_red_score_matches_by_box_and_service(self, create_user_with_groups) -> None:
         """Finding suggestion algorithm matches by affected box and service."""
         user = create_user_with_groups("gold_user", ["WCComps_GoldTeam"])
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team"})[0]
+        team = Team.objects.create(team_number=1, team_name="Test Team")
 
         matching_finding = RedTeamScore.objects.create(
             attack_vector="Web Exploit",
@@ -785,7 +785,7 @@ class TestIncidentFindingMatching:
     def test_calculate_suggested_recovery_points(self, create_user_with_groups) -> None:
         """Suggested recovery points calculated at 80% of red team deduction."""
         user = create_user_with_groups("gold_user", ["WCComps_GoldTeam"])
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team"})[0]
+        team = Team.objects.create(team_number=1, team_name="Test Team")
 
         red_finding = RedTeamScore.objects.create(
             attack_vector="RCE",
@@ -810,7 +810,7 @@ class TestIncidentFindingMatching:
     def test_reviewer_tracking_fields_nullable(self, create_user_with_groups) -> None:
         """Reviewer tracking fields can be null for unreviewed incidents."""
         user = create_user_with_groups("blue_user", ["WCComps_BlueTeam01"])
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team"})[0]
+        team = Team.objects.create(team_number=1, team_name="Test Team")
 
         incident = IncidentReport.objects.create(
             team=team,
@@ -831,7 +831,7 @@ class ScalingContextTests(TestCase):
 
     def setUp(self) -> None:
         self.user = User.objects.create_user(username="testuser", password="test123")
-        self.team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Test Team"})[0]
+        self.team = Team.objects.create(team_number=1, team_name="Test Team")
         ScoringTemplate.objects.create(
             service_weight=Decimal("40"),
             inject_weight=Decimal("40"),
@@ -887,7 +887,7 @@ class TestIncidentListView:
     def test_blue_team_can_access_incident_list(self, create_user_with_groups) -> None:
         """Blue team members can access their incident list."""
         user = create_user_with_groups("blue_user", ["WCComps_BlueTeam01"])
-        Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01"})[0]
+        Team.objects.create(team_number=1, team_name="Team 01")
         client = Client()
         client.force_login(user)
 
@@ -941,7 +941,7 @@ class TestIncidentListView:
         """Blue team members see only their team's incidents."""
         user1 = create_user_with_groups("blue_user1", ["WCComps_BlueTeam01"])
         user2 = create_user_with_groups("blue_user2", ["WCComps_BlueTeam02"])
-        team1 = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01"})[0]
+        team1 = Team.objects.create(team_number=1, team_name="Team 01")
         team2 = Team.objects.create(team_number=2, team_name="Team 02")
 
         incident1 = IncidentReport.objects.create(
@@ -971,7 +971,7 @@ class TestIncidentListView:
     def test_incident_list_shows_correct_fields(self, create_user_with_groups) -> None:
         """Incident list shows timestamp, box, and attack type."""
         user = create_user_with_groups("blue_user", ["WCComps_BlueTeam01"])
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01"})[0]
+        team = Team.objects.create(team_number=1, team_name="Team 01")
 
         IncidentReport.objects.create(
             team=team,
@@ -995,7 +995,7 @@ class TestIncidentListView:
         """Incident list does NOT show match status to blue team."""
         user = create_user_with_groups("blue_user", ["WCComps_BlueTeam01"])
         gold_user = create_user_with_groups("gold_user", ["WCComps_GoldTeam"])
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01"})[0]
+        team = Team.objects.create(team_number=1, team_name="Team 01")
 
         red_finding = RedTeamScore.objects.create(
             attack_vector="Test attack",
@@ -1028,7 +1028,7 @@ class TestIncidentListView:
     def test_incident_list_shows_multiple_incidents_in_order(self, create_user_with_groups) -> None:
         """Incident list shows multiple incidents ordered by submission time."""
         user = create_user_with_groups("blue_user", ["WCComps_BlueTeam01"])
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01"})[0]
+        team = Team.objects.create(team_number=1, team_name="Team 01")
 
         incident1 = IncidentReport.objects.create(
             team=team,
@@ -1066,7 +1066,7 @@ class TestIncidentListView:
     def test_incident_list_empty_when_no_incidents(self, create_user_with_groups) -> None:
         """Incident list shows empty state when team has no incidents."""
         user = create_user_with_groups("blue_user", ["WCComps_BlueTeam01"])
-        Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01"})[0]
+        Team.objects.create(team_number=1, team_name="Team 01")
         client = Client()
         client.force_login(user)
 
@@ -1078,7 +1078,7 @@ class TestIncidentListView:
     def test_incident_list_links_to_detail_view(self, create_user_with_groups) -> None:
         """Incident list contains links to detail view."""
         user = create_user_with_groups("blue_user", ["WCComps_BlueTeam01"])
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01"})[0]
+        team = Team.objects.create(team_number=1, team_name="Team 01")
 
         incident = IncidentReport.objects.create(
             team=team,

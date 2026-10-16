@@ -5,7 +5,7 @@ from django.test import Client
 from django.urls import reverse
 
 from core.models import DiscordTask
-from team.models import DiscordLink, Team
+from team.models import DiscordLink
 from ticketing import lifecycle
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 
@@ -15,10 +15,8 @@ THREAD_ID = 4242
 
 
 @pytest.fixture
-def team():
-    return Team.objects.update_or_create(
-        team_number=1, defaults={"team_name": "Team 01", "authentik_group": "WCComps_BlueTeam01"}
-    )[0]
+def team(blue_team):
+    return blue_team
 
 
 def _ticket(team, status, number="T001-001", **extra):

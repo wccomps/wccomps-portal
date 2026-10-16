@@ -4,15 +4,14 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from team.models import Team
 from ticketing.models import Ticket, TicketCategory
 
 pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def tickets():
-    team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01"})[0]
+def tickets(blue_team):
+    team = blue_team
     category = TicketCategory.objects.get(pk=6)
     return {
         status: Ticket.objects.create(

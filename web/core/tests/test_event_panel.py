@@ -200,7 +200,7 @@ def _arrange(stage):
     elif stage == "leftovers":
         from ticketing.models import Ticket
 
-        team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01", "is_active": True})[0]
+        team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
         Ticket.objects.create(ticket_number="T001-001", team=team, title="Left")
 
 
@@ -356,7 +356,7 @@ def test_running_with_no_recorded_start_or_sync_says_so(client):
 def test_leftovers_open_advanced_where_clear_leftover_data_is(client):
     from ticketing.models import Ticket
 
-    team = Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01", "is_active": True})[0]
+    team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     Ticket.objects.create(ticket_number="T001-001", team=team, title="Left")
 
     page = _page(client)

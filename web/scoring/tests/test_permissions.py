@@ -4,8 +4,6 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from team.models import Team
-
 pytestmark = pytest.mark.django_db
 
 
@@ -79,8 +77,8 @@ class TestScorecardPermissions:
     """Test permissions for scorecard and scorecard PDF views."""
 
     @pytest.fixture
-    def test_team(self):
-        return Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 1", "is_active": True})[0]
+    def test_team(self, blue_team):
+        return blue_team
 
     def test_unauthenticated_redirects_to_login(self, unauthenticated_client, test_team):
         """Unauthenticated users should be redirected to login."""

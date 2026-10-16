@@ -11,9 +11,9 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def team1():
+def team1(blue_team):
     """Create team 1 (matches blue_team_user's group)."""
-    return Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01", "is_active": True})[0]
+    return blue_team
 
 
 @pytest.fixture
@@ -458,8 +458,8 @@ class TestTicketNotifications:
     """Tests for ops_ticket_notifications endpoint."""
 
     @pytest.fixture
-    def team1(self):
-        return Team.objects.update_or_create(team_number=1, defaults={"team_name": "Team 01", "is_active": True})[0]
+    def team1(self, blue_team):
+        return blue_team
 
     def test_returns_open_count(self, ticketing_support_user, team1):
         """Should return count of open tickets."""
