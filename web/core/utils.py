@@ -88,7 +88,7 @@ def run_detached(lines: Iterator[str]) -> Iterator[str]:
 
 
 def optional_int(value: str) -> int | None:
-    """The integer in request text, or None when the text isn't one (callers then ignore it)."""
+    """The integer in request text, or None when the text isn't one."""
     try:
         return int(value)
     except ValueError:
