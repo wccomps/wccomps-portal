@@ -413,3 +413,16 @@ def test_an_incident_report_refuses_a_role_it_doesnt_let_in_with_a_403(red_team_
     )
     assert client.get(reverse("scoring:submit_incident_report")).status_code == 403
     assert client.get(reverse("scoring:view_incident_report", args=[incident.pk])).status_code == 403
+
+
+@pytest.mark.parametrize("page", ["index", "login"])
+def test_the_admin_site_refuses_a_signed_in_non_admin_itself(gold_team_user: User, page: str) -> None:
+    """The admin site answers a signed-in visitor it refuses with a 403, not its login form (signing in is
+    Authentik's), so the sign-in gate needs no admin rule of its own."""
+    from django.contrib import admin
+    from django.test import RequestFactory
+
+    request = RequestFactory().get(reverse(f"admin:{page}"))
+    request.user = gold_team_user
+    view = admin.site.login if page == "login" else admin.site.admin_view(admin.site.index)
+    assert view(request).status_code == 403

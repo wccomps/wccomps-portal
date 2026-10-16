@@ -4,7 +4,7 @@ import json
 
 import pytest
 from django.conf import settings
-from django.contrib.auth.models import AnonymousUser
+from django.contrib.auth.models import AnonymousUser, User
 from django.http import HttpResponse
 from django.test import Client, RequestFactory
 from django.urls import URLPattern, URLResolver, get_resolver
@@ -419,25 +419,18 @@ class TestAuthentikRequiredMiddleware:
         # The middleware should sanitize to "/" since //evil.com is external
         assert "evil.com" not in response.url or "%2F" in response.url
 
-    def test_admin_path_requires_admin_permission(self, middleware, blue_team_user):
-        """Django admin should require Authentik admin permission, not just authentication."""
-        factory = RequestFactory()
-        request = factory.get("/admin/")
-        request.user = blue_team_user  # authenticated but not admin
+    def test_admin_path_requires_admin_permission(self, blue_team_user):
+        """The Django admin requires the Authentik admin permission, not just a sign-in (the admin site refuses)."""
+        client = Client()
+        client.force_login(blue_team_user)
+        assert client.get("/admin/").status_code == 403
 
-        response = middleware(request)
-
-        assert response.status_code == 403
-
-    def test_admin_path_allowed_for_admin_user(self, middleware, admin_user):
-        """Django admin should be accessible to Authentik admins."""
-        factory = RequestFactory()
-        request = factory.get("/admin/")
-        request.user = admin_user
-
-        response = middleware(request)
-
-        assert response.status_code == 200
+    def test_admin_path_allowed_for_admin_user(self, admin_user):
+        """The Django admin lets an Authentik admin in."""
+        User.objects.filter(pk=admin_user.pk).update(is_staff=True, is_superuser=True)
+        client = Client()
+        client.force_login(admin_user)
+        assert client.get("/admin/").status_code == 200
 
     def test_authenticated_user_on_whitelist_path(self, middleware, authenticated_request):
         """Authenticated user on whitelisted path should still pass through."""

@@ -6,11 +6,9 @@ from typing import Any
 from urllib.parse import quote
 
 from django.conf import settings
-from django.contrib import admin
 from django.db import connection
 from django.http import HttpRequest, HttpResponse, HttpResponsePermanentRedirect, JsonResponse
 from django.shortcuts import redirect
-from django.urls import Resolver404, resolve
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
@@ -166,14 +164,6 @@ class SubdomainRedirectMiddleware:
         logger.info('%s %s "%s %s" %s %s', event, host, request.method, request.path, status, referer)
 
 
-def _is_admin_page(request: HttpRequest) -> bool:
-    """Whether the path resolves to a page of the Django admin site, wherever it is mounted."""
-    try:
-        return resolve(request.path_info).namespace == admin.site.name
-    except Resolver404:
-        return False
-
-
 class AuthentikRequiredMiddleware:
     """Require Authentik login for all pages except OAuth flow and Discord linking."""
 
@@ -220,11 +210,6 @@ class AuthentikRequiredMiddleware:
                 next_url = "/"
             safe_next = quote(next_url, safe="")
             return redirect(f"/auth/login/?next={safe_next}")
-
-        # The Django admin's pages: the admin site decides who gets in (core.admin), and a signed-in visitor it
-        # refuses gets a 403 here rather than its login form (signing in is Authentik's)
-        if _is_admin_page(request) and not admin.site.has_permission(request):
-            return HttpResponse("Forbidden", status=403)
 
         return self.get_response(request)
 
