@@ -1,5 +1,5 @@
-{# Usage: <c-pagination page_obj=page_obj query_params="&status=open" /> #}
-{# Props: page_obj (Django Paginator), query_params (url params to preserve) #}
+{# Usage: <c-pagination :page_obj="page_obj" query_params="&status={{ status_filter|urlencode }}" /> #}
+{# Props: page_obj (Django Paginator), query_params (the filters to keep, as &name=value, each value |urlencode) #}
 <c-vars page_obj query_params />
 {% if page_obj %}
     <p class="paginator">

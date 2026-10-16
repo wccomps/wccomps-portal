@@ -1,6 +1,6 @@
 {# Table header component - sortable column header with optional tooltip #}
 {# Usage: <c-table_header sort_field="team__team_number" current_sort="-created_at">Team</c-table_header> #}
-{# Props: sort_field, current_sort, query_params (dict), sortable (bool), tooltip (optional help text) #}
+{# Props: sort_field, current_sort, query_params (the list's filters as &name=value, each value |urlencode), sortable (bool), tooltip (optional help text) #}
 <c-vars sort_field current_sort query_params sortable="true" tooltip />
 <th scope="col"
     {{ attrs }}

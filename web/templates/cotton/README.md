@@ -177,7 +177,7 @@ Sortable table column header.
 <c-table_header
     sort_field="team__team_number"
     current_sort="{{ sort_by }}"
-    query_params="&status=open">
+    query_params="&status={{ status_filter|urlencode }}">
     Team Number
 </c-table_header>
 ```
@@ -185,16 +185,36 @@ Sortable table column header.
 #### `<c-pagination>`
 Page navigation for paginated results.
 ```django
-<c-pagination page_obj=page_obj query_params="&status=open&team=1" />
+<c-pagination :page_obj="page_obj" query_params="&status={{ status_filter|urlencode }}&team={{ team_filter|urlencode }}" />
 ```
+
+`query_params` is the list's filters, written `&name=value` with each value `|urlencode`d, so a value holding `&`
+stays one parameter.
 
 ## Benefits
 
 1. **Consistency**: UI elements look and behave the same across pages
 2. **Maintainability**: Update styling in one place, affects all uses
 3. **Reduced Code**: Less repetition in templates (~40% reduction)
-4. **Type Safety**: Components enforce correct prop usage
-5. **Documentation**: Self-documenting with clear prop names
+4. **Documentation**: Self-documenting with clear prop names
+
+## Attributes and Escaping
+
+A component writes the attributes it doesn't declare in `<c-vars>` with `{{ attrs }}`. django-cotton doesn't escape
+them; `core/cotton.py` does, for every component, at startup:
+- a value from the page's context (`:title="search"`, `title=search`, `:attrs="dict"`) is escaped;
+- a value written `title="{{ search }}"` was escaped by the template engine and isn't escaped again;
+- a literal (`title="Tom &amp; Jerry"`, `@click="go(&quot;a&quot;)"`) is the template's own HTML and keeps its entities.
+
+`core/tests/test_cotton_escaping.py` renders a component with values built to break out of their attribute and
+fails if one comes out raw; run it after any django-cotton upgrade, since `core/cotton.py` replaces two of its
+internals. An Alpine binding on a component is written `::name` (cotton passes it through as `:name`); a `:name`
+the page's context doesn't have, on a component that doesn't declare it, fails to render rather than vanishing.
+Escaping makes a value safe as attribute text only: request text never goes into `href`, `on*` or Alpine
+attributes, where text is a URL or code.
+
+One page's markup that htmx also refreshes (a list's table) is a template beside the page that the page
+`{% include %}`s and the view renders on its own, not a component.
 
 ## Styling Vocabulary
 
