@@ -83,7 +83,7 @@ class TestAuthentikManager:
 
         assert error.status_code == 403
         assert "Permission denied" in str(error)
-        assert "token lacks required permissions" in str(error)
+        assert "the token lacks required permissions" in str(error)
 
     def test_handle_response_error_404(self, manager: AuthentikManager) -> None:
         """Test error handling for 404 Not Found."""

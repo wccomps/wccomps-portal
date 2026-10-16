@@ -35,7 +35,7 @@ TRANSITIONS: dict[str, tuple[frozenset[str], str]] = {
     ),
     "resolve": (frozenset({Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED}), "Cannot resolve ticket with status: {status}."),
     "cancel": (frozenset({Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED}), "Cannot cancel ticket with status: {status}."),
-    "reopen": (frozenset({Ticket.STATUS_RESOLVED}), "Cannot reopen - ticket is {status}."),
+    "reopen": (frozenset({Ticket.STATUS_RESOLVED}), "Cannot reopen ticket with status: {status}."),
 }
 
 

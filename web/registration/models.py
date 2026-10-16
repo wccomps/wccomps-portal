@@ -238,7 +238,7 @@ class RegistrationContact(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.get_role_display()}) - {self.registration.school_name}"
+        return f"{self.name} ({self.get_role_display()}), {self.registration.school_name}"
 
 
 class RegistrationEventEnrollment(models.Model):
@@ -299,7 +299,8 @@ class EventResult(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.school.name} at {self.event.name}: #{self.rank or '-'}"
+        rank = f": #{self.rank}" if self.rank else ""
+        return f"{self.school.name} at {self.event.name}{rank}"
 
 
 class EventArchive(models.Model):

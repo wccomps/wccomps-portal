@@ -394,7 +394,7 @@ def ip_pool_delete(request: HttpRequest, pool_id: int) -> HttpResponse:
     pool = get_object_or_404(RedTeamIPPool, id=pool_id, created_by=user)
 
     if pool.findings.exists():
-        messages.error(request, f"Cannot delete pool '{pool.name}' - it is used by {pool.findings.count()} finding(s)")
+        messages.error(request, f"Cannot delete pool '{pool.name}': it is used by {pool.findings.count()} finding(s)")
         return redirect("scoring:ip_pool_list")
 
     pool_name = pool.name

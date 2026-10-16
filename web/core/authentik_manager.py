@@ -95,13 +95,13 @@ class AuthentikManager:
             error_detail = response.text
 
         status_messages = {
-            401: "Authentication failed - check AUTHENTIK_TOKEN",
-            403: "Permission denied - token lacks required permissions",
+            401: "Authentication failed (check AUTHENTIK_TOKEN)",
+            403: "Permission denied (the token lacks required permissions)",
             404: "Resource not found",
             429: "Rate limit exceeded",
             500: "Authentik server error",
-            502: "Bad gateway - Authentik may be down",
-            503: "Service unavailable - Authentik may be overloaded",
+            502: "Bad gateway (Authentik may be down)",
+            503: "Service unavailable (Authentik may be overloaded)",
         }
 
         status_msg = status_messages.get(response.status_code, "HTTP error")
@@ -418,7 +418,7 @@ class AuthentikManager:
             return (True, "")
         except Exception as e:
             logger.exception(f"Failed to toggle {username}: {e}")
-            return (False, "Account toggle failed - check server logs")
+            return (False, "Account toggle failed. Check the server logs.")
 
     def reset_blueteam_password(self, team_number: int, password: str) -> tuple[bool, str]:
         """Reset a blue team account's password in Authentik.
@@ -460,7 +460,7 @@ class AuthentikManager:
 
         except Exception as e:
             logger.exception(f"Failed to reset password for {username}: {e}")
-            return (False, "Password reset failed - check server logs")
+            return (False, "Password reset failed. Check the server logs.")
 
     def _list_all(self, path: str, params: dict[str, str]) -> list[dict[str, object]]:
         """Fetch every page of an Authentik list endpoint. Raises on any HTTP error."""
