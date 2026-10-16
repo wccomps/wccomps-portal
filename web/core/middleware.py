@@ -40,6 +40,36 @@ class SecurityHeadersMiddleware:
         return response
 
 
+class RejectNulMiddleware:
+    """Refuse a request whose path, query string or form fields hold a NUL character, with a 400.
+
+    PostgreSQL text can't hold NUL, so a query that looks such text up or stores it fails. Forms refuse it field by
+    field (Django's CharField validator); this also covers what views read without a form, like paths and filters.
+    """
+
+    MESSAGE = "The request contains a NUL character."
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        if self._has_nul(request):
+            if request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate":
+                return JsonResponse({"error": self.MESSAGE}, status=400)
+            return HttpResponse(self.MESSAGE, status=400, content_type="text/plain; charset=utf-8")
+        return self.get_response(request)
+
+    @staticmethod
+    def _has_nul(request: HttpRequest) -> bool:
+        # request.POST holds a form's fields (and nothing for other bodies); uploaded files aren't fields
+        fields = [request.GET, request.POST]
+        return "\x00" in request.path or any(
+            "\x00" in key or any("\x00" in value for value in values)
+            for query in fields
+            for key, values in query.lists()
+        )
+
+
 class UserTimezoneMiddleware:
     """Show and read times in the browser's timezone, which static/js/utils.js puts in the tz cookie.
 
