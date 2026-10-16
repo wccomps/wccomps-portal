@@ -356,3 +356,20 @@ def test_the_django_admin_lets_in_only_the_admin_permission(role: str, let_in: b
     request = RequestFactory().get("/admin/")
     request.user = role_user(role)
     assert admin.site.has_permission(request) is let_in
+
+
+JS_STRING_LIST = re.compile(r"apps: \[((?:'(?:[^'\\\n\r  ]|\\.)*'(?:, )?)*)\],\n")
+
+
+@given(names=st.lists(request_text(30).filter(lambda n: "\x00" not in n), min_size=1, max_size=3))
+@example(names=["a'b", "c\\d", "e\nf"])
+def test_the_setup_page_writes_app_names_into_its_script_as_strings(admin_client: Client, names: list[str]) -> None:
+    """App names come from the admin's JSON field too, where a quote, backslash or line break broke the script."""
+    from core.models import CompetitionConfig
+
+    with rolled_back():
+        config = CompetitionConfig.get_config()
+        config.controlled_applications = names
+        config.save()
+        response = admin_client.get(reverse("admin_competition_setup"))
+    assert JS_STRING_LIST.search(response.content.decode()), "an app name broke the script's list of strings"
