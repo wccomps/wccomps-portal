@@ -1,18 +1,15 @@
 """Escaping for the attributes a django-cotton component writes with {{ attrs }}.
 
-django-cotton (through 2.8.0) joins {{ attrs }} itself and marks the result safe without escaping it, so a value
-passed with :name="value" or name=value goes into the page as raw markup, and one that starts and ends with `"`
-closes its attribute. escape_component_attrs makes every value an escaped, double-quoted attribute:
-- a value from the page's context is escaped, like any {{ value }};
-- a value the template engine already escaped (name="{{ value }}", a safe string) is written as it is;
-- a literal in the template's source (name="text", ::name="text") is HTML the template author wrote, so an
-  entity in it (&quot;, &amp;) stays the character it stands for.
-In the last two, only `"` is encoded, so the value can't close its attribute.
+django-cotton (tested on 2.7.2; 2.8.0 has the same code) joins {{ attrs }} itself and marks the result safe without
+escaping it, so a value passed with :name="value" or name=value is written unescaped, and one that starts and ends
+with `"` closes its attribute. escape_component_attrs makes every value one double-quoted attribute: a value the
+template engine already escaped (a safe string, such as name="{{ value }}") only has `"` encoded, and any other
+value, a template literal included, is escaped. So a component attribute in a template is written with the
+characters themselves, not entities (test_template_lint checks).
 
-A :name the page's context doesn't have, which cotton would silently leave out, fails to render instead under
-settings.STRICT_COMPONENT_ATTRS (DEBUG and the tests), and is left out with a warning in production, unless the
-component declares it (then its <c-vars> default applies). That is how an Alpine binding written :name rather
-than ::name shows up.
+It also stops cotton silently dropping a :name the page's context doesn't have (usually an Alpine binding meant as
+::name): under settings.STRICT_COMPONENT_ATTRS (DEBUG and the tests) the render fails, and in production a warning
+is logged and the attribute left out, as cotton does.
 """
 
 import logging
@@ -22,22 +19,12 @@ from django.conf import settings
 from django.template import TemplateSyntaxError
 from django.utils.html import escape
 from django.utils.safestring import SafeData, SafeString, mark_safe
-from django_cotton.templatetags import Attrs, _component
+from django_cotton.templatetags import Attrs
 
-# What HTML allows in an attribute name: anything else could end the name and start markup
+# Characters that can't end an attribute name or start markup; a :attrs spread's keys come from data
 ATTRIBUTE_NAME = re.compile(r"[^\s\"'<>/=\x00-\x1f\x7f]+")
 
 logger = logging.getLogger(__name__)
-
-
-prepare_attrs = _component._prepare_attrs
-
-
-class SourceText(str):
-    """An attribute value written literally in a template: HTML, but not marked safe, so a component that prints
-    it with {{ name }} still escapes it as before."""
-
-    __slots__ = ()
 
 
 def attribute(name: str, value: object) -> str:
@@ -45,41 +32,25 @@ def attribute(name: str, value: object) -> str:
         raise ValueError(f"{name!r} is not an attribute name a component can write")
     if value is True:
         return name
-    if isinstance(value, SafeData | SourceText):
+    if isinstance(value, SafeData):
         return f'{name}="{str(value).replace('"', "&quot;")}"'
     return f'{name}="{escape(value)}"'
 
 
 def attrs_html(attrs: Attrs) -> SafeString:
-    # cotton leaves out a :name it can't resolve; one the component doesn't declare would just vanish
-    dropped = [name for name in attrs._unprocessable if name not in attrs._exclude_from_str]
-    if dropped:
-        problem = (
-            f":{dropped[0]} isn't in the page's context, so the component leaves it out; "
-            f"an Alpine binding is written ::{dropped[0]}"
-        )
-        if settings.STRICT_COMPONENT_ATTRS:
-            raise TemplateSyntaxError(problem)
-        logger.warning(problem)
     return mark_safe(" ".join(attribute(name, value) for name, value in attrs.attrs_dict().items()))  # noqa: S308
 
 
-def mark_source_literals(attrs: dict[str, object], active_library: object) -> list[object]:
-    """django-cotton's _prepare_attrs, with each value it writes as the template spelled it marked SourceText."""
-    literal_kinds = {_component.AttrKind.STATIC, _component.AttrKind.UNQUOTED}
-    return [
-        prepared._replace(value=SourceText(prepared.value))
-        if isinstance(prepared.value, str)
-        and (
-            prepared.kind in literal_kinds
-            or (prepared.kind == _component.AttrKind.ESCAPED and prepared.compiled is None)
-        )
-        else prepared
-        for prepared in prepare_attrs(attrs, active_library)
-    ]
+def unresolved(attrs: Attrs, name: str) -> None:
+    """Called by cotton for each :name it can't resolve, on any component, before it leaves the attribute out."""
+    problem = f":{name} isn't in the page's context, so the component leaves it out; an Alpine binding is ::{name}"
+    if settings.STRICT_COMPONENT_ATTRS:
+        raise TemplateSyntaxError(problem)
+    logger.warning(problem)
+    attrs._unprocessable.append(name)
 
 
 def escape_component_attrs() -> None:
-    """Install the escaping above into django-cotton. CoreConfig.ready calls it once, before any template loads."""
+    """Install the above into django-cotton. CoreConfig.ready calls it; both run at render time, not parse time."""
     Attrs.__str__ = attrs_html
-    _component._prepare_attrs = mark_source_literals
+    Attrs.unprocessable = unresolved

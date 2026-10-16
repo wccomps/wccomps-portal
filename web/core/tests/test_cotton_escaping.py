@@ -1,9 +1,5 @@
-"""Canary for how a component writes {{ attrs }}: every attribute a page passes comes out as exactly one attribute
-whose value the browser decodes back to what was passed, whatever the value holds and however it was passed.
-
-django-cotton itself writes attrs unescaped (core.cotton escapes them), so this renders a real component through
-the template engine; it fails if an upgrade or a change to core.cotton lets a value out raw.
-"""
+"""Canary for core.cotton: a value a page passes a component comes out as exactly one attribute that decodes back to
+it, for each way the portal passes one, rendered through the real template engine."""
 
 import logging
 from html.parser import HTMLParser
@@ -11,6 +7,7 @@ from html.parser import HTMLParser
 import pytest
 from django.template import Context, Template, TemplateSyntaxError
 from django.test import override_settings
+from django.utils.safestring import mark_safe
 from django_cotton.compiler_regex import CottonCompiler
 from hypothesis import example, given
 from hypothesis import strategies as st
@@ -34,10 +31,15 @@ COMPONENT = """<c-button
     aria-description="{{ value }}"
     data-url="{{ url }}"
     :data-raw-url="url"
-    @click="open = !open && go('a', &quot;b&quot;)"
+    @click="open = !open && go('a')"
     ::class="{ 'on': open }"
     x-data='{"open": false}'
-    data-static="/list?a=1&b=2">Go</c-button>"""
+    data-static="/list?a=1&b=2"
+    ::x-text="{{ value }}"
+    data-fallback=not_in_context
+    :data-literal="'a literal'"
+    :data-template-literal="'{{ value }}'"
+    :data-safe="safe">Go</c-button>"""
 
 
 class Elements(HTMLParser):
@@ -50,7 +52,12 @@ class Elements(HTMLParser):
 
 
 def render(value: str) -> str:
-    context = {"value": value, "url": "/list?a=1&b=2", "spread": {"data-spread": value}}
+    context = {
+        "value": value,
+        "url": "/list?a=1&b=2",
+        "spread": {"data-spread": value},
+        "safe": mark_safe('<b class="x">ok</b>'),  # noqa: S308
+    }
     return Template(CottonCompiler().process(COMPONENT)).render(Context(context))
 
 
@@ -79,10 +86,15 @@ def test_every_attrs_value_comes_out_as_the_value_it_was(breakout: str, value: s
             "aria-description": passed,
             "data-url": "/list?a=1&b=2",
             "data-raw-url": "/list?a=1&b=2",
-            "@click": "open = !open && go('a', \"b\")",
+            "@click": "open = !open && go('a')",
             ":class": "{ 'on': open }",
             "x-data": '{"open": false}',
             "data-static": "/list?a=1&b=2",
+            ":x-text": passed,
+            "data-fallback": "not_in_context",
+            "data-literal": "a literal",
+            "data-template-literal": "{{ value }}",  # cotton reads a quoted :name as a string literal, unrendered
+            "data-safe": '<b class="x">ok</b>',
             "class": "button  ",
         }, html
 
@@ -111,8 +123,18 @@ def test_in_production_a_dynamic_attribute_not_in_the_context_is_left_out_with_a
     assert "::disabled" in caplog.text
 
 
-def test_an_alpine_binding_and_an_unset_declared_attribute_render() -> None:
-    source = '<c-button ::disabled="loading">Go</c-button><c-badge :aria_label="missing">New</c-badge>'
-    html = Template(CottonCompiler().process(source)).render(Context({}))
+@pytest.mark.parametrize(
+    "source",
+    [
+        '<c-badge :aria_label="missing">New</c-badge>',  # declared in its <c-vars>
+        '<c-pagination :page_obj="missing" />',  # prints no {{ attrs }}
+    ],
+)
+def test_a_dynamic_attribute_not_in_the_context_fails_on_any_component(source: str) -> None:
+    with pytest.raises(TemplateSyntaxError, match="isn't in the page's context"):
+        Template(CottonCompiler().process(source)).render(Context({}))
+
+
+def test_an_alpine_binding_renders() -> None:
+    html = Template(CottonCompiler().process('<c-button ::disabled="loading">Go</c-button>')).render(Context({}))
     assert ':disabled="loading"' in html
-    assert "aria-label" not in html

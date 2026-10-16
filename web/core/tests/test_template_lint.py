@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from core.tests.guards import TEMPLATES_DIR, tracked_templates
+from core.tests.guards import TEMPLATES_DIR, fail_with, template_name, tracked_templates
+from core.tests.test_template_vocabulary import tags
 
 
 def get_all_template_files() -> list[Path]:
@@ -221,3 +222,24 @@ class TestCottonAttrsPassthrough:
                 "Cotton components missing {{ attrs }} (attributes silently dropped):\n"
                 + "\n".join(f"  - cotton/{n}" for n in missing)
             )
+
+
+# ---------------------------------------------------------------------------
+# 7. An entity in a component attribute: core.cotton escapes it again
+# ---------------------------------------------------------------------------
+
+ENTITY_RE = re.compile(r"&(#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);", re.IGNORECASE)
+
+
+def test_no_html_entity_in_a_component_attribute() -> None:
+    """core.cotton escapes a component's attribute values, so &quot; would reach the browser as the text &quot;.
+    Write the character itself, quoting the attribute with the other kind of quote if needed."""
+    found = {
+        f"{template_name(path)}:{tag.line}:{tag.name}:{name}": value
+        for path in tracked_templates()
+        for tag in tags(path)
+        if tag.name.startswith("c-")
+        for name, value in tag.attrs.items()
+        if ENTITY_RE.search(value)
+    }
+    fail_with("HTML entities in component attributes", found, {})

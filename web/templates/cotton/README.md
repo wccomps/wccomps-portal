@@ -201,18 +201,20 @@ stays one parameter.
 ## Attributes and Escaping
 
 A component writes the attributes it doesn't declare in `<c-vars>` with `{{ attrs }}`. django-cotton doesn't escape
-them; `core/cotton.py` does, for every component, at startup:
-- a value from the page's context (`:title="search"`, `title=search`, `:attrs="dict"`) is escaped;
-- a value written `title="{{ search }}"` was escaped by the template engine and isn't escaped again;
-- a literal (`title="Tom &amp; Jerry"`, `@click="go(&quot;a&quot;)"`) is the template's own HTML and keeps its entities.
+them; `core/cotton.py` does, for every component:
+- a value the template engine already escaped (`title="{{ search }}"`) isn't escaped again;
+- any other value is escaped: from the page's context (`:title="search"`, `title=search`, `:attrs="dict"`) or a
+  literal (`title="Tom & Jerry"`). Write the character, not an entity, in a component attribute (a template lint
+  fails on `&amp;` or `&quot;` there); quote the attribute with `'` when the value holds `"`.
 
-`core/tests/test_cotton_escaping.py` renders a component with values built to break out of their attribute and
-fails if one comes out raw; run it after any django-cotton upgrade, since `core/cotton.py` replaces two of its
-internals. An Alpine binding on a component is written `::name` (cotton passes it through as `:name`); a `:name`
-the page's context doesn't have, on a component that doesn't declare it, fails to render under DEBUG and in tests
-(`STRICT_COMPONENT_ATTRS`), and in production is left out with a warning.
-Escaping makes a value safe as attribute text only: request text never goes into `href`, `on*` or Alpine
-attributes, where text is a URL or code.
+An Alpine binding on a component is written `::name` (cotton passes it through as `:name`). A `:name` that isn't in
+the page's context (and isn't a Python literal such as `0`) fails the render under DEBUG and in tests
+(`STRICT_COMPONENT_ATTRS`), on any component; in production it is logged and left out.
+
+`core/tests/test_cotton_escaping.py` renders components with values built to break out of their attribute and fails
+if one comes out raw; run it after any django-cotton upgrade, since `core/cotton.py` replaces two methods of its
+`Attrs`. Escaping makes a value safe as attribute text, not as a URL or code: request text reaches an `href` only as
+a URL-encoded query value, and never an `on*` or Alpine attribute.
 
 One page's markup that htmx also refreshes (a list's table) is a template beside the page that the page
 `{% include %}`s and the view renders on its own, not a component.
