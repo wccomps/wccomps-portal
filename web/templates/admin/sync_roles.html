@@ -58,8 +58,7 @@
     </div>
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('syncRolesAdmin', () => compose(toastMixin(), {
-                loading: false,
+        Alpine.data('syncRolesAdmin', () => compose(actionMixin(), {
                 taskId: null,
                 changes: [],
                 isDryRun: false,
