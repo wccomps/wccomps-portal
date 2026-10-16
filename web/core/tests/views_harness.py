@@ -217,16 +217,20 @@ def build_world() -> World:
         finding=findings[0], file_data=b"\x89PNG\r\n\x1a\n", filename="s.png", mime_type="image/png"
     )
 
+    # Each role deletes only the reports it submitted: one by each role that can submit one
     incidents = [
         IncidentReport.objects.create(
             team=team,
-            submitted_by=users["blue_team"] if team == teams[0] else users["gold_team"],
+            submitted_by=users[role],
             source_ip="10.0.0.9",
             attack_detected_at=timezone.now(),
             attack_description="Seen",
             affected_boxes=["web"],
         )
-        for team in teams[:2]
+        for team, role in (
+            (teams[0], "blue_team"),
+            *((teams[1], role) for role in sorted(may("gold_team", "white_team"))),
+        )
     ]
     incident_shot = IncidentScreenshot.objects.create(
         incident=incidents[0], file_data=b"\x89PNG\r\n\x1a\n", filename="i.png", mime_type="image/png"
@@ -667,6 +671,7 @@ class Answer:
     content: bytes
     written: list[str]  # tables the request wrote to
     errors: list[str]  # error messages the request queued
+    warnings: list[str] = field(default_factory=list)  # its warning messages
     mailed: int = 0  # emails it sent
     outbound: int = 0  # requests it tried to make to another service
 
@@ -715,8 +720,9 @@ def send(world: World, drawn: Drawn) -> Answer:
     storage = getattr(response.wsgi_request, "_messages", None)  # type: ignore[attr-defined]
     queued = getattr(storage, "_queued_messages", [])
     errors = [str(m) for m in queued if m.level >= message_levels.ERROR]
+    warnings = [str(m) for m in queued if m.level == message_levels.WARNING]
     mailed = len(mail.outbox) - mail_before
-    return Answer(response, content, written, errors, mailed, len(OUTBOUND) - outbound_before)
+    return Answer(response, content, written, errors, warnings, mailed, len(OUTBOUND) - outbound_before)
 
 
 def _is_upload(value: Any) -> bool:
@@ -755,9 +761,31 @@ def kind_of(answer: Answer) -> Kind:
     return Kind.ANSWERED
 
 
-# A permission check's answers. A redirect elsewhere with an error is a form's or an object's refusal after a POST,
-# but on a GET, which posts nothing to refuse, it is a refusal of the visitor too (every_allowed_role_gets_in)
+# A permission check's answers
 PERMISSION_REFUSALS = {Kind.SIGN_IN, Kind.FORBIDDEN, Kind.MISSING, Kind.REFUSED_HOME}
+
+# What a refusal of the visitor says, in a message or a page: an answer that says it is one the classifier doesn't know
+REFUSAL_TEXT = re.compile(
+    r"access denied|permission|not allowed|not authori[sz]ed|can only \w+ (your|tickets you)", re.I
+)
+
+
+def refuses_visitor(answer: Answer, method: str) -> bool:
+    """Whether the answer keeps the visitor out (every_allowed_role_gets_in), rather than showing a page or taking
+    the request. A redirect elsewhere with an error is refused on a GET, which posts nothing a form could refuse
+    (it may be the visitor or the object's state, as email_scorecards with nothing to send: either way the visitor
+    didn't get in there); after a POST with no fields it is the form refusing them, so the visitor got in."""
+    kind = kind_of(answer)
+    return kind in PERMISSION_REFUSALS or kind is Kind.WRONG_METHOD or (kind is Kind.REFUSED and method == "GET")
+
+
+def unknown_refusal(answer: Answer) -> str | None:
+    """What says an answer refuses_visitor lets in is a refusal after all: a message or page in refusal words."""
+    said = [*answer.errors, *answer.warnings]
+    if answer.response.get("Content-Type", "").startswith(("text/html", "application/json", "text/plain")):
+        said.append(answer.content.decode(errors="replace"))
+    found = [m.group(0) for text in said if (m := REFUSAL_TEXT.search(text))]
+    return f"{answer.response.status_code} saying {found[0]!r}" if found else None
 
 
 def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
@@ -912,11 +940,13 @@ def every_allowed_role_gets_in(case: ViewCase, world: World) -> None:
                     drawn = build(case, role=role, method=method, name=name, kwargs=kwargs, query=query, fields={})
                     with rolled_back(), case.patches(world) if case.patches else ExitStack():
                         answer = send(world, drawn)
-                    answers.append((drawn.path, method, answer.response.status_code))
+                        shape = unknown_refusal(answer)
+                    answers.append((drawn.path, method, answer.response.status_code, *([shape] if shape else [])))
                     if answer.response.status_code != 405:
                         break
-                refusals = {*PERMISSION_REFUSALS, Kind.WRONG_METHOD} | ({Kind.REFUSED} if method == "GET" else set())
-                if kind_of(answer) not in refusals:
+                # An answer in refusal words the classifier doesn't know (a POST's error redirect, a warning, a page
+                # saying no) keeps the visitor out of this object too
+                if not refuses_visitor(answer, method) and not unknown_refusal(answer):
                     break
             else:
                 raise AssertionError(f"{name}: {role} is allowed by the row but refused everywhere: {answers}")

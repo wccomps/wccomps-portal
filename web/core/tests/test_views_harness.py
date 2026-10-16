@@ -13,6 +13,8 @@ from core.tests.views_harness import (
     build,
     check_answer,
     may,
+    refuses_visitor,
+    unknown_refusal,
 )
 
 
@@ -100,3 +102,39 @@ def test_the_blue_team_role_user_is_a_team_member(db: object) -> None:
 
     team = get_user_team(role_user("blue_team"))
     assert team is not None and team.team_number == 1
+
+
+def _redirect(errors: list[str], warnings: list[str] | None = None) -> Answer:
+    response = HttpResponse(status=302)
+    response["Location"] = "/elsewhere/"
+    return Answer(response, b"", [], errors, warnings or [])
+
+
+def _page(status: int, text: str) -> Answer:
+    return Answer(HttpResponse(text, status=status), text.encode(), [], [])
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        _redirect(["You can only delete your own incident reports"]),  # a POST's error redirect
+        _redirect([], ["You don't have permission to do that"]),  # a warning redirect
+        _page(200, "<h1>Access Denied</h1>"),  # a page saying no
+        _page(400, '{"error": "Not allowed"}'),
+    ],
+)
+def test_an_answer_in_refusal_words_isnt_taken_for_getting_in(answer: Answer) -> None:
+    """every_allowed_role_gets_in counts these as got in by their shape (no 403, no redirect home, a POST), so
+    their words must keep the visitor out, or a row too wide for its view passes."""
+    assert not refuses_visitor(answer, "POST")
+    assert unknown_refusal(answer)
+
+
+def test_an_answer_letting_the_visitor_in_has_no_refusal_words() -> None:
+    assert unknown_refusal(_page(200, "<h1>Tickets</h1>")) is None
+    assert unknown_refusal(_redirect([], ["Nothing changed"])) is None
+
+
+def test_a_gets_error_redirect_refuses_the_visitor_and_a_posts_doesnt() -> None:
+    assert refuses_visitor(_redirect(["Nothing to send"]), "GET")
+    assert not refuses_visitor(_redirect(["Nothing to send"]), "POST")
