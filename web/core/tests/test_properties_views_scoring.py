@@ -1,6 +1,4 @@
-"""Property tests for the scoring views: the leaderboard and scorecards, red team findings and IP pools, incident
-reports, inject grading and feedback, orange adjustments, configuration, exports and scorecard emails. The
-properties are views_harness.check_answer's."""
+"""The view property rows for the scoring views."""
 
 from contextlib import ExitStack
 from types import SimpleNamespace

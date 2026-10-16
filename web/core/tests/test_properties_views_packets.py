@@ -1,5 +1,4 @@
-"""Property tests for the packet views: a team's packets and downloads, and Gold Team's list, upload, detail,
-distribution actions and resends. The properties are views_harness.check_answer's."""
+"""The view property rows for the packet views."""
 
 import pytest
 from hypothesis import strategies as st

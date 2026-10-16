@@ -1,6 +1,5 @@
-"""Property tests for the Django admin: the site's own pages, and each registered model's list (search, filters,
-ordering, actions), add, change, delete and history pages. One row per model, built from the admin registry, so a
-newly registered model is driven the same way. The properties are views_harness.check_answer's."""
+"""The view property rows for the Django admin: the site's own pages and one row per registered model (built from
+the registry, so a new model is driven too)."""
 
 from typing import Any
 

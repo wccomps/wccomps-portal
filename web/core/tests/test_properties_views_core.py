@@ -1,5 +1,4 @@
-"""Property tests for the core views: home, health, sign-in and Discord linking, the school list, and the ops
-pages (competition, teams, broadcast, role sync, categories). The properties are views_harness.check_answer's."""
+"""The view property rows for the core views: home, sign-in, Discord linking, the school list and ops pages."""
 
 from typing import Any
 from urllib.parse import parse_qs, urlsplit

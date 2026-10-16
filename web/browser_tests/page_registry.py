@@ -251,7 +251,6 @@ def get_allowed_test_cases() -> list[tuple[PageDef, str]]:
     return [(page, role) for page in PAGES for role in page.allowed_roles]
 
 
-
 def get_element_check_cases() -> list[tuple[PageDef, str]]:
     """Generate (page_def, role) pairs that have element checks defined."""
     return [(page, role) for page in PAGES for role in page.checks]

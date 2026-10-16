@@ -5,7 +5,8 @@ every function that parses CSV or an uploaded file (found by what it does: calls
 UploadedFile, reads request.FILES, or reads an upload, file or attachment); every URL pattern and admin model page;
 and the bot's slash commands, modals, buttons, selects and message listeners.
 
-Each must be registered against property tests (FORM_CASES, PARSERS) or listed in EXCEPTIONS with the reason. A
+Each must be registered against property tests (FORM_CASES, PARSERS, or a row in a VIEW_MODULES module's CASES for a
+URL pattern or admin model) or listed in EXCEPTIONS with the reason. A
 registry entry or exception that matches no entry point fails too, so neither can go stale. Fix a failure by adding
 a property test case for the new entry point (the test module's docstring says how), or an exception with a reason.
 """
@@ -402,8 +403,8 @@ def test_the_guards_find_csv_readers_and_writers_however_they_are_imported(
 
 
 def test_no_property_test_pins_its_example_count() -> None:
-    """The Hypothesis profile (ci or deep, conftest.py) sets how many examples a test runs; a test that pins
-    max_examples would run the same few under HYPOTHESIS_PROFILE=deep."""
+    """The Hypothesis profile (ci or deep, or its -views variant for the view tests; conftest.py) sets how many
+    examples a test runs; a test that pins max_examples would run the same few under HYPOTHESIS_PROFILE=deep."""
     tracked = subprocess.run(
         ["git", "ls-files", "-z", "*.py"],  # noqa: S607
         cwd=REPO_DIR,

@@ -1,5 +1,4 @@
-"""Property tests for the registration views: the public form and its edit link, the review of registrations,
-seasons, events and team assignment. The properties are views_harness.check_answer's."""
+"""The view property rows for the registration views."""
 
 import pytest
 from hypothesis import strategies as st

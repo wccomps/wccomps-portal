@@ -9,14 +9,15 @@ from hypothesis import HealthCheck, settings
 # slow and large on purpose (5000-character strings, files), so the speed and size checks don't either.
 _SUPPRESSED = [HealthCheck.function_scoped_fixture, HealthCheck.too_slow, HealthCheck.data_too_large]
 
-# ci: the same examples every run, few enough that the whole suite stays fast
-settings.register_profile(
-    "ci", max_examples=25, derandomize=True, deadline=None, database=None, suppress_health_check=_SUPPRESSED
-)
-# deep: many random examples, for a search before a release or after changing input handling
-settings.register_profile("deep", max_examples=2000, deadline=None, suppress_health_check=_SUPPRESSED)
-# The view property tests (web/core/tests/views_harness.py) send a whole request per example and run for every URL
-# pattern: ci keeps them to fewer examples, deep to fewer than its 2000 (about 45 minutes)
-settings.register_profile("ci-views", parent=settings.get_profile("ci"), max_examples=10)
-settings.register_profile("deep-views", parent=settings.get_profile("deep"), max_examples=500)
+# Each profile, and its "-views" variant for the view property tests (web/core/tests/views_harness.py), which send
+# a whole request per example for every URL pattern and so run fewer.
+# ci: the same examples every run, few enough that the whole suite stays fast. deep: many random examples, for a
+# search before a release or after changing input handling.
+PROFILES: dict[str, tuple[dict[str, object], int]] = {
+    "ci": ({"max_examples": 25, "derandomize": True, "database": None}, 10),
+    "deep": ({"max_examples": 2000}, 500),
+}
+for _name, (_options, _view_examples) in PROFILES.items():
+    settings.register_profile(_name, deadline=None, suppress_health_check=_SUPPRESSED, **_options)
+    settings.register_profile(f"{_name}-views", parent=settings.get_profile(_name), max_examples=_view_examples)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci"))

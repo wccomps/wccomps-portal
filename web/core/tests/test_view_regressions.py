@@ -288,8 +288,8 @@ def test_django_still_fails_on_an_empty_to_field(admin_user: User, page: str) ->
 @given(param=st.text(min_size=1, max_size=20).filter(lambda p: "\x00" not in p))
 @example(param="next")
 def test_the_admin_list_shows_its_error_page_for_an_unknown_filter(superuser_client: Client, param: str) -> None:
-    """A list asked again for a filter it doesn't have (?e=1 is its own redirect) shows Django's error page, which
-    the portal's admin header broke: it read user.username with no user in the page."""
+    """Django redirects a list asked for a filter it doesn't have to ?e=1, then renders its invalid-setup page
+    without a request, which the portal's admin header broke: it read user.username with no user in the page."""
     assume(param not in ("q", "o", "p", "e", "all", "_popup", "_to_field") and not param.startswith("_"))
     with rolled_back():
         response = superuser_client.get(reverse("admin:core_botstate_changelist"), {param: "x", "e": "1"})

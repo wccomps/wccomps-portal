@@ -1,5 +1,4 @@
-"""Property tests for the ticketing views: the list, detail and its actions, attachments, bulk actions, creation,
-notifications and the ops review. The properties are views_harness.check_answer's."""
+"""The view property rows for the ticketing views."""
 
 from typing import Any
 

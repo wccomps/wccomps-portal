@@ -14,11 +14,11 @@ WCComps Portal is a competition management platform for WRCCDC. Three components
 # From web/ pytest ignores testpaths and skips bot/tests.
 PYTHONPATH="$(pwd)/web:$(pwd)" DB_HOST=localhost DB_PORT=5433 DB_USER=test_user DB_PASSWORD=test_password DB_NAME=wccomps_test uv run pytest -m "not browser"
 # Browser tests (Playwright): same env, `-m browser -n0`
-# Hypothesis runs the "ci" profile (25 fixed examples per test); HYPOTHESIS_PROFILE=deep runs 2000 random ones per
-# test, for every Hypothesis test (none pins its own count). The property files take about 40 minutes that way.
+# Hypothesis runs the "ci" profile: 25 fixed examples per test (10 for the view tests). HYPOTHESIS_PROFILE=deep runs
+# 2000 random ones (500 for the view tests). No test pins its own count.
 # User-input property tests: web/core/tests/test_properties_*.py; test_property_coverage.py fails on any input
 # without one (or an exceptions entry with a reason). A new URL pattern needs a row in its test_properties_views_*
-# table (views_harness.ViewCase); those tests send a request per example: 10 under ci, 500 under deep.
+# table (views_harness.ViewCase).
 
 # Lint and type checks (CI runs these plus the tests on every PR)
 uv run ruff check . && uv run djlint web/templates --lint && DJANGO_SETTINGS_MODULE=portal.settings uv run mypy

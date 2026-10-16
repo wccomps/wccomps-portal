@@ -35,7 +35,6 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from hypothesis.errors import InvalidArgument
 from orange_team.models import (
     OrangeAssignment,
     OrangeAssignmentResult,
@@ -102,7 +101,7 @@ def may(*permissions: str) -> frozenset[str]:
 @dataclass
 class World:
     users: dict[str, User]  # signed-in roles
-    clients: dict[str, Client]  # every role, signed in as its user
+    clients: dict[str, Client]  # every role's, signed in as its user (anonymous's isn't)
     season: Season
     event: Event  # the open event
     teams: list[Team]  # teams 1-3; the blue role is team 1
@@ -759,16 +758,11 @@ def uploads(max_files: int = 1) -> st.SearchStrategy[Any]:
 
 def views_profile() -> settings:
     """The profile's view variant (conftest.py): a request per example is slow, so they run fewer examples."""
-    name = f"{os.environ.get('HYPOTHESIS_PROFILE', 'ci')}-views"
-    try:
-        return settings.get_profile(name)
-    except InvalidArgument:
-        return settings()
+    return settings.get_profile(f"{os.environ.get('HYPOTHESIS_PROFILE', 'ci')}-views")
 
 
 def any_request_is_answered_safely(case: ViewCase, world: World) -> None:
-    """Any request (role, method, path values, query, body, headers, cookies) for the case's URL pattern gets an
-    answer that passes check_answer."""
+    """Any request the row's URL pattern can get passes check_answer."""
 
     @views_profile()
     @given(data=st.data())

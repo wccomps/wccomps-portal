@@ -1,5 +1,4 @@
-"""Property tests for the orange team views: the dashboard, check-ins, checks and their rubrics, assignments,
-follow-ups, review and export. The properties are views_harness.check_answer's."""
+"""The view property rows for the orange team views."""
 
 from typing import Any
 
