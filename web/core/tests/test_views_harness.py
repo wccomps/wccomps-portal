@@ -5,13 +5,11 @@ import ast
 import importlib
 
 import pytest
-from browser_tests.page_registry import PAGES
 from django.http import HttpResponse
 
 from core.permission_constants import PERMISSION_MAP
 from core.tests.roles import ROLE_GROUPS
 from core.tests.test_no_unused_code import python_trees
-from core.tests.test_property_coverage import VIEW_MODULES
 from core.tests.views_harness import (
     RUN_DETACHED,
     Answer,
@@ -46,17 +44,6 @@ def test_every_permission_group_has_a_role() -> None:
         f"Authentik groups in PERMISSION_MAP no test role holds (add them to core.tests.roles): {missing}"
     )
     assert all(may(permission) for permission in PERMISSION_MAP), "a permission no role holds"
-
-
-def test_the_browser_tests_visit_each_page_as_a_role_it_lets_in() -> None:
-    allowed = {case.name: case.allowed for module in VIEW_MODULES for case in module.CASES}
-    wrong = [
-        f"{page.url_name}: {role}"
-        for page in PAGES
-        for role in page.allowed_roles
-        if role not in allowed[page.url_name]
-    ]
-    assert not wrong, f"page_registry visits pages as roles they refuse: {wrong}"
 
 
 def _run_detached_users() -> dict[str, set[str]]:
@@ -102,3 +89,16 @@ def test_a_refusal_that_mails_or_calls_out_fails() -> None:
         check_answer(case, drawn, Answer(HttpResponse(status=403), b"", [], [], mailed=1))
     with pytest.raises(AssertionError, match="called another service 1 time"):
         check_answer(case, drawn, Answer(HttpResponse(status=403), b"", [], [], outbound=1))
+
+
+def test_every_skipped_browser_role_is_one_the_page_lets_in() -> None:
+    """A page's skip_roles entry for a role its row refuses is stale (the role was never going to be visited)."""
+    from browser_tests.page_registry import BROWSER_ROLES, PAGES, _view_rows_allowed
+
+    stale = [
+        f"{page.url_name}: {role}"
+        for page in PAGES
+        for role in page.skip_roles
+        if role not in BROWSER_ROLES or role not in _view_rows_allowed()[page.url_name]
+    ]
+    assert not stale, f"skip_roles entries for roles the page's row refuses: {stale}"

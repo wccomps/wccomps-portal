@@ -14,18 +14,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# The roles the role-wide browser tests visit as (core.tests.roles holds each role's groups)
-BROWSER_ROLES = [
-    "blue_team",
-    "red_team",
-    "gold_team",
-    "orange_team",
-    "white_team",
-    "ticketing_support",
-    "ticketing_admin",
-    "admin",
-]
-
 
 @pytest.fixture(scope="session")
 def _allow_sync_orm_under_playwright() -> Iterator[None]:

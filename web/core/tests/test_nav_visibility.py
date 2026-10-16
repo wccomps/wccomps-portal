@@ -12,6 +12,7 @@ Source templates:
 import re
 
 import pytest
+from browser_tests.page_registry import BROWSER_ROLES
 from django.test import Client
 
 from core.tests.roles import role_user
@@ -26,7 +27,7 @@ def team_one(db: object) -> None:
     Team.objects.create(team_number=1, team_name="Team 01")
 
 
-# Page each role can access (must return 200 and render the primary nav).
+# A page each browser role (browser_tests.page_registry.BROWSER_ROLES) can open, which renders the primary nav.
 # Different roles need different pages since no single page is accessible to all.
 ROLE_TEST_URL: dict[str, str] = {
     "blue_team": "/scoring/incident/list/",
@@ -41,9 +42,6 @@ ROLE_TEST_URL: dict[str, str] = {
 
 # Page that renders scoring/base.html (has the scoring sub-nav).
 SCORING_TEST_URL = "/scoring/incidents/"
-
-# Roles that can access the scoring review page.
-SCORING_ROLES = ["gold_team", "white_team", "admin"]
 
 # ---------------------------------------------------------------------------
 # Expected nav links per role (the single source of truth for what's correct)
@@ -78,6 +76,7 @@ EXPECTED_PRIMARY_NAV: dict[str, set[str]] = {
     },
 }
 
+# For each role the scoring review page lets in
 EXPECTED_SCORING_SUBNAV: dict[str, set[str]] = {
     "gold_team": {"Red Team Scores", "Orange Checks", "Incidents", "Inject Grades", "Ticket Points"},
     "white_team": {"Incidents", "Inject Grades"},
@@ -117,7 +116,7 @@ def _extract_scoring_subnav_links(html: str) -> set[str]:
 class TestRenderedPrimaryNav:
     """Render real pages and verify each role sees exactly the correct primary nav links."""
 
-    @pytest.mark.parametrize("role", EXPECTED_PRIMARY_NAV.keys())
+    @pytest.mark.parametrize("role", BROWSER_ROLES)
     def test_primary_nav_links(self, role):
         user = role_user(role)
         client = Client()
@@ -141,7 +140,7 @@ class TestRenderedPrimaryNav:
 class TestRenderedScoringSubnav:
     """Render the scoring review page and verify each role sees the correct sub-nav."""
 
-    @pytest.mark.parametrize("role", SCORING_ROLES)
+    @pytest.mark.parametrize("role", EXPECTED_SCORING_SUBNAV)
     def test_scoring_subnav_links(self, role):
         user = role_user(role)
         client = Client()
@@ -160,3 +159,13 @@ class TestRenderedScoringSubnav:
             f"  Extra:    {sorted(visible - expected)}\n"
             f"  Missing:  {sorted(expected - visible)}"
         )
+
+
+def test_the_tables_cover_the_roles_their_pages_let_in() -> None:
+    """Every browser role has a page and expected links, and the scoring sub-nav is checked for exactly the roles the
+    scoring review page lets in."""
+    from browser_tests.page_registry import _view_rows_allowed
+
+    assert set(ROLE_TEST_URL) == set(EXPECTED_PRIMARY_NAV) == set(BROWSER_ROLES)
+    scoring = _view_rows_allowed()["scoring:review_incidents"] & set(BROWSER_ROLES)
+    assert set(EXPECTED_SCORING_SUBNAV) == scoring
