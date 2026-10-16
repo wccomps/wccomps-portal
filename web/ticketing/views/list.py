@@ -1,4 +1,3 @@
-import contextlib
 import logging
 from datetime import timedelta
 from typing import cast
@@ -11,6 +10,7 @@ from django.utils import timezone
 
 from core.auth_utils import get_user_team, has_permission
 from core.tickets_config import get_all_categories, get_category_config
+from core.utils import filter_number
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -47,12 +47,8 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     team_filter = request.GET.get("team", "") if is_ops else ""
     assignee_filter = request.GET.get("assignee", "") if is_ops else ""
 
-    page_size_str = request.GET.get("page_size", "50")
-    try:
-        page_size = int(page_size_str)
-        if page_size not in VALID_PAGE_SIZES:
-            page_size = 50
-    except ValueError:
+    page_size = filter_number(request.GET.get("page_size", ""))
+    if page_size not in VALID_PAGE_SIZES:
         page_size = 50
 
     if is_ops:
@@ -79,9 +75,8 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     if selected_statuses:
         query = query.filter(status__in=selected_statuses)
 
-    if category_filter != "all":
-        with contextlib.suppress(ValueError):
-            query = query.filter(category_id=int(category_filter))
+    if (category_id := filter_number(category_filter)) is not None:
+        query = query.filter(category_id=category_id)
 
     if search_query:
         query = query.filter(
@@ -92,16 +87,13 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             | Q(service_name__icontains=search_query)
         )
 
-    if is_ops and team_filter:
-        with contextlib.suppress(ValueError):
-            query = query.filter(team__team_number=int(team_filter))
+    if (team_number := filter_number(team_filter)) is not None:
+        query = query.filter(team__team_number=team_number)
 
-    if is_ops and assignee_filter:
-        if assignee_filter == "unassigned":
-            query = query.filter(assigned_to__isnull=True)
-        else:
-            with contextlib.suppress(ValueError):
-                query = query.filter(assigned_to_id=int(assignee_filter))
+    if assignee_filter == "unassigned":
+        query = query.filter(assigned_to__isnull=True)
+    elif (assignee_id := filter_number(assignee_filter)) is not None:
+        query = query.filter(assigned_to_id=assignee_id)
 
     result = filter_sort_paginate(
         request,
@@ -184,10 +176,7 @@ def ticket_notifications(request: HttpRequest) -> JsonResponse:
     ):
         return JsonResponse({"error": "forbidden"}, status=403)
 
-    try:
-        since_id = int(request.GET.get("since_id", "0"))
-    except ValueError, TypeError:
-        since_id = 0
+    since_id = filter_number(request.GET.get("since_id", "")) or 0
 
     open_count = Ticket.objects.filter(status="open").count()
     raw_tickets = (

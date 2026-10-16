@@ -70,7 +70,14 @@ def test_a_list_filter_stays_one_parameter_in_the_links_that_carry_it(
 
 
 NUMBER_FILTERS = [
+    ("ticket_list", "team"),
+    ("ticket_list", "category"),
+    ("ticket_list", "assignee"),
+    ("ticket_list", "page_size"),
+    ("ticket_list", "page"),
     ("ops_review_tickets", "category"),
+    ("ops_review_tickets", "team"),
+    ("scoring:inject_grades_review", "page"),
     ("scoring:red_team_findings", "team"),
     ("scoring:red_team_findings", "attack_type"),
     ("scoring:red_team_findings", "submitter"),

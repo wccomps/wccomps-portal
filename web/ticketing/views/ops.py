@@ -40,12 +40,8 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
     if (category_id := filter_number(category_filter)) is not None:
         query = query.filter(category_id=category_id)
 
-    if team_filter:
-        try:
-            team_number = int(team_filter)
-            query = query.filter(team__team_number=team_number)
-        except ValueError:
-            pass
+    if (team_number := filter_number(team_filter)) is not None:
+        query = query.filter(team__team_number=team_number)
 
     if search_query:
         query = query.filter(

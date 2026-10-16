@@ -251,12 +251,7 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
         elif sort_key == "graded_at":
             all_grades_for_outlier_calc.sort(key=lambda g: g.graded_at, reverse=reverse)
 
-    paginator = Paginator(all_grades_for_outlier_calc, 50)
-    try:
-        page_num = int(page)
-    except ValueError:
-        page_num = 1
-    page_obj = paginator.get_page(page_num)
+    page_obj = Paginator(all_grades_for_outlier_calc, 50).get_page(page)
 
     # Stats (unfiltered counts)
     total_grades = InjectScore.objects.count()

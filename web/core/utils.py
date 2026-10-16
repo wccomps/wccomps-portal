@@ -88,7 +88,7 @@ def run_detached(lines: Iterator[str]) -> Iterator[str]:
 
 
 def filter_number(value: str) -> int | None:
-    """A list filter's number as the URL carries it, or None when it isn't one: the page then ignores that filter."""
+    """A number as the request carries it, or None when it isn't one: a list filter that isn't one is ignored."""
     try:
         return int(value)
     except ValueError:
@@ -125,14 +125,7 @@ def filter_sort_paginate[M: Model](
     if sort_by:
         queryset = queryset.order_by(sort_by)
 
-    page_str = request.GET.get("page", "1")
-    try:
-        page_num = int(page_str)
-    except TypeError, ValueError:
-        page_num = 1
-
-    paginator = Paginator(queryset, page_size)
-    page_obj = paginator.get_page(page_num)
+    page_obj = Paginator(queryset, page_size).get_page(request.GET.get("page"))
 
     return FilterSortPage(page_obj=page_obj, current_sort=sort_by)
 
@@ -157,12 +150,7 @@ def bulk_approve(  # type: ignore[explicit-any]
         messages.info(request, f"No {item_label}s selected for approval")
         return redirect(redirect_url)
 
-    valid_ids: list[int] = []
-    for raw_id in raw_ids:
-        try:
-            valid_ids.append(int(raw_id))
-        except ValueError, TypeError:
-            continue
+    valid_ids = [number for raw_id in raw_ids if (number := filter_number(raw_id)) is not None]
 
     if not valid_ids:
         messages.warning(request, f"No valid {item_label} IDs provided")
