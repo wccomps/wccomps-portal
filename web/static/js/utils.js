@@ -158,6 +158,11 @@ function streamMixin(url) {
 
         streamAction: '',
 
+        // A button's stream action, its data-action (its data-confirm is asked first)
+        runStreamAction(e) {
+            return this.doStreamAction(e.currentTarget.dataset.action);
+        },
+
         async doStreamAction(action, extraData = {}) {
             this.streamAction = action;
             this.loading = true;
@@ -211,6 +216,17 @@ document.addEventListener('submit', (e) => {
     const form = e.target;
     const question = form.dataset.confirm;
     if (form.dataset.posting || (question && !confirm(question))) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+    }
+}, true);
+
+// A button's or link's data-confirm is asked the same way when it is clicked, before the page's own click handler
+// (an Alpine @click that posts by fetch): a question answered no stops the click. ::data-confirm binds a question built
+// from the page's state; an empty one asks nothing.
+document.addEventListener('click', (e) => {
+    const control = e.target.closest('button[data-confirm], a[data-confirm]');
+    if (control && control.dataset.confirm && !confirm(control.dataset.confirm)) {
         e.preventDefault();
         e.stopImmediatePropagation();
     }

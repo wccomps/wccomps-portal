@@ -159,12 +159,15 @@
                             </c-table_header>
                         </tr>
                     </c-slot>
-                    <template x-for="app in apps" :key="app">
+                    <template x-for="row in appRows" :key="row.app">
                         <tr>
-                            <td x-text="app"></td>
+                            <td x-text="row.app"></td>
                             <td>
-                                <c-button variant="danger" @click="removeApp" ::data-app="app">
-                                    Remove <span class="sr-only" x-text="app"></span>
+                                <c-button variant="danger"
+                                          @click="removeApp"
+                                          ::data-app="row.app"
+                                          ::data-confirm="row.question">
+                                    Remove <span class="sr-only" x-text="row.app"></span>
                                 </c-button>
                             </td>
                         </tr>
@@ -269,6 +272,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         get noApps() { return this.apps.length === 0; },
+        get appRows() { return this.apps.map(app => ({ app, question: `Remove ${app} from the competition apps?` })); },
         get hasApps() { return this.apps.length > 0; },
         get addDisabled() { return this.loading || !this.newApp; },
 
@@ -295,9 +299,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         async removeApp(e) {
-            const app = e.currentTarget.dataset.app;
-            if (!confirm('Remove ' + app + ' from the competition apps?')) return;
-            this.showApps(await this.doAction('remove_app', { app_slug: app }));
+            this.showApps(await this.doAction('remove_app', { app_slug: e.currentTarget.dataset.app }));
         },
 
         // The stored list as the server returned it, until the reload

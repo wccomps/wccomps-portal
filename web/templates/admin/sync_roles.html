@@ -19,11 +19,17 @@
                     <li>This also runs automatically every few minutes</li>
                 </ul>
                 <c-button_row class="mt-20">
-                    <c-button variant="primary" @click="requestSyncPreview" ::disabled="loading">
+                    <c-button variant="primary"
+                              @click="requestSyncPreview"
+                              ::disabled="loading"
+                              data-confirm="Preview role changes? No changes will be made.">
                         <span x-show="notLoading">Preview Changes (Dry Run)</span>
                         <span x-show="loading">Working...</span>
                     </c-button>
-                    <c-button variant="default" @click="requestSyncLive" ::disabled="loading">
+                    <c-button variant="default"
+                              @click="requestSyncLive"
+                              ::disabled="loading"
+                              data-confirm="Sync Discord roles now? Anyone holding a synced role their groups or team seat do not grant loses it, including members who have not linked. Run the preview first to see who.">
                         Sync Roles Now
                     </c-button>
                 </c-button_row>
@@ -63,14 +69,6 @@
                 requestSyncLive() { this.requestSync(false); },
 
                 async requestSync(dryRun) {
-                    const confirmMsg = dryRun ?
-                        'Preview role changes? No changes will be made.' :
-                        'Sync Discord roles now? Anyone holding a synced role their groups or team seat do not grant loses it, including members who have not linked. Run the preview first to see who.';
-
-                    if (!confirm(confirmMsg)) {
-                        return;
-                    }
-
                     this.loading = true;
                     this.isDryRun = dryRun;
                     this.message = dryRun ? 'Starting preview...' : 'Starting sync...';

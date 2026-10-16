@@ -34,30 +34,48 @@
                 </div>
                 <div class="d-flex gap-10">
                     {% if packet.status == "draft" %}
-                        <c-button variant="primary" @click="distributePacket" ::disabled="loading">
+                        <c-button variant="primary"
+                                  @click="runStreamAction"
+                                  data-action="distribute"
+                                  data-confirm="Distribute this packet to all teams now?"
+                                  ::disabled="loading">
                             Distribute
                         </c-button>
                     {% endif %}
                     {% if stats.pending > 0 and packet.is_sent %}
-                        <c-button variant="warning" @click="retryPending" ::disabled="loading">
+                        <c-button variant="warning"
+                                  @click="runStreamAction"
+                                  data-action="resend_pending"
+                                  data-confirm="Retry all pending distributions?"
+                                  ::disabled="loading">
                             Retry Pending
                         </c-button>
                     {% endif %}
                     {% if stats.failed > 0 %}
-                        <c-button variant="warning" @click="resendFailed" ::disabled="loading">
+                        <c-button variant="warning"
+                                  @click="runStreamAction"
+                                  data-action="resend_failed"
+                                  data-confirm="Resend to all failed teams?"
+                                  ::disabled="loading">
                             Resend Failed
                         </c-button>
                     {% endif %}
                     {% if packet.is_sent %}
                         <c-button variant="default"
-                                  @click="sendNewTeams"
+                                  @click="runStreamAction"
+                                  data-action="send_new_teams"
+                                  data-confirm="Email this packet to teams with no copy of it yet? Teams whose send failed or is pending are not included (use Resend Failed / Retry Pending)."
                                   ::disabled="loading"
                                   title="Email teams with no copy of this packet yet; teams whose send failed or is pending are not included (use Resend Failed / Retry Pending)">
                             Send to Teams Without It
                         </c-button>
                     {% endif %}
                     {% if packet.status == "draft" %}
-                        <c-button variant="danger" @click="cancelPacket" ::disabled="loading">
+                        <c-button variant="danger"
+                                  @click="runStreamAction"
+                                  data-action="cancel"
+                                  data-confirm="Cancel this packet distribution?"
+                                  ::disabled="loading">
                             Cancel
                         </c-button>
                     {% endif %}
@@ -188,22 +206,6 @@
     <script>
     document.addEventListener('alpine:init', () => {
         Alpine.data('packetAdmin', () => compose(streamMixin('{% url "packet_action" packet.id %}'), {
-
-            distributePacket() {
-                if (confirm('Distribute this packet to all teams now?')) this.doStreamAction('distribute');
-            },
-            resendFailed() {
-                if (confirm('Resend to all failed teams?')) this.doStreamAction('resend_failed');
-            },
-            retryPending() {
-                if (confirm('Retry all pending distributions?')) this.doStreamAction('resend_pending');
-            },
-            sendNewTeams() {
-                if (confirm('Email this packet to teams with no copy of it yet? Teams whose send failed or is pending are not included (use Resend Failed / Retry Pending).')) this.doStreamAction('send_new_teams');
-            },
-            cancelPacket() {
-                if (confirm('Cancel this packet distribution?')) this.doStreamAction('cancel');
-            },
 
             doTestEmail() {
                 const email = this.$refs.testEmail.value;

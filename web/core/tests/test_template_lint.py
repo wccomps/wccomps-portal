@@ -6,15 +6,19 @@ Catches issues that are silent at runtime or hard to spot in code review.
 import re
 
 from core.tests.guards import (
+    REPO_DIR,
     Tag,
     component_templates,
     fail_with,
     page_templates,
+    scripts,
     tags,
     template_name,
     text,
+    tracked_files,
     tracked_templates,
     with_open_elements,
+    without_js_comments,
 )
 
 # ---------------------------------------------------------------------------
@@ -228,9 +232,13 @@ def test_no_page_value_in_an_inline_handler() -> None:
     fail_with("Page values inside inline handlers", found, {})
 
 
-def test_a_question_is_data_confirm_on_a_form() -> None:
-    """static/js/utils.js asks a form's data-confirm before it submits; on any other element it asks nothing. No form
-    posts by htmx (the filter toolbars only GET), so a question there belongs in data-confirm, not hx-confirm."""
+ASKING_ELEMENTS = ("form", "c-form", "button", "c-button", "a", "c-link")
+
+
+def test_a_question_is_data_confirm_on_a_form_or_a_button() -> None:
+    """static/js/utils.js asks a form's data-confirm before it submits, and a button's or link's when it is clicked
+    (before an Alpine @click that posts by fetch); anywhere else it asks nothing. hx-confirm asks only before an htmx
+    request, which no POST form makes (the filter toolbars only GET)."""
     found = {}
     for path in tracked_templates():
         for tag in tags(path):
@@ -238,6 +246,31 @@ def test_a_question_is_data_confirm_on_a_form() -> None:
             if "hx-confirm" in tag.attrs:
                 found[where] = "hx-confirm (put the question in its form's data-confirm)"
             confirm = [name for name in tag.attrs if name.lstrip(":") == "data-confirm"]
-            if confirm and tag.name not in ("form", "c-form"):
-                found[where] = "data-confirm on something other than a form"
+            if confirm and tag.name not in ASKING_ELEMENTS:
+                found[where] = "data-confirm on something other than a form, button or link"
     fail_with("Questions asked somewhere they aren't", found, {})
+
+
+BARE_CONFIRM_RE = re.compile(r"(?<![\w.])confirm\(")
+# "file" -> why it calls confirm() itself
+BARE_CONFIRM_EXCEPTIONS = {
+    "web/static/js/utils.js": "asks every data-confirm question",
+    "web/templates/scoring/review_inject_feedback.html": "asks before dropping an unsaved edit on click-away or "
+    "Escape, which no button is clicked for",
+}
+
+
+def test_a_page_asks_through_data_confirm() -> None:
+    """Each fetch-posting page asked with its own confirm() call (about 20): a question is data-confirm, on the form
+    or the button, so one listener asks it."""
+    found = {}
+    for path in tracked_templates():
+        for line, script in scripts(path):
+            for m in BARE_CONFIRM_RE.finditer(script):
+                found[f"web/templates/{template_name(path)}"] = f"line {line + script.count(chr(10), 0, m.start())}"
+    for name in tracked_files():
+        if name.startswith("web/static/js/") and name.endswith(".js"):
+            js = without_js_comments((REPO_DIR / name).read_text(encoding="utf-8"))
+            if m := BARE_CONFIRM_RE.search(js):
+                found[name] = f"line {js.count(chr(10), 0, m.start()) + 1}"
+    fail_with("confirm() called outside the data-confirm listener", found, BARE_CONFIRM_EXCEPTIONS)
