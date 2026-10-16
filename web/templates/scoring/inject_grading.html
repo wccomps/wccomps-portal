@@ -2,7 +2,7 @@
 {% block white_team_content %}
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('clearableForm', () => compose(submitGuardMixin(), {
+        Alpine.data('clearableForm', () => ({
             clearForm() { this.$el.querySelectorAll("input[name^='points_team_']").forEach(i => i.value = ''); }
         }));
     });

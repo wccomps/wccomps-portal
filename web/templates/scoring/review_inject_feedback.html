@@ -6,9 +6,7 @@
 {% block white_team_content %}
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('feedbackBulkSelect', () => compose(bulkSelectMixin('feedback-id', 'feedback item'), submitGuardMixin(), {
-            init() { this.selectableIds = Array.from(this.$el.querySelectorAll('input[name="score_ids"]')).map(el => el.value); }
-        }));
+        Alpine.data('feedbackBulkSelect', () => bulkSelectMixin('feedback-id', 'feedback item'));
         Alpine.data('editableCell', () => ({
             editing: false,
             originalValue: '',

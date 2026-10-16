@@ -1,15 +1,15 @@
 {# Form component - standard POST form with built-in double-submit protection #}
 {# Usage: <c-form action="/url">...fields...<c-button type="submit">Save</c-button></c-form> #}
-{# Props: action, enctype, class, id, x_data (a form with its own Alpine component names it here; that component #}
-{# composes submitGuardMixin() from static/js/utils.js). Also takes data-confirm (through attrs): the question asked first #}
-<c-vars action enctype class id x_data="submitGuard" />
+{# Props: action, enctype, class, id. Also takes data-confirm (through attrs): the question asked first #}
+{# Page behaviour goes in an Alpine component on an element around the form; the form keeps its own guard #}
+<c-vars action enctype class id />
 <form method="post"
       {% if action %}action="{{ action }}"{% endif %}
       {% if enctype %}enctype="{{ enctype }}"{% endif %}
       {% if id %}id="{{ id }}"{% endif %}
       {{ attrs }}
       class="{{ class }}"
-      x-data="{{ x_data }}"
+      x-data="submitGuard"
       @submit="onSubmit">
     {{ slot }}
 </form>
