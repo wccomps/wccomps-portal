@@ -223,7 +223,9 @@ window.addEventListener('submit', (e) => {
     if (e.defaultPrevented || !('postOnce' in form.dataset)) return;
     form.dataset.posting = 'true';
     // Disabled after the browser has read the form, so the button pressed still sends its name and value
-    setTimeout(() => form.querySelectorAll('button[type="submit"]:not(:disabled), input[type="submit"]:not(:disabled)')
+    // (form.elements: also a button outside the form that joins it with form=)
+    setTimeout(() => [...form.elements]
+        .filter(control => control.type === 'submit' && !control.disabled)
         .forEach(button => { button.disabled = true; button.dataset.postingDisabled = 'true'; }));
 });
 

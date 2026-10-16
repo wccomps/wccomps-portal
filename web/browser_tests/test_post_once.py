@@ -62,3 +62,27 @@ def test_a_c_form_posts_once_and_sends_the_button_pressed(live_server, pw_browse
         assert parse_qs(posted[0] or "")["choice"] == ["pressed"]
     finally:
         context.close()
+
+
+def test_a_submit_button_outside_its_form_is_disabled_while_it_posts(live_server, pw_browser):
+    """The bulk approve button sits in the toolbar and joins the table's form with form=."""
+    from decimal import Decimal
+
+    from scoring.models import RedTeamScore
+
+    user = _create_role_user("admin", None)
+    RedTeamScore.objects.create(attack_vector="ssh", points_per_team=Decimal(10), submitted_by=user)
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    page.on("dialog", lambda dialog: dialog.accept())
+    page.route("**/bulk-approve/", lambda route: route.fulfill(status=204))  # keeps the page in place
+    try:
+        page.goto(f"{live_server.url}{reverse('scoring:red_team_findings')}")
+        page.locator('input[name="finding_ids"]').first.check()
+        approve = page.get_by_role("button", name="Approve Selected")
+        approve.click()
+        page.wait_for_function("document.querySelector('#bulk-approve-form[data-posting]') !== null")
+        page.wait_for_timeout(200)
+        assert approve.is_disabled()
+    finally:
+        context.close()
