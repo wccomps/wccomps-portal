@@ -30,33 +30,13 @@ def pytest_configure(config: pytest.Config) -> None:
         sock.close()
 
 
-from core.models import UserGroups
-from team.models import DiscordLink
+from core.tests.roles import groups_of, make_user
 
 
 @pytest.fixture
 def create_user_with_groups(db: Any) -> Callable[..., User]:
-    """Factory fixture to create users with Authentik groups and DiscordLink."""
-    _discord_id_counter = [1000000000]
-
-    def _create(username: str, groups: list[str]) -> User:
-        user = User.objects.create_user(username=username, password="testpass123")
-        UserGroups.objects.create(
-            user=user,
-            authentik_id=f"{username}-uid",
-            groups=groups,
-        )
-        # Every test user gets a DiscordLink (bot-side permission checks look users up through it)
-        DiscordLink.objects.create(
-            user=user,
-            discord_id=_discord_id_counter[0],
-            discord_username=username,
-            is_active=True,
-        )
-        _discord_id_counter[0] += 1
-        return user
-
-    return _create
+    """Factory fixture to create users with Authentik groups and DiscordLink (core.tests.roles.make_user)."""
+    return make_user
 
 
 @pytest.fixture
@@ -66,7 +46,7 @@ def unauthenticated_client() -> Client:
 
 @pytest.fixture
 def blue_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("blueteam01", ["WCComps_BlueTeam01"])
+    return create_user_with_groups("blueteam01", groups_of("blue_team"))
 
 
 @pytest.fixture
@@ -76,37 +56,37 @@ def blue_team_02_user(create_user_with_groups: Callable[..., User]) -> User:
 
 @pytest.fixture
 def red_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("redteam", ["WCComps_RedTeam"])
+    return create_user_with_groups("redteam", groups_of("red_team"))
 
 
 @pytest.fixture
 def gold_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("goldteam", ["WCComps_GoldTeam"])
+    return create_user_with_groups("goldteam", groups_of("gold_team"))
 
 
 @pytest.fixture
 def white_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("whiteteam", ["WCComps_WhiteTeam"])
+    return create_user_with_groups("whiteteam", groups_of("white_team"))
 
 
 @pytest.fixture
 def orange_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("orangeteam", ["WCComps_OrangeTeam"])
+    return create_user_with_groups("orangeteam", groups_of("orange_team"))
 
 
 @pytest.fixture
 def ticketing_support_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("support", ["WCComps_Ticketing_Support"])
+    return create_user_with_groups("support", groups_of("ticketing_support"))
 
 
 @pytest.fixture
 def ticketing_admin_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("ticketing_admin", ["WCComps_Ticketing_Admin"])
+    return create_user_with_groups("ticketing_admin", groups_of("ticketing_admin"))
 
 
 @pytest.fixture
 def admin_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("admin", ["WCComps_Discord_Admin"])
+    return create_user_with_groups("admin", groups_of("admin"))
 
 
 @pytest.fixture

@@ -8,7 +8,9 @@ from unittest.mock import patch
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context, resolve_url
+from core.tests.roles import role_user
+
+from .conftest import create_session_context, resolve_url
 from .page_registry import PAGES
 from .table_data import seed_table_data
 
@@ -84,7 +86,7 @@ def test_table_headers_line_up_on_every_page(live_server, pw_browser):
     from django.urls import reverse
     from quotient.client import Inject
 
-    viewer = _create_role_user("admin", None)
+    viewer = role_user("admin")
     test_data = seed_table_data(viewer)
     urls = [
         (page_def.url_name, resolve_url(page_def, test_data))

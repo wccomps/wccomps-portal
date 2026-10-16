@@ -70,7 +70,7 @@ CASES = [
         methods=("POST",),
         post=lambda w: {"criterion_id": _ids(w, "criterion_id").map(int), "met": st.booleans()},
         idempotent=(OrangeAssignment,),
-        idempotent_as="orange",
+        idempotent_as="orange_team",
     ),
     ViewCase("orange_team:assignment_submit", ORANGE, post=_form(SubmitScoreForm())),
     ViewCase("orange_team:assignment_approve", LEAD),
@@ -81,7 +81,7 @@ CASES = [
         ORANGE,
         post=_form(FollowUpForm(), assignment_id=lambda w: _ids(w, "assignment_id")),
     ),
-    ViewCase("orange_team:followup_dismiss", ORANGE, idempotent=(OrangeFollowUp,), idempotent_as="orange"),
+    ViewCase("orange_team:followup_dismiss", ORANGE, idempotent=(OrangeFollowUp,), idempotent_as="orange_team"),
 ]
 
 

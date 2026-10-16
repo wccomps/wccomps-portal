@@ -2,7 +2,9 @@
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -21,7 +23,7 @@ def test_upload_shows_preview_and_confirm_imports(live_server, pw_browser, tmp_p
     Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01", "is_active": True})
     csv_file = tmp_path / "schools.csv"
     csv_file.write_text(CSV)
-    user = _create_role_user("gold_team", None)
+    user = role_user("gold_team")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     try:
@@ -57,7 +59,7 @@ def test_add_mode_adds_a_late_school_and_keeps_the_list(live_server, pw_browser,
     set_team_school(first, "School One", contact_email="one@example.edu")
     csv_file = tmp_path / "late.csv"
     csv_file.write_text("school_name,contact_email\nSchool One,one@example.edu\nSchool Two,two@example.edu\n")
-    user = _create_role_user("gold_team", None)
+    user = role_user("gold_team")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     try:
@@ -88,7 +90,7 @@ def test_with_no_active_season_the_import_creates_one(live_server, pw_browser, t
     Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01", "is_active": True})
     csv_file = tmp_path / "schools.csv"
     csv_file.write_text(CSV)
-    user = _create_role_user("gold_team", None)
+    user = role_user("gold_team")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     try:

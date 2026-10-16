@@ -12,25 +12,11 @@ Source templates:
 import re
 
 import pytest
-from django.contrib.auth.models import User
 from django.test import Client
 
-from core.models import UserGroups
-from team.models import DiscordLink, Team
+from core.tests.roles import role_user
 
 pytestmark = pytest.mark.django_db
-
-# Role name → Authentik group(s)
-ROLE_GROUPS: dict[str, list[str]] = {
-    "blue_team": ["WCComps_BlueTeam01"],
-    "red_team": ["WCComps_RedTeam"],
-    "gold_team": ["WCComps_GoldTeam"],
-    "orange_team": ["WCComps_OrangeTeam"],
-    "white_team": ["WCComps_WhiteTeam"],
-    "ticketing_support": ["WCComps_Ticketing_Support"],
-    "ticketing_admin": ["WCComps_Ticketing_Admin"],
-    "admin": ["WCComps_Discord_Admin"],
-}
 
 # Page each role can access (must return 200 and render the primary nav).
 # Different roles need different pages since no single page is accessible to all.
@@ -91,30 +77,6 @@ EXPECTED_SCORING_SUBNAV: dict[str, set[str]] = {
 }
 
 
-def _create_role_user(role: str) -> User:
-    """Create a test user with the given role's Authentik groups + required links."""
-    groups = ROLE_GROUPS[role]
-    username = f"navrender_{role}"
-    user = User.objects.create_user(username=username, password="testpass123")
-    UserGroups.objects.create(user=user, authentik_id=f"{username}-uid", groups=groups)
-
-    team = None
-    if role == "blue_team":
-        team, _ = Team.objects.get_or_create(
-            team_number=1,
-            defaults={"team_name": "Test Team 01", "authentik_group": "WCComps_BlueTeam01", "is_active": True},
-        )
-
-    DiscordLink.objects.create(
-        user=user,
-        discord_id=8000000 + list(ROLE_GROUPS.keys()).index(role),
-        discord_username=username,
-        team=team,
-        is_active=True,
-    )
-    return user
-
-
 def _extract_primary_nav_links(html: str) -> set[str]:
     """Extract link texts from the primary nav (.nav-links div)."""
     match = re.search(r'<div class="nav-links">(.*?)</div>', html, re.DOTALL)
@@ -147,9 +109,9 @@ def _extract_scoring_subnav_links(html: str) -> set[str]:
 class TestRenderedPrimaryNav:
     """Render real pages and verify each role sees exactly the correct primary nav links."""
 
-    @pytest.mark.parametrize("role", ROLE_GROUPS.keys())
+    @pytest.mark.parametrize("role", EXPECTED_PRIMARY_NAV.keys())
     def test_primary_nav_links(self, role):
-        user = _create_role_user(role)
+        user = role_user(role)
         client = Client()
         client.force_login(user)
 
@@ -173,7 +135,7 @@ class TestRenderedScoringSubnav:
 
     @pytest.mark.parametrize("role", SCORING_ROLES)
     def test_scoring_subnav_links(self, role):
-        user = _create_role_user(role)
+        user = role_user(role)
         client = Client()
         client.force_login(user)
 

@@ -66,8 +66,9 @@ from scoring.models import (
     ScoringTemplate,
 )
 
-from core.models import DiscordTask, UserGroups
+from core.models import DiscordTask
 from core.permission_constants import check_groups_for_permission
+from core.tests.roles import ROLE_GROUPS, make_user
 from core.tests.strategies import PAYLOADS, field_values, request_text, rolled_back, uploaded_files, valid_values
 from team.models import DiscordLink, LinkToken, Team
 from ticketing.models import Ticket, TicketAttachment, TicketCategory, TicketComment
@@ -76,21 +77,7 @@ from ticketing.models import Ticket, TicketAttachment, TicketCategory, TicketCom
 # Roles
 # ---------------------------------------------------------------------------------------------------------------
 
-# Each role's Authentik groups; None is a visitor who isn't signed in
-ROLES: dict[str, list[str] | None] = {
-    "anonymous": None,
-    "no_role": [],
-    "blue": ["WCComps_BlueTeam01"],
-    "red": ["WCComps_RedTeam"],
-    "gold": ["WCComps_GoldTeam"],
-    "white": ["WCComps_WhiteTeam"],
-    "white_lead": ["WCComps_WhiteTeam", "WCComps_WhiteTeam_Lead"],
-    "orange": ["WCComps_OrangeTeam"],
-    "orange_lead": ["WCComps_OrangeTeam", "WCComps_OrangeTeam_Lead"],
-    "support": ["WCComps_Ticketing_Support"],
-    "ticketing_admin": ["WCComps_Ticketing_Admin"],
-    "admin": ["WCComps_Discord_Admin"],
-}
+ROLES = ROLE_GROUPS
 EVERYONE = frozenset(ROLES)
 SIGNED_IN = EVERYONE - {"anonymous"}
 
@@ -127,19 +114,8 @@ class World:
         return self.rows.get(kind, [])
 
 
-def _user(role: str, groups: list[str], discord_id: int) -> User:
-    user = User.objects.create_user(username=f"prop-{role}", password="unused")
-    UserGroups.objects.create(user=user, authentik_id=f"prop-{role}-uid", groups=groups)
-    DiscordLink.objects.create(user=user, discord_id=discord_id, discord_username=f"prop-{role}", is_active=True)
-    return user
-
-
 def build_world() -> World:
-    users = {
-        role: _user(role, groups, 7_000_000_000 + n)
-        for n, (role, groups) in enumerate(ROLES.items())
-        if groups is not None
-    }
+    users = {role: make_user(f"prop-{role}", groups) for role, groups in ROLES.items() if groups is not None}
     # The Django admin also wants a superuser (each model page checks Django's own permissions)
     User.objects.filter(pk=users["admin"].pk).update(is_staff=True, is_superuser=True)
     clients = {"anonymous": Client()}
@@ -161,7 +137,7 @@ def build_world() -> World:
         registration_open=True,
     )
     teams = [Team.objects.create(team_number=n, team_name=f"Team {n:02d}") for n in (1, 2, 3)]
-    DiscordLink.objects.filter(user=users["blue"]).update(team=teams[0])
+    DiscordLink.objects.filter(user=users["blue_team"]).update(team=teams[0])
     set_team_school(teams[0], "School One", contact_email="coach@example.edu")
     set_team_school(teams[1], "School Two", contact_email="coach2@example.edu")
 
@@ -188,7 +164,7 @@ def build_world() -> World:
                 ticket_number=number,
                 title=f"Ticket {number}",
                 status=status,
-                assigned_to=users["support"] if status != "open" else None,
+                assigned_to=users["ticketing_support"] if status != "open" else None,
                 assigned_at=timezone.now() if status != "open" else None,
                 resolved_at=timezone.now() if status == "resolved" else None,
                 points_charged=5 if status == "resolved" else 0,
@@ -202,7 +178,7 @@ def build_world() -> World:
         )
         for ticket in (tickets[0], tickets[3])
     ]
-    TicketComment.objects.create(ticket=tickets[0], author=users["blue"], comment_text="Hello")
+    TicketComment.objects.create(ticket=tickets[0], author=users["blue_team"], comment_text="Hello")
 
     from core.discord_tasks import SyncRoles
 
@@ -214,9 +190,9 @@ def build_world() -> World:
 
     # Red team: findings by red (pending and approved), one by admin that red contributes to, a pool, screenshots
     attack = AttackType.objects.filter(is_active=True).first() or AttackType.objects.create(name="Default creds")
-    pool = RedTeamIPPool.objects.create(name="Pool A", ip_addresses="10.0.0.1", created_by=users["red"])
+    pool = RedTeamIPPool.objects.create(name="Pool A", ip_addresses="10.0.0.1", created_by=users["red_team"])
     findings = []
-    for submitter, approved in ((users["red"], False), (users["red"], True), (users["admin"], False)):
+    for submitter, approved in ((users["red_team"], False), (users["red_team"], True), (users["admin"], False)):
         finding = RedTeamScore.objects.create(
             attack_type=attack,
             source_ip="10.0.0.9",
@@ -226,7 +202,7 @@ def build_world() -> World:
             notes="Seen <b>",
         )
         finding.affected_teams.set(teams[:2])
-        finding.contributors.add(users["red"])
+        finding.contributors.add(users["red_team"])
         findings.append(finding)
     red_shot = RedTeamScreenshot.objects.create(
         finding=findings[0], file_data=b"\x89PNG\r\n\x1a\n", filename="s.png", mime_type="image/png"
@@ -235,7 +211,7 @@ def build_world() -> World:
     incidents = [
         IncidentReport.objects.create(
             team=team,
-            submitted_by=users["blue"] if team == teams[0] else users["gold"],
+            submitted_by=users["blue_team"] if team == teams[0] else users["gold_team"],
             source_ip="10.0.0.9",
             attack_detected_at=timezone.now(),
             attack_description="Seen",
@@ -253,7 +229,7 @@ def build_world() -> World:
             inject_id="1",
             inject_name="Inject 01 - Web (100 pts)",
             points_awarded=50,
-            graded_by=users["white"],
+            graded_by=users["white_team"],
             feedback="Good",
             is_approved=approved,
         )
@@ -269,20 +245,22 @@ def build_world() -> World:
     ]
     plain = OrangeCheck.objects.create(title="Email", description="", max_points=10)
     assignments = [
-        OrangeAssignment.objects.create(orange_check=check, user=users["orange"], team=teams[0]),
-        OrangeAssignment.objects.create(orange_check=check, user=users["orange"], team=teams[1], status="submitted"),
-        OrangeAssignment.objects.create(orange_check=plain, user=users["orange"], team=teams[0]),
-        OrangeAssignment.objects.create(orange_check=plain, user=users["orange_lead"], team=teams[2]),
+        OrangeAssignment.objects.create(orange_check=check, user=users["orange_team"], team=teams[0]),
+        OrangeAssignment.objects.create(
+            orange_check=check, user=users["orange_team"], team=teams[1], status="submitted"
+        ),
+        OrangeAssignment.objects.create(orange_check=plain, user=users["orange_team"], team=teams[0]),
+        OrangeAssignment.objects.create(orange_check=plain, user=users["orange_team_lead"], team=teams[2]),
     ]
     for assignment in assignments[:2]:
         for criterion in criteria:
             OrangeAssignmentResult.objects.create(assignment=assignment, criterion=criterion)
-    OrangeCheckIn.objects.create(user=users["orange"])
+    OrangeCheckIn.objects.create(user=users["orange_team"])
     followup = OrangeFollowUp.objects.create(
-        user=users["orange"], assignment=assignments[0], remind_at=timezone.now(), note="Call back"
+        user=users["orange_team"], assignment=assignments[0], remind_at=timezone.now(), note="Call back"
     )
     orange_score = OrangeTeamScore.objects.create(
-        team=teams[0], submitted_by=users["orange"], description="Answered", points_awarded=5
+        team=teams[0], submitted_by=users["orange_team"], description="Answered", points_awarded=5
     )
 
     packet = Packet.objects.create(

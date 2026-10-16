@@ -2,7 +2,9 @@
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -15,7 +17,7 @@ def test_headers_align_and_show_the_current_sort(live_server, pw_browser):
     Ticket.objects.create(
         ticket_number="T001-091", team=team, category=TicketCategory.objects.get(pk=6), title="t", status="open"
     )
-    context = create_session_context(pw_browser, live_server, _create_role_user("ticketing_support", None))
+    context = create_session_context(pw_browser, live_server, role_user("ticketing_support"))
     page = context.new_page()
 
     try:

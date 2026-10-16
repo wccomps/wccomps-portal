@@ -4,7 +4,9 @@ from decimal import Decimal
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -20,7 +22,7 @@ def test_select_all_checks_and_clears_every_row(live_server, pw_browser):
             team=team, description=f"check {i}", points_awarded=Decimal("5"), is_approved=False
         )
 
-    user = _create_role_user("orange_team", None)
+    user = role_user("orange_team")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     errors: list[str] = []
@@ -59,7 +61,7 @@ def test_selecting_every_row_checks_the_header(live_server, pw_browser):
             team=team, description=f"check {i}", points_awarded=Decimal("5"), is_approved=False
         )
 
-    user = _create_role_user("orange_team", None)
+    user = role_user("orange_team")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
 

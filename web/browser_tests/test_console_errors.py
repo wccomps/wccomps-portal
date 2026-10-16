@@ -2,9 +2,10 @@
 
 import pytest
 
+from core.tests.roles import role_user
+
 from .conftest import (
-    ALL_ROLES,
-    _create_role_user,
+    BROWSER_ROLES,
     create_session_context,
     make_test_data,
     resolve_url,
@@ -15,11 +16,11 @@ from .page_registry import PAGES
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 
-@pytest.mark.parametrize("role", [r for r in ALL_ROLES if r != "unauthenticated"])
+@pytest.mark.parametrize("role", BROWSER_ROLES)
 def test_no_console_errors(role, live_server, pw_browser):
     """Every allowed page for this role should render with zero console errors."""
     test_data = make_test_data()
-    user = _create_role_user(role, None)
+    user = role_user(role)
     context = create_session_context(pw_browser, live_server, user)
 
     failures = []

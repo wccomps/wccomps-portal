@@ -2,7 +2,9 @@
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -53,7 +55,7 @@ def test_changelist_action_go_button_fits_its_label(live_server, pw_browser):
 
 
 def test_ticket_bulk_action_buttons_fit_their_labels(live_server, pw_browser):
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     try:

@@ -4,7 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context, visit_and_capture_errors
+from core.tests.roles import role_user
+
+from .conftest import create_session_context, visit_and_capture_errors
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -12,7 +14,7 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 def test_a_save_returns_to_the_setup_page_with_no_console_errors(live_server, pw_browser):
     from core.models import CompetitionConfig
 
-    user = _create_role_user("gold_team", None)
+    user = role_user("gold_team")
     context = create_session_context(pw_browser, live_server, user)
     manager = MagicMock()
     manager.list_applications.return_value = ["scoring"]
@@ -53,7 +55,7 @@ def _checks():
 
 
 def test_the_readiness_results_are_a_standard_table_with_result_badges(live_server, pw_browser):
-    user = _create_role_user("gold_team", None)
+    user = role_user("gold_team")
     context = create_session_context(pw_browser, live_server, user)
     manager = MagicMock()
     manager.list_applications.return_value = []

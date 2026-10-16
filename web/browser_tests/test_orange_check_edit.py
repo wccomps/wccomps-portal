@@ -2,7 +2,9 @@
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -12,7 +14,7 @@ def test_remove_first_criterion_and_save(live_server, pw_browser):
 
     from team.models import Team
 
-    user = _create_role_user("gold_team", None)
+    user = role_user("gold_team")
     check = OrangeCheck.objects.create(title="Phones", description="", created_by=user)
     first = OrangeCheckCriterion.objects.create(orange_check=check, label="First", points=1, sort_order=0)
     second = OrangeCheckCriterion.objects.create(orange_check=check, label="Second", points=2, sort_order=1)

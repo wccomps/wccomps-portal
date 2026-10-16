@@ -56,7 +56,7 @@ def _ids(w: World, kind: str) -> st.SearchStrategy[Any]:
 
 
 def _red_score(w: World) -> Fields:
-    form = RedTeamScoreForm(team_count=3, user=w.users["red"])
+    form = RedTeamScoreForm(team_count=3, user=w.users["red_team"])
     return form_fields(form) | {
         "screenshots": uploads(3),
         "attack_vector": hostile_text(),
@@ -110,14 +110,16 @@ CASES = [
     ),
     ViewCase("scoring:red_screenshot", may("red_team", "gold_team"), params={"screenshot_id": "red_screenshot_id"}),
     ViewCase("scoring:ip_pool_list", RED),
-    ViewCase("scoring:ip_pool_create", RED, post=lambda w: form_fields(RedTeamIPPoolForm(user=w.users["red"]))),
-    ViewCase("scoring:ip_pool_edit", RED, post=lambda w: form_fields(RedTeamIPPoolForm(user=w.users["red"]))),
+    ViewCase("scoring:ip_pool_create", RED, post=lambda w: form_fields(RedTeamIPPoolForm(user=w.users["red_team"]))),
+    ViewCase("scoring:ip_pool_edit", RED, post=lambda w: form_fields(RedTeamIPPoolForm(user=w.users["red_team"]))),
     ViewCase("scoring:ip_pool_delete", RED),
-    ViewCase("scoring:incident_list", GOLD_WHITE | {"blue"}),
-    ViewCase("scoring:submit_incident_report", GOLD_WHITE | {"blue"}, post=_incident),
-    ViewCase("scoring:view_incident_report", GOLD_WHITE | {"blue"}),
-    ViewCase("scoring:delete_incident_report", GOLD_WHITE | {"blue"}),
-    ViewCase("scoring:incident_screenshot", GOLD_WHITE | {"blue"}, params={"screenshot_id": "incident_screenshot_id"}),
+    ViewCase("scoring:incident_list", GOLD_WHITE | {"blue_team"}),
+    ViewCase("scoring:submit_incident_report", GOLD_WHITE | {"blue_team"}, post=_incident),
+    ViewCase("scoring:view_incident_report", GOLD_WHITE | {"blue_team"}),
+    ViewCase("scoring:delete_incident_report", GOLD_WHITE | {"blue_team"}),
+    ViewCase(
+        "scoring:incident_screenshot", GOLD_WHITE | {"blue_team"}, params={"screenshot_id": "incident_screenshot_id"}
+    ),
     ViewCase("scoring:orange_team_redirect", SIGNED_IN),
     ViewCase("scoring:submit_orange_check", SIGNED_IN),
     ViewCase(

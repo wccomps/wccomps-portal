@@ -30,7 +30,7 @@ from ticketing.forms import (
 from ticketing.models import Ticket, TicketHistory
 
 # Ticket pages are for ticketing staff and for teams (their own tickets); the view refuses everyone else
-TICKET_USERS = may("ticketing_support") | {"blue"}
+TICKET_USERS = may("ticketing_support") | {"blue_team"}
 STAFF = may("ticketing_support")
 FILTERS = ("status", "category", "search", "team", "assignee", "page_size", "sort", "page")
 
@@ -66,7 +66,7 @@ CASES = [
         STAFF,
         post=lambda w: form_fields(TicketBulkActionForm(), {"ticket_numbers": _ticket_numbers(w)}),
         idempotent=(Ticket,),
-        idempotent_as="support",
+        idempotent_as="ticketing_support",
     ),
     ViewCase(
         "tickets_bulk_resolve",
@@ -83,13 +83,15 @@ CASES = [
         query=lambda w: {"comments_version": hostile_text(), "history_version": hostile_text()},
     ),
     ViewCase("ticket_comment", TICKET_USERS, post=_form(TicketCommentForm())),
-    ViewCase("ticket_cancel", frozenset({"blue"})),
-    ViewCase("ticket_claim", STAFF, idempotent=(Ticket,), idempotent_as="support"),
+    ViewCase("ticket_cancel", frozenset({"blue_team"})),
+    ViewCase("ticket_claim", STAFF, idempotent=(Ticket,), idempotent_as="ticketing_support"),
     ViewCase("ticket_unclaim", STAFF),
     ViewCase(
         "ticket_reassign",
         STAFF,
-        post=_form(TicketReassignForm(), new_assignee_username=st.sampled_from(["prop-support", "prop-admin"])),
+        post=_form(
+            TicketReassignForm(), new_assignee_username=st.sampled_from(["prop-ticketing_support", "prop-admin"])
+        ),
     ),
     ViewCase("ticket_resolve", STAFF, post=_form(TicketResolveForm())),
     ViewCase("ticket_reopen", STAFF, post=_form(TicketReopenForm())),

@@ -2,7 +2,7 @@
 
 import pytest
 
-from .conftest import _create_role_user
+from core.tests.roles import role_user
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -10,7 +10,7 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 def test_page_load_sets_the_timezone_cookie(live_server, pw_browser):
     from django.test import Client
 
-    user = _create_role_user("ticketing_support", None)
+    user = role_user("ticketing_support")
     client = Client()
     client.force_login(user)
     context = pw_browser.new_context(timezone_id="America/New_York")
