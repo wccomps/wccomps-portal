@@ -50,6 +50,7 @@ UTILITIES_RE = re.compile(r"/\* BEGIN UTILITIES \*/(.*?)/\* END UTILITIES \*/", 
 SHARED_COMPONENTS = {
     "action_box.html",
     "alert.html",
+    "approval_filter.html",
     "badge.html",
     "button.html",
     "button_row.html",
@@ -66,6 +67,7 @@ SHARED_COMPONENTS = {
     "link.html",
     "messages.html",
     "module.html",
+    "no_matches.html",
     "nav.html",
     "nav_item.html",
     "page_header.html",
@@ -74,6 +76,7 @@ SHARED_COMPONENTS = {
     "score_value.html",
     "table.html",
     "table_header.html",
+    "team_filter.html",
     "toast.html",
     "toggle_button.html",
 }

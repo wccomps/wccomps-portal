@@ -89,7 +89,7 @@
                 <tr>
                     <td colspan="8">
                         {% if filtered %}
-                            No tickets match your filters. Try <a href="{% url 'ops_review_tickets' %}">clearing all filters</a>
+                            <c-no_matches items="tickets" href="{% url 'ops_review_tickets' %}" />
                         {% else %}
                             No pending tickets. All resolved tickets have been approved.
                         {% endif %}

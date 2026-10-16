@@ -99,7 +99,7 @@
                 <tr>
                     <td colspan="8">
                         {% if filtered %}
-                            No grades match your filters. Try adjusting your filters or <a href="{% url 'scoring:inject_grades_review' %}">clearing all filters</a>
+                            <c-no_matches items="grades" href="{% url 'scoring:inject_grades_review' %}" />
                         {% else %}
                             No pending grades. All inject grades have been approved.
                         {% endif %}

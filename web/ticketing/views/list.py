@@ -10,7 +10,8 @@ from django.utils import timezone
 
 from core.auth_utils import get_user_team, has_permission
 from core.tickets_config import get_all_categories, get_category_config
-from core.utils import list_filters, optional_int
+from core.utils import by_team, list_filters, optional_int
+from team.models import Team
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -36,14 +37,11 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
 
     from core.utils import filter_sort_paginate
 
-    # Several statuses allowed (#37): checkboxes send ?status=a&status=b; a comma-separated value
-    # (an older link's) works too. Unknown values are ignored; none selected means all.
-    requested = {part for value in request.GET.getlist("status") for part in value.split(",")}
-    selected_statuses = [s for s, _label in Ticket.STATUS_CHOICES if s in requested]
     filters, filtered = list_filters(
-        request, {"category": "all", "search": ""} | ({"team": "", "assignee": ""} if is_ops else {})
+        request,
+        {"category": "all", "search": ""} | ({"team": "", "assignee": ""} if is_ops else {}),
+        several={"status": [status for status, _label in Ticket.STATUS_CHOICES]},
     )
-    filtered = filtered or bool(selected_statuses)
 
     page_size = optional_int(request.GET.get("page_size", ""))
     if page_size not in VALID_PAGE_SIZES:
@@ -70,8 +68,8 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             )
         )
 
-    if selected_statuses:
-        query = query.filter(status__in=selected_statuses)
+    if filters.chosen["status"]:
+        query = query.filter(status__in=filters.chosen["status"])
 
     if (category_id := optional_int(filters["category"])) is not None:
         query = query.filter(category_id=category_id)
@@ -85,8 +83,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             | Q(service_name__icontains=filters["search"])
         )
 
-    if (team_number := optional_int(filters.get("team", ""))) is not None:
-        query = query.filter(team__team_number=team_number)
+    query = by_team(query, filters.get("team", ""))
 
     if filters.get("assignee", "") == "unassigned":
         query = query.filter(assigned_to__isnull=True)
@@ -125,6 +122,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     page_obj.object_list = enriched  # type: ignore[assignment]  # templates iterate enriched dicts, keep pagination
 
     assignees = User.objects.filter(assigned_tickets__isnull=False).distinct().order_by("username") if is_ops else []
+    teams = Team.objects.filter(tickets__isnull=False).distinct().order_by("team_number") if is_ops else []
 
     is_ticketing_admin = has_permission(user, "ticketing_admin")
 
@@ -134,13 +132,13 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         "team": team,
         "authentik_username": authentik_username,
         "page_obj": page_obj,
-        "selected_statuses": selected_statuses,
         "status_choices": Ticket.STATUS_CHOICES,
         "filters": filters,
         "filtered": filtered,
         "sort_by": sort_by,
         "page_size": page_size,
         "assignees": assignees,
+        "available_teams": teams,
         "categories": get_all_categories(),
     }
 

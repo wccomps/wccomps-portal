@@ -148,7 +148,7 @@
                 <td colspan="{% if is_gold_team %}11{% else %}9{% endif %}"
                     class="text-center p-20">
                     {% if filtered %}
-                        No findings match your filters. Try <a href="{{ request.path }}">clearing all filters</a>
+                        <c-no_matches items="findings" href="{{ request.path }}" />
                     {% elif filters.status == "pending" %}
                         No pending findings. All red team findings have been approved.
                     {% else %}

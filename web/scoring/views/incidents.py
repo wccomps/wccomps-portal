@@ -9,7 +9,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import get_user_team, has_permission, require_permission
 from core.stored_files import file_response
-from core.utils import list_filters, optional_int
+from core.utils import by_approval, by_team, list_filters
 from team.models import Team
 
 from ..calculator import calculate_suggested_recovery_points, suggest_red_score_matches
@@ -178,13 +178,7 @@ def review_incidents(request: HttpRequest) -> HttpResponse:
 
     base_query = IncidentReport.objects.select_related("team").prefetch_related("screenshots")
 
-    if filters["status"] == "pending":
-        base_query = base_query.filter(is_approved=False)
-    elif filters["status"] == "approved":
-        base_query = base_query.filter(is_approved=True)
-
-    if (team_id := optional_int(filters["team"])) is not None:
-        base_query = base_query.filter(team__id=team_id)
+    base_query = by_team(by_approval(base_query, filters["status"]), filters["team"])
 
     if filters["box"]:
         base_query = base_query.filter(affected_boxes__contains=[filters["box"]])

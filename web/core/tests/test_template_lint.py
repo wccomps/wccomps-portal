@@ -153,11 +153,12 @@ FRAGMENT_COMPONENTS = {
 
 
 def test_cotton_components_include_attrs() -> None:
-    """Without {{ attrs }}, Alpine directives on components are silently dropped."""
+    """Without {{ attrs }}, Alpine directives on components are silently dropped. A component built on another passes
+    them on with :attrs="attrs" ({{ attrs }} inside a component tag would be written out as text)."""
     found = {
         template_name(path): "writes no {{ attrs }}"
         for path in component_templates()
-        if path.suffix == ".html" and "{{ attrs }}" not in text(path)
+        if path.suffix == ".html" and "{{ attrs }}" not in text(path) and ':attrs="attrs"' not in text(path)
     }
     fail_with("Components that drop the attributes passed to them", found, FRAGMENT_COMPONENTS)
 

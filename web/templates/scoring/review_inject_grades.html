@@ -27,15 +27,7 @@
                         </c-button>
                     </c-slot>
                 {% endif %}
-                <c-filter_field label="Status" id="id_status">
-                    <select name="status" id="id_status" aria-label="Filter by status">
-                        <option value="pending"
-                                {% if filters.status == 'pending' %}selected{% endif %}>Pending Only</option>
-                        <option value="approved"
-                                {% if filters.status == 'approved' %}selected{% endif %}>Approved Only</option>
-                        <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
-                    </select>
-                </c-filter_field>
+                <c-approval_filter value="{{ filters.status }}" />
                 <c-filter_field label="Inject" id="id_inject">
                     <select name="inject" id="id_inject" aria-label="Filter by inject">
                         <option value="">All Injects</option>
@@ -47,17 +39,7 @@
                         {% endfor %}
                     </select>
                 </c-filter_field>
-                <c-filter_field label="Team" id="id_team">
-                    <select name="team" id="id_team" aria-label="Filter by team">
-                        <option value="">All Teams</option>
-                        {% for team in available_teams %}
-                            <option value="{{ team.id }}"
-                                    {% if filters.team == team.id|stringformat:"s" %}selected{% endif %}>
-                                Team {{ team.team_number }}
-                            </option>
-                        {% endfor %}
-                    </select>
-                </c-filter_field>
+                <c-team_filter :teams="available_teams" value="{{ filters.team }}" />
                 <c-filter_field label="Outliers Only" id="id_outliers">
                     <select name="outliers" id="id_outliers" aria-label="Filter outliers">
                         <option value="" {% if filters.outliers != "1" %}selected{% endif %}>All Grades</option>

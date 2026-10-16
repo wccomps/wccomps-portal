@@ -52,19 +52,14 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
     """The filtered, sorted page of findings and the filter state for the table both findings pages show."""
     from django.db.models import Q
 
-    from core.utils import filter_sort_paginate, list_filters
+    from core.utils import by_approval, by_team, filter_sort_paginate, list_filters
 
     filters, filtered = list_filters(
         request, {"status": default_status, "team": "", "attack_type": "", "submitter": "", "search": ""}
     )
 
     findings = RedTeamScore.objects.prefetch_related("affected_teams", "screenshots").select_related("submitted_by")
-    if filters["status"] == "pending":
-        findings = findings.filter(is_approved=False)
-    elif filters["status"] == "approved":
-        findings = findings.filter(is_approved=True)
-    if (team_id := optional_int(filters["team"])) is not None:
-        findings = findings.filter(affected_teams__id=team_id)
+    findings = by_team(by_approval(findings, filters["status"]), filters["team"], "affected_teams")
     if (attack_type_id := optional_int(filters["attack_type"])) is not None:
         findings = findings.filter(attack_type_id=attack_type_id)
     if (submitter_id := optional_int(filters["submitter"])) is not None:

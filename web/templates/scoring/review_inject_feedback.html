@@ -57,15 +57,7 @@
                     {% endfor %}
                 </select>
             </c-filter_field>
-            <c-filter_field label="Status" id="id_status">
-                <select name="status" id="id_status" aria-label="Filter by status">
-                    <option value="pending"
-                            {% if filters.status == 'pending' %}selected{% endif %}>Pending</option>
-                    <option value="approved"
-                            {% if filters.status == 'approved' %}selected{% endif %}>Approved</option>
-                    <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
-                </select>
-            </c-filter_field>
+            <c-approval_filter value="{{ filters.status }}" />
         </c-filter_toolbar>
         {% include "scoring/partials/inject_feedback_table.html" %}
     </c-module>

@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
-from core.utils import list_filters, optional_int, requested_sort, stable_order
+from core.utils import by_approval, by_team, list_filters, requested_sort, stable_order
 from team.models import Team
 
 from ..forms import ApproveInjectFeedbackForm, SaveInjectFeedbackForm
@@ -177,16 +177,10 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
 
     base_query = InjectScore.objects.select_related("team", "graded_by")
 
-    if filters["status"] == "pending":
-        base_query = base_query.filter(is_approved=False)
-    elif filters["status"] == "approved":
-        base_query = base_query.filter(is_approved=True)
+    base_query = by_team(by_approval(base_query, filters["status"]), filters["team"])
 
     if filters["inject"]:
         base_query = base_query.filter(inject_id=filters["inject"])
-
-    if (team_id := optional_int(filters["team"])) is not None:
-        base_query = base_query.filter(team__id=team_id)
 
     if filters["search"]:
         from django.db.models import Q
@@ -289,10 +283,7 @@ def review_inject_feedback(request: HttpRequest) -> HttpResponse:
 
     if filters["inject"]:
         scores = scores.filter(inject_id=filters["inject"])
-    if filters["status"] == "pending":
-        scores = scores.filter(feedback_approved=False)
-    elif filters["status"] == "approved":
-        scores = scores.filter(feedback_approved=True)
+    scores = by_approval(scores, filters["status"], "feedback_approved")
 
     inject_choices = (
         InjectScore.objects.filter(is_approved=True)

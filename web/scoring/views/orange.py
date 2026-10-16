@@ -7,7 +7,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import require_permission
-from core.utils import list_filters, optional_int
+from core.utils import by_approval, by_team, list_filters, optional_int
 
 from ..models import OrangeTeamScore
 
@@ -28,13 +28,7 @@ def review_orange(request: HttpRequest) -> HttpResponse:
 
     base_query = OrangeTeamScore.objects.select_related("team", "submitted_by", "approved_by", "orange_check")
 
-    if filters["status"] == "pending":
-        base_query = base_query.filter(is_approved=False)
-    elif filters["status"] == "approved":
-        base_query = base_query.filter(is_approved=True)
-
-    if (team_id := optional_int(filters["team"])) is not None:
-        base_query = base_query.filter(team__id=team_id)
+    base_query = by_team(by_approval(base_query, filters["status"]), filters["team"])
 
     if filters["check"]:
         if filters["check"] == "manual":

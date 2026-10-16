@@ -3,6 +3,8 @@ filters set and its clear-filters link stays on the page, and a finding without 
 or Unknown. A finding's own page says Unknown for the attack type and shows a legacy finding's vector in a row of
 its own."""
 
+import re
+
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
@@ -30,7 +32,7 @@ def test_with_no_filters_the_empty_state_does_not_blame_filters(client: Client, 
 def test_with_a_filter_set_the_clear_link_stays_on_the_page(client: Client, name: str) -> None:
     html = client.get(reverse(name), {"team": "5"}).content.decode()
     assert "match your filters" in html
-    assert f'<a href="{reverse(name)}">clearing all filters</a>' in html
+    assert re.search(rf'<a href="{re.escape(reverse(name))}"[^>]*>\s*clearing all filters\s*</a>', html)
 
 
 @pytest.mark.parametrize(("vector", "shown"), [("", "Unknown"), ("ssh brute force", "ssh brute force")])

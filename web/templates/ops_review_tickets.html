@@ -23,29 +23,14 @@
                     </c-button>
                 </c-slot>
             {% endif %}
-            <c-filter_field label="Status" id="id_status">
-                <select name="status" id="id_status" aria-label="Filter by status">
-                    <option value="pending"
-                            {% if filters.status == 'pending' %}selected{% endif %}>Pending Only</option>
-                    <option value="approved"
-                            {% if filters.status == 'approved' %}selected{% endif %}>Approved Only</option>
-                    <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
-                </select>
-            </c-filter_field>
-            <c-filter_field label="Team" id="id_team">
-                <input type="number"
-                       name="team"
-                       id="id_team"
-                       value="{{ filters.team }}"
-                       placeholder="Team #"
-                       aria-label="Filter by team number">
-            </c-filter_field>
+            <c-approval_filter value="{{ filters.status }}" />
+            <c-team_filter :teams="available_teams" value="{{ filters.team }}" />
             <c-filter_field label="Category" id="id_category">
                 <select name="category" id="id_category" aria-label="Filter by category">
                     <option value="">All Categories</option>
                     {% for cat in categories %}
                         <option value="{{ cat.id }}"
-                                {% if filters.category == cat.id %}selected{% endif %}>{{ cat.display_name }}</option>
+                                {% if filters.category == cat.id|stringformat:"i" %}selected{% endif %}>{{ cat.display_name }}</option>
                     {% endfor %}
                 </select>
             </c-filter_field>

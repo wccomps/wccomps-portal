@@ -184,9 +184,9 @@
             <tr>
                 <td colspan="{% if is_ops %}9{% else %}5{% endif %}">
                     {% if filtered %}
-                        <c-empty_state title="No tickets match your filters">
-                            Try <c-link href="{% url 'ticket_list' %}">clearing all filters</c-link> or <c-link href="{% url 'create_ticket' %}" variant="add">create a new ticket</c-link>
-                        </c-empty_state>
+                        <c-no_matches items="tickets" href="{% url 'ticket_list' %}">
+                            or <c-link href="{% url 'create_ticket' %}" variant="add">create a new ticket</c-link>
+                        </c-no_matches>
                     {% else %}
                         <c-empty_state title="No tickets yet"
                                        description="Either everything is working perfectly, or nobody knows how to ask for help.">

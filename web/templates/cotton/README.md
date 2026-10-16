@@ -56,9 +56,17 @@ Search and filter form with horizontal layout.
 #### `<c-filter_field>`
 Individual filter input within toolbar.
 ```django
-<c-filter_field label="Team" id="id_team">
-    <input type="number" name="team" />
+<c-filter_field label="Search" id="id_search">
+    <input type="text" name="search" />
 </c-filter_field>
+```
+
+#### `<c-approval_filter>` and `<c-team_filter>`
+The review lists' approval-status filter and a list's team filter, which names a team by its number. The views
+filter with `core.utils.by_approval` and `by_team`.
+```django
+<c-approval_filter value="{{ filters.status }}" />
+<c-team_filter :teams="available_teams" value="{{ filters.team }}" />
 ```
 
 ### Interactive Elements
@@ -150,6 +158,12 @@ Props:
 Use cases: Empty lists, no search results, filtered views with zero matches.
 
 ### Tables
+
+#### `<c-no_matches>`
+The empty state of a list whose filters hide every row, with a link that clears them.
+```django
+<c-no_matches items="tickets" href="{% url 'ticket_list' %}" />
+```
 
 #### `<c-table>`
 Data table with header and body slots.

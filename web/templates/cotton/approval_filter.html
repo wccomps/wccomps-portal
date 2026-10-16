@@ -1,0 +1,13 @@
+{# Approval status filter component - the review lists' ?status= select (core.utils.APPROVAL_STATUSES, by_approval) #}
+{# Usage: <c-approval_filter value="{{ filters.status }}" /> #}
+{# Props: value (the status chosen) #}
+{% load list_filters %}
+<c-vars value />
+<c-filter_field label="Status" id="id_status">
+    <select name="status" id="id_status" aria-label="Filter by status" {{ attrs }}>
+        {% approval_statuses as statuses %}
+        {% for status, label in statuses %}
+            <option value="{{ status }}" {% if value == status %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+    </select>
+</c-filter_field>

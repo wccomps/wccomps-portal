@@ -10,7 +10,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import require_permission
 from core.tickets_config import get_all_categories, get_category_config
-from core.utils import list_filters, optional_int
+from core.utils import by_approval, by_team, list_filters, optional_int
 from team.models import Team
 from ticketing.models import Ticket, TicketHistory
 from ticketing.scoring_sync import recompute_team_ticket_adjustment
@@ -29,16 +29,10 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
 
     query = Ticket.objects.filter(status="resolved").select_related("team", "approved_by")
 
-    if filters["status"] == "approved":
-        query = query.filter(is_approved=True)
-    elif filters["status"] == "pending":
-        query = query.filter(is_approved=False)
+    query = by_team(by_approval(query, filters["status"]), filters["team"])
 
     if (category_id := optional_int(filters["category"])) is not None:
         query = query.filter(category_id=category_id)
-
-    if (team_number := optional_int(filters["team"])) is not None:
-        query = query.filter(team__team_number=team_number)
 
     if filters["search"]:
         query = query.filter(
@@ -77,6 +71,7 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
         "filtered": filtered,
         "sort_by": sort_by,
         "categories": get_all_categories(),
+        "available_teams": Team.objects.filter(tickets__status="resolved").distinct().order_by("team_number"),
         "has_pending": Ticket.objects.filter(status="resolved", is_approved=False).exists(),
         "show_ops_nav": True,
     }
