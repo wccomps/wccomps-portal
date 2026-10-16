@@ -21,6 +21,9 @@ from ..models import (
 from ..quotient_sync import get_box_metadata, get_cached_team_count
 from ..screenshots import ScreenshotError, read_screenshots
 
+# What the findings table (scoring/partials/red_findings_table.html) sorts by, for both pages that show it
+RED_FINDING_SORTS = [order for field in ("attack_type__name", "created_at") for order in (field, f"-{field}")]
+
 
 def _normalize_red_score_post(post_data: QueryDict) -> QueryDict:
     """Normalize legacy field names in red team finding POST data.
@@ -94,7 +97,7 @@ def red_team_findings(request: HttpRequest) -> HttpResponse:
     result = filter_sort_paginate(
         request,
         base_query,
-        valid_sort_fields=["created_at", "-created_at", "attack_type__name", "-attack_type__name"],
+        valid_sort_fields=RED_FINDING_SORTS,
         default_sort="-created_at",
     )
     page_obj = result["page_obj"]
@@ -173,12 +176,7 @@ def red_team_scores(request: HttpRequest) -> HttpResponse:
     result = filter_sort_paginate(
         request,
         base_query.distinct(),
-        valid_sort_fields=[
-            "created_at",
-            "-created_at",
-            "points_per_team",
-            "-points_per_team",
-        ],
+        valid_sort_fields=RED_FINDING_SORTS,
         default_sort="-created_at",
         page_size=25,
     )

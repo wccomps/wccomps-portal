@@ -1,5 +1,5 @@
 """A list page's filters are escaped where the page echoes them, stay one parameter in the links that carry them
-on, and a filter that isn't a number is ignored rather than failing the page."""
+on, a filter that isn't a number is ignored rather than failing the page, and every sort header sorts."""
 
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlsplit
@@ -99,3 +99,26 @@ def test_a_list_filter_that_is_not_a_number_is_ignored(admin_client: Client, nam
     with rolled_back():
         response = admin_client.get(reverse(name), {param: value})
     assert response.status_code == 200
+
+
+LIST_PAGES = sorted({name for name, _ in ECHOED_FILTERS})
+
+
+@pytest.mark.parametrize("name", LIST_PAGES)
+def test_every_sort_header_a_list_shows_is_one_its_view_sorts_by(admin_client: Client, name: str) -> None:
+    """A header sorted by field links to -field next; a view that refuses the field falls back to its default."""
+    links = Links()
+    links.feed(admin_client.get(reverse(name)).content.decode())
+    fields = {
+        sort
+        for url in links.urls
+        for sort in parse_qs(urlsplit(url).query).get("sort", [])
+        if not sort.startswith("-") and sort != "default"
+    }
+    refused = []
+    for field in sorted(fields):
+        sorted_links = Links()
+        sorted_links.feed(admin_client.get(reverse(name), {"sort": field}).content.decode())
+        if not any(parse_qs(urlsplit(url).query).get("sort") == [f"-{field}"] for url in sorted_links.urls):
+            refused.append(field)
+    assert not refused
