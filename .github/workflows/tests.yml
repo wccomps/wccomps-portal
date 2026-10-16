@@ -1,7 +1,7 @@
 name: Tests
 
-# The test job ci.yml runs on every PR and push, and deep-properties.yml runs nightly with the deep profile: one
-# Postgres service, setup and test command for both.
+# The test job ci.yml runs on every PR and every push to main, and deep-properties.yml runs nightly with the deep
+# profile: one Postgres service, setup and test command for both.
 
 on:
   workflow_call:
@@ -18,10 +18,17 @@ on:
         description: What to check out (empty for the triggering commit)
         type: string
         default: ""
+      timeout-minutes:
+        description: How long the job may run (a deep run takes hours; a PR's run, minutes)
+        type: number
+        default: 30
     outputs:
       sha:
         description: The commit the tests ran on
         value: ${{ jobs.lint-and-test.outputs.sha }}
+      results:
+        description: The name of the artifact holding the tests' JUnit XML (test-results.xml)
+        value: ${{ jobs.lint-and-test.outputs.results }}
 
 permissions:
   contents: read
@@ -29,10 +36,10 @@ permissions:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
-    # Below the 6-hour job limit with room to spare, so a slow deep run fails here, not by being killed
-    timeout-minutes: 300
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     outputs:
       sha: ${{ steps.sha.outputs.sha }}
+      results: ${{ steps.sha.outputs.results }}
 
     services:
       postgres:
@@ -65,7 +72,9 @@ jobs:
 
       - name: Record the commit under test
         id: sha
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "results=test-results-${{ inputs.profile }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -116,6 +125,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ inputs.profile }}
+          name: ${{ steps.sha.outputs.results }}
           path: test-results.xml
           if-no-files-found: ignore
