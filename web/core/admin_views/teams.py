@@ -60,7 +60,7 @@ def admin_team_detail(request: HttpRequest, team_number: int) -> HttpResponse:
 
 def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
     if request.method != "POST":
-        return HttpResponse("Method not allowed", status=405)
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
     user = cast(User, request.user)
     authentik_username = user.username
@@ -225,7 +225,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
 
 def admin_teams_bulk_action(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
-        return HttpResponse("Method not allowed", status=405)
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
     user = cast(User, request.user)
     authentik_username = user.username
