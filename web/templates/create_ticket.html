@@ -174,10 +174,10 @@
 
             return {
                 submitting: false,
-                selectedCategory: '{{ form_data.category|default:"" }}',
-                selectedHostname: '{{ form_data.hostname|default:"" }}',
-                selectedService: '{{ form_data.service_name|default:"" }}',
-                ipAddress: '{{ form_data.ip_address|default:"" }}',
+                selectedCategory: '{{ form_data.category|default:""|escapejs }}',
+                selectedHostname: '{{ form_data.hostname|default:""|escapejs }}',
+                selectedService: '{{ form_data.service_name|default:""|escapejs }}',
+                ipAddress: '{{ form_data.ip_address|default:""|escapejs }}',
                 visibleFields: [],
                 requiredFields: [],
 

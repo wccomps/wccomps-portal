@@ -2,6 +2,7 @@
 input, so each fix is held by a test of its own."""
 
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -321,3 +322,23 @@ def test_an_anonymous_post_body_is_not_read_before_the_sign_in_gate() -> None:
     response = Client().post(reverse("ticket_list"), {"search": "\x00"})
     assert response.status_code == 302
     assert response["Location"].startswith("/auth/login/")
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# The ticket form puts posted values back into its script as JavaScript strings
+# ---------------------------------------------------------------------------------------------------------------
+
+JS_STRING = re.compile(r"selectedHostname: '((?:[^'\\\n\r  ]|\\.)*)',\n")
+
+
+@given(hostname=request_text(60).filter(lambda h: "\x00" not in h))
+@example(hostname="a\\")
+@example(hostname="a\nb")
+def test_the_ticket_form_writes_posted_text_into_its_script_as_a_string(
+    blue_team_user: User, tickets: dict[str, Any], hostname: str
+) -> None:
+    """HTML escaping left a backslash or a line break that ended or broke the JavaScript string (self only)."""
+    client = signed_in(blue_team_user)
+    with rolled_back():
+        response = client.post(reverse("create_ticket"), {"hostname": hostname})  # no title: the form comes back
+    assert JS_STRING.search(response.content.decode()), "the posted hostname broke the script's string"
