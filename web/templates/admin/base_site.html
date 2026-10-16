@@ -163,6 +163,9 @@
             submitting: false,
             onSubmit(e) {
                 if (this.submitting) { e.preventDefault(); return; }
+                // A form's data-confirm is the question to ask first, read as text
+                const question = this.$el.dataset.confirm;
+                if (question && !confirm(question)) { e.preventDefault(); return; }
                 this.submitting = true;
                 setTimeout(() => { this.submitting = false; }, 10000);
             }

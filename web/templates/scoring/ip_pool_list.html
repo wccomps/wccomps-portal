@@ -41,7 +41,7 @@
                         <td>
                             {% if not pool.findings.exists %}
                                 <c-form action="{% url 'scoring:ip_pool_delete' pool.id %}"
-                                        onsubmit="return confirm('Delete pool \'{{ pool.name }}\'?');">
+                                        data-confirm="Delete pool '{{ pool.name }}'?">
                                     {% csrf_token %}
                                     <c-button type="submit" variant="danger" ::disabled="submitting">
                                         Delete

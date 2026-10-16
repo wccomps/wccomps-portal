@@ -1,6 +1,6 @@
 {# Form component - standard POST form with built-in double-submit protection #}
 {# Usage: <c-form action="/url">...fields...<c-button type="submit">Save</c-button></c-form> #}
-{# Props: action, enctype, class, id #}
+{# Props: action, enctype, class, id; data-confirm asks that question before the form submits #}
 {# Note: Forms with custom x-data components should use raw <form> and merge submitGuard logic #}
 <c-vars action enctype class id />
 <form method="post"
