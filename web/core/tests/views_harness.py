@@ -442,8 +442,8 @@ class ViewCase:
     idempotent: tuple[type[models.Model], ...] = ()
     idempotent_as: str = "admin"  # the role that sends the repeated POST
     # The URL names every_allowed_role_gets_in drives, when not all of them: the ones behind the portal's own gate
-    # (an admin model's changelist, behind the admin site; a model admin's other pages are its own choice, which the
-    # random requests check only for refusing non-admins and never failing)
+    # (an admin model's changelist, behind the admin site; a model admin's other pages are left to the random
+    # requests, which check only that non-admins are refused and nothing fails)
     gate_names: tuple[str, ...] = ()
     # A query a role let in needs to get past the view's own checks (every_allowed_role_gets_in)
     entry_query: Callable[[World], dict[str, list[str]]] | None = None
@@ -760,7 +760,7 @@ def kind_of(answer: Answer) -> Kind:
 # A permission check's answers
 PERMISSION_REFUSALS = {Kind.SIGN_IN, Kind.FORBIDDEN, Kind.MISSING, Kind.REFUSED_HOME}
 
-# What a refusal of the visitor says, in a message or a page: an answer that says it is one the classifier doesn't know
+# Words a refusal of the visitor uses, in a message or a page
 REFUSAL_TEXT = re.compile(
     r"access denied|permission|not allowed|not authori[sz]ed|can only \w+ (your|tickets you)", re.I
 )
@@ -776,7 +776,7 @@ def refuses_visitor(answer: Answer, method: str) -> bool:
 
 
 def unknown_refusal(answer: Answer) -> str | None:
-    """What says an answer refuses_visitor lets in is a refusal after all: a message or page in refusal words."""
+    """The refusal words in an answer refuses_visitor lets in (its messages or page), or None."""
     said = [*answer.errors, *answer.warnings]
     if answer.response.get("Content-Type", "").startswith(("text/html", "application/json", "text/plain")):
         said.append(answer.content.decode(errors="replace"))
@@ -942,7 +942,7 @@ def every_allowed_role_gets_in(case: ViewCase, world: World) -> None:
                         break
                 # An answer in refusal words the classifier doesn't know (a POST's error redirect, a warning, a page
                 # saying no) keeps the visitor out of this object too
-                if not refuses_visitor(answer, method) and not unknown_refusal(answer):
+                if not refuses_visitor(answer, method) and not shape:
                     break
             else:
                 raise AssertionError(f"{name}: {role} is allowed by the row but refused everywhere: {answers}")

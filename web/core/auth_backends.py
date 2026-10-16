@@ -9,10 +9,13 @@ from . import auth_utils
 
 
 class AuthentikAdminBackend(BaseBackend):
-    """Every Django model permission for a user with the admin permission (PERMISSION_MAP), and none for anyone else.
+    """Every Django model permission, in sync and async checks, for a user with the admin permission (PERMISSION_MAP);
+    nothing from this backend for anyone else.
 
-    The Django admin's model pages check Django's own permissions (user.has_perm), which no one is given in Django:
-    who is an admin is an Authentik group. Signing in is the OAuth flow's, so this backend authenticates no one.
+    The Django admin's model pages check Django's own permissions (user.has_perm), which the portal grants no one:
+    who is an admin is an Authentik group. Superusers and ModelBackend's Permission rows still grant permissions, but
+    only behind the admin site's gate (AuthentikAdminSite.has_permission). Signing in is the OAuth flow's, so this
+    backend authenticates no one.
     """
 
     def has_perm(self, user_obj: User | AnonymousUser, perm: str, obj: Model | None = None) -> bool:
