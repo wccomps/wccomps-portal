@@ -26,7 +26,7 @@
                     </c-table_header>
                     <c-table_header sort_field="team__team_number"
                                     current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&team={{ selected_team }}&check={{ selected_check }}&search={{ search_query }}">
+                                    query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&check={{ selected_check|urlencode }}&search={{ search_query|urlencode }}">
                         Team
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -34,12 +34,12 @@
                     </c-table_header>
                     <c-table_header sort_field="points_awarded"
                                     current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&team={{ selected_team }}&check={{ selected_check }}&search={{ search_query }}">
+                                    query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&check={{ selected_check|urlencode }}&search={{ search_query|urlencode }}">
                         Points
                     </c-table_header>
                     <c-table_header sort_field="created_at"
                                     current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&team={{ selected_team }}&check={{ selected_check }}&search={{ search_query }}">
+                                    query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&check={{ selected_check|urlencode }}&search={{ search_query|urlencode }}">
                         Submitted
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -105,5 +105,5 @@
         </c-table>
     </form>
     <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter }}&team={{ selected_team }}&check={{ selected_check }}&search={{ search_query }}&sort={{ sort_by }}" />
+                  query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&check={{ selected_check|urlencode }}&search={{ search_query|urlencode }}&sort={{ sort_by|urlencode }}" />
 </div>

@@ -30,7 +30,7 @@
                 </c-table_header>
                 <c-table_header sort_field="attack_type__name"
                                 current_sort="{{ sort_by }}"
-                                query_params="&status={{ status_filter }}&team={{ selected_team }}&attack_type={{ selected_attack_type }}&submitter={{ selected_submitter }}&search={{ search_query }}">
+                                query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&attack_type={{ selected_attack_type|urlencode }}&submitter={{ selected_submitter|urlencode }}&search={{ search_query|urlencode }}">
                     Attack Type
                 </c-table_header>
                 <c-table_header sortable="false">
@@ -44,7 +44,7 @@
                 </c-table_header>
                 <c-table_header sort_field="created_at"
                                 current_sort="{{ sort_by }}"
-                                query_params="&status={{ status_filter }}&team={{ selected_team }}&attack_type={{ selected_attack_type }}&submitter={{ selected_submitter }}&search={{ search_query }}">
+                                query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&attack_type={{ selected_attack_type|urlencode }}&submitter={{ selected_submitter|urlencode }}&search={{ search_query|urlencode }}">
                     Submitted
                 </c-table_header>
                 <c-table_header sortable="false">
@@ -167,5 +167,5 @@
         {% endfor %}
     </c-table>
     <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter }}&team={{ selected_team }}&attack_type={{ selected_attack_type }}&submitter={{ selected_submitter }}&sort={{ sort_by }}&search={{ search_query }}" />
+                  query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&attack_type={{ selected_attack_type|urlencode }}&submitter={{ selected_submitter|urlencode }}&sort={{ sort_by|urlencode }}&search={{ search_query|urlencode }}" />
 </div>

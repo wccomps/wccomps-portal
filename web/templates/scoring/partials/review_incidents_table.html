@@ -23,7 +23,7 @@
                     </c-table_header>
                     <c-table_header sort_field="team__team_number"
                                     current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&team={{ selected_team }}&box={{ selected_box }}&search={{ search_query }}">
+                                    query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&box={{ selected_box|urlencode }}&search={{ search_query|urlencode }}">
                         Team
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -34,7 +34,7 @@
                     </c-table_header>
                     <c-table_header sort_field="attack_detected_at"
                                     current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&team={{ selected_team }}&box={{ selected_box }}&search={{ search_query }}">
+                                    query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&box={{ selected_box|urlencode }}&search={{ search_query|urlencode }}">
                         Detected
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -121,5 +121,5 @@
         </c-table>
     </form>
     <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter }}&team={{ selected_team }}&box={{ selected_box }}&search={{ search_query }}&sort={{ sort_by }}" />
+                  query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&box={{ selected_box|urlencode }}&search={{ search_query|urlencode }}&sort={{ sort_by|urlencode }}" />
 </div>

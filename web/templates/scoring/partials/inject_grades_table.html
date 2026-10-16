@@ -23,17 +23,17 @@
                     </th>
                     <c-table_header sort_field="inject_name"
                                     current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
+                                    query_params="&status={{ status_filter|urlencode }}&inject={{ selected_inject|urlencode }}&team={{ selected_team|urlencode }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query|urlencode }}">
                         Inject
                     </c-table_header>
                     <c-table_header sort_field="team__team_number"
                                     current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
+                                    query_params="&status={{ status_filter|urlencode }}&inject={{ selected_inject|urlencode }}&team={{ selected_team|urlencode }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query|urlencode }}">
                         Team
                     </c-table_header>
                     <c-table_header sort_field="points_awarded"
                                     current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
+                                    query_params="&status={{ status_filter|urlencode }}&inject={{ selected_inject|urlencode }}&team={{ selected_team|urlencode }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query|urlencode }}">
                         Points
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -41,7 +41,7 @@
                     </c-table_header>
                     <c-table_header sort_field="graded_at"
                                     current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}">
+                                    query_params="&status={{ status_filter|urlencode }}&inject={{ selected_inject|urlencode }}&team={{ selected_team|urlencode }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query|urlencode }}">
                         Graded
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -119,5 +119,5 @@
         </c-table>
     </form>
     <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter }}&inject={{ selected_inject }}&team={{ selected_team }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query }}&sort={{ sort_by }}" />
+                  query_params="&status={{ status_filter|urlencode }}&inject={{ selected_inject|urlencode }}&team={{ selected_team|urlencode }}&outliers={{ show_outliers_only|yesno:'1,' }}&search={{ search_query|urlencode }}&sort={{ sort_by|urlencode }}" />
 </div>
