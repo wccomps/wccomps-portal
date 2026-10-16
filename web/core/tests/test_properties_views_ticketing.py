@@ -11,6 +11,7 @@ from core.tests.views_harness import (
     World,
     any_request_is_answered_safely,
     echo_sweep,
+    every_allowed_role_gets_in,
     form_fields,
     hostile_text,
     may,
@@ -51,7 +52,8 @@ CASES = [
     ViewCase("ticket_list", TICKET_USERS, query=_filters),
     ViewCase(
         "create_ticket",
-        TICKET_USERS | may("gold_team", "admin", "ticketing_admin"),
+        # A team member files for its team; gold, admins and ticketing admins file for any team (support can't)
+        frozenset({"blue_team"}) | may("gold_team", "admin", "ticketing_admin"),
         post=lambda w: form_fields(
             CreateTicketForm(),
             {
@@ -93,7 +95,7 @@ CASES = [
         ),
     ),
     ViewCase("ticket_resolve", STAFF, post=_form(TicketResolveForm())),
-    ViewCase("ticket_reopen", STAFF, post=_form(TicketReopenForm())),
+    ViewCase("ticket_reopen", may("ticketing_admin"), post=_form(TicketReopenForm())),
     ViewCase(
         "ticket_change_category",
         STAFF,
@@ -121,6 +123,11 @@ def test_any_request_is_answered_safely(case: ViewCase, view_world: World) -> No
 @pytest.mark.parametrize("case", CASES, ids=[c.name for c in CASES])
 def test_every_field_is_escaped_where_echoed(case: ViewCase, view_world: World) -> None:
     echo_sweep(case, view_world)
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.name for c in CASES])
+def test_every_allowed_role_gets_in(case: ViewCase, view_world: World) -> None:
+    every_allowed_role_gets_in(case, view_world)
 
 
 IDEMPOTENT = [case for case in CASES if case.idempotent]

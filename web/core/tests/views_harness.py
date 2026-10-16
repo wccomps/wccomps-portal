@@ -131,6 +131,7 @@ def build_world() -> World:
         clients[role].force_login(user)
 
     season = Season.objects.create(name="2026", year=2026, is_active=True)
+    Season.objects.create(name="2025", year=2025)  # an earlier one with no events, which can be deleted
     event = Event.objects.create(
         season=season, name="Invitational", event_type="invitational", event_number=1, date=date(2026, 10, 3)
     )
@@ -197,6 +198,8 @@ def build_world() -> World:
     # Red team: findings by red (pending and approved), one by admin that red contributes to, a pool, screenshots
     attack = AttackType.objects.filter(is_active=True).first() or AttackType.objects.create(name="Default creds")
     pool = RedTeamIPPool.objects.create(name="Pool A", ip_addresses="10.0.0.1", created_by=users["red_team"])
+    # Each red role edits only its own pools: one for admin too
+    admin_pool = RedTeamIPPool.objects.create(name="Pool B", ip_addresses="10.0.0.2", created_by=users["admin"])
     findings = []
     for submitter, approved in ((users["red_team"], False), (users["red_team"], True), (users["admin"], False)):
         finding = RedTeamScore.objects.create(
@@ -257,6 +260,9 @@ def build_world() -> World:
         ),
         OrangeAssignment.objects.create(orange_check=plain, user=users["orange_team"], team=teams[0]),
         OrangeAssignment.objects.create(orange_check=plain, user=users["orange_team_lead"], team=teams[2]),
+        # Each orange role saves only its own assignments: one for gold and admin too
+        OrangeAssignment.objects.create(orange_check=check, user=users["admin"], team=teams[2]),
+        OrangeAssignment.objects.create(orange_check=plain, user=users["gold_team"], team=teams[1]),
     ]
     for assignment in assignments[:2]:
         for criterion in criteria:
@@ -311,7 +317,7 @@ def build_world() -> World:
         "attachment_id": [a.pk for a in attachments],
         "finding_id": [f.pk for f in findings],
         "red_screenshot_id": [red_shot.pk],
-        "pool_id": [pool.pk],
+        "pool_id": [pool.pk, admin_pool.pk],
         "incident_id": [i.pk for i in incidents],
         "incident_screenshot_id": [incident_shot.pk],
         "grade_id": [g.pk for g in grades],
@@ -431,6 +437,11 @@ class ViewCase:
     # Models whose rows must come out the same when the same POST is sent twice
     idempotent: tuple[type[models.Model], ...] = ()
     idempotent_as: str = "admin"  # the role that sends the repeated POST
+    # Whether a URL name is offered to anyone at all now (an admin page an admin turns off); every_allowed_role_gets_in
+    # expects one that isn't to refuse every role
+    offered: Callable[[str], bool] | None = None
+    # A query a role let in needs to get past the view's own checks (every_allowed_role_gets_in)
+    entry_query: Callable[[World], dict[str, list[str]]] | None = None
     patches: Callable[[World], ExitStack] | None = None  # what the case needs from outside (Quotient's injects)
 
     @property
@@ -907,6 +918,44 @@ def echo_sweep(case: ViewCase, world: World) -> None:
                 )  # fmt: skip
                 with rolled_back(), case.patches(world) if case.patches else ExitStack():
                     check_answer(case, drawn, send(world, drawn))
+
+
+def refused_by_permission(answer: Answer) -> bool:
+    """A permission refusal: 401/403, a missing object, the sign-in gate, or require_permission's redirect home with
+    an error (a form's error redirects elsewhere, so it isn't one)."""
+    status = answer.response.status_code
+    if status in (401, 403, 404) or sent_to_sign_in(answer):
+        return True
+    return 300 <= status < 400 and urlsplit(answer.response.get("Location", "")).path == "/" and bool(answer.errors)
+
+
+def every_allowed_role_gets_in(case: ViewCase, world: World) -> None:
+    """Each role the row allows gets past the view's permission check on some real object: a GET (a POST with no
+    fields where the view takes only POST) is not refused for at least one valid path. A row that lists a role its
+    view refuses is too wide, and its oracle never checks that role's refusal."""
+    for name in (case.name, *case.also):
+        params = route_params(case, name)
+        count = max((len(world.ids(kind)) for _, _, kind in params), default=1)
+        offered = case.offered(name) if case.offered else True
+        for role in sorted(case.allowed):
+            answers = []
+            for index in range(count):
+                kwargs = {param: (ids := world.ids(kind))[index % len(ids)] for _, param, kind in params}
+                for method in ("GET", "POST"):
+                    if method not in case.methods:
+                        continue
+                    query = case.entry_query(world) if case.entry_query else {}
+                    drawn = build(case, role=role, method=method, name=name, kwargs=kwargs, query=query, fields={})
+                    with rolled_back(), case.patches(world) if case.patches else ExitStack():
+                        answer = send(world, drawn)
+                    answers.append((drawn.path, method, answer.response.status_code))
+                    if answer.response.status_code != 405:
+                        break
+                if not refused_by_permission(answer) and answer.response.status_code != 405:
+                    assert offered, f"{name}: a page the row says is turned off let {role} in: {answers}"
+                    break
+            else:
+                assert not offered, f"{name}: {role} is allowed by the row but refused everywhere: {answers}"
 
 
 def snapshot(models_: tuple[type[models.Model], ...]) -> dict[str, list[dict[str, Any]]]:

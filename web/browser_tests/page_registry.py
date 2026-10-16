@@ -59,7 +59,6 @@ PAGES: list[PageDef] = [
     PageDef(
         url_name="create_ticket",
         skip_roles={
-            "ticketing_support": "the view refuses it: not a team member, and not staff who file for a team",
             "gold_team": "the same staff form admin is rendered with",
             "ticketing_admin": "the same staff form admin is rendered with",
         },

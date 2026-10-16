@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 from django.contrib import admin
+from django.contrib.auth.models import User
 from django.db import models
 from django.test import RequestFactory
 from hypothesis import strategies as st
@@ -15,6 +16,7 @@ from core.tests.views_harness import (
     World,
     any_request_is_answered_safely,
     echo_sweep,
+    every_allowed_role_gets_in,
     form_fields,
     hostile_text,
     may,
@@ -68,6 +70,19 @@ def _admin_post(model: type[models.Model], model_admin: admin.ModelAdmin[Any]) -
     return post
 
 
+def _offered(model_admin: admin.ModelAdmin[Any], page: str) -> bool:
+    """Whether the model admin offers the page to anyone now."""
+    request = RequestFactory().get("/")
+    request.user = User(is_active=True, is_staff=True, is_superuser=True)
+    match page:
+        case "add":
+            return model_admin.has_add_permission(request)
+        case "delete":
+            return model_admin.has_delete_permission(request)
+        case _:
+            return True
+
+
 def _model_case(model: type[models.Model], model_admin: admin.ModelAdmin[Any]) -> ViewCase:
     prefix = f"admin:{model._meta.app_label}_{model._meta.model_name}"
     return ViewCase(
@@ -78,6 +93,8 @@ def _model_case(model: type[models.Model], model_admin: admin.ModelAdmin[Any]) -
         params={"object_id": f"pk:{model._meta.label}"},
         query=_changelist_query(model_admin),
         post=_admin_post(model, model_admin),
+        # Some admins turn adding or deleting off (CompetitionConfig's add, while one exists)
+        offered=lambda name: _offered(model_admin, name.rsplit("_", 1)[1]),
     )
 
 
@@ -99,17 +116,35 @@ SITE = ViewCase(
         "admin:logout",
         "admin:password_change",
         "admin:password_change_done",
-        "admin:autocomplete",
         "admin:jsi18n",
-        "admin:view_on_site",
         "admin:app_list",
     ),
     covers="url:admin/",
-    params={"content_type_id": "pk:contenttypes.ContentType", "object_id": "team_id", "app_label": "app_label"},
+    params={"app_label": "app_label"},
     query=_site_query,
     post=lambda w: {name: hostile_text() for name in ("old_password", "new_password1", "new_password2")},
 )
-CASES = [SITE, *(_model_case(model, model_admin) for model, model_admin in admin.site._registry.items())]
+# No model has a page on the site (get_absolute_url), so Django's shortcut finds none for anyone
+VIEW_ON_SITE = ViewCase(
+    "admin:view_on_site",
+    frozenset(),
+    covers="url:admin/",
+    params={"content_type_id": "pk:contenttypes.ContentType", "object_id": "team_id"},
+)
+AUTOCOMPLETE = ViewCase(
+    "admin:autocomplete",
+    ADMINS,
+    covers="url:admin/",
+    query=_site_query,
+    # The one field an admin form searches (scoring's RedTeamScoreAdmin autocomplete_fields)
+    entry_query=lambda w: {"app_label": ["scoring"], "model_name": ["redteamscore"], "field_name": ["attack_type"]},
+)
+CASES = [
+    SITE,
+    VIEW_ON_SITE,
+    AUTOCOMPLETE,
+    *(_model_case(model, model_admin) for model, model_admin in admin.site._registry.items()),
+]
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c.entry_point for c in CASES])
@@ -120,3 +155,8 @@ def test_any_request_is_answered_safely(case: ViewCase, view_world: World) -> No
 @pytest.mark.parametrize("case", CASES, ids=[c.entry_point for c in CASES])
 def test_every_field_is_escaped_where_echoed(case: ViewCase, view_world: World) -> None:
     echo_sweep(case, view_world)
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.entry_point for c in CASES])
+def test_every_allowed_role_gets_in(case: ViewCase, view_world: World) -> None:
+    every_allowed_role_gets_in(case, view_world)
