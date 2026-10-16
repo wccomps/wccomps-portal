@@ -239,9 +239,14 @@ window.addEventListener('pageshow', (e) => {
     document.querySelectorAll('form').forEach(form => { const guard = guardOf(form); if (guard.submitting) guard.submitting = false; });
 });
 
-// An htmx refresh would replace a posting form with a fresh, unguarded one, so it waits for the page to be left
+// A refresh (an element reloading itself, like the ticket list's 30 s poll) replaces what it covers, so it waits
+// while a form there is posting (it would come back unguarded) or a row there is checked (the selection would go).
+// A request the person made, such as a filter change, goes ahead.
 document.addEventListener('htmx:beforeRequest', (e) => {
-    if ([...e.detail.elt.querySelectorAll('form')].some(form => guardOf(form).submitting)) e.preventDefault();
+    const area = e.detail.target;
+    if (e.detail.elt !== area) return;
+    const posting = [...area.querySelectorAll('form')].some(form => guardOf(form).submitting);
+    if (posting || area.querySelector('input[type="checkbox"]:checked')) e.preventDefault();
 });
 
 /* The ticket list a tab last showed: its ticket pages' way back */
