@@ -1,7 +1,8 @@
 # One image for both processes: they share the Django models and must run the same version.
 #   web (default): entrypoint.sh applies migrations under a lock, then gunicorn (web/gunicorn.conf.py)
 #   bot: entrypoint cleared, run from /app: `python main.py`
-FROM python:3.14-slim
+# The same Python as .python-version (local uv and CI read it); a test that passes on one patch can fail on another
+FROM python:3.14.8-slim
 
 WORKDIR /app
 
