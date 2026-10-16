@@ -19,7 +19,8 @@
                     <strong x-text="selectedCount" aria-live="polite">0</strong> tickets selected
                 </span>
                 <c-form action="{% url 'tickets_bulk_claim' %}"
-                      class="d-inline">
+                        class="d-inline"
+                        ::data-confirm="claimQuestion">
                     {% csrf_token %}
                     <input type="hidden" name="ticket_numbers" :value="selectedTickets" />
                     <c-button type="submit" variant="primary">
@@ -27,7 +28,8 @@
                     </c-button>
                 </c-form>
                 <c-form action="{% url 'tickets_bulk_resolve' %}"
-                      class="d-inline">
+                        class="d-inline"
+                        ::data-confirm="resolveQuestion">
                     {% csrf_token %}
                     <input type="hidden" name="ticket_numbers" :value="selectedTickets" />
                     <c-button type="submit" variant="primary">

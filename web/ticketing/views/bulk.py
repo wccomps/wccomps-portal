@@ -25,7 +25,8 @@ def tickets_bulk_claim(request: HttpRequest) -> HttpResponse:
 
     form = TicketBulkActionForm(request.POST)
     if not form.is_valid():
-        return HttpResponse("No tickets selected", status=400)
+        messages.info(request, "No tickets selected")
+        return redirect("ticket_list")
 
     claimed = 0
     for ticket_id in Ticket.objects.filter(ticket_number__in=form.cleaned_data["ticket_numbers"]).values_list(
@@ -50,7 +51,8 @@ def tickets_bulk_resolve(request: HttpRequest) -> HttpResponse:
 
     form = TicketBulkActionForm(request.POST)
     if not form.is_valid():
-        return HttpResponse("No tickets selected", status=400)
+        messages.info(request, "No tickets selected")
+        return redirect("ticket_list")
 
     requested = Ticket.objects.filter(ticket_number__in=form.cleaned_data["ticket_numbers"])
     tickets = requested if has_permission(user, "ticketing_admin") else requested.filter(assigned_to=user)

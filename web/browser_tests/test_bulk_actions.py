@@ -129,3 +129,29 @@ def test_the_ticket_lists_refresh_waits_while_a_bulk_claim_is_posting(live_serve
         assert page.evaluate("window.posted") == 1
     finally:
         context.close()
+
+
+@pytest.mark.parametrize(("button", "verb"), [("Claim Selected", "Claim"), ("Resolve Selected", "Resolve")])
+def test_the_ticket_lists_bulk_actions_ask_with_the_count(live_server, pw_browser, button, verb):
+    from team.models import Team
+    from ticketing.models import Ticket, TicketCategory
+
+    user = _create_role_user("admin", None)
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    ticket = Ticket.objects.create(
+        ticket_number="T004-001", team=team, category=TicketCategory.objects.first(), title="t"
+    )
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    questions: list[str] = []
+    page.on("dialog", lambda dialog: (questions.append(dialog.message), dialog.dismiss()))
+    try:
+        page.goto(f"{live_server.url}{reverse('ticket_list')}")
+        page.locator('tbody input[type="checkbox"]').first.check()
+        page.get_by_role("button", name=button).click()
+        page.wait_for_load_state("networkidle")
+        assert questions == [f"{verb} 1 ticket(s)?"]
+        ticket.refresh_from_db()
+        assert ticket.status == "open"
+    finally:
+        context.close()
