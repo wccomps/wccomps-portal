@@ -1,6 +1,7 @@
 """Requests the view property tests (views_harness) found breaking a view, each pinned with @example of a failing
 input, so each fix is held by a test of its own."""
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -10,6 +11,7 @@ from django.test import Client
 from django.urls import reverse
 from hypothesis import assume, example, given
 from hypothesis import strategies as st
+from orange_team.models import OrangeAssignment, OrangeAssignmentResult, OrangeCheck, OrangeCheckCriterion
 
 from core.tests.strategies import request_text, rolled_back
 from team.models import DiscordLink, Team
@@ -141,3 +143,60 @@ def test_a_refusal_page_carries_its_status(
     assert response.status_code == status
     tickets["own"].refresh_from_db()
     assert tickets["own"].status == "open"
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# The rubric autosave answers any body with JSON
+# ---------------------------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def rubric(orange_team_user: User) -> dict[str, Any]:
+    check = OrangeCheck.objects.create(title="Phones", description="", max_points=5)
+    criterion = OrangeCheckCriterion.objects.create(orange_check=check, label="Answered", points=5, sort_order=1)
+    team = Team.objects.create(team_number=1, team_name="Team 01")
+    assignment = OrangeAssignment.objects.create(orange_check=check, user=orange_team_user, team=team)
+    OrangeAssignmentResult.objects.create(assignment=assignment, criterion=criterion)
+    return {"client": signed_in(orange_team_user), "assignment": assignment, "criterion": criterion}
+
+
+json_values = st.recursive(
+    st.one_of(st.none(), st.booleans(), st.integers(), st.floats(allow_nan=False), st.text(max_size=10)),
+    lambda inner: st.one_of(st.lists(inner, max_size=3), st.dictionaries(st.text(max_size=8), inner, max_size=3)),
+    max_leaves=8,
+)
+
+
+@given(
+    body=st.one_of(
+        st.binary(max_size=50),
+        json_values.map(lambda v: json.dumps(v).encode()),
+        st.fixed_dictionaries({}, optional={"criterion_id": json_values, "met": json_values}).map(
+            lambda v: json.dumps(v).encode()
+        ),
+    )
+)
+@example(body=b"[]")
+@example(body=b"\xb8")
+@example(body=b'{"criterion_id": "x", "met": true}')
+@example(body=b'{"criterion_id": 1, "met": "yes"}')
+def test_the_rubric_autosave_answers_any_body_with_json(rubric: dict[str, Any], body: bytes) -> None:
+    url = reverse("orange_team:assignment_save", args=[rubric["assignment"].pk])
+    with rolled_back():
+        response = rubric["client"].post(url, body, content_type="application/json")
+        assert response["Content-Type"] == "application/json"
+        answer = response.json()
+        assert response.status_code == 200 or answer["error"]
+
+
+@given(assignment_id=st.integers(0, 2**63 - 1))
+@example(assignment_id=0)
+def test_the_rubric_autosave_answers_a_missing_assignment_with_a_json_404(
+    rubric: dict[str, Any], assignment_id: int
+) -> None:
+    assume(assignment_id != rubric["assignment"].pk)
+    body = json.dumps({"criterion_id": rubric["criterion"].pk, "met": True})
+    url = reverse("orange_team:assignment_save", args=[assignment_id])
+    response = rubric["client"].post(url, body, content_type="application/json")
+    assert response.status_code == 404
+    assert response.json()["error"]
