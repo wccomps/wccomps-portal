@@ -11,9 +11,8 @@
     {{ block.super }}
     <script>
     // This tab's ticket pages lead back to the list as it was when the tab left it (sessionStorage is per tab): the
-    // address at pagehide follows filter changes and Back or Forward between them. Saved on load too, for a ticket
-    // opened in a new tab, which starts from a copy of this tab's storage.
-    rememberTicketList();
+    // address at pagehide follows filter changes and Back or Forward between them. A ticket opened in a new tab
+    // leads back to the plain list.
     window.addEventListener('pagehide', rememberTicketList);
     </script>
     {% if is_ops %}
