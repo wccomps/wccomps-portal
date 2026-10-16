@@ -1,5 +1,6 @@
 """The view property rows for the scoring views."""
 
+import json
 from contextlib import ExitStack
 from types import SimpleNamespace
 from typing import Any
@@ -232,4 +233,7 @@ def test_an_export_answers_json_for_format_json(case: ViewCase, view_world: Worl
     """The one view that reads a format parameter: ?format=json is its JSON answer (CI drew it first)."""
     drawn = build(case, role="admin", method="GET", name=case.name, kwargs={}, query={"format": ["json"]}, fields={})
     with rolled_back():
-        check_answer(case, drawn, send(view_world, drawn))
+        answer = send(view_world, drawn)
+    check_answer(case, drawn, answer)
+    assert answer.response["Content-Type"].startswith("application/json")
+    json.loads(answer.content)
