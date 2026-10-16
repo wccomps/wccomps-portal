@@ -311,10 +311,16 @@ latin1_with_nul = with_nul.map(lambda t: t.encode("latin-1", "replace").decode("
 @example(name="sessionid", text="abcdefgh\x00xyz")
 def test_a_nul_character_in_a_cookie_is_refused(name: str, text: str) -> None:
     """The session key reached PostgreSQL, so anyone got a 500 (and paged the error webhook) with one cookie."""
-    client = Client()
-    client.cookies[name] = text
+    client = Client(HTTP_COOKIE=f"{name}={text}")  # raw, as anyone can send it (the test client's jar refuses it)
     with rolled_back():
         response = client.get(reverse("ticket_list"))
+    assert response.status_code == 400
+
+
+def test_a_quoted_octal_nul_in_a_cookie_is_refused() -> None:
+    """Django's cookie parser turns a quoted octal escape into the character itself: the first form reported."""
+    with rolled_back():
+        response = Client(HTTP_COOKIE='sessionid="abcdefgh\\000xyz"').get(reverse("ticket_list"))
     assert response.status_code == 400
 
 

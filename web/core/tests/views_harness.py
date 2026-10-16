@@ -674,14 +674,20 @@ class Answer:
 
 
 def client_for(world: World, role: str, tz: str | None = None) -> Client:
-    """A fresh client for the role: its session's cookie (unless anonymous) and the tz cookie. A sign-out deletes the
-    session row only inside the example's rolled-back savepoint, so every request starts signed in again."""
-    client = Client()
-    if role in world.sessions:
-        client.cookies["sessionid"] = world.sessions[role]
+    """A fresh client for the role, sending its session's cookie (unless anonymous) and the tz cookie. A sign-out
+    deletes the session row only inside the example's rolled-back savepoint, so every request starts signed in again.
+
+    The cookies go as a raw Cookie header, as a browser (or anyone) sends them, which Django parses itself: the test
+    client's own cookie jar refuses a control character in a value (CPython 3.14.8 and later), so a hostile tz value
+    couldn't be sent through it."""
+    cookies = {"sessionid": world.sessions[role]} if role in world.sessions else {}
     if tz is not None:
-        client.cookies["tz"] = tz
-    return client
+        cookies["tz"] = tz
+    return Client(HTTP_COOKIE=raw_cookie_header(cookies))
+
+
+def raw_cookie_header(cookies: dict[str, str]) -> str:
+    return "; ".join(f"{name}={value}" for name, value in cookies.items())
 
 
 def send(world: World, drawn: Drawn) -> Answer:
