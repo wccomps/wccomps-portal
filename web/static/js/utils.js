@@ -203,50 +203,46 @@ function jsKey(id) {
 
 /* Forms: asking first, and posting once */
 
-// The guard state of the Alpine component a form belongs to, or an empty object outside one.
-function guardOf(form) {
-    return window.Alpine ? Alpine.$data(form) : {};
-}
-
-// Any form's data-confirm is the question asked before it submits, read as text. Capture runs before the form's
-// own handlers, so a cancelled question stops them; a form already submitting isn't asked again.
+// A POST form posts once: the first submit marks it data-posting and disables its submit buttons until the page is
+// left, and a later submit is dropped. Before that, its data-confirm question is asked, read as text. Capture runs
+// before the form's own handlers, so a dropped or cancelled submit stops them too.
 document.addEventListener('submit', (e) => {
-    const question = e.target.dataset.confirm;
-    if (!question || guardOf(e.target).submitting) return;
-    if (!confirm(question)) {
+    const form = e.target;
+    const question = form.dataset.confirm;
+    if (form.dataset.posting || (question && !confirm(question))) {
         e.preventDefault();
         e.stopImmediatePropagation();
     }
 }, true);
 
-/**
- * Double-submit protection for a POST form (c-form's submitGuard, bound @submit="onSubmit"): the first submit goes
- * through and later ones are blocked until the page is left. A page brought back by Back frees its forms again; a
- * POST that fails without leaving the page (offline, Stop) keeps its form blocked until a reload.
- */
-function submitGuardMixin() {
-    return {
-        submitting: false,
-        onSubmit(e) {
-            if (this.submitting) { e.preventDefault(); return; }
-            this.submitting = true;
-        },
-    };
-}
+// Marked last (window, bubbling), so a form whose own handler cancels the submit (one that posts by fetch) isn't
+window.addEventListener('submit', (e) => {
+    const form = e.target;
+    if (e.defaultPrevented || form.method.toLowerCase() !== 'post') return;
+    form.dataset.posting = 'true';
+    // Disabled after the browser has read the form, so the button pressed still sends its name and value
+    setTimeout(() => form.querySelectorAll('button[type="submit"]:not(:disabled), input[type="submit"]:not(:disabled)')
+        .forEach(button => { button.disabled = true; button.dataset.postingDisabled = 'true'; }));
+});
 
+// A page brought back by Back posts again; a POST that fails without leaving the page (offline, Stop) keeps its
+// form blocked until a reload
 window.addEventListener('pageshow', (e) => {
     if (!e.persisted) return;
-    document.querySelectorAll('form').forEach(form => { const guard = guardOf(form); if (guard.submitting) guard.submitting = false; });
+    document.querySelectorAll('form[data-posting]').forEach(form => delete form.dataset.posting);
+    document.querySelectorAll('[data-posting-disabled]').forEach(button => {
+        button.disabled = false;
+        delete button.dataset.postingDisabled;
+    });
 });
 
 // A refresh (an element reloading itself, like the ticket list's 30 s poll) replaces what it covers, so it waits
-// while a form there is posting (it would come back unguarded) or a row there is checked (the selection would go).
-// A request the person made, such as a filter change, goes ahead.
+// while a form there is posting or a row there is checked (the selection would go). A request the person made,
+// such as a filter change, goes ahead.
 document.addEventListener('htmx:beforeRequest', (e) => {
     const area = e.detail.target;
     if (e.detail.elt !== area) return;
-    const posting = [...area.querySelectorAll('form')].some(form => guardOf(form).submitting);
-    if (posting || area.querySelector('input[type="checkbox"]:checked')) e.preventDefault();
+    if (area.querySelector('form[data-posting], input[type="checkbox"]:checked')) e.preventDefault();
 });
 
 /* The ticket list a tab last showed: its ticket pages' way back */

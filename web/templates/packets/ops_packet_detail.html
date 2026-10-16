@@ -132,7 +132,7 @@
                                             action="{% url 'packet_resend_team' packet.id dist.team.id %}"
                                             class="m-0">
                                         {% csrf_token %}
-                                        <c-button type="submit" variant="default" ::disabled="submitting">
+                                        <c-button type="submit" variant="default">
                                             Resend
                                         </c-button>
                                     </c-form>

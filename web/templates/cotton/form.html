@@ -1,15 +1,13 @@
-{# Form component - standard POST form with built-in double-submit protection #}
+{# Form component - a POST form; static/js/utils.js lets each form post once and asks its data-confirm first #}
 {# Usage: <c-form action="/url">...fields...<c-button type="submit">Save</c-button></c-form> #}
 {# Props: action, enctype, class, id. Also takes data-confirm (through attrs): the question asked first #}
-{# Page behaviour goes in an Alpine component on an element around the form; the form keeps its own guard #}
+{# A form with its own page behaviour takes its Alpine component through attrs (x-data="name") #}
 <c-vars action enctype class id />
 <form method="post"
       {% if action %}action="{{ action }}"{% endif %}
       {% if enctype %}enctype="{{ enctype }}"{% endif %}
       {% if id %}id="{{ id }}"{% endif %}
       {{ attrs }}
-      class="{{ class }}"
-      x-data="submitGuard"
-      @submit="onSubmit">
+      class="{{ class }}">
     {{ slot }}
 </form>

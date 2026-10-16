@@ -18,25 +18,25 @@
                     {# djlint:on #}
                     {% if is_ops %}
                         {% if ticket.status == "claimed" and ticket.assigned_to.username == authentik_username or is_ticketing_admin %}
-                            <span x-data="categoryChanger" data-initial-cat="{{ ticket.category_id }}">
-                                <c-form action="{% url 'ticket_change_category' ticket.ticket_number %}"
-                                        class="d-inline-block m-0"
-                                        data-confirm="Change category? This may change points charged.">
-                                    {% csrf_token %}
-                                    <select name="new_category"
-                                            :value="newCat"
-                                            @change="onCatChange"
-                                            aria-label="Change ticket category"
-                                            class="py-5 px-10">
-                                        {% for cat_id, cat_info in categories.items %}
-                                            <option value="{{ cat_id }}"
-                                                    {% if cat_id == ticket.category_id %}selected{% endif %}>
-                                                {{ cat_info.display_name }} ({{ cat_info.points }}pt)
-                                            </option>
-                                        {% endfor %}
-                                    </select>
-                                </c-form>
-                            </span>
+                            <c-form action="{% url 'ticket_change_category' ticket.ticket_number %}"
+                                    class="d-inline-block m-0"
+                                    x-data="categoryChanger"
+                                    data-initial-cat="{{ ticket.category_id }}"
+                                    data-confirm="Change category? This may change points charged.">
+                                {% csrf_token %}
+                                <select name="new_category"
+                                        :value="newCat"
+                                        @change="onCatChange"
+                                        aria-label="Change ticket category"
+                                        class="py-5 px-10">
+                                    {% for cat_id, cat_info in categories.items %}
+                                        <option value="{{ cat_id }}"
+                                                {% if cat_id == ticket.category_id %}selected{% endif %}>
+                                            {{ cat_info.display_name }} ({{ cat_info.points }}pt)
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </c-form>
                         {% else %}
                             <span>{{ category_name }}</span>
                         {% endif %}
@@ -51,14 +51,14 @@
                         {% if ticket.status == "open" %}
                             <c-form action="{% url 'ticket_claim' ticket.ticket_number %}" class="m-0">
                                 {% csrf_token %}
-                                <c-button type="submit" variant="primary" ::disabled="submitting">
+                                <c-button type="submit" variant="primary">
                                     Claim
                                 </c-button>
                             </c-form>
                         {% elif ticket.status == "claimed" and ticket.assigned_to.username == authentik_username or is_ticketing_admin %}
                             <c-form action="{% url 'ticket_unclaim' ticket.ticket_number %}" class="m-0">
                                 {% csrf_token %}
-                                <c-button type="submit" variant="default" ::disabled="submitting">
+                                <c-button type="submit" variant="default">
                                     Unclaim
                                 </c-button>
                             </c-form>
@@ -67,7 +67,7 @@
                             <c-form action="{% url 'ticket_reopen' ticket.ticket_number %}" class="m-0">
                                 {% csrf_token %}
                                 <input type="hidden" name="reopen_reason" value="">
-                                <c-button type="submit" variant="warning" ::disabled="submitting">
+                                <c-button type="submit" variant="warning">
                                     Reopen
                                 </c-button>
                             </c-form>
@@ -115,7 +115,7 @@
                                            class="w-full">
                                 </div>
                             </div>
-                            <c-button type="submit" variant="primary" ::disabled="submitting">
+                            <c-button type="submit" variant="primary">
                                 Resolve Ticket
                             </c-button>
                         </c-form>
@@ -141,7 +141,7 @@
                         <datalist id="staff-usernames">
                             {% for name in staff_usernames %}<option value="{{ name }}"></option>{% endfor %}
                         </datalist>
-                        <c-button type="submit" variant="default" ::disabled="submitting">
+                        <c-button type="submit" variant="default">
                             {% if ticket.status == "open" %}
                                 Assign
                             {% else %}
@@ -206,7 +206,7 @@
                                   class="vTextField"></textarea>
                     </c-form_field>
                     <c-button_row>
-                        <c-button type="submit" variant="primary" ::disabled="submitting">
+                        <c-button type="submit" variant="primary">
                             Post Comment
                         </c-button>
                     </c-button_row>
@@ -264,7 +264,7 @@
                        name="attachment"
                        required
                        aria-label="Choose file to upload">
-                <c-button type="submit" variant="default" ::disabled="submitting">
+                <c-button type="submit" variant="default">
                     Upload
                 </c-button>
             </c-form>
@@ -275,7 +275,7 @@
             <c-form action="{% url 'ticket_cancel' ticket.ticket_number %}"
                     data-confirm="Are you sure you want to cancel this ticket?">
                 {% csrf_token %}
-                <c-button type="submit" variant="danger" ::disabled="submitting">
+                <c-button type="submit" variant="danger">
                     Cancel Ticket
                 </c-button>
             </c-form>

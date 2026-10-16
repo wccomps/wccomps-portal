@@ -4,73 +4,71 @@
     {% if selected_inject %}
         <c-fieldset heading="{{ selected_inject.title }}">
             {% if selected_inject.description %}<p class="text-muted mb-15">{{ selected_inject.description }}</p>{% endif %}
-            <div x-data="clearableForm">
-                <c-form>
-                    {% csrf_token %}
-                    <input type="hidden" name="inject_id" value="{{ selected_inject_id }}">
-                    <c-table aria_label="Team grades">
-                        <c-slot name="headers">
-                            <tr>
-                                <c-table_header sortable="false">
-                                    Team
-                                </c-table_header>
-                                <c-table_header sortable="false">
-                                    Points
-                                </c-table_header>
-                                <c-table_header sortable="false">
-                                    Current Grade
-                                </c-table_header>
-                                <c-table_header sortable="false">
-                                    Feedback
-                                </c-table_header>
-                            </tr>
-                        </c-slot>
-                        {% for item in team_data %}
-                            <tr>
-                                <td>
-                                    <strong>Team {{ item.team.team_number }}</strong>
-                                </td>
-                                <td>
-                                    <input type="number"
-                                           name="points_team_{{ item.team.team_number }}"
-                                           class="vTextField w-150"
-                                           value="{% if item.points is not None %}{{ item.points }}{% endif %}"
-                                           min="0"
-                                           step="0.01"
-                                           placeholder>
-                                    <input type="hidden"
-                                           name="loaded_team_{{ item.team.team_number }}"
-                                           value="{% if item.points is not None %}{{ item.points }}{% endif %}">
-                                </td>
-                                <td>
-                                    {% if item.grade %}
-                                        <small class="text-muted">
-                                            {{ item.grade.points_awarded }} pts by {{ item.grade.graded_by.username|default:"Auto" }}
-                                            ({{ item.grade.graded_at|date:"m/d H:i" }})
-                                        </small>
-                                    {% else %}
-                                        <small class="text-muted">Not graded</small>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <textarea name="feedback_team_{{ item.team.team_number }}"
-                                              class="vTextField w-full"
-                                              rows="2"
-                                              placeholder="Feedback for the team (optional)">{% if item.feedback %}{{ item.feedback }}{% endif %}</textarea>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    </c-table>
-                    <c-button_row class="mt-20 justify-end">
-                        <c-button type="button" variant="default" @click="clearForm">
-                            Clear Form
-                        </c-button>
-                        <c-button type="submit" variant="primary" ::disabled="submitting">
-                            Save Grades
-                        </c-button>
-                    </c-button_row>
-                </c-form>
-            </div>
+            <c-form x-data="clearableForm">
+                {% csrf_token %}
+                <input type="hidden" name="inject_id" value="{{ selected_inject_id }}">
+                <c-table aria_label="Team grades">
+                    <c-slot name="headers">
+                        <tr>
+                            <c-table_header sortable="false">
+                                Team
+                            </c-table_header>
+                            <c-table_header sortable="false">
+                                Points
+                            </c-table_header>
+                            <c-table_header sortable="false">
+                                Current Grade
+                            </c-table_header>
+                            <c-table_header sortable="false">
+                                Feedback
+                            </c-table_header>
+                        </tr>
+                    </c-slot>
+                    {% for item in team_data %}
+                        <tr>
+                            <td>
+                                <strong>Team {{ item.team.team_number }}</strong>
+                            </td>
+                            <td>
+                                <input type="number"
+                                       name="points_team_{{ item.team.team_number }}"
+                                       class="vTextField w-150"
+                                       value="{% if item.points is not None %}{{ item.points }}{% endif %}"
+                                       min="0"
+                                       step="0.01"
+                                       placeholder>
+                                <input type="hidden"
+                                       name="loaded_team_{{ item.team.team_number }}"
+                                       value="{% if item.points is not None %}{{ item.points }}{% endif %}">
+                            </td>
+                            <td>
+                                {% if item.grade %}
+                                    <small class="text-muted">
+                                        {{ item.grade.points_awarded }} pts by {{ item.grade.graded_by.username|default:"Auto" }}
+                                        ({{ item.grade.graded_at|date:"m/d H:i" }})
+                                    </small>
+                                {% else %}
+                                    <small class="text-muted">Not graded</small>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <textarea name="feedback_team_{{ item.team.team_number }}"
+                                          class="vTextField w-full"
+                                          rows="2"
+                                          placeholder="Feedback for the team (optional)">{% if item.feedback %}{{ item.feedback }}{% endif %}</textarea>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </c-table>
+                <c-button_row class="mt-20 justify-end">
+                    <c-button type="button" variant="default" @click="clearForm">
+                        Clear Form
+                    </c-button>
+                    <c-button type="submit" variant="primary">
+                        Save Grades
+                    </c-button>
+                </c-button_row>
+            </c-form>
         </c-fieldset>
     {% elif inject_choices %}
         <c-empty_state title="No inject selected"

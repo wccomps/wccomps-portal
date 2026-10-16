@@ -99,7 +99,7 @@
                         <input type="hidden" name="preview" value="{{ preview_data.token }}">
                         <c-button_row class="mt-20 justify-end">
                             <c-link href="{% url 'school_info_import' %}">Cancel</c-link>
-                            <c-button type="submit" variant="primary" ::disabled="submitting">
+                            <c-button type="submit" variant="primary">
                                 Confirm and Import
                             </c-button>
                         </c-button_row>
@@ -223,7 +223,7 @@ Tech Institute,admin@techinst.edu,,</pre>
                         </c-fieldset>
                         <c-button_row class="justify-end">
                             <c-link href="{% url 'school_info' %}">Cancel</c-link>
-                            <c-button type="submit" variant="primary" ::disabled="submitting">
+                            <c-button type="submit" variant="primary">
                                 Upload and Preview
                             </c-button>
                         </c-button_row>

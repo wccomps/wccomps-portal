@@ -17,126 +17,124 @@
     "
                    subtitle="Define a check with a max, a window, and optional criteria" />
     <c-module>
-        <div x-data="criteriaForm">
-            <c-form action="{% if mode == 'edit' %}{% url 'orange_team:check_edit' orange_check.pk %}{% endif %}">
-                {% csrf_token %}
-                <c-fieldset heading="Check Details">
-                    <c-form_field label="Title" required="true" id="id_title">
-                        <input type="text"
-                               class="vTextField"
-                               id="id_title"
-                               name="title"
-                               maxlength="200"
-                               value="{{ values.title }}"
-                               required>
-                    </c-form_field>
-                    <c-form_field label="Description"
-                                  id="id_description"
-                                  help_text="Steps/instructions for the orange teamer">
-                        <textarea class="vLargeTextField"
-                                  id="id_description"
-                                  name="description"
-                                  rows="4">{{ values.description }}</textarea>
-                    </c-form_field>
-                    <c-form_field label="Scheduled At"
-                                  id="id_scheduled_at"
-                                  help_text="When the window opens (optional)">
-                        <input type="datetime-local"
-                               class="vTextField"
-                               id="id_scheduled_at"
-                               name="scheduled_at"
-                               value="{{ values.scheduled_at }}">
-                    </c-form_field>
-                    <c-form_field label="Time limit (minutes)"
-                                  id="id_time_limit_minutes"
-                                  help_text="How long the window stays open from the scheduled time (optional)">
-                        <input type="number"
-                               class="vTextField"
-                               id="id_time_limit_minutes"
-                               name="time_limit_minutes"
-                               min="1"
-                               max="{{ max_minutes }}"
-                               value="{{ values.time_limit_minutes }}">
-                    </c-form_field>
-                    <c-form_field label="Max points"
-                                  id="id_max_points"
-                                  help_text="Used when the check has no criteria">
-                        <input type="number"
-                               class="vTextField"
-                               id="id_max_points"
-                               name="max_points"
-                               min="0"
-                               max="{{ max_points }}"
-                               value="{{ values.max_points }}">
-                    </c-form_field>
-                </c-fieldset>
-                <c-fieldset heading="Rubric Criteria (optional)">
-                    <template x-for="(criterion, index) in criteria" :key="criterion.n">
-                        <div class="form-row d-flex items-end gap-10">
-                            <input type="hidden" :name="criterion.idName" :value="criterion.id">
-                            <div class="flex-grow-1">
-                                <label :for="criterion.labelName" class="required">Label:</label>
-                                <input type="text"
-                                       class="vTextField"
-                                       :id="criterion.labelName"
-                                       :name="criterion.labelName"
-                                       :value="criterion.label"
-                                       @input="setCriterionField"
-                                       :data-index="index"
-                                       data-prop="label"
-                                       maxlength="200"
-                                       required>
-                            </div>
-                            <div>
-                                <label :for="criterion.pointsName" class="required">Points:</label>
-                                <input type="number"
-                                       class="vTextField"
-                                       :id="criterion.pointsName"
-                                       :name="criterion.pointsName"
-                                       :value="criterion.points"
-                                       @input="setCriterionField"
-                                       :data-index="index"
-                                       data-prop="points"
-                                       min="1"
-                                       max="{{ max_points }}"
-                                       required>
-                            </div>
-                            <div class="mb-5">
-                                <c-button type="button"
-                                          variant="danger"
-                                          x-show="canRemove"
-                                          x-on:click="removeCriterion"
-                                          ::data-index="index">
-                                    Remove
-                                </c-button>
-                            </div>
+        <c-form x-data="criteriaForm" action="{% if mode == 'edit' %}{% url 'orange_team:check_edit' orange_check.pk %}{% endif %}">
+            {% csrf_token %}
+            <c-fieldset heading="Check Details">
+                <c-form_field label="Title" required="true" id="id_title">
+                    <input type="text"
+                           class="vTextField"
+                           id="id_title"
+                           name="title"
+                           maxlength="200"
+                           value="{{ values.title }}"
+                           required>
+                </c-form_field>
+                <c-form_field label="Description"
+                              id="id_description"
+                              help_text="Steps/instructions for the orange teamer">
+                    <textarea class="vLargeTextField"
+                              id="id_description"
+                              name="description"
+                              rows="4">{{ values.description }}</textarea>
+                </c-form_field>
+                <c-form_field label="Scheduled At"
+                              id="id_scheduled_at"
+                              help_text="When the window opens (optional)">
+                    <input type="datetime-local"
+                           class="vTextField"
+                           id="id_scheduled_at"
+                           name="scheduled_at"
+                           value="{{ values.scheduled_at }}">
+                </c-form_field>
+                <c-form_field label="Time limit (minutes)"
+                              id="id_time_limit_minutes"
+                              help_text="How long the window stays open from the scheduled time (optional)">
+                    <input type="number"
+                           class="vTextField"
+                           id="id_time_limit_minutes"
+                           name="time_limit_minutes"
+                           min="1"
+                           max="{{ max_minutes }}"
+                           value="{{ values.time_limit_minutes }}">
+                </c-form_field>
+                <c-form_field label="Max points"
+                              id="id_max_points"
+                              help_text="Used when the check has no criteria">
+                    <input type="number"
+                           class="vTextField"
+                           id="id_max_points"
+                           name="max_points"
+                           min="0"
+                           max="{{ max_points }}"
+                           value="{{ values.max_points }}">
+                </c-form_field>
+            </c-fieldset>
+            <c-fieldset heading="Rubric Criteria (optional)">
+                <template x-for="(criterion, index) in criteria" :key="criterion.n">
+                    <div class="form-row d-flex items-end gap-10">
+                        <input type="hidden" :name="criterion.idName" :value="criterion.id">
+                        <div class="flex-grow-1">
+                            <label :for="criterion.labelName" class="required">Label:</label>
+                            <input type="text"
+                                   class="vTextField"
+                                   :id="criterion.labelName"
+                                   :name="criterion.labelName"
+                                   :value="criterion.label"
+                                   @input="setCriterionField"
+                                   :data-index="index"
+                                   data-prop="label"
+                                   maxlength="200"
+                                   required>
                         </div>
-                    </template>
-                    <div class="mt-10">
-                        <c-button type="button" variant="default" x-on:click="addCriterion">
-                            Add Criterion
-                        </c-button>
+                        <div>
+                            <label :for="criterion.pointsName" class="required">Points:</label>
+                            <input type="number"
+                                   class="vTextField"
+                                   :id="criterion.pointsName"
+                                   :name="criterion.pointsName"
+                                   :value="criterion.points"
+                                   @input="setCriterionField"
+                                   :data-index="index"
+                                   data-prop="points"
+                                   min="1"
+                                   max="{{ max_points }}"
+                                   required>
+                        </div>
+                        <div class="mb-5">
+                            <c-button type="button"
+                                      variant="danger"
+                                      x-show="canRemove"
+                                      x-on:click="removeCriterion"
+                                      ::data-index="index">
+                                Remove
+                            </c-button>
+                        </div>
                     </div>
-                </c-fieldset>
-                <c-button_row class="justify-end">
-                    <c-link href="
-            {% if mode == 'edit' %}
-                {% url 'orange_team:check_detail' orange_check.pk %}
-            {% else %}
-                {% url 'orange_team:check_list' %}
-            {% endif %}
-            "
-                            variant="cancel">Cancel</c-link>
-                    <c-button type="submit" variant="primary" ::disabled="submitting">
-                        {% if mode == "create" %}
-                            Create Check
-                        {% else %}
-                            Save Changes
-                        {% endif %}
+                </template>
+                <div class="mt-10">
+                    <c-button type="button" variant="default" x-on:click="addCriterion">
+                        Add Criterion
                     </c-button>
-                </c-button_row>
-            </c-form>
-        </div>
+                </div>
+            </c-fieldset>
+            <c-button_row class="justify-end">
+                <c-link href="
+        {% if mode == 'edit' %}
+            {% url 'orange_team:check_detail' orange_check.pk %}
+        {% else %}
+            {% url 'orange_team:check_list' %}
+        {% endif %}
+        "
+                        variant="cancel">Cancel</c-link>
+                <c-button type="submit" variant="primary">
+                    {% if mode == "create" %}
+                        Create Check
+                    {% else %}
+                        Save Changes
+                    {% endif %}
+                </c-button>
+            </c-button_row>
+        </c-form>
     </c-module>
     {{ criteria|json_script:"criteria-data" }}
     <script>
