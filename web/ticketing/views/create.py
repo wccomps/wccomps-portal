@@ -46,6 +46,7 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
                 "error": "Access denied",
                 "message": "You must be a team member to create tickets.",
             },
+            status=403,
         )
 
     from quotient.client import QuotientAPIError, get_quotient_client

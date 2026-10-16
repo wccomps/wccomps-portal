@@ -12,7 +12,7 @@ pytestmark = pytest.mark.django_db
 
 
 def test_an_event_saves_in_the_admin():
-    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="admin")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     client = Client()
     client.force_login(admin)

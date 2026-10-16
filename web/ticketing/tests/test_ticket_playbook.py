@@ -11,8 +11,8 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def team(db: object) -> Team:
-    return Team.objects.create(team_number=1, team_name="Team 01", authentik_group="WCComps_BlueTeam01")
+def team(db: object, blue_team) -> Team:
+    return blue_team
 
 
 @pytest.fixture

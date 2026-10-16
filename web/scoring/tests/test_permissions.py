@@ -4,8 +4,6 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from team.models import Team
-
 pytestmark = pytest.mark.django_db
 
 
@@ -79,8 +77,8 @@ class TestScorecardPermissions:
     """Test permissions for scorecard and scorecard PDF views."""
 
     @pytest.fixture
-    def test_team(self):
-        return Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
+    def test_team(self, blue_team):
+        return blue_team
 
     def test_unauthenticated_redirects_to_login(self, unauthenticated_client, test_team):
         """Unauthenticated users should be redirected to login."""
@@ -245,20 +243,19 @@ class TestIncidentSubmissionPermissions:
         assert response.status_code == 302
         assert "/accounts/" in response.url or "login" in response.url
 
-    def test_blue_team_denied_without_team(self, blue_team_user):
+    def test_blue_team_denied_without_team(self, blue_group_member_without_team):
         """Blue Team user without a team should be denied."""
         client = Client()
-        client.force_login(blue_team_user)
+        client.force_login(blue_group_member_without_team)
         response = client.get(reverse("scoring:submit_incident_report"))
-        # Should redirect to leaderboard with error message
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_red_team_denied_without_team(self, red_team_user):
         """Red Team should not submit incidents (not a blue team)."""
         client = Client()
         client.force_login(red_team_user)
         response = client.get(reverse("scoring:submit_incident_report"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_gold_team_allowed_without_team(self, gold_team_user, mock_quotient_client):
         """Gold Team can submit incidents as admin (team selection in form)."""
@@ -279,7 +276,7 @@ class TestIncidentSubmissionPermissions:
         client = Client()
         client.force_login(orange_team_user)
         response = client.get(reverse("scoring:submit_incident_report"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_admin_allowed(self, admin_user, mock_quotient_client):
         """Admin (Gold Team) should submit incidents."""

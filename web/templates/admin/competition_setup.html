@@ -250,7 +250,7 @@ document.addEventListener('alpine:init', () => {
     Alpine.data('competitionSetup', () => compose(actionMixin(actionUrl), readinessMixin(actionUrl), {
         maxMembers: {{ config.max_team_members }},
         startMessage: JSON.parse(document.getElementById('start-message-data').textContent),
-        apps: [{% for app in config.controlled_applications %}'{{ app }}'{% if not forloop.last %}, {% endif %}{% endfor %}],
+        apps: [{% for app in config.controlled_applications %}'{{ app|escapejs }}'{% if not forloop.last %}, {% endif %}{% endfor %}],
         newApp: '',
         availableApps: [],
         startDatetime: '',

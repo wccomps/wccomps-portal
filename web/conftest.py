@@ -30,33 +30,14 @@ def pytest_configure(config: pytest.Config) -> None:
         sock.close()
 
 
-from core.models import UserGroups
-from team.models import DiscordLink
+from core.tests.roles import groups_of, make_user, role_user
+from team.models import Team
 
 
 @pytest.fixture
 def create_user_with_groups(db: Any) -> Callable[..., User]:
-    """Factory fixture to create users with Authentik groups and DiscordLink."""
-    _discord_id_counter = [1000000000]
-
-    def _create(username: str, groups: list[str]) -> User:
-        user = User.objects.create_user(username=username, password="testpass123")
-        UserGroups.objects.create(
-            user=user,
-            authentik_id=f"{username}-uid",
-            groups=groups,
-        )
-        # Every test user gets a DiscordLink (bot-side permission checks look users up through it)
-        DiscordLink.objects.create(
-            user=user,
-            discord_id=_discord_id_counter[0],
-            discord_username=username,
-            is_active=True,
-        )
-        _discord_id_counter[0] += 1
-        return user
-
-    return _create
+    """Factory fixture to create users with Authentik groups and DiscordLink (core.tests.roles.make_user)."""
+    return make_user
 
 
 @pytest.fixture
@@ -65,8 +46,21 @@ def unauthenticated_client() -> Client:
 
 
 @pytest.fixture
-def blue_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("blueteam01", ["WCComps_BlueTeam01"])
+def blue_team_user(db: Any) -> User:
+    """The blue_team role's user, a member of Team 1 (core.tests.roles.role_user)."""
+    return role_user("blue_team", username="blueteam01")
+
+
+@pytest.fixture
+def blue_team(blue_team_user: User) -> Team:
+    """Team 1, the blue_team_user's team."""
+    return Team.objects.get(team_number=1)
+
+
+@pytest.fixture
+def blue_group_member_without_team(db: Any) -> User:
+    """A user holding the blue_team role's group whose team doesn't exist (no Team 1)."""
+    return make_user("blueteam01-noteam", groups_of("blue_team"))
 
 
 @pytest.fixture
@@ -75,38 +69,38 @@ def blue_team_02_user(create_user_with_groups: Callable[..., User]) -> User:
 
 
 @pytest.fixture
-def red_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("redteam", ["WCComps_RedTeam"])
+def red_team_user(db: Any) -> User:
+    return role_user("red_team", username="redteam")
 
 
 @pytest.fixture
-def gold_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("goldteam", ["WCComps_GoldTeam"])
+def gold_team_user(db: Any) -> User:
+    return role_user("gold_team", username="goldteam")
 
 
 @pytest.fixture
-def white_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("whiteteam", ["WCComps_WhiteTeam"])
+def white_team_user(db: Any) -> User:
+    return role_user("white_team", username="whiteteam")
 
 
 @pytest.fixture
-def orange_team_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("orangeteam", ["WCComps_OrangeTeam"])
+def orange_team_user(db: Any) -> User:
+    return role_user("orange_team", username="orangeteam")
 
 
 @pytest.fixture
-def ticketing_support_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("support", ["WCComps_Ticketing_Support"])
+def ticketing_support_user(db: Any) -> User:
+    return role_user("ticketing_support", username="support")
 
 
 @pytest.fixture
-def ticketing_admin_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("ticketing_admin", ["WCComps_Ticketing_Admin"])
+def ticketing_admin_user(db: Any) -> User:
+    return role_user("ticketing_admin", username="ticketing_admin")
 
 
 @pytest.fixture
-def admin_user(create_user_with_groups: Callable[..., User]) -> User:
-    return create_user_with_groups("admin", ["WCComps_Discord_Admin"])
+def admin_user(db: Any) -> User:
+    return role_user("admin", username="admin")
 
 
 @pytest.fixture
@@ -197,6 +191,8 @@ def mock_quotient_client():
         instance = MagicMock()
         instance.get_infrastructure.return_value = None
         instance.get_injects.return_value = []
+        instance.get_service_choices.return_value = []
+        instance.get_box_names.return_value = []
         mock_client.return_value = instance
         yield instance
 

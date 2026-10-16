@@ -66,6 +66,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "core.middleware.SecurityHeadersMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    "core.middleware.RejectNulMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -74,6 +75,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "core.middleware.SubdomainRedirectMiddleware",
     "core.middleware.AuthentikRequiredMiddleware",
+    "core.middleware.RejectNulFieldsMiddleware",
     "core.middleware.UserTimezoneMiddleware",
     "core.middleware.AccessLoggingMiddleware",
 ]
@@ -178,6 +180,10 @@ if not DEBUG:
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LOGIN_URL = "/auth/login/"
+
+# The admin permission grants the Django model permissions the admin's model pages check (core.auth_backends);
+# superusers and Permission rows still grant them too, behind the admin site's gate
+AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend", "core.auth_backends.AuthentikAdminBackend"]
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 

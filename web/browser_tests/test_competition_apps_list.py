@@ -4,7 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -19,7 +21,7 @@ def test_stale_page_edit_keeps_apps_added_elsewhere(live_server, pw_browser):
     config.controlled_applications = ["scoring", "netbird"]
     config.save()
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
@@ -63,7 +65,7 @@ def test_a_slug_missing_from_authentiks_app_list_can_be_typed_in(live_server, pw
     config.controlled_applications = ["scoring"]
     config.save()
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     manager = MagicMock()
@@ -92,7 +94,7 @@ def test_start_message_loads_and_saves(live_server, pw_browser):
     config.start_message = "Default VM login\nadmin / old"
     config.save()
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     manager = MagicMock()

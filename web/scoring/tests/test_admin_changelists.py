@@ -30,9 +30,6 @@ def client_with_rows(admin_user: User) -> Client:
     )
     ServiceScore.objects.create(team=team, service_points=Decimal(5), sla_violations=Decimal(-1))
     client = Client()
-    # Production admins are Authentik admins who are also Django superusers.
-    admin_user.is_superuser = True
-    admin_user.save()
     client.force_login(admin_user)
     return client
 

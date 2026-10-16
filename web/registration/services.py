@@ -467,12 +467,10 @@ CHANGED_WHILE_CLOSING_OUT = "Something changed while closing out; nothing was ch
 def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
     """Close out the event (see _close_out). As the outermost transaction it runs at REPEATABLE READ, so the results
     it freezes, the archive and the rows it deletes are one snapshot: a score changed meanwhile makes it refuse with
-    CHANGED_WHILE_CLOSING_OUT, writing nothing, and rows created after its snapshot stay as live data. Inside a caller's
-    transaction, that transaction's isolation applies.
+    CHANGED_WHILE_CLOSING_OUT, writing nothing, and rows created after its snapshot stay as live data. It must be the
+    outermost transaction: inside another, setting the isolation level fails.
     """
     try:
-        if connection.in_atomic_block:
-            return _close_out(target, actor)
         # The lock first: inside the transaction it would come after the snapshot
         with school_list_held(), transaction.atomic():
             with connection.cursor() as cursor:

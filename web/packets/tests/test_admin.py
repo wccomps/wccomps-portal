@@ -16,7 +16,7 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def staff_client():
-    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="admin")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     client = Client()
     client.force_login(admin)

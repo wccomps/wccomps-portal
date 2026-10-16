@@ -6,7 +6,6 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from team.models import Team
 from ticketing.models import Ticket, TicketCategory
 
 pytestmark = pytest.mark.django_db
@@ -30,8 +29,8 @@ def staff_only():
 
 
 @pytest.fixture
-def team_1():
-    return Team.objects.create(team_number=1, team_name="Team 01", authentik_group="WCComps_BlueTeam01")
+def team_1(blue_team):
+    return blue_team
 
 
 def _client(user):

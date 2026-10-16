@@ -23,7 +23,7 @@ def _updates(queries, table):
 
 @pytest.mark.parametrize("change", ["approve", "reject"])
 def test_a_stale_registration_keeps_the_school_set_meanwhile(change):
-    registration = TeamRegistration.objects.create(school_name="Example University", status="paid")
+    registration = TeamRegistration.objects.create(school_name="Example University")
     stale = TeamRegistration.objects.get(pk=registration.pk)
     school = School.for_name("Example University")
     TeamRegistration.objects.filter(pk=registration.pk).update(school=school)
@@ -85,7 +85,7 @@ def test_the_event_edit_page_never_writes_is_active(gold_team_user, event):
 
 def _post_event_admin(event, **changes):
     """Save the event's admin change page with the given fields changed; returns the event UPDATEs."""
-    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="admin")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     client = Client()
     client.force_login(admin)

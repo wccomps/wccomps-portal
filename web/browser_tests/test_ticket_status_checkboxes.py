@@ -2,7 +2,9 @@
 
 import pytest
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -18,7 +20,7 @@ def test_ticking_two_statuses_filters_list(live_server, pw_browser):
             ticket_number=f"T001-09{i}", team=team, category=category, title=f"{status} ticket", status=status
         )
 
-    user = _create_role_user("ticketing_support", None)
+    user = role_user("ticketing_support")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     errors: list[str] = []

@@ -11,9 +11,9 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def team1():
+def team1(blue_team):
     """Create team 1 (matches blue_team_user's group)."""
-    return Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    return blue_team
 
 
 @pytest.fixture
@@ -186,7 +186,7 @@ class TestTicketDetailView:
 
         response = client.get(reverse("ticket_detail", args=["T999-999"]))
 
-        assert response.status_code == 200
+        assert response.status_code == 404
         assert b"Ticket not found" in response.content or b"does not exist" in response.content
 
 
@@ -458,8 +458,8 @@ class TestTicketNotifications:
     """Tests for ops_ticket_notifications endpoint."""
 
     @pytest.fixture
-    def team1(self):
-        return Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    def team1(self, blue_team):
+        return blue_team
 
     def test_returns_open_count(self, ticketing_support_user, team1):
         """Should return count of open tickets."""

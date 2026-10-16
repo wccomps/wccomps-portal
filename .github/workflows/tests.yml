@@ -1,0 +1,130 @@
+name: Tests
+
+# The test job ci.yml runs on every PR and every push to main, and deep-properties.yml runs nightly with the deep
+# profile: one Postgres service, setup and test command for both.
+
+on:
+  workflow_call:
+    inputs:
+      profile:
+        description: The Hypothesis profile (conftest.py)
+        type: string
+        default: ci
+      lint:
+        description: Also run the format, lint, type and migration checks
+        type: boolean
+        default: true
+      ref:
+        description: What to check out (empty for the triggering commit)
+        type: string
+        default: ""
+      timeout-minutes:
+        description: How long the job may run (a deep run takes hours; a CI run, minutes)
+        type: number
+        default: 30
+    outputs:
+      sha:
+        description: The commit the tests ran on
+        value: ${{ jobs.lint-and-test.outputs.sha }}
+      results:
+        description: The name of the artifact holding the tests' JUnit XML (test-results.xml)
+        value: ${{ jobs.lint-and-test.outputs.results }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+      results: ${{ steps.sha.outputs.results }}
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: wccomps
+          POSTGRES_PASSWORD: wccomps
+          POSTGRES_DB: wccomps_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_USER: wccomps
+      DB_PASSWORD: wccomps
+      DB_NAME: wccomps_test
+      HYPOTHESIS_PROFILE: ${{ inputs.profile }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Record the commit under test
+        id: sha
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "results=test-results-${{ inputs.profile }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: |
+          uv sync
+
+      - name: Check code formatting
+        if: inputs.lint
+        run: |
+          uv run ruff format --check .
+
+      - name: Run linting
+        if: inputs.lint
+        run: |
+          uv run ruff check .
+
+      - name: Run type checking
+        if: inputs.lint
+        run: |
+          DJANGO_SETTINGS_MODULE=portal.settings uv run mypy
+
+      - name: Check for unapplied migrations
+        if: inputs.lint
+        run: |
+          cd web && DJANGO_SETTINGS_MODULE=portal.settings uv run python manage.py makemigrations --check --dry-run
+
+      - name: Collect static files
+        run: |
+          cd web && DJANGO_SETTINGS_MODULE=portal.settings uv run python manage.py collectstatic --noinput
+        env:
+          DJANGO_SECRET_KEY: test-secret-key-for-ci
+
+      - name: Run tests
+        run: |
+          uv run pytest -m "not browser" --junitxml=test-results.xml
+        env:
+          PYTHONPATH: ${{ github.workspace }}/web:${{ github.workspace }}
+          DJANGO_SECRET_KEY: test-secret-key-for-ci
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.sha.outputs.results }}
+          path: test-results.xml
+          if-no-files-found: ignore

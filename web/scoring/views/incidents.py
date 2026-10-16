@@ -30,8 +30,12 @@ def submit_incident_report(request: HttpRequest) -> HttpResponse:
     if not is_admin:
         team = get_user_team(user)
         if not team:
-            messages.error(request, "You must be assigned to a team to submit incident reports")
-            return redirect("leaderboard_page")
+            return render(
+                request,
+                "error.html",
+                {"error": "Access Denied", "message": "You must be assigned to a team to submit incident reports."},
+                status=403,
+            )
 
     if request.method == "POST":
         form = IncidentReportForm(team, is_admin, request.POST, request.FILES)
@@ -108,8 +112,12 @@ def view_incident_report(request: HttpRequest, incident_id: int) -> HttpResponse
     if not has_permission(user, "gold_team") and not has_permission(user, "white_team"):
         user_team = get_user_team(user)
         if not user_team or incident.team != user_team:
-            messages.error(request, "You do not have permission to view this incident report")
-            return redirect("leaderboard_page")
+            return render(
+                request,
+                "error.html",
+                {"error": "Access Denied", "message": "You do not have permission to view this incident report."},
+                status=403,
+            )
 
     can_delete = incident.submitted_by == user and not incident.is_approved
 

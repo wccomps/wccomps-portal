@@ -98,7 +98,7 @@
                         <span x-show="enabled">🔔</span>
                     </button>
                 {% endif %}
-                <span class="nav-user">{{ authentik_username|default:user.username }}</span>
+                <span class="nav-user">{% firstof authentik_username user.username %}</span>
                 <a href="{% url 'oauth_logout' %}">Log out</a>
             </div>
         </div>

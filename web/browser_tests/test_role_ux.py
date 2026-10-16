@@ -2,8 +2,9 @@
 
 import pytest
 
+from core.tests.roles import role_user
+
 from .conftest import (
-    _create_role_user,
     create_session_context,
     make_test_data,
     resolve_url,
@@ -24,7 +25,7 @@ _element_ids = [f"{p.url_name}--{r}" for p, r in _element_cases]
 def test_role_specific_elements(page_def, role, live_server, pw_browser):
     """Verify role-specific UI elements are present or absent."""
     test_data = make_test_data()
-    user = _create_role_user(role, None)
+    user = role_user(role)
     context = create_session_context(pw_browser, live_server, user)
 
     try:

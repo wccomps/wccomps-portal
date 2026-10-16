@@ -8,28 +8,11 @@ import pytest
 from django.test import Client
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
-from core.models import UserGroups
-from team.models import DiscordLink, Team
-
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
     from pytest_django.live_server_helper import LiveServer
 
 logger = logging.getLogger(__name__)
-
-# Role name → Authentik group(s)
-ROLE_GROUPS: dict[str, list[str]] = {
-    "blue_team": ["WCComps_BlueTeam01"],
-    "red_team": ["WCComps_RedTeam"],
-    "gold_team": ["WCComps_GoldTeam"],
-    "orange_team": ["WCComps_OrangeTeam"],
-    "white_team": ["WCComps_WhiteTeam"],
-    "ticketing_support": ["WCComps_Ticketing_Support"],
-    "ticketing_admin": ["WCComps_Ticketing_Admin"],
-    "admin": ["WCComps_Discord_Admin"],
-}
-
-ALL_ROLES = [*ROLE_GROUPS.keys(), "unauthenticated"]
 
 
 @pytest.fixture(scope="session")
@@ -60,41 +43,6 @@ def pw_browser(_allow_sync_orm_under_playwright: None):
                 logger.debug("Failed to launch %s, trying next", launch_fn)
                 continue
         raise RuntimeError("No browser could be launched. Run: playwright install")
-
-
-def _create_role_user(role: str, db) -> User | None:
-    """Create a test user with the given role's Authentik groups + DiscordLink."""
-    from django.contrib.auth.models import User
-
-    if role == "unauthenticated":
-        return None
-
-    groups = ROLE_GROUPS[role]
-    username = f"browser_test_{role}"
-    user = User.objects.create_user(username=username, password="testpass123")
-    UserGroups.objects.create(user=user, authentik_id=f"{username}-uid", groups=groups)
-
-    # Blue team users need a Team + DiscordLink with team assignment
-    team = None
-    if role == "blue_team":
-        team, _ = Team.objects.get_or_create(
-            team_number=1,
-            defaults={
-                "team_name": "Test Team 01",
-                "authentik_group": "WCComps_BlueTeam01",
-                "is_active": True,
-            },
-        )
-
-    DiscordLink.objects.create(
-        user=user,
-        discord_id=9000000 + list(ROLE_GROUPS.keys()).index(role),
-        discord_username=username,
-        team=team,
-        is_active=True,
-    )
-
-    return user
 
 
 def create_session_context(

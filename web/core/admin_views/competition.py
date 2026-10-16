@@ -605,7 +605,7 @@ def admin_competition_apps(request: HttpRequest) -> JsonResponse:
 
 def admin_competition_action(request: HttpRequest) -> HttpResponseBase:
     if request.method != "POST":
-        return HttpResponse("Method not allowed", status=405)
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
     user = cast(User, request.user)
     if not _has_admin_or_gold_access(user):
