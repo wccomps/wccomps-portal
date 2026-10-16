@@ -33,6 +33,7 @@ from core.tests.guards import (
     Tag,
     fail_with,
     is_standalone_document,
+    page_templates,
     tags,
     template_name,
     text,
@@ -368,13 +369,6 @@ def shared_component_paths() -> tuple[Path, ...]:
 
 
 @cache
-def checked_templates() -> tuple[Path, ...]:
-    """Pages and page partials: not the shared components, not standalone documents."""
-    shared = set(shared_component_paths())
-    return tuple(p for p in tracked_templates() if p not in shared and not is_standalone_document(p))
-
-
-@cache
 def python_sources() -> tuple[Path, ...]:
     not_source = re.compile(r"/(tests|migrations|browser_tests|integration_tests)/|/test_[^/]*\.py$|/conftest\.py$")
     return tuple(
@@ -391,7 +385,7 @@ def add(found: dict[str, set[str]], where: str, names: Iterable[str]) -> None:
 def page_uses() -> dict[str, set[str]]:
     """Class -> the pages (and Python files) that put it on a page."""
     found: dict[str, set[str]] = {}
-    for path in checked_templates():
+    for path in page_templates():
         add(found, template_name(path), written_classes(path) | scripted_classes(path))
     for path in python_sources():
         add(
@@ -417,7 +411,7 @@ def bound_page_uses() -> dict[str, set[str]]:
     """Class -> the pages whose :class bindings can apply it. Only the undefined-class check reads this: a getter
     returning a mistyped class (alert--sucess) renders an unstyled element."""
     found: dict[str, set[str]] = {}
-    for path in checked_templates():
+    for path in page_templates():
         add(found, template_name(path), bound_classes(path))
     return found
 
@@ -536,7 +530,7 @@ def get_form(tag: Tag, component: str) -> bool:
 
 def test_no_hand_written_component_markup() -> None:
     lines: dict[str, list[str]] = {}
-    for path in checked_templates():
+    for path in page_templates():
         for tag in tags(path):
             classes = attribute_classes(tag.attrs.get("class", ""))
             for element, cls, component in RAW_MARKUP:
@@ -549,7 +543,7 @@ def test_no_hand_written_component_markup() -> None:
 def test_no_inline_styles() -> None:
     """A page's look comes from classes: a style attribute or <style> block is styling the vocabulary can't see."""
     lines: dict[str, list[str]] = {}
-    for path in checked_templates():
+    for path in page_templates():
         where = f"{template_name(path)}:style"
         for tag in tags(path):
             if STYLE_ATTRS & set(tag.attrs):
@@ -601,7 +595,7 @@ def badge_kind_problem(variant: str) -> str:
 def test_table_widths_are_lengths() -> None:
     """c-table's widths become inline styles, so each one must be a plain length, not CSS of the page's own."""
     found: dict[str, str] = {}
-    for path in checked_templates():
+    for path in page_templates():
         for tag in tags(path):
             if tag.name != "c-table" or "widths" not in tag.attrs:
                 continue

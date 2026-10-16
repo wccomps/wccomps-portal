@@ -10,18 +10,12 @@ from pathlib import Path
 
 from core.tests.guards import Tag, elements, fail_with, is_standalone_document, tags, template_name, tracked_templates
 
-# Not styled by the portal's admin CSS, with the reason. Standalone documents (guards.is_standalone_document)
-# carry their own styles and are left out too.
-EXCLUDED = {
-    "cotton/table_header.html": "the component itself",
-}
+# Standalone documents (guards.is_standalone_document) carry their own styles and are left out
 VOID = {"input", "br", "img", "hr", "meta", "link", "source", "col", "wbr", "area", "base", "embed", "track"}
 
 
 def _templates() -> list[Path]:
-    return [
-        path for path in tracked_templates() if not is_standalone_document(path) and template_name(path) not in EXCLUDED
-    ]
+    return [path for path in tracked_templates() if not is_standalone_document(path)]
 
 
 def with_open_elements(path: Path) -> Iterator[tuple[Tag, list[Tag]]]:
@@ -78,6 +72,6 @@ def test_current_sort_is_the_context_value() -> None:
         f"{template_name(path)}:{tag.line}": f'current_sort="{tag.attrs["current_sort"]}"'
         for path in _templates()
         for tag in tags(path)
-        if "{{" not in tag.attrs.get("current_sort", "{{")
+        if tag.name != "c-vars" and "{{" not in tag.attrs.get("current_sort", "{{")
     }
     fail_with("current_sort must be a template value like {{ sort_by }}", found, {})

@@ -4,43 +4,32 @@ Catches issues that are silent at runtime or hard to spot in code review.
 """
 
 import re
-from pathlib import Path
 
-import pytest
-
-from core.tests.guards import TEMPLATES_DIR, Tag, elements, fail_with, tags, template_name, tracked_templates
-
-
-def get_all_template_files() -> list[Path]:
-    return list(tracked_templates())
-
-
-def is_cotton_component(path: Path) -> bool:
-    return "cotton" in path.parts
-
+from core.tests.guards import (
+    Tag,
+    component_templates,
+    elements,
+    fail_with,
+    page_templates,
+    tags,
+    template_name,
+    tracked_templates,
+)
 
 # ---------------------------------------------------------------------------
 # 1. Missing {% load cotton %} → hard TemplateSyntaxError
 # ---------------------------------------------------------------------------
 
 
-class TestCottonImports:
-    def test_cotton_components_have_load_statement(self) -> None:
-        """Templates using <c-*> must have {% load cotton %}."""
-        missing = []
-        for path in get_all_template_files():
-            if is_cotton_component(path):
-                continue
-            content = path.read_text()
-            uses = bool(re.search(r"<c-\w+|{%\s*c-\w+", content))
-            loads = bool(re.search(r"{%\s*load\s+[^%]*\bcotton\b[^%]*%}", content))
-            if uses and not loads:
-                missing.append(str(path.relative_to(TEMPLATES_DIR)))
-        if missing:
-            pytest.fail(
-                "Templates using cotton components without {% load cotton %}:\n"
-                + "\n".join(f"  - {t}" for t in sorted(missing))
-            )
+def test_cotton_components_have_load_statement() -> None:
+    """Templates using <c-*> must have {% load cotton %}."""
+    found = {}
+    for path in page_templates():
+        content = path.read_text()
+        uses = bool(re.search(r"<c-\w+|{%\s*c-\w+", content))
+        if uses and not re.search(r"{%\s*load\s+[^%]*\bcotton\b[^%]*%}", content):
+            found[template_name(path)] = "uses cotton components without {% load cotton %}"
+    fail_with("Missing {% load cotton %}", found, {})
 
 
 # ---------------------------------------------------------------------------
@@ -51,9 +40,7 @@ class TestCottonImports:
 def test_no_nested_forms() -> None:
     """Nested <form> tags are invalid HTML: the browser drops the inner form, so its button submits the outer one."""
     found = {}
-    for path in get_all_template_files():
-        if is_cotton_component(path):
-            continue
+    for path in page_templates():
         depth = 0
         for tag in elements(path):
             if tag.name in ("form", "c-form"):
@@ -84,8 +71,8 @@ class TestAlpineCSPCompatibility:
     )
 
     def test_alpine_expressions_are_csp_compatible(self) -> None:
-        violations: list[tuple[str, int, str, str]] = []
-        for path in get_all_template_files():
+        found = {}
+        for path in tracked_templates():
             for tag in tags(path):
                 for directive, raw in tag.attrs.items():
                     value = raw.strip()
@@ -93,13 +80,8 @@ class TestAlpineCSPCompatibility:
                         continue
                     pattern = self.X_FOR_RE if directive == "x-for" else self.SIMPLE_EXPR_RE
                     if not pattern.match(value):
-                        violations.append((template_name(path), tag.line, directive, value))
-        if violations:
-            lines = [f'  - {p}:{ln} {d}="{v}"' for p, ln, d, v in sorted(violations)]
-            pytest.fail(
-                "Alpine expression incompatible with CSP build "
-                "(move to computed getter in Alpine.data):\n" + "\n".join(lines)
-            )
+                        found[f'{template_name(path)}:{tag.line} {directive}="{value}"'] = ""
+        fail_with("Alpine expressions the CSP build can't run (move them to a getter in Alpine.data)", found, {})
 
 
 # ---------------------------------------------------------------------------
@@ -116,19 +98,14 @@ class TestNoXModel:
 
     def test_no_x_model_in_templates(self) -> None:
         """x-model must not be used — it is incompatible with Alpine CSP build."""
-        violations: list[tuple[str, int, str]] = [
-            (template_name(path), tag.line, value)
-            for path in get_all_template_files()
+        found = {
+            f'{template_name(path)}:{tag.line} x-model="{value}"': ""
+            for path in tracked_templates()
             for tag in tags(path)
             for name, value in tag.attrs.items()
             if name.split(".")[0] == "x-model"
-        ]
-        if violations:
-            lines = [f'  - {p}:{ln} x-model="{v}"' for p, ln, v in sorted(violations)]
-            pytest.fail(
-                "x-model is incompatible with Alpine CSP build. "
-                "Use :value/@input (or :checked/@change) with a setField method:\n" + "\n".join(lines)
-            )
+        }
+        fail_with("x-model (use :value/@input or :checked/@change with a setter method)", found, {})
 
 
 class TestMixinsComposedNotSpread:
@@ -138,14 +115,12 @@ class TestMixinsComposedNotSpread:
     SPREAD_RE = re.compile(r"\.\.\.\w+Mixin\(")
 
     def test_no_mixin_spread(self) -> None:
-        violations = []
-        for path in get_all_template_files():
+        found = {}
+        for path in tracked_templates():
             content = path.read_text()
             for match in self.SPREAD_RE.finditer(content):
-                line = content[: match.start()].count("\n") + 1
-                violations.append(f"  - {path.relative_to(TEMPLATES_DIR)}:{line}")
-        if violations:
-            pytest.fail("Combine mixins with compose(mixin(), {...}), not spread:\n" + "\n".join(violations))
+                found[f"{template_name(path)}:{content.count(chr(10), 0, match.start()) + 1}"] = ""
+        fail_with("Mixins spread rather than combined with compose(mixin(), {...})", found, {})
 
 
 class TestNoServerSideAlertVariant:
@@ -156,17 +131,13 @@ class TestNoServerSideAlertVariant:
     """
 
     def test_no_c_alert_with_a_dynamic_variant(self) -> None:
-        violations = [
-            f"  - {template_name(path)}:{tag.line}"
-            for path in get_all_template_files()
+        found = {
+            f"{template_name(path)}:{tag.line}": ""
+            for path in tracked_templates()
             for tag in tags(path)
             if tag.name == "c-alert" and ":variant" in tag.attrs
-        ]
-        if violations:
-            pytest.fail(
-                "Use <c-toast /> for messages Alpine sets; c-alert's :variant is fixed at render:\n"
-                + "\n".join(violations)
-            )
+        }
+        fail_with("c-alert with :variant (fixed at render; use <c-toast /> for messages Alpine sets)", found, {})
 
 
 # ---------------------------------------------------------------------------
@@ -174,28 +145,22 @@ class TestNoServerSideAlertVariant:
 # ---------------------------------------------------------------------------
 
 
-class TestCottonAttrsPassthrough:
+# Components that don't write {{ attrs }}, and why nothing needs to pass them attributes
+FRAGMENT_COMPONENTS = {
+    "cotton/detail_row.html": "a row of c-detail_grid, which carries the grid's attributes",
+    "cotton/messages.html": "the chrome's message list, rendered once by admin/base_site.html",
+    "cotton/pagination.html": "a paragraph of page links built from page_obj alone",
+}
+
+
+def test_cotton_components_include_attrs() -> None:
     """Without {{ attrs }}, Alpine directives on components are silently dropped."""
-
-    COTTON_DIR = TEMPLATES_DIR / "cotton"
-    FRAGMENT_COMPONENTS = {
-        "detail_row.html",
-        "messages.html",
-        "pagination.html",
+    found = {
+        template_name(path): "writes no {{ attrs }}"
+        for path in component_templates()
+        if path.suffix == ".html" and "{{ attrs }}" not in path.read_text()
     }
-
-    def test_cotton_components_include_attrs(self) -> None:
-        missing = []
-        for path in sorted(self.COTTON_DIR.glob("*.html")):
-            if path.name in self.FRAGMENT_COMPONENTS:
-                continue
-            if "{{ attrs }}" not in path.read_text():
-                missing.append(path.name)
-        if missing:
-            pytest.fail(
-                "Cotton components missing {{ attrs }} (attributes silently dropped):\n"
-                + "\n".join(f"  - cotton/{n}" for n in missing)
-            )
+    fail_with("Components that drop the attributes passed to them", found, FRAGMENT_COMPONENTS)
 
 
 # ---------------------------------------------------------------------------

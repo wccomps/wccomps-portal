@@ -46,6 +46,19 @@ def tracked_templates() -> tuple[Path, ...]:
     )
 
 
+@cache
+def component_templates() -> tuple[Path, ...]:
+    """The shared components, templates/cotton/."""
+    return tuple(p for p in tracked_templates() if p.is_relative_to(TEMPLATES_DIR / "cotton"))
+
+
+@cache
+def page_templates() -> tuple[Path, ...]:
+    """Pages and the includes beside them: every template but the components and the standalone documents."""
+    components = set(component_templates())
+    return tuple(p for p in tracked_templates() if p not in components and not is_standalone_document(p))
+
+
 def template_name(path: Path) -> str:
     """The path Django loads a template by (admin/base_site.html)."""
     return path.relative_to(TEMPLATES_DIR).as_posix()
