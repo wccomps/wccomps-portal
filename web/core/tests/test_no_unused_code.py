@@ -239,7 +239,6 @@ CODE_EXCEPTIONS = {
     "*:label_from_instance": "Django model choice fields call it for each option",
     "*:get_readonly_fields": "Django admin calls it on the change form",
     "*:abstract": DJANGO_MODEL_OPTION,
-    "*:ordering": DJANGO_MODEL_OPTION,
     "*:db_table": DJANGO_MODEL_OPTION,
     "*:verbose_name": DJANGO_MODEL_OPTION,
     "*:verbose_name_plural": DJANGO_MODEL_OPTION,

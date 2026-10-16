@@ -109,6 +109,13 @@ def requested_sort(request: HttpRequest, sort_fields: Collection[str], default_s
     return sort_by if sort_by.removeprefix("-") in sort_fields else default_sort
 
 
+def stable_order[M: Model](queryset: QuerySet[M], sort_by: str) -> QuerySet[M]:
+    """The queryset ordered by sort_by, then its model's default ordering and pk, so rows that tie keep one order
+    and a page boundary never splits them differently from one request to the next."""
+    default_ordering = list(queryset.model._meta.ordering or ())
+    return queryset.order_by(*([sort_by] if sort_by else []), *default_ordering, "pk")
+
+
 def filter_sort_paginate[M: Model](
     request: HttpRequest,
     queryset: QuerySet[M],
@@ -119,11 +126,7 @@ def filter_sort_paginate[M: Model](
 ) -> FilterSortPage[M]:
     """Order a filtered queryset by requested_sort and paginate it by ?page=."""
     sort_by = requested_sort(request, sort_fields, default_sort)
-
-    if sort_by:
-        queryset = queryset.order_by(sort_by)
-
-    page_obj = Paginator(queryset, page_size).get_page(request.GET.get("page"))
+    page_obj = Paginator(stable_order(queryset, sort_by), page_size).get_page(request.GET.get("page"))
 
     return FilterSortPage(page_obj=page_obj, current_sort=sort_by)
 

@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
-from core.utils import optional_int, requested_sort
+from core.utils import optional_int, requested_sort, stable_order
 from team.models import Team
 
 from ..forms import ApproveInjectFeedbackForm, SaveInjectFeedbackForm
@@ -196,8 +196,7 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
 
         base_query = base_query.filter(Q(inject_name__icontains=search_query) | Q(inject_id__icontains=search_query))
 
-    if sort_by:
-        base_query = base_query.order_by(sort_by)
+    base_query = stable_order(base_query, sort_by)
 
     # Outliers are computed among the grades that match the current filters
     # Dynamically add is_outlier and std_devs_from_mean attrs to grade objects
