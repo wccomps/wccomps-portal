@@ -1597,7 +1597,7 @@ dev = [
 requires-dist = [
     { name = "discord-py", specifier = ">=2.4.0" },
     { name = "django", specifier = ">=5.1.14,<6.2" },
-    { name = "django-cotton", specifier = ">=0.9" },
+    { name = "django-cotton", specifier = ">=2.7" },
     { name = "django-stubs-ext", specifier = ">=5.1.1" },
     { name = "gunicorn", specifier = ">=21.2" },
     { name = "httpx", specifier = ">=0.28.1" },
