@@ -10,7 +10,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase, HttpRespons
 if TYPE_CHECKING:
     from django.contrib.admin.sites import _ViewType
 
-from .auth_utils import has_permission
+from .auth_utils import uses_django_admin
 from .models import (
     AuditLog,
     BotState,
@@ -29,7 +29,7 @@ class AuthentikAdminSite(admin.AdminSite):
     site_url = "/ops/tickets/"
 
     def has_permission(self, request: HttpRequest) -> bool:
-        return request.user.is_active and has_permission(request.user, "admin")
+        return uses_django_admin(request.user)
 
     def _refused(self, request: HttpRequest) -> HttpResponse | None:
         """A 403 for a signed-in non-admin: the login form is no use, signing in is Authentik's."""
