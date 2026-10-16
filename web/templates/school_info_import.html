@@ -86,8 +86,8 @@
                                     <td>{{ row.school_name }}</td>
                                     <td>{% if row.returning_events is None %}New{% else %}Returning ({{ row.returning_events }} past event{{ row.returning_events|pluralize }}){% endif %}</td>
                                     <td>{{ row.contact_email }}</td>
-                                    <td>{{ row.secondary_email }}</td>
-                                    <td>{{ row.notes }}</td>
+                                    <td>{{ row.secondary_email|default:"" }}</td>
+                                    <td>{{ row.notes|default:"" }}</td>
                                 </tr>
                             {% endfor %}
                         </c-table>
@@ -125,16 +125,16 @@
                     <p>Your CSV file must include the following columns:</p>
                     <ul class="ml-20">
                         <li>
-                            <strong>school_name</strong> (required) - Name of the school or organization
+                            <strong>school_name</strong> (required): Name of the school or organization
                         </li>
                         <li>
-                            <strong>contact_email</strong> (required) - Primary contact email address
+                            <strong>contact_email</strong> (required): Primary contact email address
                         </li>
                         <li>
-                            <strong>secondary_email</strong> (optional) - Secondary contact email address
+                            <strong>secondary_email</strong> (optional): Secondary contact email address
                         </li>
                         <li>
-                            <strong>notes</strong> (optional) - Additional notes about the team
+                            <strong>notes</strong> (optional): Additional notes about the team
                         </li>
                     </ul>
                     <h3 class="mt-20">Example CSV File</h3>

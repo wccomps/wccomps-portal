@@ -130,6 +130,7 @@ class TagReader(HTMLParser):
         super().__init__(convert_charrefs=False)
         self.kept = kept
         self.found: list[Tag] = []
+        self.texts: list[tuple[int, str]] = []
 
     def restore(self, value: str) -> str:
         return PLACEHOLDER_RE.sub(lambda m: self.kept[int(m.group(1))], value.replace(AMPERSAND, "&"))
@@ -149,12 +150,15 @@ class TagReader(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         self.found.append(Tag(tag, {}, self.getpos()[0], closing=True))
 
+    def handle_data(self, data: str) -> None:
+        if not self.cdata_elem and data.strip():  # cdata_elem: inside <script> or <style>
+            self.texts.append((self.getpos()[0], self.restore(data)))
+
 
 @cache
-def elements(path: Path) -> tuple[Tag, ...]:
-    """Every start and end tag in the template, in order (stdlib HTMLParser). Template tags are set aside first, so
-    a ">" or quote inside one ({% if n > 0 %}) neither ends the tag nor its attribute. A self-closing or void tag
-    has no end tag."""
+def read(path: Path) -> TagReader:
+    """The template read by HTMLParser. Template tags are set aside first, so a ">" or quote inside one
+    ({% if n > 0 %}) neither ends a tag nor its attribute."""
     kept: list[str] = []
 
     def hide(match: re.Match[str]) -> str:
@@ -164,7 +168,17 @@ def elements(path: Path) -> tuple[Tag, ...]:
     reader = TagReader(kept)
     reader.feed(TEMPLATE_TAG_RE.sub(hide, text(path)).replace("&", AMPERSAND))
     reader.close()
-    return tuple(reader.found)
+    return reader
+
+
+def elements(path: Path) -> tuple[Tag, ...]:
+    """Every start and end tag in the template, in order. A self-closing or void tag has no end tag."""
+    return tuple(read(path).found)
+
+
+def text_nodes(path: Path) -> tuple[tuple[int, str], ...]:
+    """The text between tags with its line, outside <script> and <style>, template tags kept as written."""
+    return tuple(read(path).texts)
 
 
 @cache

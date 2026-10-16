@@ -217,7 +217,7 @@
                 </div>
                 <div class="mt-10" aria-live="polite">
                     <small class="text-muted">
-                        <span id="selectedCount">0</span> teams selected - Click teams to toggle selection
+                        <span id="selectedCount">0</span> teams selected. Click teams to toggle selection
                     </small>
                 </div>
                 {% if form.affected_teams.errors %}<div class="text-danger mt-10">{{ form.affected_teams.errors }}</div>{% endif %}
@@ -270,7 +270,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h3 class="modal-title" id="pool-modal-title">Create IP Pool</h3>
-                <button type="button" class="modal-close" onclick="closeCreatePoolModal()">×</button>
+                <button type="button" class="modal-close" onclick="closeCreatePoolModal()">Close</button>
             </div>
             <div class="modal-body">
                 <form id="createPoolForm">

@@ -40,7 +40,7 @@
         </c-slot>
         <c-fieldset heading="Details">
             <p>
-                <strong>Description:</strong> {{ orange_check.description|default:"None" }}
+                <strong>Description:</strong> {{ orange_check.description|default:"No description" }}
             </p>
             {% if orange_check.scheduled_at %}
                 <p>
@@ -135,7 +135,7 @@
                                 </c-badge>
                             {% endif %}
                         </td>
-                        <td>{{ assignment.score }} / {{ orange_check.max_score }}</td>
+                        <td>{% if assignment.score is not None %}{{ assignment.score }} / {{ orange_check.max_score }}{% endif %}</td>
                     </tr>
                 {% endfor %}
             </c-table>

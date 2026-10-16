@@ -19,7 +19,7 @@
                     {{ event.date|date:"F d, Y" }}
                 </c-detail_row>
                 <c-detail_row label="Time">
-                    {{ event.start_time|time:"g:i A" }} - {{ event.end_time|time:"g:i A" }}
+                    {{ event.start_time|time:"g:i A" }} to {{ event.end_time|time:"g:i A" }}
                 </c-detail_row>
                 <c-detail_row label="Type">
                     {{ event.get_event_type_display }}

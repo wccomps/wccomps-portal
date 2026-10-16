@@ -1,5 +1,6 @@
-"""UI text (templates and Django admin columns) uses words: no emoji or symbol marks standing for a status, and no
-dashes, em dashes or en dashes, whether as an empty-cell placeholder or in prose. An empty value is left blank.
+"""UI text (templates and Django admin columns) uses words: no emoji, symbol marks or math signs standing for a
+status or a control, no em or en dashes, and no hyphen standing in for a dash (" - ", "--") or for a missing value.
+An empty value is left blank. Page titles keep their "Page - WCComps Portal" separator.
 
 A symbol that is the control itself (a menu toggle, a sort arrow) is listed in SYMBOL_EXCEPTIONS with why.
 """
@@ -8,11 +9,14 @@ import re
 import unicodedata
 from pathlib import Path
 
-from core.tests.guards import REPO_DIR, fail_with, template_name, tracked_files, tracked_templates
+from core.tests.guards import REPO_DIR, fail_with, template_name, text, text_nodes, tracked_files, tracked_templates
 
 DASHES = {"—": "em dash", "–": "en dash"}
 # A lone hyphen standing for "no value": a |default:"-", a cell or span holding only "-", or an admin column's "-"
 DASH_PLACEHOLDER_RE = re.compile(r"""default:\s*["']-["']|>\s*-\s*<|return\s+["']-["']""")
+# In a template's text: a hyphen alone (a missing value), one between spaces or doubled (a dash)
+TEXT_DASH_RE = re.compile(r"^\s*-\s*$|\s-\s|--")
+TITLE_RE = re.compile(r"{%\s*block\s+\w*title\s*%}.*?{%\s*endblock|<title>.*?</title>", re.DOTALL)
 
 # "file:character" -> why that symbol is the right UI there
 SYMBOL_EXCEPTIONS = {
@@ -26,6 +30,8 @@ SYMBOL_EXCEPTIONS = {
     "cotton/table_header.html:▼": "the sort direction arrow on the sorted column",
     "cotton/fieldset.html:▶": "the collapsible fieldset's expand arrow",
     "registration/register.html:©": "the copyright line",
+    "scoring/_scorecard_body.html:×": "multiplication in the score formula",
+    "scoring/scorecard_print.html:×": "multiplication in the score formula",
 }
 
 
@@ -37,7 +43,7 @@ def ui_files() -> list[tuple[str, Path]]:
 
 
 def is_symbol(character: str) -> bool:
-    return ord(character) > 127 and unicodedata.category(character) in ("So", "Sk")
+    return ord(character) > 127 and unicodedata.category(character) in ("So", "Sk", "Sm")
 
 
 def test_ui_text_has_no_symbol_marks() -> None:
@@ -59,4 +65,15 @@ def test_ui_text_has_no_dashes() -> None:
                     found[f"{name}:{number}"] = what
             if DASH_PLACEHOLDER_RE.search(line):
                 found[f"{name}:{number}"] = "a dash standing for no value (leave it blank)"
+        if path.suffix == ".html":
+            content = text(path)
+            titles = [
+                range(content.count("\n", 0, m.start()) + 1, content.count("\n", 0, m.end()) + 2)
+                for m in TITLE_RE.finditer(content)
+            ]
+            for start, words in text_nodes(path):
+                for offset, words_line in enumerate(words.split("\n")):
+                    number = start + offset
+                    if TEXT_DASH_RE.search(words_line) and not any(number in lines for lines in titles):
+                        found[f"{name}:{number}"] = f"a hyphen used as a dash or for no value: {words_line.strip()!r}"
     fail_with("Dashes in UI text", found, {})

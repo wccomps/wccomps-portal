@@ -38,7 +38,7 @@
                         <td>{{ assignment.orange_check.title }}</td>
                         <td>Team {{ assignment.team.team_number }}</td>
                         <td>{{ assignment.user.username }}</td>
-                        <td>{{ assignment.score }} / {{ assignment.orange_check.max_score }}</td>
+                        <td>{% if assignment.score is not None %}{{ assignment.score }} / {{ assignment.orange_check.max_score }}{% endif %}</td>
                         <td>
                             {% if assignment.status == "submitted" %}
                                 <c-badge variant="warning">
