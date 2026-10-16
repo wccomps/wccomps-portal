@@ -95,11 +95,11 @@ class TeamRegistration(models.Model):
         return f"{self.school_name} ({self.status})"
 
     def approve(self, user: User) -> bool:
-        """Approve it if it is still pending; False when a review (or a payment) got there first."""
+        """Approve it if it is still pending; False when it no longer is."""
         return self._decide(status="approved", approved_at=timezone.now(), approved_by=user)
 
     def reject(self, reason: str) -> bool:
-        """Reject it if it is still pending; False when a review (or a payment) got there first."""
+        """Reject it if it is still pending; False when it no longer is."""
         return self._decide(status="rejected", rejection_reason=reason)
 
     def _decide(self, **fields: object) -> bool:

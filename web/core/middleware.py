@@ -41,7 +41,8 @@ class SecurityHeadersMiddleware:
 
 
 def wants_json_error(request: HttpRequest) -> bool:
-    """A background fetch (not a page navigation, and not htmx, which reloads instead) gets errors it can show: JSON."""
+    """A background fetch gets a JSON error it can show; a page navigation, and htmx (which swaps in the answer as
+    markup), get a page or text."""
     return (
         request.headers.get("HX-Request") != "true" and request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate"
     )
@@ -65,9 +66,10 @@ class RejectNulMiddleware:
     read.
 
     PostgreSQL text can't hold NUL, so a query that looks such text up or stores it fails: a session key with one
-    failed every page with a 500. Forms refuse it field by field (Django's CharField validator); this covers what is
-    read without a form. It reads no body: form fields are checked after the sign-in gate (RejectNulFieldsMiddleware).
-    JSON bodies and other headers aren't checked; the one JSON view reads typed values only.
+    failed every signed-in page with a 500. Forms refuse it field by field (Django's CharField validator); this
+    covers what is read without a form. It reads no body: a signed-in request's form fields are checked after the
+    sign-in gate (RejectNulFieldsMiddleware). JSON bodies and other headers aren't checked; the one view that reads a
+    JSON body reads typed values only.
     """
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:

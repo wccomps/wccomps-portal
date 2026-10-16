@@ -1,4 +1,4 @@
-"""The view property rows for the core views: home, sign-in, Discord linking, the school list and ops pages."""
+"""The view property rows for the core views."""
 
 from typing import Any
 from urllib.parse import parse_qs, urlsplit

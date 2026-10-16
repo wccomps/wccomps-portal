@@ -329,7 +329,7 @@ def test_an_anonymous_post_body_is_not_parsed_for_a_nul(path: str) -> None:
 # The ticket form puts posted values back into its script as JavaScript strings
 # ---------------------------------------------------------------------------------------------------------------
 
-JS_STRING = re.compile(r"selectedHostname: '((?:[^'\\\n\r  ]|\\.)*)',\n")
+JS_STRING = re.compile(r"selectedHostname: '((?:[^'\\\n\r\u2028\u2029]|\\.)*)',\n")
 
 
 @given(hostname=request_text(60).filter(lambda h: "\x00" not in h))
@@ -356,7 +356,7 @@ def test_the_django_admin_lets_in_only_the_admin_permission(role: str, let_in: b
     assert admin.site.has_permission(request) is let_in
 
 
-JS_STRING_LIST = re.compile(r"apps: \[((?:'(?:[^'\\\n\r  ]|\\.)*'(?:, )?)*)\],\n")
+JS_STRING_LIST = re.compile(r"apps: \[((?:'(?:[^'\\\n\r\u2028\u2029]|\\.)*'(?:, )?)*)\],\n")
 
 
 @given(names=st.lists(request_text(30).filter(lambda n: "\x00" not in n), min_size=1, max_size=3))

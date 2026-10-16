@@ -108,7 +108,7 @@ class World:
     clients: dict[str, Client]  # every role's, signed in as its user (anonymous's isn't)
     season: Season
     event: Event  # the open event
-    teams: list[Team]  # teams 1-3; the blue role is team 1
+    teams: list[Team]  # teams 1-3; the blue_team role's is team 1 (it holds that team's Authentik group)
     rows: dict[str, list[Any]] = field(default_factory=dict)  # by kind: the valid ids a path can name
 
     def ids(self, kind: str) -> list[Any]:
@@ -479,7 +479,11 @@ class Drawn:
         return [unquote(self.path), *query, *_texts(self.data), *body]
 
     def carries_nul(self) -> bool:
-        return any("\x00" in text for text in (*self.texts, self.tz or ""))
+        """A NUL where core.middleware's NUL refusals look: the path, query and cookies, and a signed-in request's
+        form fields (not a JSON body)."""
+        query = [text for key, values in self.query.items() for text in (key, *values)]
+        fields = _texts(self.data) if self.role != "anonymous" else []
+        return any("\x00" in text for text in (unquote(self.path), *query, *fields, self.tz or ""))
 
 
 def _optional(strategy: st.SearchStrategy[Any]) -> st.SearchStrategy[Any]:
@@ -750,7 +754,7 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
         # A signed-in role sent to sign in is a client that lost its session: every check after this would pass
         assert not sent_to_sign_in(answer), f"{where}: a signed-in role was sent to sign in ({status})"
     if drawn.role not in case.allowed:
-        # Only a NUL is refused with a 400 before any role is considered (core.middleware.RejectNulMiddleware)
+        # Only a NUL is refused with a 400 before the view's role check (core.middleware's NUL refusals)
         refused_early = status == 400 and drawn.carries_nul()
         location = response.get("Location", "")
         assert refused or refused_early, f"{where}: a role the page refuses got {status} {location}"
@@ -846,7 +850,6 @@ def run_detached_bindings() -> list[tuple[ModuleType, str]]:
     """Every (module, name) bound to the real core.utils.run_detached, under any name, core.utils's own included.
     Patching core.utils covers a call through it (utils.run_detached(...)) and an import inside a function; the
     others imported the function before the patch (the URLconf loads every view first)."""
-
     get_resolver().url_patterns  # noqa: B018 - loads every view module
     return [
         (module, name)
