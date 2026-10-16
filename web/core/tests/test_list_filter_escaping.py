@@ -104,21 +104,91 @@ def test_a_list_filter_that_is_not_a_number_is_ignored(admin_client: Client, nam
 LIST_PAGES = sorted({name for name, _ in ECHOED_FILTERS})
 
 
+@pytest.fixture
+def three_of_each(admin_user: User) -> None:
+    """Three rows for every list page, differing in every column the pages sort by."""
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from django.utils import timezone
+    from scoring.models import AttackType, IncidentReport, InjectScore, OrangeTeamScore, RedTeamScore
+
+    from team.models import Team
+    from ticketing.models import Ticket, TicketCategory
+
+    now = timezone.now()
+    categories = list(TicketCategory.objects.order_by("pk")[:3])
+    for i, (number, name) in enumerate([(3, "b"), (1, "c"), (2, "a")]):
+        team = Team.objects.create(team_number=number, team_name=f"Team {number}")
+        when = now - timedelta(hours=i + 1)
+        assignee = User.objects.create_user(username=f"{name}-assignee")
+        ticket = Ticket.objects.create(
+            ticket_number=f"T{number:03d}-001",
+            team=team,
+            category=categories[i],
+            title=name,
+            status="resolved",
+            assigned_to=assignee,
+            resolved_at=when,
+            points_charged=10 * number,
+        )
+        Ticket.objects.create(
+            ticket_number=f"T{number:03d}-002",
+            team=team,
+            category=categories[i],
+            title=name,
+            status=("open", "claimed", "cancelled")[i],
+            assigned_to=assignee,
+        )
+        finding = RedTeamScore.objects.create(
+            attack_vector=name,
+            attack_type=AttackType.objects.create(name=f"{name} attack"),
+            points_per_team=Decimal(number),
+            submitted_by=admin_user,
+        )
+        incident = IncidentReport.objects.create(
+            team=team, submitted_by=admin_user, attack_description=name, source_ip="10.0.0.1", attack_detected_at=when
+        )
+        orange = OrangeTeamScore.objects.create(team=team, description=name, points_awarded=Decimal(number))
+        InjectScore.objects.create(
+            team=team,
+            inject_id=name,
+            inject_name=f"{name} inject",
+            max_points=Decimal(100),
+            points_awarded=Decimal(number),
+            graded_by=admin_user,
+            graded_at=when,
+        )
+        for row in (ticket, finding, incident, orange):
+            type(row).objects.filter(pk=row.pk).update(created_at=when)
+
+
+def sort_key(row: object, field: str) -> object:
+    """The value a row sorts by for an order_by field: a__b follows the relation; a related row sorts by its pk.
+    The ticket pages list {"ticket": ticket, ...} rows."""
+    value = row["ticket"] if isinstance(row, dict) else row
+    for part in field.split("__"):
+        value = getattr(value, part)
+    return getattr(value, "pk", value)
+
+
 @pytest.mark.parametrize("name", LIST_PAGES)
-def test_every_sort_header_a_list_shows_is_one_its_view_sorts_by(admin_client: Client, name: str) -> None:
-    """A header sorted by field links to -field next; a view that refuses the field falls back to its default."""
+def test_every_sort_header_a_list_shows_sorts_its_rows(admin_client: Client, three_of_each: None, name: str) -> None:
+    """Each header's field, asked for in either direction, orders the page's rows by it."""
     links = Links()
     links.feed(admin_client.get(reverse(name)).content.decode())
     fields = {
-        sort
+        sort.removeprefix("-")
         for url in links.urls
         for sort in parse_qs(urlsplit(url).query).get("sort", [])
-        if not sort.startswith("-") and sort != "default"
+        if sort != "default"
     }
-    refused = []
+    assert fields
+    unsorted = []
     for field in sorted(fields):
-        sorted_links = Links()
-        sorted_links.feed(admin_client.get(reverse(name), {"sort": field}).content.decode())
-        if not any(parse_qs(urlsplit(url).query).get("sort") == [f"-{field}"] for url in sorted_links.urls):
-            refused.append(field)
-    assert not refused
+        for direction in ("", "-"):
+            rows = list(admin_client.get(reverse(name), {"sort": direction + field}).context["page_obj"])
+            keys = [sort_key(row, field) for row in rows]
+            if len(set(keys)) < 2 or keys != sorted(keys, reverse=direction == "-"):
+                unsorted.append(f"{direction}{field}: {keys}")
+    assert not unsorted
