@@ -2,7 +2,7 @@
 {% load cotton status_variants %}
 <div id="ticket-list-content"
      {% if is_ops %}x-data="ticketBulkSelect"{% endif %}
-     hx-get="{% url 'ticket_list' %}?status={{ status_filter|urlencode }}&category={{ category_filter|urlencode }}&search={{ search_query|urlencode }}&sort={{ sort_by|urlencode }}&page_size={{ page_size|urlencode }} {% if is_ops %}&team={{ team_filter|urlencode }}&assignee={{ assignee_filter|urlencode }}{% endif %} "
+     hx-get="{% url 'ticket_list' %}{% querystring %}"
      hx-trigger="every 30s"
      hx-select="#ticket-list-content"
      hx-swap="outerHTML">
@@ -63,28 +63,23 @@
                         Title
                     </c-table_header>
                     <c-table_header sort_field="team__team_number"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&category={{ category_filter|urlencode }}&team={{ team_filter|urlencode }}&assignee={{ assignee_filter|urlencode }}&search={{ search_query|urlencode }}&page_size={{ page_size|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Team
                     </c-table_header>
                     <c-table_header sort_field="category"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&category={{ category_filter|urlencode }}&team={{ team_filter|urlencode }}&assignee={{ assignee_filter|urlencode }}&search={{ search_query|urlencode }}&page_size={{ page_size|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Category
                     </c-table_header>
                     <c-table_header sort_field="status"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&category={{ category_filter|urlencode }}&team={{ team_filter|urlencode }}&assignee={{ assignee_filter|urlencode }}&search={{ search_query|urlencode }}&page_size={{ page_size|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Status
                     </c-table_header>
                     <c-table_header sort_field="assigned_to__username"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&category={{ category_filter|urlencode }}&team={{ team_filter|urlencode }}&assignee={{ assignee_filter|urlencode }}&search={{ search_query|urlencode }}&page_size={{ page_size|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Assigned
                     </c-table_header>
                     <c-table_header sort_field="created_at"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&category={{ category_filter|urlencode }}&team={{ team_filter|urlencode }}&assignee={{ assignee_filter|urlencode }}&search={{ search_query|urlencode }}&page_size={{ page_size|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Created
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -123,7 +118,7 @@
                 {% endif %}
                 <th role="gridcell">
                     {% if is_ops %}
-                        <a href="{% url 'ticket_detail' ticket_number=item.ticket.ticket_number %}?status={{ status_filter|urlencode }}&category={{ category_filter|urlencode }}&team={{ team_filter|urlencode }}&assignee={{ assignee_filter|urlencode }}&search={{ search_query|urlencode }}&sort={{ sort_by|urlencode }}&page={{ page_obj.number|urlencode }}&page_size={{ page_size|urlencode }}">
+                        <a href="{% url 'ticket_detail' ticket_number=item.ticket.ticket_number %}{% querystring %}">
                             {{ item.ticket.ticket_number }}
                         </a>
                         {% if item.is_stale %}<c-badge variant="danger">STALE</c-badge>{% endif %}
@@ -212,8 +207,5 @@
             </tr>
         {% endfor %}
     </c-table>
-    <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter|urlencode }}&category={{ category_filter|urlencode }}&search={{ search_query|urlencode }}&sort={{ sort_by|urlencode }}&page_size={{ page_size|urlencode }}
-    {% if is_ops %}&team={{ team_filter|urlencode }}&assignee={{ assignee_filter|urlencode }}{% endif %}
-    " />
+    <c-pagination :page_obj="page_obj" />
 </div>

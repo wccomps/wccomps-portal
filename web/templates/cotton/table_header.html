@@ -1,13 +1,13 @@
 {# Table header component - sortable column header with optional tooltip #}
 {# Usage: <c-table_header sort_field="team__team_number" current_sort="-created_at">Team</c-table_header> #}
-{# Props: sort_field, current_sort, query_params (the list's filters as &name=value, each value |urlencode), sortable (bool), tooltip (optional help text) #}
-<c-vars sort_field current_sort query_params sortable="true" tooltip />
+{# Props: sort_field, current_sort, sortable (bool), tooltip (optional help text). The link keeps the page's query and goes to page 1 #}
+<c-vars sort_field current_sort sortable="true" tooltip />
 <th scope="col"
     {{ attrs }}
     {% if tooltip %}title="{{ tooltip }}"{% endif %}>
     <div class="text" {% if tooltip %}style="white-space:nowrap"{% endif %}>
         {% if sortable == "true" and sort_field %}
-            <a href="?{% if current_sort == sort_field %}sort=-{{ sort_field }}{% elif current_sort == "-"|add:sort_field %}sort=default{% else %}sort={{ sort_field }}{% endif %}{{ query_params }}">
+            <a href="{% if current_sort == sort_field %}{% querystring sort="-"|add:sort_field page=None %}{% elif current_sort == "-"|add:sort_field %}{% querystring sort="default" page=None %}{% else %}{% querystring sort=sort_field page=None %}{% endif %}">
                 {{ slot }}
                 {% if current_sort == sort_field %}
                     ▲

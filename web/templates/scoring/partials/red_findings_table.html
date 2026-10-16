@@ -29,8 +29,7 @@
                     ID
                 </c-table_header>
                 <c-table_header sort_field="attack_type__name"
-                                current_sort="{{ sort_by }}"
-                                query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&attack_type={{ selected_attack_type|urlencode }}&submitter={{ selected_submitter|urlencode }}&search={{ search_query|urlencode }}">
+                                current_sort="{{ sort_by }}">
                     Attack Type
                 </c-table_header>
                 <c-table_header sortable="false">
@@ -43,8 +42,7 @@
                     Teams
                 </c-table_header>
                 <c-table_header sort_field="created_at"
-                                current_sort="{{ sort_by }}"
-                                query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&attack_type={{ selected_attack_type|urlencode }}&submitter={{ selected_submitter|urlencode }}&search={{ search_query|urlencode }}">
+                                current_sort="{{ sort_by }}">
                     Submitted
                 </c-table_header>
                 <c-table_header sortable="false">
@@ -166,6 +164,5 @@
             </tr>
         {% endfor %}
     </c-table>
-    <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&attack_type={{ selected_attack_type|urlencode }}&submitter={{ selected_submitter|urlencode }}&sort={{ sort_by|urlencode }}&search={{ search_query|urlencode }}" />
+    <c-pagination :page_obj="page_obj" />
 </div>

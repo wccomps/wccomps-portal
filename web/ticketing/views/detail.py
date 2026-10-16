@@ -116,16 +116,6 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
         if is_ticketing_support or is_ticketing_admin:
             context["staff_usernames"] = _ticketing_staff_usernames()
 
-        # Preserve filter state from referrer for back navigation
-        context["status_filter"] = request.GET.get("status", "")
-        context["category_filter"] = request.GET.get("category", "")
-        context["team_filter"] = request.GET.get("team", "")
-        context["assignee_filter"] = request.GET.get("assignee", "")
-        context["search_filter"] = request.GET.get("search", "")
-        context["sort_filter"] = request.GET.get("sort", "")
-        context["page_filter"] = request.GET.get("page", "")
-        context["page_size"] = request.GET.get("page_size", "")
-
     return render(request, "ticket_detail.html", context)
 
 

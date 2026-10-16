@@ -22,26 +22,22 @@
                         Ticket
                     </c-table_header>
                     <c-table_header sort_field="team__team_number"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&team={{ team_filter|urlencode }}&category={{ category_filter|urlencode }}&search={{ search_query|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Team
                     </c-table_header>
                     <c-table_header sort_field="category"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&team={{ team_filter|urlencode }}&category={{ category_filter|urlencode }}&search={{ search_query|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Category
                     </c-table_header>
                     <c-table_header sortable="false">
                         Resolved By
                     </c-table_header>
                     <c-table_header sort_field="points_charged"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&team={{ team_filter|urlencode }}&category={{ category_filter|urlencode }}&search={{ search_query|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Points
                     </c-table_header>
                     <c-table_header sort_field="resolved_at"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&team={{ team_filter|urlencode }}&category={{ category_filter|urlencode }}&search={{ search_query|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Resolved
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -107,6 +103,5 @@
             {% endfor %}
         </c-table>
     </form>
-    <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter|urlencode }}&team={{ team_filter|urlencode }}&category={{ category_filter|urlencode }}&search={{ search_query|urlencode }}&sort={{ sort_by|urlencode }}" />
+    <c-pagination :page_obj="page_obj" />
 </div>

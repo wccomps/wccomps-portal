@@ -25,21 +25,18 @@
                         Check
                     </c-table_header>
                     <c-table_header sort_field="team__team_number"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&check={{ selected_check|urlencode }}&search={{ search_query|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Team
                     </c-table_header>
                     <c-table_header sortable="false">
                         Description
                     </c-table_header>
                     <c-table_header sort_field="points_awarded"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&check={{ selected_check|urlencode }}&search={{ search_query|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Points
                     </c-table_header>
                     <c-table_header sort_field="created_at"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&check={{ selected_check|urlencode }}&search={{ search_query|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Submitted
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -104,6 +101,5 @@
             {% endfor %}
         </c-table>
     </form>
-    <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&check={{ selected_check|urlencode }}&search={{ search_query|urlencode }}&sort={{ sort_by|urlencode }}" />
+    <c-pagination :page_obj="page_obj" />
 </div>

@@ -52,7 +52,7 @@ def test_selection_survives_in_links_and_checkboxes(ticketing_support_user, tick
 
     html = client.get(reverse("ticket_list") + "?status=claimed&status=open").content.decode()
 
-    assert "status=open%2Cclaimed" in html  # sort/pagination/detail links keep both
+    assert "status=claimed&amp;status=open" in html  # sort/pagination/detail links keep both
     for status, checked in (("open", True), ("claimed", True), ("resolved", False)):
         box = html.split(f'value="{status}"')[1].split(">")[0]
         assert ("checked" in box) is checked

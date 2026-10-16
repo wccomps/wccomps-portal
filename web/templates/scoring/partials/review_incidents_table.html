@@ -22,8 +22,7 @@
                         ID
                     </c-table_header>
                     <c-table_header sort_field="team__team_number"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&box={{ selected_box|urlencode }}&search={{ search_query|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Team
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -33,8 +32,7 @@
                         Description
                     </c-table_header>
                     <c-table_header sort_field="attack_detected_at"
-                                    current_sort="{{ sort_by }}"
-                                    query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&box={{ selected_box|urlencode }}&search={{ search_query|urlencode }}">
+                                    current_sort="{{ sort_by }}">
                         Detected
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -120,6 +118,5 @@
             {% endfor %}
         </c-table>
     </form>
-    <c-pagination :page_obj="page_obj"
-                  query_params="&status={{ status_filter|urlencode }}&team={{ selected_team|urlencode }}&box={{ selected_box|urlencode }}&search={{ search_query|urlencode }}&sort={{ sort_by|urlencode }}" />
+    <c-pagination :page_obj="page_obj" />
 </div>
