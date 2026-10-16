@@ -2,7 +2,8 @@
 
 A view module's property tests hold a table of ViewCase rows, one per URL pattern: how to build its path, query
 string and body, and which roles may get past its permission check. The properties (check_answer) hold for every
-row: no 5xx and every stream read to the end; a refused request (or one answered 4xx) changes no row; a JSON
+row: no 5xx and every stream read to the end; a refused request (or one answered 4xx) changes nothing it can see
+(no row in any table, no mail sent, no request to another service; the cache isn't checked); a JSON
 endpoint answers every refusal and error with a JSON error; text a request carries is HTML-escaped wherever a page
 echoes it and never runs as template syntax; and no redirect leaves the site.
 
@@ -28,6 +29,7 @@ from django.contrib import admin
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.messages import constants as message_levels
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection, models
 from django.http import HttpResponseBase
@@ -603,6 +605,8 @@ class Answer:
     content: bytes
     written: list[str]  # tables the request wrote to
     errors: list[str]  # error messages the request queued
+    mailed: int = 0  # emails it sent
+    outbound: int = 0  # requests it tried to make to another service
 
 
 def send(world: World, drawn: Drawn) -> Answer:
@@ -612,6 +616,7 @@ def send(world: World, drawn: Drawn) -> Answer:
     else:
         client.cookies["tz"] = drawn.tz
     before = table_writes()
+    mail_before, outbound_before = len(getattr(mail, "outbox", [])), len(OUTBOUND)
     files = {k: v for k, v in drawn.data.items() if _is_upload(v)}
     for upload in (u for v in files.values() for u in (v if isinstance(v, list) else [v])):
         upload.seek(0)
@@ -648,7 +653,8 @@ def send(world: World, drawn: Drawn) -> Answer:
     storage = getattr(response.wsgi_request, "_messages", None)  # type: ignore[attr-defined]
     queued = getattr(storage, "_queued_messages", [])
     errors = [str(m) for m in queued if m.level >= message_levels.ERROR]
-    return Answer(response, content, written, errors)
+    mailed = len(getattr(mail, "outbox", [])) - mail_before
+    return Answer(response, content, written, errors, mailed, len(OUTBOUND) - outbound_before)
 
 
 def _is_upload(value: Any) -> bool:
@@ -688,6 +694,8 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
         assert refused or refused_early, f"{where}: a role the page refuses got {status} {location}"
     if refused or 400 <= status < 500:
         assert not answer.written, f"{where} refused ({status}, {answer.errors}) but wrote {answer.written}"
+        assert not answer.mailed, f"{where} refused ({status}) but sent {answer.mailed} email(s)"
+        assert not answer.outbound, f"{where} refused ({status}) but called another service {answer.outbound} time(s)"
 
     content_type = response.get("Content-Type", "")
     htmx_reload = status == 204 and response.get("HX-Refresh") == "true"
@@ -723,7 +731,11 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
 # ---------------------------------------------------------------------------------------------------------------
 
 
+OUTBOUND: list[str] = []  # every request a view tried to make to another service, by URL
+
+
 def _offline(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+    OUTBOUND.append(str(request.url))
     raise httpx.ConnectError("offline: property tests reach no other service", request=request)
 
 
@@ -754,15 +766,15 @@ def offline() -> Iterator[None]:
 
 
 def run_detached_callers() -> list[ModuleType]:
-    """Every loaded module that imported core.utils.run_detached (the URLconf loads every view): each binds the name
-    at import, so each is patched where it calls it."""
+    """Every loaded module that imported core.utils.run_detached (the URLconf loads every view), patched already or
+    not: each binds the name at import, so each is patched where it calls it."""
     from core import utils
 
     get_resolver().url_patterns  # noqa: B018 - loads every view module
     return [
         module
         for module in list(sys.modules.values())
-        if module is not utils and getattr(module, "run_detached", None) is utils.run_detached
+        if module is not utils and getattr(module, "run_detached", None) in (utils.run_detached, _inline)
     ]
 
 

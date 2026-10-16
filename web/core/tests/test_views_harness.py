@@ -97,3 +97,17 @@ def test_offline_patches_every_run_detached_caller() -> None:
             if getattr(module, "run_detached", None) is utils.run_detached and module is not utils
         ]
     assert not unpatched, f"offline() left run_detached unpatched in {unpatched}"
+
+
+def test_a_refusal_that_mails_or_calls_out_fails() -> None:
+    case = ViewCase("ticket_list", frozenset({"admin"}))
+    drawn = Drawn("red_team", "GET", "/tickets/", {}, {}, None, {}, None, [])
+    for answer in (
+        Answer(HttpResponse(status=403), b"", [], [], mailed=1),
+        Answer(HttpResponse(status=403), b"", [], [], outbound=1),
+    ):
+        try:
+            check_answer(case, drawn, answer)
+        except AssertionError:
+            continue
+        raise AssertionError(f"a refusal that sent mail or called out passed: {answer}")
