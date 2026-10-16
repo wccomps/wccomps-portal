@@ -369,8 +369,12 @@ OFF_SITE = (
 # Text that is template syntax: rendered as a template it shows the sum, never the text
 TEMPLATE_PROBE = "{{ 123456|add:654321 }}"
 TEMPLATE_PROBE_RENDERED = "777777"
-# What a page must never echo raw: each payload with markup in it
-MARKUP_PAYLOADS = tuple(p for p in (*PAYLOADS, "<p data-probe=1>") if "<" in p or '"' in p)
+# What the sweep puts in every field: it breaks out of a double- or single-quoted attribute and opens a tag
+PROBE_TAG = "<p data-probe=1>"
+ECHO_PROBE = f"'\">{PROBE_TAG}"
+# What a page must never echo raw: each payload with markup in it, and the probe's tag on its own (a writer that
+# requotes an attribute changes the quotes in front of it)
+MARKUP_PAYLOADS = tuple(p for p in (*PAYLOADS, ECHO_PROBE, PROBE_TAG) if "<" in p or '"' in p)
 
 
 def hostile_text(max_length: int | None = None) -> st.SearchStrategy[str]:
@@ -765,6 +769,38 @@ def any_request_is_answered_safely(case: ViewCase, world: World) -> None:
             check_answer(case, drawn, send(world, drawn))
 
     run()
+
+
+def _first_path(case: ViewCase, world: World, name: str) -> str:
+    """The URL with the first valid value for each path parameter, so the view gets past its lookups."""
+    kwargs: dict[str, Any] = {}
+    for converter, param in _path_params(ROUTES[name]):
+        valid = world.ids(_kind(case, param))
+        kwargs[param] = valid[0] if valid else (1 if converter == "int" else "x")
+    for param in re.findall(r"\(\?P<(\w+)>", ROUTES[name]):
+        kwargs[param] = world.ids(_kind(case, param))[0]
+    return reverse(name, kwargs=kwargs) if kwargs else reverse(name)
+
+
+def echo_sweep(case: ViewCase, world: World) -> None:
+    """Every field the row's view reads (query and POST), set to markup and template syntax at once: a GET and a
+    POST as each role allowed in, on each of its URL names. check_answer then fails on any field echoed raw.
+
+    Deterministic, so CI checks every field every run: the random search rarely pairs an allowed role, the method
+    a field is read on, and markup in that one field (the cotton attrs XSS passed ci-views)."""
+    probe = ECHO_PROBE + TEMPLATE_PROBE
+    query = {name: [probe] for name in (case.query(world) if case.query else {})}
+    fields = dict.fromkeys(case.post(world) if case.post else {}, probe)
+    for name in (case.name, *case.also):
+        path = _first_path(case, world, name)
+        for role in sorted(case.allowed):
+            for method in ("GET", "POST"):
+                body = json.dumps(fields).encode() if method == "POST" and case.json_body else None
+                data = fields if method == "POST" and not case.json_body else {}
+                headers = {"Sec-Fetch-Mode": "cors"} if case.json else {}
+                drawn = Drawn(role, method, path, query, data, body, headers, None, [probe])
+                with rolled_back(), case.patches(world) if case.patches else ExitStack():
+                    check_answer(case, drawn, send(world, drawn))
 
 
 def snapshot(models_: tuple[type[models.Model], ...]) -> dict[str, list[dict[str, Any]]]:

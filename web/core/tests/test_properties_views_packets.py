@@ -9,6 +9,7 @@ from core.tests.views_harness import (
     ViewCase,
     World,
     any_request_is_answered_safely,
+    echo_sweep,
     form_fields,
     may,
 )
@@ -42,3 +43,8 @@ CASES = [
 @pytest.mark.parametrize("case", CASES, ids=[c.name for c in CASES])
 def test_any_request_is_answered_safely(case: ViewCase, view_world: World) -> None:
     any_request_is_answered_safely(case, view_world)
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.name for c in CASES])
+def test_every_field_is_escaped_where_echoed(case: ViewCase, view_world: World) -> None:
+    echo_sweep(case, view_world)

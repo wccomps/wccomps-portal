@@ -320,9 +320,9 @@ def test_every_url_pattern_has_property_tests() -> None:
     stale = sorted(set(covered) - set(found))
     assert not stale, f"View property rows for URL patterns that no longer exist: {stale}"
     for module in VIEW_MODULES:
-        test = module.test_any_request_is_answered_safely
-        cases = [m.args[1] for m in getattr(test, "pytestmark", []) if m.name == "parametrize"]
-        assert cases == [module.CASES], f"{module.__name__}: the property test must run every row of CASES"
+        for test in (module.test_any_request_is_answered_safely, module.test_every_field_is_escaped_where_echoed):
+            cases = [m.args[1] for m in getattr(test, "pytestmark", []) if m.name == "parametrize"]
+            assert cases == [module.CASES], f"{module.__name__}.{test.__name__} must run every row of CASES"
 
 
 def test_every_bot_entry_point_is_covered_or_left_for_pr_c() -> None:
