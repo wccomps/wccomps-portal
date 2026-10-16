@@ -200,7 +200,7 @@ RAW_MARKUP_EXCEPTIONS: dict[str, str] = {
     ),
     "admin/index.html:<c-module>": "Django admin's own index page: its recent actions box, kept as Django writes it",
     "create_ticket.html:<c-form>": (
-        'Another branch is rewriting the ticket form; it becomes a c-form (x_data="ticketForm") after that merges'
+        "Its own ticketForm component checks the fields on submit; a c-form needs that component moved around the form"
     ),
     "orange_team/check_form.html:<c-form_field>": (
         "Rubric rows Alpine repeats (x-for); c-form_field takes a fixed label and id, these are bound per row"

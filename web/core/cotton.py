@@ -1,16 +1,12 @@
 """Escaping for the attributes a django-cotton component writes with {{ attrs }}.
 
-django-cotton (tested on 2.7.2; 2.8.0 has the same code) joins {{ attrs }} itself and marks the result safe without
-escaping it, so a value passed with :name="value" or name=value is written unescaped, and one that starts and ends
-with `"` closes its attribute. escape_component_attrs makes every value one double-quoted attribute. A safe string
-only has `"` encoded: a value with template tags (the engine escaped it), a quoted :name="'text'" literal (template
-source, which Django marks safe like {{ "text" }}), or a value a view marked safe. Any other value is escaped, a
-plain literal (name="text") included: in one, write the character, not an entity (test_template_lint checks).
+django-cotton joins {{ attrs }} unescaped (2.8.0 too), so a value starting and ending with `"` closes its attribute.
+Here every value is one double-quoted attribute: a safe string (rendered from template tags, a quoted :name="'text'"
+literal, a value a view marked safe) only has `"` encoded, and anything else is escaped.
 
-It also stops cotton silently dropping a :name the page's context doesn't have (usually an Alpine binding meant as
-::name): under settings.STRICT_COMPONENT_ATTRS (DEBUG and the tests) the render fails; in production it is reported
-to wccomps.errors once per template, component and name in each worker process, and the component renders as cotton
-would without it.
+A :name the page's context lacks (usually an Alpine binding meant as ::name) fails the render under
+settings.STRICT_COMPONENT_ATTRS (DEBUG and the tests); in production it goes to wccomps.errors once per template,
+component and name in each worker process, and the component renders as cotton would without it.
 """
 
 import logging

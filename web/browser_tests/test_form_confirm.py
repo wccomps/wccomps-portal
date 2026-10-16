@@ -1,4 +1,4 @@
-"""A form's data-confirm question is asked before it submits (admin/base_site.html): a dismissed question keeps the
+"""A form's data-confirm question is asked before it submits (static/js/utils.js): a dismissed question keeps the
 form from submitting, and an empty one (a confirm that applies only sometimes) asks nothing."""
 
 import pytest

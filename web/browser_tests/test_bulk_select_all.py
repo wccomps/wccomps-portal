@@ -1,4 +1,4 @@
-"""Select-all on a bulk-review table checks (and clears) every row — shared bulkSelectMixin."""
+"""Select-all on a bulk-review table checks (and clears) every row: the shared bulkSelectMixin."""
 
 from decimal import Decimal
 

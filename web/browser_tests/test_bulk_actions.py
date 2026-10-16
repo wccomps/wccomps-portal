@@ -1,5 +1,6 @@
-"""Every bulk approve is an ordinary form submit: it asks a question that counts the checked rows (the confirm
-listener in static/js/utils.js), and the form's guard lets one POST through however long the server takes."""
+"""Every bulk action is an ordinary form submit that asks a question counting the checked rows (the confirm listener
+in static/js/utils.js). The guard tests: a c-form posts once however long its POST takes, and the ticket list's
+refresh doesn't replace a form that is posting."""
 
 import pytest
 from django.urls import reverse

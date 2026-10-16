@@ -212,10 +212,10 @@ the page's context (and isn't a Python literal such as `0`) fails the render und
 wasn't passed (its `<c-vars>` default, if it has one).
 
 `core/tests/test_cotton_escaping.py` renders components with values built to break out of their attribute and fails
-if one comes out raw; run it after any django-cotton upgrade, since `core/cotton.py` replaces two methods of its
-`Attrs`. Escaping makes a value safe as attribute text, not as a URL or code: request text reaches an `href` only as
-a query value `{% querystring %}` or `QueryDict.urlencode()` encoded (the ticket page's way back), and never an
-`on*` or Alpine attribute.
+if one comes out raw; run it after any django-cotton upgrade, since `core/cotton.py` replaces three of its internals
+(`Attrs.__str__`, `Attrs.unprocessable` and the component node's `render`). Escaping makes a value safe as attribute text, not as a URL or code: request text reaches an `href` only as
+a query value `{% querystring %}` encodes, or as the browser's own `location.search` (the ticket page's way back),
+and never an `on*` or Alpine attribute.
 
 One page's markup that htmx also refreshes (a list's table) is a template beside the page that the page
 `{% include %}`s and the view renders on its own, not a component.

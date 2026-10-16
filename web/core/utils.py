@@ -108,8 +108,8 @@ def list_filters(request: HttpRequest, defaults: Mapping[str, str]) -> tuple[dic
 
 
 def requested_sort(request: HttpRequest, sort_fields: Collection[str], default_sort: str) -> str:
-    """The list's ?sort=: one of sort_fields, with a leading - for descending; "default" means no ordering, and any
-    other value the default."""
+    """The list's ?sort=: one of sort_fields, with a leading - for descending; "default" means the model's default
+    ordering (an empty sort), and any other value the list's default sort."""
     sort_by = request.GET.get("sort", default_sort)
     if sort_by == "default":
         return ""

@@ -5,7 +5,7 @@
  * Combine mixins with a component's own fields using compose(): Alpine.data('x', () => compose(toastMixin(), { ... })).
  */
 
-/* ── Helpers ─────────────────────────────────────────────────────── */
+/* Helpers */
 
 /**
  * Merge objects into one, keeping getters live: object spread evaluates each getter once and copies
@@ -85,7 +85,7 @@ function setTogglePressed(button, pressed) {
     button.setAttribute('aria-pressed', String(pressed));
 }
 
-/* ── Alpine Mixins ───────────────────────────────────────────────── */
+/* Alpine Mixins */
 
 /** Toast notification state: message, messageType, alertClass. */
 function toastMixin() {
@@ -201,7 +201,7 @@ function jsKey(id) {
     return 'k' + String(id).replace(/\W/g, '_');
 }
 
-/* ── Forms: asking first, and posting once ─────────────────────────── */
+/* Forms: asking first, and posting once */
 
 // The guard state of the Alpine component a form belongs to, or an empty object outside one.
 function guardOf(form) {
@@ -273,7 +273,7 @@ function bulkSelectMixin(dataAttr, noun) {
     const camel = dataAttr.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
     return {
         // Reactive map keyed by jsKey(id). Each row binds :checked="selectedMap.<key>",
-        // so Alpine owns the checkbox state — the CSP build cannot evaluate selected.includes(id),
+        // so Alpine owns the checkbox state: the CSP build cannot evaluate selected.includes(id),
         // and an imperative sync was being clobbered by Alpine's render pass.
         selectedMap: {},
         selectableIds: [],

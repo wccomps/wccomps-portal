@@ -18,7 +18,7 @@ from core.tests.guards import (
 )
 
 # ---------------------------------------------------------------------------
-# 1. Missing {% load cotton %} → hard TemplateSyntaxError
+# 1. Missing {% load cotton %}: a hard TemplateSyntaxError
 # ---------------------------------------------------------------------------
 
 
@@ -34,7 +34,7 @@ def test_cotton_components_have_load_statement() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 3. Nested <form> tags → browser validation bugs
+# 3. Nested <form> tags: browser validation bugs
 # ---------------------------------------------------------------------------
 
 
@@ -50,7 +50,7 @@ def test_no_nested_forms() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 4. Alpine CSP compatibility → silent runtime failure
+# 4. Alpine CSP compatibility: silent runtime failure
 # ---------------------------------------------------------------------------
 
 
@@ -84,7 +84,7 @@ class TestAlpineCSPCompatibility:
 
 
 # ---------------------------------------------------------------------------
-# 5. No x-model → incompatible with Alpine CSP build
+# 5. No x-model: incompatible with the Alpine CSP build
 # ---------------------------------------------------------------------------
 
 
@@ -96,7 +96,7 @@ class TestNoXModel:
     """
 
     def test_no_x_model_in_templates(self) -> None:
-        """x-model must not be used — it is incompatible with Alpine CSP build."""
+        """x-model must not be used: it is incompatible with the Alpine CSP build."""
         found = {
             f'{template_name(path)}:{tag.line} x-model="{value}"': ""
             for path in tracked_templates()
@@ -140,7 +140,7 @@ class TestNoServerSideAlertVariant:
 
 
 # ---------------------------------------------------------------------------
-# 6. Missing {{ attrs }} → silent attribute dropping
+# 6. Missing {{ attrs }}: attributes silently dropped
 # ---------------------------------------------------------------------------
 
 
@@ -189,7 +189,7 @@ def test_no_html_entity_in_a_component_attribute() -> None:
 
 
 def test_no_confirm_in_an_inline_handler() -> None:
-    """A form asks first with data-confirm="question" (admin/base_site.html asks it, as text); an inline on*
+    """A form asks first with data-confirm="question" (static/js/utils.js asks it, as text); an inline on*
     handler holding confirm() makes the question part of a script."""
     found = {
         f"{template_name(path)}:{tag.line}:{tag.name}:{name}": value
@@ -205,8 +205,8 @@ PAGE_VALUE_RE = re.compile(r"[A-Za-z_][\w.]*")
 
 
 def page_value_in_handler(tag: Tag, name: str, value: str) -> bool:
-    """An on* attribute that carries a page value: written {{ }} or {% %}, bound with :on*, or, on a component, an
-    unquoted name cotton reads from the context (a bare name like that is no handler)."""
+    """An on* attribute that carries a page value: written {{ }} or {% %}, bound with :on*, or, on a component, a bare
+    name (no handler is one; cotton reads an unquoted one from the context, and the tag reader can't see quotes)."""
     if not name.lstrip(":").lower().startswith("on"):
         return False
     if name.startswith(":") or "{{" in value or "{%" in value:
