@@ -4,6 +4,7 @@
      {% if is_ops %}x-data="ticketBulkSelect"{% endif %}
      hx-get="{% url 'ticket_list' %}{% querystring %}"
      hx-trigger="every 30s"
+     hx-headers='{"X-Ticket-List-Poll": "true"}'
      hx-select="#ticket-list-content"
      hx-swap="outerHTML">
     {% if is_ops %}

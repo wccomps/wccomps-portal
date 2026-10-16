@@ -54,6 +54,7 @@ def test_the_refresh_keeps_the_page_and_filters(client: Client, ticket: Ticket) 
     html = client.get(reverse("ticket_list"), QUERY).content.decode()
     refresh = next(a for a in attributes(html) if a.get("id") == "ticket-list-content")
     assert query_of(refresh["hx-get"]) == QUERY
+    assert refresh["hx-headers"] == '{"X-Ticket-List-Poll": "true"}'
 
 
 def list_link_queries(client: Client, ticket: Ticket) -> list[dict[str, list[str]]]:
@@ -82,3 +83,10 @@ def test_a_ticket_link_carries_no_list_query(client: Client, ticket: Ticket) -> 
     detail_url = reverse("ticket_detail", kwargs={"ticket_number": ticket.ticket_number})
     links = [a["href"] for a in attributes(html) if (a.get("href") or "").startswith(detail_url)]
     assert links == [detail_url]
+
+
+def test_another_tabs_refresh_does_not_change_the_way_back(client: Client, ticket: Ticket) -> None:
+    query = {**QUERY, "page": ["1"]}
+    client.get(reverse("ticket_list"), query)  # tab A shows a filtered list
+    client.get(reverse("ticket_list"), headers={"HX-Request": "true", "X-Ticket-List-Poll": "true"})  # tab B refreshes
+    assert query in list_link_queries(client, ticket)
