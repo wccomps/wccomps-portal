@@ -5,71 +5,79 @@ Column headers go through c-table_header, whose <span>/<a> Django admin's CSS pa
 checkbox column classes so it lines up with the row checkboxes.
 """
 
-import re
+from collections.abc import Iterator
+from pathlib import Path
 
-import pytest
-
-from core.tests.guards import is_standalone_document, tags, template_name, tracked_templates
+from core.tests.guards import Tag, elements, fail_with, is_standalone_document, tags, template_name, tracked_templates
 
 # Not styled by the portal's admin CSS, with the reason. Standalone documents (guards.is_standalone_document)
 # carry their own styles and are left out too.
 EXCLUDED = {
     "cotton/table_header.html": "the component itself",
 }
-
-HEADER_ROWS = re.compile(r'<thead\b.*?</thead>|<c-slot name="headers">.*?</c-slot>', re.S)
-HAND_WRITTEN_TH = re.compile(r"<th\b[^>]*>.*?</th>", re.S)
-SELECT_ALL = re.compile(r'type="checkbox"')
-ROW_CHECKBOX = re.compile(r'<input\b[^>]*type="checkbox"[^>]*@change="toggleItem"', re.S)
+VOID = {"input", "br", "img", "hr", "meta", "link", "source", "col", "wbr", "area", "base", "embed", "track"}
 
 
-def _templates() -> list[tuple[str, str]]:
+def _templates() -> list[Path]:
     return [
-        (template_name(path), path.read_text())
-        for path in tracked_templates()
-        if not is_standalone_document(path) and template_name(path) not in EXCLUDED
+        path for path in tracked_templates() if not is_standalone_document(path) and template_name(path) not in EXCLUDED
     ]
 
 
-def _line(text: str, index: int) -> int:
-    return text.count("\n", 0, index) + 1
+def with_open_elements(path: Path) -> Iterator[tuple[Tag, list[Tag]]]:
+    """Each start tag with the elements open around it, outermost first."""
+    open_tags: list[Tag] = []
+    for tag in elements(path):
+        if tag.closing:
+            names = [t.name for t in open_tags]
+            if tag.name in names:
+                del open_tags[len(names) - 1 - names[::-1].index(tag.name) :]
+            continue
+        yield tag, open_tags
+        if tag.name not in VOID:
+            open_tags.append(tag)
+
+
+def in_header_row(open_tags: list[Tag]) -> bool:
+    return any(t.name == "thead" or (t.name == "c-slot" and t.attrs.get("name") == "headers") for t in open_tags)
 
 
 def test_column_headers_use_the_component() -> None:
-    offenders = []
-    for rel, text in _templates():
-        for rows in HEADER_ROWS.finditer(text):
-            for th in HAND_WRITTEN_TH.finditer(rows.group(0)):
-                cell = th.group(0)
-                where = f"{rel}:{_line(text, rows.start() + th.start())}"
-                if not SELECT_ALL.search(cell):
-                    offenders.append(f'{where}: use <c-table_header> (sortable="false" if not sortable)')
-                elif 'class="action-checkbox-column"' not in cell:
-                    offenders.append(f'{where}: the select-all <th> needs class="action-checkbox-column"')
-    if offenders:
-        pytest.fail("Hand-written table headers:\n" + "\n".join(offenders))
+    found = {}
+    for path in _templates():
+        header_cells: dict[int, tuple[Tag, bool]] = {}
+        for tag, open_tags in with_open_elements(path):
+            if tag.name == "th" and in_header_row(open_tags):
+                header_cells[id(tag)] = (tag, False)
+            cell = next((t for t in reversed(open_tags) if t.name == "th"), None)
+            if cell is not None and tag.name == "input" and tag.attrs.get("type") == "checkbox":
+                header_cells[id(cell)] = (cell, True)
+        for th, select_all in header_cells.values():
+            where = f"{template_name(path)}:{th.line}"
+            if not select_all:
+                found[where] = 'use <c-table_header> (sortable="false" if not sortable)'
+            elif "action-checkbox-column" not in th.attrs.get("class", "").split():
+                found[where] = 'the select-all <th> needs class="action-checkbox-column"'
+    fail_with("Hand-written table headers", found, {})
 
 
 def test_row_checkboxes_share_the_select_all_column() -> None:
-    offenders = []
-    for rel, text in _templates():
-        for checkbox in ROW_CHECKBOX.finditer(text):
-            cell_start = text.rfind("<td", 0, checkbox.start())
-            cell_tag = text[cell_start : text.index(">", cell_start) + 1]
-            if 'class="action-checkbox"' not in cell_tag:
-                offenders.append(f"{rel}:{_line(text, cell_start)}")
-    if offenders:
-        pytest.fail('Row checkbox cells need class="action-checkbox":\n' + "\n".join(offenders))
+    found = {}
+    for path in _templates():
+        for tag, open_tags in with_open_elements(path):
+            if tag.name == "input" and tag.attrs.get("type") == "checkbox" and tag.attrs.get("@change") == "toggleItem":
+                cell = next((t for t in reversed(open_tags) if t.name == "td"), None)
+                if cell is None or "action-checkbox" not in cell.attrs.get("class", "").split():
+                    found[f"{template_name(path)}:{tag.line}"] = 'the row checkbox cell needs class="action-checkbox"'
+    fail_with("Row checkbox cells", found, {})
 
 
 def test_current_sort_is_the_context_value() -> None:
     """current_sort="sort_by" passes the string "sort_by", so the sort arrow never shows."""
-    offenders = [
-        f'{template_name(path)}:{tag.line}: current_sort="{tag.attrs["current_sort"]}"'
-        for path in tracked_templates()
-        if not is_standalone_document(path) and template_name(path) not in EXCLUDED
+    found = {
+        f"{template_name(path)}:{tag.line}": f'current_sort="{tag.attrs["current_sort"]}"'
+        for path in _templates()
         for tag in tags(path)
         if "{{" not in tag.attrs.get("current_sort", "{{")
-    ]
-    if offenders:
-        pytest.fail("current_sort must be a template value like {{ sort_by }}:\n" + "\n".join(offenders))
+    }
+    fail_with("current_sort must be a template value like {{ sort_by }}", found, {})

@@ -475,8 +475,8 @@ def known_variants() -> dict[str, set[str]]:
         content = path.read_text()
         compared = set(re.findall(r"variant\s*==\s*['\"]([^'\"]*)['\"]", content))
         if compared:
-            default = re.search(r'<c-vars\b[^>]*\bvariant="([^"]*)"', content)
-            known[path.stem] = compared | ({default.group(1)} if default else set())
+            defaults = {tag.attrs["variant"] for tag in tags(path) if tag.name == "c-vars" and "variant" in tag.attrs}
+            known[path.stem] = compared | defaults
     return known
 
 

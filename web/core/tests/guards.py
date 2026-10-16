@@ -11,6 +11,7 @@ import re
 import subprocess
 from collections.abc import Iterable, Mapping
 from functools import cache
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -87,23 +88,22 @@ def fail_with(
         pytest.fail(f"{title} ({len(problems)}):\n" + "\n".join(f"  {p}" for p in problems), pytrace=False)
 
 
-# Template tags, read with their attributes (template tags inside a value kept as written)
+# HTML and component tags, with any {{ }} or {% %} in an attribute kept as written
 COMMENT_RE = re.compile(r"{#.*?#}|{%\s*comment\s*%}.*?{%\s*endcomment\s*%}", re.DOTALL)
 TEMPLATE_TAG_RE = re.compile(r"{%.*?%}|{{.*?}}", re.DOTALL)
 PLACEHOLDER_RE = re.compile("\x01(\\d+)\x02")
-TAG_RE = re.compile(
-    r"""<(?P<name>[A-Za-z][\w:.-]*)(?=[\s/>])(?P<attrs>(?:\s*[^\s=>/"']+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+))?)*)\s*/?>"""
-)
-ATTR_RE = re.compile(r"""([^\s=>/"']+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>"']+))?""")
+# HTMLParser decodes entities in attribute values; this stands in for & so values come back as written
+AMPERSAND = "\x03"
 
 
 class Tag:
-    """An element or component tag, with template tags in its attribute values kept as written."""
+    """A start or end tag of an element or component, with template tags in its attribute values kept as written."""
 
-    def __init__(self, name: str, attrs: dict[str, str], line: int) -> None:
+    def __init__(self, name: str, attrs: dict[str, str], line: int, closing: bool = False) -> None:
         self.name = name
         self.attrs = attrs
         self.line = line
+        self.closing = closing
 
 
 @cache
@@ -112,29 +112,49 @@ def text(path: Path) -> str:
     return COMMENT_RE.sub(lambda m: "\n" * m.group().count("\n"), path.read_text(encoding="utf-8"))
 
 
+class TagReader(HTMLParser):
+    def __init__(self, kept: list[str]) -> None:
+        super().__init__(convert_charrefs=False)
+        self.kept = kept
+        self.found: list[Tag] = []
+
+    def restore(self, value: str) -> str:
+        return PLACEHOLDER_RE.sub(lambda m: self.kept[int(m.group(1))], value.replace(AMPERSAND, "&"))
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = {}
+        for name, value in attrs:
+            # An attribute inside {% if %}...{% endif %} reads as the attribute itself
+            name = PLACEHOLDER_RE.sub("", name)
+            if name:
+                values[name] = self.restore(value or "")
+        self.found.append(Tag(tag, values, self.getpos()[0]))
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag: str) -> None:
+        self.found.append(Tag(tag, {}, self.getpos()[0], closing=True))
+
+
 @cache
-def tags(path: Path) -> tuple[Tag, ...]:
-    """Every tag in the template. Template tags are set aside first, so a ">" or quote inside one ({% if n > 0 %})
-    neither ends the tag nor its attribute."""
-    content = text(path)
+def elements(path: Path) -> tuple[Tag, ...]:
+    """Every start and end tag in the template, in order (stdlib HTMLParser). Template tags are set aside first, so
+    a ">" or quote inside one ({% if n > 0 %}) neither ends the tag nor its attribute. A self-closing or void tag
+    has no end tag."""
     kept: list[str] = []
 
     def hide(match: re.Match[str]) -> str:
         kept.append(match.group())
         return f"\x01{len(kept) - 1}\x02"
 
-    hidden = TEMPLATE_TAG_RE.sub(hide, content)
+    reader = TagReader(kept)
+    reader.feed(TEMPLATE_TAG_RE.sub(hide, text(path)).replace("&", AMPERSAND))
+    reader.close()
+    return tuple(reader.found)
 
-    def restore(value: str) -> str:
-        return PLACEHOLDER_RE.sub(lambda m: kept[int(m.group(1))], value)
 
-    found = []
-    for match in TAG_RE.finditer(hidden):
-        attrs = {}
-        for name, value in ATTR_RE.findall(match.group("attrs")):
-            # An attribute inside {% if %}...{% endif %} reads as the attribute itself
-            name = PLACEHOLDER_RE.sub("", name)
-            if name:
-                attrs[name] = restore(value[1:-1] if value[:1] in "\"'" else value)
-        found.append(Tag(match.group("name").lower(), attrs, hidden.count("\n", 0, match.start()) + 1))
-    return tuple(found)
+@cache
+def tags(path: Path) -> tuple[Tag, ...]:
+    """Every start tag in the template (see elements)."""
+    return tuple(tag for tag in elements(path) if not tag.closing)

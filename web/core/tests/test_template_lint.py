@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from core.tests.guards import TEMPLATES_DIR, Tag, fail_with, tags, template_name, tracked_templates
+from core.tests.guards import TEMPLATES_DIR, Tag, elements, fail_with, tags, template_name, tracked_templates
 
 
 def get_all_template_files() -> list[Path]:
@@ -48,27 +48,19 @@ class TestCottonImports:
 # ---------------------------------------------------------------------------
 
 
-class TestNestedForms:
-    def test_no_nested_forms(self) -> None:
-        """Nested <form> tags are invalid HTML and cause browser bugs."""
-        issues: list[tuple[str, int]] = []
-        for path in get_all_template_files():
-            if is_cotton_component(path):
-                continue
-            content = path.read_text()
-            rel = str(path.relative_to(TEMPLATES_DIR))
-            depth = 0
-            for match in re.finditer(r"<(/?)form[\s>]", content, re.IGNORECASE):
-                if match.group(1) == "/":
-                    depth = max(0, depth - 1)
-                else:
-                    depth += 1
-                    if depth > 1:
-                        line = content[: match.start()].count("\n") + 1
-                        issues.append((rel, line))
-        if issues:
-            lines = [f"  - {p}:{ln}" for p, ln in sorted(issues)]
-            pytest.fail("Nested <form> tags:\n" + "\n".join(lines))
+def test_no_nested_forms() -> None:
+    """Nested <form> tags are invalid HTML: the browser drops the inner form, so its button submits the outer one."""
+    found = {}
+    for path in get_all_template_files():
+        if is_cotton_component(path):
+            continue
+        depth = 0
+        for tag in elements(path):
+            if tag.name in ("form", "c-form"):
+                depth += -1 if tag.closing else 1
+                if depth > 1 and not tag.closing:
+                    found[f"{template_name(path)}:{tag.line}"] = "a form inside a form"
+    fail_with("Nested forms", found, {})
 
 
 # ---------------------------------------------------------------------------
