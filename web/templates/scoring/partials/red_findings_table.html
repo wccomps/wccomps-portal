@@ -28,8 +28,7 @@
                 <c-table_header sortable="false">
                     ID
                 </c-table_header>
-                <c-table_header sort_field="attack_type__name"
-                                current_sort="{{ sort_by }}">
+                <c-table_header sort_field="attack_type__name" current_sort="{{ sort_by }}">
                     Attack Type
                 </c-table_header>
                 <c-table_header sortable="false">
@@ -41,8 +40,7 @@
                 <c-table_header sortable="false">
                     Teams
                 </c-table_header>
-                <c-table_header sort_field="created_at"
-                                current_sort="{{ sort_by }}">
+                <c-table_header sort_field="created_at" current_sort="{{ sort_by }}">
                     Submitted
                 </c-table_header>
                 <c-table_header sortable="false">
@@ -130,7 +128,9 @@
                         <form method="post"
                               action="{% url 'scoring:delete_red_score' finding.id %}"
                               class="d-inline"
-                              onsubmit="return confirm('Delete this finding?');">
+                              x-data="submitGuard"
+                              @submit="onSubmit"
+                              data-confirm="Delete this finding?">
                             {% csrf_token %}
                             <c-button type="submit" variant="danger">
                                 Delete
@@ -140,7 +140,9 @@
                         <form method="post"
                               action="{% url 'scoring:leave_red_score' finding.id %}"
                               class="d-inline"
-                              onsubmit="return confirm('Remove yourself from this finding?');">
+                              x-data="submitGuard"
+                              @submit="onSubmit"
+                              data-confirm="Remove yourself from this finding?">
                             {% csrf_token %}
                             <c-button type="submit" variant="danger">
                                 Leave

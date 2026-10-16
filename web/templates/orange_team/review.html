@@ -55,7 +55,9 @@
                                 <div class="d-flex gap-10">
                                     <form method="post"
                                           action="{% url 'orange_team:assignment_approve' assignment.pk %}"
-                                          onsubmit="return confirm('Approve this assignment?')">
+                                          x-data="submitGuard"
+                                          @submit="onSubmit"
+                                          data-confirm="Approve this assignment?">
                                         {% csrf_token %}
                                         <c-button type="submit" variant="primary">
                                             Approve
@@ -63,7 +65,9 @@
                                     </form>
                                     <form method="post"
                                           action="{% url 'orange_team:assignment_reject' assignment.pk %}"
-                                          onsubmit="return confirm('Reject this assignment?')">
+                                          x-data="submitGuard"
+                                          @submit="onSubmit"
+                                          data-confirm="Reject this assignment?">
                                         {% csrf_token %}
                                         <input type="text" name="notes" placeholder="Reason (optional)">
                                         <c-button type="submit" variant="danger">

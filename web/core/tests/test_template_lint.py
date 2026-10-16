@@ -243,3 +243,21 @@ def test_no_html_entity_in_a_component_attribute() -> None:
         if ENTITY_RE.search(value)
     }
     fail_with("HTML entities in component attributes", found, {})
+
+
+# ---------------------------------------------------------------------------
+# 8. A confirm() in an inline handler: the question is JS source, so a page value in it can end the string
+# ---------------------------------------------------------------------------
+
+
+def test_no_confirm_in_an_inline_handler() -> None:
+    """A form asks first with data-confirm="question" (submitGuard asks it, as text); an inline onsubmit or onclick
+    holding confirm() makes the question part of a script."""
+    found = {
+        f"{template_name(path)}:{tag.line}:{tag.name}:{name}": value
+        for path in tracked_templates()
+        for tag in tags(path)
+        for name, value in tag.attrs.items()
+        if name.lower().startswith("on") and "confirm(" in value
+    }
+    fail_with("Inline handlers that call confirm()", found, {})

@@ -115,7 +115,9 @@
                                 <form method="post"
                                       action="{% url 'registration_unassign_team' assignment_id=item.assignment.id %}"
                                       class="d-inline"
-                                      onsubmit="return confirm('Remove team assignment?')">
+                                      x-data="submitGuard"
+                                      @submit="onSubmit"
+                                      data-confirm="Remove team assignment?">
                                     {% csrf_token %}
                                     <input type="hidden" name="school" value="{{ item.assignment.school_id }}">
                                     <c-button type="submit" variant="danger">

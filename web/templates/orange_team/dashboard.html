@@ -64,7 +64,9 @@
                 </div>
                 <form method="post"
                       action="{% url 'orange_team:toggle_checkin' %}"
-                      {% if active_checkin %}onsubmit="return confirm('Check out? You will stop receiving assignments.')"{% endif %}>
+                      x-data="submitGuard"
+                      @submit="onSubmit"
+                      {% if active_checkin %}data-confirm="Check out? You will stop receiving assignments."{% endif %}>
                     {% csrf_token %}
                     {% if active_checkin %}
                         <c-button type="submit" variant="danger">
@@ -110,7 +112,9 @@
                         <td>
                             <form method="post"
                                   action="{% url 'orange_team:followup_dismiss' followup.pk %}"
-                                  onsubmit="return confirm('Dismiss this reminder?')">
+                                  x-data="submitGuard"
+                                  @submit="onSubmit"
+                                  data-confirm="Dismiss this reminder?">
                                 {% csrf_token %}
                                 <c-button type="submit" variant="danger">
                                     Dismiss
@@ -225,7 +229,9 @@
                                 <form method="post"
                                       id="submit-{{ assignment.pk }}"
                                       action="{% url 'orange_team:assignment_submit' assignment.pk %}"
-                                      onsubmit="return confirm('Submit this check? You cannot edit the score after submission.')">
+                                      x-data="submitGuard"
+                                      @submit="onSubmit"
+                                      data-confirm="Submit this check? You cannot edit the score after submission.">
                                     {% csrf_token %}
                                     <c-button type="submit" variant="primary">
                                         Submit
