@@ -12,6 +12,7 @@ from django.urls import reverse
 from hypothesis import assume, example, given
 from hypothesis import strategies as st
 from orange_team.models import OrangeAssignment, OrangeAssignmentResult, OrangeCheck, OrangeCheckCriterion
+from registration.models import TeamRegistration
 
 from core.tests.strategies import request_text, rolled_back
 from team.models import DiscordLink, Team
@@ -200,3 +201,20 @@ def test_the_rubric_autosave_answers_a_missing_assignment_with_a_json_404(
     response = rubric["client"].post(url, body, content_type="application/json")
     assert response.status_code == 404
     assert response.json()["error"]
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Only a pending registration is approved or rejected
+# ---------------------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", ["registration_approve", "registration_reject"])
+@given(status=st.sampled_from(["approved", "paid", "credentials_sent", "rejected"]))
+@example(status="paid")
+def test_only_a_pending_registration_is_approved_or_rejected(admin_client: Client, action: str, status: str) -> None:
+    """Approving a paid registration (a second click, a stale page) put it back to approved."""
+    with rolled_back():
+        registration = TeamRegistration.objects.create(school_name="School", status=status)
+        before = TeamRegistration.objects.filter(pk=registration.pk).values().get()
+        admin_client.post(reverse(action, args=[registration.pk]), {"reason": "Late"})
+        assert TeamRegistration.objects.filter(pk=registration.pk).values().get() == before
