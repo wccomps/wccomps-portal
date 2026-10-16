@@ -22,3 +22,6 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # The Python version changes by a PR to .python-version, with the Dockerfile's tag (test_python_pin)
+      - dependency-name: python

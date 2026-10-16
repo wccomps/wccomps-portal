@@ -1589,6 +1589,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-django" },
     { name = "pytest-xdist" },
+    { name = "pyyaml" },
     { name = "ruff" },
     { name = "vulture" },
 ]
@@ -1618,6 +1619,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.21" },
     { name = "pytest-django", specifier = ">=4.7" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", specifier = ">=0.14.0" },
     { name = "vulture", specifier = ">=2.16" },
 ]

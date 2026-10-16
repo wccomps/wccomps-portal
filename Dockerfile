@@ -1,7 +1,9 @@
 # One image for both processes: they share the Django models and must run the same version.
 #   web (default): entrypoint.sh applies migrations under a lock, then gunicorn (web/gunicorn.conf.py)
 #   bot: entrypoint cleared, run from /app: `python main.py`
-# The same Python as .python-version (local uv and CI read it); a test that passes on one patch can fail on another
+# The Python .python-version pins (local uv and CI read it too): a test that passes on one patch can fail on another.
+# uv sync below reads the file and, with downloads off, refuses an image whose Python differs; test_python_pin checks
+# this tag against it.
 FROM python:3.14.8-slim
 
 WORKDIR /app
@@ -15,12 +17,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock .python-version ./
 
 # uv only installs, so it's mounted for this step instead of shipped. --no-build refuses a source
 # distribution, which would need the compiler this image doesn't have.
 RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
-    uv sync --frozen --no-dev --no-build
+    UV_PYTHON_DOWNLOADS=never uv sync --frozen --no-dev --no-build
 
 COPY web/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
