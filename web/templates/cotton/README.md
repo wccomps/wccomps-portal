@@ -202,14 +202,17 @@ only `sort` or `page`. Another link that should keep the list's filters does the
 
 A component writes the attributes it doesn't declare in `<c-vars>` with `{{ attrs }}`. django-cotton doesn't escape
 them; `core/cotton.py` does, for every component:
-- a value the template engine already escaped (`title="{{ search }}"`) isn't escaped again;
+- a safe string only has `"` encoded: a value with template tags (`title="{{ search }}"`, which the engine already
+  escaped, or `href="?a=1&amp;b={{ x }}"`), a quoted literal (`:title="'text'"`, template source, which Django marks
+  safe as it does `{{ "text" }}`), or a value a view marked safe;
 - any other value is escaped: from the page's context (`:title="search"`, `title=search`, `:attrs="dict"`) or a
-  literal (`title="Tom & Jerry"`). Write the character, not an entity, in a component attribute (a template lint
+  plain literal (`title="Tom & Jerry"`). In a plain literal write the character, not an entity (a template lint
   fails on `&amp;` or `&quot;` there); quote the attribute with `'` when the value holds `"`.
 
 An Alpine binding on a component is written `::name` (cotton passes it through as `:name`). A `:name` that isn't in
 the page's context (and isn't a Python literal such as `0`) fails the render under DEBUG and in tests
-(`STRICT_COMPONENT_ATTRS`), on any component; in production it is logged and left out.
+(`STRICT_COMPONENT_ATTRS`), on any component; in production it is reported and the component renders as if it
+wasn't passed (its `<c-vars>` default, if it has one).
 
 `core/tests/test_cotton_escaping.py` renders components with values built to break out of their attribute and fails
 if one comes out raw; run it after any django-cotton upgrade, since `core/cotton.py` replaces two methods of its
