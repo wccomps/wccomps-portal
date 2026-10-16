@@ -10,7 +10,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import require_permission
 from core.tickets_config import get_all_categories, get_category_config
-from core.utils import filter_number
+from core.utils import optional_int
 from team.models import Team
 from ticketing.models import Ticket, TicketHistory
 from ticketing.scoring_sync import recompute_team_ticket_adjustment
@@ -37,10 +37,10 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
     elif status_filter == "pending":
         query = query.filter(is_approved=False)
 
-    if (category_id := filter_number(category_filter)) is not None:
+    if (category_id := optional_int(category_filter)) is not None:
         query = query.filter(category_id=category_id)
 
-    if (team_number := filter_number(team_filter)) is not None:
+    if (team_number := optional_int(team_filter)) is not None:
         query = query.filter(team__team_number=team_number)
 
     if search_query:

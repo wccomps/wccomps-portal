@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from core.auth_utils import get_user_team, has_permission
 from core.tickets_config import get_all_categories, get_category_config
-from core.utils import filter_number
+from core.utils import optional_int
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     team_filter = request.GET.get("team", "") if is_ops else ""
     assignee_filter = request.GET.get("assignee", "") if is_ops else ""
 
-    page_size = filter_number(request.GET.get("page_size", ""))
+    page_size = optional_int(request.GET.get("page_size", ""))
     if page_size not in VALID_PAGE_SIZES:
         page_size = 50
 
@@ -75,7 +75,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     if selected_statuses:
         query = query.filter(status__in=selected_statuses)
 
-    if (category_id := filter_number(category_filter)) is not None:
+    if (category_id := optional_int(category_filter)) is not None:
         query = query.filter(category_id=category_id)
 
     if search_query:
@@ -87,12 +87,12 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             | Q(service_name__icontains=search_query)
         )
 
-    if (team_number := filter_number(team_filter)) is not None:
+    if (team_number := optional_int(team_filter)) is not None:
         query = query.filter(team__team_number=team_number)
 
     if assignee_filter == "unassigned":
         query = query.filter(assigned_to__isnull=True)
-    elif (assignee_id := filter_number(assignee_filter)) is not None:
+    elif (assignee_id := optional_int(assignee_filter)) is not None:
         query = query.filter(assigned_to_id=assignee_id)
 
     result = filter_sort_paginate(
@@ -176,7 +176,7 @@ def ticket_notifications(request: HttpRequest) -> JsonResponse:
     ):
         return JsonResponse({"error": "forbidden"}, status=403)
 
-    since_id = filter_number(request.GET.get("since_id", "")) or 0
+    since_id = optional_int(request.GET.get("since_id", "")) or 0
 
     open_count = Ticket.objects.filter(status="open").count()
     raw_tickets = (

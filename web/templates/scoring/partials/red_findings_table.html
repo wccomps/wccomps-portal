@@ -124,7 +124,7 @@
                     {% endif %}
                 </td>
                 <td class="field-actions">
-                    {% if finding.submitted_by == current_user and not finding.is_approved %}
+                    {% if finding.submitted_by == user and not finding.is_approved %}
                         <form method="post"
                               action="{% url 'scoring:delete_red_score' finding.id %}"
                               class="d-inline"
@@ -136,7 +136,7 @@
                                 Delete
                             </c-button>
                         </form>
-                    {% elif current_user in finding.contributors.all and finding.submitted_by != current_user and not finding.is_approved %}
+                    {% elif user in finding.contributors.all and finding.submitted_by != user and not finding.is_approved %}
                         <form method="post"
                               action="{% url 'scoring:leave_red_score' finding.id %}"
                               class="d-inline"

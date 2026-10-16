@@ -87,8 +87,8 @@ def run_detached(lines: Iterator[str]) -> Iterator[str]:
         yield line
 
 
-def filter_number(value: str) -> int | None:
-    """A number as the request carries it, or None when it isn't one: a list filter that isn't one is ignored."""
+def optional_int(value: str) -> int | None:
+    """The integer in request text, or None when the text isn't one (callers then ignore it)."""
     try:
         return int(value)
     except ValueError:
@@ -150,7 +150,7 @@ def bulk_approve(  # type: ignore[explicit-any]
         messages.info(request, f"No {item_label}s selected for approval")
         return redirect(redirect_url)
 
-    valid_ids = [number for raw_id in raw_ids if (number := filter_number(raw_id)) is not None]
+    valid_ids = [number for raw_id in raw_ids if (number := optional_int(raw_id)) is not None]
 
     if not valid_ids:
         messages.warning(request, f"No valid {item_label} IDs provided")
