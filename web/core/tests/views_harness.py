@@ -686,11 +686,7 @@ def client_for(world: World, role: str, tz: str | None = None) -> Client:
     cookies = {"sessionid": world.sessions[role]} if role in world.sessions else {}
     if tz is not None:
         cookies["tz"] = tz
-    return Client(HTTP_COOKIE=raw_cookie_header(cookies))
-
-
-def raw_cookie_header(cookies: dict[str, str]) -> str:
-    return "; ".join(f"{name}={value}" for name, value in cookies.items())
+    return Client(HTTP_COOKIE="; ".join(f"{name}={value}" for name, value in cookies.items()))
 
 
 def encoded(drawn: Drawn) -> tuple[bytes, str]:
