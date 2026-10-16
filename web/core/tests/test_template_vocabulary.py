@@ -30,9 +30,12 @@ from core.tests.guards import (
     REPO_DIR,
     TEMPLATES_DIR,
     WEB_DIR,
+    Tag,
     fail_with,
     is_standalone_document,
+    tags,
     template_name,
+    text,
     tracked_files,
     tracked_templates,
 )
@@ -239,13 +242,6 @@ UNUSED_CSS_EXCEPTIONS: dict[str, str] = {
 # Reading templates, scripts and stylesheets
 # ---------------------------------------------------------------------------------------------------------------
 
-COMMENT_RE = re.compile(r"{#.*?#}|{%\s*comment\s*%}.*?{%\s*endcomment\s*%}", re.DOTALL)
-TEMPLATE_TAG_RE = re.compile(r"{%.*?%}|{{.*?}}", re.DOTALL)
-PLACEHOLDER_RE = re.compile("\x01(\\d+)\x02")
-TAG_RE = re.compile(
-    r"""<(?P<name>[A-Za-z][\w:.-]*)(?=[\s/>])(?P<attrs>(?:\s*[^\s=>/"']+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+))?)*)\s*/?>"""
-)
-ATTR_RE = re.compile(r"""([^\s=>/"']+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>"']+))?""")
 SCRIPT_RE = re.compile(r"<script\b[^>]*>(.*?)</script>", re.DOTALL | re.IGNORECASE)
 STYLE_BLOCK_RE = re.compile(r"<style\b", re.IGNORECASE)
 STATIC_JS_RE = re.compile(r"""{%\s*static\s+["'](js/[\w.-]+\.js)["']\s*%}""")
@@ -269,49 +265,6 @@ CSS_RULE_RE = re.compile(r"([^{}]+)\{[^{}]*\}")
 CSS_CLASS_RE = re.compile(r"\.(-?[A-Za-z_][\w-]*)")
 TRANSITION_ATTRS = {f"x-transition:{phase}{part}" for phase in ("enter", "leave") for part in ("", "-start", "-end")}
 STYLE_ATTRS = {"style", ":style", "::style", "x-bind:style"}
-
-
-class Tag:
-    """An element or component tag, with template tags in its attribute values kept as written."""
-
-    def __init__(self, name: str, attrs: dict[str, str], line: int) -> None:
-        self.name = name
-        self.attrs = attrs
-        self.line = line
-
-
-@cache
-def text(path: Path) -> str:
-    """The file without template comments, keeping their line breaks so line numbers still match."""
-    return COMMENT_RE.sub(lambda m: "\n" * m.group().count("\n"), path.read_text(encoding="utf-8"))
-
-
-@cache
-def tags(path: Path) -> tuple[Tag, ...]:
-    """Every tag in the template. Template tags are set aside first, so a ">" or quote inside one ({% if n > 0 %})
-    neither ends the tag nor its attribute."""
-    content = text(path)
-    kept: list[str] = []
-
-    def hide(match: re.Match[str]) -> str:
-        kept.append(match.group())
-        return f"\x01{len(kept) - 1}\x02"
-
-    hidden = TEMPLATE_TAG_RE.sub(hide, content)
-
-    def restore(value: str) -> str:
-        return PLACEHOLDER_RE.sub(lambda m: kept[int(m.group(1))], value)
-
-    found = []
-    for match in TAG_RE.finditer(hidden):
-        attrs = {}
-        for name, value in ATTR_RE.findall(match.group("attrs")):
-            # An attribute inside {% if %}...{% endif %} reads as the attribute itself
-            name = PLACEHOLDER_RE.sub("", name)
-            if name:
-                attrs[name] = restore(value[1:-1] if value[:1] in "\"'" else value)
-        found.append(Tag(match.group("name").lower(), attrs, hidden.count("\n", 0, match.start()) + 1))
-    return tuple(found)
 
 
 def literal_classes(literal: str) -> set[str]:

@@ -8,8 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from core.tests.guards import TEMPLATES_DIR, fail_with, template_name, tracked_templates
-from core.tests.test_template_vocabulary import tags
+from core.tests.guards import TEMPLATES_DIR, fail_with, tags, template_name, tracked_templates
 
 
 def get_all_template_files() -> list[Path]:
@@ -84,13 +83,7 @@ class TestAlpineCSPCompatibility:
     """
 
     ALPINE_DIRECTIVE_RE = re.compile(
-        r"(?<![:\w])"
-        r"("
-        r"x-(?:show|if|text|html|model|for|init|effect|bind|on)(?::[\w.\-]+)?"
-        r"|@[\w.\-]+"
-        r"|::[\w][\w\-]*"
-        r"|:[\w][\w\-]*"
-        r')\s*=\s*"([^"]*)"',
+        r"x-(?:show|if|text|html|model|for|init|effect|bind|on)(?::[\w.\-]+)?|@[\w.\-]+|::?[\w][\w\-]*"
     )
     SIMPLE_EXPR_RE = re.compile(r"^[a-zA-Z_$][\w$]*(\.[a-zA-Z_$][\w$]*)*$")
     X_FOR_RE = re.compile(
@@ -101,21 +94,14 @@ class TestAlpineCSPCompatibility:
     def test_alpine_expressions_are_csp_compatible(self) -> None:
         violations: list[tuple[str, int, str, str]] = []
         for path in get_all_template_files():
-            content = path.read_text()
-            rel = str(path.relative_to(TEMPLATES_DIR))
-            for match in self.ALPINE_DIRECTIVE_RE.finditer(content):
-                directive = match.group(1)
-                value = match.group(2).strip()
-                if not value or "{{" in value or "{%" in value:
-                    continue
-                if directive == "x-for":
-                    if not self.X_FOR_RE.match(value):
-                        line = content[: match.start()].count("\n") + 1
-                        violations.append((rel, line, directive, value))
-                    continue
-                if not self.SIMPLE_EXPR_RE.match(value):
-                    line = content[: match.start()].count("\n") + 1
-                    violations.append((rel, line, directive, value))
+            for tag in tags(path):
+                for directive, raw in tag.attrs.items():
+                    value = raw.strip()
+                    if not self.ALPINE_DIRECTIVE_RE.fullmatch(directive) or not value or "{{" in value or "{%" in value:
+                        continue
+                    pattern = self.X_FOR_RE if directive == "x-for" else self.SIMPLE_EXPR_RE
+                    if not pattern.match(value):
+                        violations.append((template_name(path), tag.line, directive, value))
         if violations:
             lines = [f'  - {p}:{ln} {d}="{v}"' for p, ln, d, v in sorted(violations)]
             pytest.fail(
@@ -136,17 +122,15 @@ class TestNoXModel:
     method defined in Alpine.data() instead.
     """
 
-    X_MODEL_RE = re.compile(r'x-model="([^"]*)"')
-
     def test_no_x_model_in_templates(self) -> None:
         """x-model must not be used — it is incompatible with Alpine CSP build."""
-        violations: list[tuple[str, int, str]] = []
-        for path in get_all_template_files():
-            content = path.read_text()
-            rel = str(path.relative_to(TEMPLATES_DIR))
-            for match in self.X_MODEL_RE.finditer(content):
-                line = content[: match.start()].count("\n") + 1
-                violations.append((rel, line, match.group(1)))
+        violations: list[tuple[str, int, str]] = [
+            (template_name(path), tag.line, value)
+            for path in get_all_template_files()
+            for tag in tags(path)
+            for name, value in tag.attrs.items()
+            if name.split(".")[0] == "x-model"
+        ]
         if violations:
             lines = [f'  - {p}:{ln} x-model="{v}"' for p, ln, v in sorted(violations)]
             pytest.fail(
@@ -179,15 +163,13 @@ class TestNoServerSideAlertVariant:
     included. Messages that change in the browser use <c-toast />, whose class Alpine binds.
     """
 
-    ALERT_VARIANT_RE = re.compile(r"<c-alert\b[^>]*\s:variant=")
-
     def test_no_c_alert_with_a_dynamic_variant(self) -> None:
-        violations = []
-        for path in get_all_template_files():
-            content = path.read_text()
-            for match in self.ALERT_VARIANT_RE.finditer(content):
-                line = content[: match.start()].count("\n") + 1
-                violations.append(f"  - {path.relative_to(TEMPLATES_DIR)}:{line}")
+        violations = [
+            f"  - {template_name(path)}:{tag.line}"
+            for path in get_all_template_files()
+            for tag in tags(path)
+            if tag.name == "c-alert" and ":variant" in tag.attrs
+        ]
         if violations:
             pytest.fail(
                 "Use <c-toast /> for messages Alpine sets; c-alert's :variant is fixed at render:\n"

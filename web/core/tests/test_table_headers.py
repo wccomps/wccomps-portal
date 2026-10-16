@@ -9,7 +9,7 @@ import re
 
 import pytest
 
-from core.tests.guards import is_standalone_document, template_name, tracked_templates
+from core.tests.guards import is_standalone_document, tags, template_name, tracked_templates
 
 # Not styled by the portal's admin CSS, with the reason. Standalone documents (guards.is_standalone_document)
 # carry their own styles and are left out too.
@@ -65,10 +65,11 @@ def test_row_checkboxes_share_the_select_all_column() -> None:
 def test_current_sort_is_the_context_value() -> None:
     """current_sort="sort_by" passes the string "sort_by", so the sort arrow never shows."""
     offenders = [
-        f"{rel}:{_line(text, m.start())}: {m.group(0)}"
-        for rel, text in _templates()
-        for m in re.finditer(r'(?<![:\w])current_sort="[^"]*"', text)
-        if "{{" not in m.group(0) and rel != "cotton/README.md"
+        f'{template_name(path)}:{tag.line}: current_sort="{tag.attrs["current_sort"]}"'
+        for path in tracked_templates()
+        if not is_standalone_document(path) and template_name(path) not in EXCLUDED
+        for tag in tags(path)
+        if "{{" not in tag.attrs.get("current_sort", "{{")
     ]
     if offenders:
         pytest.fail("current_sort must be a template value like {{ sort_by }}:\n" + "\n".join(offenders))

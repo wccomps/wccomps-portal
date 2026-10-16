@@ -85,3 +85,56 @@ def fail_with(
     ]
     if problems:
         pytest.fail(f"{title} ({len(problems)}):\n" + "\n".join(f"  {p}" for p in problems), pytrace=False)
+
+
+# Template tags, read with their attributes (template tags inside a value kept as written)
+COMMENT_RE = re.compile(r"{#.*?#}|{%\s*comment\s*%}.*?{%\s*endcomment\s*%}", re.DOTALL)
+TEMPLATE_TAG_RE = re.compile(r"{%.*?%}|{{.*?}}", re.DOTALL)
+PLACEHOLDER_RE = re.compile("\x01(\\d+)\x02")
+TAG_RE = re.compile(
+    r"""<(?P<name>[A-Za-z][\w:.-]*)(?=[\s/>])(?P<attrs>(?:\s*[^\s=>/"']+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+))?)*)\s*/?>"""
+)
+ATTR_RE = re.compile(r"""([^\s=>/"']+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>"']+))?""")
+
+
+class Tag:
+    """An element or component tag, with template tags in its attribute values kept as written."""
+
+    def __init__(self, name: str, attrs: dict[str, str], line: int) -> None:
+        self.name = name
+        self.attrs = attrs
+        self.line = line
+
+
+@cache
+def text(path: Path) -> str:
+    """The file without template comments, keeping their line breaks so line numbers still match."""
+    return COMMENT_RE.sub(lambda m: "\n" * m.group().count("\n"), path.read_text(encoding="utf-8"))
+
+
+@cache
+def tags(path: Path) -> tuple[Tag, ...]:
+    """Every tag in the template. Template tags are set aside first, so a ">" or quote inside one ({% if n > 0 %})
+    neither ends the tag nor its attribute."""
+    content = text(path)
+    kept: list[str] = []
+
+    def hide(match: re.Match[str]) -> str:
+        kept.append(match.group())
+        return f"\x01{len(kept) - 1}\x02"
+
+    hidden = TEMPLATE_TAG_RE.sub(hide, content)
+
+    def restore(value: str) -> str:
+        return PLACEHOLDER_RE.sub(lambda m: kept[int(m.group(1))], value)
+
+    found = []
+    for match in TAG_RE.finditer(hidden):
+        attrs = {}
+        for name, value in ATTR_RE.findall(match.group("attrs")):
+            # An attribute inside {% if %}...{% endif %} reads as the attribute itself
+            name = PLACEHOLDER_RE.sub("", name)
+            if name:
+                attrs[name] = restore(value[1:-1] if value[:1] in "\"'" else value)
+        found.append(Tag(match.group("name").lower(), attrs, hidden.count("\n", 0, match.start()) + 1))
+    return tuple(found)
