@@ -1,7 +1,7 @@
 import logging
 import time
 import zoneinfo
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 from urllib.parse import quote
 
@@ -40,34 +40,60 @@ class SecurityHeadersMiddleware:
         return response
 
 
+def wants_json_error(request: HttpRequest) -> bool:
+    """A background fetch (not a page navigation, and not htmx, which reloads instead) gets errors it can show: JSON."""
+    return (
+        request.headers.get("HX-Request") != "true" and request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate"
+    )
+
+
+NUL_MESSAGE = "The request contains a NUL character."
+
+
+def _nul_refusal(request: HttpRequest) -> HttpResponse:
+    if wants_json_error(request):
+        return JsonResponse({"error": NUL_MESSAGE}, status=400)
+    return HttpResponse(NUL_MESSAGE, status=400, content_type="text/plain; charset=utf-8")
+
+
+def _holds_nul(pairs: Iterable[tuple[str, str]]) -> bool:
+    return any("\x00" in key or "\x00" in value for key, value in pairs)
+
+
 class RejectNulMiddleware:
-    """Refuse a request whose path, query string or form fields hold a NUL character, with a 400.
+    """Refuse a request whose path, query string or cookies hold a NUL character, with a 400, before the session is
+    read.
 
-    PostgreSQL text can't hold NUL, so a query that looks such text up or stores it fails. Forms refuse it field by
-    field (Django's CharField validator); this also covers what views read without a form, like paths and filters.
+    PostgreSQL text can't hold NUL, so a query that looks such text up or stores it fails: a session key with one
+    failed every page with a 500. Forms refuse it field by field (Django's CharField validator); this covers what is
+    read without a form. It reads no body: form fields are checked after the sign-in gate (RejectNulFieldsMiddleware).
+    JSON bodies and other headers aren't checked; the one JSON view reads typed values only.
     """
-
-    MESSAGE = "The request contains a NUL character."
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        if self._has_nul(request):
-            if request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate":
-                return JsonResponse({"error": self.MESSAGE}, status=400)
-            return HttpResponse(self.MESSAGE, status=400, content_type="text/plain; charset=utf-8")
+        query = ((key, value) for key, values in request.GET.lists() for value in values)
+        if "\x00" in request.path or _holds_nul(query) or _holds_nul(request.COOKIES.items()):
+            return _nul_refusal(request)
         return self.get_response(request)
 
-    @staticmethod
-    def _has_nul(request: HttpRequest) -> bool:
+
+class RejectNulFieldsMiddleware:
+    """Refuse a form whose fields hold a NUL character, with a 400. It runs after the sign-in gate, so an anonymous
+    body is parsed only on the public pages."""
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
         # request.POST holds a form's fields (and nothing for other bodies); uploaded files aren't fields
-        fields = [request.GET, request.POST]
-        return "\x00" in request.path or any(
-            "\x00" in key or any("\x00" in value for value in values)
-            for query in fields
-            for key, values in query.lists()
-        )
+        if request.method == "POST" and _holds_nul(
+            (key, value) for key, values in request.POST.lists() for value in values
+        ):
+            return _nul_refusal(request)
+        return self.get_response(request)
 
 
 class UserTimezoneMiddleware:
@@ -174,7 +200,7 @@ class AuthentikRequiredMiddleware:
             # navigates through login; any other background request gets an error it can show.
             if request.headers.get("HX-Request") == "true":
                 return HttpResponse(status=204, headers={"HX-Refresh": "true"})
-            if request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate":
+            if wants_json_error(request):
                 return JsonResponse({"error": "Your session expired. Reload the page to sign in again."}, status=401)
             # Validate and sanitize the next parameter to prevent open redirect
             next_url = request.path

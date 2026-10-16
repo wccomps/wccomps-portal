@@ -467,6 +467,9 @@ class Drawn:
     tz: str | None
     texts: list[str]  # every piece of text the request carries, for the escaping check
 
+    def carries_nul(self) -> bool:
+        return any("\x00" in text for text in (*self.texts, self.tz or ""))
+
 
 def _optional(strategy: st.SearchStrategy[Any]) -> st.SearchStrategy[Any]:
     """A field missing, posted once, or posted twice."""
@@ -474,7 +477,16 @@ def _optional(strategy: st.SearchStrategy[Any]) -> st.SearchStrategy[Any]:
 
 
 METHODS = ("GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS")
-TZ_COOKIES = ("UTC", "America/Los_Angeles", "Pacific/Kiritimati", "Etc/GMT-14", "../../etc/passwd", "Nope/Zone", "")
+TZ_COOKIES = (
+    "UTC",
+    "America/Los_Angeles",
+    "Pacific/Kiritimati",
+    "Etc/GMT-14",
+    "../../etc/passwd",
+    "Nope/Zone",
+    "",
+    "U\x00TC",
+)
 
 
 def _texts(value: Any) -> list[str]:
@@ -534,7 +546,7 @@ def requests(draw: st.DrawFn, case: ViewCase, world: World, *, role: str | None 
     headers = {}
     if case.json or draw(st.booleans(), label="fetch"):
         headers["Sec-Fetch-Mode"] = "cors"  # a fetch() from the page, as the JSON endpoints are called
-    if draw(st.booleans(), label="htmx"):
+    if not case.json and draw(st.booleans(), label="htmx"):  # a JSON endpoint is called by fetch(), never htmx
         headers["HX-Request"] = "true"
     if draw(st.booleans(), label="xhr"):
         headers["X-Requested-With"] = "XMLHttpRequest"
@@ -672,8 +684,10 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
 
     refused = is_refusal(answer)
     if drawn.role not in case.allowed:
-        # A 400 refuses a malformed request before any role is considered (a NUL character, core.middleware)
-        assert refused or status == 400, f"{where}: a role the page refuses got {status} {response.get('Location', '')}"
+        # Only a NUL is refused with a 400 before any role is considered (core.middleware.RejectNulMiddleware)
+        refused_early = status == 400 and drawn.carries_nul()
+        location = response.get("Location", "")
+        assert refused or refused_early, f"{where}: a role the page refuses got {status} {location}"
     if refused or 400 <= status < 500:
         assert not answer.written, f"{where} refused ({status}, {answer.errors}) but wrote {answer.written}"
 

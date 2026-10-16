@@ -267,3 +267,30 @@ def test_the_admin_list_shows_its_error_page_for_an_unknown_filter(superuser_cli
     with rolled_back():
         response = superuser_client.get(reverse("admin:core_botstate_changelist"), {param: "x", "e": "1"})
     assert response.status_code in (200, 302)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# A NUL character in a cookie is refused before the session is read
+# ---------------------------------------------------------------------------------------------------------------
+
+
+# A header arrives as bytes Django decodes as Latin-1, so a cookie holds only characters below 256
+latin1_with_nul = with_nul.map(lambda t: t.encode("latin-1", "replace").decode("latin-1"))
+
+
+@given(name=st.sampled_from(["sessionid", "csrftoken", "tz", "other"]), text=latin1_with_nul)
+@example(name="sessionid", text="abcdefgh\x00xyz")
+def test_a_nul_character_in_a_cookie_is_refused(name: str, text: str) -> None:
+    """The session key reached PostgreSQL, so anyone got a 500 (and paged the error webhook) with one cookie."""
+    client = Client()
+    client.cookies[name] = text
+    with rolled_back():
+        response = client.get(reverse("ticket_list"))
+    assert response.status_code == 400
+
+
+def test_an_anonymous_post_body_is_not_read_before_the_sign_in_gate() -> None:
+    """Only signed-in requests (and the public pages) get their form fields parsed for a NUL."""
+    response = Client().post(reverse("ticket_list"), {"search": "\x00"})
+    assert response.status_code == 302
+    assert response["Location"].startswith("/auth/login/")
