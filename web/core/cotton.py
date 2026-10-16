@@ -9,13 +9,16 @@ closes its attribute. escape_component_attrs makes every value an escaped, doubl
   entity in it (&quot;, &amp;) stays the character it stands for.
 In the last two, only `"` is encoded, so the value can't close its attribute.
 
-A :name the page's context doesn't have, which cotton would silently leave out, fails to render instead, unless
-the component declares it (then its <c-vars> default applies). That is how an Alpine binding written :name
-rather than ::name shows up.
+A :name the page's context doesn't have, which cotton would silently leave out, fails to render instead under
+settings.STRICT_COMPONENT_ATTRS (DEBUG and the tests), and is left out with a warning in production, unless the
+component declares it (then its <c-vars> default applies). That is how an Alpine binding written :name rather
+than ::name shows up.
 """
 
+import logging
 import re
 
+from django.conf import settings
 from django.template import TemplateSyntaxError
 from django.utils.html import escape
 from django.utils.safestring import SafeData, SafeString, mark_safe
@@ -23,6 +26,8 @@ from django_cotton.templatetags import Attrs, _component
 
 # What HTML allows in an attribute name: anything else could end the name and start markup
 ATTRIBUTE_NAME = re.compile(r"[^\s\"'<>/=\x00-\x1f\x7f]+")
+
+logger = logging.getLogger(__name__)
 
 
 prepare_attrs = _component._prepare_attrs
@@ -49,10 +54,13 @@ def attrs_html(attrs: Attrs) -> SafeString:
     # cotton leaves out a :name it can't resolve; one the component doesn't declare would just vanish
     dropped = [name for name in attrs._unprocessable if name not in attrs._exclude_from_str]
     if dropped:
-        raise TemplateSyntaxError(
-            f":{dropped[0]} isn't in the page's context, so the component would leave it out; "
+        problem = (
+            f":{dropped[0]} isn't in the page's context, so the component leaves it out; "
             f"an Alpine binding is written ::{dropped[0]}"
         )
+        if settings.STRICT_COMPONENT_ATTRS:
+            raise TemplateSyntaxError(problem)
+        logger.warning(problem)
     return mark_safe(" ".join(attribute(name, value) for name, value in attrs.attrs_dict().items()))  # noqa: S308
 
 

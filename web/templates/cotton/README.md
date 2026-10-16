@@ -209,7 +209,8 @@ them; `core/cotton.py` does, for every component, at startup:
 `core/tests/test_cotton_escaping.py` renders a component with values built to break out of their attribute and
 fails if one comes out raw; run it after any django-cotton upgrade, since `core/cotton.py` replaces two of its
 internals. An Alpine binding on a component is written `::name` (cotton passes it through as `:name`); a `:name`
-the page's context doesn't have, on a component that doesn't declare it, fails to render rather than vanishing.
+the page's context doesn't have, on a component that doesn't declare it, fails to render under DEBUG and in tests
+(`STRICT_COMPONENT_ATTRS`), and in production is left out with a warning.
 Escaping makes a value safe as attribute text only: request text never goes into `href`, `on*` or Alpine
 attributes, where text is a URL or code.
 

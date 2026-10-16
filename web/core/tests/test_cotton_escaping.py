@@ -5,10 +5,12 @@ django-cotton itself writes attrs unescaped (core.cotton escapes them), so this 
 the template engine; it fails if an upgrade or a change to core.cotton lets a value out raw.
 """
 
+import logging
 from html.parser import HTMLParser
 
 import pytest
 from django.template import Context, Template, TemplateSyntaxError
+from django.test import override_settings
 from django_cotton.compiler_regex import CottonCompiler
 from hypothesis import example, given
 from hypothesis import strategies as st
@@ -95,6 +97,18 @@ def test_a_dynamic_attribute_that_is_not_in_the_context_fails_to_render() -> Non
     template = Template(CottonCompiler().process('<c-button :disabled="loading">Go</c-button>'))
     with pytest.raises(TemplateSyntaxError, match="::disabled"):
         template.render(Context({}))
+
+
+@override_settings(STRICT_COMPONENT_ATTRS=False)
+def test_in_production_a_dynamic_attribute_not_in_the_context_is_left_out_with_a_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    template = Template(CottonCompiler().process('<c-button :disabled="loading" title="Go">Go</c-button>'))
+    with caplog.at_level(logging.WARNING, logger="core.cotton"):
+        html = template.render(Context({}))
+    assert 'title="Go"' in html
+    assert "disabled" not in html
+    assert "::disabled" in caplog.text
 
 
 def test_an_alpine_binding_and_an_unset_declared_attribute_render() -> None:

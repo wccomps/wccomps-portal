@@ -62,6 +62,7 @@ the unparenthesized form is used intentionally throughout.
 - `core/cotton.py` escapes every value a component writes with `{{ attrs }}` (django-cotton doesn't);
   `core/tests/test_cotton_escaping.py` fails if one comes out raw, so run it after a django-cotton upgrade.
   Bind Alpine on a component with `::name`; `:name` is a page variable, and one the page lacks fails to render
+  under DEBUG and in tests (production logs a warning and leaves it out)
 - One page's htmx-refreshed markup (a list's table) is an `{% include %}` beside the page, not a component
 
 ### Streaming Progress Pattern
