@@ -56,13 +56,12 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
     """The filtered, sorted page of findings and the filter state for the table both findings pages show."""
     from django.db.models import Q
 
-    from core.utils import filter_sort_paginate
+    from core.utils import filter_sort_paginate, list_filters
 
-    status_filter = request.GET.get("status", default_status) or default_status
-    team_filter = request.GET.get("team", "")
-    attack_type_filter = request.GET.get("attack_type", "")
-    submitter_filter = request.GET.get("submitter", "")
-    search_query = request.GET.get("search", "").strip()
+    filters, filtered = list_filters(
+        request, {"status": default_status, "team": "", "attack_type": "", "submitter": "", "search": ""}
+    )
+    status_filter, team_filter, attack_type_filter, submitter_filter, search_query = filters.values()
 
     findings = RedTeamScore.objects.prefetch_related("affected_teams", "screenshots").select_related("submitted_by")
     if status_filter == "pending":
@@ -95,8 +94,7 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
         "selected_attack_type": attack_type_filter,
         "selected_submitter": submitter_filter,
         "search_query": search_query,
-        "filtered": status_filter != default_status
-        or any((team_filter, attack_type_filter, submitter_filter, search_query)),
+        "filtered": filtered,
         "available_teams": Team.objects.filter(red_team_scores__isnull=False).distinct().order_by("team_number"),
         "available_attack_types": AttackType.objects.filter(findings__isnull=False).distinct().order_by("name"),
         "available_submitters": User.objects.filter(red_scores_submitted__isnull=False).distinct().order_by("username"),

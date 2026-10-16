@@ -87,7 +87,7 @@
             {% empty %}
                 <tr>
                     <td colspan="8" class="text-center p-20">
-                        {% if selected_team or selected_check or search_query or status_filter != "pending" %}
+                        {% if filtered %}
                             No checks match your filters. Try <a href="{% url 'scoring:review_orange' %}">clearing all filters</a>
                         {% else %}
                             No pending checks. All orange team checks have been approved.

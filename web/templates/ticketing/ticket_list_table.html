@@ -182,7 +182,7 @@
         {% empty %}
             <tr>
                 <td colspan="{% if is_ops %}9{% else %}5{% endif %}">
-                    {% if search_query or status_filter != "all" or category_filter != "all" or team_filter or assignee_filter %}
+                    {% if filtered %}
                         <c-empty_state title="No tickets match your filters">
                             Try <c-link href="{% url 'ticket_list' %}">clearing all filters</c-link> or <c-link href="{% url 'create_ticket' %}" variant="add">create a new ticket</c-link>
                         </c-empty_state>

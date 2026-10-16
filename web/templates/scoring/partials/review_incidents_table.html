@@ -104,7 +104,7 @@
             {% empty %}
                 <tr>
                     <td colspan="9">
-                        {% if selected_team or selected_box or search_query or status_filter != "pending" %}
+                        {% if filtered %}
                             No incidents match your filters. Try <a href="{% url 'scoring:review_incidents' %}">clearing all filters</a>
                         {% else %}
                             No pending incidents. All incident reports have been approved.

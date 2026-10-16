@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from core.auth_utils import get_user_team, has_permission
 from core.tickets_config import get_all_categories, get_category_config
-from core.utils import optional_int
+from core.utils import list_filters, optional_int
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -47,11 +47,12 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     requested = {part for value in request.GET.getlist("status") for part in value.split(",")}
     selected_statuses = [s for s, _label in Ticket.STATUS_CHOICES if s in requested]
     status_filter = ",".join(selected_statuses) or "all"
-    category_filter = request.GET.get("category", "all") or "all"
-    search_query = request.GET.get("search", "").strip()
-
-    team_filter = request.GET.get("team", "") if is_ops else ""
-    assignee_filter = request.GET.get("assignee", "") if is_ops else ""
+    filters, filtered = list_filters(
+        request, {"category": "all", "search": ""} | ({"team": "", "assignee": ""} if is_ops else {})
+    )
+    category_filter, search_query = filters["category"], filters["search"]
+    team_filter, assignee_filter = filters.get("team", ""), filters.get("assignee", "")
+    filtered = filtered or bool(selected_statuses)
 
     page_size = optional_int(request.GET.get("page_size", ""))
     if page_size not in VALID_PAGE_SIZES:
@@ -147,6 +148,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         "status_choices": Ticket.STATUS_CHOICES,
         "category_filter": category_filter,
         "search_query": search_query,
+        "filtered": filtered,
         "sort_by": sort_by,
         "page_size": page_size,
         "team_filter": team_filter,

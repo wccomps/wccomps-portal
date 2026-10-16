@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
-from core.utils import optional_int, requested_sort, stable_order
+from core.utils import list_filters, optional_int, requested_sort, stable_order
 from team.models import Team
 
 from ..forms import ApproveInjectFeedbackForm, SaveInjectFeedbackForm
@@ -171,11 +171,11 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
 
     from django.core.paginator import Paginator
 
-    status_filter = request.GET.get("status", "pending") or "pending"
-    inject_filter = request.GET.get("inject", "")
-    team_filter = request.GET.get("team", "")
-    show_outliers_only = request.GET.get("outliers") == "1"
-    search_query = request.GET.get("search", "").strip()
+    filters, filtered = list_filters(
+        request, {"status": "pending", "inject": "", "team": "", "outliers": "", "search": ""}
+    )
+    status_filter, inject_filter, team_filter, outliers, search_query = filters.values()
+    show_outliers_only = outliers == "1"
     sort_by = requested_sort(request, INJECT_GRADE_SORTS, "inject_name")
 
     base_query = InjectScore.objects.select_related("team", "graded_by")
@@ -251,6 +251,7 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
         "show_outliers_only": show_outliers_only,
         "status_filter": status_filter,
         "search_query": search_query,
+        "filtered": filtered,
         "sort_by": sort_by,
     }
 

@@ -89,7 +89,7 @@
             {% empty %}
                 <tr>
                     <td colspan="8">
-                        {% if search_query or status_filter != "pending" or team_filter or category_filter %}
+                        {% if filtered %}
                             No tickets match your filters. Try <a href="{% url 'ops_review_tickets' %}">clearing all filters</a>
                         {% else %}
                             No pending tickets. All resolved tickets have been approved.

@@ -3,7 +3,7 @@ import json
 import logging
 import queue
 import threading
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection, Iterator, Mapping
 from datetime import datetime
 from typing import TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -98,6 +98,13 @@ def optional_int(value: str) -> int | None:
 class FilterSortPage[M: Model](TypedDict):
     page_obj: Page[M]
     current_sort: str
+
+
+def list_filters(request: HttpRequest, defaults: Mapping[str, str]) -> tuple[dict[str, str], bool]:
+    """A list page's filters from the request, each its default when absent or blank (values trimmed), and whether
+    any is set to something else: the page's empty state then says its filters hide rows."""
+    values = {name: request.GET.get(name, "").strip() or default for name, default in defaults.items()}
+    return values, any(values[name] != default for name, default in defaults.items())
 
 
 def requested_sort(request: HttpRequest, sort_fields: Collection[str], default_sort: str) -> str:

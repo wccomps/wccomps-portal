@@ -7,7 +7,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import require_permission
-from core.utils import optional_int
+from core.utils import list_filters, optional_int
 
 from ..models import OrangeTeamScore
 
@@ -24,10 +24,8 @@ def review_orange(request: HttpRequest) -> HttpResponse:
     from core.utils import filter_sort_paginate
     from team.models import Team
 
-    status_filter = request.GET.get("status", "pending") or "pending"
-    team_filter = request.GET.get("team", "")
-    check_filter = request.GET.get("check", "")
-    search_query = request.GET.get("search", "").strip()
+    filters, filtered = list_filters(request, {"status": "pending", "team": "", "check": "", "search": ""})
+    status_filter, team_filter, check_filter, search_query = filters.values()
 
     base_query = OrangeTeamScore.objects.select_related("team", "submitted_by", "approved_by", "orange_check")
 
@@ -75,6 +73,7 @@ def review_orange(request: HttpRequest) -> HttpResponse:
         "selected_team": team_filter,
         "selected_check": check_filter,
         "search_query": search_query,
+        "filtered": filtered,
         "status_filter": status_filter,
         "sort_by": sort_by,
     }

@@ -9,7 +9,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import get_user_team, has_permission, require_permission
 from core.stored_files import file_response
-from core.utils import optional_int
+from core.utils import list_filters, optional_int
 from team.models import Team
 
 from ..calculator import calculate_suggested_recovery_points, suggest_red_score_matches
@@ -166,10 +166,8 @@ def review_incidents(request: HttpRequest) -> HttpResponse:
     """Review and match incident reports (gold team)."""
     from core.utils import filter_sort_paginate
 
-    status_filter = request.GET.get("status", "pending") or "pending"
-    team_filter = request.GET.get("team", "")
-    box_filter = request.GET.get("box", "")
-    search_query = request.GET.get("search", "").strip()
+    filters, filtered = list_filters(request, {"status": "pending", "team": "", "box": "", "search": ""})
+    status_filter, team_filter, box_filter, search_query = filters.values()
 
     base_query = IncidentReport.objects.select_related("team").prefetch_related("screenshots")
 
@@ -216,6 +214,7 @@ def review_incidents(request: HttpRequest) -> HttpResponse:
         "selected_team": team_filter,
         "selected_box": box_filter,
         "search_query": search_query,
+        "filtered": filtered,
         "status_filter": status_filter,
         "sort_by": sort_by,
         "has_pending": pending_count > 0,

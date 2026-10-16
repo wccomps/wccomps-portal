@@ -192,3 +192,17 @@ def test_every_sort_header_a_list_shows_sorts_its_rows(admin_client: Client, thr
             if len(set(keys)) < 2 or keys != sorted(keys, reverse=direction == "-"):
                 unsorted.append(f"{direction}{field}: {keys}")
     assert not unsorted
+
+
+FILTERED_PAGES = ["ticket_list", "ops_review_tickets", "scoring:review_incidents", "scoring:review_orange"]
+FILTERED_PAGES += ["scoring:inject_grades_review", "scoring:red_team_findings", "scoring:red_team_scores"]
+
+
+@pytest.mark.parametrize("name", FILTERED_PAGES)
+def test_an_empty_list_blames_filters_only_when_some_are_set(admin_client: Client, name: str) -> None:
+    def says_filtered(query: dict[str, str]) -> bool:
+        return "match your filters" in admin_client.get(reverse(name), query).content.decode()
+
+    assert not says_filtered({})
+    assert not says_filtered({"team": "", "search": "  "})
+    assert says_filtered({"search": "nothing matches this"})

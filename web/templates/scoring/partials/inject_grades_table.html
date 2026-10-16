@@ -98,7 +98,7 @@
             {% empty %}
                 <tr>
                     <td colspan="8">
-                        {% if selected_inject or selected_team or show_outliers_only or search_query or status_filter != "pending" %}
+                        {% if filtered %}
                             No grades match your filters. Try adjusting your filters or <a href="{% url 'scoring:inject_grades_review' %}">clearing all filters</a>
                         {% else %}
                             No pending grades. All inject grades have been approved.
