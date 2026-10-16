@@ -177,3 +177,28 @@ def test_the_ticket_lists_refresh_keeps_a_selection(live_server, pw_browser):
         assert page.get_by_role("button", name="Claim Selected").is_visible()
     finally:
         context.close()
+
+
+def test_the_ticket_lists_refresh_skips_while_a_row_form_is_posting(live_server, pw_browser):
+    """With nothing checked, a row's own Claim posting still holds the refresh (the form[data-posting] clause)."""
+    from team.models import Team
+    from ticketing.models import Ticket, TicketCategory
+
+    user = _create_role_user("admin", None)
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    Ticket.objects.create(ticket_number="T004-001", team=team, category=TicketCategory.objects.first(), title="t")
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    page.clock.install()
+    page.on("dialog", lambda dialog: dialog.accept())
+    # A 204 keeps the page in place with the row's form still posting
+    page.route("**/T004-001/claim/", lambda route: route.fulfill(status=204))
+    try:
+        page.goto(f"{live_server.url}{reverse('ticket_list')}")
+        page.locator("tbody").get_by_role("button", name="Claim").click()
+        page.wait_for_function("document.querySelector('form[data-posting]') !== null")
+        page.clock.fast_forward(31_000)  # the refresh's turn
+        page.wait_for_load_state("networkidle")
+        assert page.evaluate("document.querySelector('form[data-posting]') !== null")
+    finally:
+        context.close()
