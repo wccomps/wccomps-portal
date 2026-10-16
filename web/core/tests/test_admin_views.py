@@ -133,7 +133,7 @@ class TestAdminTeamDetailView:
         client = Client()
         client.force_login(admin_user)
         response = client.get(reverse("admin_team_detail", kwargs={"team_number": 999}))
-        assert response.status_code == 200
+        assert response.status_code == 404
         assert b"not found" in response.content.lower()
 
 

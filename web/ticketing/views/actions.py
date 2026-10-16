@@ -38,6 +38,7 @@ def ticket_cancel(request: HttpRequest, ticket_number: str) -> HttpResponse:
                 "error": "Invalid account",
                 "message": "Your account is not associated with a team.",
             },
+            status=403,
         )
 
     try:
@@ -50,6 +51,7 @@ def ticket_cancel(request: HttpRequest, ticket_number: str) -> HttpResponse:
                 "error": "Ticket not found",
                 "message": f"Ticket {ticket_number} does not exist or does not belong to your team.",
             },
+            status=404,
         )
 
     ticket, error = cancel_ticket(

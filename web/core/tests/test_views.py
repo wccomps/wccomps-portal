@@ -186,7 +186,7 @@ class TestTicketDetailView:
 
         response = client.get(reverse("ticket_detail", args=["T999-999"]))
 
-        assert response.status_code == 200
+        assert response.status_code == 404
         assert b"Ticket not found" in response.content or b"does not exist" in response.content
 
 

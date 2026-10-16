@@ -314,6 +314,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
                 "error": "Team not found",
                 "message": f"Team {team_number} does not exist.",
             },
+            status=404,
         )
 
     try:
