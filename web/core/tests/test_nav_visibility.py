@@ -13,6 +13,7 @@ import re
 
 import pytest
 from django.test import Client
+from django.urls import reverse
 
 from core.tests.roles import BROWSER_ROLES, role_user
 
@@ -21,19 +22,19 @@ pytestmark = pytest.mark.django_db
 
 # A page each browser role (core.tests.roles.BROWSER_ROLES) can open, which renders the primary nav.
 # Different roles need different pages since no single page is accessible to all.
-ROLE_TEST_URL: dict[str, str] = {
-    "blue_team": "/scoring/incident/list/",
-    "red_team": "/scoring/red-team/",
-    "gold_team": "/leaderboard/",
-    "orange_team": "/orange-team/",
-    "white_team": "/scoring/incidents/",
-    "ticketing_support": "/tickets/",
-    "ticketing_admin": "/tickets/",
-    "admin": "/tickets/",
+ROLE_TEST_PAGE: dict[str, str] = {
+    "blue_team": "scoring:incident_list",
+    "red_team": "scoring:submit_red_score",
+    "gold_team": "leaderboard_page",
+    "orange_team": "orange_team:dashboard",
+    "white_team": "scoring:review_incidents",
+    "ticketing_support": "ticket_list",
+    "ticketing_admin": "ticket_list",
+    "admin": "ticket_list",
 }
 
-# Page that renders scoring/base.html (has the scoring sub-nav).
-SCORING_TEST_URL = "/scoring/incidents/"
+# The page that renders scoring/base.html (has the scoring sub-nav)
+SCORING_TEST_PAGE = "scoring:review_incidents"
 
 # ---------------------------------------------------------------------------
 # Expected nav links per role (the single source of truth for what's correct)
@@ -114,14 +115,14 @@ class TestRenderedPrimaryNav:
         client = Client()
         client.force_login(user)
 
-        response = client.get(ROLE_TEST_URL[role])
-        assert response.status_code == 200, f"{role} got {response.status_code} on {ROLE_TEST_URL[role]}"
+        response = client.get(reverse(ROLE_TEST_PAGE[role]))
+        assert response.status_code == 200, f"{role} got {response.status_code} on {ROLE_TEST_PAGE[role]}"
 
         html = response.content.decode()
         visible = _extract_primary_nav_links(html)
         expected = EXPECTED_PRIMARY_NAV[role]
         assert visible == expected, (
-            f"{role}: primary nav mismatch on {ROLE_TEST_URL[role]}\n"
+            f"{role}: primary nav mismatch on {ROLE_TEST_PAGE[role]}\n"
             f"  Expected: {sorted(expected)}\n"
             f"  Got:      {sorted(visible)}\n"
             f"  Extra:    {sorted(visible - expected)}\n"
@@ -138,8 +139,8 @@ class TestRenderedScoringSubnav:
         client = Client()
         client.force_login(user)
 
-        response = client.get(SCORING_TEST_URL)
-        assert response.status_code == 200, f"{role} got {response.status_code} on {SCORING_TEST_URL}"
+        response = client.get(reverse(SCORING_TEST_PAGE))
+        assert response.status_code == 200, f"{role} got {response.status_code} on {SCORING_TEST_PAGE}"
 
         html = response.content.decode()
         visible = _extract_scoring_subnav_links(html)
@@ -154,10 +155,10 @@ class TestRenderedScoringSubnav:
 
 
 def test_the_tables_cover_the_roles_their_pages_let_in() -> None:
-    """Every browser role has a page and expected links, and the scoring sub-nav is checked for exactly the roles the
-    scoring review page lets in."""
+    """Every browser role has a page its view row lets it into and expected links, and the scoring sub-nav is checked
+    for exactly the roles the scoring review page lets in."""
     from core.tests.view_rows import allowed_roles
 
-    assert set(ROLE_TEST_URL) == set(EXPECTED_PRIMARY_NAV) == set(BROWSER_ROLES)
-    scoring = allowed_roles("scoring:review_incidents") & set(BROWSER_ROLES)
-    assert set(EXPECTED_SCORING_SUBNAV) == scoring
+    assert set(ROLE_TEST_PAGE) == set(EXPECTED_PRIMARY_NAV) == set(BROWSER_ROLES)
+    assert all(role in allowed_roles(page) for role, page in ROLE_TEST_PAGE.items())
+    assert set(EXPECTED_SCORING_SUBNAV) == allowed_roles(SCORING_TEST_PAGE) & set(BROWSER_ROLES)
