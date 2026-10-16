@@ -1,12 +1,8 @@
 {# Inject grades review table - swappable content for htmx #}
 {% load cotton %}
 <div id="inject-grades-content"
-     x-data="injectGradesBulkSelect"
-     @bulk-approve-grades.document="submitBulk">
-    <form id="bulk-approve-form"
-          method="post"
-          action="{% url 'scoring:inject_grades_bulk_approve' %}"
-          x-ref="bulkForm">
+     x-data="injectGradesBulkSelect">
+    <c-form id="bulk-approve-form" action="{% url 'scoring:inject_grades_bulk_approve' %}" ::data-confirm="approveQuestion">
         {% csrf_token %}
         <c-table id="result_list"
                  role="grid"
@@ -111,6 +107,6 @@
                 </tr>
             {% endfor %}
         </c-table>
-    </form>
+    </c-form>
     <c-pagination :page_obj="page_obj" />
 </div>

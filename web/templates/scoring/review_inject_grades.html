@@ -9,14 +9,7 @@
 {% block scoring_content %}
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('injectGradesBulkSelect', () => compose(bulkSelectMixin('grade-id'), {
-            init() { this.initBulkSelect(); },
-            submitBulk() {
-                if (this.submitting) return;
-                if (this.selected.length === 0) { alert('Please select at least one grade to approve'); return; }
-                if (confirm('Approve ' + this.selected.length + ' grade(s)? This action cannot be undone.')) { this.submitting = true; this.$refs.bulkForm.submit(); }
-            }
-        }));
+        Alpine.data('injectGradesBulkSelect', () => bulkSelectMixin('grade-id', 'grade'));
     });
     </script>
     <div id="content-main">
@@ -29,9 +22,7 @@
                               hx_push_url="true">
                 {% if has_unapproved %}
                     <c-slot name="actions">
-                        <c-button type="button"
-                                  onclick="document.dispatchEvent(new CustomEvent('bulk-approve-grades'))"
-                                  variant="primary">
+                        <c-button type="submit" form="bulk-approve-form" variant="primary">
                             Approve Selected
                         </c-button>
                     </c-slot>

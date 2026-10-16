@@ -196,34 +196,59 @@ function streamMixin(url) {
     });
 }
 
-/**
- * Bulk selection mixin for review/list pages.
- * @param {string} dataAttr — HTML data attribute suffix (e.g. 'incident-id').
- * Call this.initBulkSelect() from your init() method.
- */
 function jsKey(id) {
     // Mirror of the `jskey` template filter: a valid JS identifier for a row id.
     return 'k' + String(id).replace(/\W/g, '_');
 }
 
+/* ── Forms: asking first, and posting once ─────────────────────────── */
+
+// The guard state of the Alpine component a form belongs to, or an empty object outside one.
+function guardOf(form) {
+    return window.Alpine ? Alpine.$data(form) : {};
+}
+
+// Any form's data-confirm is the question asked before it submits, read as text. Capture runs before the form's
+// own handlers, so a cancelled question stops them; a form already submitting isn't asked again.
+document.addEventListener('submit', (e) => {
+    const question = e.target.dataset.confirm;
+    if (!question || guardOf(e.target).submitting) return;
+    if (!confirm(question)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+    }
+}, true);
+
 /**
- * Double-submit protection for a POST form (c-form's submitGuard): the first submit goes through and others are
- * blocked for 10 s. Bind @submit="onSubmit". The form's data-confirm question is asked first, by admin/base_site.html.
+ * Double-submit protection for a POST form (c-form's submitGuard; bind @submit="onSubmit"): the first submit goes
+ * through and later ones are blocked until the page is left. A page brought back by Back, or an htmx request that
+ * finished, frees its forms again (releaseForms below).
  */
 function submitGuardMixin() {
     return {
         submitting: false,
         onSubmit(e) {
             if (this.submitting) { e.preventDefault(); return; }
-            const form = e.target;
             this.submitting = true;
-            form.dataset.submitting = 'true';
-            setTimeout(() => { this.submitting = false; delete form.dataset.submitting; }, 10000);
         },
     };
 }
 
-function bulkSelectMixin(dataAttr) {
+function releaseForms(root) {
+    const forms = root.tagName === 'FORM' ? [root] : root.querySelectorAll('form');
+    forms.forEach(form => { const guard = guardOf(form); if (guard.submitting) guard.submitting = false; });
+}
+window.addEventListener('pageshow', (e) => { if (e.persisted) releaseForms(document); });
+document.addEventListener('htmx:afterRequest', (e) => releaseForms(e.detail.elt.closest('form') || e.detail.elt));
+
+/**
+ * Bulk selection for a review table whose rows carry data-<dataAttr>="<id>" checkboxes. approveQuestion is the
+ * bulk form's data-confirm (::data-confirm="approveQuestion"): it counts the checked rows, and with none checked
+ * asks nothing, so the server says nothing was selected.
+ * @param {string} dataAttr  the rows' data attribute suffix (e.g. 'incident-id')
+ * @param {string} noun      what a row is, for the question (e.g. 'incident')
+ */
+function bulkSelectMixin(dataAttr, noun) {
     const camel = dataAttr.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
     return {
         // Reactive map keyed by jsKey(id). Each row binds :checked="selectedMap.<key>",
@@ -231,7 +256,7 @@ function bulkSelectMixin(dataAttr) {
         // and an imperative sync was being clobbered by Alpine's render pass.
         selectedMap: {},
         selectableIds: [],
-        submitting: false,
+        init() { this.initBulkSelect(); },
         initBulkSelect() {
             this.selectableIds = Array.from(
                 this.$el.querySelectorAll('[data-' + dataAttr + ']'),
@@ -242,6 +267,10 @@ function bulkSelectMixin(dataAttr) {
         },
         get selected() {
             return this.selectableIds.filter(id => this.selectedMap[jsKey(id)]);
+        },
+        get approveQuestion() {
+            const count = this.selected.length;
+            return count ? `Approve ${count} ${noun}(s)? This cannot be undone.` : '';
         },
         get allSelected() {
             return this.selectableIds.length > 0

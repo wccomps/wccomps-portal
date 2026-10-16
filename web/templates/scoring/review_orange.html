@@ -6,14 +6,7 @@
 {% block scoring_content %}
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('orangeBulkSelect', () => compose(bulkSelectMixin('check-id'), {
-            init() { this.initBulkSelect(); },
-            submitBulk() {
-                if (this.submitting) return;
-                if (this.selected.length === 0) { alert('Please select at least one check to approve'); return; }
-                if (confirm('Approve ' + this.selected.length + ' check(s)? This action cannot be undone.')) { this.submitting = true; this.$refs.bulkForm.submit(); }
-            }
-        }));
+        Alpine.data('orangeBulkSelect', () => bulkSelectMixin('check-id', 'check'));
     });
     </script>
     <c-page_header title="Review Orange Team Checks" />
@@ -25,9 +18,7 @@
                           hx_push_url="true">
             {% if has_pending %}
                 <c-slot name="actions">
-                    <c-button type="button"
-                              onclick="document.dispatchEvent(new CustomEvent('bulk-approve-orange'))"
-                              variant="primary">
+                    <c-button type="submit" form="bulk-approve-form" variant="primary">
                         Approve Selected
                     </c-button>
                 </c-slot>

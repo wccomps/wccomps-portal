@@ -6,14 +6,7 @@
 {% block red_content %}
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('redFindingsBulkSelect', () => compose(bulkSelectMixin('finding-id'), {
-            init() { this.initBulkSelect(); },
-            submitBulk() {
-                if (this.submitting) return;
-                if (this.selected.length === 0) { alert('Please select at least one finding to approve'); return; }
-                if (confirm('Approve ' + this.selected.length + ' finding(s)?')) { this.submitting = true; this.$refs.bulkForm.submit(); }
-            }
-        }));
+        Alpine.data('redFindingsBulkSelect', () => bulkSelectMixin('finding-id', 'finding'));
     });
     </script>
     <c-page_header title="All Findings" />
@@ -23,16 +16,6 @@
                           hx_target="#red-findings-content"
                           hx_swap="outerHTML"
                           hx_push_url="true">
-            {% if is_gold_team and pending_findings %}
-                <c-slot name="actions">
-                    <c-button type="button"
-                              id="bulk-approve-btn"
-                              onclick="document.dispatchEvent(new CustomEvent('bulk-approve'))"
-                              variant="primary">
-                        Approve Selected
-                    </c-button>
-                </c-slot>
-            {% endif %}
             <c-filter_field label="Status" id="id_status">
                 <select name="status" id="id_status" aria-label="Filter by status">
                     <option value="pending"

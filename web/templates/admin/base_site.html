@@ -139,18 +139,6 @@
             src="{% static 'vendor/alpinejs-csp.min.js' %}"
             integrity="sha384-ToFwPnlRgZIoDDSatKvWLkecUR4Py5dma633TT4TVBQfs4nHKXXexI3v72xi5LnC"></script>
     <script>
-    // Any form's data-confirm is the question to ask before it submits, read as text. Capture runs before the
-    // form's own handlers, so a cancelled question stops them too; a form already submitting isn't asked again.
-    document.addEventListener('submit', (e) => {
-        const form = e.target;
-        const question = form.dataset.confirm;
-        if (question && !form.dataset.submitting && !confirm(question)) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-        }
-    }, true);
-    </script>
-    <script>
     document.addEventListener('alpine:init', () => {
         Alpine.data('nav', () => ({
             navOpen: false,

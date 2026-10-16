@@ -1,10 +1,10 @@
 {% load cotton %}
 <div id="inject-feedback-content">
     {% if scores %}
-        <form id="bulk-approve-form"
-              method="post"
-              action="{% url 'scoring:bulk_approve_inject_feedback' %}"
-              x-data="feedbackBulkSelect">
+        <c-form id="bulk-approve-form"
+                action="{% url 'scoring:bulk_approve_inject_feedback' %}"
+                x_data="feedbackBulkSelect"
+                ::data-confirm="approveQuestion">
             {% csrf_token %}
             <c-table id="inject_feedback" aria_label="Inject feedback review">
                 <c-slot name="headers">
@@ -103,7 +103,7 @@
                     </tr>
                 {% endfor %}
             </c-table>
-        </form>
+        </c-form>
         {% for score in scores %}
             <c-form id="save-{{ score.id }}"
                     action="{% url 'scoring:save_inject_feedback' %}"

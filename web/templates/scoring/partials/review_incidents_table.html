@@ -1,12 +1,8 @@
 {# Review incidents table - swappable content for htmx #}
 {% load cotton %}
 <div id="review-incidents-content"
-     x-data="incidentsBulkSelect"
-     @bulk-approve-incidents.document="submitBulk">
-    <form id="bulk-approve-form"
-          method="post"
-          action="{% url 'scoring:bulk_approve_incidents' %}"
-          x-ref="bulkForm">
+     x-data="incidentsBulkSelect">
+    <c-form id="bulk-approve-form" action="{% url 'scoring:bulk_approve_incidents' %}" ::data-confirm="approveQuestion">
         {% csrf_token %}
         <c-table id="result_list" aria_label="Incident reports list">
             <c-slot name="headers">
@@ -117,6 +113,6 @@
                 </tr>
             {% endfor %}
         </c-table>
-    </form>
+    </c-form>
     <c-pagination :page_obj="page_obj" />
 </div>

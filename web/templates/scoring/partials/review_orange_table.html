@@ -1,12 +1,8 @@
 {# Orange team checks review table - swappable content for htmx #}
 {% load cotton %}
 <div id="review-orange-content"
-     x-data="orangeBulkSelect"
-     @bulk-approve-orange.document="submitBulk">
-    <form id="bulk-approve-form"
-          method="post"
-          action="{% url 'scoring:bulk_approve_orange_adjustments' %}"
-          x-ref="bulkForm">
+     x-data="orangeBulkSelect">
+    <c-form id="bulk-approve-form" action="{% url 'scoring:bulk_approve_orange_adjustments' %}" ::data-confirm="approveQuestion">
         {% csrf_token %}
         <c-table id="result_list" role="grid" aria_label="Orange team checks list">
             <c-slot name="headers">
@@ -100,6 +96,6 @@
                 </tr>
             {% endfor %}
         </c-table>
-    </form>
+    </c-form>
     <c-pagination :page_obj="page_obj" />
 </div>

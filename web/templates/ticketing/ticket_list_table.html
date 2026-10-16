@@ -17,26 +17,22 @@
                 <span>
                     <strong x-text="selectedCount" aria-live="polite">0</strong> tickets selected
                 </span>
-                <form method="post"
-                      action="{% url 'tickets_bulk_claim' %}"
-                      class="d-inline"
-                      x-ref="bulkClaimForm">
+                <c-form action="{% url 'tickets_bulk_claim' %}"
+                      class="d-inline">
                     {% csrf_token %}
                     <input type="hidden" name="ticket_numbers" :value="selectedTickets" />
                     <c-button type="submit" variant="primary">
                         Claim Selected
                     </c-button>
-                </form>
-                <form method="post"
-                      action="{% url 'tickets_bulk_resolve' %}"
-                      class="d-inline"
-                      x-ref="bulkResolveForm">
+                </c-form>
+                <c-form action="{% url 'tickets_bulk_resolve' %}"
+                      class="d-inline">
                     {% csrf_token %}
                     <input type="hidden" name="ticket_numbers" :value="selectedTickets" />
                     <c-button type="submit" variant="primary">
                         Resolve Selected
                     </c-button>
-                </form>
+                </c-form>
             </div>
         </div>
     {% endif %}

@@ -12,18 +12,9 @@
     {% if is_ops %}
         <script>
         document.addEventListener('alpine:init', () => {
-            Alpine.data('ticketBulkSelect', () => compose(bulkSelectMixin('ticket-id'), {
-                init() { this.initBulkSelect(); },
+            Alpine.data('ticketBulkSelect', () => compose(bulkSelectMixin('ticket-id', 'ticket'), {
                 get selectedCount() { return this.selected.length; },
                 get selectedTickets() { return this.selected.join(','); },
-                bulkClaim() {
-                    if (this.selected.length === 0) { alert('Please select at least one ticket'); return; }
-                    this.$refs.bulkClaimForm.submit();
-                },
-                bulkResolve() {
-                    if (this.selected.length === 0) { alert('Please select at least one ticket'); return; }
-                    this.$refs.bulkResolveForm.submit();
-                }
             }));
         });
         </script>
