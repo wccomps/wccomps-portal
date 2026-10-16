@@ -12,7 +12,7 @@ from core.tests.roles import BROWSER_ROLES
 class PageDef:
     url_name: str
     url_kwargs: dict[str, str | int] = field(default_factory=dict)
-    needs_data: str | None = None  # "ticket", "team", "orange_check", "packet" — keys into test_data dict
+    needs_data: str | None = None  # a key of conftest.make_test_data's dict: the row the URL names
     # A browser role the view row lets in that the page isn't rendered as -> why
     skip_roles: dict[str, str] = field(default_factory=dict)
     expect_redirect: bool = False  # True if page redirects (e.g., home)
@@ -118,6 +118,10 @@ PAGES: list[PageDef] = [
         url_name="scoring:red_team_findings",
     ),
     PageDef(
+        url_name="scoring:view_red_score",
+        needs_data="finding",
+    ),
+    PageDef(
         url_name="scoring:ip_pool_list",
     ),
     PageDef(
@@ -132,6 +136,14 @@ PAGES: list[PageDef] = [
     ),
     PageDef(
         url_name="scoring:review_incidents",
+    ),
+    PageDef(
+        url_name="scoring:view_incident_report",
+        needs_data="incident",
+    ),
+    PageDef(
+        url_name="scoring:match_incident",
+        needs_data="incident",
     ),
     # =========================================================================
     # Scoring — Orange Team

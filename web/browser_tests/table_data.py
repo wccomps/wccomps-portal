@@ -1,6 +1,5 @@
 """Rows for every data table, so pages render their tables (most show an empty state instead of an empty table)."""
 
-from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import User
@@ -40,17 +39,8 @@ def seed_table_data(viewer: User) -> dict:
     # Scoring: an unapproved row for each review queue (with its select-all checkbox), and approved
     # inject points so the team has standings (leaderboard, scorecard, scorecard emails).
     pool = RedTeamIPPool.objects.create(name="Pool A", ip_addresses="10.0.0.1\n10.0.0.2", created_by=viewer)
-    finding = RedTeamScore.objects.create(
-        attack_vector="SSH brute force", source_ip_pool=pool, points_per_team=Decimal("10"), submitted_by=member
-    )
-    finding.affected_teams.add(team)
-    IncidentReport.objects.create(
-        team=team,
-        submitted_by=member,
-        attack_description="Saw an SSH login",
-        source_ip="10.0.0.1",
-        attack_detected_at=now - timedelta(minutes=30),
-    )
+    RedTeamScore.objects.filter(pk=data["finding"].pk).update(source_ip_pool=pool, submitted_by=member)
+    IncidentReport.objects.filter(pk=data["incident"].pk).update(submitted_by=member)
     for inject_id, approved in (("1", False), ("2", True)):
         InjectScore.objects.create(
             team=team,
