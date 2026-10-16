@@ -115,7 +115,7 @@ def test_ui_text_built_in_python_has_no_symbol_marks_or_dashes() -> None:
     "--". Every string in web/ is held to it, Discord messages built there included."""
     found = {}
     for name in tracked_files():
-        if not PYTHON_UI_FILES_RE.fullmatch(name) or name.startswith("web/core/tests"):
+        if not PYTHON_UI_FILES_RE.fullmatch(name):
             continue
         for number, value in string_constants(REPO_DIR / name):
             marks = sorted({c for c in value if c in DASHES or is_symbol(c)})

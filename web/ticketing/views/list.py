@@ -40,7 +40,6 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     # (an older link's) works too. Unknown values are ignored; none selected means all.
     requested = {part for value in request.GET.getlist("status") for part in value.split(",")}
     selected_statuses = [s for s, _label in Ticket.STATUS_CHOICES if s in requested]
-    status_filter = ",".join(selected_statuses) or "all"
     filters, filtered = list_filters(
         request, {"category": "all", "search": ""} | ({"team": "", "assignee": ""} if is_ops else {})
     )
@@ -135,7 +134,6 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         "team": team,
         "authentik_username": authentik_username,
         "page_obj": page_obj,
-        "status_filter": status_filter,
         "selected_statuses": selected_statuses,
         "status_choices": Ticket.STATUS_CHOICES,
         "filters": filters,
