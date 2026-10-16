@@ -18,6 +18,7 @@ from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from http.cookies import SimpleCookie
 from types import ModuleType
 from typing import Any
 from unittest.mock import patch
@@ -420,6 +421,8 @@ class ViewCase:
     post: FieldsFor | None = None  # POST fields (str, list of str, an upload, or a list of uploads)
     methods: tuple[str, ...] = ("GET", "POST")
     json: bool = False  # a JSON endpoint: every error and refusal is a JSON error, never a page or redirect
+    # Why the view sends a signed-in visitor to sign in (check_answer fails on that otherwise)
+    sends_to_sign_in: str = ""
     # Why the view answers JSON to some requests yet isn't a JSON endpoint (check_answer fails on JSON otherwise)
     json_sometimes: str = ""
     json_body: bool = False  # reads a JSON request body
@@ -610,7 +613,18 @@ class Answer:
 
 
 def send(world: World, drawn: Drawn) -> Answer:
+    """Send the request on its role's shared client, and give the client back its cookies afterwards: a sign-out
+    (oauth_logout, admin:logout) would otherwise leave the role signed out for the rest of the module. The session
+    row it deletes comes back with the example's rolled-back savepoint."""
     client = world.clients[drawn.role]
+    cookies = SimpleCookie(client.cookies)
+    try:
+        return _send(client, drawn)
+    finally:
+        client.cookies = cookies
+
+
+def _send(client: Client, drawn: Drawn) -> Answer:
     if drawn.tz is None:
         client.cookies.pop("tz", None)
     else:
@@ -666,6 +680,14 @@ def _is_upload(value: Any) -> bool:
 AUTHENTIK_HOSTS = {"auth.wccomps.org"}
 
 
+def sent_to_sign_in(answer: Answer) -> bool:
+    """The sign-in gate's answers: a redirect to sign in, an htmx reload, or a fetch's 401."""
+    response = answer.response
+    if response.status_code == 401 or (response.status_code == 204 and response.get("HX-Refresh") == "true"):
+        return True
+    return 300 <= response.status_code < 400 and urlsplit(response.get("Location", "")).path.startswith("/auth/login/")
+
+
 def is_refusal(answer: Answer) -> bool:
     """Refused: 401/403/404/405, an htmx reload to sign in, or a redirect to sign in or with an error message
     (require_permission's way)."""
@@ -687,6 +709,9 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
     assert status < 500, f"{where} answered {status}: {answer.content[:500]!r}"
 
     refused = is_refusal(answer)
+    if drawn.role != "anonymous" and not case.sends_to_sign_in:
+        # A signed-in role sent to sign in is a client that lost its session: every check after this would pass
+        assert not sent_to_sign_in(answer), f"{where}: a signed-in role was sent to sign in ({status})"
     if drawn.role not in case.allowed:
         # Only a NUL is refused with a 400 before any role is considered (core.middleware.RejectNulMiddleware)
         refused_early = status == 400 and drawn.carries_nul()

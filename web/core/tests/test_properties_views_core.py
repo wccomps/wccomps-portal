@@ -94,7 +94,10 @@ CASES = [
     ),
     ViewCase("oauth_logout", EVERYONE),
     ViewCase(
-        "link_initiate", EVERYONE, query=lambda w: {"token": st.one_of(st.just("prop-link-token"), hostile_text())}
+        "link_initiate",
+        EVERYONE,
+        query=lambda w: {"token": st.one_of(st.just("prop-link-token"), hostile_text())},
+        sends_to_sign_in="a link token starts the sign-in that the link callback finishes",
     ),
     ViewCase(
         "link_callback",
