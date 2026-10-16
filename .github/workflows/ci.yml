@@ -8,73 +8,9 @@ on:
 
 jobs:
   lint-and-test:
-    runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: wccomps
-          POSTGRES_PASSWORD: wccomps
-          POSTGRES_DB: wccomps_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    env:
-      DB_HOST: localhost
-      DB_PORT: "5432"
-      DB_USER: wccomps
-      DB_PASSWORD: wccomps
-      DB_NAME: wccomps_test
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.14'
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Install dependencies
-        run: |
-          uv sync
-
-      - name: Check code formatting
-        run: |
-          uv run ruff format --check .
-
-      - name: Run linting
-        run: |
-          uv run ruff check .
-
-      - name: Run type checking
-        run: |
-          DJANGO_SETTINGS_MODULE=portal.settings uv run mypy
-
-      - name: Check for unapplied migrations
-        run: |
-          cd web && DJANGO_SETTINGS_MODULE=portal.settings uv run python manage.py makemigrations --check --dry-run
-
-      - name: Collect static files
-        run: |
-          cd web && DJANGO_SETTINGS_MODULE=portal.settings uv run python manage.py collectstatic --noinput
-        env:
-          DJANGO_SECRET_KEY: test-secret-key-for-ci
-
-      - name: Run tests
-        run: |
-          uv run pytest -m "not browser"
-        env:
-          PYTHONPATH: ${{ github.workspace }}/web:${{ github.workspace }}
-          DJANGO_SECRET_KEY: test-secret-key-for-ci
+    uses: ./.github/workflows/tests.yml
+    with:
+      profile: ci
 
   # The production image (deployed on the deoxys cluster by wccomps/wccomps-argocd).
   # PRs only build (to catch a broken Dockerfile); pushes to main also publish to GHCR.

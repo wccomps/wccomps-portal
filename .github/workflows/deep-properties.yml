@@ -1,8 +1,10 @@
 name: Nightly deep property tests
 
 # The ci profile runs the same few Hypothesis examples on every PR; this runs the deep profile (many random
-# examples, conftest.py) on main every night, and on failure opens or updates one issue with the failing tests and
-# their examples. A PR that edits this file runs it once with the ci profile, and opens no issue.
+# examples, conftest.py) on main every night and on demand. When a run doesn't pass (a test fails, an earlier step
+# fails, or the job times out) it opens one issue, or comments on the open one; when a run passes, it closes it.
+# A PR that edits this workflow, tests.yml or the report script runs it with the ci profile and prints the issue
+# body it would send instead of sending it.
 
 on:
   schedule:
@@ -11,106 +13,59 @@ on:
   pull_request:
     paths:
       - .github/workflows/deep-properties.yml
+      - .github/workflows/tests.yml
+      - .github/scripts/deep_report.py
 
 permissions:
   contents: read
   issues: write
 
 jobs:
-  deep:
+  tests:
+    uses: ./.github/workflows/tests.yml
+    with:
+      profile: ${{ github.event_name == 'pull_request' && 'ci' || 'deep' }}
+      lint: false
+      # The night's run tests main; a PR's run tests the PR
+      ref: ${{ github.event_name == 'pull_request' && '' || 'main' }}
+
+  report:
+    needs: tests
+    if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 300
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: wccomps
-          POSTGRES_PASSWORD: wccomps
-          POSTGRES_DB: wccomps_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     env:
-      DB_HOST: localhost
-      DB_PORT: "5432"
-      DB_USER: wccomps
-      DB_PASSWORD: wccomps
-      DB_NAME: wccomps_test
-      HYPOTHESIS_PROFILE: ${{ github.event_name == 'pull_request' && 'ci' || 'deep' }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ISSUE_TITLE: "Nightly deep property tests failed"
-
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      SHA: ${{ needs.tests.outputs.sha || github.sha }}
+      RESULT: ${{ needs.tests.result }}
+      DRY_RUN: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v7
         with:
-          # The night's run tests main; a PR's run tests the PR
-          ref: ${{ github.event_name == 'pull_request' && github.sha || 'main' }}
+          persist-credentials: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.14'
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Install dependencies
-        run: |
-          uv sync
-
-      - name: Collect static files
-        run: |
-          cd web && DJANGO_SETTINGS_MODULE=portal.settings uv run python manage.py collectstatic --noinput
-        env:
-          DJANGO_SECRET_KEY: test-secret-key-for-ci
-
-      - name: Run the tests under the deep profile (every Hypothesis test; ci for a PR)
-        id: tests
+      - uses: actions/download-artifact@v4
         continue-on-error: true
-        run: |
-          uv run pytest -m "not browser" -n auto --junitxml=deep-results.xml
-        env:
-          PYTHONPATH: ${{ github.workspace }}/web:${{ github.workspace }}
-          DJANGO_SECRET_KEY: test-secret-key-for-ci
+        with:
+          name: test-results-${{ github.event_name == 'pull_request' && 'ci' || 'deep' }}
 
-      - name: Open or update the failure issue
-        if: steps.tests.outcome == 'failure' && github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      - name: Open, update or close the failure issue
         run: |
-          python3 - <<'EOF'
-          import os
-          import xml.etree.ElementTree as ET
-
-          lines = [f"Run: {os.environ['RUN_URL']} (commit {os.environ['GITHUB_SHA'][:8]})", ""]
-          try:
-              cases = ET.parse("deep-results.xml").getroot().iter("testcase")
-          except (OSError, ET.ParseError):
-              cases = []
-              lines.append("The run produced no results file; see the run's log.")
-          for case in cases:
-              for problem in [*case.findall("failure"), *case.findall("error")]:
-                  name = f"{case.get('classname')}::{case.get('name')}"
-                  text = (problem.text or problem.get("message") or "")[-3000:]
-                  lines += [f"### {name}", "", "```", text, "```", ""]
-          body = "\n".join(lines)[:60000]
-          with open("issue-body.md", "w", encoding="utf-8") as out:
-              out.write(body)
-          EOF
+          python3 .github/scripts/deep_report.py test-results.xml "$RUN_URL" "$SHA" > issue-body.md
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Tests: $RESULT. The issue body a failing night would send:"
+            cat issue-body.md
+            exit 0
+          fi
           number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$ISSUE_TITLE\" in:title" \
             --json number,title --jq 'map(select(.title == $ENV.ISSUE_TITLE)) | .[0].number // empty')
-          if [ -n "$number" ]; then
+          if [ "$RESULT" = "success" ]; then
+            if [ -n "$number" ]; then
+              gh issue close "$number" --repo "$GITHUB_REPOSITORY" --comment "Passed at $SHA: $RUN_URL"
+            fi
+          elif [ -n "$number" ]; then
             gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body-file issue-body.md
           else
             gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file issue-body.md
           fi
-
-      - name: Fail the run when the tests failed
-        if: steps.tests.outcome == 'failure'
-        run: exit 1
