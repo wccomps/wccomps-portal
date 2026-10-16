@@ -213,7 +213,7 @@ def test_resending_failed_emails_takes_the_lock(_send, team):
 @patch.object(PacketDistributionService, "send_packet_email")
 def test_the_admin_retry_takes_the_lock(_send, team):
     packet = _sent_packet(team)
-    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="admin")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     client = Client()
     client.force_login(admin)

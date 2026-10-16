@@ -4,7 +4,7 @@ import json
 
 import pytest
 from django.conf import settings
-from django.contrib.auth.models import AnonymousUser, User
+from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse
 from django.test import Client, RequestFactory
 from django.urls import URLPattern, URLResolver, get_resolver
@@ -427,7 +427,6 @@ class TestAuthentikRequiredMiddleware:
 
     def test_admin_path_allowed_for_admin_user(self, admin_user):
         """The Django admin lets an Authentik admin in."""
-        User.objects.filter(pk=admin_user.pk).update(is_staff=True, is_superuser=True)
         client = Client()
         client.force_login(admin_user)
         assert client.get("/admin/").status_code == 200

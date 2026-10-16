@@ -122,8 +122,6 @@ def build_world() -> World:
     users = {
         role: role_user(role, username=f"prop-{role}") for role, groups in ROLE_GROUPS.items() if groups is not None
     }
-    # The Django admin also wants a superuser (each model page checks Django's own permissions)
-    User.objects.filter(pk=users["admin"].pk).update(is_staff=True, is_superuser=True)
     sessions = {}
     for role, user in users.items():
         signing_in = Client()

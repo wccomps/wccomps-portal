@@ -103,9 +103,6 @@ def test_a_season_with_only_unused_events_is_deleted(gold_client, season):
 
 @pytest.fixture
 def admin_client(admin_user):
-    admin_user.is_staff = True
-    admin_user.is_superuser = True
-    admin_user.save()
     client = Client()
     client.force_login(admin_user)
     return client

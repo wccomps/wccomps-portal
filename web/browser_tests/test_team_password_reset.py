@@ -85,7 +85,7 @@ def test_django_admin_team_pages_have_reset_password(live_server, pw_browser, pa
     school = SchoolInfo.objects.create(
         team=team, school=School.for_name("Example School"), contact_email="captain@example.com"
     )
-    admin = User.objects.create(username="adminreset", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="adminreset")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     context = create_session_context(pw_browser, live_server, admin)
     page = context.new_page()

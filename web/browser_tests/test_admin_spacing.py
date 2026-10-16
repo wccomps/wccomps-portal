@@ -14,7 +14,7 @@ def test_admin_add_button_sits_below_the_breadcrumb_bar(live_server, pw_browser)
 
     from core.models import UserGroups
 
-    admin = User.objects.create(username="adminspacing", is_staff=True, is_superuser=True)
+    admin = User.objects.create(username="adminspacing")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     context = create_session_context(pw_browser, live_server, admin)
     page = context.new_page()

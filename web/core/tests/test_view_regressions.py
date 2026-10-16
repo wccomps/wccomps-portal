@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
+from django.db.models import Model
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
@@ -245,29 +246,28 @@ def test_checking_in_a_missing_volunteer_is_a_404(admin_client: Client, user_id:
 
 
 @pytest.fixture
-def superuser_client(admin_user: User) -> Client:
-    User.objects.filter(pk=admin_user.pk).update(is_staff=True, is_superuser=True)
+def admin_site_client(admin_user: User) -> Client:
     return signed_in(admin_user)
 
 
 @pytest.mark.parametrize("page", ["change", "delete"])
 @given(method=st.sampled_from(["get", "post"]))
 @example(method="get")
-def test_the_admin_refuses_an_empty_to_field(superuser_client: Client, page: str, method: str) -> None:
+def test_the_admin_refuses_an_empty_to_field(admin_site_client: Client, page: str, method: str) -> None:
     """Django's change and delete pages look an empty _to_field up as a field named "" and fail with a 500."""
     url = reverse(f"admin:core_botstate_{page}", args=[1])
     with rolled_back():
         BotState.objects.create(pk=1, key="k", value="v")
-        response = getattr(superuser_client, method)(f"{url}?_to_field=", {"_to_field": ""})
+        response = getattr(admin_site_client, method)(f"{url}?_to_field=", {"_to_field": ""})
     assert response.status_code == 400
 
 
-def test_the_admin_reads_to_field_as_django_does(superuser_client: Client) -> None:
+def test_the_admin_reads_to_field_as_django_does(admin_site_client: Client) -> None:
     """Django reads the POSTed _to_field before the query's: a POSTed one stands even with an empty query one."""
     url = reverse("admin:core_botstate_change", args=[1])
     with rolled_back():
         BotState.objects.create(pk=1, key="k", value="v")
-        response = superuser_client.post(f"{url}?_to_field=", {"_to_field": "id", "key": "k", "value": "v"})
+        response = admin_site_client.post(f"{url}?_to_field=", {"_to_field": "id", "key": "k", "value": "v"})
     assert response.status_code != 400
 
 
@@ -280,7 +280,6 @@ def test_django_still_fails_on_an_empty_to_field(admin_user: User, page: str) ->
     from django.test import RequestFactory
 
     BotState.objects.create(pk=1, key="k", value="v")
-    User.objects.filter(pk=admin_user.pk).update(is_staff=True, is_superuser=True)
     request = RequestFactory().get("/", {"_to_field": ""})
     request.user = User.objects.get(pk=admin_user.pk)
     model_admin = admin.site._registry[BotState]
@@ -291,12 +290,12 @@ def test_django_still_fails_on_an_empty_to_field(admin_user: User, page: str) ->
 
 @given(param=st.text(min_size=1, max_size=20).filter(lambda p: "\x00" not in p))
 @example(param="next")
-def test_the_admin_list_shows_its_error_page_for_an_unknown_filter(superuser_client: Client, param: str) -> None:
+def test_the_admin_list_shows_its_error_page_for_an_unknown_filter(admin_site_client: Client, param: str) -> None:
     """Django redirects a list asked for a filter it doesn't have to ?e=1, then renders its invalid-setup page
     without a request, which the portal's admin header broke: it read user.username with no user in the page."""
     assume(param not in ("q", "o", "p", "e", "all", "_popup", "_to_field") and not param.startswith("_"))
     with rolled_back():
-        response = superuser_client.get(reverse("admin:core_botstate_changelist"), {param: "x", "e": "1"})
+        response = admin_site_client.get(reverse("admin:core_botstate_changelist"), {param: "x", "e": "1"})
     assert response.status_code in (200, 302)
 
 
@@ -400,7 +399,6 @@ def test_the_admin_site_alone_decides_who_gets_into_the_django_admin(gold_team_u
 
     client = signed_in(gold_team_user)
     assert client.get(reverse("admin:index")).status_code == 403
-    User.objects.filter(pk=gold_team_user.pk).update(is_staff=True, is_superuser=True)
     with patch.object(type(admin.site), "has_permission", lambda self, request: True):
         assert client.get(reverse("admin:index")).status_code == 200
 
@@ -427,3 +425,34 @@ def test_the_admin_site_refuses_a_signed_in_non_admin_itself(gold_team_user: Use
     request.user = gold_team_user
     view = admin.site.login if page == "login" else admin.site.admin_view(admin.site.index)
     assert view(request).status_code == 403
+
+
+def _registered_models() -> list[type[Model]]:
+    from django.contrib import admin
+
+    return sorted(admin.site._registry, key=lambda model: model._meta.label)
+
+
+def test_an_admin_who_isnt_a_superuser_can_use_every_admin_model(admin_user: User) -> None:
+    """Production's admins hold the admin permission (an Authentik group) and no Django flags: each model page checks
+    Django's own permissions, which refused them everything."""
+    client = signed_in(admin_user)
+    user = User.objects.get(pk=admin_user.pk)
+    assert not user.is_superuser and not user.is_staff
+    for model in _registered_models():
+        meta = model._meta
+        for action in ("view", "add", "change", "delete"):
+            assert user.has_perm(f"{meta.app_label}.{action}_{meta.model_name}"), (meta.label, action)
+        changelist = reverse(f"admin:{meta.app_label}_{meta.model_name}_changelist")
+        assert client.get(changelist).status_code == 200, meta.label
+
+
+def test_a_superuser_without_the_admin_permission_cant_get_into_the_admin(gold_team_user: User) -> None:
+    client = signed_in(gold_team_user)
+    assert client.get(reverse("admin:index")).status_code == 403
+    assert client.get(reverse("admin:core_botstate_changelist")).status_code == 403
+
+
+def test_the_admin_permission_grants_nothing_to_a_user_without_it(gold_team_user: User) -> None:
+    user = User.objects.get(pk=gold_team_user.pk)
+    assert not any(user.has_perm(f"{m._meta.app_label}.view_{m._meta.model_name}") for m in _registered_models())
