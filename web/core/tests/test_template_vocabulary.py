@@ -32,8 +32,8 @@ from core.tests.guards import (
     WEB_DIR,
     Tag,
     fail_with,
-    is_standalone_document,
     page_templates,
+    portal_templates,
     tags,
     template_name,
     text,
@@ -340,9 +340,7 @@ def bound_names(path: Path) -> set[str]:
 @cache
 def portal_scripts() -> tuple[str, ...]:
     """Every script the portal runs: the non-standalone templates' scripts and static/js."""
-    found = [
-        script for p in tracked_templates() if not is_standalone_document(p) for script in SCRIPT_RE.findall(text(p))
-    ]
+    found = [script for p in portal_templates() for script in SCRIPT_RE.findall(text(p))]
     return tuple(found + [path.read_text(encoding="utf-8") for path in static_scripts().values()])
 
 
@@ -391,7 +389,7 @@ def page_uses() -> dict[str, set[str]]:
         add(
             found,
             path.relative_to(WEB_DIR).as_posix(),
-            (n for v in DICT_CLASS_RE.findall(path.read_text()) for n in literal_classes(v)),
+            (n for v in DICT_CLASS_RE.findall(text(path)) for n in literal_classes(v)),
         )
     return found
 
@@ -420,7 +418,7 @@ def bound_page_uses() -> dict[str, set[str]]:
 def hooks() -> frozenset[str]:
     """Classes the portal's script reads to find elements (querySelector('.box-toggle')). Such a class counts as
     defined even with no rule of its own."""
-    portal = [p for p in tracked_templates() if not is_standalone_document(p)]
+    portal = portal_templates()
     return frozenset(
         name
         for path in portal
@@ -466,7 +464,7 @@ def known_variants() -> dict[str, set[str]]:
     """Component -> the variants its template compares `variant` with, plus its default."""
     known = {}
     for path in shared_component_paths():
-        content = path.read_text()
+        content = text(path)
         compared = set(re.findall(r"variant\s*==\s*['\"]([^'\"]*)['\"]", content))
         if compared:
             defaults = {tag.attrs["variant"] for tag in tags(path) if tag.name == "c-vars" and "variant" in tag.attrs}
@@ -559,9 +557,7 @@ def test_variants_are_ones_the_component_knows() -> None:
     variant="danger" rendered green). A variant from a stored status goes through the status's mapping."""
     known = known_variants()
     found: dict[str, str] = {}
-    for path in tracked_templates():
-        if is_standalone_document(path):
-            continue
+    for path in portal_templates():
         for tag in tags(path):
             name = tag.name.removeprefix("c-")
             if not tag.name.startswith("c-") or name not in known or "variant" not in tag.attrs:

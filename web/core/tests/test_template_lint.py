@@ -8,12 +8,13 @@ import re
 from core.tests.guards import (
     Tag,
     component_templates,
-    elements,
     fail_with,
     page_templates,
     tags,
     template_name,
+    text,
     tracked_templates,
+    with_open_elements,
 )
 
 # ---------------------------------------------------------------------------
@@ -25,7 +26,7 @@ def test_cotton_components_have_load_statement() -> None:
     """Templates using <c-*> must have {% load cotton %}."""
     found = {}
     for path in page_templates():
-        content = path.read_text()
+        content = text(path)
         uses = bool(re.search(r"<c-\w+|{%\s*c-\w+", content))
         if uses and not re.search(r"{%\s*load\s+[^%]*\bcotton\b[^%]*%}", content):
             found[template_name(path)] = "uses cotton components without {% load cotton %}"
@@ -39,14 +40,12 @@ def test_cotton_components_have_load_statement() -> None:
 
 def test_no_nested_forms() -> None:
     """Nested <form> tags are invalid HTML: the browser drops the inner form, so its button submits the outer one."""
-    found = {}
-    for path in page_templates():
-        depth = 0
-        for tag in elements(path):
-            if tag.name in ("form", "c-form"):
-                depth += -1 if tag.closing else 1
-                if depth > 1 and not tag.closing:
-                    found[f"{template_name(path)}:{tag.line}"] = "a form inside a form"
+    found = {
+        f"{template_name(path)}:{tag.line}": "a form inside a form"
+        for path in page_templates()
+        for tag, open_tags in with_open_elements(path)
+        if tag.name in ("form", "c-form") and any(t.name in ("form", "c-form") for t in open_tags)
+    }
     fail_with("Nested forms", found, {})
 
 
@@ -117,7 +116,7 @@ class TestMixinsComposedNotSpread:
     def test_no_mixin_spread(self) -> None:
         found = {}
         for path in tracked_templates():
-            content = path.read_text()
+            content = text(path)
             for match in self.SPREAD_RE.finditer(content):
                 found[f"{template_name(path)}:{content.count(chr(10), 0, match.start()) + 1}"] = ""
         fail_with("Mixins spread rather than combined with compose(mixin(), {...})", found, {})
@@ -158,7 +157,7 @@ def test_cotton_components_include_attrs() -> None:
     found = {
         template_name(path): "writes no {{ attrs }}"
         for path in component_templates()
-        if path.suffix == ".html" and "{{ attrs }}" not in path.read_text()
+        if path.suffix == ".html" and "{{ attrs }}" not in text(path)
     }
     fail_with("Components that drop the attributes passed to them", found, FRAGMENT_COMPONENTS)
 

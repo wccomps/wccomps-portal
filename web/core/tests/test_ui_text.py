@@ -42,6 +42,11 @@ def ui_files() -> list[tuple[str, Path]]:
     ]
 
 
+def lines_of(path: Path) -> list[str]:
+    """A template's lines without its template comments, or a Python file's lines."""
+    return (text(path) if path.suffix == ".html" else path.read_text(encoding="utf-8")).splitlines()
+
+
 def is_symbol(character: str) -> bool:
     return ord(character) > 127 and unicodedata.category(character) in ("So", "Sk", "Sm")
 
@@ -49,7 +54,7 @@ def is_symbol(character: str) -> bool:
 def test_ui_text_has_no_symbol_marks() -> None:
     found = {}
     for name, path in ui_files():
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        for number, line in enumerate(lines_of(path), 1):
             for character in line:
                 if is_symbol(character):
                     found.setdefault(f"{name}:{character}", f"line {number}, {unicodedata.name(character, '?')}")
@@ -59,7 +64,7 @@ def test_ui_text_has_no_symbol_marks() -> None:
 def test_ui_text_has_no_dashes() -> None:
     found = {}
     for name, path in ui_files():
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        for number, line in enumerate(lines_of(path), 1):
             for dash, what in DASHES.items():
                 if dash in line:
                     found[f"{name}:{number}"] = what

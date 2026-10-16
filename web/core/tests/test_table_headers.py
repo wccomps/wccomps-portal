@@ -5,31 +5,7 @@ Column headers go through c-table_header, whose <span>/<a> Django admin's CSS pa
 checkbox column classes so it lines up with the row checkboxes.
 """
 
-from collections.abc import Iterator
-from pathlib import Path
-
-from core.tests.guards import Tag, elements, fail_with, is_standalone_document, tags, template_name, tracked_templates
-
-# Standalone documents (guards.is_standalone_document) carry their own styles and are left out
-VOID = {"input", "br", "img", "hr", "meta", "link", "source", "col", "wbr", "area", "base", "embed", "track"}
-
-
-def _templates() -> list[Path]:
-    return [path for path in tracked_templates() if not is_standalone_document(path)]
-
-
-def with_open_elements(path: Path) -> Iterator[tuple[Tag, list[Tag]]]:
-    """Each start tag with the elements open around it, outermost first."""
-    open_tags: list[Tag] = []
-    for tag in elements(path):
-        if tag.closing:
-            names = [t.name for t in open_tags]
-            if tag.name in names:
-                del open_tags[len(names) - 1 - names[::-1].index(tag.name) :]
-            continue
-        yield tag, open_tags
-        if tag.name not in VOID:
-            open_tags.append(tag)
+from core.tests.guards import Tag, fail_with, portal_templates, tags, template_name, with_open_elements
 
 
 def in_header_row(open_tags: list[Tag]) -> bool:
@@ -38,7 +14,7 @@ def in_header_row(open_tags: list[Tag]) -> bool:
 
 def test_column_headers_use_the_component() -> None:
     found = {}
-    for path in _templates():
+    for path in portal_templates():
         header_cells: dict[int, tuple[Tag, bool]] = {}
         for tag, open_tags in with_open_elements(path):
             if tag.name == "th" and in_header_row(open_tags):
@@ -57,7 +33,7 @@ def test_column_headers_use_the_component() -> None:
 
 def test_row_checkboxes_share_the_select_all_column() -> None:
     found = {}
-    for path in _templates():
+    for path in portal_templates():
         for tag, open_tags in with_open_elements(path):
             if tag.name == "input" and tag.attrs.get("type") == "checkbox" and tag.attrs.get("@change") == "toggleItem":
                 cell = next((t for t in reversed(open_tags) if t.name == "td"), None)
@@ -70,7 +46,7 @@ def test_current_sort_is_the_context_value() -> None:
     """current_sort="sort_by" passes the string "sort_by", so the sort arrow never shows."""
     found = {
         f"{template_name(path)}:{tag.line}": f'current_sort="{tag.attrs["current_sort"]}"'
-        for path in _templates()
+        for path in portal_templates()
         for tag in tags(path)
         if tag.name != "c-vars" and "{{" not in tag.attrs.get("current_sort", "{{")
     }

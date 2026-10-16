@@ -5,7 +5,7 @@ Exceptions must be visible in this file, with a reason, so they get reviewed.
 
 import re
 
-from core.tests.guards import fail_with, page_templates, template_name
+from core.tests.guards import fail_with, page_templates, template_name, text
 
 MESSAGE_LOOP = re.compile(r"{%\s*if\s+messages\s*%}|{%\s*for\s+\w+\s+in\s+messages\s*%}")
 
@@ -20,6 +20,6 @@ def test_pages_do_not_render_messages_themselves() -> None:
     found = {
         template_name(p): "loops over messages; admin/base_site.html renders them"
         for p in page_templates()
-        if MESSAGE_LOOP.search(p.read_text())
+        if MESSAGE_LOOP.search(text(p))
     }
     fail_with("Pages that render messages themselves", found, MESSAGE_LOOP_ALLOWLIST)

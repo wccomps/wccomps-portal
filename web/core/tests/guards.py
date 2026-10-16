@@ -9,7 +9,7 @@ go stale.
 import fnmatch
 import re
 import subprocess
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from functools import cache
 from html.parser import HTMLParser
 from pathlib import Path
@@ -19,8 +19,6 @@ import pytest
 REPO_DIR = Path(__file__).resolve().parents[3]
 WEB_DIR = REPO_DIR / "web"
 TEMPLATES_DIR = WEB_DIR / "templates"
-# Template and HTML comments, which say <html> without being one
-COMMENTS_RE = re.compile(r"{#.*?#}|{%\s*comment\s*%}.*?{%\s*endcomment\s*%}|<!--.*?-->", re.DOTALL)
 
 
 @cache
@@ -53,6 +51,12 @@ def component_templates() -> tuple[Path, ...]:
 
 
 @cache
+def portal_templates() -> tuple[Path, ...]:
+    """Every template the portal frames: all but the standalone documents (components included)."""
+    return tuple(p for p in tracked_templates() if not is_standalone_document(p))
+
+
+@cache
 def page_templates() -> tuple[Path, ...]:
     """Pages and the includes beside them: every template but the components and the standalone documents."""
     components = set(component_templates())
@@ -68,8 +72,7 @@ def template_name(path: Path) -> str:
 def is_standalone_document(path: Path) -> bool:
     """A template with an <html> of its own (emails, the print scorecard, the 500 page, the public registration
     form): it carries its own styles and never loads the portal's base template or app.css."""
-    content = COMMENTS_RE.sub("", path.read_text(encoding="utf-8"))
-    return bool(re.search(r"<html\b", content, re.IGNORECASE))
+    return any(tag.name == "html" for tag in elements(path))
 
 
 def fail_with(
@@ -185,3 +188,20 @@ def text_nodes(path: Path) -> tuple[tuple[int, str], ...]:
 def tags(path: Path) -> tuple[Tag, ...]:
     """Every start tag in the template (see elements)."""
     return tuple(tag for tag in elements(path) if not tag.closing)
+
+
+VOID = {"input", "br", "img", "hr", "meta", "link", "source", "col", "wbr", "area", "base", "embed", "track"}
+
+
+def with_open_elements(path: Path) -> Iterator[tuple[Tag, list[Tag]]]:
+    """Each start tag with the elements open around it, outermost first."""
+    open_tags: list[Tag] = []
+    for tag in elements(path):
+        if tag.closing:
+            names = [t.name for t in open_tags]
+            if tag.name in names:
+                del open_tags[len(names) - 1 - names[::-1].index(tag.name) :]
+            continue
+        yield tag, open_tags
+        if tag.name not in VOID:
+            open_tags.append(tag)
