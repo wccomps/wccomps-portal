@@ -225,8 +225,8 @@ window.addEventListener('submit', (e) => {
         .forEach(button => { button.disabled = true; button.dataset.postingDisabled = 'true'; }));
 });
 
-// A page brought back by Back posts again; a POST that fails without leaving the page (offline, Stop) keeps its
-// form blocked until a reload
+// A page brought back by Back posts again. A POST that fails without leaving the page (offline, Stop) keeps its
+// form blocked until a reload, and a refresh covering that form keeps skipping its turns until then too.
 window.addEventListener('pageshow', (e) => {
     if (!e.persisted) return;
     document.querySelectorAll('form[data-posting]').forEach(form => delete form.dataset.posting);
@@ -236,9 +236,9 @@ window.addEventListener('pageshow', (e) => {
     });
 });
 
-// A refresh (an element reloading itself, like the ticket list's 30 s poll) replaces what it covers, so it waits
-// while a form there is posting or a row there is checked (the selection would go). A request the person made,
-// such as a filter change, goes ahead.
+// A refresh (an element reloading itself, like the ticket list's 30 s poll) replaces what it covers, so it skips its
+// turn while a form there is posting (the swap would reset its guard) or a row there is checked (the selection
+// would go). A request the person made, such as a filter change, goes ahead.
 document.addEventListener('htmx:beforeRequest', (e) => {
     const area = e.detail.target;
     if (e.detail.elt !== area) return;

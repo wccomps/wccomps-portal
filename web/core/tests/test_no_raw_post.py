@@ -22,7 +22,7 @@ RAW_POST_PATTERNS = re.compile(
 # The view modules scanned (repo-relative fnmatch patterns over tracked files)
 VIEW_PATTERNS = ("web/*/views.py", "web/*/views/*.py", "web/*/admin_views/*.py")
 
-# "path" -> why that view reads request.POST itself
+# "path:line" (or "path:*") -> why that view reads request.POST itself
 EXCEPTIONS: dict[str, str] = {}
 
 

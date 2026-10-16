@@ -154,7 +154,8 @@ class TagReader(HTMLParser):
         self.found.append(Tag(tag, {}, self.getpos()[0], closing=True))
 
     def handle_data(self, data: str) -> None:
-        if not self.cdata_elem and data.strip():  # cdata_elem: inside <script> or <style>
+        # cdata_elem: inside a raw text element; of those, a title's and a textarea's text is shown
+        if self.cdata_elem in (None, "title", "textarea") and data.strip():
             self.texts.append((self.getpos()[0], self.restore(data)))
 
 
@@ -180,7 +181,8 @@ def elements(path: Path) -> tuple[Tag, ...]:
 
 
 def text_nodes(path: Path) -> tuple[tuple[int, str], ...]:
-    """The text between tags with its line, outside <script> and <style>, template tags kept as written."""
+    """The text a page shows, with its line: between tags, titles and textareas included, scripts and styles left
+    out, template tags kept as written."""
     return tuple(read(path).texts)
 
 

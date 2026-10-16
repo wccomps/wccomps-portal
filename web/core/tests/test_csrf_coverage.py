@@ -60,7 +60,8 @@ def missing_form_tokens(templates: list[tuple[str, Path]]) -> dict[str, str]:
     return missing
 
 
-def portal_templates() -> list[tuple[str, Path]]:
+def all_templates() -> list[tuple[str, Path]]:
+    """Every tracked template, the standalone documents included (the public registration form posts too)."""
     return [(template_name(path), path) for path in tracked_templates()]
 
 
@@ -93,7 +94,7 @@ def _fetch_posts(source: str) -> list[re.Match[str]]:
 
 
 def _load_templates() -> dict[str, str]:
-    return {name: path.read_text() for name, path in portal_templates()}
+    return {name: text(path) for name, path in all_templates()}
 
 
 def _all_patterns(resolver: URLResolver, prefix: str = "") -> list[tuple[str, URLPattern]]:
@@ -110,7 +111,7 @@ def _all_patterns(resolver: URLResolver, prefix: str = "") -> list[tuple[str, UR
 
 
 def test_every_post_form_has_csrf_token():
-    fail_with("POST forms without {% csrf_token %}", missing_form_tokens(portal_templates()), POST_FORM_EXCEPTIONS)
+    fail_with("POST forms without {% csrf_token %}", missing_form_tokens(all_templates()), POST_FORM_EXCEPTIONS)
 
 
 def test_javascript_posts_can_find_the_token():

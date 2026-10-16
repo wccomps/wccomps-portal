@@ -1,6 +1,7 @@
-"""UI text (templates and Django admin columns) uses words: no emoji, symbol marks or math signs standing for a
-status or a control, no em or en dashes, and no hyphen standing in for a dash (" - ", "--") or for a missing value.
-An empty value is left blank. Page titles keep their "Page - WCComps Portal" separator.
+"""UI text uses words. In templates and Django admin columns: no emoji, symbol marks or math signs standing for a
+status or a control, no em or en dashes, and no hyphen standing in for a dash (" - ", "--") or for a missing value;
+an empty value is left blank, and page titles keep their "Page - WCComps Portal" separator. In the web app's other
+Python strings: no symbol marks, em or en dashes, or "--" (the spaced hyphen isn't checked there yet).
 
 A symbol that is the control itself (a menu toggle, a sort arrow) is listed in SYMBOL_EXCEPTIONS with why.
 """
@@ -85,8 +86,9 @@ def test_ui_text_has_no_dashes() -> None:
     fail_with("Dashes in UI text", found, {})
 
 
-# Python modules whose strings reach a page: the web app (not its tests or migrations), and the bot's role sync,
-# whose change list the Sync Roles page shows. The rest of the bot writes Discord messages, outside this rule.
+# Python modules held to the rule: every module in the web app (not its tests or migrations), Discord messages
+# built there included, and the bot's role sync, whose change list the Sync Roles page shows. The rest of the bot
+# writes Discord messages and is outside it.
 PYTHON_UI_FILES_RE = re.compile(r"web/(?!.*/tests/|.*/migrations/|browser_tests/).*\.py|bot/role_sync\.py")
 
 
@@ -109,7 +111,8 @@ def string_constants(path: Path) -> list[tuple[int, str]]:
 
 
 def test_ui_text_built_in_python_has_no_symbol_marks_or_dashes() -> None:
-    """Messages, form errors, admin columns and other strings a page shows follow the same rule as templates."""
+    """Messages, form errors, admin columns and other strings built in Python: no symbol marks, em or en dashes, or
+    "--". Every string in web/ is held to it, Discord messages built there included."""
     found = {}
     for name in tracked_files():
         if not PYTHON_UI_FILES_RE.fullmatch(name) or name.startswith("web/core/tests"):
