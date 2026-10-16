@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
-from core.utils import optional_int
+from core.utils import optional_int, requested_sort
 from team.models import Team
 
 from ..forms import ApproveInjectFeedbackForm, SaveInjectFeedbackForm
@@ -159,6 +159,10 @@ def inject_grading(request: HttpRequest) -> HttpResponse:
     return render(request, "scoring/inject_grading.html", context)
 
 
+# The columns the inject grades table sorts by
+INJECT_GRADE_SORTS = ("inject_name", "team__team_number", "points_awarded", "graded_at")
+
+
 @require_permission("white_team", error_message="Only White Team or Gold Team members can review inject grades")
 def inject_grades_review(request: HttpRequest) -> HttpResponse:
     """Review and approve inject grades (Gold Team)."""
@@ -172,10 +176,7 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
     team_filter = request.GET.get("team", "")
     show_outliers_only = request.GET.get("outliers") == "1"
     search_query = request.GET.get("search", "").strip()
-    sort_by = request.GET.get("sort", "inject_name")
-    if sort_by == "default":
-        sort_by = ""
-    page = request.GET.get("page", "1")
+    sort_by = requested_sort(request, INJECT_GRADE_SORTS, "inject_name")
 
     base_query = InjectScore.objects.select_related("team", "graded_by")
 
@@ -194,6 +195,9 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
         from django.db.models import Q
 
         base_query = base_query.filter(Q(inject_name__icontains=search_query) | Q(inject_id__icontains=search_query))
+
+    if sort_by:
+        base_query = base_query.order_by(sort_by)
 
     # Outliers are computed among the grades that match the current filters
     # Dynamically add is_outlier and std_devs_from_mean attrs to grade objects
@@ -225,33 +229,7 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
     if show_outliers_only:
         all_grades_for_outlier_calc = [g for g in all_grades_for_outlier_calc if g.is_outlier]
 
-    valid_sort_fields = [
-        "inject_name",
-        "-inject_name",
-        "team__team_number",
-        "-team__team_number",
-        "points_awarded",
-        "-points_awarded",
-        "graded_at",
-        "-graded_at",
-    ]
-    if sort_by and sort_by not in valid_sort_fields:
-        sort_by = "inject_name"
-
-    # Sort in Python since we already have the list
-    if sort_by:
-        reverse = sort_by.startswith("-")
-        sort_key = sort_by.lstrip("-")
-        if sort_key == "team__team_number":
-            all_grades_for_outlier_calc.sort(key=lambda g: g.team.team_number, reverse=reverse)
-        elif sort_key == "inject_name":
-            all_grades_for_outlier_calc.sort(key=lambda g: g.inject_name, reverse=reverse)
-        elif sort_key == "points_awarded":
-            all_grades_for_outlier_calc.sort(key=lambda g: float(g.points_awarded), reverse=reverse)
-        elif sort_key == "graded_at":
-            all_grades_for_outlier_calc.sort(key=lambda g: g.graded_at, reverse=reverse)
-
-    page_obj = Paginator(all_grades_for_outlier_calc, 50).get_page(page)
+    page_obj = Paginator(all_grades_for_outlier_calc, 50).get_page(request.GET.get("page"))
 
     # Stats (unfiltered counts)
     total_grades = InjectScore.objects.count()
