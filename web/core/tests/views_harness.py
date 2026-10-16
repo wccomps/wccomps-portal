@@ -418,6 +418,8 @@ class ViewCase:
     post: FieldsFor | None = None  # POST fields (str, list of str, an upload, or a list of uploads)
     methods: tuple[str, ...] = ("GET", "POST")
     json: bool = False  # a JSON endpoint: every error and refusal is a JSON error, never a page or redirect
+    # Why the view answers JSON to some requests yet isn't a JSON endpoint (check_answer fails on JSON otherwise)
+    json_sometimes: str = ""
     json_body: bool = False  # reads a JSON request body
     # Models whose rows must come out the same when the same POST is sent twice
     idempotent: tuple[type[models.Model], ...] = ()
@@ -697,6 +699,8 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
         assert status in (400, 401, 403, 404, 405, 409, 413, 429), f"{where}: JSON error status {status}"
     if content_type.startswith("application/json") and has_body:
         json.loads(answer.content)
+        if 200 <= status < 300:
+            assert case.json or case.json_sometimes, f"{where} answers JSON: mark its row json=True"
 
     if content_type.startswith("text/html"):
         page = answer.content.decode("utf-8", "replace")

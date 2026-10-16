@@ -84,7 +84,7 @@ def _school_import(w: World) -> Fields:
 
 CASES = [
     ViewCase("home", SIGNED_IN - {"no_role"}),
-    ViewCase("health_check", EVERYONE),
+    ViewCase("health_check", EVERYONE, json=True),
     ViewCase("livez", EVERYONE),
     ViewCase("oauth_login", EVERYONE),
     ViewCase(

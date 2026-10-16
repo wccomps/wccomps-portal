@@ -108,7 +108,12 @@ CASES = [
     ),
     ViewCase("scoring:red_screenshot", may("red_team", "gold_team"), params={"screenshot_id": "red_screenshot_id"}),
     ViewCase("scoring:ip_pool_list", RED),
-    ViewCase("scoring:ip_pool_create", RED, post=lambda w: form_fields(RedTeamIPPoolForm(user=w.users["red_team"]))),
+    ViewCase(
+        "scoring:ip_pool_create",
+        RED,
+        post=lambda w: form_fields(RedTeamIPPoolForm(user=w.users["red_team"])),
+        json_sometimes="answers the finding form's pool modal (an XHR) with JSON, and its own form page otherwise",
+    ),
     ViewCase("scoring:ip_pool_edit", RED, post=lambda w: form_fields(RedTeamIPPoolForm(user=w.users["red_team"]))),
     ViewCase("scoring:ip_pool_delete", RED),
     ViewCase("scoring:incident_list", GOLD_WHITE | {"blue_team"}),
