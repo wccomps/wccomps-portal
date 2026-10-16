@@ -22,9 +22,8 @@ def back_to_list(request: HttpRequest) -> HttpResponse:
     list_path = reverse("ticket_list")
     referer = request.headers.get("referer", "")
     came_from = urlsplit(referer)
-    if url_has_allowed_host_and_scheme(referer, {request.get_host()}) and came_from.path == list_path:
-        return redirect(f"{list_path}?{came_from.query}" if came_from.query else list_path)
-    return redirect(list_path)
+    from_list = url_has_allowed_host_and_scheme(referer, {request.get_host()}) and came_from.path == list_path
+    return redirect(f"{list_path}?{came_from.query}" if from_list and came_from.query else list_path)
 
 
 def tickets_bulk_claim(request: HttpRequest) -> HttpResponse:
