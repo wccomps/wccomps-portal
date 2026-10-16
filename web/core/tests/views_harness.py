@@ -17,6 +17,7 @@ from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from enum import StrEnum
 from typing import Any
 from unittest.mock import patch
 from urllib.parse import unquote, urlsplit
@@ -731,26 +732,35 @@ def _is_upload(value: Any) -> bool:
 AUTHENTIK_HOSTS = {"auth.wccomps.org"}
 
 
-def sent_to_sign_in(answer: Answer) -> bool:
-    """The sign-in gate's answers: a redirect to sign in, an htmx reload, or a fetch's 401."""
+class Kind(StrEnum):
+    """What an answer is, as far as the oracle cares."""
+
+    SIGN_IN = "sign in"  # the sign-in gate: a redirect to sign in, an htmx reload, or a fetch's 401
+    FORBIDDEN = "forbidden"  # 403
+    MISSING = "missing"  # 404
+    WRONG_METHOD = "wrong method"  # 405
+    REFUSED_HOME = "refused home"  # require_permission's redirect home with an error
+    REFUSED = "refused"  # another redirect with an error (a form's, an object's state)
+    ANSWERED = "answered"
+
+
+def kind_of(answer: Answer) -> Kind:
     response = answer.response
-    if response.status_code == 401 or (response.status_code == 204 and response.get("HX-Refresh") == "true"):
-        return True
-    return 300 <= response.status_code < 400 and urlsplit(response.get("Location", "")).path.startswith("/auth/login/")
+    status = response.status_code
+    location = urlsplit(response.get("Location", "")).path
+    if status == 401 or (status == 204 and response.get("HX-Refresh") == "true"):
+        return Kind.SIGN_IN
+    if 300 <= status < 400 and location.startswith("/auth/login/"):
+        return Kind.SIGN_IN
+    if status in (403, 404, 405):
+        return {403: Kind.FORBIDDEN, 404: Kind.MISSING, 405: Kind.WRONG_METHOD}[status]
+    if 300 <= status < 400 and answer.errors:
+        return Kind.REFUSED_HOME if location == "/" else Kind.REFUSED
+    return Kind.ANSWERED
 
 
-def is_refusal(answer: Answer) -> bool:
-    """Refused: 401/403/404/405, an htmx reload to sign in, or a redirect to sign in or with an error message
-    (require_permission's way)."""
-    status = answer.response.status_code
-    if status in (401, 403, 404, 405):
-        return True
-    if status == 204 and answer.response.get("HX-Refresh") == "true":
-        return True  # an htmx request whose session expired: the page reloads into sign-in
-    if 300 <= status < 400:
-        location = answer.response.get("Location", "")
-        return urlsplit(location).path.startswith("/auth/login/") or bool(answer.errors)
-    return False
+# A permission check's answers (a form's or an object's own refusal redirects elsewhere)
+PERMISSION_REFUSALS = {Kind.SIGN_IN, Kind.FORBIDDEN, Kind.MISSING, Kind.REFUSED_HOME}
 
 
 def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
@@ -759,10 +769,11 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
     where = f"{drawn.role} {drawn.method} {drawn.path}"
     assert status < 500, f"{where} answered {status}: {answer.content[:500]!r}"
 
-    refused = is_refusal(answer)
+    kind = kind_of(answer)
+    refused = kind is not Kind.ANSWERED
     if drawn.role != "anonymous" and not case.sends_to_sign_in:
         # A signed-in role sent to sign in is a client that lost its session: every check after this would pass
-        assert not sent_to_sign_in(answer), f"{where}: a signed-in role was sent to sign in ({status})"
+        assert kind is not Kind.SIGN_IN, f"{where}: a signed-in role was sent to sign in ({status})"
     if drawn.role not in case.allowed:
         # Only a NUL is refused with a 400 before the view's role check (core.middleware's NUL refusals)
         refused_early = status == 400 and drawn.carries_nul()
@@ -774,7 +785,7 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
         assert not answer.outbound, f"{where} refused ({status}) but called another service {answer.outbound} time(s)"
 
     content_type = response.get("Content-Type", "")
-    htmx_reload = status == 204 and response.get("HX-Refresh") == "true"
+    htmx_reload = kind is Kind.SIGN_IN and status == 204  # the gate reloads an htmx page into sign-in
     has_body = drawn.method != "HEAD"
     if case.json and has_body and not htmx_reload and (400 <= status < 500 or drawn.role not in case.allowed):
         assert content_type.startswith("application/json"), f"{where} answered {status} {content_type}, not JSON"
@@ -884,15 +895,6 @@ def echo_sweep(case: ViewCase, world: World) -> None:
                     check_answer(case, drawn, send(world, drawn))
 
 
-def refused_by_permission(answer: Answer) -> bool:
-    """A permission refusal: 401/403, a missing object, the sign-in gate, or require_permission's redirect home with
-    an error (a form's error redirects elsewhere, so it isn't one)."""
-    status = answer.response.status_code
-    if status in (401, 403, 404) or sent_to_sign_in(answer):
-        return True
-    return 300 <= status < 400 and urlsplit(answer.response.get("Location", "")).path == "/" and bool(answer.errors)
-
-
 def every_allowed_role_gets_in(case: ViewCase, world: World) -> None:
     """Each role the row allows gets past the view's permission check on some real object: a GET (a POST with no
     fields where the view takes only POST) is not refused for at least one valid path. A row that lists a role its
@@ -915,7 +917,7 @@ def every_allowed_role_gets_in(case: ViewCase, world: World) -> None:
                     answers.append((drawn.path, method, answer.response.status_code))
                     if answer.response.status_code != 405:
                         break
-                if not refused_by_permission(answer) and answer.response.status_code != 405:
+                if kind_of(answer) not in (*PERMISSION_REFUSALS, Kind.WRONG_METHOD):
                     assert offered, f"{name}: a page the row says is turned off let {role} in: {answers}"
                     break
             else:
