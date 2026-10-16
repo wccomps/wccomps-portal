@@ -48,8 +48,6 @@
                             {% if check.scheduled_at %}
                                 {{ check.scheduled_at|date:"H:i" }}
                                 {% if check.window_end %}to {{ check.window_end|date:"H:i" }}{% endif %}
-                            {% else %}
-                                
                             {% endif %}
                         </td>
                         <td>{{ check.max_score }}</td>
@@ -118,15 +116,11 @@
                         <td>
                             {% if v.current_task %}
                                 Team {{ v.current_task.team.team_number }} · {{ v.current_task.orange_check.title }}
-                            {% else %}
-                                
                             {% endif %}
                         </td>
                         <td>
                             {% if v.next_task %}
                                 Team {{ v.next_task.team.team_number }} · {{ v.next_task.orange_check.title }}
-                            {% else %}
-                                
                             {% endif %}
                         </td>
                         <td>{{ v.open_count }}</td>

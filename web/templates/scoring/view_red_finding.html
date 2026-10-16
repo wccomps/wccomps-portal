@@ -24,7 +24,7 @@
                 <h3>Attack Details</h3>
                 <c-detail_grid>
                     <c-detail_row label="Attack Type">
-                        {{ finding.attack_type.name|default:finding.attack_vector|default:"Unknown" }}
+                        {{ finding.attack_type.name|default:"Unknown" }}
                     </c-detail_row>
                     <c-detail_row label="Affected Boxes">
                         {{ finding.affected_boxes_display }}

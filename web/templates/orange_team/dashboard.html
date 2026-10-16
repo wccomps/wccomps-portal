@@ -153,8 +153,6 @@
                             {% if assignment.orange_check.scheduled_at %}
                                 {{ assignment.orange_check.scheduled_at|date:"H:i" }}
                                 {% if assignment.orange_check.window_end %}to {{ assignment.orange_check.window_end|date:"H:i" }}{% endif %}
-                            {% else %}
-                                
                             {% endif %}
                         </td>
                         <td>

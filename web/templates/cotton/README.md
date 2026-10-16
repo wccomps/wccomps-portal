@@ -135,9 +135,7 @@ Color mapping:
 Empty state display for when no data is available.
 ```django
 <c-empty_state title="No incidents found" />
-<c-empty_state icon="📋" title="No results" />
 <c-empty_state
-    icon="🔍"
     title="No search results"
     description="Try adjusting your filters.">
     <a href="/reset/" class="button">Clear Filters</a>
@@ -145,7 +143,6 @@ Empty state display for when no data is available.
 ```
 
 Props:
-- `icon` (optional): Emoji or icon character displayed above title
 - `title` (required): Main heading text
 - `description` (optional): Secondary explanatory text in muted color
 - Slot: Optional action button or link

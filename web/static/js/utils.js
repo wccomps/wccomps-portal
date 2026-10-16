@@ -277,8 +277,7 @@ function bulkSelectMixin(dataAttr, noun) {
         // and an imperative sync was being clobbered by Alpine's render pass.
         selectedMap: {},
         selectableIds: [],
-        init() { this.initBulkSelect(); },
-        initBulkSelect() {
+        init() {
             this.selectableIds = Array.from(
                 this.$el.querySelectorAll('[data-' + dataAttr + ']'),
             ).map(el => el.dataset[camel]);

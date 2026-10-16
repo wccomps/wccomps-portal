@@ -4,11 +4,6 @@
     All Findings - Red Team
 {% endblock title %}
 {% block red_content %}
-    <script>
-    document.addEventListener('alpine:init', () => {
-        Alpine.data('redFindingsBulkSelect', () => bulkSelectMixin('finding-id', 'finding'));
-    });
-    </script>
     <c-page_header title="All Findings" />
     <c-module filtered="true" id="changelist">
         <c-filter_toolbar form_id="changelist-filter"

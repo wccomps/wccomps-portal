@@ -16,13 +16,6 @@ from team.models import Team
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture
-def admin_client(admin_user: User) -> Client:
-    client = Client()
-    client.force_login(admin_user)
-    return client
-
-
 def test_inject_grades_that_tie_on_the_inject_come_in_team_order(admin_client: Client, admin_user: User) -> None:
     for number in (5, 2, 9, 1):
         team = Team.objects.create(team_number=number, team_name=f"Team {number}")
