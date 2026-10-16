@@ -201,6 +201,7 @@ def red_team_scores(request: HttpRequest) -> HttpResponse:
         "available_attack_types": available_attack_types,
         "available_submitters": available_submitters,
         "is_gold_team": False,  # Red team view - no approval actions
+        "current_user": request.user,
     }
 
     if request.headers.get("HX-Request"):
