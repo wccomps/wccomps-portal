@@ -817,8 +817,9 @@ def _first_path(case: ViewCase, world: World, name: str) -> str:
 
 
 def echo_sweep(case: ViewCase, world: World) -> None:
-    """Every field the row's view reads (query and POST), set to markup and template syntax at once: a GET and a
-    POST as each role allowed in, on each of its URL names. check_answer then fails on any field echoed raw.
+    """Every field the row's view reads (query and POST), set to markup and template syntax at once, on each of its
+    URL names: a GET and a POST as each role allowed in (pages, and what a POST re-renders, differ by role).
+    check_answer then fails on any field echoed raw.
 
     Deterministic, so CI checks every field every run: the random search rarely pairs an allowed role, the method
     a field is read on, and markup in that one field (the cotton attrs XSS passed ci-views)."""
@@ -827,14 +828,13 @@ def echo_sweep(case: ViewCase, world: World) -> None:
     fields = dict.fromkeys(case.post(world) if case.post else {}, probe)
     for name in (case.name, *case.also):
         path = _first_path(case, world, name)
-        for role in sorted(case.allowed):
-            for method in ("GET", "POST"):
-                body = json.dumps(fields).encode() if method == "POST" and case.json_body else None
-                data = fields if method == "POST" and not case.json_body else {}
-                headers = {"Sec-Fetch-Mode": "cors"} if case.json else {}
-                drawn = Drawn(role, method, path, query, data, body, headers, None, [probe])
-                with rolled_back(), case.patches(world) if case.patches else ExitStack():
-                    check_answer(case, drawn, send(world, drawn))
+        for role, method in ((role, method) for role in sorted(case.allowed) for method in ("GET", "POST")):
+            body = json.dumps(fields).encode() if method == "POST" and case.json_body else None
+            data = fields if method == "POST" and not case.json_body else {}
+            headers = {"Sec-Fetch-Mode": "cors"} if case.json else {}
+            drawn = Drawn(role, method, path, query, data, body, headers, None, [probe])
+            with rolled_back(), case.patches(world) if case.patches else ExitStack():
+                check_answer(case, drawn, send(world, drawn))
 
 
 def snapshot(models_: tuple[type[models.Model], ...]) -> dict[str, list[dict[str, Any]]]:
