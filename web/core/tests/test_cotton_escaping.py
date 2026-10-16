@@ -5,11 +5,12 @@ import logging
 from html.parser import HTMLParser
 
 import pytest
-from django.template import Context, Template, TemplateSyntaxError, Variable
+from django.template import Context, Origin, Template, TemplateSyntaxError, Variable
 from django.test import override_settings
 from django.utils.safestring import mark_safe
 from django_cotton.compiler_regex import CottonCompiler
 from django_cotton.templatetags import Attrs
+from django_cotton.templatetags._component import CottonComponentNode
 from hypothesis import example, given
 from hypothesis import strategies as st
 
@@ -147,6 +148,7 @@ def test_the_installed_attrs_methods_are_core_cotton_ones() -> None:
     """CoreConfig.ready installs them; both run at render time, so they cover every template however early it loaded."""
     assert Attrs.__str__ is cotton.attrs_html
     assert Attrs.unprocessable is cotton.unresolved
+    assert CottonComponentNode.render is cotton.render_tracked
 
 
 @pytest.mark.parametrize(
@@ -162,11 +164,13 @@ def test_a_plain_value_is_escaped_and_a_safe_one_only_has_its_quotes_encoded(val
 
 
 @override_settings(STRICT_COMPONENT_ATTRS=False)
-def test_in_production_a_dropped_attribute_is_reported_once_per_place(caplog: pytest.LogCaptureFixture) -> None:
-    template = Template(CottonCompiler().process('\n<c-button :disabled="loading_once">Go</c-button>'))
+def test_in_production_a_dropped_attribute_is_reported_once(caplog: pytest.LogCaptureFixture) -> None:
+    """Once per worker process: by the template's name, the component and the attribute."""
+    source = CottonCompiler().process('\n<c-button\n  :disabled="loading_once">Go</c-button>')
+    template = Template(source, origin=Origin(name="/srv/templates/pages/x.html", template_name="pages/x.html"))
     with caplog.at_level(logging.ERROR, logger="wccomps.errors"):
         template.render(Context({}))
         template.render(Context({}))
-    reports = [r for r in caplog.records if r.name == "wccomps.errors" and "::disabled" in r.getMessage()]
+    reports = [r.getMessage() for r in caplog.records if r.name == "wccomps.errors" and "::disabled" in r.getMessage()]
     assert len(reports) == 1
-    assert ":2" in reports[0].getMessage()
+    assert reports[0].startswith("pages/x.html: <c-button> :disabled ")
