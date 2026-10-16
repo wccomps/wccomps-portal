@@ -6,7 +6,9 @@ from urllib.parse import parse_qs
 import pytest
 from django.urls import reverse
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -17,7 +19,7 @@ def test_an_admin_action_after_a_csv_export_reaches_the_server(live_server, pw_b
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     User.objects.filter(pk=user.pk).update(is_staff=True, is_superuser=True)
     team = Team.objects.create(team_number=4, team_name="Team 04")
     Ticket.objects.create(ticket_number="T004-001", team=team, category=TicketCategory.objects.first(), title="t")
@@ -40,7 +42,7 @@ def test_an_admin_action_after_a_csv_export_reaches_the_server(live_server, pw_b
 def test_a_c_form_posts_once_and_sends_the_button_pressed(live_server, pw_browser):
     from scoring.models import RedTeamIPPool
 
-    user = _create_role_user("red_team", None)
+    user = role_user("red_team")
     RedTeamIPPool.objects.create(name="Pool", ip_addresses="10.0.0.1", created_by=user)
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
@@ -70,7 +72,7 @@ def test_a_submit_button_outside_its_form_is_disabled_while_it_posts(live_server
 
     from scoring.models import RedTeamScore
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     RedTeamScore.objects.create(attack_vector="ssh", points_per_team=Decimal(10), submitted_by=user)
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()

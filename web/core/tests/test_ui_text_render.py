@@ -7,13 +7,14 @@ from decimal import Decimal
 from html.parser import HTMLParser
 
 import pytest
-from browser_tests.conftest import _create_role_user
 from browser_tests.table_data import seed_table_data
 from django.contrib.auth.models import User
 from django.template.loader import render_to_string
 from django.test import Client, RequestFactory
 from django.urls import reverse
 from django.utils import timezone
+
+from core.tests.roles import role_user
 
 pytestmark = pytest.mark.django_db
 
@@ -100,7 +101,7 @@ def test_staff_pages_read_without_their_missing_values(admin_user: User, sparse:
 
 def test_team_pages_read_without_their_missing_values(sparse: dict) -> None:
     client = Client()
-    client.force_login(_create_role_user("blue_team", None))
+    client.force_login(role_user("blue_team"))
     for page in (reverse("ticket_list"), reverse("team_packet")):
         response = client.get(page)
         assert response.status_code == 200, page

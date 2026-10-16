@@ -51,7 +51,7 @@ def test_remove_first_criterion_and_save(live_server, pw_browser):
 def test_remove_deletes_the_row_clicked(live_server, pw_browser):
     from orange_team.models import OrangeCheck, OrangeCheckCriterion
 
-    user = _create_role_user("gold_team", None)
+    user = role_user("gold_team")
     check = OrangeCheck.objects.create(title="Phones", description="", created_by=user)
     for order, label in enumerate(["First", "Second", "Third"]):
         OrangeCheckCriterion.objects.create(orange_check=check, label=label, points=1, sort_order=order)

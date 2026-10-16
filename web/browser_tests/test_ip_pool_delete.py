@@ -3,7 +3,9 @@
 import pytest
 from django.urls import reverse
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -14,7 +16,7 @@ NAME = "x');document.title='ran';('"
 def test_delete_asks_with_the_pool_name_as_text(live_server, pw_browser, accept):
     from scoring.models import RedTeamIPPool
 
-    user = _create_role_user("red_team", None)
+    user = role_user("red_team")
     pool = RedTeamIPPool.objects.create(name=NAME, ip_addresses="10.0.0.1", created_by=user)
 
     context = create_session_context(pw_browser, live_server, user)

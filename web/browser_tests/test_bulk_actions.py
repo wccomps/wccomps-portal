@@ -5,7 +5,9 @@ refresh doesn't replace a form that is posting."""
 import pytest
 from django.urls import reverse
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 from .table_data import seed_table_data
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
@@ -38,7 +40,7 @@ PAGES = [
 
 @pytest.mark.parametrize(("name", "kind"), PAGES)
 def test_a_bulk_approve_asks_with_the_count_and_a_dismissal_approves_nothing(live_server, pw_browser, name, kind):
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     seed_table_data(user)
     before = unapproved(kind)
     context = create_session_context(pw_browser, live_server, user)
@@ -71,7 +73,7 @@ def test_a_form_whose_post_is_slow_posts_once(live_server, pw_browser):
     A window listener counts the submits that get through and stops them leaving the page."""
     from scoring.models import RedTeamIPPool
 
-    user = _create_role_user("red_team", None)
+    user = role_user("red_team")
     RedTeamIPPool.objects.create(name="Pool", ip_addresses="10.0.0.1", created_by=user)
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
@@ -103,7 +105,7 @@ def test_the_ticket_lists_refresh_skips_while_a_bulk_claim_is_posting(live_serve
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     team = Team.objects.create(team_number=4, team_name="Team 04")
     Ticket.objects.create(ticket_number="T004-001", team=team, category=TicketCategory.objects.first(), title="t")
     context = create_session_context(pw_browser, live_server, user)
@@ -136,7 +138,7 @@ def test_the_ticket_lists_bulk_actions_ask_with_the_count(live_server, pw_browse
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     team = Team.objects.create(team_number=4, team_name="Team 04")
     ticket = Ticket.objects.create(
         ticket_number="T004-001", team=team, category=TicketCategory.objects.first(), title="t"
@@ -162,7 +164,7 @@ def test_the_ticket_lists_refresh_keeps_a_selection(live_server, pw_browser):
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     team = Team.objects.create(team_number=4, team_name="Team 04")
     Ticket.objects.create(ticket_number="T004-001", team=team, category=TicketCategory.objects.first(), title="t")
     context = create_session_context(pw_browser, live_server, user)
@@ -184,7 +186,7 @@ def test_the_ticket_lists_refresh_skips_while_a_row_form_is_posting(live_server,
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     team = Team.objects.create(team_number=4, team_name="Team 04")
     Ticket.objects.create(ticket_number="T004-001", team=team, category=TicketCategory.objects.first(), title="t")
     context = create_session_context(pw_browser, live_server, user)

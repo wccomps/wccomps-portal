@@ -5,14 +5,16 @@ from urllib.parse import parse_qs
 import pytest
 from django.urls import reverse
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 from .table_data import seed_table_data
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 
 def test_resend_posts_the_rows_emails(live_server, pw_browser):
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     data = seed_table_data(user)
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()

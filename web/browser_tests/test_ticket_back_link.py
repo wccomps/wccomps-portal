@@ -5,7 +5,9 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from django.urls import reverse
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -18,7 +20,7 @@ def test_each_tab_returns_to_its_own_list(live_server, pw_browser):
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     team = Team.objects.create(team_number=4, team_name="Team 04")
     ticket = Ticket.objects.create(
         ticket_number="T004-001", team=team, category=TicketCategory.objects.first(), title="t"
@@ -45,7 +47,7 @@ def test_without_a_list_shown_the_way_back_is_the_plain_list(live_server, pw_bro
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     team = Team.objects.create(team_number=4, team_name="Team 04")
     ticket = Ticket.objects.create(
         ticket_number="T004-001", team=team, category=TicketCategory.objects.first(), title="t"
@@ -63,7 +65,7 @@ def test_after_going_back_between_filters_the_way_back_is_the_list_shown(live_se
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     ticket = Ticket.objects.create(
         ticket_number="T004-001",
         team=Team.objects.create(team_number=4, team_name="Team 04"),

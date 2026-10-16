@@ -4,7 +4,9 @@ form from submitting, and an empty one (a confirm that applies only sometimes) a
 import pytest
 from django.urls import reverse
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -27,7 +29,7 @@ def open_dashboard(live_server, pw_browser, user, answer: bool):
 def test_checking_out_asks_first(live_server, pw_browser, answer):
     from orange_team.models import OrangeCheckIn
 
-    user = _create_role_user("orange_team", None)
+    user = role_user("orange_team")
     OrangeCheckIn.objects.create(user=user)
     context, page, questions = open_dashboard(live_server, pw_browser, user, answer)
     try:
@@ -42,7 +44,7 @@ def test_checking_out_asks_first(live_server, pw_browser, answer):
 def test_checking_in_asks_nothing(live_server, pw_browser):
     from orange_team.models import OrangeCheckIn
 
-    user = _create_role_user("orange_team", None)
+    user = role_user("orange_team")
     context, page, questions = open_dashboard(live_server, pw_browser, user, False)
     try:
         with page.expect_navigation():
@@ -57,7 +59,7 @@ def test_a_dismissed_category_change_keeps_the_category(live_server, pw_browser)
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     team = Team.objects.create(team_number=7, team_name="Team 07")
     first, second = TicketCategory.objects.all()[:2]
     ticket = Ticket.objects.create(ticket_number="T007-001", team=team, category=first, title="t", status="claimed")
@@ -77,10 +79,11 @@ def test_a_dismissed_category_change_keeps_the_category(live_server, pw_browser)
 
 
 def test_cancelling_a_ticket_asks_first(live_server, pw_browser):
+    from team.models import Team
     from ticketing.models import Ticket
 
-    user = _create_role_user("blue_team", None)
-    ticket = Ticket.objects.create(ticket_number="T001-009", team=user.discord_links.first().team, title="t")
+    user = role_user("blue_team")
+    ticket = Ticket.objects.create(ticket_number="T001-009", team=Team.objects.get(team_number=1), title="t")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     questions: list[str] = []

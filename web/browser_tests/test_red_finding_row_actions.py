@@ -6,7 +6,9 @@ from decimal import Decimal
 import pytest
 from django.urls import reverse
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -14,7 +16,7 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 def test_delete_in_a_row_deletes_that_finding(live_server, pw_browser):
     from scoring.models import RedTeamScore
 
-    user = _create_role_user("red_team", None)
+    user = role_user("red_team")
     finding = RedTeamScore.objects.create(attack_vector="ssh", points_per_team=Decimal(10), submitted_by=user)
 
     context = create_session_context(pw_browser, live_server, user)
@@ -32,7 +34,7 @@ def test_delete_in_a_row_deletes_that_finding(live_server, pw_browser):
 def test_approve_selected_approves_the_checked_findings(live_server, pw_browser):
     from scoring.models import RedTeamScore
 
-    user = _create_role_user("gold_team", None)
+    user = role_user("gold_team")
     checked, unchecked = (
         RedTeamScore.objects.create(attack_vector=vector, points_per_team=Decimal(10), submitted_by=user)
         for vector in ("ssh", "rdp")
@@ -55,7 +57,7 @@ def test_approve_selected_approves_the_checked_findings(live_server, pw_browser)
 def test_a_team_button_on_the_submit_page_selects_that_team(live_server, pw_browser):
     from team.models import Team
 
-    user = _create_role_user("red_team", None)
+    user = role_user("red_team")
     for number in (3, 4):
         Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
     context = create_session_context(pw_browser, live_server, user)

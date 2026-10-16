@@ -8,7 +8,9 @@ from urllib.parse import parse_qs
 import pytest
 from django.urls import reverse
 
-from .conftest import _create_role_user, create_session_context
+from core.tests.roles import role_user
+
+from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
@@ -18,7 +20,7 @@ def test_clear_form_empties_the_points_and_a_save_posts_none(live_server, pw_bro
 
     from team.models import Team
 
-    user = _create_role_user("admin", None)
+    user = role_user("admin")
     for number in (1, 2):
         team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
         InjectScore.objects.create(
