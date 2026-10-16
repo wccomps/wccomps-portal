@@ -25,26 +25,25 @@ def review_orange(request: HttpRequest) -> HttpResponse:
     from team.models import Team
 
     filters, filtered = list_filters(request, {"status": "pending", "team": "", "check": "", "search": ""})
-    status_filter, team_filter, check_filter, search_query = filters.values()
 
     base_query = OrangeTeamScore.objects.select_related("team", "submitted_by", "approved_by", "orange_check")
 
-    if status_filter == "pending":
+    if filters["status"] == "pending":
         base_query = base_query.filter(is_approved=False)
-    elif status_filter == "approved":
+    elif filters["status"] == "approved":
         base_query = base_query.filter(is_approved=True)
 
-    if (team_id := optional_int(team_filter)) is not None:
+    if (team_id := optional_int(filters["team"])) is not None:
         base_query = base_query.filter(team__id=team_id)
 
-    if check_filter:
-        if check_filter == "manual":
+    if filters["check"]:
+        if filters["check"] == "manual":
             base_query = base_query.filter(orange_check__isnull=True)
-        elif (check_id := optional_int(check_filter)) is not None:
+        elif (check_id := optional_int(filters["check"])) is not None:
             base_query = base_query.filter(orange_check_id=check_id)
 
-    if search_query:
-        base_query = base_query.filter(Q(description__icontains=search_query))
+    if filters["search"]:
+        base_query = base_query.filter(Q(description__icontains=filters["search"]))
 
     result = filter_sort_paginate(
         request,
@@ -70,11 +69,8 @@ def review_orange(request: HttpRequest) -> HttpResponse:
         "has_pending": pending_count > 0,
         "available_teams": available_teams,
         "available_checks": available_checks,
-        "selected_team": team_filter,
-        "selected_check": check_filter,
-        "search_query": search_query,
+        "filters": filters,
         "filtered": filtered,
-        "status_filter": status_filter,
         "sort_by": sort_by,
     }
 

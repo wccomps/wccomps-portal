@@ -147,7 +147,7 @@
                     class="text-center p-20">
                     {% if filtered %}
                         No findings match your filters. Try <a href="{{ request.path }}">clearing all filters</a>
-                    {% elif status_filter == "pending" %}
+                    {% elif filters.status == "pending" %}
                         No pending findings. All red team findings have been approved.
                     {% else %}
                         No findings yet.

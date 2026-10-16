@@ -57,24 +57,23 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
     filters, filtered = list_filters(
         request, {"status": default_status, "team": "", "attack_type": "", "submitter": "", "search": ""}
     )
-    status_filter, team_filter, attack_type_filter, submitter_filter, search_query = filters.values()
 
     findings = RedTeamScore.objects.prefetch_related("affected_teams", "screenshots").select_related("submitted_by")
-    if status_filter == "pending":
+    if filters["status"] == "pending":
         findings = findings.filter(is_approved=False)
-    elif status_filter == "approved":
+    elif filters["status"] == "approved":
         findings = findings.filter(is_approved=True)
-    if (team_id := optional_int(team_filter)) is not None:
+    if (team_id := optional_int(filters["team"])) is not None:
         findings = findings.filter(affected_teams__id=team_id)
-    if (attack_type_id := optional_int(attack_type_filter)) is not None:
+    if (attack_type_id := optional_int(filters["attack_type"])) is not None:
         findings = findings.filter(attack_type_id=attack_type_id)
-    if (submitter_id := optional_int(submitter_filter)) is not None:
+    if (submitter_id := optional_int(filters["submitter"])) is not None:
         findings = findings.filter(submitted_by_id=submitter_id)
-    if search_query:
+    if filters["search"]:
         findings = findings.filter(
-            Q(attack_type__name__icontains=search_query)
-            | Q(notes__icontains=search_query)
-            | Q(affected_service__icontains=search_query)
+            Q(attack_type__name__icontains=filters["search"])
+            | Q(notes__icontains=filters["search"])
+            | Q(affected_service__icontains=filters["search"])
         )
 
     # distinct: the team filter joins the many-to-many affected_teams
@@ -89,11 +88,7 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
         "findings": result["page_obj"],
         "page_obj": result["page_obj"],
         "sort_by": result["current_sort"],
-        "status_filter": status_filter,
-        "selected_team": team_filter,
-        "selected_attack_type": attack_type_filter,
-        "selected_submitter": submitter_filter,
-        "search_query": search_query,
+        "filters": filters,
         "filtered": filtered,
         "available_teams": Team.objects.filter(red_team_scores__isnull=False).distinct().order_by("team_number"),
         "available_attack_types": AttackType.objects.filter(findings__isnull=False).distinct().order_by("name"),

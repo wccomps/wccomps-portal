@@ -200,13 +200,16 @@ def test_every_sort_header_a_list_shows_sorts_its_rows(admin_client: Client, thr
 
 FILTERED_PAGES = ["ticket_list", "ops_review_tickets", "scoring:review_incidents", "scoring:review_orange"]
 FILTERED_PAGES += ["scoring:inject_grades_review", "scoring:red_team_findings", "scoring:red_team_scores"]
+FILTERED_PAGES += ["scoring:review_inject_feedback", "registration_review_list"]
+FILTER_SET = {"scoring:review_inject_feedback": {"inject": "nothing"}, "registration_review_list": {"status": "paid"}}
 
 
 @pytest.mark.parametrize("name", FILTERED_PAGES)
 def test_an_empty_list_blames_filters_only_when_some_are_set(admin_client: Client, name: str) -> None:
     def says_filtered(query: dict[str, str]) -> bool:
-        return "match your filters" in admin_client.get(reverse(name), query).content.decode()
+        page = admin_client.get(reverse(name), query).content.decode()
+        return "match your filters" in page or "match the current filters" in page or "the selected status" in page
 
     assert not says_filtered({})
     assert not says_filtered({"team": "", "search": "  "})
-    assert says_filtered({"search": "nothing matches this"})
+    assert says_filtered(FILTER_SET.get(name, {"search": "nothing matches this"}))

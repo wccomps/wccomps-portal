@@ -8,7 +8,7 @@ from django.utils import timezone
 from packets.models import packets_sent
 
 from core.auth_utils import require_permission
-from core.utils import client_ip
+from core.utils import client_ip, list_filters
 from team.models import SchoolInfo, Team
 
 from .forms import EventForm, RegistrationForm, RejectRegistrationForm, SeasonForm, ShownSchoolForm
@@ -105,15 +105,16 @@ def registration_edit(request: HttpRequest, token: str) -> HttpResponse:
 
 @require_permission("gold_team")
 def review_list(request: HttpRequest) -> HttpResponse:
-    status_filter = request.GET.get("status", "")
+    filters, filtered = list_filters(request, {"status": ""})
 
     registrations = TeamRegistration.objects.prefetch_related("contacts", "event_enrollments__event").all()
-    if status_filter:
-        registrations = registrations.filter(status=status_filter)
+    if filters["status"]:
+        registrations = registrations.filter(status=filters["status"])
 
     context = {
         "registrations": registrations,
-        "status_filter": status_filter,
+        "filters": filters,
+        "filtered": filtered,
         "status_choices": TeamRegistration.STATUS_CHOICES,
         "subnav_active": "registrations",
     }

@@ -44,8 +44,6 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     filters, filtered = list_filters(
         request, {"category": "all", "search": ""} | ({"team": "", "assignee": ""} if is_ops else {})
     )
-    category_filter, search_query = filters["category"], filters["search"]
-    team_filter, assignee_filter = filters.get("team", ""), filters.get("assignee", "")
     filtered = filtered or bool(selected_statuses)
 
     page_size = optional_int(request.GET.get("page_size", ""))
@@ -76,24 +74,24 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     if selected_statuses:
         query = query.filter(status__in=selected_statuses)
 
-    if (category_id := optional_int(category_filter)) is not None:
+    if (category_id := optional_int(filters["category"])) is not None:
         query = query.filter(category_id=category_id)
 
-    if search_query:
+    if filters["search"]:
         query = query.filter(
-            Q(title__icontains=search_query)
-            | Q(description__icontains=search_query)
-            | Q(ticket_number__icontains=search_query)
-            | Q(hostname__icontains=search_query)
-            | Q(service_name__icontains=search_query)
+            Q(title__icontains=filters["search"])
+            | Q(description__icontains=filters["search"])
+            | Q(ticket_number__icontains=filters["search"])
+            | Q(hostname__icontains=filters["search"])
+            | Q(service_name__icontains=filters["search"])
         )
 
-    if (team_number := optional_int(team_filter)) is not None:
+    if (team_number := optional_int(filters.get("team", ""))) is not None:
         query = query.filter(team__team_number=team_number)
 
-    if assignee_filter == "unassigned":
+    if filters.get("assignee", "") == "unassigned":
         query = query.filter(assigned_to__isnull=True)
-    elif (assignee_id := optional_int(assignee_filter)) is not None:
+    elif (assignee_id := optional_int(filters.get("assignee", ""))) is not None:
         query = query.filter(assigned_to_id=assignee_id)
 
     result = filter_sort_paginate(
@@ -140,13 +138,10 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         "status_filter": status_filter,
         "selected_statuses": selected_statuses,
         "status_choices": Ticket.STATUS_CHOICES,
-        "category_filter": category_filter,
-        "search_query": search_query,
+        "filters": filters,
         "filtered": filtered,
         "sort_by": sort_by,
         "page_size": page_size,
-        "team_filter": team_filter,
-        "assignee_filter": assignee_filter,
         "assignees": assignees,
         "categories": get_all_categories(),
     }

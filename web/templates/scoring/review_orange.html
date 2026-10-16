@@ -26,10 +26,10 @@
             <c-filter_field label="Status" id="id_status">
                 <select name="status" id="id_status" aria-label="Filter by status">
                     <option value="pending"
-                            {% if status_filter == 'pending' %}selected{% endif %}>Pending Only</option>
+                            {% if filters.status == 'pending' %}selected{% endif %}>Pending Only</option>
                     <option value="approved"
-                            {% if status_filter == 'approved' %}selected{% endif %}>Approved Only</option>
-                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                            {% if filters.status == 'approved' %}selected{% endif %}>Approved Only</option>
+                    <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
                 </select>
             </c-filter_field>
             <c-filter_field label="Team" id="id_team">
@@ -37,7 +37,7 @@
                     <option value="">All Teams</option>
                     {% for team in available_teams %}
                         <option value="{{ team.id }}"
-                                {% if selected_team == team.id|stringformat:"s" %}selected{% endif %}>
+                                {% if filters.team == team.id|stringformat:"s" %}selected{% endif %}>
                             Team {{ team.team_number }}
                         </option>
                     {% endfor %}
@@ -46,10 +46,10 @@
             <c-filter_field label="Check" id="id_check">
                 <select name="check" id="id_check" aria-label="Filter by check">
                     <option value="">All Checks</option>
-                    <option value="manual" {% if selected_check == 'manual' %}selected{% endif %}>Manual</option>
+                    <option value="manual" {% if filters.check == 'manual' %}selected{% endif %}>Manual</option>
                     {% for check in available_checks %}
                         <option value="{{ check.id }}"
-                                {% if selected_check == check.id|stringformat:"s" %}selected{% endif %}>{{ check.title }}</option>
+                                {% if filters.check == check.id|stringformat:"s" %}selected{% endif %}>{{ check.title }}</option>
                     {% endfor %}
                 </select>
             </c-filter_field>
@@ -57,7 +57,7 @@
                 <input type="text"
                        name="search"
                        id="id_search"
-                       value="{{ search_query }}"
+                       value="{{ filters.search }}"
                        placeholder="Search..."
                        aria-label="Search checks">
             </c-filter_field>

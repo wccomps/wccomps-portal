@@ -26,10 +26,10 @@
             <c-filter_field label="Status" id="id_status">
                 <select name="status" id="id_status" aria-label="Filter by status">
                     <option value="pending"
-                            {% if status_filter == 'pending' %}selected{% endif %}>Pending Only</option>
+                            {% if filters.status == 'pending' %}selected{% endif %}>Pending Only</option>
                     <option value="approved"
-                            {% if status_filter == 'approved' %}selected{% endif %}>Approved Only</option>
-                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                            {% if filters.status == 'approved' %}selected{% endif %}>Approved Only</option>
+                    <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
                 </select>
             </c-filter_field>
             <c-filter_field label="Target Team" id="id_team">
@@ -37,7 +37,7 @@
                     <option value="">All Teams</option>
                     {% for team in available_teams %}
                         <option value="{{ team.id }}"
-                                {% if selected_team == team.id|stringformat:"s" %}selected{% endif %}>
+                                {% if filters.team == team.id|stringformat:"s" %}selected{% endif %}>
                             Team {{ team.team_number }}
                         </option>
                     {% endfor %}
@@ -50,7 +50,7 @@
                     <option value="">All Attack Types</option>
                     {% for attack_type in available_attack_types %}
                         <option value="{{ attack_type.id }}"
-                                {% if selected_attack_type == attack_type.id|stringformat:"s" %}selected{% endif %}>
+                                {% if filters.attack_type == attack_type.id|stringformat:"s" %}selected{% endif %}>
                             {{ attack_type.name }}
                         </option>
                     {% endfor %}
@@ -61,7 +61,7 @@
                     <option value="">All Submitters</option>
                     {% for user in available_submitters %}
                         <option value="{{ user.id }}"
-                                {% if selected_submitter == user.id|stringformat:"s" %}selected{% endif %}>
+                                {% if filters.submitter == user.id|stringformat:"s" %}selected{% endif %}>
                             {{ user.username }}
                         </option>
                     {% endfor %}
@@ -71,7 +71,7 @@
                 <input type="text"
                        name="search"
                        id="id_search"
-                       value="{{ search_query }}"
+                       value="{{ filters.search }}"
                        placeholder="Search..."
                        aria-label="Search findings">
             </c-filter_field>

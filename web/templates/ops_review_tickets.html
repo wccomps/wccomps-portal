@@ -26,17 +26,17 @@
             <c-filter_field label="Status" id="id_status">
                 <select name="status" id="id_status" aria-label="Filter by status">
                     <option value="pending"
-                            {% if status_filter == 'pending' %}selected{% endif %}>Pending Only</option>
+                            {% if filters.status == 'pending' %}selected{% endif %}>Pending Only</option>
                     <option value="approved"
-                            {% if status_filter == 'approved' %}selected{% endif %}>Approved Only</option>
-                    <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                            {% if filters.status == 'approved' %}selected{% endif %}>Approved Only</option>
+                    <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
                 </select>
             </c-filter_field>
             <c-filter_field label="Team" id="id_team">
                 <input type="number"
                        name="team"
                        id="id_team"
-                       value="{{ team_filter }}"
+                       value="{{ filters.team }}"
                        placeholder="Team #"
                        aria-label="Filter by team number">
             </c-filter_field>
@@ -45,7 +45,7 @@
                     <option value="">All Categories</option>
                     {% for cat in categories %}
                         <option value="{{ cat.id }}"
-                                {% if category_filter == cat.id %}selected{% endif %}>{{ cat.display_name }}</option>
+                                {% if filters.category == cat.id %}selected{% endif %}>{{ cat.display_name }}</option>
                     {% endfor %}
                 </select>
             </c-filter_field>
@@ -53,7 +53,7 @@
                 <input type="text"
                        name="search"
                        id="id_search"
-                       value="{{ search_query }}"
+                       value="{{ filters.search }}"
                        placeholder="Search..."
                        aria-label="Search tickets">
             </c-filter_field>

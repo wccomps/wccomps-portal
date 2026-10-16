@@ -49,7 +49,7 @@
                     <input type="text"
                            name="search"
                            id="id_search"
-                           value="{{ search_query }}"
+                           value="{{ filters.search }}"
                            placeholder="Search... (press / to focus)"
                            aria-label="Search tickets"
                            accesskey="/">
@@ -71,10 +71,10 @@
                 </c-filter_field>
                 <c-filter_field label="Category" id="id_category">
                     <select name="category" id="id_category" aria-label="Filter by category">
-                        <option value="all" {% if category_filter == 'all' %}selected{% endif %}>All Categories</option>
+                        <option value="all" {% if filters.category == 'all' %}selected{% endif %}>All Categories</option>
                         {% for cat_id, cat_info in categories.items %}
                             <option value="{{ cat_id }}"
-                                    {% if category_filter == cat_id|stringformat:"i" %}selected{% endif %}>
+                                    {% if filters.category == cat_id|stringformat:"i" %}selected{% endif %}>
                                 {{ cat_info.display_name }}
                             </option>
                         {% endfor %}
@@ -85,7 +85,7 @@
                         <input type="number"
                                name="team"
                                id="id_team"
-                               value="{{ team_filter }}"
+                               value="{{ filters.team }}"
                                placeholder="Team #"
                                aria-label="Filter by team number">
                     </c-filter_field>
@@ -93,10 +93,10 @@
                         <select name="assignee" id="id_assignee" aria-label="Filter by assignee">
                             <option value="">All Assignees</option>
                             <option value="unassigned"
-                                    {% if assignee_filter == 'unassigned' %}selected{% endif %}>Unassigned</option>
+                                    {% if filters.assignee == 'unassigned' %}selected{% endif %}>Unassigned</option>
                             {% for person in assignees %}
                                 <option value="{{ person.id }}"
-                                        {% if assignee_filter == person.id|stringformat:"i" %}selected{% endif %}>
+                                        {% if filters.assignee == person.id|stringformat:"i" %}selected{% endif %}>
                                     {{ person }}
                                 </option>
                             {% endfor %}

@@ -170,8 +170,6 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
     filters, filtered = list_filters(
         request, {"status": "pending", "inject": "", "team": "", "outliers": "", "search": ""}
     )
-    status_filter, inject_filter, team_filter, outliers, search_query = filters.values()
-    show_outliers_only = outliers == "1"
     # The inject grades table's sortable columns
     sort_by = requested_sort(
         request, ("inject_name", "team__team_number", "points_awarded", "graded_at"), "inject_name"
@@ -179,21 +177,23 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
 
     base_query = InjectScore.objects.select_related("team", "graded_by")
 
-    if status_filter == "pending":
+    if filters["status"] == "pending":
         base_query = base_query.filter(is_approved=False)
-    elif status_filter == "approved":
+    elif filters["status"] == "approved":
         base_query = base_query.filter(is_approved=True)
 
-    if inject_filter:
-        base_query = base_query.filter(inject_id=inject_filter)
+    if filters["inject"]:
+        base_query = base_query.filter(inject_id=filters["inject"])
 
-    if (team_id := optional_int(team_filter)) is not None:
+    if (team_id := optional_int(filters["team"])) is not None:
         base_query = base_query.filter(team__id=team_id)
 
-    if search_query:
+    if filters["search"]:
         from django.db.models import Q
 
-        base_query = base_query.filter(Q(inject_name__icontains=search_query) | Q(inject_id__icontains=search_query))
+        base_query = base_query.filter(
+            Q(inject_name__icontains=filters["search"]) | Q(inject_id__icontains=filters["search"])
+        )
 
     base_query = stable_order(base_query, sort_by)
 
@@ -224,7 +224,7 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
                 grade.is_outlier = False
                 grade.std_devs_from_mean = 0
 
-    if show_outliers_only:
+    if filters["outliers"] == "1":
         all_grades_for_outlier_calc = [g for g in all_grades_for_outlier_calc if g.is_outlier]
 
     page_obj = Paginator(all_grades_for_outlier_calc, 50).get_page(request.GET.get("page"))
@@ -245,11 +245,7 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
         "has_unapproved": unapproved_count > 0,
         "available_injects": available_injects,
         "available_teams": available_teams,
-        "selected_inject": inject_filter,
-        "selected_team": team_filter,
-        "show_outliers_only": show_outliers_only,
-        "status_filter": status_filter,
-        "search_query": search_query,
+        "filters": filters,
         "filtered": filtered,
         "sort_by": sort_by,
     }
@@ -281,8 +277,7 @@ def inject_grades_bulk_approve(request: HttpRequest) -> HttpResponse:
 @require_permission("gold_team", "white_team", error_message="Only Gold/White Team members can review inject feedback")
 def review_inject_feedback(request: HttpRequest) -> HttpResponse:
     """Gold/White team review of inject feedback before showing to teams."""
-    inject_filter = request.GET.get("inject", "")
-    status_filter = request.GET.get("status", "all")
+    filters, filtered = list_filters(request, {"inject": "", "status": "all"})
 
     scores = (
         InjectScore.objects.filter(is_approved=True)
@@ -292,11 +287,11 @@ def review_inject_feedback(request: HttpRequest) -> HttpResponse:
         .order_by("inject_name", "team__team_number")
     )
 
-    if inject_filter:
-        scores = scores.filter(inject_id=inject_filter)
-    if status_filter == "pending":
+    if filters["inject"]:
+        scores = scores.filter(inject_id=filters["inject"])
+    if filters["status"] == "pending":
         scores = scores.filter(feedback_approved=False)
-    elif status_filter == "approved":
+    elif filters["status"] == "approved":
         scores = scores.filter(feedback_approved=True)
 
     inject_choices = (
@@ -313,8 +308,8 @@ def review_inject_feedback(request: HttpRequest) -> HttpResponse:
     context = {
         "scores": scores,
         "inject_choices": inject_choices,
-        "inject_filter": inject_filter,
-        "status_filter": status_filter,
+        "filters": filters,
+        "filtered": filtered,
         "has_unapproved": has_unapproved,
     }
 

@@ -52,8 +52,13 @@
         {% empty %}
             <tr>
                 <td colspan="6">
-                    <c-empty_state title="No registrations found"
-                                   description="Registration requests will appear here" />
+                    {% if filtered %}
+                        <c-empty_state title="No registrations found"
+                                       description="No registration requests have the selected status" />
+                    {% else %}
+                        <c-empty_state title="No registrations found"
+                                       description="Registration requests will appear here" />
+                    {% endif %}
                 </td>
             </tr>
         {% endfor %}

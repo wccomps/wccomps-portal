@@ -26,28 +26,27 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
     from core.utils import filter_sort_paginate
 
     filters, filtered = list_filters(request, {"status": "pending", "team": "", "search": "", "category": ""})
-    status_filter, team_filter, search_query, category_filter = filters.values()
 
     query = Ticket.objects.filter(status="resolved").select_related("team", "approved_by")
 
-    if status_filter == "approved":
+    if filters["status"] == "approved":
         query = query.filter(is_approved=True)
-    elif status_filter == "pending":
+    elif filters["status"] == "pending":
         query = query.filter(is_approved=False)
 
-    if (category_id := optional_int(category_filter)) is not None:
+    if (category_id := optional_int(filters["category"])) is not None:
         query = query.filter(category_id=category_id)
 
-    if (team_number := optional_int(team_filter)) is not None:
+    if (team_number := optional_int(filters["team"])) is not None:
         query = query.filter(team__team_number=team_number)
 
-    if search_query:
+    if filters["search"]:
         query = query.filter(
-            Q(title__icontains=search_query)
-            | Q(description__icontains=search_query)
-            | Q(ticket_number__icontains=search_query)
-            | Q(hostname__icontains=search_query)
-            | Q(service_name__icontains=search_query)
+            Q(title__icontains=filters["search"])
+            | Q(description__icontains=filters["search"])
+            | Q(ticket_number__icontains=filters["search"])
+            | Q(hostname__icontains=filters["search"])
+            | Q(service_name__icontains=filters["search"])
         )
 
     result = filter_sort_paginate(
@@ -74,10 +73,7 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
 
     context = {
         "page_obj": page_obj,
-        "status_filter": status_filter,
-        "team_filter": team_filter,
-        "category_filter": category_filter,
-        "search_query": search_query,
+        "filters": filters,
         "filtered": filtered,
         "sort_by": sort_by,
         "categories": get_all_categories(),

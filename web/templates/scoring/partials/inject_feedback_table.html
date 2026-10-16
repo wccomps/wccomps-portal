@@ -122,7 +122,11 @@
             {% endif %}
         {% endfor %}
     {% else %}
-        <c-empty_state title="No feedback to review"
-                       description="No inject scores with comments found matching the current filters" />
+        {% if filtered %}
+            <c-empty_state title="No feedback to review"
+                           description="No inject scores with comments match the current filters" />
+        {% else %}
+            <c-empty_state title="No feedback to review" description="No approved inject scores have comments yet" />
+        {% endif %}
     {% endif %}
 </div>

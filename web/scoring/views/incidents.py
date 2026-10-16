@@ -167,26 +167,25 @@ def review_incidents(request: HttpRequest) -> HttpResponse:
     from core.utils import filter_sort_paginate
 
     filters, filtered = list_filters(request, {"status": "pending", "team": "", "box": "", "search": ""})
-    status_filter, team_filter, box_filter, search_query = filters.values()
 
     base_query = IncidentReport.objects.select_related("team").prefetch_related("screenshots")
 
-    if status_filter == "pending":
+    if filters["status"] == "pending":
         base_query = base_query.filter(is_approved=False)
-    elif status_filter == "approved":
+    elif filters["status"] == "approved":
         base_query = base_query.filter(is_approved=True)
 
-    if (team_id := optional_int(team_filter)) is not None:
+    if (team_id := optional_int(filters["team"])) is not None:
         base_query = base_query.filter(team__id=team_id)
 
-    if box_filter:
-        base_query = base_query.filter(affected_boxes__contains=[box_filter])
+    if filters["box"]:
+        base_query = base_query.filter(affected_boxes__contains=[filters["box"]])
 
-    if search_query:
+    if filters["search"]:
         from django.db.models import Q
 
         base_query = base_query.filter(
-            Q(attack_description__icontains=search_query) | Q(affected_service__icontains=search_query)
+            Q(attack_description__icontains=filters["search"]) | Q(affected_service__icontains=filters["search"])
         )
 
     result = filter_sort_paginate(
@@ -211,11 +210,8 @@ def review_incidents(request: HttpRequest) -> HttpResponse:
         "approved_count": approved_count,
         "pending_count": pending_count,
         "available_teams": available_teams,
-        "selected_team": team_filter,
-        "selected_box": box_filter,
-        "search_query": search_query,
+        "filters": filters,
         "filtered": filtered,
-        "status_filter": status_filter,
         "sort_by": sort_by,
         "has_pending": pending_count > 0,
     }

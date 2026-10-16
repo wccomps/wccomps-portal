@@ -16,7 +16,7 @@
                         <option value="">All Statuses</option>
                         {% for value, label in status_choices %}
                             <option value="{{ value }}"
-                                    {% if value == status_filter %}selected{% endif %}>{{ label }}</option>
+                                    {% if value == filters.status %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>
                 </c-filter_field>

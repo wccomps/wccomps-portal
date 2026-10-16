@@ -30,10 +30,10 @@
                 <c-filter_field label="Status" id="id_status">
                     <select name="status" id="id_status" aria-label="Filter by status">
                         <option value="pending"
-                                {% if status_filter == 'pending' %}selected{% endif %}>Pending Only</option>
+                                {% if filters.status == 'pending' %}selected{% endif %}>Pending Only</option>
                         <option value="approved"
-                                {% if status_filter == 'approved' %}selected{% endif %}>Approved Only</option>
-                        <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                                {% if filters.status == 'approved' %}selected{% endif %}>Approved Only</option>
+                        <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
                     </select>
                 </c-filter_field>
                 <c-filter_field label="Inject" id="id_inject">
@@ -41,7 +41,7 @@
                         <option value="">All Injects</option>
                         {% for inject in available_injects %}
                             <option value="{{ inject.inject_id }}"
-                                    {% if selected_inject == inject.inject_id %}selected{% endif %}>
+                                    {% if filters.inject == inject.inject_id %}selected{% endif %}>
                                 {{ inject.inject_name }}
                             </option>
                         {% endfor %}
@@ -52,7 +52,7 @@
                         <option value="">All Teams</option>
                         {% for team in available_teams %}
                             <option value="{{ team.id }}"
-                                    {% if selected_team == team.id|stringformat:"s" %}selected{% endif %}>
+                                    {% if filters.team == team.id|stringformat:"s" %}selected{% endif %}>
                                 Team {{ team.team_number }}
                             </option>
                         {% endfor %}
@@ -60,15 +60,15 @@
                 </c-filter_field>
                 <c-filter_field label="Outliers Only" id="id_outliers">
                     <select name="outliers" id="id_outliers" aria-label="Filter outliers">
-                        <option value="" {% if not show_outliers_only %}selected{% endif %}>All Grades</option>
-                        <option value="1" {% if show_outliers_only %}selected{% endif %}>Outliers Only</option>
+                        <option value="" {% if filters.outliers != "1" %}selected{% endif %}>All Grades</option>
+                        <option value="1" {% if filters.outliers == "1" %}selected{% endif %}>Outliers Only</option>
                     </select>
                 </c-filter_field>
                 <c-filter_field label="Search" id="id_search" min_width="180px">
                     <input type="text"
                            name="search"
                            id="id_search"
-                           value="{{ search_query }}"
+                           value="{{ filters.search }}"
                            placeholder="Search..."
                            aria-label="Search grades">
                 </c-filter_field>
