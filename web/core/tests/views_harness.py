@@ -22,7 +22,7 @@ from http.cookies import SimpleCookie
 from types import ModuleType
 from typing import Any
 from unittest.mock import patch
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import httpx
 from django import forms
@@ -113,9 +113,11 @@ class World:
     rows: dict[str, list[Any]] = field(default_factory=dict)  # by kind: the valid ids a path can name
 
     def ids(self, kind: str) -> list[Any]:
-        """The valid values of a kind of path parameter ("pk:<app.Label>" for an admin model's keys); a kind the
-        world doesn't have is a KeyError, not an empty list."""
-        return self.rows[kind]
+        """The valid values of a kind of path parameter ("pk:<app_label.Model>" for an admin model's keys). A kind
+        with none fails: a row whose path names no real row only ever drives the view's not-found answer."""
+        values = self.rows[kind]
+        assert values, f"the world has no {kind}: seed one in build_world"
+        return values
 
 
 def build_world() -> World:
@@ -468,7 +470,13 @@ class Drawn:
     body: bytes | None
     headers: dict[str, str]
     tz: str | None
-    texts: list[str]  # every piece of text the request carries, for the escaping check
+
+    @property
+    def texts(self) -> list[str]:
+        """Every piece of text the request carries, from what is sent: for the escaping and NUL checks."""
+        query = [text for key, values in self.query.items() for text in (key, *values)]
+        body = [self.body.decode("utf-8", "replace")] if self.body is not None else []
+        return [unquote(self.path), *query, *_texts(self.data), *body]
 
     def carries_nul(self) -> bool:
         return any("\x00" in text for text in (*self.texts, self.tz or ""))
@@ -504,26 +512,55 @@ def _texts(value: Any) -> list[str]:
     return []
 
 
-def _kind(case: ViewCase, param: str) -> str:
-    return case.params.get(param, param)
+def route_params(case: ViewCase, name: str) -> list[tuple[str, str, str]]:
+    """Each path parameter of the URL name: its converter ("re" for a regex pattern's group), name and kind."""
+    route = ROUTES[name]
+    found = [*path_params(route), *(("re", param) for param in re.findall(r"\(\?P<(\w+)>", route))]
+    return [(converter, param, case.params.get(param, param)) for converter, param in found]
+
+
+def build(
+    case: ViewCase,
+    *,
+    role: str,
+    method: str,
+    name: str,
+    kwargs: dict[str, Any],
+    query: dict[str, list[str]],
+    fields: dict[str, Any],
+    body: bytes | None = None,
+    headers: dict[str, str] | None = None,
+    tz: str | None = None,
+) -> Drawn:
+    """The request a row sends: its path, its transport (a JSON body for a JSON-body row, form fields otherwise) and
+    the fetch header a JSON endpoint is called with."""
+    path = reverse(name, kwargs=kwargs) if kwargs else reverse(name)
+    headers = dict(headers or {})
+    if case.json:
+        headers["Sec-Fetch-Mode"] = "cors"  # a fetch() from the page, as the JSON endpoints are called
+    if case.json_body:
+        body = body if body is not None else json.dumps(fields).encode()
+        fields = {}
+    return Drawn(role, method, path, query, fields, body, headers, tz)
 
 
 @st.composite
-def requests(draw: st.DrawFn, case: ViewCase, world: World, *, role: str | None = None) -> Drawn:
+def requests(
+    draw: st.DrawFn, case: ViewCase, world: World, *, role: str | None = None, method: str | None = None
+) -> Drawn:
     """A request for the case's URL pattern: any role, method, path values, query, body, headers and cookies."""
     role = role or draw(st.sampled_from(sorted(ROLES)), label="role")
-    method = draw(st.one_of(st.sampled_from(case.methods), st.sampled_from(METHODS)), label="method")
+    method = method or draw(st.one_of(st.sampled_from(case.methods), st.sampled_from(METHODS)), label="method")
     name = draw(st.sampled_from((case.name, *case.also)), label="url name")
     kwargs: dict[str, Any] = {}
-    for converter, param in path_params(ROUTES[name]):
-        valid = world.ids(_kind(case, param))
+    for converter, param, kind in route_params(case, name):
+        valid = world.ids(kind)
         if converter == "int":
             kwargs[param] = draw(path_int(valid))
+        elif converter == "re":  # only a valid value routes
+            kwargs[param] = draw(st.sampled_from(valid))
         else:
             kwargs[param] = draw(path_str([str(v) for v in valid], slashes=converter == "path"))
-    for param in re.findall(r"\(\?P<(\w+)>", ROUTES[name]):  # a regex pattern's groups: only valid values route
-        kwargs[param] = draw(st.sampled_from(world.ids(_kind(case, param))))
-    path = reverse(name, kwargs=kwargs) if kwargs else reverse(name)
 
     query_fields = {"next": st.one_of(st.sampled_from(OFF_SITE), hostile_text())}
     if case.query is not None:
@@ -534,21 +571,21 @@ def requests(draw: st.DrawFn, case: ViewCase, world: World, *, role: str | None 
         if value is not None:
             query[field_name] = [str(v) for v in (value if isinstance(value, list) else [value])]
 
-    data: dict[str, Any] = {}
+    fields: dict[str, Any] = {}
     body = None
     if case.json_body:
         body = draw(json_bodies(case.post(world) if case.post else {}), label="json body")
     elif case.post is not None:
-        for name, strategy in case.post(world).items():
-            value = draw(_optional(strategy), label=f"post {name}")
+        for field_name, strategy in case.post(world).items():
+            value = draw(_optional(strategy), label=f"post {field_name}")
             if value is not None:
-                data[name] = value
+                fields[field_name] = value
         extras = draw(st.dictionaries(st.text(max_size=20), hostile_text(), max_size=2), label="extra fields")
-        data |= {k: v for k, v in extras.items() if k not in data and k}
+        fields |= {k: v for k, v in extras.items() if k not in fields and k}
 
     headers = {}
-    if case.json or draw(st.booleans(), label="fetch"):
-        headers["Sec-Fetch-Mode"] = "cors"  # a fetch() from the page, as the JSON endpoints are called
+    if draw(st.booleans(), label="fetch"):
+        headers["Sec-Fetch-Mode"] = "cors"
     if not case.json and draw(st.booleans(), label="htmx"):  # a JSON endpoint is called by fetch(), never htmx
         headers["HX-Request"] = "true"
     if draw(st.booleans(), label="xhr"):
@@ -556,10 +593,10 @@ def requests(draw: st.DrawFn, case: ViewCase, world: World, *, role: str | None 
     if draw(st.booleans(), label="referer"):
         headers["Referer"] = draw(st.one_of(st.sampled_from(OFF_SITE), st.just("http://testserver/tickets/")))
     tz = draw(st.one_of(st.none(), st.sampled_from(TZ_COOKIES)), label="tz cookie")
-    texts = [*_texts(kwargs), *_texts(query), *_texts(data)]
-    if body is not None:
-        texts.append(body.decode("utf-8", "replace"))
-    return Drawn(role, method, path, query, data, body, headers, tz, texts)
+    return build(
+        case, role=role, method=method, name=name, kwargs=kwargs, query=query, fields=fields, body=body,
+        headers=headers, tz=tz,
+    )  # fmt: skip
 
 
 def path_params(route: str) -> list[tuple[str, str]]:
@@ -830,36 +867,26 @@ def any_request_is_answered_safely(case: ViewCase, world: World) -> None:
     run()
 
 
-def _first_path(case: ViewCase, world: World, name: str) -> str:
-    """The URL with the first valid value for each path parameter, so the view gets past its lookups."""
-    kwargs: dict[str, Any] = {}
-    for converter, param in path_params(ROUTES[name]):
-        valid = world.ids(_kind(case, param))
-        kwargs[param] = valid[0] if valid else (1 if converter == "int" else "x")
-    for param in re.findall(r"\(\?P<(\w+)>", ROUTES[name]):
-        kwargs[param] = world.ids(_kind(case, param))[0]
-    return reverse(name, kwargs=kwargs) if kwargs else reverse(name)
-
-
 def echo_sweep(case: ViewCase, world: World) -> None:
-    """Every field the row's view reads (query and POST), set to markup and template syntax at once, on each of its
-    URL names: a GET and a POST as each role allowed in (pages, and what a POST re-renders, differ by role).
-    check_answer then fails on any field echoed raw.
+    """Every query and POST field the row declares, set to markup and template syntax at once, on each of its URL
+    names (with the first valid value for each path parameter): each of the row's methods as each role allowed in
+    (pages, and what a POST re-renders, differ by role). check_answer then fails on any field echoed raw.
 
-    Deterministic, so CI checks every field every run: the random search rarely pairs an allowed role, the method
-    a field is read on, and markup in that one field (the cotton attrs XSS passed ci-views)."""
+    Deterministic, so CI checks every declared field every run: the random search rarely pairs an allowed role, the
+    method a field is read on, and markup in that one field (the cotton attrs XSS passed ci-views)."""
     probe = ECHO_PROBE + TEMPLATE_PROBE
     query = {name: [probe] for name in (case.query(world) if case.query else {})}
     fields = dict.fromkeys(case.post(world) if case.post else {}, probe)
     for name in (case.name, *case.also):
-        path = _first_path(case, world, name)
-        for role, method in ((role, method) for role in sorted(case.allowed) for method in ("GET", "POST")):
-            body = json.dumps(fields).encode() if method == "POST" and case.json_body else None
-            data = fields if method == "POST" and not case.json_body else {}
-            headers = {"Sec-Fetch-Mode": "cors"} if case.json else {}
-            drawn = Drawn(role, method, path, query, data, body, headers, None, [probe])
-            with rolled_back(), case.patches(world) if case.patches else ExitStack():
-                check_answer(case, drawn, send(world, drawn))
+        kwargs = {param: world.ids(kind)[0] for _, param, kind in route_params(case, name)}
+        for role in sorted(case.allowed):
+            for method in case.methods:
+                drawn = build(
+                    case, role=role, method=method, name=name, kwargs=kwargs, query=query,
+                    fields=fields if method == "POST" else {},
+                )  # fmt: skip
+                with rolled_back(), case.patches(world) if case.patches else ExitStack():
+                    check_answer(case, drawn, send(world, drawn))
 
 
 def snapshot(models_: tuple[type[models.Model], ...]) -> dict[str, list[dict[str, Any]]]:
@@ -880,8 +907,7 @@ def repeated_post_changes_nothing_more(case: ViewCase, world: World) -> None:
     @given(data=st.data())
     def run(data: st.DataObject) -> None:
         with rolled_back(), case.patches(world) if case.patches else ExitStack():
-            drawn = data.draw(requests(case, world, role=case.idempotent_as), label="request")
-            drawn.method = "POST"
+            drawn = data.draw(requests(case, world, role=case.idempotent_as, method="POST"), label="request")
             check_answer(case, drawn, send(world, drawn))
             once = snapshot(case.idempotent)
             check_answer(case, drawn, send(world, drawn))

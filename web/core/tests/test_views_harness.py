@@ -1,26 +1,21 @@
 """The view property harness's own checks: its oracle refuses what it should, and its tables stay in step with the
 code they stand for."""
 
-import re
 import sys
 
 from browser_tests.page_registry import PAGES
 from django.http import HttpResponse
 
 from core.permission_constants import PERMISSION_MAP
-from core.tests.guards import fail_with
 from core.tests.test_property_coverage import VIEW_MODULES
 from core.tests.views_harness import (
     ROLES,
-    ROUTES,
     Answer,
     Drawn,
     ViewCase,
-    World,
     check_answer,
     may,
     offline,
-    path_params,
     run_detached_callers,
 )
 
@@ -32,14 +27,14 @@ def _answer(status: int) -> Answer:
 def test_a_400_to_a_refused_role_passes_only_for_a_nul() -> None:
     """A view that validates its input before its permission check would answer a refused role 400."""
     case = ViewCase("ticket_list", frozenset({"admin"}))
-    plain = Drawn("red_team", "GET", "/tickets/", {"search": ["x"]}, {}, None, {}, None, ["x"])
+    plain = Drawn("red_team", "GET", "/tickets/", {"search": ["x"]}, {}, None, {}, None)
     try:
         check_answer(case, plain, _answer(400))
     except AssertionError:
         pass
     else:
         raise AssertionError("a 400 without a NUL passed as a refusal")
-    with_nul = Drawn("red_team", "GET", "/tickets/", {"search": ["\x00"]}, {}, None, {}, None, ["\x00"])
+    with_nul = Drawn("red_team", "GET", "/tickets/", {"search": ["\x00"]}, {}, None, {}, None)
     check_answer(case, with_nul, _answer(400))
 
 
@@ -65,25 +60,6 @@ def test_the_browser_tests_visit_each_page_as_a_role_it_lets_in() -> None:
     assert not wrong, f"page_registry visits pages as roles they refuse: {wrong}"
 
 
-# A path parameter kind that may have no valid value in the world -> why
-EMPTY_KINDS: dict[str, str] = {}
-
-
-def test_every_path_parameter_has_a_valid_value(view_world: World) -> None:
-    """A row whose path names no real row only ever drives the view's not-found answer."""
-    found = {}
-    for module in VIEW_MODULES:
-        for case in module.CASES:
-            for name in (case.name, *case.also):
-                route = ROUTES[name]
-                params = [param for _, param in path_params(route)] + re.findall(r"\(\?P<(\w+)>", route)
-                for param in params:
-                    kind = case.params.get(param, param)
-                    if not view_world.rows.get(kind):
-                        found[kind] = f"{name}'s {param}"
-    fail_with("Path parameters with no valid value in the world (seed one in build_world)", found, EMPTY_KINDS)
-
-
 def test_offline_patches_every_run_detached_caller() -> None:
     """A streaming view whose run_detached isn't patched runs in a thread that sees none of the test's rows."""
     from core import utils
@@ -101,7 +77,7 @@ def test_offline_patches_every_run_detached_caller() -> None:
 
 def test_a_refusal_that_mails_or_calls_out_fails() -> None:
     case = ViewCase("ticket_list", frozenset({"admin"}))
-    drawn = Drawn("red_team", "GET", "/tickets/", {}, {}, None, {}, None, [])
+    drawn = Drawn("red_team", "GET", "/tickets/", {}, {}, None, {}, None)
     for answer in (
         Answer(HttpResponse(status=403), b"", [], [], mailed=1),
         Answer(HttpResponse(status=403), b"", [], [], outbound=1),
