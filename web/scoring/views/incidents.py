@@ -230,7 +230,7 @@ def review_incidents(request: HttpRequest) -> HttpResponse:
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/review_incidents_table.html", context)
+        return render(request, "scoring/partials/review_incidents_table.html", context)
 
     return render(request, "scoring/review_incidents.html", context)
 

@@ -114,17 +114,7 @@
                     </c-filter_field>
                 {% endif %}
             </c-filter_toolbar>
-            <c-ticket_list_table :page_obj="page_obj"
-                                 :status_filter="status_filter"
-                                 :category_filter="category_filter"
-                                 :search_query="search_query"
-                                 :sort_by="sort_by"
-                                 :page_size="page_size"
-                                 :team_filter="team_filter"
-                                 :assignee_filter="assignee_filter"
-                                 :authentik_username="authentik_username"
-                                 :is_ticketing_admin="is_ticketing_admin"
-                                 :is_ops="is_ops" />
+            {% include "ticketing/ticket_list_table.html" %}
         </c-module>
     </div>
 {% endblock content %}

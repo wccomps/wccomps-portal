@@ -1,8 +1,6 @@
 {# Review tickets table - swappable content for htmx #}
-{# Declared, so cotton leaves them out of attrs: it writes attrs unescaped #}
-<c-vars page_obj status_filter team_filter category_filter search_query sort_by />
-<div {{ attrs }}
-     id="review-tickets-content"
+{% load cotton %}
+<div id="review-tickets-content"
      x-data="ticketsBulkSelect"
      @bulk-approve-tickets.document="submitBulk">
     <form id="bulk-approve-form"

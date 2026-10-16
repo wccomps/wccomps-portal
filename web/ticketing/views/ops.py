@@ -100,7 +100,7 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/review_tickets_table.html", context)
+        return render(request, "ticketing/review_tickets_table.html", context)
 
     return render(request, "ops_review_tickets.html", context)
 

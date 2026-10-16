@@ -135,7 +135,7 @@ def red_team_findings(request: HttpRequest) -> HttpResponse:
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/red_findings_table.html", context)
+        return render(request, "scoring/partials/red_findings_table.html", context)
 
     return render(request, "scoring/review_red_findings.html", context)
 
@@ -204,7 +204,7 @@ def red_team_scores(request: HttpRequest) -> HttpResponse:
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/red_findings_table.html", context)
+        return render(request, "scoring/partials/red_findings_table.html", context)
 
     return render(request, "scoring/red_team_findings.html", context)
 

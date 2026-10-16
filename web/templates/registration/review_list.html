@@ -21,7 +21,7 @@
                     </select>
                 </c-filter_field>
             </c-filter_toolbar>
-            <c-registration_review_table :registrations="registrations" />
+            {% include "registration/review_table.html" %}
         </c-module>
     </div>
 {% endblock registration_content %}

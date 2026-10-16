@@ -87,7 +87,7 @@ def review_orange(request: HttpRequest) -> HttpResponse:
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/review_orange_table.html", context)
+        return render(request, "scoring/partials/review_orange_table.html", context)
 
     return render(request, "scoring/review_orange.html", context)
 

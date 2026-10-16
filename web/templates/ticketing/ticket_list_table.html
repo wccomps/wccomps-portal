@@ -1,9 +1,6 @@
 {# Unified ticket list table - swappable content for htmx #}
 {% load cotton status_variants %}
-{# Declared, so cotton leaves them out of attrs: it writes attrs unescaped #}
-<c-vars page_obj status_filter category_filter search_query sort_by page_size team_filter assignee_filter authentik_username is_ticketing_admin is_ops />
-<div {{ attrs }}
-     id="ticket-list-content"
+<div id="ticket-list-content"
      {% if is_ops %}x-data="ticketBulkSelect"{% endif %}
      hx-get="{% url 'ticket_list' %}?status={{ status_filter }}&category={{ category_filter }}&search={{ search_query }}&sort={{ sort_by }}&page_size={{ page_size }} {% if is_ops %}&team={{ team_filter }}&assignee={{ assignee_filter }}{% endif %} "
      hx-trigger="every 30s"

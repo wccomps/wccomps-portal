@@ -78,13 +78,6 @@
                 </select>
             </c-filter_field>
         </c-filter_toolbar>
-        <c-red_findings_table :findings="findings"
-                              :page_obj="page_obj"
-                              :status_filter="status_filter"
-                              :selected_team="selected_team"
-                              :selected_attack_type="selected_attack_type"
-                              :selected_submitter="selected_submitter"
-                              :sort_by="sort_by"
-                              :is_gold_team="is_gold_team" />
+        {% include "scoring/partials/red_findings_table.html" %}
     </c-module>
 {% endblock red_content %}

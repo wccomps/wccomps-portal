@@ -42,7 +42,7 @@ APP_CSS = WEB_DIR / "static/css/app.css"
 ADMIN_CSS = Path(django.__file__).parent / "contrib/admin/static/admin/css"
 UTILITIES_RE = re.compile(r"/\* BEGIN UTILITIES \*/(.*?)/\* END UTILITIES \*/", re.DOTALL)
 
-# The shared components: the portal's building blocks. Every .html in cotton/ is here or in PAGE_PARTIALS.
+# The shared components: the portal's building blocks. Every .html in cotton/ is here.
 SHARED_COMPONENTS = {
     "action_box.html",
     "alert.html",
@@ -73,18 +73,6 @@ SHARED_COMPONENTS = {
     "toast.html",
     "toggle_button.html",
 }
-# One page's markup kept in cotton/, not shared; checked like pages
-PAGE_PARTIALS = {
-    "inject_grades_table.html",
-    "inject_grading_content.html",
-    "red_findings_table.html",
-    "registration_review_table.html",
-    "review_incidents_table.html",
-    "review_orange_table.html",
-    "review_tickets_table.html",
-    "ticket_list_table.html",
-}
-
 # Markup a page writes by hand that a shared component renders: (element, class or None, component)
 RAW_MARKUP = [
     ("button", None, "<c-button>"),
@@ -545,13 +533,12 @@ def by_use(uses: dict[str, set[str]], names: Iterable[str]) -> dict[str, str]:
 
 
 def test_all_components_registered() -> None:
-    """Every component is either shared (part of the vocabulary) or one page's partial (checked like a page)."""
+    """Every component is a shared one (part of the vocabulary); one page's markup is an include beside the page."""
     actual = {p.name for p in tracked_templates() if p.parent == COTTON_DIR}
-    registered = SHARED_COMPONENTS | PAGE_PARTIALS
-    unknown = sorted(actual - registered)
-    deleted = sorted(registered - actual)
-    assert not unknown, f"Add these cotton files to SHARED_COMPONENTS or PAGE_PARTIALS: {unknown}"
-    assert not deleted, f"These are in SHARED_COMPONENTS or PAGE_PARTIALS but not in cotton/: {deleted}"
+    unknown = sorted(actual - SHARED_COMPONENTS)
+    deleted = sorted(SHARED_COMPONENTS - actual)
+    assert not unknown, f"Add these cotton files to SHARED_COMPONENTS: {unknown}"
+    assert not deleted, f"These are in SHARED_COMPONENTS but not in cotton/: {deleted}"
 
 
 def test_utilities_section_is_marked() -> None:

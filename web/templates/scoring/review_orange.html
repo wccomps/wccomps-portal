@@ -71,11 +71,6 @@
                        aria-label="Search checks">
             </c-filter_field>
         </c-filter_toolbar>
-        <c-review_orange_table :page_obj="page_obj"
-                               :status_filter="status_filter"
-                               :selected_team="selected_team"
-                               :selected_check="selected_check"
-                               :search_query="search_query"
-                               :sort_by="sort_by" />
+        {% include "scoring/partials/review_orange_table.html" %}
     </c-module>
 {% endblock scoring_content %}

@@ -154,7 +154,7 @@ def inject_grading(request: HttpRequest) -> HttpResponse:
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/inject_grading_content.html", context)
+        return render(request, "scoring/partials/inject_grading_content.html", context)
 
     return render(request, "scoring/inject_grading.html", context)
 
@@ -283,7 +283,7 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/inject_grades_table.html", context)
+        return render(request, "scoring/partials/inject_grades_table.html", context)
 
     return render(request, "scoring/review_inject_grades.html", context)
 

@@ -222,4 +222,4 @@ class ReviewOrangePageTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         # HTMX response should use the table template, not the full page
-        self.assertTemplateUsed(response, "cotton/review_orange_table.html")
+        self.assertTemplateUsed(response, "scoring/partials/review_orange_table.html")

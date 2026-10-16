@@ -119,7 +119,7 @@ def review_list(request: HttpRequest) -> HttpResponse:
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/registration_review_table.html", context)
+        return render(request, "registration/review_table.html", context)
 
     return render(request, "registration/review_list.html", context)
 

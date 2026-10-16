@@ -82,13 +82,7 @@
                            aria-label="Search grades">
                 </c-filter_field>
             </c-filter_toolbar>
-            <c-inject_grades_table :page_obj="page_obj"
-                                   :status_filter="status_filter"
-                                   :selected_inject="selected_inject"
-                                   :selected_team="selected_team"
-                                   :show_outliers_only="show_outliers_only"
-                                   :search_query="search_query"
-                                   :sort_by="sort_by" />
+            {% include "scoring/partials/inject_grades_table.html" %}
         </c-module>
     </div>
 {% endblock scoring_content %}

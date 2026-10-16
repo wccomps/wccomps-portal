@@ -169,7 +169,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     }
 
     if request.headers.get("HX-Request"):
-        return render(request, "cotton/ticket_list_table.html", context)
+        return render(request, "ticketing/ticket_list_table.html", context)
 
     return render(request, "ticket_list.html", context)
 

@@ -69,11 +69,6 @@
                        aria-label="Search incidents">
             </c-filter_field>
         </c-filter_toolbar>
-        <c-review_incidents_table :page_obj="page_obj"
-                                  :status_filter="status_filter"
-                                  :selected_team="selected_team"
-                                  :selected_box="selected_box"
-                                  :search_query="search_query"
-                                  :sort_by="sort_by" />
+        {% include "scoring/partials/review_incidents_table.html" %}
     </c-module>
 {% endblock scoring_content %}

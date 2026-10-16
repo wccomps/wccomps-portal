@@ -1,8 +1,6 @@
 {# Orange team checks review table - swappable content for htmx #}
-{# Declared, so cotton leaves them out of attrs: it writes attrs unescaped #}
-<c-vars page_obj status_filter selected_team selected_check search_query sort_by />
-<div {{ attrs }}
-     id="review-orange-content"
+{% load cotton %}
+<div id="review-orange-content"
      x-data="orangeBulkSelect"
      @bulk-approve-orange.document="submitBulk">
     <form id="bulk-approve-form"
