@@ -96,6 +96,10 @@ module = "*.migrations.*"
 ignore_errors = true
 
 [[tool.mypy.overrides]]
+module = "django_cotton.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = "weasyprint"
 ignore_missing_imports = true
 
