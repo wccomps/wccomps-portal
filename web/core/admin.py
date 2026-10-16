@@ -10,7 +10,7 @@ from django.http import HttpRequest, HttpResponseBase
 if TYPE_CHECKING:
     from django.contrib.admin.sites import _ViewType
 
-from .auth_utils import get_authentik_groups
+from .auth_utils import has_permission
 from .models import (
     AuditLog,
     BotState,
@@ -29,11 +29,8 @@ class AuthentikAdminSite(admin.AdminSite):
     site_url = "/ops/tickets/"
 
     def has_permission(self, request: HttpRequest) -> bool:
-        if not request.user.is_active or not request.user.is_authenticated:
-            return False
-
-        groups = get_authentik_groups(request.user)
-        return "WCComps_Discord_Admin" in groups or "WCComps_Ticketing_Admin" in groups
+        # The sign-in gate's rule for /admin/ (core.middleware.AuthentikRequiredMiddleware), from PERMISSION_MAP
+        return request.user.is_active and has_permission(request.user, "admin")
 
     # The stubs bound _ViewType by Callable[..., HttpResponseBase], whose ... mypy counts as explicit Any
     def admin_view(self, view: _ViewType, cacheable: bool = False) -> _ViewType:  # type: ignore[explicit-any]

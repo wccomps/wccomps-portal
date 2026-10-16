@@ -1,7 +1,6 @@
 """The view property rows for the Django admin: the site's own pages and one row per registered model (built from
 the registry, so a new model is driven too)."""
 
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -11,7 +10,6 @@ from django.test import RequestFactory
 from hypothesis import strategies as st
 
 from core.tests.views_harness import (
-    ROLES,
     Fields,
     ViewCase,
     World,
@@ -22,24 +20,7 @@ from core.tests.views_harness import (
     may,
 )
 
-
-def _admin_site_roles() -> frozenset[str]:
-    """The roles the portal's admin site lets in (AuthentikAdminSite.has_permission) that also pass the sign-in
-    gate, which lets only the admin permission into /admin/ (AuthentikRequiredMiddleware)."""
-    let_in = {
-        role
-        for role, groups in ROLES.items()
-        if groups is not None
-        and admin.site.has_permission(
-            SimpleNamespace(
-                user=SimpleNamespace(is_active=True, is_authenticated=True, usergroups=SimpleNamespace(groups=groups))
-            )
-        )
-    }
-    return frozenset(let_in) & may("admin")
-
-
-ADMINS = _admin_site_roles()
+ADMINS = may("admin")  # the admin site and the sign-in gate let in only the admin permission
 
 
 def _list_filters(model_admin: admin.ModelAdmin[Any]) -> list[str]:

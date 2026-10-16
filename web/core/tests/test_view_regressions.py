@@ -16,6 +16,7 @@ from orange_team.models import OrangeAssignment, OrangeAssignmentResult, OrangeC
 from registration.models import TeamRegistration
 
 from core.models import BotState
+from core.tests.roles import role_user
 from core.tests.strategies import request_text, rolled_back
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket
@@ -342,3 +343,14 @@ def test_the_ticket_form_writes_posted_text_into_its_script_as_a_string(
     with rolled_back():
         response = client.post(reverse("create_ticket"), {"hostname": hostname})  # no title: the form comes back
     assert JS_STRING.search(response.content.decode()), "the posted hostname broke the script's string"
+
+
+@pytest.mark.parametrize(("role", "let_in"), [("admin", True), ("ticketing_admin", False), ("gold_team", False)])
+def test_the_django_admin_lets_in_only_the_admin_permission(role: str, let_in: bool) -> None:
+    """One rule for /admin/, the sign-in gate's: the admin site let Ticketing Admins in where the gate didn't."""
+    from django.contrib import admin
+    from django.test import RequestFactory
+
+    request = RequestFactory().get("/admin/")
+    request.user = role_user(role)
+    assert admin.site.has_permission(request) is let_in
