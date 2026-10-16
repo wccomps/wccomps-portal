@@ -1,0 +1,112 @@
+name: Nightly deep property tests
+
+# The ci profile runs the same few Hypothesis examples on every PR; this runs the deep profile (many random
+# examples, conftest.py) on main every night, and on failure opens or updates one issue with the failing tests and
+# their examples.
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  deep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: wccomps
+          POSTGRES_PASSWORD: wccomps
+          POSTGRES_DB: wccomps_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_USER: wccomps
+      DB_PASSWORD: wccomps
+      DB_NAME: wccomps_test
+      HYPOTHESIS_PROFILE: deep
+      ISSUE_TITLE: "Nightly deep property tests failed"
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: |
+          uv sync
+
+      - name: Collect static files
+        run: |
+          cd web && DJANGO_SETTINGS_MODULE=portal.settings uv run python manage.py collectstatic --noinput
+        env:
+          DJANGO_SECRET_KEY: test-secret-key-for-ci
+
+      - name: Run the tests under the deep profile (every Hypothesis test)
+        id: tests
+        continue-on-error: true
+        run: |
+          uv run pytest -m "not browser" -n auto --junitxml=deep-results.xml
+        env:
+          PYTHONPATH: ${{ github.workspace }}/web:${{ github.workspace }}
+          DJANGO_SECRET_KEY: test-secret-key-for-ci
+
+      - name: Open or update the failure issue
+        if: steps.tests.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'EOF'
+          import os
+          import xml.etree.ElementTree as ET
+
+          lines = [f"Run: {os.environ['RUN_URL']} (commit {os.environ['GITHUB_SHA'][:8]})", ""]
+          try:
+              cases = ET.parse("deep-results.xml").getroot().iter("testcase")
+          except (OSError, ET.ParseError):
+              cases = []
+              lines.append("The run produced no results file; see the run's log.")
+          for case in cases:
+              for problem in [*case.findall("failure"), *case.findall("error")]:
+                  name = f"{case.get('classname')}::{case.get('name')}"
+                  text = (problem.text or problem.get("message") or "")[-3000:]
+                  lines += [f"### {name}", "", "```", text, "```", ""]
+          body = "\n".join(lines)[:60000]
+          with open("issue-body.md", "w", encoding="utf-8") as out:
+              out.write(body)
+          EOF
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$ISSUE_TITLE\" in:title" \
+            --json number,title --jq 'map(select(.title == $ENV.ISSUE_TITLE)) | .[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body-file issue-body.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file issue-body.md
+          fi
+
+      - name: Fail the run when the tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1

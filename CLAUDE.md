@@ -15,7 +15,8 @@ WCComps Portal is a competition management platform for WRCCDC. Three components
 PYTHONPATH="$(pwd)/web:$(pwd)" DB_HOST=localhost DB_PORT=5433 DB_USER=test_user DB_PASSWORD=test_password DB_NAME=wccomps_test uv run pytest -m "not browser"
 # Browser tests (Playwright): same env, `-m browser -n0`
 # Hypothesis runs the "ci" profile: 25 fixed examples per test (10 for the view tests). HYPOTHESIS_PROFILE=deep runs
-# 2000 random ones (500 for the view tests). No test pins its own count.
+# 2000 random ones (500 for the view tests), and runs nightly on main (deep-properties.yml opens or updates one
+# issue on a failure). No test pins its own count.
 # User-input property tests: web/core/tests/test_properties_*.py; test_property_coverage.py fails on any input
 # without one (or an exceptions entry with a reason). A new URL pattern needs a row in its test_properties_views_*
 # table (views_harness.ViewCase).
