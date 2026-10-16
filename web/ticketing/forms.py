@@ -105,7 +105,8 @@ class TicketChangeCategoryForm(forms.Form):
 
 
 class TicketBulkActionForm(forms.Form):
-    ticket_numbers = forms.CharField()
+    # Not required: no selection gets the one error below, which the bulk views show
+    ticket_numbers = forms.CharField(required=False)
 
     def clean_ticket_numbers(self) -> list[str]:
         raw = self.cleaned_data["ticket_numbers"]

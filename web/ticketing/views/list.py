@@ -1,12 +1,15 @@
 import logging
 from datetime import timedelta
 from typing import cast
+from urllib.parse import urlsplit
 
 from django.contrib.auth.models import User
 from django.db.models import Count, Max, Q
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from core.auth_utils import get_user_team, has_permission
 from core.tickets_config import get_all_categories, get_category_config
@@ -18,6 +21,22 @@ logger = logging.getLogger(__name__)
 
 VALID_PAGE_SIZES = [25, 50, 100, 200]
 STALE_TICKET_MINUTES = 30
+
+
+def back_to_list(request: HttpRequest, *also: str) -> HttpResponse:
+    """Back to the page the request came from (its Referer) when that is the ticket list, as the person had it
+    filtered, or one of the also paths; else to the plain list.
+
+    The ticket pages find their way back to the filtered list differently (utils.js keeps the list's query in
+    sessionStorage): they are a later visit, while this is the redirect straight after a POST from the page, and every
+    ticket action redirects to the bare ticket URL, so a query carried in the links wouldn't survive. Both stay.
+    """
+    list_path = reverse("ticket_list")
+    referer = request.headers.get("referer", "")
+    came_from = urlsplit(referer)
+    if url_has_allowed_host_and_scheme(referer, {request.get_host()}) and came_from.path in (list_path, *also):
+        return redirect(f"{came_from.path}?{came_from.query}" if came_from.query else came_from.path)
+    return redirect(list_path)
 
 
 def ticket_list(request: HttpRequest) -> HttpResponse:
