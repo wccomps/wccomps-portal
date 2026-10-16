@@ -203,9 +203,10 @@ function jsKey(id) {
 
 /* Forms: asking first, and posting once */
 
-// A POST form posts once: the first submit marks it data-posting and disables its submit buttons until the page is
-// left, and a later submit is dropped. Before that, its data-confirm question is asked, read as text. Capture runs
-// before the form's own handlers, so a dropped or cancelled submit stops them too.
+// A c-form (data-post-once) posts once: the first submit marks it data-posting and disables its submit buttons until
+// the page is left, and a later submit is dropped. Before that, any form's data-confirm question is asked, read as
+// text. Capture runs before the form's own handlers, so a dropped or cancelled submit stops them too. Other forms,
+// Django admin's among them (an action that only downloads a file leaves the page as it was), aren't guarded.
 document.addEventListener('submit', (e) => {
     const form = e.target;
     const question = form.dataset.confirm;
@@ -216,9 +217,10 @@ document.addEventListener('submit', (e) => {
 }, true);
 
 // Marked last (window, bubbling), so a form whose own handler cancels the submit (one that posts by fetch) isn't
+// marked
 window.addEventListener('submit', (e) => {
     const form = e.target;
-    if (e.defaultPrevented || form.method.toLowerCase() !== 'post') return;
+    if (e.defaultPrevented || !('postOnce' in form.dataset)) return;
     form.dataset.posting = 'true';
     // Disabled after the browser has read the form, so the button pressed still sends its name and value
     setTimeout(() => form.querySelectorAll('button[type="submit"]:not(:disabled), input[type="submit"]:not(:disabled)')
