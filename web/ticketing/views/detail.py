@@ -15,6 +15,7 @@ from core.models import DiscordTask
 from core.tickets_config import get_all_categories, get_category_config
 from ticketing.forms import TicketCommentForm
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
+from ticketing.views.list import LIST_QUERY_SESSION_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
         "comments": comments,
         "comments_version": list_version(comments),
         "attachments": attachments,
+        "list_query": request.session.get(LIST_QUERY_SESSION_KEY, ""),
         "status_display": ticket.status.upper().replace("_", " "),
     }
 

@@ -113,7 +113,7 @@
                 {% endif %}
                 <th role="gridcell">
                     {% if is_ops %}
-                        <a href="{% url 'ticket_detail' ticket_number=item.ticket.ticket_number %}{% querystring %}">
+                        <a href="{% url 'ticket_detail' ticket_number=item.ticket.ticket_number %}">
                             {{ item.ticket.ticket_number }}
                         </a>
                         {% if item.is_stale %}<c-badge variant="danger">STALE</c-badge>{% endif %}

@@ -1,5 +1,5 @@
-"""The ticket list's links keep the query the list was opened with: the 30 s refresh, a ticket's link, and the
-ticket page's way back to the list."""
+"""The ticket list's refresh keeps the query the list was opened with, and the ticket page's way back returns to
+the list as it was last shown, after any action on the ticket."""
 
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlsplit
@@ -56,10 +56,29 @@ def test_the_refresh_keeps_the_page_and_filters(client: Client, ticket: Ticket) 
     assert query_of(refresh["hx-get"]) == QUERY
 
 
-def test_the_ticket_page_links_back_to_the_list_it_was_opened_from(client: Client, ticket: Ticket) -> None:
-    list_html = client.get(reverse("ticket_list"), {**QUERY, "page": ["1"]}).content.decode()
+def list_link_queries(client: Client, ticket: Ticket) -> list[dict[str, list[str]]]:
+    """The queries of the ticket page's links to the list: the menu's, and the breadcrumb's way back."""
+    html = client.get(reverse("ticket_detail", kwargs={"ticket_number": ticket.ticket_number})).content.decode()
+    return [
+        query_of(a["href"]) for a in attributes(html) if urlsplit(a.get("href") or "").path == reverse("ticket_list")
+    ]
+
+
+def test_after_filtering_opening_and_claiming_the_back_link_returns_to_the_same_list(
+    client: Client, ticket: Ticket
+) -> None:
+    query = {**QUERY, "page": ["1"]}
+    client.get(reverse("ticket_list"), query)
+    assert query in list_link_queries(client, ticket)
+    response = client.post(reverse("ticket_claim", kwargs={"ticket_number": ticket.ticket_number}))
+    assert response.status_code == 302
+    ticket.refresh_from_db()
+    assert ticket.status == "claimed"
+    assert query in list_link_queries(client, ticket)
+
+
+def test_a_ticket_link_carries_no_list_query(client: Client, ticket: Ticket) -> None:
+    html = client.get(reverse("ticket_list"), QUERY).content.decode()
     detail_url = reverse("ticket_detail", kwargs={"ticket_number": ticket.ticket_number})
-    row_link = next(a["href"] for a in attributes(list_html) if (a.get("href") or "").startswith(detail_url))
-    detail_html = client.get(row_link).content.decode()
-    back = [a["href"] for a in attributes(detail_html) if urlsplit(a.get("href") or "").path == reverse("ticket_list")]
-    assert {**QUERY, "page": ["1"]} in [query_of(href) for href in back]
+    links = [a["href"] for a in attributes(html) if (a.get("href") or "").startswith(detail_url)]
+    assert links == [detail_url]

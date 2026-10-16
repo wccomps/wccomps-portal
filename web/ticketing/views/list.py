@@ -16,6 +16,7 @@ from ticketing.models import Ticket
 logger = logging.getLogger(__name__)
 
 VALID_PAGE_SIZES = [25, 50, 100, 200]
+LIST_QUERY_SESSION_KEY = "ticket_list_query"
 STALE_TICKET_MINUTES = 30
 
 
@@ -36,8 +37,11 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
 
     from core.utils import filter_sort_paginate
 
-    # Several statuses allowed (#37): checkboxes send ?status=a&status=b, and sort/page links carry
-    # them as one comma-separated value. Unknown values are ignored; none selected means all.
+    # The ticket page's way back returns to the list as it was last shown
+    request.session[LIST_QUERY_SESSION_KEY] = request.GET.urlencode()
+
+    # Several statuses allowed (#37): checkboxes send ?status=a&status=b; a comma-separated value
+    # (an older link's) works too. Unknown values are ignored; none selected means all.
     requested = {part for value in request.GET.getlist("status") for part in value.split(",")}
     selected_statuses = [s for s, _label in Ticket.STATUS_CHOICES if s in requested]
     status_filter = ",".join(selected_statuses) or "all"

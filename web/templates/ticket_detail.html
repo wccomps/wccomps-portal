@@ -7,7 +7,7 @@
     <div id="content-main">
         <c-page_header title="{{ ticket.ticket_number }} — {{ ticket.title }}"
                        subtitle="Team {{ ticket.team.team_number }}"
-                       parent_url="{% url 'ticket_list' %}{% querystring %}"
+                       parent_url="{% url 'ticket_list' %}{% if list_query %}?{{ list_query }}{% endif %}"
                        parent_label="Tickets" />
         <c-module>
             <div class="status-bar">
