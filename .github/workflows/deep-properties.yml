@@ -57,6 +57,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # The report script is 3.14 syntax; the runner's own python3 is older
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+
       - uses: actions/download-artifact@v4
         continue-on-error: true
         with:
@@ -64,7 +69,7 @@ jobs:
 
       - name: Open, update or close the failure issue
         run: |
-          python3 .github/scripts/deep_report.py test-results.xml "$RUN_URL" "$SHA" > issue-body.md
+          python .github/scripts/deep_report.py test-results.xml "$RUN_URL" "$SHA" > issue-body.md
           if [ "$DRY_RUN" = "true" ]; then
             echo "Tests: $RESULT. The issue body a failing night would send:"
             cat issue-body.md

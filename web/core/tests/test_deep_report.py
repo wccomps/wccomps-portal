@@ -53,3 +53,23 @@ def test_a_failure_stays_inside_its_code_block(tmp_path_factory, message: str) -
 def test_a_missing_results_file_is_reported(tmp_path: Path) -> None:
     body = deep_report.body(tmp_path / "none.xml", "https://run", "abc123")
     assert "no readable test results" in body
+
+
+def test_every_workflow_job_that_runs_python_sets_up_the_pinned_version() -> None:
+    """A job's python3 is the runner's own (older than 3.14, which the scripts' syntax needs) unless the job sets up
+    the version .python-version pins: the report job failed on the runner's python3."""
+    import yaml
+
+    unpinned = []
+    for workflow in sorted((REPO_DIR / ".github" / "workflows").glob("*.yml")):
+        for name, job in yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"].items():
+            steps = job.get("steps", [])
+            runs_python = any(re.search(r"\bpython3?\b", step.get("run", "")) for step in steps)
+            pinned = any(
+                step.get("uses", "").startswith("actions/setup-python@")
+                and step.get("with", {}).get("python-version-file") == ".python-version"
+                for step in steps
+            )
+            if runs_python and not pinned:
+                unpinned.append(f"{workflow.name}:{name}")
+    assert not unpinned, f"Jobs running Python without the pinned version: {unpinned}"
