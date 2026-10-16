@@ -228,8 +228,8 @@ def test_no_page_value_in_an_inline_handler() -> None:
 
 
 def test_a_question_is_data_confirm_on_a_form() -> None:
-    """static/js/utils.js asks a form's data-confirm before it submits; on any other element it asks nothing, and
-    hx-confirm asks only before an htmx request, which no form makes."""
+    """static/js/utils.js asks a form's data-confirm before it submits; on any other element it asks nothing. No form
+    posts by htmx (the filter toolbars only GET), so a question there belongs in data-confirm, not hx-confirm."""
     found = {}
     for path in tracked_templates():
         for tag in tags(path):

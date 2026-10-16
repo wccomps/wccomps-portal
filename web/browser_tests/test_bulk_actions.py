@@ -98,7 +98,7 @@ def test_a_form_whose_post_is_slow_posts_once(live_server, pw_browser):
         context.close()
 
 
-def test_the_ticket_lists_refresh_waits_while_a_bulk_claim_is_posting(live_server, pw_browser):
+def test_the_ticket_lists_refresh_skips_while_a_bulk_claim_is_posting(live_server, pw_browser):
     """A refresh would replace the list's forms with fresh ones mid-POST, so it doesn't run while one is posting."""
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
@@ -158,7 +158,7 @@ def test_the_ticket_lists_bulk_actions_ask_with_the_count(live_server, pw_browse
 
 
 def test_the_ticket_lists_refresh_keeps_a_selection(live_server, pw_browser):
-    """A refresh replaces the list's rows, so it waits while any row is checked."""
+    """A refresh replaces the list's rows, so it skips its turn while any row is checked."""
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
 

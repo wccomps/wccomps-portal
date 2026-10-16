@@ -1,7 +1,8 @@
 """UI text uses words. In templates and Django admin columns: no emoji, symbol marks or math signs standing for a
 status or a control, no em or en dashes, and no hyphen standing in for a dash (" - ", "--") or for a missing value;
-an empty value is left blank, and page titles keep their "Page - WCComps Portal" separator. In the web app's other
-Python strings: no symbol marks, em or en dashes, or "--" (the spaced hyphen isn't checked there yet).
+an empty value is left blank, and page titles keep their "Page - WCComps Portal" separator. In every string literal
+of the web app's Python (admin.py included) and the bot's role sync: no symbol marks, em or en dashes, or "--" (the
+spaced hyphen isn't checked there yet).
 
 A symbol that is the control itself (a menu toggle, a sort arrow) is listed in SYMBOL_EXCEPTIONS with why.
 """
@@ -111,8 +112,8 @@ def string_constants(path: Path) -> list[tuple[int, str]]:
 
 
 def test_ui_text_built_in_python_has_no_symbol_marks_or_dashes() -> None:
-    """Messages, form errors, admin columns and other strings built in Python: no symbol marks, em or en dashes, or
-    "--". Every string in web/ is held to it, Discord messages built there included."""
+    """Every string literal in web/ (not tests, migrations or docstrings) and bot/role_sync.py: no symbol marks, em or
+    en dashes, or "--". Discord messages built in web/ are held to it too."""
     found = {}
     for name in tracked_files():
         if not PYTHON_UI_FILES_RE.fullmatch(name):
