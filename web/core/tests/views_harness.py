@@ -24,6 +24,7 @@ import httpx
 from django import forms
 from django.contrib import admin
 from django.contrib.auth.models import User
+from django.contrib.contenttypes.models import ContentType
 from django.contrib.messages import constants as message_levels
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection, models
@@ -63,15 +64,17 @@ from scoring.models import (
     RedTeamIPPool,
     RedTeamScore,
     RedTeamScreenshot,
+    ScoringExclusion,
     ScoringTemplate,
+    ServiceScore,
 )
 
-from core.models import DiscordTask
+from core.models import AuditLog, BotState, CompetitionConfig, DiscordTask
 from core.permission_constants import check_groups_for_permission
 from core.tests.roles import ROLE_GROUPS, make_user
 from core.tests.strategies import PAYLOADS, field_values, request_text, rolled_back, uploaded_files, valid_values
-from team.models import DiscordLink, LinkToken, Team
-from ticketing.models import Ticket, TicketAttachment, TicketCategory, TicketComment
+from team.models import DiscordLink, LinkAttempt, LinkRateLimit, LinkToken, Team
+from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
 
 # ---------------------------------------------------------------------------------------------------------------
 # Roles
@@ -106,12 +109,9 @@ class World:
     rows: dict[str, list[Any]] = field(default_factory=dict)  # by kind: the valid ids a path can name
 
     def ids(self, kind: str) -> list[Any]:
-        """The valid values of a kind of path parameter; "pk:<app.Model>" is every primary key of that model."""
-        if kind.startswith("pk:") and kind not in self.rows:
-            from django.apps import apps
-
-            self.rows[kind] = list(apps.get_model(kind[3:])._default_manager.values_list("pk", flat=True))
-        return self.rows.get(kind, [])
+        """The valid values of a kind of path parameter ("pk:<app.Label>" for an admin model's keys); a kind the
+        world doesn't have is a KeyError, not an empty list."""
+        return self.rows[kind]
 
 
 def build_world() -> World:
@@ -322,8 +322,25 @@ def build_world() -> World:
         "event_assignment_id": list(EventTeamAssignment.objects.values_list("pk", flat=True)),
         "link_token": [link_token.token],
         "app_label": sorted({model._meta.app_label for model in admin.site._registry}),
+        "pk:contenttypes.ContentType": list(ContentType.objects.values_list("pk", flat=True)),
     }
+    _seed_admin_only_models(teams, tickets[0], users["admin"])
+    for model in admin.site._registry:
+        world.rows[f"pk:{model._meta.label}"] = list(model._default_manager.values_list("pk", flat=True))
     return world
+
+
+def _seed_admin_only_models(teams: list[Team], ticket: Ticket, admin_user: User) -> None:
+    """A row for each admin model the views don't need, so its change, delete and history pages show a real one."""
+    AuditLog.objects.create(action="seeded", admin_user="prop-admin", target_entity="team", target_id=1)
+    BotState.objects.create(key="dashboard_message", value="1")
+    CompetitionConfig.get_config()
+    LinkAttempt.objects.create(discord_id=1, discord_username="linker", authentik_username="prop-admin", success=False)
+    LinkRateLimit.objects.create(discord_id=1)
+    TicketHistory.objects.create(ticket=ticket, action="created", actor=admin_user)
+    CommentRateLimit.objects.create(ticket=ticket, discord_id=1)
+    ServiceScore.objects.create(team=teams[0])
+    ScoringExclusion.objects.create(team=teams[2])
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -490,7 +507,7 @@ def requests(draw: st.DrawFn, case: ViewCase, world: World, *, role: str | None 
     method = draw(st.one_of(st.sampled_from(case.methods), st.sampled_from(METHODS)), label="method")
     name = draw(st.sampled_from((case.name, *case.also)), label="url name")
     kwargs: dict[str, Any] = {}
-    for converter, param in _path_params(ROUTES[name]):
+    for converter, param in path_params(ROUTES[name]):
         valid = world.ids(_kind(case, param))
         if converter == "int":
             kwargs[param] = draw(path_int(valid))
@@ -537,7 +554,7 @@ def requests(draw: st.DrawFn, case: ViewCase, world: World, *, role: str | None 
     return Drawn(role, method, path, query, data, body, headers, tz, texts)
 
 
-def _path_params(route: str) -> list[tuple[str, str]]:
+def path_params(route: str) -> list[tuple[str, str]]:
     return re.findall(r"<(int|str|path):(\w+)>", route)
 
 
@@ -766,7 +783,7 @@ def any_request_is_answered_safely(case: ViewCase, world: World) -> None:
 def _first_path(case: ViewCase, world: World, name: str) -> str:
     """The URL with the first valid value for each path parameter, so the view gets past its lookups."""
     kwargs: dict[str, Any] = {}
-    for converter, param in _path_params(ROUTES[name]):
+    for converter, param in path_params(ROUTES[name]):
         valid = world.ids(_kind(case, param))
         kwargs[param] = valid[0] if valid else (1 if converter == "int" else "x")
     for param in re.findall(r"\(\?P<(\w+)>", ROUTES[name]):

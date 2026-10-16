@@ -1,12 +1,15 @@
 """The view property harness's own checks: its oracle refuses what it should, and its tables stay in step with the
 code they stand for."""
 
+import re
+
 from browser_tests.page_registry import PAGES
 from django.http import HttpResponse
 
 from core.permission_constants import PERMISSION_MAP
+from core.tests.guards import fail_with
 from core.tests.test_property_coverage import VIEW_MODULES
-from core.tests.views_harness import ROLES, Answer, Drawn, ViewCase, check_answer, may
+from core.tests.views_harness import ROLES, ROUTES, Answer, Drawn, ViewCase, World, check_answer, may, path_params
 
 
 def _answer(status: int) -> Answer:
@@ -47,3 +50,22 @@ def test_the_browser_tests_visit_each_page_as_a_role_it_lets_in() -> None:
         if role not in allowed[page.url_name]
     ]
     assert not wrong, f"page_registry visits pages as roles they refuse: {wrong}"
+
+
+# A path parameter kind that may have no valid value in the world -> why
+EMPTY_KINDS: dict[str, str] = {}
+
+
+def test_every_path_parameter_has_a_valid_value(view_world: World) -> None:
+    """A row whose path names no real row only ever drives the view's not-found answer."""
+    found = {}
+    for module in VIEW_MODULES:
+        for case in module.CASES:
+            for name in (case.name, *case.also):
+                route = ROUTES[name]
+                params = [param for _, param in path_params(route)] + re.findall(r"\(\?P<(\w+)>", route)
+                for param in params:
+                    kind = case.params.get(param, param)
+                    if not view_world.rows.get(kind):
+                        found[kind] = f"{name}'s {param}"
+    fail_with("Path parameters with no valid value in the world (seed one in build_world)", found, EMPTY_KINDS)
