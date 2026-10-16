@@ -1,22 +1,24 @@
 """The view property harness's own checks: its oracle refuses what it should, and its tables stay in step with the
 code they stand for."""
 
-import sys
+import ast
+import importlib
 
 from browser_tests.page_registry import PAGES
 from django.http import HttpResponse
 
 from core.permission_constants import PERMISSION_MAP
+from core.tests.test_no_unused_code import python_trees
 from core.tests.test_property_coverage import VIEW_MODULES
 from core.tests.views_harness import (
     ROLES,
+    RUN_DETACHED,
     Answer,
     Drawn,
     ViewCase,
     check_answer,
     may,
     offline,
-    run_detached_callers,
 )
 
 
@@ -60,17 +62,38 @@ def test_the_browser_tests_visit_each_page_as_a_role_it_lets_in() -> None:
     assert not wrong, f"page_registry visits pages as roles they refuse: {wrong}"
 
 
+def _run_detached_users() -> dict[str, set[str]]:
+    """From the source, not from what is loaded: each project module that names run_detached (an import of it, under
+    any name, or an attribute call), with the names it binds it to."""
+    users: dict[str, set[str]] = {}
+    for path, tree in python_trees().items():
+        if not path.startswith("web/") or "/tests/" in path or path == "web/core/utils.py":
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module in ("core.utils", "utils"):
+                names = {a.asname or a.name for a in node.names if a.name == "run_detached"}
+            elif isinstance(node, ast.Attribute) and node.attr == "run_detached":
+                names = {""}
+            else:
+                continue
+            module = path.removeprefix("web/").removesuffix(".py").replace("/", ".")
+            users.setdefault(module, set()).update(names)
+    return users
+
+
 def test_offline_patches_every_run_detached_caller() -> None:
     """A streaming view whose run_detached isn't patched runs in a thread that sees none of the test's rows."""
     from core import utils
 
-    callers = {module.__name__ for module in run_detached_callers()}
-    assert {"core.admin_views.competition", "packets.views", "scoring.views.export"} <= callers
+    users = _run_detached_users()
+    assert users, "no module uses run_detached: the scan is broken"
     with offline():
+        assert utils.run_detached is not RUN_DETACHED, "offline() left core.utils.run_detached unpatched"
         unpatched = [
-            name
-            for name, module in list(sys.modules.items())
-            if getattr(module, "run_detached", None) is utils.run_detached and module is not utils
+            f"{module}.{name}"
+            for module, names in users.items()
+            for name in names - {""}
+            if getattr(importlib.import_module(module), name) is RUN_DETACHED
         ]
     assert not unpatched, f"offline() left run_detached unpatched in {unpatched}"
 

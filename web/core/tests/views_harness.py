@@ -801,6 +801,17 @@ def _offline(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Respons
     raise httpx.ConnectError("offline: property tests reach no other service", request=request)
 
 
+def _real_run_detached() -> Callable[[Iterator[str]], Iterator[str]]:
+    from core.utils import run_detached
+
+    return run_detached
+
+
+RUN_DETACHED = _real_run_detached()  # taken before any offline() patches it
+# The project's own packages, whose modules can call run_detached
+PROJECT_PACKAGES = {"core", "packets", "scoring", "orange_team", "registration", "team", "ticketing", "quotient"}
+
+
 def _inline(lines: Iterator[str]) -> Iterator[str]:
     """run_detached without its thread: the thread's own connection would see none of the test's rows."""
     yield from lines
@@ -822,21 +833,27 @@ def offline() -> Iterator[None]:
                 QUOTIENT_PASSWORD="property",
             )
         )
-        for module in run_detached_callers():
-            stack.enter_context(patch.object(module, "run_detached", _inline))
+        for module, name in run_detached_bindings():
+            stack.enter_context(patch.object(module, name, _inline))
         yield
 
 
-def run_detached_callers() -> list[ModuleType]:
-    """Every loaded module that imported core.utils.run_detached (the URLconf loads every view), patched already or
-    not: each binds the name at import, so each is patched where it calls it."""
-    from core import utils
+def _is_project_code(name: str) -> bool:
+    return name.split(".")[0] in PROJECT_PACKAGES and ".tests" not in name
+
+
+def run_detached_bindings() -> list[tuple[ModuleType, str]]:
+    """Every (module, name) bound to the real core.utils.run_detached, under any name, core.utils's own included.
+    Patching core.utils covers a call through it (utils.run_detached(...)) and an import inside a function; the
+    others imported the function before the patch (the URLconf loads every view first)."""
 
     get_resolver().url_patterns  # noqa: B018 - loads every view module
     return [
-        module
+        (module, name)
         for module in list(sys.modules.values())
-        if module is not utils and getattr(module, "run_detached", None) in (utils.run_detached, _inline)
+        if _is_project_code(getattr(module, "__name__", "") or "")
+        for name, value in list(vars(module).items())
+        if value is RUN_DETACHED
     ]
 
 
