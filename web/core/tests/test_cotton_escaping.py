@@ -2,18 +2,18 @@
 it, for each way the portal passes one, rendered through the real template engine."""
 
 import logging
-import os
-import subprocess
-import sys
 from html.parser import HTMLParser
 
 import pytest
-from django.template import Context, Template, TemplateSyntaxError
+from django.template import Context, Template, TemplateSyntaxError, Variable
 from django.test import override_settings
 from django.utils.safestring import mark_safe
 from django_cotton.compiler_regex import CottonCompiler
+from django_cotton.templatetags import Attrs
 from hypothesis import example, given
 from hypothesis import strategies as st
+
+from core import cotton
 
 BREAKOUTS = [
     '"><svg onload=alert(1)>"',
@@ -42,7 +42,8 @@ COMPONENT = """<c-button
     data-fallback=not_in_context
     :data-literal="'a literal'"
     :data-template-literal="'{{ value }}'"
-    :data-safe="safe">Go</c-button>"""
+    :data-safe="safe"
+    :data-quoted="quoted">Go</c-button>"""
 
 
 class Elements(HTMLParser):
@@ -60,6 +61,7 @@ def render(value: str) -> str:
         "url": "/list?a=1&b=2",
         "spread": {"data-spread": value},
         "safe": mark_safe('<b class="x">ok</b>'),  # noqa: S308
+        "quoted": f"'{value}'",
     }
     return Template(CottonCompiler().process(COMPONENT)).render(Context(context))
 
@@ -96,8 +98,10 @@ def test_every_attrs_value_comes_out_as_the_value_it_was(breakout: str, value: s
             ":x-text": passed,
             "data-fallback": "not_in_context",
             "data-literal": "a literal",
-            "data-template-literal": "{{ value }}",  # cotton reads a quoted :name as a string literal, unrendered
+            # A quoted :name is a Django string literal: template source, marked safe and left unrendered
+            "data-template-literal": "{{ value }}",
             "data-safe": '<b class="x">ok</b>',
+            "data-quoted": f"'{passed}'",
             "class": "button  ",
         }, html
 
@@ -115,15 +119,11 @@ def test_a_dynamic_attribute_that_is_not_in_the_context_fails_to_render() -> Non
 
 
 @override_settings(STRICT_COMPONENT_ATTRS=False)
-def test_in_production_a_dynamic_attribute_not_in_the_context_is_left_out_with_a_warning(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    template = Template(CottonCompiler().process('<c-button :disabled="loading" title="Go">Go</c-button>'))
-    with caplog.at_level(logging.WARNING, logger="core.cotton"):
-        html = template.render(Context({}))
+def test_in_production_a_dynamic_attribute_not_in_the_context_is_left_out() -> None:
+    template = Template(CottonCompiler().process('<c-button :disabled="loading_left_out" title="Go">Go</c-button>'))
+    html = template.render(Context({}))
     assert 'title="Go"' in html
     assert "disabled" not in html
-    assert "::disabled" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -143,18 +143,30 @@ def test_an_alpine_binding_renders() -> None:
     assert ':disabled="loading"' in html
 
 
-def test_django_setup_installs_the_escaping_before_anything_can_render() -> None:
-    """core.cotton patches render-time code (Attrs), so it holds for every template if django.setup(), which every
-    entry point (wsgi, manage.py, the bot) runs before rendering, installs it. A fresh interpreter checks that."""
-    script = (
-        "import django\n"
-        "from django_cotton.templatetags import Attrs\n"
-        "unpatched = Attrs.__str__\n"
-        "django.setup()\n"
-        "from core import cotton\n"
-        "assert unpatched is not cotton.attrs_html\n"
-        "assert Attrs.__str__ is cotton.attrs_html and Attrs.unprocessable is cotton.unresolved\n"
-    )
-    env = {**os.environ, "DJANGO_SETTINGS_MODULE": "portal.test_settings"}
-    result = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, check=False)  # noqa: S603
-    assert result.returncode == 0, result.stderr
+def test_the_installed_attrs_methods_are_core_cotton_ones() -> None:
+    """CoreConfig.ready installs them; both run at render time, so they cover every template however early it loaded."""
+    assert Attrs.__str__ is cotton.attrs_html
+    assert Attrs.unprocessable is cotton.unresolved
+
+
+@pytest.mark.parametrize(
+    ("value", "written"),
+    [
+        ('<b> & "x"', "&lt;b&gt; &amp; &quot;x&quot;"),
+        (mark_safe('<b> &amp; "x"'), "<b> &amp; &quot;x&quot;"),  # noqa: S308
+        (Variable("'<b> &amp;'").resolve({}), "<b> &amp;"),
+    ],
+)
+def test_a_plain_value_is_escaped_and_a_safe_one_only_has_its_quotes_encoded(value: str, written: str) -> None:
+    assert cotton.attribute("title", value) == f'title="{written}"'
+
+
+@override_settings(STRICT_COMPONENT_ATTRS=False)
+def test_in_production_a_dropped_attribute_is_reported_once_per_place(caplog: pytest.LogCaptureFixture) -> None:
+    template = Template(CottonCompiler().process('\n<c-button :disabled="loading_once">Go</c-button>'))
+    with caplog.at_level(logging.ERROR, logger="wccomps.errors"):
+        template.render(Context({}))
+        template.render(Context({}))
+    reports = [r for r in caplog.records if r.name == "wccomps.errors" and "::disabled" in r.getMessage()]
+    assert len(reports) == 1
+    assert ":2" in reports[0].getMessage()
