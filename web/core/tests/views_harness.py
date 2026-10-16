@@ -769,7 +769,8 @@ def kind_of(answer: Answer) -> Kind:
     return Kind.ANSWERED
 
 
-# A permission check's answers (a form's or an object's own refusal redirects elsewhere)
+# A permission check's answers. A redirect elsewhere with an error is a form's or an object's refusal after a POST,
+# but on a GET, which posts nothing to refuse, it is a refusal of the visitor too (every_allowed_role_gets_in)
 PERMISSION_REFUSALS = {Kind.SIGN_IN, Kind.FORBIDDEN, Kind.MISSING, Kind.REFUSED_HOME}
 
 
@@ -928,7 +929,8 @@ def every_allowed_role_gets_in(case: ViewCase, world: World) -> None:
                     answers.append((drawn.path, method, answer.response.status_code))
                     if answer.response.status_code != 405:
                         break
-                if kind_of(answer) not in (*PERMISSION_REFUSALS, Kind.WRONG_METHOD):
+                refusals = {*PERMISSION_REFUSALS, Kind.WRONG_METHOD} | ({Kind.REFUSED} if method == "GET" else set())
+                if kind_of(answer) not in refusals:
                     assert offered, f"{name}: a page the row says is turned off let {role} in: {answers}"
                     break
             else:

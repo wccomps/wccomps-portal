@@ -11,10 +11,12 @@ import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 from hypothesis import assume, example, given
 from hypothesis import strategies as st
 from orange_team.models import OrangeAssignment, OrangeAssignmentResult, OrangeCheck, OrangeCheckCriterion
 from registration.models import TeamRegistration
+from scoring.models import IncidentReport
 
 from core.middleware import NUL_MESSAGE
 from core.models import BotState
@@ -400,3 +402,14 @@ def test_the_admin_site_alone_decides_who_gets_into_the_django_admin(gold_team_u
     User.objects.filter(pk=gold_team_user.pk).update(is_staff=True, is_superuser=True)
     with patch.object(type(admin.site), "has_permission", lambda self, request: True):
         assert client.get(reverse("admin:index")).status_code == 200
+
+
+def test_an_incident_report_refuses_a_role_it_doesnt_let_in_with_a_403(red_team_user: User) -> None:
+    """A refusal by role answered with a redirect home-but-elsewhere and a message looked like a page let in."""
+    client = signed_in(red_team_user)
+    team = Team.objects.create(team_number=2, team_name="Team 02")
+    incident = IncidentReport.objects.create(
+        team=team, source_ip="10.0.0.9", attack_detected_at=timezone.now(), attack_description="x"
+    )
+    assert client.get(reverse("scoring:submit_incident_report")).status_code == 403
+    assert client.get(reverse("scoring:view_incident_report", args=[incident.pk])).status_code == 403

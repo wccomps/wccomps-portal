@@ -250,15 +250,14 @@ class TestIncidentSubmissionPermissions:
         client = Client()
         client.force_login(blue_team_user)
         response = client.get(reverse("scoring:submit_incident_report"))
-        # Should redirect to leaderboard with error message
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_red_team_denied_without_team(self, red_team_user):
         """Red Team should not submit incidents (not a blue team)."""
         client = Client()
         client.force_login(red_team_user)
         response = client.get(reverse("scoring:submit_incident_report"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_gold_team_allowed_without_team(self, gold_team_user, mock_quotient_client):
         """Gold Team can submit incidents as admin (team selection in form)."""
@@ -279,7 +278,7 @@ class TestIncidentSubmissionPermissions:
         client = Client()
         client.force_login(orange_team_user)
         response = client.get(reverse("scoring:submit_incident_report"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_admin_allowed(self, admin_user, mock_quotient_client):
         """Admin (Gold Team) should submit incidents."""
