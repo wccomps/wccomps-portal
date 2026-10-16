@@ -139,6 +139,18 @@
             src="{% static 'vendor/alpinejs-csp.min.js' %}"
             integrity="sha384-ToFwPnlRgZIoDDSatKvWLkecUR4Py5dma633TT4TVBQfs4nHKXXexI3v72xi5LnC"></script>
     <script>
+    // Any form's data-confirm is the question to ask before it submits, read as text. Capture runs before the
+    // form's own handlers, so a cancelled question stops them too; a form already submitting isn't asked again.
+    document.addEventListener('submit', (e) => {
+        const form = e.target;
+        const question = form.dataset.confirm;
+        if (question && !form.dataset.submitting && !confirm(question)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }
+    }, true);
+    </script>
+    <script>
     document.addEventListener('alpine:init', () => {
         Alpine.data('nav', () => ({
             navOpen: false,
@@ -159,17 +171,7 @@
             },
             go() { window.location.href = this.$store.ticketNotifs.toastUrl; }
         }));
-        Alpine.data('submitGuard', () => ({
-            submitting: false,
-            onSubmit(e) {
-                if (this.submitting) { e.preventDefault(); return; }
-                // A form's data-confirm is the question to ask first, read as text
-                const question = this.$el.dataset.confirm;
-                if (question && !confirm(question)) { e.preventDefault(); return; }
-                this.submitting = true;
-                setTimeout(() => { this.submitting = false; }, 10000);
-            }
-        }));
+        Alpine.data('submitGuard', submitGuardMixin);
         Alpine.data('audioToggle', () => ({
             enabled: false,
             get disabled() { return !this.enabled; },

@@ -20,7 +20,7 @@
                     Are you sure you want to delete the event "{{ event.name }}"?
                     This will also delete its registration enrollments.
                 </c-alert>
-                <form method="post">
+                <c-form>
                     {% csrf_token %}
                     <c-button_row class="mt-20 justify-end">
                         <c-link href="{% url 'registration_event_list' season_id=event.season_id %}"
@@ -29,7 +29,7 @@
                             Delete Event
                         </c-button>
                     </c-button_row>
-                </form>
+                </c-form>
             {% endif %}
         </c-module>
     </div>

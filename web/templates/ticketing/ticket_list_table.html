@@ -62,24 +62,19 @@
                     <c-table_header sortable="false">
                         Title
                     </c-table_header>
-                    <c-table_header sort_field="team__team_number"
-                                    current_sort="{{ sort_by }}">
+                    <c-table_header sort_field="team__team_number" current_sort="{{ sort_by }}">
                         Team
                     </c-table_header>
-                    <c-table_header sort_field="category"
-                                    current_sort="{{ sort_by }}">
+                    <c-table_header sort_field="category" current_sort="{{ sort_by }}">
                         Category
                     </c-table_header>
-                    <c-table_header sort_field="status"
-                                    current_sort="{{ sort_by }}">
+                    <c-table_header sort_field="status" current_sort="{{ sort_by }}">
                         Status
                     </c-table_header>
-                    <c-table_header sort_field="assigned_to__username"
-                                    current_sort="{{ sort_by }}">
+                    <c-table_header sort_field="assigned_to__username" current_sort="{{ sort_by }}">
                         Assigned
                     </c-table_header>
-                    <c-table_header sort_field="created_at"
-                                    current_sort="{{ sort_by }}">
+                    <c-table_header sort_field="created_at" current_sort="{{ sort_by }}">
                         Created
                     </c-table_header>
                     <c-table_header sortable="false">
@@ -159,32 +154,29 @@
                 {% if is_ops %}
                     <td class="field-actions" role="gridcell">
                         {% if item.ticket.status == "open" %}
-                            <form method="post"
-                                  action="{% url 'ticket_claim' item.ticket.ticket_number %}"
-                                  class="d-inline">
+                            <c-form action="{% url 'ticket_claim' item.ticket.ticket_number %}"
+                                    class="d-inline">
                                 {% csrf_token %}
                                 <c-button type="submit" variant="primary">
                                     Claim
                                 </c-button>
-                            </form>
+                            </c-form>
                         {% elif item.ticket.status == "claimed" %}
-                            <form method="post"
-                                  action="{% url 'ticket_resolve' item.ticket.ticket_number %}"
-                                  class="d-inline">
+                            <c-form action="{% url 'ticket_resolve' item.ticket.ticket_number %}"
+                                    class="d-inline">
                                 {% csrf_token %}
                                 <c-button type="submit" variant="primary">
                                     Resolve
                                 </c-button>
-                            </form>
+                            </c-form>
                             {% if item.ticket.assigned_to.username == authentik_username or is_ticketing_admin %}
-                                <form method="post"
-                                      action="{% url 'ticket_unclaim' item.ticket.ticket_number %}"
-                                      class="d-inline">
+                                <c-form action="{% url 'ticket_unclaim' item.ticket.ticket_number %}"
+                                        class="d-inline">
                                     {% csrf_token %}
                                     <c-button type="submit" variant="default">
                                         Unclaim
                                     </c-button>
-                                </form>
+                                </c-form>
                             {% endif %}
                         {% endif %}
                     </td>

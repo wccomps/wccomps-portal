@@ -37,14 +37,13 @@
                 <td>{{ registration.submitted_at|date:"Y-m-d H:i" }}</td>
                 <td>
                     {% if registration.status == "pending" %}
-                        <form method="post"
-                              action="{% url 'registration_approve' registration.id %}"
-                              class="d-inline">
+                        <c-form action="{% url 'registration_approve' registration.id %}"
+                                class="d-inline">
                             {% csrf_token %}
                             <c-button type="submit" variant="primary">
                                 Approve
                             </c-button>
-                        </form>
+                        </c-form>
                         <c-link href="{% url 'registration_reject' registration.id %}"
                                 class="deletelink">Reject</c-link>
                     {% endif %}

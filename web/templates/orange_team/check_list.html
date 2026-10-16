@@ -8,10 +8,12 @@
     <c-module title="Checks">
         <c-slot name="toolbar">
             <c-link href="{% url 'orange_team:check_create' %}" variant="add">Create Check</c-link>
-            <form method="post" action="{% url 'orange_team:auto_assign_all' %}" class="d-inline">
+            <c-form action="{% url 'orange_team:auto_assign_all' %}" class="d-inline">
                 {% csrf_token %}
-                <c-button type="submit" variant="primary">Auto-assign all</c-button>
-            </form>
+                <c-button type="submit" variant="primary">
+                    Auto-assign all
+                </c-button>
+            </c-form>
         </c-slot>
         {% if checks %}
             <c-table id="check-list" aria_label="Orange team checks">
@@ -129,10 +131,12 @@
                         </td>
                         <td>{{ v.open_count }}</td>
                         <td>
-                            <form method="post" action="{% url 'orange_team:admin_toggle_checkin' v.user.pk %}">
+                            <c-form action="{% url 'orange_team:admin_toggle_checkin' v.user.pk %}">
                                 {% csrf_token %}
-                                <c-button type="submit" variant="warning">Check out</c-button>
-                            </form>
+                                <c-button type="submit" variant="warning">
+                                    Check out
+                                </c-button>
+                            </c-form>
                         </td>
                     </tr>
                 {% endfor %}

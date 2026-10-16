@@ -140,12 +140,12 @@
                 {% endif %}
                 {% if is_gold_team or is_admin %}
                     <c-link href="{% url 'scoring:email_scorecards' %}" variant="primary">Email All Scorecards</c-link>
-                    <form method="post" action="{% url 'scoring:sync_scores' %}" class="m-0">
+                    <c-form action="{% url 'scoring:sync_scores' %}" class="m-0">
                         {% csrf_token %}
                         <c-button type="submit" variant="primary">
                             Sync Service Scores
                         </c-button>
-                    </form>
+                    </c-form>
                 {% endif %}
                 {% if is_admin %}
                     <c-button type="button"

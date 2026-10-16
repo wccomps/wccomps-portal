@@ -206,6 +206,23 @@ function jsKey(id) {
     return 'k' + String(id).replace(/\W/g, '_');
 }
 
+/**
+ * Double-submit protection for a POST form (c-form's submitGuard): the first submit goes through and others are
+ * blocked for 10 s. Bind @submit="onSubmit". The form's data-confirm question is asked first, by admin/base_site.html.
+ */
+function submitGuardMixin() {
+    return {
+        submitting: false,
+        onSubmit(e) {
+            if (this.submitting) { e.preventDefault(); return; }
+            const form = e.target;
+            this.submitting = true;
+            form.dataset.submitting = 'true';
+            setTimeout(() => { this.submitting = false; delete form.dataset.submitting; }, 10000);
+        },
+    };
+}
+
 function bulkSelectMixin(dataAttr) {
     const camel = dataAttr.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
     return {

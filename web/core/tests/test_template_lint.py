@@ -251,8 +251,8 @@ def test_no_html_entity_in_a_component_attribute() -> None:
 
 
 def test_no_confirm_in_an_inline_handler() -> None:
-    """A form asks first with data-confirm="question" (submitGuard asks it, as text); an inline onsubmit or onclick
-    holding confirm() makes the question part of a script."""
+    """A form asks first with data-confirm="question" (admin/base_site.html asks it, as text); an inline on*
+    handler holding confirm() makes the question part of a script."""
     found = {
         f"{template_name(path)}:{tag.line}:{tag.name}:{name}": value
         for path in tracked_templates()

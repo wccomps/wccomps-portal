@@ -125,29 +125,23 @@
                 </td>
                 <td class="field-actions">
                     {% if finding.submitted_by == user and not finding.is_approved %}
-                        <form method="post"
-                              action="{% url 'scoring:delete_red_score' finding.id %}"
-                              class="d-inline"
-                              x-data="submitGuard"
-                              @submit="onSubmit"
-                              data-confirm="Delete this finding?">
+                        <c-form action="{% url 'scoring:delete_red_score' finding.id %}"
+                                class="d-inline"
+                                data-confirm="Delete this finding?">
                             {% csrf_token %}
                             <c-button type="submit" variant="danger">
                                 Delete
                             </c-button>
-                        </form>
+                        </c-form>
                     {% elif user in finding.contributors.all and finding.submitted_by != user and not finding.is_approved %}
-                        <form method="post"
-                              action="{% url 'scoring:leave_red_score' finding.id %}"
-                              class="d-inline"
-                              x-data="submitGuard"
-                              @submit="onSubmit"
-                              data-confirm="Remove yourself from this finding?">
+                        <c-form action="{% url 'scoring:leave_red_score' finding.id %}"
+                                class="d-inline"
+                                data-confirm="Remove yourself from this finding?">
                             {% csrf_token %}
                             <c-button type="submit" variant="danger">
                                 Leave
                             </c-button>
-                        </form>
+                        </c-form>
                     {% else %}
                         <span class="text-muted">None</span>
                     {% endif %}

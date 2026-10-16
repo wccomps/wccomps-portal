@@ -53,27 +53,21 @@
                         <td>
                             {% if assignment.status == "submitted" %}
                                 <div class="d-flex gap-10">
-                                    <form method="post"
-                                          action="{% url 'orange_team:assignment_approve' assignment.pk %}"
-                                          x-data="submitGuard"
-                                          @submit="onSubmit"
-                                          data-confirm="Approve this assignment?">
+                                    <c-form action="{% url 'orange_team:assignment_approve' assignment.pk %}"
+                                            data-confirm="Approve this assignment?">
                                         {% csrf_token %}
                                         <c-button type="submit" variant="primary">
                                             Approve
                                         </c-button>
-                                    </form>
-                                    <form method="post"
-                                          action="{% url 'orange_team:assignment_reject' assignment.pk %}"
-                                          x-data="submitGuard"
-                                          @submit="onSubmit"
-                                          data-confirm="Reject this assignment?">
+                                    </c-form>
+                                    <c-form action="{% url 'orange_team:assignment_reject' assignment.pk %}"
+                                            data-confirm="Reject this assignment?">
                                         {% csrf_token %}
                                         <input type="text" name="notes" placeholder="Reason (optional)">
                                         <c-button type="submit" variant="danger">
                                             Reject
                                         </c-button>
-                                    </form>
+                                    </c-form>
                                 </div>
                             {% endif %}
                         </td>

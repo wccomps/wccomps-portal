@@ -10,14 +10,20 @@
                    parent_label="Orange Team Dashboard" />
     <c-module title="Teams">
         <c-slot name="toolbar">
-            <form method="post" action="{% url 'orange_team:check_auto_assign' orange_check.pk %}" class="d-inline">
+            <c-form action="{% url 'orange_team:check_auto_assign' orange_check.pk %}"
+                    class="d-inline">
                 {% csrf_token %}
-                <c-button type="submit" variant="primary">Auto-assign</c-button>
-            </form>
-            <form method="post" action="{% url 'orange_team:check_rebalance' orange_check.pk %}" class="d-inline">
+                <c-button type="submit" variant="primary">
+                    Auto-assign
+                </c-button>
+            </c-form>
+            <c-form action="{% url 'orange_team:check_rebalance' orange_check.pk %}"
+                    class="d-inline">
                 {% csrf_token %}
-                <c-button type="submit">Rebalance unstarted</c-button>
-            </form>
+                <c-button type="submit">
+                    Rebalance unstarted
+                </c-button>
+            </c-form>
             <span class="text-muted">{{ scored }} of {{ team_total }} scored</span>
         </c-slot>
         {% if rows %}
@@ -42,11 +48,11 @@
                         </td>
                         <td>
                             {% if row.assignment and row.assignment.status != "submitted" and row.assignment.status != "approved" %}
-                                <form method="post"
-                                      action="{% url 'orange_team:reassign_team' row.assignment.pk %}"
-                                      class="d-flex gap-10 items-center">
+                                <c-form action="{% url 'orange_team:reassign_team' row.assignment.pk %}"
+                                        class="d-flex gap-10 items-center">
                                     {% csrf_token %}
-                                    <select name="user_id" aria-label="Assigned volunteer for Team {{ row.team.team_number }}">
+                                    <select name="user_id"
+                                            aria-label="Assigned volunteer for Team {{ row.team.team_number }}">
                                         {% for u in on_shift %}
                                             <option value="{{ u.pk }}"
                                                     {% if row.assignment.user_id == u.pk %}selected{% endif %}>
@@ -54,8 +60,10 @@
                                             </option>
                                         {% endfor %}
                                     </select>
-                                    <c-button type="submit">Save</c-button>
-                                </form>
+                                    <c-button type="submit">
+                                        Save
+                                    </c-button>
+                                </c-form>
                             {% elif row.assignment %}
                                 {{ row.assignment.user.username }}
                             {% else %}

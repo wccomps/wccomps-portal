@@ -62,11 +62,8 @@
                         </c-badge>
                     {% endif %}
                 </div>
-                <form method="post"
-                      action="{% url 'orange_team:toggle_checkin' %}"
-                      x-data="submitGuard"
-                      @submit="onSubmit"
-                      {% if active_checkin %}data-confirm="Check out? You will stop receiving assignments."{% endif %}>
+                <c-form action="{% url 'orange_team:toggle_checkin' %}"
+                        data-confirm="{% if active_checkin %}Check out? You will stop receiving assignments.{% endif %}">
                     {% csrf_token %}
                     {% if active_checkin %}
                         <c-button type="submit" variant="danger">
@@ -77,7 +74,7 @@
                             Check In
                         </c-button>
                     {% endif %}
-                </form>
+                </c-form>
             </div>
         </div>
     </c-module>
@@ -110,16 +107,13 @@
                         <td>{{ followup.remind_at|date:"m/d H:i" }}</td>
                         <td>{{ followup.note|default:"—" }}</td>
                         <td>
-                            <form method="post"
-                                  action="{% url 'orange_team:followup_dismiss' followup.pk %}"
-                                  x-data="submitGuard"
-                                  @submit="onSubmit"
-                                  data-confirm="Dismiss this reminder?">
+                            <c-form action="{% url 'orange_team:followup_dismiss' followup.pk %}"
+                                    data-confirm="Dismiss this reminder?">
                                 {% csrf_token %}
                                 <c-button type="submit" variant="danger">
                                     Dismiss
                                 </c-button>
-                            </form>
+                            </c-form>
                         </td>
                     </tr>
                 {% endfor %}
@@ -226,25 +220,21 @@
                         </td>
                         <td>
                             {% if assignment.status != "submitted" %}
-                                <form method="post"
-                                      id="submit-{{ assignment.pk }}"
-                                      action="{% url 'orange_team:assignment_submit' assignment.pk %}"
-                                      x-data="submitGuard"
-                                      @submit="onSubmit"
-                                      data-confirm="Submit this check? You cannot edit the score after submission.">
+                                <c-form id="submit-{{ assignment.pk }}"
+                                        action="{% url 'orange_team:assignment_submit' assignment.pk %}"
+                                        data-confirm="Submit this check? You cannot edit the score after submission.">
                                     {% csrf_token %}
                                     <c-button type="submit" variant="primary">
                                         Submit
                                     </c-button>
-                                </form>
+                                </c-form>
                             {% else %}
                                 <span class="text-muted">Awaiting approval</span>
                             {% endif %}
                             <details>
                                 <summary>Set Reminder</summary>
-                                <form method="post"
-                                      action="{% url 'orange_team:followup_create' %}"
-                                      class="d-flex gap-10 items-end">
+                                <c-form action="{% url 'orange_team:followup_create' %}"
+                                        class="d-flex gap-10 items-end">
                                     {% csrf_token %}
                                     <input type="hidden" name="assignment_id" value="{{ assignment.pk }}">
                                     <label>
@@ -262,7 +252,7 @@
                                     <c-button type="submit" variant="primary">
                                         Set
                                     </c-button>
-                                </form>
+                                </c-form>
                             </details>
                         </td>
                     </tr>

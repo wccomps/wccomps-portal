@@ -105,21 +105,19 @@
             </c-table>
         </form>
         {% for score in scores %}
-            <form id="save-{{ score.id }}"
-                  method="post"
-                  action="{% url 'scoring:save_inject_feedback' %}"
-                  hidden>
+            <c-form id="save-{{ score.id }}"
+                    action="{% url 'scoring:save_inject_feedback' %}"
+                    hidden>
                 {% csrf_token %}
                 <input type="hidden" name="score_id" value="{{ score.id }}">
-            </form>
+            </c-form>
             {% if not score.feedback_approved %}
-                <form id="approve-{{ score.id }}"
-                      method="post"
-                      action="{% url 'scoring:approve_inject_feedback' %}"
-                      hidden>
+                <c-form id="approve-{{ score.id }}"
+                        action="{% url 'scoring:approve_inject_feedback' %}"
+                        hidden>
                     {% csrf_token %}
                     <input type="hidden" name="score_id" value="{{ score.id }}">
-                </form>
+                </c-form>
             {% endif %}
         {% endfor %}
     {% else %}

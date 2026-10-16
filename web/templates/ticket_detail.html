@@ -22,7 +22,8 @@
                                   class="d-inline-block m-0"
                                   x-data="categoryChanger"
                                   data-initial-cat="{{ ticket.category_id }}"
-                                  @submit="confirmChange">
+                                  data-confirm="Change category? This may change points charged."
+                                  @submit="onSubmit">
                                 {% csrf_token %}
                                 <select name="new_category"
                                         :value="newCat"
@@ -297,16 +298,9 @@
     </div>
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('categoryChanger', () => ({
-            submitting: false,
+        Alpine.data('categoryChanger', () => compose(submitGuardMixin(), {
             newCat: '',
             init() { this.newCat = this.$el.dataset.initialCat; },
-            confirmChange(e) {
-                if (this.submitting) { e.preventDefault(); return; }
-                if (!confirm('Change category? This may change points charged.')) { e.preventDefault(); return; }
-                this.submitting = true;
-                setTimeout(() => { this.submitting = false; }, 10000);
-            },
             onCatChange(e) { this.newCat = e.target.value; this.$el.closest('form').requestSubmit(); }
         }));
     });

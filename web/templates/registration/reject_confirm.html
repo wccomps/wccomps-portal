@@ -18,7 +18,7 @@
                     </c-detail_row>
                 </c-slot>
             </c-detail_grid>
-            <form method="post">
+            <c-form>
                 {% csrf_token %}
                 <c-fieldset aligned="true">
                     <c-form_field label="Rejection Reason"
@@ -34,7 +34,7 @@
                         Reject Registration
                     </c-button>
                 </c-button_row>
-            </form>
+            </c-form>
         </c-module>
     </div>
 {% endblock registration_content %}
