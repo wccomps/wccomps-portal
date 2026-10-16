@@ -243,3 +243,21 @@ def test_no_confirm_in_an_inline_handler() -> None:
         if name.lower().startswith("on") and "confirm(" in value
     }
     fail_with("Inline handlers that call confirm()", found, {})
+
+
+def test_no_template_data_in_an_inline_handler() -> None:
+    """An on* attribute is script, which HTML escaping doesn't make safe: a page value goes in a data-* attribute
+    that an Alpine.data component reads as text."""
+    found = {
+        f"{template_name(path)}:{tag.line}:{tag.name}:{name}": value
+        for path in tracked_templates()
+        for tag in tags(path)
+        for name, value in tag.attrs.items()
+        if name.lower().startswith("on") and ("{{" in value or "{%" in value)
+    }
+    exceptions = {
+        "cotton/button.html:*:button:onclick": (
+            "c-button prints its onclick prop; a caller that puts {{ }} in it is caught at the caller's c-button"
+        )
+    }
+    fail_with("Template data inside inline handlers", found, exceptions)

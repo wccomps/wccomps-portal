@@ -201,13 +201,14 @@
                 <!-- Visual team selector buttons -->
                 <div class="border rounded">
                     <div class="p-15">
-                        <div id="teamButtons" class="d-flex flex-wrap gap-10">
+                        <div id="teamButtons" class="d-flex flex-wrap gap-10" x-data="teamPicker">
                             {% for checkbox in form.affected_teams %}
                                 <button type="button"
                                         class="team-btn"
                                         data-team-id="{{ checkbox.data.value }}"
                                         data-team-label="{{ checkbox.choice_label }}"
-                                        onclick="toggleTeam(this, '{{ checkbox.id_for_label }}')">
+                                        data-checkbox-id="{{ checkbox.id_for_label }}"
+                                        @click="toggle">
                                     {{ checkbox.choice_label }}
                                 </button>
                             {% endfor %}
@@ -459,6 +460,13 @@
             const checked = Array.from(checkboxes).filter(cb => cb.checked).length;
             document.getElementById('selectedCount').textContent = checked;
         }
+
+        document.addEventListener('alpine:init', () => {
+            // A team button toggles the hidden checkbox its data-checkbox-id names
+            Alpine.data('teamPicker', () => ({
+                toggle(e) { toggleTeam(e.currentTarget, e.currentTarget.dataset.checkboxId); }
+            }));
+        });
 
         function toggleTeam(button, checkboxId) {
             const checkbox = document.getElementById(checkboxId);

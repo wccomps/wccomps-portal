@@ -1,4 +1,5 @@
-"""In the findings table, a row's Delete deletes that finding, and Approve Selected approves the checked rows."""
+"""In the findings table, a row's Delete deletes that finding and Approve Selected approves the checked rows; on the
+submit page, a team button selects that team."""
 
 from decimal import Decimal
 
@@ -47,5 +48,25 @@ def test_approve_selected_approves_the_checked_findings(live_server, pw_browser)
             page.get_by_role("button", name="Approve Selected").click()
         assert list(RedTeamScore.objects.filter(is_approved=True).values_list("pk", flat=True)) == [checked.pk]
         assert not RedTeamScore.objects.get(pk=unchecked.pk).is_approved
+    finally:
+        context.close()
+
+
+def test_a_team_button_on_the_submit_page_selects_that_team(live_server, pw_browser):
+    from team.models import Team
+
+    user = _create_role_user("red_team", None)
+    for number in (3, 4):
+        Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    try:
+        page.goto(f"{live_server.url}{reverse('scoring:submit_red_score')}")
+        button = page.locator(".team-btn").nth(1)
+        button.click()
+        checkbox_id = button.get_attribute("data-checkbox-id")
+        assert page.locator(f"#{checkbox_id}").is_checked()
+        assert "team-btn--selected" in (button.get_attribute("class") or "")
+        assert page.locator("#selectedCount").inner_text() == "1"
     finally:
         context.close()
