@@ -493,3 +493,15 @@ def test_the_permission_backend_reads_has_permission_when_asked(admin_user: User
         assert not User.objects.get(pk=admin_user.pk).has_perm("core.view_botstate")
     with patch("core.auth_utils.has_permission", return_value=True):
         assert User.objects.get(pk=admin_user.pk).has_perm("core.view_botstate")
+
+
+def test_the_async_permission_checks_follow_the_admin_permission(admin_user: User, gold_team_user: User) -> None:
+    """Django's async checks (ahas_perm, ahas_module_perms) go to each backend's async methods, which answered from
+    Permission rows only."""
+    from asgiref.sync import async_to_sync
+
+    admin, other = User.objects.get(pk=admin_user.pk), User.objects.get(pk=gold_team_user.pk)
+    assert async_to_sync(admin.ahas_perm)("core.view_botstate")
+    assert async_to_sync(admin.ahas_module_perms)("core")
+    assert not async_to_sync(other.ahas_perm)("core.view_botstate")
+    assert not async_to_sync(other.ahas_module_perms)("core")

@@ -262,8 +262,9 @@ CODE_EXCEPTIONS = {
     "*/urls*.py:urlpatterns": "Django reads urlpatterns from each URLconf",
     "web/core/admin.py:site_*": "Django admin reads site_header, site_title and site_url off the AdminSite",
     "web/core/admin.py:index_title": "Django admin reads index_title off the AdminSite",
-    "web/core/auth_backends.py:has_*": "Django asks each AUTHENTICATION_BACKENDS backend has_perm and has_module_perms",
-    "web/core/auth_backends.py:app_label": "has_module_perms's argument, named as Django passes it",
+    "web/core/auth_backends.py:*has_*": "Django asks each AUTHENTICATION_BACKENDS backend has_perm and "
+    "has_module_perms, and their async forms",
+    "web/core/auth_backends.py:app_label": "has_module_perms's argument, named as in Django's backend signature",
     "web/core/views.py:modified": "Setting request.session.modified tells Django to save the session",
     "web/gunicorn.conf.py:*": "gunicorn reads every top-level name in its config file",
     # Project code kept on purpose

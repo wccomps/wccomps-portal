@@ -1,5 +1,6 @@
 """Django model permissions from Authentik groups."""
 
+from asgiref.sync import sync_to_async
 from django.contrib.auth.backends import BaseBackend
 from django.contrib.auth.models import AnonymousUser, User
 from django.db.models import Model
@@ -19,6 +20,12 @@ class AuthentikAdminBackend(BaseBackend):
 
     def has_module_perms(self, user_obj: User | AnonymousUser, app_label: str) -> bool:
         return self._is_admin(user_obj)
+
+    async def ahas_perm(self, user_obj: User | AnonymousUser, perm: str, obj: Model | None = None) -> bool:
+        return await sync_to_async(self._is_admin)(user_obj)
+
+    async def ahas_module_perms(self, user_obj: User | AnonymousUser, app_label: str) -> bool:
+        return await sync_to_async(self._is_admin)(user_obj)
 
     @staticmethod
     def _is_admin(user_obj: User | AnonymousUser) -> bool:
