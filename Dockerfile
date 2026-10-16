@@ -4,6 +4,12 @@
 # The Python .python-version pins (local uv and CI read it too): a test that passes on one patch can fail on another.
 # uv sync below reads the file and, with downloads off, refuses an image whose Python differs; test_python_pin checks
 # this tag against it.
+# Each image is a FROM with a version tag, which Dependabot's docker entry bumps (test_python_pin), all but Python's:
+# its tag changes with .python-version.
+
+# uv only installs, so it's mounted for that step instead of shipped
+FROM ghcr.io/astral-sh/uv:0.9.28 AS uv
+
 FROM python:3.14.8-slim
 
 WORKDIR /app
@@ -19,9 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml uv.lock .python-version ./
 
-# uv only installs, so it's mounted for this step instead of shipped. --no-build refuses a source
-# distribution, which would need the compiler this image doesn't have.
-RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
+# --no-build refuses a source distribution, which would need the compiler this image doesn't have
+RUN --mount=from=uv,source=/uv,target=/bin/uv \
     UV_PYTHON_DOWNLOADS=never uv sync --frozen --no-dev --no-build
 
 COPY web/entrypoint.sh /entrypoint.sh
