@@ -1,4 +1,6 @@
 {# Review incidents table - swappable content for htmx #}
+{# Declared, so cotton leaves them out of attrs: it writes attrs unescaped #}
+<c-vars page_obj status_filter selected_team selected_box search_query sort_by />
 <div {{ attrs }}
      id="review-incidents-content"
      x-data="incidentsBulkSelect"

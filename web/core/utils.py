@@ -87,6 +87,14 @@ def run_detached(lines: Iterator[str]) -> Iterator[str]:
         yield line
 
 
+def filter_number(value: str) -> int | None:
+    """A list filter's number as the URL carries it, or None when it isn't one: the page then ignores that filter."""
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
 class FilterSortPage[M: Model](TypedDict):
     page_obj: Page[M]
     current_sort: str

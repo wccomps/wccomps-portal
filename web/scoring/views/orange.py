@@ -1,4 +1,3 @@
-import contextlib
 from typing import cast
 
 from django.contrib.auth.models import User
@@ -8,6 +7,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import require_permission
+from core.utils import filter_number
 
 from ..models import OrangeTeamScore
 
@@ -36,15 +36,14 @@ def review_orange(request: HttpRequest) -> HttpResponse:
     elif status_filter == "approved":
         base_query = base_query.filter(is_approved=True)
 
-    if team_filter:
-        base_query = base_query.filter(team__id=team_filter)
+    if (team_id := filter_number(team_filter)) is not None:
+        base_query = base_query.filter(team__id=team_id)
 
     if check_filter:
         if check_filter == "manual":
             base_query = base_query.filter(orange_check__isnull=True)
-        else:
-            with contextlib.suppress(ValueError, TypeError):
-                base_query = base_query.filter(orange_check_id=int(check_filter))
+        elif (check_id := filter_number(check_filter)) is not None:
+            base_query = base_query.filter(orange_check_id=check_id)
 
     if search_query:
         base_query = base_query.filter(Q(description__icontains=search_query))

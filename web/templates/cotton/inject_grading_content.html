@@ -1,5 +1,7 @@
 {# Inject grading content - swappable content for htmx #}
 {# Usage: <c-inject_grading_content :selected_inject="selected_inject" :selected_inject_id="selected_inject_id" :team_data="team_data" :inject_choices="inject_choices" /> #}
+{# Declared, so cotton leaves them out of attrs: it writes attrs unescaped #}
+<c-vars selected_inject selected_inject_id team_data inject_choices />
 <div {{ attrs }} id="inject-grading-content">
     {% if selected_inject %}
         <c-fieldset heading="{{ selected_inject.title }}">

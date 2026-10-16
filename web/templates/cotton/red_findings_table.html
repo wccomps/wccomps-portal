@@ -1,5 +1,7 @@
 {# Red team findings table - swappable content for htmx #}
 {# Usage: <c-red_findings_table :findings="findings" :page_obj="page_obj" ... /> #}
+{# Declared, so cotton leaves them out of attrs: it writes attrs unescaped #}
+<c-vars findings page_obj status_filter selected_team selected_attack_type selected_submitter sort_by is_gold_team />
 <div {{ attrs }}
      id="red-findings-content"
      x-data="redFindingsBulkSelect"
