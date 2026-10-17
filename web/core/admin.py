@@ -1,3 +1,4 @@
+from contextlib import suppress
 from functools import wraps
 from typing import TYPE_CHECKING, cast
 
@@ -6,8 +7,8 @@ from django.contrib.admin.exceptions import DisallowedModelAdminToField
 from django.contrib.admin.options import TO_FIELD_VAR
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.contrib.auth.views import redirect_to_login
-from django.core.exceptions import PermissionDenied
-from django.db.models import QuerySet
+from django.core.exceptions import FieldDoesNotExist, PermissionDenied, ValidationError
+from django.db.models import Model, QuerySet
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.urls import reverse
 
@@ -68,8 +69,31 @@ admin.site = AuthentikAdminSite()
 admin.sites.site = admin.site
 
 
+class PortalModelAdmin[ModelT: Model](admin.ModelAdmin[ModelT]):
+    """Every portal model's admin (test_admin_initial_data checks)."""
+
+    # The stubs say text, but a form's initial value is any value its field takes (a datetime for a date widget)
+    def get_changeform_initial_data(self, request: HttpRequest) -> dict[str, object]:  # type: ignore[override]
+        """An add form's values from its query (Django's prefill), each as its form field cleans it, or left out when
+        the field refuses it: Django passes the text on as it came, and a date widget given text fails the page
+        (a 500)."""
+        initial = super().get_changeform_initial_data(request)
+        kept: dict[str, object] = {}
+        for name, value in initial.items():
+            try:
+                form_field = self.opts.get_field(name).formfield()  # type: ignore[union-attr]
+            except FieldDoesNotExist:
+                kept[name] = value  # not a field: the admin's own parameters
+                continue
+            if form_field is None:
+                continue
+            with suppress(ValidationError):
+                kept[name] = form_field.clean(value)
+        return kept
+
+
 @admin.register(AuditLog)
-class AuditLogAdmin(admin.ModelAdmin[AuditLog]):
+class AuditLogAdmin(PortalModelAdmin[AuditLog]):
     list_display = ["action", "admin_user", "target_entity", "target_id", "created_at"]
     list_filter = ["action", "target_entity"]
     search_fields = ["admin_user", "action"]
@@ -87,7 +111,7 @@ class AuditLogAdmin(admin.ModelAdmin[AuditLog]):
 
 
 @admin.register(DiscordTask)
-class DiscordTaskAdmin(admin.ModelAdmin[DiscordTask]):
+class DiscordTaskAdmin(PortalModelAdmin[DiscordTask]):
     list_display = ["task_type", "status", "retry_count", "created_at", "completed_at"]
     list_filter = ["status", "task_type"]
     search_fields = ["task_type", "error_message"]
@@ -110,7 +134,7 @@ class DiscordTaskAdmin(admin.ModelAdmin[DiscordTask]):
 
 
 @admin.register(BotState)
-class BotStateAdmin(admin.ModelAdmin[BotState]):
+class BotStateAdmin(PortalModelAdmin[BotState]):
     list_display = ["key", "value", "updated_at"]
     search_fields = ["key", "value"]
     ordering = ["key"]
@@ -124,7 +148,7 @@ class BotStateAdmin(admin.ModelAdmin[BotState]):
 
 
 @admin.register(CompetitionConfig)
-class CompetitionConfigAdmin(admin.ModelAdmin[CompetitionConfig]):
+class CompetitionConfigAdmin(PortalModelAdmin[CompetitionConfig]):
     list_display = [
         "competition_status",
         "competition_start_time",
@@ -193,7 +217,7 @@ class CompetitionConfigAdmin(admin.ModelAdmin[CompetitionConfig]):
 
 
 @admin.register(UserGroups)
-class UserGroupsAdmin(admin.ModelAdmin[UserGroups]):
+class UserGroupsAdmin(PortalModelAdmin[UserGroups]):
     list_display = ["user", "authentik_id", "group_count"]
     search_fields = ["user__username", "authentik_id"]
     readonly_fields = ["user", "authentik_id", "groups"]

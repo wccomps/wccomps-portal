@@ -5,6 +5,8 @@ from django.db.models import Count, Q, QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.utils.html import format_html
 
+from core.admin import PortalModelAdmin
+
 from .models import Packet, PacketDistribution
 
 
@@ -42,7 +44,7 @@ class PacketDistributionInline(admin.TabularInline[PacketDistribution, Packet]):
 
 
 @admin.register(Packet)
-class PacketAdmin(admin.ModelAdmin[Packet]):
+class PacketAdmin(PortalModelAdmin[Packet]):
     list_display = [
         "title",
         "status",
@@ -244,7 +246,7 @@ class PacketAdmin(admin.ModelAdmin[Packet]):
 
 
 @admin.register(PacketDistribution)
-class PacketDistributionAdmin(admin.ModelAdmin[PacketDistribution]):
+class PacketDistributionAdmin(PortalModelAdmin[PacketDistribution]):
     list_display = [
         "packet",
         "team",

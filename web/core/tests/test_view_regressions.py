@@ -299,6 +299,53 @@ def test_the_admin_list_shows_its_error_page_for_an_unknown_filter(admin_site_cl
     assert response.status_code in (200, 302)
 
 
+@given(value=st.text(max_size=40).filter(lambda v: "\x00" not in v))
+@example(value="0")
+@example(value="2027-01-02 03:04:05")
+def test_an_admin_add_form_takes_any_prefill(admin_site_client: Client, value: str) -> None:
+    """Django's add page hands a query value to the field's widget as text; a date widget given text failed the page
+    (/admin/team/linktoken/add/?expires_at=0 answered 500)."""
+    with rolled_back():
+        response = admin_site_client.get(reverse("admin:team_linktoken_add"), {"expires_at": value})
+    assert response.status_code == 200
+
+
+def test_an_admin_add_form_keeps_a_prefill_its_field_accepts(admin_site_client: Client) -> None:
+    with rolled_back():
+        response = admin_site_client.get(reverse("admin:team_linktoken_add"), {"expires_at": "2027-01-02 03:04:05"})
+    assert 'value="2027-01-02"' in response.content.decode()
+
+
+def test_every_admin_is_a_portal_model_admin() -> None:
+    """PortalModelAdmin keeps a prefill the add form can show; every registered admin needs it."""
+    from django.contrib import admin
+
+    from core.admin import PortalModelAdmin
+
+    others = [
+        model._meta.label for model, kind in admin.site._registry.items() if not isinstance(kind, PortalModelAdmin)
+    ]
+    assert not others, f"Admins not built on PortalModelAdmin: {others}"
+
+
+def test_django_still_fails_on_a_text_prefill_for_a_date(admin_user: User) -> None:
+    """The canary for PortalModelAdmin.get_changeform_initial_data: Django's own add page, given a date field's
+    prefill as text, still fails. When this fails, Django has fixed it: drop the override in core/admin.py."""
+    from django.contrib import admin
+    from django.test import RequestFactory
+
+    from core.admin import PortalModelAdmin
+    from team.models import LinkToken
+
+    request = RequestFactory().get("/", {"expires_at": "2027-01-02 03:04:05"})
+    request.user = admin_user
+    model_admin = admin.site._registry[LinkToken]
+    initial = super(PortalModelAdmin, model_admin).get_changeform_initial_data(request)
+    form = model_admin.get_form(request)(initial=initial)
+    with pytest.raises(AttributeError):
+        str(form["expires_at"])
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # A NUL character in a cookie is refused before the session is read
 # ---------------------------------------------------------------------------------------------------------------
@@ -310,6 +357,7 @@ latin1_with_nul = with_nul.map(lambda t: t.encode("latin-1", "replace").decode("
 
 @given(name=st.sampled_from(["sessionid", "csrftoken", "tz", "other"]), text=latin1_with_nul)
 @example(name="sessionid", text="abcdefgh\x00xyz")
+@example(name="sessionid", text=";\x00;0")  # a NUL in a chunk with no name, which Django's parser drops
 def test_a_nul_character_in_a_cookie_is_refused(name: str, text: str) -> None:
     """The session key reached PostgreSQL, so anyone got a 500 (and paged the error webhook) with one cookie."""
     client = Client(HTTP_COOKIE=f"{name}={text}")  # raw, as anyone can send it (the test client's jar refuses it)
