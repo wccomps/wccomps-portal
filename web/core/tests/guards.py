@@ -134,6 +134,8 @@ class TagReader(HTMLParser):
         self.kept = kept
         self.found: list[Tag] = []
         self.texts: list[tuple[int, str]] = []
+        self.scripts: list[tuple[int, str]] = []
+        self.in_script = False
 
     def restore(self, value: str) -> str:
         return PLACEHOLDER_RE.sub(lambda m: self.kept[int(m.group(1))], value.replace(AMPERSAND, "&"))
@@ -152,8 +154,15 @@ class TagReader(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         self.found.append(Tag(tag, {}, self.getpos()[0], closing=True))
+        self.in_script = False
 
     def handle_data(self, data: str) -> None:
+        if self.cdata_elem == "script":
+            if not self.in_script:
+                self.scripts.append((self.getpos()[0], ""))
+                self.in_script = True
+            line, script = self.scripts[-1]
+            self.scripts[-1] = (line, script + self.restore(data))
         # cdata_elem: inside a raw text element (script, style, xmp, iframe, noembed, noframes, title, textarea);
         # of those, a title's and a textarea's text is shown
         if self.cdata_elem in (None, "title", "textarea") and data.strip():
@@ -185,6 +194,50 @@ def text_nodes(path: Path) -> tuple[tuple[int, str], ...]:
     """The text a page shows, with its line: between tags, titles and textareas included, the other raw text
     elements (scripts, styles, xmp, iframe, noembed, noframes) left out, template tags kept as written."""
     return tuple(read(path).texts)
+
+
+# A comment, or a string (left as written, so a "//" in a URL is no comment)
+JS_COMMENT_OR_STRING_RE = re.compile(
+    r"""//[^\n]*|/\*.*?\*/|'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`""", re.DOTALL
+)
+
+
+def without_js_comments(source: str) -> str:
+    """The JavaScript with its comments blanked (line breaks kept), strings left as written."""
+    return JS_COMMENT_OR_STRING_RE.sub(
+        lambda m: m.group() if m.group()[0] in "'\"`" else "\n" * m.group().count("\n"), source
+    )
+
+
+def scripts(path: Path) -> tuple[tuple[int, str], ...]:
+    """Each inline <script>'s JavaScript with the line it starts on, comments left out, template tags kept as
+    written."""
+    return tuple((line, without_js_comments(script)) for line, script in read(path).scripts)
+
+
+@cache
+def static_scripts() -> tuple[tuple[str, str], ...]:
+    """Each tracked static JavaScript file (repo-relative path) and its JavaScript, comments left out."""
+    return tuple(
+        (name, without_js_comments((REPO_DIR / name).read_text(encoding="utf-8")))
+        for name in tracked_files()
+        if name.startswith("web/static/js/") and name.endswith(".js")
+    )
+
+
+EXTENDS_RE = re.compile(r"""{%\s*extends\s+["']([^"']+)["']\s*%}""")
+
+
+@cache
+def extends_chain(path: Path, root: Path = TEMPLATES_DIR) -> tuple[str, ...]:
+    """The template's name (from root) and the name of each template it extends, nearest first. A parent outside
+    root (Django's own admin templates) ends the chain."""
+    chain = [path.relative_to(root).as_posix()]
+    while (path := root / chain[-1]).is_file() and (match := EXTENDS_RE.search(text(path))):
+        if match.group(1) in chain:
+            break
+        chain.append(match.group(1))
+    return tuple(chain)
 
 
 @cache

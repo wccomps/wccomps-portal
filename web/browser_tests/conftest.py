@@ -97,8 +97,13 @@ def visit_and_capture_errors(
 
 def make_test_data():
     """Create shared test data needed by pages with needs_data."""
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from django.utils import timezone
     from orange_team.models import OrangeCheck
     from packets.models import Packet
+    from scoring.models import IncidentReport, RedTeamScore
 
     from team.models import Team
     from ticketing.models import Ticket
@@ -120,6 +125,16 @@ def make_test_data():
         status="open",
     )
 
+    finding = RedTeamScore.objects.create(
+        attack_vector="SSH brute force", source_ip="10.0.0.1", points_per_team=Decimal("10")
+    )
+    finding.affected_teams.add(team)
+    incident = IncidentReport.objects.create(
+        team=team,
+        attack_description="Saw an SSH login",
+        source_ip="10.0.0.1",
+        attack_detected_at=timezone.now() - timedelta(minutes=30),
+    )
     orange_check = OrangeCheck.objects.create(title="Browser Test Check", description="Created for browser tests")
     packet = Packet.objects.create(
         title="Browser Test Packet",
@@ -135,6 +150,8 @@ def make_test_data():
         "team": team,
         "orange_check": orange_check,
         "packet": packet,
+        "finding": finding,
+        "incident": incident,
     }
 
 
@@ -151,4 +168,8 @@ def resolve_url(page_def, test_data: dict) -> str:
         kwargs["check_id"] = test_data["orange_check"].pk
     elif page_def.needs_data == "packet":
         kwargs["packet_id"] = test_data["packet"].pk
+    elif page_def.needs_data == "finding":
+        kwargs["finding_id"] = test_data["finding"].pk
+    elif page_def.needs_data == "incident":
+        kwargs["incident_id"] = test_data["incident"].pk
     return reverse(page_def.url_name, kwargs=kwargs)

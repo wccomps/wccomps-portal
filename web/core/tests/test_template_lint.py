@@ -10,6 +10,8 @@ from core.tests.guards import (
     component_templates,
     fail_with,
     page_templates,
+    scripts,
+    static_scripts,
     tags,
     template_name,
     text,
@@ -153,11 +155,12 @@ FRAGMENT_COMPONENTS = {
 
 
 def test_cotton_components_include_attrs() -> None:
-    """Without {{ attrs }}, Alpine directives on components are silently dropped."""
+    """Without {{ attrs }}, Alpine directives on components are silently dropped. A component built on another passes
+    them on with :attrs="attrs" ({{ attrs }} inside a component tag would be written out as text)."""
     found = {
         template_name(path): "writes no {{ attrs }}"
         for path in component_templates()
-        if path.suffix == ".html" and "{{ attrs }}" not in text(path)
+        if path.suffix == ".html" and "{{ attrs }}" not in text(path) and ':attrs="attrs"' not in text(path)
     }
     fail_with("Components that drop the attributes passed to them", found, FRAGMENT_COMPONENTS)
 
@@ -227,9 +230,13 @@ def test_no_page_value_in_an_inline_handler() -> None:
     fail_with("Page values inside inline handlers", found, {})
 
 
-def test_a_question_is_data_confirm_on_a_form() -> None:
-    """static/js/utils.js asks a form's data-confirm before it submits; on any other element it asks nothing. No form
-    posts by htmx (the filter toolbars only GET), so a question there belongs in data-confirm, not hx-confirm."""
+ASKING_ELEMENTS = ("form", "c-form", "button", "c-button", "a", "c-link")
+
+
+def test_a_question_is_data_confirm_on_a_form_or_a_button() -> None:
+    """static/js/utils.js asks a form's data-confirm before it submits, and a button's or link's when it is clicked
+    (before an Alpine @click that posts by fetch); anywhere else it asks nothing. hx-confirm asks only before an htmx
+    request, which no POST form makes (the filter toolbars only GET)."""
     found = {}
     for path in tracked_templates():
         for tag in tags(path):
@@ -237,6 +244,29 @@ def test_a_question_is_data_confirm_on_a_form() -> None:
             if "hx-confirm" in tag.attrs:
                 found[where] = "hx-confirm (put the question in its form's data-confirm)"
             confirm = [name for name in tag.attrs if name.lstrip(":") == "data-confirm"]
-            if confirm and tag.name not in ("form", "c-form"):
-                found[where] = "data-confirm on something other than a form"
+            if confirm and tag.name not in ASKING_ELEMENTS:
+                found[where] = "data-confirm on something other than a form, button or link"
     fail_with("Questions asked somewhere they aren't", found, {})
+
+
+BARE_CONFIRM_RE = re.compile(r"(?<![\w.])confirm\(")
+# "file" -> why it calls confirm() itself
+BARE_CONFIRM_EXCEPTIONS = {
+    "web/static/js/utils.js": "asks every data-confirm question",
+    "web/templates/scoring/review_inject_feedback.html": "asks before dropping an unsaved edit on click-away or "
+    "Escape, which no button is clicked for",
+}
+
+
+def test_a_page_asks_through_data_confirm() -> None:
+    """Each fetch-posting page asked with its own confirm() call (about 20): a question is data-confirm, on the form
+    or the button, so one listener asks it."""
+    found = {}
+    for path in tracked_templates():
+        for line, script in scripts(path):
+            for m in BARE_CONFIRM_RE.finditer(script):
+                found[f"web/templates/{template_name(path)}"] = f"line {line + script.count(chr(10), 0, m.start())}"
+    for name, js in static_scripts():
+        if m := BARE_CONFIRM_RE.search(js):
+            found[name] = f"line {js.count(chr(10), 0, m.start()) + 1}"
+    fail_with("confirm() called outside the data-confirm listener", found, BARE_CONFIRM_EXCEPTIONS)

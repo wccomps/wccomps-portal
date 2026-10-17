@@ -11,6 +11,7 @@
                 Bulk Actions
             </c-slot>
             <form @submit.prevent="bulkAction"
+                  :data-confirm="bulkQuestion"
                   class="d-flex gap-10 items-end flex-wrap">
                 <c-filter_field label="Team Numbers" id="bulk_team_numbers">
                     <input type="text"
@@ -100,20 +101,16 @@
                 bulkTeamNumbers: '',
                 bulkActionType: 'activate',
 
+                // No team numbers asks nothing: bulkAction says what's missing
+                get bulkQuestion() {
+                    if (!this.bulkTeamNumbers) return '';
+                    const verb = { activate: 'Activate', deactivate: 'Deactivate', recreate: 'Recreate channels for' };
+                    return `${verb[this.bulkActionType]} teams ${this.bulkTeamNumbers}?`;
+                },
                 bulkAction() {
                     if (!this.bulkTeamNumbers) {
                         this.message = 'Please enter team numbers';
                         this.messageType = 'error';
-                        return;
-                    }
-
-                    const actionDesc = {
-                        'activate': 'activate',
-                        'deactivate': 'deactivate',
-                        'recreate': 'recreate channels for'
-                    } [this.bulkActionType];
-
-                    if (!confirm(`${actionDesc.charAt(0).toUpperCase() + actionDesc.slice(1)} teams ${this.bulkTeamNumbers}?`)) {
                         return;
                     }
                     this.doAction(this.bulkActionType, { team_numbers: this.bulkTeamNumbers });

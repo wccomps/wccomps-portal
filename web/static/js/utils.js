@@ -163,7 +163,14 @@ function streamMixin(url) {
 
         streamAction: '',
 
-        async doStreamAction(action, extraData = {}) {
+        // A button's stream action, its data-action (its data-confirm is asked first)
+        runStreamAction(e) {
+            return this.doStreamAction(e.currentTarget.dataset.action);
+        },
+
+        // Streams the action and shows its progress and message; returns the stream's last message, or null if the
+        // request failed. A success reloads the page unless reload is false, as with doAction.
+        async doStreamAction(action, extraData = {}, { reload = true } = {}) {
             this.streamAction = action;
             this.loading = true;
             this.message = '';
@@ -171,6 +178,7 @@ function streamMixin(url) {
             this.progressCurrent = 0;
             this.progressTotal = 1;
             this.progressFailed = 0;
+            let done = null;
 
             try {
                 await wcStream(
@@ -183,9 +191,10 @@ function streamMixin(url) {
                         if (!msg.ok) this.progressFailed++;
                     },
                     (msg) => {
+                        done = msg;
                         this.message = msg.message;
                         this.messageType = msg.success ? 'success' : 'error';
-                        if (msg.success) setTimeout(() => location.reload(), 2000);
+                        if (msg.success && reload) setTimeout(() => location.reload(), 2000);
                     },
                 );
             } catch (e) {
@@ -197,6 +206,7 @@ function streamMixin(url) {
             if (!this.message) this.progressTotal = 0;
             // A failure stays until the next action: it says what didn't happen
             if (this.messageType === 'success') setTimeout(() => { this.message = ''; }, 5000);
+            return done;
         },
     });
 }
@@ -216,6 +226,17 @@ document.addEventListener('submit', (e) => {
     const form = e.target;
     const question = form.dataset.confirm;
     if (form.dataset.posting || (question && !confirm(question))) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+    }
+}, true);
+
+// A button's or link's data-confirm is asked the same way when it is clicked, before the page's own click handler
+// (an Alpine @click that posts by fetch): a question answered no stops the click. ::data-confirm binds a question built
+// from the page's state; an empty one asks nothing.
+document.addEventListener('click', (e) => {
+    const control = e.target.closest('button[data-confirm], a[data-confirm]');
+    if (control && control.dataset.confirm && !confirm(control.dataset.confirm)) {
         e.preventDefault();
         e.stopImmediatePropagation();
     }
@@ -245,13 +266,11 @@ window.addEventListener('pageshow', (e) => {
     });
 });
 
-// A refresh (an element reloading itself, like the ticket list's 30 s poll) replaces what it covers, so it skips its
-// turn while a form there is posting (the swap would reset its guard) or a row there is checked (the selection
-// would go). A request the person made, such as a filter change, goes ahead.
+// A poll (a request no event triggered, like the ticket list's 30 s refresh) replaces what it targets, so it skips its
+// turn while a form there is posting: the swap would reset its guard. A request the person made goes ahead.
 document.addEventListener('htmx:beforeRequest', (e) => {
-    const area = e.detail.target;
-    if (e.detail.elt !== area) return;
-    if (area.querySelector('form[data-posting], input[type="checkbox"]:checked')) e.preventDefault();
+    if (e.detail.requestConfig && e.detail.requestConfig.triggeringEvent) return;
+    if (e.detail.target.querySelector('form[data-posting]')) e.preventDefault();
 });
 
 /* The ticket list a tab last showed: its ticket pages' way back */
@@ -288,11 +307,16 @@ function bulkSelectMixin(dataAttr, noun) {
         selectedMap: {},
         selectableIds: [],
         init() {
+            this.readRows();
+            // A refresh that swaps the rows (the ticket list's) keeps what is still listed checked
+            this.$el.addEventListener('htmx:afterSettle', () => this.readRows());
+        },
+        readRows() {
             this.selectableIds = Array.from(
                 this.$el.querySelectorAll('[data-' + dataAttr + ']'),
             ).map(el => el.dataset[camel]);
             const map = {};
-            this.selectableIds.forEach(id => { map[jsKey(id)] = false; });
+            this.selectableIds.forEach(id => { map[jsKey(id)] = Boolean(this.selectedMap[jsKey(id)]); });
             this.selectedMap = map;
         },
         get selected() {

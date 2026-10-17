@@ -4,14 +4,17 @@ from typing import TYPE_CHECKING, cast
 from django.contrib import admin
 from django.contrib.admin.exceptions import DisallowedModelAdminToField
 from django.contrib.admin.options import TO_FIELD_VAR
+from django.contrib.auth import REDIRECT_FIELD_NAME
+from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
+from django.urls import reverse
 
 if TYPE_CHECKING:
     from django.contrib.admin.sites import _ViewType
 
-from .auth_utils import has_permission
+from .auth_utils import uses_django_admin
 from .models import (
     AuditLog,
     BotState,
@@ -30,7 +33,7 @@ class AuthentikAdminSite(admin.AdminSite):
     site_url = "/ops/tickets/"
 
     def has_permission(self, request: HttpRequest) -> bool:
-        return request.user.is_active and has_permission(request.user, "admin")
+        return uses_django_admin(request.user)
 
     def _refuse(self, request: HttpRequest) -> None:
         """The 403 for a signed-in non-admin: the login form is no use, signing in is Authentik's."""
@@ -38,6 +41,9 @@ class AuthentikAdminSite(admin.AdminSite):
             raise PermissionDenied
 
     def login(self, request: HttpRequest, extra_context: dict[str, object] | None = None) -> HttpResponse:
+        """Signing in is Authentik's: a visitor goes to the portal's sign-in, keeping where the admin sent them."""
+        if not request.user.is_authenticated:
+            return redirect_to_login(request.GET.get(REDIRECT_FIELD_NAME) or reverse("admin:index"))
         self._refuse(request)
         return super().login(request, extra_context)
 

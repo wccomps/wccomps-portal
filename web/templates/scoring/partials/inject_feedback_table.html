@@ -122,8 +122,7 @@
         {% endfor %}
     {% else %}
         {% if filtered %}
-            <c-empty_state title="No feedback to review"
-                           description="No inject scores with comments match the current filters" />
+            <c-no_matches items="feedback items" href="{% url 'scoring:review_inject_feedback' %}" />
         {% else %}
             <c-empty_state title="No feedback to review" description="No approved inject scores have comments yet" />
         {% endif %}

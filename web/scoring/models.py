@@ -534,7 +534,7 @@ class IncidentReport(Approvable):
         ]
 
     def __str__(self) -> str:
-        return f"IR-{self.pk}: {self.team.team_name} - {self.attack_description[:50]}"
+        return f"IR-{self.pk} ({self.team.team_name}): {self.attack_description[:50]}"
 
     @property
     def affected_boxes_display(self) -> str:
@@ -636,8 +636,8 @@ class InjectScore(Approvable):
 
     def __str__(self) -> str:
         if self.max_points:
-            return f"{self.team.team_name} - {self.inject_name}: {self.points_awarded}/{self.max_points}"
-        return f"{self.team.team_name} - {self.inject_name}: {self.points_awarded}"
+            return f"{self.team.team_name}, {self.inject_name}: {self.points_awarded}/{self.max_points}"
+        return f"{self.team.team_name}, {self.inject_name}: {self.points_awarded}"
 
 
 class OrangeTeamScore(Approvable):
@@ -689,7 +689,7 @@ class OrangeTeamScore(Approvable):
 
     def __str__(self) -> str:
         sign = "+" if self.points_awarded >= 0 else ""
-        return f"{self.team.team_name} - {self.description[:50]}: {sign}{self.points_awarded}"
+        return f"{self.team.team_name}, {self.description[:50]}: {sign}{self.points_awarded}"
 
 
 class ServiceScore(models.Model):
@@ -781,7 +781,7 @@ class ServiceDetail(models.Model):
         ordering = ["service_name", "team__team_number"]
 
     def __str__(self) -> str:
-        return f"{self.team.team_name} - {self.service_name}: {self.points}"
+        return f"{self.team.team_name}, {self.service_name}: {self.points}"
 
 
 class ScoringExclusion(models.Model):

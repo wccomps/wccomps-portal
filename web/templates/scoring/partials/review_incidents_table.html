@@ -105,7 +105,7 @@
                 <tr>
                     <td colspan="9">
                         {% if filtered %}
-                            No incidents match your filters. Try <a href="{% url 'scoring:review_incidents' %}">clearing all filters</a>
+                            <c-no_matches items="incidents" href="{% url 'scoring:review_incidents' %}" />
                         {% else %}
                             No pending incidents. All incident reports have been approved.
                         {% endif %}

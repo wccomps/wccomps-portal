@@ -3,10 +3,13 @@ and parentheses that close. The rows are sparse on purpose: unscored assignments
 vector or boxes, a team without school info, a packet nobody has downloaded."""
 
 import re
+from collections.abc import Iterable
 from decimal import Decimal
 from html.parser import HTMLParser
 
 import pytest
+from browser_tests.conftest import resolve_url
+from browser_tests.page_registry import PAGES
 from browser_tests.table_data import seed_table_data
 from django.contrib.auth.models import User
 from django.template.loader import render_to_string
@@ -14,6 +17,7 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 from django.utils import timezone
 
+from core.tests.guards import fail_with
 from core.tests.roles import role_user
 
 pytestmark = pytest.mark.django_db
@@ -35,14 +39,42 @@ def visible_text(html: str) -> str:
     return " ".join(" ".join(parser.parts).split())
 
 
-def assert_readable(html: str, where: str) -> None:
+def unreadable(html: str) -> list[str]:
+    """What makes the page's text unreadable: a Python "None", or parentheses that don't close."""
     words = visible_text(html)
-    assert not re.search(r"\bNone\b", words), f"{where}: {words}"
-    assert words.count("(") == words.count(")"), f"{where}: {words}"
+    return [
+        problem
+        for problem, found in (
+            ("None", re.search(r"\bNone\b", words)),
+            ("parentheses", words.count("(") != words.count(")")),
+        )
+        if found
+    ]
+
+
+def assert_readable(html: str, where: str) -> None:
+    assert not unreadable(html), f"{where}: {visible_text(html)}"
+
+
+# "<page>:<problem>" -> why the page reads that way on purpose
+UNREADABLE_EXCEPTIONS = {
+    "/admin/scoring/attacktype/:parentheses": "the attack type admin's Description column cuts a long description at "
+    "50 characters, closing parenthesis and all (the seeded attack types)",
+}
+
+
+def read_every(client: Client, pages: Iterable[str]) -> dict[str, str]:
+    found = {}
+    for page in pages:
+        response = client.get(page)
+        assert response.status_code == 200, page
+        found |= dict.fromkeys((f"{page}:{problem}" for problem in unreadable(response.content.decode())), "")
+    return found
 
 
 @pytest.fixture
-def sparse(admin_user: User) -> dict:
+def rows(admin_user: User) -> tuple[dict, dict]:
+    """The seeded rows, and the same with sparse rows in place of those the registry's URLs name."""
     from orange_team.models import OrangeAssignment, OrangeCheck, OrangeFollowUp
     from scoring.models import IncidentReport, RedTeamScore
 
@@ -64,51 +96,34 @@ def sparse(admin_user: User) -> dict:
         source_ip="10.0.0.9",
         attack_detected_at=timezone.now(),
     )
-    return {**data, "check": check, "finding": finding, "incident": incident}
+    return data, {**data, "team": team, "orange_check": check, "finding": finding, "incident": incident}
 
 
-def test_staff_pages_read_without_their_missing_values(admin_user: User, sparse: dict) -> None:
-    User.objects.filter(pk=admin_user.pk).update(is_staff=True, is_superuser=True)  # Django admin's changelists
+def _pages_as(role: str, data: dict) -> list[str]:
+    """Each browser registry page the role is rendered as there, its URL naming the rows in data."""
+    return [resolve_url(page, data) for page in PAGES if role in page.allowed_roles and not page.expect_redirect]
+
+
+def test_staff_pages_read_without_their_missing_values(admin_user: User, rows: tuple[dict, dict]) -> None:
+    from django.contrib import admin
+
+    seeded, sparse = rows
     client = Client()
     client.force_login(admin_user)
-    pages = [
-        reverse("orange_team:dashboard"),
-        reverse("orange_team:review_queue"),
-        reverse("orange_team:check_list"),
-        reverse("orange_team:check_detail", args=[sparse["orange_check"].pk]),
-        reverse("orange_team:check_detail", args=[sparse["check"].pk]),
-        reverse("packet_detail", args=[sparse["packet"].pk]),
-        reverse("school_info"),
-        reverse("scoring:scorecard", args=[1]),
-        reverse("scoring:scorecard", args=[7]),
-        reverse("scoring:email_scorecards"),
-        reverse("scoring:export_index"),
-        reverse("scoring:match_incident", args=[sparse["incident"].pk]),
-        reverse("scoring:view_incident_report", args=[sparse["incident"].pk]),
-        reverse("scoring:view_red_score", args=[sparse["finding"].pk]),
-        reverse("scoring:red_team_findings"),
-        reverse("scoring:inject_grades_review"),
-        reverse("ops_review_tickets"),
-        reverse("ticket_detail", args=[sparse["ticket"].ticket_number]),
-        reverse("admin:scoring_incidentreport_changelist"),
-        reverse("admin:scoring_redteamscore_changelist"),
-    ]
-    for page in pages:
-        response = client.get(page)
-        assert response.status_code == 200, page
-        assert_readable(response.content.decode(), page)
+    changelists = [reverse(f"admin:{m._meta.app_label}_{m._meta.model_name}_changelist") for m in admin.site._registry]
+    pages = {*_pages_as("admin", seeded), *_pages_as("admin", sparse), *changelists}
+    fail_with("Staff pages with unreadable text", read_every(client, sorted(pages)), UNREADABLE_EXCEPTIONS)
 
 
-def test_team_pages_read_without_their_missing_values(sparse: dict) -> None:
+def test_team_pages_read_without_their_missing_values(rows: tuple[dict, dict]) -> None:
     client = Client()
     client.force_login(role_user("blue_team"))
-    for page in (reverse("ticket_list"), reverse("team_packet")):
-        response = client.get(page)
-        assert response.status_code == 200, page
-        assert_readable(response.content.decode(), page)
+    fail_with("Team pages with unreadable text", read_every(client, _pages_as("blue_team", rows[0])), {})
 
 
-def test_the_printed_scorecard_and_import_preview_read_without_missing_values(admin_user: User, sparse: dict) -> None:
+def test_the_printed_scorecard_and_import_preview_read_without_missing_values(
+    admin_user: User, rows: tuple[dict, dict]
+) -> None:
     from scoring.views.leaderboard import _scorecard_context
 
     for team_number in (1, 7):

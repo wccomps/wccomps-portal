@@ -250,7 +250,7 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
         user_groups.groups = groups
         user_groups.save(update_fields=["groups"])
 
-    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    login(request, user)
 
     # Get next URL from the signed state (re-validate to defend in depth)
     next_url = state_data.get("next", "/")

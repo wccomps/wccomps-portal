@@ -52,7 +52,7 @@ def ticket() -> Ticket:
 
 def test_the_refresh_keeps_the_page_and_filters(client: Client, ticket: Ticket) -> None:
     html = client.get(reverse("ticket_list"), QUERY).content.decode()
-    refresh = next(a for a in attributes(html) if a.get("id") == "ticket-list-content")
+    refresh = next(a for a in attributes(html) if a.get("hx-trigger") == "every 30s")
     assert query_of(refresh["hx-get"]) == QUERY
 
 

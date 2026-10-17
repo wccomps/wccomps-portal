@@ -135,6 +135,15 @@ def test_an_answer_letting_the_visitor_in_has_no_refusal_words() -> None:
     assert unknown_refusal(_redirect([], ["Nothing changed"])) is None
 
 
+@pytest.mark.parametrize(
+    "text",
+    ["<li>Refreshed team permissions</li>", "<p>The admin permission opens the Django admin.</p>"],
+)
+def test_a_page_that_only_mentions_permissions_isnt_a_refusal(text: str) -> None:
+    """The bare word "permission" counted as a refusal, failing an allowed role whose page says it."""
+    assert unknown_refusal(_page(200, text)) is None
+
+
 def test_a_gets_error_redirect_refuses_the_visitor_and_a_posts_doesnt() -> None:
     assert refuses_visitor(_redirect(["Nothing to send"]), "GET")
     assert not refuses_visitor(_redirect(["Nothing to send"]), "POST")

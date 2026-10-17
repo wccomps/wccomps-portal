@@ -53,19 +53,15 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
     """The filtered, sorted page of findings and the filter state for the table both findings pages show."""
     from django.db.models import Q
 
-    from core.utils import filter_sort_paginate, list_filters
+    from core.utils import by_approval, by_team, chosen_team, filter_sort_paginate, list_filters, team_numbers
 
     filters, filtered = list_filters(
         request, {"status": default_status, "team": "", "attack_type": "", "submitter": "", "search": ""}
     )
 
     findings = RedTeamScore.objects.prefetch_related("affected_teams", "screenshots").select_related("submitted_by")
-    if filters["status"] == "pending":
-        findings = findings.filter(is_approved=False)
-    elif filters["status"] == "approved":
-        findings = findings.filter(is_approved=True)
-    if (team_id := optional_int(filters["team"])) is not None:
-        findings = findings.filter(affected_teams__id=team_id)
+    team = chosen_team(filters["team"])
+    findings = by_team(by_approval(findings, filters["status"]), team, "affected_teams")
     if (attack_type_id := optional_int(filters["attack_type"])) is not None:
         findings = findings.filter(attack_type_id=attack_type_id)
     if (submitter_id := optional_int(filters["submitter"])) is not None:
@@ -91,7 +87,8 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
         "sort_by": result["current_sort"],
         "filters": filters,
         "filtered": filtered,
-        "available_teams": Team.objects.filter(red_team_scores__isnull=False).distinct().order_by("team_number"),
+        "team_numbers": team_numbers(Team.objects.filter(red_team_scores__isnull=False), team),
+        "chosen_team": team,
         "available_attack_types": AttackType.objects.filter(findings__isnull=False).distinct().order_by("name"),
         "available_submitters": User.objects.filter(red_scores_submitted__isnull=False).distinct().order_by("username"),
     }
@@ -397,7 +394,7 @@ def ip_pool_delete(request: HttpRequest, pool_id: int) -> HttpResponse:
     pool = get_object_or_404(RedTeamIPPool, id=pool_id, created_by=user)
 
     if pool.findings.exists():
-        messages.error(request, f"Cannot delete pool '{pool.name}' - it is used by {pool.findings.count()} finding(s)")
+        messages.error(request, f"Cannot delete pool '{pool.name}': it is used by {pool.findings.count()} finding(s)")
         return redirect("scoring:ip_pool_list")
 
     pool_name = pool.name

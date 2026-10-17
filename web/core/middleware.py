@@ -171,6 +171,7 @@ class AuthentikRequiredMiddleware:
             "/auth/callback/",
             "/auth/logout/",
             "/auth/link",  # Discord account linking (token-based)
+            "/admin/login/",  # sends a visitor to /auth/login/ with its own next (core.admin)
         ]
         self.whitelist_startswith = [
             "/register/edit/",  # Token-based registration editing

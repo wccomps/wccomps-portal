@@ -11,6 +11,8 @@
         hx_target
         hx_swap
         hx_push_url />
+{# hx-sync: Enter in a form's only text field both changes it and submits it, and the second request replaces the first, #}
+{# so the history gets one entry #}
 <div {{ attrs }} class="toolbar d-flex justify-between items-start gap-10">
     <form id="{{ form_id }}"
           method="{{ method }}"
@@ -20,6 +22,7 @@
           {% if hx_swap %}hx-swap="{{ hx_swap }}"{% endif %}
           {% if hx_push_url %}hx-push-url="{{ hx_push_url }}"{% endif %}
           {% if hx_get %}hx-trigger="submit, change, input changed delay:500ms from:find input[type=text], input changed delay:500ms from:find input[type=search]"{% endif %}
+          {% if hx_get %}hx-sync="this:replace"{% endif %}
           role="search"
           aria-label="{{ aria_label }}"
           class="{{ class }} flex-1">

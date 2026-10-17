@@ -20,9 +20,10 @@
         document.addEventListener('alpine:init', () => {
             Alpine.data('ticketBulkSelect', () => compose(bulkSelectMixin('ticket-id', 'ticket'), {
                 get selectedCount() { return this.selected.length; },
+                get selectedNoun() { return this.selected.length === 1 ? 'ticket' : 'tickets'; },
                 get selectedTickets() { return this.selected.join(','); },
-                get claimQuestion() { return this.selected.length ? `Claim ${this.selected.length} ticket(s)?` : ''; },
-                get resolveQuestion() { return this.selected.length ? `Resolve ${this.selected.length} ticket(s)?` : ''; },
+                get claimQuestion() { return this.selected.length ? `Claim ${this.selected.length} ${this.selectedNoun}?` : ''; },
+                get resolveQuestion() { return this.selected.length ? `Resolve ${this.selected.length} ${this.selectedNoun}?` : ''; },
             }));
         });
         </script>
@@ -82,14 +83,7 @@
                     </select>
                 </c-filter_field>
                 {% if is_ops %}
-                    <c-filter_field label="Team Number" id="id_team">
-                        <input type="number"
-                               name="team"
-                               id="id_team"
-                               value="{{ filters.team }}"
-                               placeholder="Team #"
-                               aria-label="Filter by team number">
-                    </c-filter_field>
+                    <c-team_filter :numbers="team_numbers" value="{{ chosen_team|default_if_none:'' }}" />
                     <c-filter_field label="Assigned To" id="id_assignee">
                         <select name="assignee" id="id_assignee" aria-label="Filter by assignee">
                             <option value="">All Assignees</option>

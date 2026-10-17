@@ -346,7 +346,7 @@ class QuotientClient:
         choices = [
             {
                 "value": f"{box.name}:{service.name}",
-                "label": f"{box.name} - {service.display_name}",
+                "label": f"{box.name}: {service.display_name}",
                 "box_ip": box.ip,
                 "box_name": box.name,
                 "service_name": service.name,

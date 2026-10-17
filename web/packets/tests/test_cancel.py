@@ -66,4 +66,4 @@ def test_the_cancel_button_shows_only_for_drafts(gold_team_user, current_event, 
 
     content = client.get(url).content.decode()
 
-    assert ('@click="cancelPacket"' in content) is shown
+    assert ('data-action="cancel"' in content) is shown

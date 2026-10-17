@@ -56,9 +56,17 @@ Search and filter form with horizontal layout.
 #### `<c-filter_field>`
 Individual filter input within toolbar.
 ```django
-<c-filter_field label="Team" id="id_team">
-    <input type="number" name="team" />
+<c-filter_field label="Search" id="id_search">
+    <input type="text" name="search" />
 </c-filter_field>
+```
+
+#### `<c-approval_filter>` and `<c-team_filter>`
+The review lists' approval-status filter and a list's team filter, which names a team by its number. The views
+filter with `core.utils.by_approval` and `by_team`.
+```django
+<c-approval_filter value="{{ filters.status }}" />
+<c-team_filter :numbers="team_numbers" value="{{ chosen_team|default_if_none:'' }}" />
 ```
 
 ### Interactive Elements
@@ -135,10 +143,8 @@ Color mapping:
 Empty state display for when no data is available.
 ```django
 <c-empty_state title="No incidents found" />
-<c-empty_state
-    title="No search results"
-    description="Try adjusting your filters.">
-    <a href="/reset/" class="button">Clear Filters</a>
+<c-empty_state title="No tickets yet" description="Tickets your team opens show here.">
+    <c-link href="{% url 'create_ticket' %}" variant="add">Create your first ticket</c-link>
 </c-empty_state>
 ```
 
@@ -147,7 +153,13 @@ Props:
 - `description` (optional): Secondary explanatory text in muted color
 - Slot: Optional action button or link
 
-Use cases: Empty lists, no search results, filtered views with zero matches.
+Use cases: an empty list. A list its filters empty uses `<c-no_matches>`.
+
+#### `<c-no_matches>`
+The empty state of a list whose filters hide every row, with a link that clears them.
+```django
+<c-no_matches items="tickets" href="{% url 'ticket_list' %}" />
+```
 
 ### Tables
 

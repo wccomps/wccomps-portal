@@ -34,6 +34,8 @@ from core.tests.guards import (
     fail_with,
     page_templates,
     portal_templates,
+    scripts,
+    static_scripts,
     tags,
     template_name,
     text,
@@ -50,6 +52,7 @@ UTILITIES_RE = re.compile(r"/\* BEGIN UTILITIES \*/(.*?)/\* END UTILITIES \*/", 
 SHARED_COMPONENTS = {
     "action_box.html",
     "alert.html",
+    "approval_filter.html",
     "badge.html",
     "button.html",
     "button_row.html",
@@ -66,6 +69,7 @@ SHARED_COMPONENTS = {
     "link.html",
     "messages.html",
     "module.html",
+    "no_matches.html",
     "nav.html",
     "nav_item.html",
     "page_header.html",
@@ -74,6 +78,7 @@ SHARED_COMPONENTS = {
     "score_value.html",
     "table.html",
     "table_header.html",
+    "team_filter.html",
     "toast.html",
     "toggle_button.html",
 }
@@ -240,7 +245,6 @@ UNUSED_CSS_EXCEPTIONS: dict[str, str] = {
 # Reading templates, scripts and stylesheets
 # ---------------------------------------------------------------------------------------------------------------
 
-SCRIPT_RE = re.compile(r"<script\b[^>]*>(.*?)</script>", re.DOTALL | re.IGNORECASE)
 STYLE_BLOCK_RE = re.compile(r"<style\b", re.IGNORECASE)
 STATIC_JS_RE = re.compile(r"""{%\s*static\s+["'](js/[\w.-]+\.js)["']\s*%}""")
 CLASS_NAME_RE = re.compile(r"-?[A-Za-z_][\w-]*")
@@ -291,22 +295,17 @@ def written_classes(path: Path) -> set[str]:
 
 
 @cache
-def static_scripts() -> dict[str, Path]:
-    """static/js files by the path templates load them with (js/utils.js)."""
-    return {
-        p.removeprefix("web/static/"): REPO_DIR / p
-        for p in tracked_files()
-        if p.startswith("web/static/js/") and p.endswith(".js")
-    }
+def loaded_scripts() -> dict[str, str]:
+    """static/js files' JavaScript by the path templates load them with (js/utils.js)."""
+    return {name.removeprefix("web/static/"): js for name, js in static_scripts()}
 
 
 def script_texts(path: Path) -> list[str]:
     """The script a template runs: its <script> blocks, its on* handlers, and the static/js files it loads."""
-    content = text(path)
-    found = SCRIPT_RE.findall(content)
+    found = [script for _, script in scripts(path)]
     found += [value for tag in tags(path) for attr, value in tag.attrs.items() if attr.startswith("on")]
-    loaded = static_scripts()
-    found += [loaded[name].read_text(encoding="utf-8") for name in STATIC_JS_RE.findall(content) if name in loaded]
+    loaded = loaded_scripts()
+    found += [loaded[name] for name in STATIC_JS_RE.findall(text(path)) if name in loaded]
     return found
 
 
@@ -337,8 +336,8 @@ def bound_names(path: Path) -> set[str]:
 @cache
 def portal_scripts() -> tuple[str, ...]:
     """Every script the portal runs: the non-standalone templates' scripts and static/js."""
-    found = [script for p in portal_templates() for script in SCRIPT_RE.findall(text(p))]
-    return tuple(found + [path.read_text(encoding="utf-8") for path in static_scripts().values()])
+    found = [script for p in portal_templates() for _, script in scripts(p)]
+    return tuple(found + [js for _, js in static_scripts()])
 
 
 @cache

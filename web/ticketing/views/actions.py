@@ -6,7 +6,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
-from django.utils.http import url_has_allowed_host_and_scheme
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from core.auth_utils import get_authentik_id, has_permission, team_record_or_404
@@ -20,6 +20,8 @@ from ticketing.lifecycle import (
     unclaim_ticket,
 )
 from ticketing.models import Ticket
+
+from .list import back_to_list
 
 logger = logging.getLogger(__name__)
 
@@ -70,10 +72,7 @@ def ticket_claim(request: HttpRequest, ticket_number: str) -> HttpResponse:
         return redirect("ticket_detail", ticket_number=ticket_number)
 
     logger.info(f"Ticket {ticket_number} claimed by {authentik_username}")
-    referer = request.META.get("HTTP_REFERER", "")
-    if referer and url_has_allowed_host_and_scheme(referer, allowed_hosts={request.get_host()}):
-        return redirect(referer)
-    return redirect("ticket_list")
+    return back_to_list(request, reverse("ticket_detail", args=[ticket_number]))
 
 
 @require_POST
@@ -105,10 +104,7 @@ def ticket_unclaim(request: HttpRequest, ticket_number: str) -> HttpResponse:
         return redirect("ticket_detail", ticket_number=ticket_number)
 
     logger.info(f"Ticket {ticket_number} unclaimed by {authentik_username}")
-    referer = request.META.get("HTTP_REFERER", "")
-    if referer and url_has_allowed_host_and_scheme(referer, allowed_hosts={request.get_host()}):
-        return redirect(referer)
-    return redirect("ticket_list")
+    return back_to_list(request, reverse("ticket_detail", args=[ticket_number]))
 
 
 @require_POST
@@ -144,10 +140,7 @@ def ticket_reassign(request: HttpRequest, ticket_number: str) -> HttpResponse:
         return redirect("ticket_detail", ticket_number=ticket_number)
 
     logger.info(f"Ticket {ticket_number} reassigned to {new_assignee_username} by {authentik_username}")
-    referer = request.META.get("HTTP_REFERER", "")
-    if referer and url_has_allowed_host_and_scheme(referer, allowed_hosts={request.get_host()}):
-        return redirect(referer)
-    return redirect("ticket_list")
+    return back_to_list(request, reverse("ticket_detail", args=[ticket_number]))
 
 
 @require_POST
@@ -190,10 +183,7 @@ def ticket_resolve(request: HttpRequest, ticket_number: str) -> HttpResponse:
         return redirect("ticket_detail", ticket_number=ticket_number)
 
     logger.info(f"Ticket {ticket_number} resolved by {authentik_username}")
-    referer = request.META.get("HTTP_REFERER", "")
-    if referer and url_has_allowed_host_and_scheme(referer, allowed_hosts={request.get_host()}):
-        return redirect(referer)
-    return redirect("ticket_list")
+    return back_to_list(request, reverse("ticket_detail", args=[ticket_number]))
 
 
 @require_POST
@@ -225,10 +215,7 @@ def ticket_reopen(request: HttpRequest, ticket_number: str) -> HttpResponse:
     logger.info(
         f"Ticket {ticket_number} reopened by {authentik_username}" + (f": {reopen_reason}" if reopen_reason else "")
     )
-    referer = request.META.get("HTTP_REFERER", "")
-    if referer and url_has_allowed_host_and_scheme(referer, allowed_hosts={request.get_host()}):
-        return redirect(referer)
-    return redirect("ticket_list")
+    return back_to_list(request, reverse("ticket_detail", args=[ticket_number]))
 
 
 @require_POST

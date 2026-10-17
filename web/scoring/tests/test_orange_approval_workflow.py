@@ -58,7 +58,7 @@ class BulkOrangeApprovalTests(TestCase):
 
     def test_bulk_approve_multiple_adjustments(self) -> None:
         """Can bulk approve multiple adjustments at once."""
-        self.client.login(username="gold", password="test123")
+        self.client.force_login(User.objects.get(username="gold"))
         url = reverse("scoring:bulk_approve_orange_adjustments")
 
         response = self.client.post(url, {"adjustment_ids": [self.adj1.id, self.adj2.id]})
@@ -74,7 +74,7 @@ class BulkOrangeApprovalTests(TestCase):
 
     def test_bulk_approve_sets_approver_for_all(self) -> None:
         """Bulk approve sets the approver user for all adjustments."""
-        self.client.login(username="gold", password="test123")
+        self.client.force_login(User.objects.get(username="gold"))
         url = reverse("scoring:bulk_approve_orange_adjustments")
 
         response = self.client.post(url, {"adjustment_ids": [self.adj1.id, self.adj2.id]})
@@ -94,7 +94,7 @@ class BulkOrangeApprovalTests(TestCase):
         OrangeTeamScore.objects.filter(pk=self.adj1.pk).update(
             is_approved=True, approved_by=self.orange_user, approved_at=approved_at
         )
-        self.client.login(username="gold", password="test123")
+        self.client.force_login(User.objects.get(username="gold"))
 
         self.client.post(reverse("scoring:bulk_approve_orange_adjustments"), {"adjustment_ids": [self.adj1.id]})
 
@@ -103,7 +103,7 @@ class BulkOrangeApprovalTests(TestCase):
 
     def test_bulk_approve_empty_selection(self) -> None:
         """Bulk approve with empty selection returns gracefully."""
-        self.client.login(username="gold", password="test123")
+        self.client.force_login(User.objects.get(username="gold"))
         url = reverse("scoring:bulk_approve_orange_adjustments")
 
         response = self.client.post(url, {"adjustment_ids": []})
@@ -113,7 +113,7 @@ class BulkOrangeApprovalTests(TestCase):
 
     def test_bulk_approve_invalid_ids_skipped(self) -> None:
         """Bulk approve skips invalid adjustment IDs."""
-        self.client.login(username="gold", password="test123")
+        self.client.force_login(User.objects.get(username="gold"))
         url = reverse("scoring:bulk_approve_orange_adjustments")
 
         response = self.client.post(url, {"adjustment_ids": [self.adj1.id, 99999]})
@@ -124,7 +124,7 @@ class BulkOrangeApprovalTests(TestCase):
 
     def test_orange_team_can_bulk_approve(self) -> None:
         """Orange Team members can bulk approve their own checks."""
-        self.client.login(username="orange", password="test123")
+        self.client.force_login(User.objects.get(username="orange"))
         url = reverse("scoring:bulk_approve_orange_adjustments")
 
         response = self.client.post(url, {"adjustment_ids": [self.adj1.id, self.adj2.id]})
@@ -137,7 +137,7 @@ class BulkOrangeApprovalTests(TestCase):
 
     def test_bulk_approve_only_accepts_post(self) -> None:
         """Bulk approve endpoint only accepts POST requests."""
-        self.client.login(username="gold", password="test123")
+        self.client.force_login(User.objects.get(username="gold"))
         url = reverse("scoring:bulk_approve_orange_adjustments")
 
         response = self.client.get(url)
@@ -145,7 +145,7 @@ class BulkOrangeApprovalTests(TestCase):
 
     def test_bulk_approve_redirects_to_review_orange(self) -> None:
         """Bulk approve redirects to the review orange page."""
-        self.client.login(username="gold", password="test123")
+        self.client.force_login(User.objects.get(username="gold"))
         url = reverse("scoring:bulk_approve_orange_adjustments")
 
         response = self.client.post(url, {"adjustment_ids": [self.adj1.id]})
@@ -173,19 +173,19 @@ class ReviewOrangePageTests(TestCase):
 
     def test_orange_team_can_access_review_page(self) -> None:
         """Orange team members can access the review page."""
-        self.client.login(username="orange", password="test123")
+        self.client.force_login(User.objects.get(username="orange"))
         response = self.client.get(reverse("scoring:review_orange"))
         self.assertEqual(response.status_code, 200)
 
     def test_gold_team_can_access_review_page(self) -> None:
         """Gold team members can access the review page."""
-        self.client.login(username="gold", password="test123")
+        self.client.force_login(User.objects.get(username="gold"))
         response = self.client.get(reverse("scoring:review_orange"))
         self.assertEqual(response.status_code, 200)
 
     def test_blue_team_cannot_access_review_page(self) -> None:
         """Blue team members cannot access the review page."""
-        self.client.login(username="blue", password="test123")
+        self.client.force_login(User.objects.get(username="blue"))
         response = self.client.get(reverse("scoring:review_orange"))
         self.assertIn(response.status_code, [302, 403])
 
@@ -206,7 +206,7 @@ class ReviewOrangePageTests(TestCase):
             is_approved=True,
         )
 
-        self.client.login(username="orange", password="test123")
+        self.client.force_login(User.objects.get(username="orange"))
         response = self.client.get(reverse("scoring:review_orange"))
 
         self.assertEqual(response.status_code, 200)
@@ -215,7 +215,7 @@ class ReviewOrangePageTests(TestCase):
 
     def test_review_page_htmx_returns_table_only(self) -> None:
         """HTMX request returns just the table partial."""
-        self.client.login(username="orange", password="test123")
+        self.client.force_login(User.objects.get(username="orange"))
         response = self.client.get(
             reverse("scoring:review_orange"),
             HTTP_HX_REQUEST="true",

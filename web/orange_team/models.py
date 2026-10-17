@@ -180,7 +180,7 @@ class OrangeAssignment(models.Model):
         ordering = ["team__team_number"]
 
     def __str__(self) -> str:
-        return f"{self.orange_check.title} - Team {self.team.team_number} ({self.user.username})"
+        return f"{self.orange_check.title} for Team {self.team.team_number} ({self.user.username})"
 
     def calculate_score(self) -> int:
         return self.results.filter(met=True).aggregate(total=models.Sum("criterion__points"))["total"] or 0

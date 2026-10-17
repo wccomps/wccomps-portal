@@ -11,7 +11,6 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import UserGroups
 from scoring.models import (
     IncidentReport,
     InjectScore,
@@ -23,18 +22,6 @@ from scoring.models import (
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture
-def admin_user():
-    """Create an admin user."""
-    user = User.objects.create_user(
-        username="admin",
-        email="admin@example.com",
-        password="admin123",
-    )
-    UserGroups.objects.create(user=user, authentik_id="admin-uid", groups=["WCComps_GoldTeam"])
-    return user
 
 
 @pytest.fixture

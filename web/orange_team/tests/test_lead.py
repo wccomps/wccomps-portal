@@ -28,7 +28,7 @@ class TestAssignmentApprove:
         )
         OrangeAssignmentResult.objects.create(assignment=assignment, criterion=c1, met=True)
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.post(f"/orange-team/assignments/{assignment.pk}/approve/")
         assert response.status_code == 302
         assignment.refresh_from_db()
@@ -49,7 +49,7 @@ class TestAssignmentApprove:
             orange_check=check, user=user, team=team, status="submitted", score=5
         )
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         response = client.post(f"/orange-team/assignments/{assignment.pk}/approve/")
         assert response.status_code == 403
         assignment.refresh_from_db()
@@ -67,7 +67,7 @@ class TestAssignmentReject:
             orange_check=check, user=orange, team=team, status="submitted", score=5
         )
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.post(
             f"/orange-team/assignments/{assignment.pk}/reject/",
             {"notes": "Please re-check team 1"},
@@ -94,7 +94,7 @@ class TestExportScores:
             submitted_at=timezone.now(),
         )
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.get("/orange-team/export/")
         assert response.status_code == 200
         assert response["Content-Type"] == "text/csv"

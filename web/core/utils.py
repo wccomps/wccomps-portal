@@ -5,7 +5,7 @@ import queue
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping
 from datetime import datetime
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.contrib import messages
@@ -16,6 +16,9 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 
 from core.discord_tasks import SyncRolesResult
+
+if TYPE_CHECKING:
+    from team.models import Team
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +121,37 @@ def list_filters(request: HttpRequest, defaults: Mapping[str, str]) -> tuple[dic
     any is set to something else: the page's empty state then says its filters hide rows."""
     values = {name: request.GET.get(name, "").strip() or default for name, default in defaults.items()}
     return values, any(values[name] != default for name, default in defaults.items())
+
+
+def by_approval[M: Model](queryset: QuerySet[M], status: str, field: str = "is_approved") -> QuerySet[M]:
+    """The rows the approval-status filter (cotton/approval_filter.html) shows: pending (not approved yet), approved,
+    or all (any other value)."""
+    if status in ("pending", "approved"):
+        return queryset.filter(**{field: status == "approved"})
+    return queryset
+
+
+def chosen_team(team: str) -> int | None:
+    """The team number the team filter (?team=) names (07 and +7 name team 7), or None when it names no team."""
+    from team.models import Team
+
+    number = optional_int(team)
+    return number if number is not None and Team.objects.filter(team_number=number).exists() else None
+
+
+def team_numbers(teams: QuerySet[Team], team: int | None) -> list[int]:
+    """The team numbers a team filter offers: the teams with rows, and the one chosen (chosen_team) even with none."""
+    numbers = set(teams.values_list("team_number", flat=True))
+    if team is not None:
+        numbers.add(team)
+    return sorted(numbers)
+
+
+def by_team[M: Model](queryset: QuerySet[M], team: int | None, field: str = "team") -> QuerySet[M]:
+    """The rows of the chosen team (chosen_team), or every row when none is chosen."""
+    if team is None:
+        return queryset
+    return queryset.filter(**{f"{field}__team_number": team})
 
 
 def requested_sort(request: HttpRequest, sort_fields: Collection[str], default_sort: str) -> str:

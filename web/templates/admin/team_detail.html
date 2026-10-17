@@ -54,6 +54,7 @@
                         <c-button variant="default"
                                   @click="teamAction"
                                   data-action="deactivate"
+                                  data-confirm="Are you sure you want to deactivate this team?"
                                   ::disabled="loading">
                             Deactivate Team
                         </c-button>
@@ -61,16 +62,18 @@
                         <c-button variant="primary"
                                   @click="teamAction"
                                   data-action="activate"
+                                  data-confirm="Are you sure you want to activate this team?"
                                   ::disabled="loading">
                             Activate Team
                         </c-button>
                     {% endif %}
-                    <c-button variant="danger" @click="resetTeam" ::disabled="loading">
+                    <c-button variant="danger" @click="resetTeam" ::disabled="loading" data-confirm="Reset this team? This unlinks all members, generates a new Authentik password and revokes all active sessions. It cannot be undone.">
                         Reset Team
                     </c-button>
                     <c-button variant="default"
                               @click="teamAction"
                               data-action="recreate_channels"
+                              data-confirm="Are you sure you want to recreate Discord channels for this team?"
                               ::disabled="loading">
                         Recreate Discord Channels
                     </c-button>
@@ -120,7 +123,7 @@
                                 <c-button variant="danger"
                                           @click="unlinkUser"
                                           data-discord-id="{{ member.discord_id }}"
-                                          data-username="{{ member.discord_username }}"
+                                          data-confirm="Unlink {{ member.discord_username }} from this team?"
                                           ::disabled="loading">
                                     Unlink
                                 </c-button>
@@ -143,24 +146,11 @@
                 get membersShown() { return !this.membersUnlinked; },
 
                 teamAction(e) {
-                    const action = e.currentTarget.dataset.action;
-                    const actionDesc = {
-                        'activate': 'activate this team',
-                        'deactivate': 'deactivate this team',
-                        'recreate_channels': 'recreate Discord channels for this team'
-                    } [action];
-
-                    if (!confirm(`Are you sure you want to ${actionDesc}?`)) {
-                        return;
-                    }
                     this.newPassword = '';
-                    this.doAction(action);
+                    this.doAction(e.currentTarget.dataset.action);
                 },
 
                 async resetTeam() {
-                    if (!confirm('Reset this team? This will:\n- Unlink all members\n- Generate a new Authentik password\n- Revoke all active sessions\n\nThis cannot be undone.')) {
-                        return;
-                    }
                     this.newPassword = '';
                     // No reload: it would wipe the new password before anyone copied it
                     const result = await this.doAction('reset', {}, { reload: false });
@@ -171,12 +161,7 @@
                 },
 
                 unlinkUser(e) {
-                    const discordId = e.currentTarget.dataset.discordId;
-                    const username = e.currentTarget.dataset.username;
-                    if (!confirm(`Unlink ${username} from this team?`)) {
-                        return;
-                    }
-                    this.doAction('unlink_user', { discord_id: discordId });
+                    this.doAction('unlink_user', { discord_id: e.currentTarget.dataset.discordId });
                 }
             }));
     });

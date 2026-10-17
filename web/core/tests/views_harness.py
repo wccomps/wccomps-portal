@@ -781,9 +781,9 @@ PERMISSION_REFUSALS = {Kind.SIGN_IN, Kind.FORBIDDEN, Kind.MISSING}
 # Statuses core.errors answers (and the sign-in gate's 401): JSON exactly when the request wants it
 ERROR_STATUSES = (400, 401, 403, 404, 405)
 
-# Words a refusal of the visitor uses, in a message or a page
+# Words a refusal of the visitor uses, in a message or a page ("permission" alone is a page's subject too)
 REFUSAL_TEXT = re.compile(
-    r"access denied|permission|not allowed|not authori[sz]ed|can only \w+ (your|tickets you)", re.I
+    r"access denied|(do not|don't) have permission|not allowed|not authori[sz]ed|can only \w+ (your|tickets you)", re.I
 )
 
 
