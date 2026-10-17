@@ -22,8 +22,8 @@
                 get selectedCount() { return this.selected.length; },
                 get selectedNoun() { return this.selected.length === 1 ? 'ticket' : 'tickets'; },
                 get selectedTickets() { return this.selected.join(','); },
-                get claimQuestion() { return this.selected.length ? `Claim ${this.selected.length} ticket(s)?` : ''; },
-                get resolveQuestion() { return this.selected.length ? `Resolve ${this.selected.length} ticket(s)?` : ''; },
+                get claimQuestion() { return this.selected.length ? `Claim ${this.selected.length} ${this.selectedNoun}?` : ''; },
+                get resolveQuestion() { return this.selected.length ? `Resolve ${this.selected.length} ${this.selectedNoun}?` : ''; },
             }));
         });
         </script>
