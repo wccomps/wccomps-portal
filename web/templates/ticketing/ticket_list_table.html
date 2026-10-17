@@ -18,7 +18,7 @@
              aria-label="Bulk actions">
             <div>
                 <span>
-                    <strong x-text="selectedCount" aria-live="polite">0</strong> tickets selected
+                    <strong x-text="selectedCount" aria-live="polite">0</strong> <span x-text="selectedNoun">tickets</span> selected
                 </span>
                 <c-form action="{% url 'tickets_bulk_claim' %}"
                         class="d-inline"

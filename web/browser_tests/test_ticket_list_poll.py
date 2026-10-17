@@ -20,7 +20,7 @@ def test_the_refresh_lists_a_new_ticket_and_keeps_the_selection(live_server, pw_
         page.clock.install()
         page.goto(f"{live_server.url}/tickets/", wait_until="networkidle")
         page.get_by_label(f"Select ticket {ticket.ticket_number}").check()
-        page.get_by_text("1 tickets selected").wait_for()
+        page.get_by_text("1 ticket selected").wait_for()
 
         Ticket.objects.create(ticket_number="TEAM01-009", title="Arrived later", team=ticket.team, status="open")
         with page.expect_response(lambda r: r.url.startswith(f"{live_server.url}/tickets/")):
@@ -29,7 +29,7 @@ def test_the_refresh_lists_a_new_ticket_and_keeps_the_selection(live_server, pw_
 
         assert page.get_by_label(f"Select ticket {ticket.ticket_number}").is_checked()
         assert not page.get_by_label("Select ticket TEAM01-009").is_checked()
-        assert page.get_by_text("1 tickets selected").is_visible()
+        assert page.get_by_text("1 ticket selected").is_visible()
         page.get_by_label("Select ticket TEAM01-009").check()
         page.get_by_text("2 tickets selected").wait_for()
     finally:

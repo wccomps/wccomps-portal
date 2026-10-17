@@ -460,7 +460,7 @@ class AuthentikManager:
 
         except Exception as e:
             logger.exception(f"Failed to reset password for {username}: {e}")
-            return (False, "Password reset failed. Check the server logs.")
+            return (False, "see the server logs")  # the callers say what failed
 
     def _list_all(self, path: str, params: dict[str, str]) -> list[dict[str, object]]:
         """Fetch every page of an Authentik list endpoint. Raises on any HTTP error."""

@@ -82,7 +82,7 @@
                 get sendQuestion() {
                     if (!this.text.trim()) return '';
                     if (this.target === 'all-teams') return 'Send this message to all team channels?';
-                    if (this.target !== 'custom') return `Send this message to ${this.target}?`;
+                    if (this.target === 'announcements') return 'Send this message to the announcements channel?';
                     return this.teamNumbers.trim() ? `Send this message to teams ${this.teamNumbers}?` : '';
                 },
 
