@@ -65,7 +65,6 @@ CASES = [
     ViewCase(
         "orange_team:assignment_save",
         ORANGE,
-        json=True,
         json_body=True,
         methods=("POST",),
         post=lambda w: {"criterion_id": _ids(w, "criterion_id").map(int), "met": st.booleans()},
