@@ -1,11 +1,12 @@
 {# Unified ticket list table - swappable content for htmx #}
 {% load cotton status_variants %}
 <div id="ticket-list-content" {% if is_ops %}x-data="ticketBulkSelect"{% endif %}>
-    {# The 30 s refresh swaps only the rows: the selection and the bulk forms outside them stay as they are #}
+    {# The 30 s refresh swaps the rows and the page links: the selection and the bulk forms outside them stay #}
     <div hidden
          hx-get="{% url 'ticket_list' %}{% querystring %}"
          hx-trigger="every 30s"
          hx-select="#result_list > tbody"
+         hx-select-oob="#ticket-list-pages"
          hx-target="#result_list > tbody"
          hx-swap="outerHTML"></div>
     {% if is_ops %}
@@ -199,5 +200,7 @@
             </tr>
         {% endfor %}
     </c-table>
-    <c-pagination :page_obj="page_obj" />
+    <div id="ticket-list-pages">
+        <c-pagination :page_obj="page_obj" />
+    </div>
 </div>
