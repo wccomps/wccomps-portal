@@ -91,7 +91,7 @@ def test_blue_team_cannot_assign(blue_team_user, helper, team):
 
     response = _assign(blue_team_user, ticket, helper.username)
 
-    assert response.status_code in (302, 403)
+    assert response.status_code == 403
     ticket.refresh_from_db()
     assert ticket.assigned_to is None
 

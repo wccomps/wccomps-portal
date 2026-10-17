@@ -11,11 +11,8 @@ pytestmark = pytest.mark.django_db
 
 
 def _check_access_denied(response) -> bool:
-    """Check if response indicates access denied (redirect, 403, or soft 200 with error)."""
-    if response.status_code in (302, 403):
-        return True
-    content_lower = response.content.lower()
-    return b"access denied" in content_lower or b"you do not have permission" in content_lower
+    """The one refusal of a signed-in role: the 403 error page (core.errors)."""
+    return response.status_code == 403 and "error.html" in [t.name for t in response.templates]
 
 
 class TestOpsSchoolInfoPermissions:

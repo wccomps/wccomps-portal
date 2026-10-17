@@ -37,7 +37,7 @@ class TestAdminCompetitionView:
         ],
     )
     def test_unauthorized_roles_denied(self, user_fixture, request):
-        """Non-gold/admin users should be redirected by @require_permission."""
+        """Non-gold/admin users get the 403 from @require_permission."""
         user = request.getfixturevalue(user_fixture)
         client = Client()
         client.force_login(user)
@@ -86,7 +86,7 @@ class TestAdminTeamsView:
         ],
     )
     def test_unauthorized_roles_denied(self, user_fixture, request):
-        """Non-gold/admin users should be redirected by @require_permission."""
+        """Non-gold/admin users get the 403 from @require_permission."""
         user = request.getfixturevalue(user_fixture)
         client = Client()
         client.force_login(user)
@@ -158,7 +158,7 @@ class TestAdminBroadcastView:
         ],
     )
     def test_unauthorized_roles_denied(self, user_fixture, request):
-        """Non-gold/admin users should be redirected by @require_permission."""
+        """Non-gold/admin users get the 403 from @require_permission."""
         user = request.getfixturevalue(user_fixture)
         client = Client()
         client.force_login(user)

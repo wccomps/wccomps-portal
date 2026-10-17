@@ -187,7 +187,7 @@ class ReviewOrangePageTests(TestCase):
         """Blue team members cannot access the review page."""
         self.client.force_login(User.objects.get(username="blue"))
         response = self.client.get(reverse("scoring:review_orange"))
-        self.assertIn(response.status_code, [302, 403])
+        self.assertEqual(response.status_code, 403)
 
     def test_review_page_defaults_to_pending_filter(self) -> None:
         """Review page defaults to showing pending checks."""
