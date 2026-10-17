@@ -1,6 +1,8 @@
 """Every page whose placeholders became blank renders readable text when its values are missing: no Python "None",
 and parentheses that close. The rows are sparse on purpose: unscored assignments, findings without an attack type,
-vector or boxes, a team without school info, a packet nobody has downloaded."""
+vector or boxes, a team without school info, a packet nobody has downloaded. Long text is the exception: an attack
+type, an incident, an orange score, a finding and a ticket whose text the admin and portal lists cut inside a
+parenthesis."""
 
 import re
 from collections.abc import Iterable
@@ -57,10 +59,7 @@ def assert_readable(html: str, where: str) -> None:
 
 
 # "<page>:<problem>" -> why the page reads that way on purpose
-UNREADABLE_EXCEPTIONS = {
-    "/admin/scoring/attacktype/:parentheses": "the attack type admin's Description column cuts a long description at "
-    "50 characters, closing parenthesis and all (the seeded attack types)",
-}
+UNREADABLE_EXCEPTIONS: dict[str, str] = {}
 
 
 def read_every(client: Client, pages: Iterable[str]) -> dict[str, str]:
@@ -74,11 +73,13 @@ def read_every(client: Client, pages: Iterable[str]) -> dict[str, str]:
 
 @pytest.fixture
 def rows(admin_user: User) -> tuple[dict, dict]:
-    """The seeded rows, and the same with sparse rows in place of those the registry's URLs name."""
+    """The seeded rows, and the same with sparse rows in place of those the registry's URLs name and the long rows
+    under long_rows."""
     from orange_team.models import OrangeAssignment, OrangeCheck, OrangeFollowUp
-    from scoring.models import IncidentReport, RedTeamScore
+    from scoring.models import AttackType, IncidentReport, OrangeTeamScore, RedTeamScore
 
     from team.models import Team
+    from ticketing.models import Ticket, TicketCategory
 
     data = seed_table_data(admin_user)
     team = Team.objects.create(team_number=7, team_name="Team 07")  # no school info
@@ -96,7 +97,28 @@ def rows(admin_user: User) -> tuple[dict, dict]:
         source_ip="10.0.0.9",
         attack_detected_at=timezone.now(),
     )
-    return data, {**data, "team": team, "orange_check": check, "finding": finding, "incident": incident}
+    long_text = "A long description (whose parentheses run on past where any list cuts it short)"
+    long_rows = [
+        AttackType.objects.create(name="Long description", description=long_text),
+        IncidentReport.objects.create(
+            team=team,
+            submitted_by=admin_user,
+            attack_description=long_text,
+            source_ip="10.0.0.9",
+            attack_detected_at=timezone.now(),
+        ),
+        OrangeTeamScore.objects.create(
+            team=team, submitted_by=admin_user, description=long_text, points_awarded=Decimal(1)
+        ),
+        RedTeamScore.objects.create(
+            attack_vector=long_text, source_ip="10.0.0.9", points_per_team=Decimal(5), submitted_by=admin_user
+        ),
+        Ticket.objects.create(
+            ticket_number="T007-001", team=team, category=TicketCategory.objects.first(), title=long_text
+        ),
+    ]
+    sparse = {**data, "team": team, "orange_check": check, "finding": finding, "incident": incident}
+    return data, {**sparse, "long_rows": long_rows}
 
 
 def _pages_as(role: str, data: dict) -> list[str]:
@@ -111,7 +133,11 @@ def test_staff_pages_read_without_their_missing_values(admin_user: User, rows: t
     client = Client()
     client.force_login(admin_user)
     changelists = [reverse(f"admin:{m._meta.app_label}_{m._meta.model_name}_changelist") for m in admin.site._registry]
-    pages = {*_pages_as("admin", seeded), *_pages_as("admin", sparse), *changelists}
+    # A record's name (its __str__) shows on its change page
+    changes = [
+        reverse(f"admin:{o._meta.app_label}_{o._meta.model_name}_change", args=[o.pk]) for o in sparse["long_rows"]
+    ]
+    pages = {*_pages_as("admin", seeded), *_pages_as("admin", sparse), *changelists, *changes}
     fail_with("Staff pages with unreadable text", read_every(client, sorted(pages)), UNREADABLE_EXCEPTIONS)
 
 

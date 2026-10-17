@@ -63,7 +63,7 @@
                         {% endif %}
                     </td>
                     <td>Team {{ check.team.team_number }}</td>
-                    <td>{{ check.description|truncatechars:60 }}</td>
+                    <td>{{ check.description|shorten:60 }}</td>
                     <td class="text-right">
                         <c-score_value :value="check.points_awarded" format="signed" />
                     </td>

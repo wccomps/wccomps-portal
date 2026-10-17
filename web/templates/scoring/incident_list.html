@@ -42,7 +42,7 @@
                             <td>{{ incident.created_at|date:"Y-m-d H:i:s" }}</td>
                             <td>{{ incident.attack_detected_at|date:"Y-m-d H:i:s" }}</td>
                             <td>{{ incident.affected_boxes_display|default:"N/A" }}</td>
-                            <td>{{ incident.attack_description|truncatewords:10 }}</td>
+                            <td>{{ incident.attack_description|shorten:60 }}</td>
                             <td>
                                 {% if incident.is_approved %}
                                     <c-badge variant="success">

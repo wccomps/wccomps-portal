@@ -239,7 +239,9 @@ A page styles itself only with classes: the ones these components render (with t
 admin's classes. A class the page's own script adds, or a selector that only mentions a component, is the page's
 own. No `style` attributes or `<style>` blocks: a fixed look is a utility, a choice is a component option (such as
 `<c-table widths="...">`). Markup a component renders goes through the component, a `variant` is one the component
-knows, and a stored status reaches a badge through `|badge_variant:"kind"` (`core/status_variants.py`).
+knows, and a stored status reaches a badge through `|badge_variant:"kind"` (`core/status_variants.py`). A
+preview of long text is `|shorten:N` (`core.utils.shorten`), never `truncatechars` or `truncatewords`, which can leave
+a parenthesis open (`core/tests/test_template_lint.py` fails on them).
 `core/tests/test_template_vocabulary.py` enforces all of this, and fails on an app.css rule no page uses; each
 check's exceptions list says why no component or utility fits.
 

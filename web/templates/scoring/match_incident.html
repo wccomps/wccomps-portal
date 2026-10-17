@@ -69,7 +69,7 @@
                                     <strong>Finding #{{ finding.id }}</strong>
                                     {% if finding.source_ip == incident.source_ip %}<c-badge variant="success" class="ml-5">IP Match</c-badge>{% endif %}
                                     <br>
-                                    <small>{{ finding.attack_vector|truncatechars:60 }}</small>
+                                    <small>{{ finding.attack_vector|shorten:60 }}</small>
                                     <br>
                                     <small class="text-muted">
                                         {% if finding.affected_boxes_display %}{{ finding.affected_boxes_display }} /{% endif %}

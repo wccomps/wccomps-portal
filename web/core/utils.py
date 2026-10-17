@@ -2,6 +2,7 @@ import ipaddress
 import json
 import logging
 import queue
+import re
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping
 from datetime import datetime
@@ -52,6 +53,32 @@ def parse_datetime_to_utc(datetime_str: str, tz_name: str = "America/Los_Angeles
         return local_time.astimezone(ZoneInfo("UTC"))
     except OverflowError as e:  # year 1 or 9999, pushed past the calendar by the zone's offset
         raise ValueError(f"{datetime_str} in {tz_name} is outside the calendar") from e
+
+
+def shorten(text: str, limit: int) -> str:
+    """A preview of the text: its first `limit` characters, back to the last whitespace in their second half (inside a
+    word when there is none), then "..." and a ")" for each parenthesis the cut left open. truncatechars and
+    truncatewords can leave one open."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if not text[limit].isspace():
+        last_break = max((m.start() for m in re.finditer(r"\s", cut)), default=-1)
+        if last_break >= limit // 2:
+            cut = cut[:last_break]
+    cut = re.sub(r"[\s,;:.(]+$", "", cut)
+    return cut + "..." + ")" * open_parentheses(cut)
+
+
+def open_parentheses(text: str) -> int:
+    """How many of the text's parentheses are still open at its end."""
+    depth = 0
+    for char in text:
+        if char == "(":
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+    return depth
 
 
 def ndjson_progress(step: str, current: int, total: int, ok: bool = True) -> str:
