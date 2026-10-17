@@ -193,7 +193,7 @@ def test_the_ticket_lists_refresh_skips_while_a_row_form_is_posting(live_server,
     page = context.new_page()
     page.clock.install()
     page.on("dialog", lambda dialog: dialog.accept())
-    # The post is stopped (as the browser's Stop does): the page stays, the row's form still posting
+    # The post is stopped (as the browser's Stop does): the page stays, the row's form still marked posting
     page.route("**/T004-001/claim/", lambda route: route.abort("aborted"))
     try:
         page.goto(f"{live_server.url}{reverse('ticket_list')}")

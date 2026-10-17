@@ -5,6 +5,7 @@ from urllib.parse import parse_qs
 
 import pytest
 from django.urls import reverse
+from playwright.sync_api import expect
 
 from core.tests.roles import role_user
 
@@ -46,14 +47,13 @@ def test_a_c_form_posts_once_and_sends_the_button_pressed(live_server, pw_browse
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
     posted = []
-    # The post is stopped (as the browser's Stop does): the page stays, its form still posting
+    # The post is stopped (as the browser's Stop does): the page stays, its form still marked posting
     page.route("**/ip-pools/*/delete/", lambda route: (posted.append(route.request.post_data), route.abort("aborted")))
     try:
         page.goto(f"{live_server.url}{reverse('scoring:ip_pool_list')}")
         delete = page.get_by_role("button", name="Delete")
         delete.evaluate("button => { button.name = 'choice'; button.value = 'pressed'; }")
         delete.click()
-        page.wait_for_timeout(300)
         delete.evaluate("button => button.form.requestSubmit()")
         page.wait_for_timeout(300)
         assert len(posted) == 1
@@ -79,8 +79,6 @@ def test_a_submit_button_outside_its_form_is_disabled_while_it_posts(live_server
         page.locator('input[name="finding_ids"]').first.check()
         approve = page.get_by_role("button", name="Approve Selected")
         approve.click()
-        page.wait_for_function("document.querySelector('#bulk-approve-form[data-posting]') !== null")
-        page.wait_for_timeout(200)
-        assert approve.is_disabled()
+        expect(approve).to_be_disabled()
     finally:
         context.close()
