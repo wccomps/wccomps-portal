@@ -99,6 +99,13 @@
                         const response = await fetch(`/ops/admin/task/${this.taskId}/status/`);
                         const result = await response.json();
 
+                        if (!response.ok) {
+                            // The task is gone or the request was refused: polling again won't change that
+                            this.message = result.error || 'The server answered ' + response.status;
+                            this.messageType = 'error';
+                            this.loading = false;
+                            return;
+                        }
                         this.message = result.message;
 
                         if (result.status === 'completed') {
