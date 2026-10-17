@@ -107,6 +107,12 @@ def page_not_found(request: HttpRequest, exception: Exception) -> HttpResponse:
     return error_answer(request, 404)
 
 
+def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:
+    """CSRF_FAILURE_VIEW: a form or fetch whose CSRF token didn't check out (most often a page open since before its
+    session changed)."""
+    return error_answer(request, 403, "Your session changed since this page loaded. Reload the page and try again.")
+
+
 def server_error(request: HttpRequest) -> HttpResponse:
     if wants_json_error(request):
         return JsonResponse({"error": MESSAGES[500]}, status=500)

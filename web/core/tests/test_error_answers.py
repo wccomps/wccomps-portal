@@ -243,3 +243,24 @@ def test_the_pool_modal_gets_json_by_asking_for_it_whatever_the_browser_sends() 
     assert RedTeamIPPool.objects.count() == 1
     # A navigation (the pool's own form page) still gets the page
     assert client.post(url, {"name": "", "ip_addresses": ""})["Content-Type"].startswith("text/html")
+
+
+# A failed CSRF check ----------------------------------------------------------------------------------------------
+
+
+def _without_csrf(role: str) -> Client:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(role_user(role))
+    return client
+
+
+def test_a_failed_csrf_check_is_the_403_page() -> None:
+    response = _without_csrf("admin").post(reverse("admin_team_detail", args=[1]))
+    assert is_error_page(response, 403)
+    assert "Reload the page" in response.content.decode()
+
+
+def test_a_failed_csrf_check_answers_a_fetch_with_json() -> None:
+    response = _without_csrf("admin").post(reverse("admin_team_action", args=[1]), {"action": "activate"})
+    assert response.status_code == 403
+    assert "Reload the page" in response.json()["error"]

@@ -62,6 +62,9 @@ INSTALLED_APPS = [
     "registration",
 ]
 
+# A failed CSRF check is answered as every other refusal is (the error page, or JSON for a fetch)
+CSRF_FAILURE_VIEW = "core.errors.csrf_failure"
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "core.middleware.SecurityHeadersMiddleware",
