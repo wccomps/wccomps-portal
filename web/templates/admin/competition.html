@@ -51,24 +51,24 @@
        x-text="formatted"></span>.
                     {% endif %}
                     {{ panel.stage.alternative }}
-                    {% if panel.stage.running %}
-                        <c-button_row class="mt-10">
-                            <c-button variant="warning"
-                                      @click="stopCompetition"
-                                      ::disabled="loading"
-                                      ::data-confirm="stopQuestion">
-                                Stop Competition
-                            </c-button>
-                        </c-button_row>
-                    {% elif panel.action_elsewhere %}
-                        <c-button_row class="mt-10">
-                            <c-link href="{{ panel.action_url }}" variant="primary">
-                                {{ panel.action_label }}
-                            </c-link>
-                        </c-button_row>
-                    {% endif %}
                 </c-detail_row>
             </c-detail_grid>
+            {% if panel.stage.running %}
+                <c-button_row>
+                    <c-button variant="warning"
+                              @click="stopCompetition"
+                              ::disabled="loading"
+                              ::data-confirm="stopQuestion">
+                        Stop Competition
+                    </c-button>
+                </c-button_row>
+            {% elif panel.action_elsewhere %}
+                <c-button_row>
+                    <c-link href="{{ panel.action_url }}" variant="primary">
+                        {{ panel.action_label }}
+                    </c-link>
+                </c-button_row>
+            {% endif %}
         </c-module>
         <c-module id="steps" class="mt-20">
             <c-slot name="title">

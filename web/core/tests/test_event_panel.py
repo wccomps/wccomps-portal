@@ -55,6 +55,12 @@ def _row(panel, label):
     return re.search(rf"<dt>{label}</dt><dd>(.*?)</dd>", _flat(panel), re.S).group(1)
 
 
+def _action(panel):
+    """The href of the link in the Event module's button row, or None if it offers no link."""
+    match = re.search(r'<div[^>]*class="submit-row[^"]*"[^>]*><a href="([^"]*)"', _flat(panel))
+    return match and match.group(1)
+
+
 def _event(**fields):
     season = Season.objects.create(name="WCComps 2027", year=2027, is_active=True)
     return Event.objects.create(
@@ -80,7 +86,7 @@ def test_with_no_event_the_event_section_points_at_the_import(client):
 
     assert _row(panel, "Event") == "No event open"
     assert "No event is open and there is no live data." in _row(panel, "Status")
-    assert f'href="{reverse("school_info_import")}"' in _row(panel, "Next step")
+    assert _action(panel) == reverse("school_info_import")
     assert ">No event</span>" in _row(panel, "Status")
 
 
@@ -104,7 +110,7 @@ def test_an_open_event_names_its_season_schools_and_date_and_points_at_the_packe
     assert _row(panel, "Schools") == "2"
     assert _row(panel, "Date") == "Oct 3, 2027"
     assert ">Not started<" in _row(panel, "Status")
-    assert f'href="{reverse("packets_list")}"' in _row(panel, "Next step")
+    assert _action(panel) == reverse("packets_list")
 
 
 def test_while_running_the_event_section_offers_stop(client):
@@ -135,7 +141,7 @@ def test_unrecorded_scores_point_at_the_scorecards_then_close_out_on_this_page(c
     page = _page(client)
 
     assert "not recorded at any event yet" in _row(_event_section(page), "Status")
-    assert f'href="{reverse("scoring:email_scorecards")}"' in _row(_event_section(page), "Next step")
+    assert _action(_event_section(page)) == reverse("scoring:email_scorecards")
     assert _steps(page)[-1][2] == "On this page"
 
 
@@ -363,7 +369,7 @@ def test_leftovers_open_advanced_where_clear_leftover_data_is(client):
     panel = _flat(_event_section(page))
 
     assert "Clear leftover data under Advanced on the Competition page" in panel
-    assert "<a " not in _row(panel, "Next step")
+    assert "<a " not in _row(panel, "Next step") and _action(panel) is None
     assert "under Advanced below" in _flat(page[page.index('id="leftovers"') :])
     # The status sentence shows once, in the Event section
     assert _flat(page).count("there is live data with no scores") == 1
