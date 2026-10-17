@@ -86,6 +86,8 @@
                     return this.teamNumbers.trim() ? `Send this message to teams ${this.teamNumbers}?` : '';
                 },
 
+                // As with every actionMixin page, a sent message's toast clears after 5 s and a problem stays until
+                // the next try: it says what wasn't sent
                 async sendBroadcast() {
                     if (!this.text.trim() || (this.target === 'custom' && !this.teamNumbers.trim())) {
                         this.message = this.text.trim() ? 'Please enter team numbers' : 'Please enter a message';
