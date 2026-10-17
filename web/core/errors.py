@@ -3,9 +3,12 @@
 Views raise PermissionDenied (signed in without the role), Http404 (missing, or another team's record) and BadRequest
 (input the view refuses); the project's handlers (portal/urls.py) answer each, and a wrong method's 405 and a failed
 CSRF check, the same way: the error page, or {"error": ...} with the same status for a JSON endpoint, a script that
-asks for JSON, or a fetch() (wants_json_error). A signed-out visitor is sent to sign in (sign_in_answer). Not covered:
-a refusal that is a record's state (a ticket someone else holds) redirects back with a message, and the sign-in and
-Discord-link flows show their own pages.
+asks for JSON, or a fetch() (wants_json_error). A signed-out visitor is sent to sign in (sign_in_answer).
+
+Not answered here: a refusal that is a record's state (a ticket someone else holds) redirects back with a message;
+the sign-in and Discord-link flows show their own pages; a form re-rendered with its errors and the IP pool modal's
+field errors answer themselves (test_no_hand_built_errors lists each); and core.middleware refuses a NUL character
+with plain text or JSON before the session is read, since rendering the page would read it.
 """
 
 from collections.abc import Callable

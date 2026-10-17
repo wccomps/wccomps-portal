@@ -146,7 +146,7 @@ def incident_screenshot_download(request: HttpRequest, screenshot_id: int) -> Ht
 
 @require_permission(INCIDENT_STAFF, error_message="Only Gold Team or White Team members can review incident reports")
 def review_incidents(request: HttpRequest) -> HttpResponse:
-    """Review and match incident reports (gold team)."""
+    """Review and match incident reports (White Team, which holds Gold Team and admins)."""
     from core.utils import filter_sort_paginate
 
     filters, filtered = list_filters(request, {"status": "pending", "team": "", "box": "", "search": ""})

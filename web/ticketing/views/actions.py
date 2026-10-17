@@ -75,7 +75,7 @@ def ticket_claim(request: HttpRequest, ticket_number: str) -> HttpResponse:
 @require_POST
 @require_permission(TICKET_STAFF)
 def ticket_unclaim(request: HttpRequest, ticket_number: str) -> HttpResponse:
-    """Unclaim a ticket (ticketing staff only)."""
+    """Put a claimed ticket back in the open queue (its assignee or a ticketing admin: the lifecycle checks)."""
     user = cast(User, request.user)
     authentik_username = user.username
 
@@ -98,7 +98,8 @@ def ticket_unclaim(request: HttpRequest, ticket_number: str) -> HttpResponse:
 @require_POST
 @require_permission(TICKET_STAFF)
 def ticket_reassign(request: HttpRequest, ticket_number: str) -> HttpResponse:
-    """Reassign a ticket to another support member (operations team only)."""
+    """Give a ticket to a staff member: any ticketing staff for an open one, its assignee or a ticketing admin for a
+    ticket someone holds (the lifecycle checks)."""
     user = cast(User, request.user)
     authentik_username = user.username
 
@@ -133,7 +134,7 @@ def ticket_reassign(request: HttpRequest, ticket_number: str) -> HttpResponse:
 @require_POST
 @require_permission(TICKET_STAFF)
 def ticket_resolve(request: HttpRequest, ticket_number: str) -> HttpResponse:
-    """Resolve a ticket (operations team only)."""
+    """Resolve a ticket (its assignee or a ticketing admin: the lifecycle checks)."""
     user = cast(User, request.user)
     authentik_username = user.username
 
@@ -166,7 +167,7 @@ def ticket_resolve(request: HttpRequest, ticket_number: str) -> HttpResponse:
 @require_POST
 @require_permission("ticketing_admin")
 def ticket_reopen(request: HttpRequest, ticket_number: str) -> HttpResponse:
-    """Reopen a resolved ticket (operations team only)."""
+    """Reopen a resolved ticket (ticketing admins)."""
     user = cast(User, request.user)
     authentik_username = user.username
 
