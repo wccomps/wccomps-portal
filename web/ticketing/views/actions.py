@@ -3,13 +3,13 @@ from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.models import User
-from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from core.auth_utils import get_authentik_id, has_permission, team_record_or_404
+from core.auth_utils import require_permission, team_record_or_404
+from ticketing.access import NOT_YOUR_TICKET, TICKET_STAFF, works_ticket
 from ticketing.forms import TicketChangeCategoryForm, TicketReassignForm, TicketReopenForm, TicketResolveForm
 from ticketing.lifecycle import (
     assign_ticket,
@@ -50,14 +50,11 @@ def ticket_cancel(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
 
 @require_POST
+@require_permission(TICKET_STAFF)
 def ticket_claim(request: HttpRequest, ticket_number: str) -> HttpResponse:
     """Claim a ticket (ticketing staff only)."""
     user = cast(User, request.user)
     authentik_username = user.username
-    get_authentik_id(user)
-
-    if not (has_permission(user, "ticketing_support") or has_permission(user, "ticketing_admin")):
-        raise PermissionDenied
 
     ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
@@ -76,21 +73,16 @@ def ticket_claim(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
 
 @require_POST
+@require_permission(TICKET_STAFF)
 def ticket_unclaim(request: HttpRequest, ticket_number: str) -> HttpResponse:
     """Unclaim a ticket (ticketing staff only)."""
     user = cast(User, request.user)
     authentik_username = user.username
 
-    if not (has_permission(user, "ticketing_support") or has_permission(user, "ticketing_admin")):
-        raise PermissionDenied
-
     ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
-    is_admin = has_permission(user, "ticketing_admin")
-    has_claimed = ticket_obj.assigned_to and ticket_obj.assigned_to.username == authentik_username
-
-    if not is_admin and not has_claimed:
-        messages.error(request, "You can only unclaim tickets you have claimed")
+    if not works_ticket(user, ticket_obj):
+        messages.error(request, NOT_YOUR_TICKET)
         return redirect("ticket_detail", ticket_number=ticket_number)
 
     ticket, error = unclaim_ticket(
@@ -108,13 +100,11 @@ def ticket_unclaim(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
 
 @require_POST
+@require_permission(TICKET_STAFF)
 def ticket_reassign(request: HttpRequest, ticket_number: str) -> HttpResponse:
     """Reassign a ticket to another support member (operations team only)."""
     user = cast(User, request.user)
     authentik_username = user.username
-
-    if not (has_permission(user, "ticketing_support") or has_permission(user, "ticketing_admin")):
-        raise PermissionDenied
 
     ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
@@ -144,23 +134,17 @@ def ticket_reassign(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
 
 @require_POST
+@require_permission(TICKET_STAFF)
 def ticket_resolve(request: HttpRequest, ticket_number: str) -> HttpResponse:
     """Resolve a ticket (operations team only)."""
     user = cast(User, request.user)
     authentik_username = user.username
-    get_authentik_id(user)
-
-    is_ticketing_admin = has_permission(user, "ticketing_admin")
-
-    if not (has_permission(user, "ticketing_support") or is_ticketing_admin):
-        raise PermissionDenied
 
     ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
-    # Verify ownership: only the assigned user or admins can resolve
-    assigned_username = ticket_obj.assigned_to.username if ticket_obj.assigned_to else None
-    if not is_ticketing_admin and assigned_username != authentik_username:
-        raise PermissionDenied("Only the assigned support member or administrators can resolve this ticket.")
+    if not works_ticket(user, ticket_obj):
+        messages.error(request, NOT_YOUR_TICKET)
+        return redirect("ticket_detail", ticket_number=ticket_number)
 
     form = TicketResolveForm(request.POST)
     if not form.is_valid():
@@ -187,13 +171,11 @@ def ticket_resolve(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
 
 @require_POST
+@require_permission("ticketing_admin")
 def ticket_reopen(request: HttpRequest, ticket_number: str) -> HttpResponse:
     """Reopen a resolved ticket (operations team only)."""
     user = cast(User, request.user)
     authentik_username = user.username
-
-    if not has_permission(user, "ticketing_admin"):
-        raise PermissionDenied
 
     ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
@@ -219,20 +201,15 @@ def ticket_reopen(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
 
 @require_POST
+@require_permission(TICKET_STAFF)
 def ticket_change_category(request: HttpRequest, ticket_number: str) -> HttpResponse:
     user = cast(User, request.user)
     authentik_username = user.username
 
-    if not has_permission(user, "ticketing_support"):
-        raise PermissionDenied
-
     ticket = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
-    is_admin = has_permission(user, "ticketing_admin")
-    has_claimed = ticket.assigned_to and ticket.assigned_to.username == authentik_username
-
-    if not is_admin and not has_claimed:
-        messages.error(request, "You must claim the ticket first")
+    if not works_ticket(user, ticket):
+        messages.error(request, NOT_YOUR_TICKET)
         return redirect("ticket_detail", ticket_number=ticket_number)
 
     form = TicketChangeCategoryForm(request.POST)

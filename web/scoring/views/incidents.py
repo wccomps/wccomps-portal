@@ -19,8 +19,8 @@ from ..models import IncidentReport, IncidentScreenshot
 from ..quotient_sync import get_box_metadata
 from ..screenshots import ScreenshotError, read_screenshots
 
-# Who sees every team's incident reports
-STAFF = ("gold_team", "white_team")
+# Who sees and reviews every team's incident reports: White Team (the permission's groups hold Gold Team and admins)
+INCIDENT_STAFF = "white_team"
 
 
 @transaction.atomic
@@ -28,7 +28,7 @@ def submit_incident_report(request: HttpRequest) -> HttpResponse:
     """Submit incident report (blue team or admin)."""
 
     user = cast(User, request.user)
-    is_admin = has_permission(user, "gold_team") or has_permission(user, "white_team")
+    is_admin = has_permission(user, INCIDENT_STAFF)
     team: Team | None = None
 
     if not is_admin:
@@ -82,16 +82,13 @@ def incident_list(request: HttpRequest) -> HttpResponse:
     """List all incidents for the user's team (blue team view)."""
     user = cast(User, request.user)
 
-    if has_permission(user, "gold_team") or has_permission(user, "white_team"):
-        incidents = IncidentReport.objects.all().select_related("team", "submitted_by").order_by("-created_at")
+    if has_permission(user, INCIDENT_STAFF):
+        incidents = IncidentReport.objects.all()
+    elif user_team := get_user_team(user):
+        incidents = IncidentReport.objects.filter(team=user_team)
     else:
-        user_team = get_user_team(user)
-        if not user_team:
-            raise PermissionDenied
-
-        incidents = (
-            IncidentReport.objects.filter(team=user_team).select_related("team", "submitted_by").order_by("-created_at")
-        )
+        raise PermissionDenied
+    incidents = incidents.select_related("team", "submitted_by").order_by("-created_at")
 
     context = {
         "incidents": incidents,
@@ -101,7 +98,7 @@ def incident_list(request: HttpRequest) -> HttpResponse:
 
 def view_incident_report(request: HttpRequest, incident_id: int) -> HttpResponse:
     user = cast(User, request.user)
-    incident = team_record_or_404(IncidentReport.objects.all(), user, staff=STAFF, id=incident_id)
+    incident = team_record_or_404(IncidentReport.objects.all(), user, staff=(INCIDENT_STAFF,), id=incident_id)
 
     can_delete = incident.submitted_by == user and not incident.is_approved
 
@@ -117,7 +114,7 @@ def view_incident_report(request: HttpRequest, incident_id: int) -> HttpResponse
 def delete_incident_report(request: HttpRequest, incident_id: int) -> HttpResponse:
     """Delete an incident report (owner only, before review)."""
     user = cast(User, request.user)
-    incident = team_record_or_404(IncidentReport.objects.all(), user, staff=STAFF, id=incident_id)
+    incident = team_record_or_404(IncidentReport.objects.all(), user, staff=(INCIDENT_STAFF,), id=incident_id)
 
     if incident.submitted_by != user:
         messages.error(request, "You can only delete your own incident reports")
@@ -137,7 +134,7 @@ def incident_screenshot_download(request: HttpRequest, screenshot_id: int) -> Ht
     screenshot = team_record_or_404(
         IncidentScreenshot.objects.select_related("incident"),
         cast(User, request.user),
-        staff=STAFF,
+        staff=(INCIDENT_STAFF,),
         team_field="incident__team",
         id=screenshot_id,
     )
@@ -147,9 +144,7 @@ def incident_screenshot_download(request: HttpRequest, screenshot_id: int) -> Ht
     return file_response(bytes(screenshot.file_data), screenshot.filename, inline=True)
 
 
-@require_permission(
-    "gold_team", "white_team", error_message="Only Gold Team or White Team members can review incident reports"
-)
+@require_permission(INCIDENT_STAFF, error_message="Only Gold Team or White Team members can review incident reports")
 def review_incidents(request: HttpRequest) -> HttpResponse:
     """Review and match incident reports (gold team)."""
     from core.utils import filter_sort_paginate
@@ -204,9 +199,7 @@ def review_incidents(request: HttpRequest) -> HttpResponse:
     return render(request, "scoring/review_incidents.html", context)
 
 
-@require_permission(
-    "gold_team", "white_team", error_message="Only Gold Team or White Team members can approve incidents"
-)
+@require_permission(INCIDENT_STAFF, error_message="Only Gold Team or White Team members can approve incidents")
 @transaction.atomic
 @require_http_methods(["POST"])
 def bulk_approve_incidents(request: HttpRequest) -> HttpResponse:
@@ -223,9 +216,7 @@ def bulk_approve_incidents(request: HttpRequest) -> HttpResponse:
     )
 
 
-@require_permission(
-    "gold_team", "white_team", error_message="Only Gold Team or White Team members can match incident reports"
-)
+@require_permission(INCIDENT_STAFF, error_message="Only Gold Team or White Team members can match incident reports")
 @transaction.atomic
 def match_incident(request: HttpRequest, incident_id: int) -> HttpResponse:
     """Match incident to red team finding (gold team)."""

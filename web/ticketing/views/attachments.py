@@ -10,13 +10,12 @@ from django.views.decorators.http import require_POST
 
 from core.auth_utils import team_record_or_404
 from core.stored_files import clean_name, file_response, stored_type
+from ticketing.access import TICKET_STAFF
 from ticketing.models import Ticket, TicketAttachment
 
 logger = logging.getLogger(__name__)
 
 MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10MB
-# Who sees every team's attachments
-STAFF = ("ticketing_support", "ticketing_admin")
 
 
 def _save_attachment(ticket: Ticket, uploaded_file: UploadedFile[bytes] | None, uploaded_by: str) -> None:
@@ -50,7 +49,9 @@ def _save_attachment(ticket: Ticket, uploaded_file: UploadedFile[bytes] | None, 
 def ticket_attachment_upload(request: HttpRequest, ticket_number: str) -> HttpResponse:
     user = cast(User, request.user)
     authentik_username = user.username
-    ticket = team_record_or_404(Ticket.objects.select_related("team"), user, staff=STAFF, ticket_number=ticket_number)
+    ticket = team_record_or_404(
+        Ticket.objects.select_related("team"), user, staff=(TICKET_STAFF,), ticket_number=ticket_number
+    )
     _save_attachment(ticket, request.FILES.get("attachment"), authentik_username)
 
     logger.info(f"Attachment uploaded to ticket {ticket.ticket_number} by {authentik_username}")
@@ -66,7 +67,7 @@ def ticket_attachment_download(
     attachment = team_record_or_404(
         TicketAttachment.objects.select_related("ticket", "ticket__team"),
         cast(User, request.user),
-        staff=STAFF,
+        staff=(TICKET_STAFF,),
         team_field="ticket__team",
         id=attachment_id,
         ticket__ticket_number=ticket_number,

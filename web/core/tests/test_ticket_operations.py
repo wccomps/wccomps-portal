@@ -350,7 +350,7 @@ class TestOpsTicketResolve:
             reverse("ticket_resolve", args=[open_ticket.ticket_number]),
             {"resolution_notes": "Trying to resolve"},
         )
-        assert response.status_code == 403
+        assert response.status_code == 302  # back to the ticket: it is not theirs
 
 
 class TestOpsTicketReopen:

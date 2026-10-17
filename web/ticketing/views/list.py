@@ -17,6 +17,7 @@ from core.errors import json_endpoint
 from core.tickets_config import get_all_categories, get_category_config
 from core.utils import by_team, chosen_team, list_filters, optional_int, team_numbers
 from team.models import Team
+from ticketing.access import TICKET_STAFF, is_ticket_staff
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -44,11 +45,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)
     authentik_username = user.username
 
-    is_ops = (
-        has_permission(user, "ticketing_support")
-        or has_permission(user, "ticketing_admin")
-        or has_permission(user, "admin")
-    )
+    is_ops = is_ticket_staff(user)
     team = get_user_team(user)
 
     if not is_ops and not team:
@@ -174,7 +171,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
 
 
 @json_endpoint
-@require_permission("admin", "ticketing_support", "ticketing_admin")
+@require_permission(TICKET_STAFF)
 def ticket_notifications(request: HttpRequest) -> JsonResponse:
     """JSON endpoint for ticket notification polling (ops staff only)."""
     since_id = optional_int(request.GET.get("since_id", "")) or 0
