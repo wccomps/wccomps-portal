@@ -512,6 +512,17 @@ def test_no_one_signs_in_with_a_password(admin_user: User) -> None:
     assert "_auth_user_id" not in response.wsgi_request.session
 
 
+def test_the_admin_sign_in_sends_a_visitor_to_the_portal_sign_in() -> None:
+    """The Django admin's login form took a password no one has: signing in is Authentik's, with the way back kept."""
+    from django.conf import settings
+
+    response = Client().get(reverse("admin:login"), {"next": "/admin/core/botstate/"})
+    assert response.status_code == 302
+    assert response.url == f"{settings.LOGIN_URL}?next=/admin/core/botstate/"
+    assert Client().post(reverse("admin:login"), {"username": "a", "password": "b"}).status_code == 302
+    assert Client().get(reverse("admin:index")).status_code == 302
+
+
 def test_a_permission_row_grants_nothing(gold_team_user: User) -> None:
     """A Django Permission row (given in the Django admin) granted that permission outside the admin permission."""
     from django.contrib.auth.models import Permission

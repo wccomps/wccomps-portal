@@ -4,8 +4,11 @@ from typing import TYPE_CHECKING, cast
 from django.contrib import admin
 from django.contrib.admin.exceptions import DisallowedModelAdminToField
 from django.contrib.admin.options import TO_FIELD_VAR
+from django.contrib.auth import REDIRECT_FIELD_NAME
+from django.contrib.auth.views import redirect_to_login
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, HttpResponseForbidden
+from django.urls import reverse
 
 if TYPE_CHECKING:
     from django.contrib.admin.sites import _ViewType
@@ -38,6 +41,9 @@ class AuthentikAdminSite(admin.AdminSite):
         return None
 
     def login(self, request: HttpRequest, extra_context: dict[str, object] | None = None) -> HttpResponse:
+        """Signing in is Authentik's: a visitor goes to the portal's sign-in, keeping where the admin sent them."""
+        if not request.user.is_authenticated:
+            return redirect_to_login(request.GET.get(REDIRECT_FIELD_NAME) or reverse("admin:index"))
         return self._refused(request) or super().login(request, extra_context)
 
     # The stubs bound _ViewType by Callable[..., HttpResponseBase], whose ... mypy counts as explicit Any
