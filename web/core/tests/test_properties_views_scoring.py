@@ -128,7 +128,7 @@ CASES = [
         "scoring:ip_pool_create",
         RED,
         post=lambda w: form_fields(RedTeamIPPoolForm(user=w.users["red_team"])),
-        json_sometimes="answers the finding form's pool modal (a fetch) with JSON, and its own form page otherwise",
+        json_sometimes="answers the pool modal, which asks for JSON, with JSON, and its own form page otherwise",
     ),
     ViewCase("scoring:ip_pool_edit", RED, post=lambda w: form_fields(RedTeamIPPoolForm(user=w.users["red_team"]))),
     ViewCase("scoring:ip_pool_delete", RED),

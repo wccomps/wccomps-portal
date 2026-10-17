@@ -635,6 +635,8 @@ def requests(
         headers["HX-Request"] = "true"
     if draw(st.booleans(), label="xhr"):
         headers["X-Requested-With"] = "XMLHttpRequest"
+    if draw(st.booleans(), label="asks for json"):
+        headers["Accept"] = "application/json"
     if draw(st.booleans(), label="referer"):
         headers["Referer"] = draw(st.one_of(st.sampled_from(OFF_SITE), st.just("http://testserver/tickets/")))
     tz = draw(st.one_of(st.none(), st.sampled_from(TZ_COOKIES)), label="tz cookie")

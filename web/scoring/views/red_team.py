@@ -330,7 +330,7 @@ def ip_pool_create(request: HttpRequest) -> HttpResponse:
             pool.created_by = user
             pool.save()
             messages.success(request, f"IP pool '{pool.name}' created with {pool.ip_count} IPs")
-            # The finding form's pool modal (a fetch) gets JSON
+            # The finding form's pool modal asks for JSON
             if wants_json_error(request):
                 return JsonResponse(
                     {

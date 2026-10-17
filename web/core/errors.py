@@ -31,11 +31,14 @@ def is_json_endpoint(view: object) -> bool:
 
 
 def wants_json_error(request: HttpRequest) -> bool:
-    """Whether an error answers JSON: a JSON endpoint's always; another view's for a background fetch(), which can
-    show it. A navigation gets a page, and htmx (which doesn't swap in an error answer; base_site.html alerts) gets
-    the page too. Before the URL resolves (a middleware's answer) only the headers decide."""
+    """Whether an answer is JSON: a JSON endpoint's always; another view's when the page's script asks for JSON
+    (Accept: application/json, whatever the browser), or for a background fetch(), which can show it. A navigation
+    gets a page, and htmx (which doesn't swap in an error answer; base_site.html alerts) gets the page too. Before the
+    URL resolves (a middleware's answer) only the headers decide."""
     match = request.resolver_match
     if match is not None and is_json_endpoint(match.func):
+        return True
+    if request.headers.get("Accept", "").startswith("application/json"):
         return True
     return (
         request.headers.get("HX-Request") != "true" and request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate"

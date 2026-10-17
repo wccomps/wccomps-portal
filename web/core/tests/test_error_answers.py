@@ -221,3 +221,25 @@ def test_a_server_error_answers_a_fetch_with_json() -> None:
     assert response.status_code == 500
     assert response.json()["error"]
     assert "boom" not in response.content.decode()
+
+
+# A page's script asking for JSON ----------------------------------------------------------------------------------
+
+
+def test_the_pool_modal_gets_json_by_asking_for_it_whatever_the_browser_sends() -> None:
+    """The finding form's pool modal asks for JSON (Accept); an older browser that sends no Sec-Fetch-Mode still
+    gets it, so a saved pool never reads as a failure (and a retry never duplicates it)."""
+    from scoring.models import RedTeamIPPool
+
+    client = signed_in("red_team")
+    url = reverse("scoring:ip_pool_create")
+    asks = {"Accept": "application/json"}
+    saved = client.post(url, {"name": "Pool A", "ip_addresses": "10.0.0.1"}, headers=asks)
+    assert saved.status_code == 200
+    assert saved.json()["success"] is True
+    refused = client.post(url, {"name": "", "ip_addresses": ""}, headers=asks)
+    assert refused.status_code == 400
+    assert refused.json()["error"]
+    assert RedTeamIPPool.objects.count() == 1
+    # A navigation (the pool's own form page) still gets the page
+    assert client.post(url, {"name": "", "ip_addresses": ""})["Content-Type"].startswith("text/html")
