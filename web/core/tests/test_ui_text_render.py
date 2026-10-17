@@ -59,7 +59,7 @@ def assert_readable(html: str, where: str) -> None:
 # "<page>:<problem>" -> why the page reads that way on purpose
 UNREADABLE_EXCEPTIONS = {
     "/admin/scoring/attacktype/:parentheses": "the attack type admin's Description column cuts a long description at "
-    "50 characters, closing parenthesis and all (the seeded attack types)",
+    "50 characters, closing parenthesis and all (the rows fixture adds one)",
 }
 
 
@@ -76,11 +76,15 @@ def read_every(client: Client, pages: Iterable[str]) -> dict[str, str]:
 def rows(admin_user: User) -> tuple[dict, dict]:
     """The seeded rows, and the same with sparse rows in place of those the registry's URLs name."""
     from orange_team.models import OrangeAssignment, OrangeCheck, OrangeFollowUp
-    from scoring.models import IncidentReport, RedTeamScore
+    from scoring.models import AttackType, IncidentReport, RedTeamScore
 
     from team.models import Team
 
     data = seed_table_data(admin_user)
+    # Its own row, not the migrations' seeds: a transactional test's flush may have emptied the table (web/conftest.py)
+    AttackType.objects.get_or_create(
+        name="Long description", defaults={"description": "A description long enough to be cut (past fifty characters)"}
+    )
     team = Team.objects.create(team_number=7, team_name="Team 07")  # no school info
     check = OrangeCheck.objects.create(title="Unscheduled", description="")
     assignment = OrangeAssignment.objects.create(orange_check=check, user=admin_user, team=team, status="in_progress")
