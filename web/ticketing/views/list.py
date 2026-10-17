@@ -4,17 +4,20 @@ from typing import cast
 from urllib.parse import urlsplit
 
 from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Max, Q
-from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from core.auth_utils import get_user_team, has_permission
+from core.auth_utils import get_user_team, has_permission, require_permission
+from core.errors import json_endpoint
 from core.tickets_config import get_all_categories, get_category_config
 from core.utils import by_team, chosen_team, list_filters, optional_int, team_numbers
 from team.models import Team
+from ticketing.access import TICKET_STAFF, ticket_actions
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -40,17 +43,12 @@ def back_to_list(request: HttpRequest, *also: str) -> HttpResponse:
 def ticket_list(request: HttpRequest) -> HttpResponse:
     """Unified ticket list view for both team members and ops staff."""
     user = cast(User, request.user)
-    authentik_username = user.username
 
-    is_ops = (
-        has_permission(user, "ticketing_support")
-        or has_permission(user, "ticketing_admin")
-        or has_permission(user, "admin")
-    )
+    is_ops = has_permission(user, TICKET_STAFF)
     team = get_user_team(user)
 
     if not is_ops and not team:
-        return HttpResponseForbidden("You do not have permission to view tickets.")
+        raise PermissionDenied("You do not have permission to view tickets.")
 
     from core.utils import filter_sort_paginate
 
@@ -69,7 +67,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
 
     if is_ops:
         query = (
-            Ticket.objects.select_related("team")
+            Ticket.objects.select_related("team", "assigned_to")
             .exclude(ticket_number="")
             .annotate(
                 comment_count=Count("comments", distinct=True),
@@ -79,7 +77,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         )
     else:
         query = (
-            Ticket.objects.select_related("team")
+            Ticket.objects.select_related("team", "assigned_to")
             .filter(team=team)
             .annotate(
                 comment_count=Count("comments", distinct=True),
@@ -138,6 +136,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
                 "category_name": cat_info.get("display_name", "Unknown"),
                 "is_stale": is_stale,
                 "status_display": ticket.status.upper().replace("_", " "),
+                "actions": ticket_actions(user, ticket),
             }
         )
     page_obj.object_list = enriched  # type: ignore[assignment]  # templates iterate enriched dicts, keep pagination
@@ -145,13 +144,9 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     assignees = User.objects.filter(assigned_tickets__isnull=False).distinct().order_by("username") if is_ops else []
     teams = team_numbers(Team.objects.filter(tickets__isnull=False), team_chosen) if is_ops else []
 
-    is_ticketing_admin = has_permission(user, "ticketing_admin")
-
     context = {
         "is_ops": is_ops,
-        "is_ticketing_admin": is_ticketing_admin,
         "team": team,
-        "authentik_username": authentik_username,
         "page_obj": page_obj,
         "selected_statuses": selected_statuses,
         "status_choices": Ticket.STATUS_CHOICES,
@@ -171,16 +166,10 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     return render(request, "ticket_list.html", context)
 
 
+@json_endpoint
+@require_permission(TICKET_STAFF)
 def ticket_notifications(request: HttpRequest) -> JsonResponse:
     """JSON endpoint for ticket notification polling (ops staff only)."""
-    user = cast(User, request.user)
-    if not (
-        has_permission(user, "admin")
-        or has_permission(user, "ticketing_support")
-        or has_permission(user, "ticketing_admin")
-    ):
-        return JsonResponse({"error": "forbidden"}, status=403)
-
     since_id = optional_int(request.GET.get("since_id", "")) or 0
 
     open_count = Ticket.objects.filter(status="open").count()

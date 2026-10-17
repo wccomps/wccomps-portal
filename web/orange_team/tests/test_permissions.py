@@ -23,7 +23,7 @@ class TestDashboardPermissions:
         client = Client()
         client.force_login(user)
         response = client.get(reverse("orange_team:dashboard"))
-        assert response.status_code == 302, f"{user_fixture} should be denied"
+        assert response.status_code == 403, f"{user_fixture} should be denied"
 
     @pytest.mark.parametrize("user_fixture", ["orange_team_user", "gold_team_user", "admin_user"])
     def test_authorized_roles_allowed(self, user_fixture, request):
@@ -50,7 +50,7 @@ class TestCheckManagementPermissions:
         client = Client()
         client.force_login(user)
         response = client.get(reverse("orange_team:check_list"))
-        assert response.status_code == 302, f"{user_fixture} should be denied"
+        assert response.status_code == 403, f"{user_fixture} should be denied"
 
     @pytest.mark.parametrize("user_fixture", ["gold_team_user", "admin_user"])
     def test_authorized_roles_allowed(self, user_fixture, request):
@@ -77,7 +77,7 @@ class TestOrangeLeadAccess:
         client = Client()
         client.force_login(orange_team_user)
         for path in self.LEAD_PATHS:
-            assert client.get(path).status_code == 302, path
+            assert client.get(path).status_code == 403, path
 
     def test_orange_lead_reaches_volunteer_dashboard(self, create_user_with_groups):
         user = create_user_with_groups("orangelead", ["WCComps_OrangeTeam_Lead"])

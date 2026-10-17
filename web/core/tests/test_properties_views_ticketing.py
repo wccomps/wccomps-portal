@@ -76,7 +76,7 @@ CASES = [
         idempotent=(Ticket,),
         idempotent_as="ticketing_admin",
     ),
-    ViewCase("ticket_notifications", STAFF, json=True, query=lambda w: {"since_id": hostile_text()}),
+    ViewCase("ticket_notifications", STAFF, query=lambda w: {"since_id": hostile_text()}),
     ViewCase("ticket_detail", TICKET_USERS, query=_filters),
     ViewCase(
         "ticket_detail_dynamic",

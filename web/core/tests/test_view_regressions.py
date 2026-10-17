@@ -417,15 +417,17 @@ def test_an_incident_report_refuses_a_role_it_doesnt_let_in_with_a_403(red_team_
 
 @pytest.mark.parametrize("page", ["index", "login"])
 def test_the_admin_site_refuses_a_signed_in_non_admin_itself(gold_team_user: User, page: str) -> None:
-    """The admin site answers a signed-in visitor it refuses with a 403, not its login form (signing in is
-    Authentik's), so the sign-in gate needs no admin rule of its own."""
+    """The admin site refuses a signed-in visitor it doesn't let in with the 403 (core.errors), not its login form
+    (signing in is Authentik's), so the sign-in gate needs no admin rule of its own."""
     from django.contrib import admin
+    from django.core.exceptions import PermissionDenied
     from django.test import RequestFactory
 
     request = RequestFactory().get(reverse(f"admin:{page}"))
     request.user = gold_team_user
     view = admin.site.login if page == "login" else admin.site.admin_view(admin.site.index)
-    assert view(request).status_code == 403
+    with pytest.raises(PermissionDenied):
+        view(request)
 
 
 def _registered_models() -> list[type[Model]]:
@@ -520,6 +522,16 @@ def test_the_admin_sign_in_sends_a_visitor_to_the_portal_sign_in() -> None:
     assert response.url == f"{settings.LOGIN_URL}?next=/admin/core/botstate/"
     assert Client().post(reverse("admin:login"), {"username": "a", "password": "b"}).status_code == 302
     assert Client().get(reverse("admin:index")).status_code == 302
+
+
+def test_the_admin_sign_in_answers_a_signed_in_non_admin_with_the_403_page(gold_team_user: User) -> None:
+    """Signed out, the admin's sign-in goes to the portal's; signed in without the admin role, it is the 403 page
+    (core.errors), never the admin's own login form."""
+    client = Client()
+    client.force_login(gold_team_user)
+    response = client.get(reverse("admin:login"))
+    assert response.status_code == 403
+    assert "error.html" in [t.name for t in response.templates]
 
 
 def test_a_permission_row_grants_nothing(gold_team_user: User) -> None:

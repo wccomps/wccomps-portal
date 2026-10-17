@@ -124,7 +124,7 @@ def _page(status: int, text: str) -> Answer:
     ],
 )
 def test_an_answer_in_refusal_words_isnt_taken_for_getting_in(answer: Answer) -> None:
-    """every_allowed_role_gets_in counts these as got in by their shape (no 403, no redirect home, a POST), so
+    """every_allowed_role_gets_in counts these as got in by their shape (no 403 or 404, a POST), so
     their words must keep the visitor out, or a row too wide for its view passes."""
     assert not refuses_visitor(answer, "POST")
     assert unknown_refusal(answer)
@@ -147,3 +147,53 @@ def test_a_page_that_only_mentions_permissions_isnt_a_refusal(text: str) -> None
 def test_a_gets_error_redirect_refuses_the_visitor_and_a_posts_doesnt() -> None:
     assert refuses_visitor(_redirect(["Nothing to send"]), "GET")
     assert not refuses_visitor(_redirect(["Nothing to send"]), "POST")
+
+
+def _refused_home() -> Answer:
+    """The redirect home with an error that require_permission once answered a refused role."""
+    response = HttpResponse(status=302)
+    response["Location"] = "/"
+    return Answer(response, b"", [], ["You don't have permission to access this page."])
+
+
+def test_a_refused_signed_in_role_gets_only_the_403() -> None:
+    case = ViewCase("ticket_list", frozenset({"admin"}))
+    drawn = Drawn("red_team", "GET", "/tickets/", {}, {}, None, {}, None)
+    for answer in (_refused_home(), _answer(404)):
+        with pytest.raises(AssertionError, match="a role the page refuses got"):
+            check_answer(case, drawn, answer)
+    check_answer(case, drawn, _answer(403))
+    check_answer(case, drawn, _answer(405))  # where the method check comes before the role check
+
+
+def test_a_refused_signed_out_visitor_is_only_sent_to_sign_in() -> None:
+    case = ViewCase("ticket_list", frozenset({"admin"}))
+    drawn = Drawn("anonymous", "GET", "/tickets/", {}, {}, None, {}, None)
+    with pytest.raises(AssertionError, match="a role the page refuses got 403"):
+        check_answer(case, drawn, _answer(403))
+    to_sign_in = HttpResponse(status=302)
+    to_sign_in["Location"] = "/auth/login/?next=%2Ftickets%2F"
+    check_answer(case, drawn, Answer(to_sign_in, b"", [], []))
+
+
+@pytest.mark.parametrize("status", [400, 403, 404, 405])
+def test_an_error_is_json_exactly_when_the_request_wants_json(status: int) -> None:
+    from django.http import JsonResponse
+
+    case = ViewCase("ticket_list", frozenset({"admin"}))
+    drawn = Drawn("admin", "GET", "/tickets/", {}, {}, None, {}, None)
+    as_json = JsonResponse({"error": "No"}, status=status)
+    page = HttpResponse("<p>No</p>", status=status)
+    with pytest.raises(AssertionError, match="not the JSON error the request wants"):
+        check_answer(case, drawn, Answer(page, page.content, [], [], wants_json=True))
+    with pytest.raises(AssertionError, match="to a request that wants the page"):
+        check_answer(case, drawn, Answer(as_json, as_json.content, [], [], wants_json=False))
+    check_answer(case, drawn, Answer(as_json, as_json.content, [], [], wants_json=True))
+    check_answer(case, drawn, Answer(page, page.content, [], [], wants_json=False))
+
+
+def test_a_json_rows_endpoint_comes_from_its_view() -> None:
+    """Whether a row is a JSON endpoint is its view's core.errors.json_endpoint mark, not a flag on the row."""
+    assert ViewCase("admin_team_action", frozenset()).json
+    assert ViewCase("scoring:api_scores", frozenset()).json
+    assert not ViewCase("ticket_list", frozenset()).json

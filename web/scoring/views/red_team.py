@@ -8,6 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
+from core.errors import wants_json_error
 from core.stored_files import file_response
 from core.utils import optional_int
 from team.models import Team
@@ -329,8 +330,8 @@ def ip_pool_create(request: HttpRequest) -> HttpResponse:
             pool.created_by = user
             pool.save()
             messages.success(request, f"IP pool '{pool.name}' created with {pool.ip_count} IPs")
-            # If this was an AJAX request (from modal), return JSON
-            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            # The finding form's pool modal asks for JSON
+            if wants_json_error(request):
                 return JsonResponse(
                     {
                         "success": True,
@@ -343,8 +344,10 @@ def ip_pool_create(request: HttpRequest) -> HttpResponse:
                 )
             return redirect("scoring:ip_pool_list")
         else:
-            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-                return JsonResponse({"success": False, "errors": form.errors}, status=400)
+            if wants_json_error(request):
+                return JsonResponse(
+                    {"success": False, "error": "The pool wasn't created.", "errors": form.errors}, status=400
+                )
     else:
         form = RedTeamIPPoolForm(user=user)
 

@@ -198,45 +198,32 @@ class TestRequirePermissionDecorator:
         assert response.status_code == 200
         assert response.content == b"success"
 
-    def test_decorator_redirects_unpermitted_user(self, blue_team_user):
-        """Decorator should redirect user without required permission."""
+    def test_decorator_refuses_unpermitted_user_with_permission_denied(self, blue_team_user):
+        """A signed-in user without the permission gets the 403 (core.errors answers PermissionDenied), saying the
+        decorator's message."""
+        from django.core.exceptions import PermissionDenied
 
-        @require_permission("ticketing_admin")
+        @require_permission("ticketing_admin", error_message="Only ticketing admins")
         def protected_view(request):
             return HttpResponse("success")
 
-        factory = RequestFactory()
-        request = factory.get("/test/")
+        request = RequestFactory().get("/test/")
         request.user = blue_team_user
-        request.session = {}
+        with pytest.raises(PermissionDenied, match="Only ticketing admins"):
+            protected_view(request)
 
-        # Mock the messages framework
-        from unittest.mock import MagicMock
-
-        request._messages = MagicMock()
-
-        response = protected_view(request)
-        assert response.status_code == 302
-        assert response.url == "/"
-
-    def test_decorator_redirects_anonymous_user(self):
-        """Decorator should redirect anonymous user."""
+    def test_decorator_sends_anonymous_user_to_sign_in(self):
+        """A signed-out visitor is sent to sign in, coming back to the page after."""
 
         @require_permission("ticketing_admin")
         def protected_view(request):
             return HttpResponse("success")
 
-        factory = RequestFactory()
-        request = factory.get("/test/")
+        request = RequestFactory().get("/test/")
         request.user = AnonymousUser()
-        request.session = {}
-
-        from unittest.mock import MagicMock
-
-        request._messages = MagicMock()
-
         response = protected_view(request)
         assert response.status_code == 302
+        assert response.url == "/auth/login/?next=%2Ftest%2F"
 
 
 class TestCheckGroupsForPermissionProperties:

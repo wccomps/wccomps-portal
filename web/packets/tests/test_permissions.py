@@ -29,7 +29,7 @@ class TestTeamPacketPermissions:
         client = Client()
         client.force_login(user)
         response = client.get(reverse("team_packet"))
-        assert response.status_code == 302, f"{user_fixture} should be denied"
+        assert response.status_code == 403, f"{user_fixture} should be denied"
 
     @pytest.mark.parametrize("user_fixture", ["blue_team_user", "gold_team_user", "admin_user"])
     def test_authorized_roles_allowed(self, user_fixture, request, team_1):
@@ -56,7 +56,7 @@ class TestPacketsManagementPermissions:
         client = Client()
         client.force_login(user)
         response = client.get(reverse("packets_list"))
-        assert response.status_code == 302, f"{user_fixture} should be denied"
+        assert response.status_code == 403, f"{user_fixture} should be denied"
 
     @pytest.mark.parametrize("user_fixture", ["gold_team_user", "admin_user"])
     def test_authorized_roles_allowed(self, user_fixture, request):
@@ -117,4 +117,4 @@ class TestPacketDownload:
         assert self._get(gold_team_user, packet).status_code == 200
 
     def test_other_roles_denied(self, red_team_user, packet):
-        assert self._get(red_team_user, packet).status_code == 302
+        assert self._get(red_team_user, packet).status_code == 403

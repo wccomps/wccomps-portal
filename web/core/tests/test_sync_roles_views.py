@@ -53,5 +53,5 @@ def test_blue_team_cannot_trigger_sync(blue_team_user):
 
     response = client.post(reverse("admin_sync_roles_action"), {"dry_run": "false"})
 
-    assert response.status_code in (302, 403)
+    assert response.status_code == 403
     assert not DiscordTask.objects.filter(task_type="sync_roles").exists()

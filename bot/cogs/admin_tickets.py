@@ -15,6 +15,7 @@ from bot.utils import (
     get_team_or_respond,
     log_to_ops_channel,
 )
+from ticketing.access import TICKET_STAFF
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 
 logger = logging.getLogger(__name__)
@@ -129,7 +130,7 @@ class AdminTicketsCog(commands.Cog):
             app_commands.Choice(name="All", value="all"),
         ]
     )
-    @app_commands.check(permission_check("ticketing_support"))
+    @app_commands.check(permission_check(TICKET_STAFF))
     async def admin_ticket_list(
         self,
         interaction: discord.Interaction,
@@ -191,7 +192,7 @@ class AdminTicketsCog(commands.Cog):
         notes="Resolution notes",
         points="Point value (required for variable categories; overrides the default otherwise)",
     )
-    @app_commands.check(permission_check("ticketing_support"))
+    @app_commands.check(permission_check(TICKET_STAFF))
     async def admin_ticket_resolve(
         self,
         interaction: discord.Interaction,
@@ -290,7 +291,10 @@ class AdminTicketsCog(commands.Cog):
         old_category_id = ticket.category_id
         new_category_id = int(new_category)
         changed, error = await achange_ticket_category_atomic(
-            ticket_id=ticket.id, new_category_id=new_category_id, actor_username=str(interaction.user)
+            ticket_id=ticket.id,
+            new_category_id=new_category_id,
+            actor_username=str(interaction.user),
+            discord_id=interaction.user.id,
         )
         if error or changed is None:
             await interaction.response.send_message(error or "Failed to change category.", ephemeral=True)
@@ -351,11 +355,14 @@ class AdminTicketsCog(commands.Cog):
                 actor_username=str(interaction.user),
                 discord_id=volunteer.id,
                 discord_username=str(volunteer),
+                actor_discord_id=interaction.user.id,
             )
             failure = "Failed to assign ticket"
             new_assignee = str(volunteer)
         else:
-            changed, error = await aunclaim_ticket(ticket_id=ticket.id, actor_username=str(interaction.user))
+            changed, error = await aunclaim_ticket(
+                ticket_id=ticket.id, actor_username=str(interaction.user), discord_id=interaction.user.id
+            )
             failure = "Failed to unassign ticket"
             new_assignee = "Unassigned"
 

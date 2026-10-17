@@ -6,6 +6,7 @@ from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.models import User
+from django.core.exceptions import BadRequest, PermissionDenied
 from django.core.files.uploadedfile import UploadedFile
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -49,6 +50,7 @@ from .auth_utils import (
     require_permission,
     team_for_groups,
 )
+from .errors import json_endpoint
 from .forms import LinkConfirmForm, SchoolInfoEditForm
 
 logger = logging.getLogger(__name__)
@@ -64,22 +66,14 @@ def home(request: HttpRequest) -> HttpResponse:
         return redirect(url)
 
     # Redirecting to a page the user can't open would bounce back here forever.
-    return render(
-        request,
-        "error.html",
-        {
-            "error": "No access",
-            "message": "Your account has no portal role yet. Ask an organizer to add you to the right group.",
-        },
-        status=403,
-    )
+    raise PermissionDenied("Your account has no portal role yet. Ask an organizer to add you to the right group.")
 
 
 def link_initiate(request: HttpRequest) -> HttpResponse:
     token = request.GET.get("token")
 
     if not token:
-        return HttpResponse("Missing token parameter", status=400)
+        raise BadRequest("Missing token parameter")
 
     try:
         link_token = LinkToken.objects.get(token=token, used=False)
@@ -304,18 +298,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
     user = cast(User, request.user)
     authentik_username = user.username
 
-    try:
-        team = Team.objects.get(team_number=team_number, is_active=True)
-    except Team.DoesNotExist:
-        return render(
-            request,
-            "error.html",
-            {
-                "error": "Team not found",
-                "message": f"Team {team_number} does not exist.",
-            },
-            status=404,
-        )
+    team = get_object_or_404(Team, team_number=team_number, is_active=True)
 
     try:
         school_info = team.school_info
@@ -540,6 +523,7 @@ def livez(request: HttpRequest) -> HttpResponse:
     return HttpResponse("ok", content_type="text/plain")
 
 
+@json_endpoint
 def health_check(request: HttpRequest) -> HttpResponse:
     """Health check endpoint for monitoring - tests database connectivity and model queries."""
     from django.apps import apps

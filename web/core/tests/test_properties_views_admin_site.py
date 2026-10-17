@@ -109,10 +109,10 @@ SITE = ViewCase(
     query=_site_query,
     post=lambda w: {name: hostile_text() for name in ("old_password", "new_password1", "new_password2")},
 )
-# No model has a page on the site (get_absolute_url), so Django's shortcut finds none for anyone
 VIEW_ON_SITE = ViewCase(
     "admin:view_on_site",
-    frozenset(),
+    ADMINS,
+    finds_none="no model has a page on the site (get_absolute_url), so Django's shortcut finds none for anyone",
     covers="url:admin/",
     params={"content_type_id": "pk:contenttypes.ContentType", "object_id": "team_id"},
 )

@@ -50,8 +50,18 @@ the unparenthesized form is used intentionally throughout.
 
 ### Permissions
 - All authorization uses Authentik groups via `core.permission_constants.PERMISSION_MAP`
-- Use `@require_permission("role_name")` decorator for page views
-- Use manual `has_permission()` check for JSON API endpoints (return `JsonResponse` 403)
+- A role check is `@require_permission("role_name")`, pages and JSON endpoints alike: signed out, it sends to
+  sign in; signed in without the role, it raises `PermissionDenied` (the 403). A view open to staff or a team's
+  own members (tickets, incident reports) checks in `team_record_or_404` or raises `PermissionDenied` itself
+- Views raise `PermissionDenied`, `Http404` and `BadRequest("why")`; the handlers in `core.errors` answer the
+  error page, or `{"error": ...}` with the same status for a JSON endpoint (`@json_endpoint`), a script that asks
+  for JSON (`Accept: application/json`) or a fetch. A wrong method is `require_POST`/`require_http_methods`.
+  test_no_hand_built_errors fails on a view building its own error answer; its exceptions are the stated ones (the
+  sign-in and Discord-link flows' own pages, a form re-rendered with its errors, the IP pool modal's field errors)
+- A refusal that is a record's state, not a role (a ticket someone else holds, an approved report), redirects back
+  with a message
+- A team's record (ticket, incident report, attachment) is looked up with `team_record_or_404`: another team's
+  record is a 404, the same as a missing one, never a 403
 - `WCComps_Discord_Admin` grants access to everything
 
 ### Discord Task Queue

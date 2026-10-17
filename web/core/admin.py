@@ -6,8 +6,9 @@ from django.contrib.admin.exceptions import DisallowedModelAdminToField
 from django.contrib.admin.options import TO_FIELD_VAR
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.contrib.auth.views import redirect_to_login
+from django.core.exceptions import PermissionDenied
 from django.db.models import QuerySet
-from django.http import HttpRequest, HttpResponse, HttpResponseBase, HttpResponseForbidden
+from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.urls import reverse
 
 if TYPE_CHECKING:
@@ -34,17 +35,17 @@ class AuthentikAdminSite(admin.AdminSite):
     def has_permission(self, request: HttpRequest) -> bool:
         return uses_django_admin(request.user)
 
-    def _refused(self, request: HttpRequest) -> HttpResponse | None:
-        """A 403 for a signed-in non-admin: the login form is no use, signing in is Authentik's."""
+    def _refuse(self, request: HttpRequest) -> None:
+        """The 403 for a signed-in non-admin: the login form is no use, signing in is Authentik's."""
         if request.user.is_authenticated and not self.has_permission(request):
-            return HttpResponseForbidden("Forbidden")
-        return None
+            raise PermissionDenied
 
     def login(self, request: HttpRequest, extra_context: dict[str, object] | None = None) -> HttpResponse:
         """Signing in is Authentik's: a visitor goes to the portal's sign-in, keeping where the admin sent them."""
         if not request.user.is_authenticated:
             return redirect_to_login(request.GET.get(REDIRECT_FIELD_NAME) or reverse("admin:index"))
-        return self._refused(request) or super().login(request, extra_context)
+        self._refuse(request)
+        return super().login(request, extra_context)
 
     # The stubs bound _ViewType by Callable[..., HttpResponseBase], whose ... mypy counts as explicit Any
     def admin_view(self, view: _ViewType, cacheable: bool = False) -> _ViewType:  # type: ignore[explicit-any]
@@ -55,8 +56,7 @@ class AuthentikAdminSite(admin.AdminSite):
             # Django refuses a _to_field it can't reference with a 400, but its change and delete pages look an empty
             # one up as a field named "" and fail with a 500. Read as Django reads it: POST, then GET.
             # test_view_regressions' canary fails once Django fixes it; then drop the _to_field check.
-            if refused := self._refused(request):
-                return refused
+            self._refuse(request)
             if request.POST.get(TO_FIELD_VAR, request.GET.get(TO_FIELD_VAR)) == "":
                 raise DisallowedModelAdminToField("An empty _to_field cannot be referenced.")
             return inner(request, *args, **kwargs)

@@ -51,7 +51,7 @@ class TestAssignmentApprove:
         client = Client()
         client.force_login(User.objects.get(username="orange1"))
         response = client.post(f"/orange-team/assignments/{assignment.pk}/approve/")
-        assert response.status_code == 302  # redirected by require_permission
+        assert response.status_code == 403
         assignment.refresh_from_db()
         assert assignment.status == "submitted"  # unchanged
 

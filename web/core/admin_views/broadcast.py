@@ -1,17 +1,18 @@
 from typing import cast
 
 from django.contrib.auth.models import User
+from django.core.exceptions import BadRequest
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, render
+from django.views.decorators.http import require_POST
 
 from core.auth_utils import require_permission
 from core.discord_tasks import BroadcastMessage, SyncRoles, SyncRolesResult
+from core.errors import json_endpoint
 from core.forms import BroadcastForm, SyncRolesForm
 from core.models import AuditLog, DiscordTask
 from core.utils import role_sync_summary
 from team.models import Team
-
-from .competition import _has_admin_or_gold_access
 
 
 @require_permission("admin", "gold_team")
@@ -27,19 +28,16 @@ def admin_broadcast(request: HttpRequest) -> HttpResponse:
     return render(request, "admin/broadcast.html", context)
 
 
+@json_endpoint
+@require_POST
+@require_permission("admin", "gold_team")
 def admin_broadcast_action(request: HttpRequest) -> HttpResponse:
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-
     user = cast(User, request.user)
     authentik_username = user.username
 
-    if not _has_admin_or_gold_access(user):
-        return JsonResponse({"error": "Access denied"}, status=403)
-
     form = BroadcastForm(request.POST)
     if not form.is_valid():
-        return JsonResponse({"error": "Target and message required"}, status=400)
+        raise BadRequest("Target and message required")
 
     target = form.cleaned_data["target"]
     message = form.cleaned_data["message"]
@@ -70,15 +68,12 @@ def admin_sync_roles(request: HttpRequest) -> HttpResponse:
     return render(request, "admin/sync_roles.html", context)
 
 
+@json_endpoint
+@require_POST
+@require_permission("admin", "gold_team")
 def admin_sync_roles_action(request: HttpRequest) -> HttpResponse:
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-
     user = cast(User, request.user)
     authentik_username = user.username
-
-    if not _has_admin_or_gold_access(user):
-        return JsonResponse({"error": "Access denied"}, status=403)
 
     form = SyncRolesForm(request.POST)
     dry_run = form.cleaned_data["dry_run"] if form.is_valid() else True
@@ -102,16 +97,10 @@ def admin_sync_roles_action(request: HttpRequest) -> HttpResponse:
     )
 
 
+@json_endpoint
+@require_permission("admin", "gold_team")
 def admin_task_status(request: HttpRequest, task_id: int) -> HttpResponse:
-    user = cast(User, request.user)
-
-    if not _has_admin_or_gold_access(user):
-        return JsonResponse({"error": "Access denied"}, status=403)
-
-    try:
-        task = DiscordTask.objects.get(id=task_id)
-    except DiscordTask.DoesNotExist:
-        return JsonResponse({"error": "Task not found"}, status=404)
+    task = get_object_or_404(DiscordTask, id=task_id)
 
     response: dict[str, object] = {
         "status": task.status,

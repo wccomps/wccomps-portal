@@ -1,6 +1,8 @@
 """Context processors for making data available to all templates."""
 
-from django.contrib.auth.models import User
+from typing import cast
+
+from django.contrib.auth.models import AnonymousUser, User
 from django.http import HttpRequest
 
 from .auth_utils import get_permissions_context, has_permission
@@ -156,8 +158,9 @@ def _get_nav_active(request: HttpRequest) -> dict[str, str]:
 
 
 def permissions(request: HttpRequest) -> dict[str, bool | str]:
-    """Add permission flags to all template contexts."""
-    if not request.user.is_authenticated:
+    """Add permission flags to all template contexts. A request with no user (an error answered before
+    AuthenticationMiddleware ran) is shown as signed out."""
+    if not getattr(request, "user", AnonymousUser()).is_authenticated:
         ctx: dict[str, bool | str] = {f"is_{perm}": False for perm in PERMISSION_MAP}
         ctx.update(
             {
@@ -170,7 +173,7 @@ def permissions(request: HttpRequest) -> dict[str, bool | str]:
         )
         return ctx
 
-    user: User = request.user
+    user = cast(User, request.user)
     perms = get_permissions_context(user)
     nav_context = _get_nav_active(request)
     return {

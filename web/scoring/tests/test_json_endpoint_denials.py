@@ -19,4 +19,4 @@ def test_denied_with_json_403(blue_team_user, name, args, method):
     client.force_login(blue_team_user)
     response = getattr(client, method)(reverse(name, args=args))
     assert response.status_code == 403
-    assert response.json() == {"error": "Access denied"}
+    assert response.json()["error"]

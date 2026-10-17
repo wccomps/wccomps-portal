@@ -37,7 +37,7 @@ def test_team_member_polls_own_ticket(blue_team_user, tickets):
 
 def test_team_member_cannot_poll_other_teams_ticket(blue_team_user, tickets):
     response = _client(blue_team_user).get(reverse("ticket_detail_dynamic", args=["T002-001"]))
-    assert response.status_code == 403
+    assert response.status_code == 404
 
 
 @pytest.mark.parametrize("list_id", ["comments-list", "history-list"])

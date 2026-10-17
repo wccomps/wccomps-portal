@@ -13,15 +13,20 @@ REAL security concerns:
 - File size limits (resource exhaustion)
 """
 
-from unittest.mock import Mock, patch
-
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import RequestFactory
+from django.test import Client
 
+from core.tests.roles import make_user
 from team.models import Team
 from ticketing.models import Ticket, TicketAttachment, TicketCategory
-from ticketing.views import ticket_attachment_download, ticket_attachment_upload
+
+
+def _member_of(team: Team) -> Client:
+    """A client signed in as a member of the team (it holds the team's Authentik group)."""
+    client = Client()
+    client.force_login(make_user(f"member{team.team_number}", [team.authentik_group]))
+    return client
 
 
 @pytest.mark.django_db
@@ -52,16 +57,9 @@ class TestFileUploadConstraints:
         large_content = b"A" * (11 * 1024 * 1024)
         uploaded_file = SimpleUploadedFile(name="large.txt", content=large_content)
 
-        factory = RequestFactory()
-        request = factory.post(f"/tickets/{ticket.ticket_number}/upload", {"attachment": uploaded_file})
-        request.user = Mock()
-        request.user.is_authenticated = True
-
-        with (
-            patch("ticketing.views.attachments.get_user_team", return_value=team),
-            patch("ticketing.views.attachments.has_permission", return_value=False),
-        ):
-            response = ticket_attachment_upload(request, ticket_number=ticket.ticket_number)
+        response = _member_of(team).post(
+            f"/tickets/{ticket.ticket_number}/attachment/upload/", {"attachment": uploaded_file}
+        )
 
         assert response.status_code == 400
         assert b"too large" in response.content.lower() or b"size" in response.content.lower()
@@ -112,20 +110,9 @@ class TestFileUploadAuthorizationBypass:
         """Team 2 user cannot download Team 1's attachment."""
         team1, team2, ticket1, ticket2, attachment1 = setup_teams
 
-        factory = RequestFactory()
-        request = factory.get(f"/tickets/{ticket1.ticket_number}/attachment/{attachment1.id}")
-        request.user = Mock()
-        request.user.is_authenticated = True
+        response = _member_of(team2).get(f"/tickets/{ticket1.ticket_number}/attachment/{attachment1.id}/")
 
-        with (
-            patch("ticketing.views.attachments.get_user_team", return_value=team2),
-            patch("ticketing.views.attachments.has_permission", return_value=False),
-        ):
-            response = ticket_attachment_download(
-                request, attachment_id=attachment1.id, ticket_number=ticket1.ticket_number
-            )
-
-        assert response.status_code in [403, 404]
+        assert response.status_code == 404
 
     def test_cannot_upload_to_other_team_ticket(self, setup_teams):
         """Team 2 user cannot upload to Team 1's ticket."""
@@ -136,16 +123,9 @@ class TestFileUploadAuthorizationBypass:
             content=b"trying to upload to wrong team",
         )
 
-        factory = RequestFactory()
-        request = factory.post(f"/tickets/{ticket1.ticket_number}/upload", {"attachment": uploaded_file})
-        request.user = Mock()
-        request.user.is_authenticated = True
+        response = _member_of(team2).post(
+            f"/tickets/{ticket1.ticket_number}/attachment/upload/", {"attachment": uploaded_file}
+        )
 
-        with (
-            patch("ticketing.views.attachments.get_user_team", return_value=team2),
-            patch("ticketing.views.attachments.has_permission", return_value=False),
-        ):
-            response = ticket_attachment_upload(request, ticket_number=ticket1.ticket_number)
-
-        assert response.status_code in [403, 404]
+        assert response.status_code == 404
         assert not TicketAttachment.objects.filter(ticket=ticket1, filename="malicious.txt").exists()

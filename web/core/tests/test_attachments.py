@@ -164,7 +164,7 @@ class TestTeamAttachmentUpload:
             {"attachment": test_file},
         )
 
-        assert response.status_code == 403
+        assert response.status_code == 404
         assert TicketAttachment.objects.filter(ticket=data["ticket2"]).count() == 0
 
     def test_upload_method_not_allowed(self, setup_tickets: dict[str, Any]) -> None:
@@ -242,7 +242,7 @@ class TestTeamAttachmentDownload:
         # Try to download team2's attachment
         response = client.get(f"/tickets/{data['ticket2'].ticket_number}/attachment/{attachment.id}/")
 
-        assert response.status_code == 403
+        assert response.status_code == 404
 
     def test_download_attachment_not_found(self, setup_tickets: dict[str, Any]) -> None:
         """Test download fails when attachment doesn't exist."""
@@ -342,7 +342,7 @@ class TestOpsAttachmentUpload:
             {"attachment": test_file},
         )
 
-        assert response.status_code == 403
+        assert response.status_code == 404
 
     def test_ops_upload_ticket_not_found(self, setup_tickets: dict[str, Any]) -> None:
         """Test upload fails when ticket doesn't exist."""
@@ -438,7 +438,7 @@ class TestOpsAttachmentDownload:
 
         response = client.get(f"/tickets/{data['ticket2'].ticket_number}/attachment/{attachment.id}/")
 
-        assert response.status_code == 403
+        assert response.status_code == 404
 
     def test_ops_download_attachment_not_found(self, setup_tickets: dict[str, Any]) -> None:
         """Test download fails when attachment doesn't exist."""

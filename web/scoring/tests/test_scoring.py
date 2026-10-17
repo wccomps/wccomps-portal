@@ -258,7 +258,7 @@ class TestLeaderboardAccess:
 
         response = client.get(reverse("leaderboard_page"))
 
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_red_team_allowed_access(self, create_user_with_groups) -> None:
         """Red Team members should have access to the leaderboard."""
@@ -298,7 +298,7 @@ class TestLeaderboardAccess:
 
         response = client.get(reverse("leaderboard_page"))
 
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_user_with_multiple_allowed_groups_can_access(self, create_user_with_groups) -> None:
         """Users with multiple groups including an allowed one should be able to access."""

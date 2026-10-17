@@ -14,6 +14,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils import timezone
 
+from core.auth_utils import has_permission
 from core.discord_tasks import AddUserToThread, PostTicketUpdate
 from core.models import DiscordTask
 from core.tickets_config import get_category_config
@@ -45,8 +46,38 @@ def refusal(ticket: Ticket, action: str) -> str | None:
     return None if ticket.status in sources else message.format(status=ticket.status)
 
 
+# action -> how the assignee refusal names it
+HELD_ACTIONS = {
+    "resolve": "resolve",
+    "unclaim": "unclaim",
+    "recategorize": "change the category of",
+    "reassign": "reassign",
+}
+
+
+def assignee_refusal(ticket: Ticket, actor: User | None, action: str) -> str | None:
+    """Why the actor may not take `action` on the ticket as its holder stands, or None if they may.
+
+    A ticket someone holds is resolved, unclaimed, recategorized or given away only by its assignee or a ticketing
+    admin; a ticket no one holds is claimed first (or given away: assigning an open ticket claims it for someone).
+    Each transition checks this under its row lock; pages ask it to decide what to offer."""
+    if actor is not None and has_permission(actor, "ticketing_admin"):
+        return None
+    holder = ticket.assigned_to
+    if holder is None:
+        return None if action == "reassign" else "Claim this ticket first."
+    if actor is not None and holder.pk == actor.pk:
+        return None
+    return f"{holder.username} holds this ticket: only they or a ticketing admin can {HELD_ACTIONS[action]} it."
+
+
 def _lock(ticket_id: int) -> Ticket | None:
-    return Ticket.objects.select_for_update(of=("self",)).select_related("team").filter(id=ticket_id).first()
+    return (
+        Ticket.objects.select_for_update(of=("self",))
+        .select_related("team", "assigned_to")
+        .filter(id=ticket_id)
+        .first()
+    )
 
 
 def _record(
@@ -98,9 +129,13 @@ def _give(
     discord_id: int | None,
     discord_username: str | None,
     user: User | None,
+    actor: User | None = None,
 ) -> tuple[Ticket | None, str | None]:
-    """Apply a claim or reassign transition to a locked ticket, for the user behind `user` or `discord_id`."""
+    """Apply a claim or reassign transition to a locked ticket, for the user behind `user` or `discord_id`; a
+    reassign is the actor's to make (assignee_refusal)."""
     if error := refusal(ticket, action):
+        return None, error
+    if action == "reassign" and (error := assignee_refusal(ticket, actor, "reassign")):
         return None, error
 
     assignee = get_user_for_ticket(discord_id=discord_id, user=user)
@@ -157,15 +192,19 @@ def assign_ticket(
     discord_id: int | None = None,
     discord_username: str | None = None,
     user: User | None = None,
+    actor: User | None = None,
+    actor_discord_id: int | None = None,
 ) -> tuple[Ticket | None, str | None]:
-    """Give a ticket to someone else: an open one is claimed on their behalf; a claimed, resolved or
-    cancelled one changes only its assignee (status, points and resolution are untouched)."""
+    """Give a ticket to someone else (`user` or `discord_id`): an open one is claimed on their behalf; a claimed,
+    resolved or cancelled one changes only its assignee (status, points and resolution are untouched), and only its
+    assignee or a ticketing admin (`actor` or `actor_discord_id`) gives it away."""
     with transaction.atomic():
         ticket = _lock(ticket_id)
         if not ticket:
             return None, "Ticket not found."
         action = "claim" if ticket.status == Ticket.STATUS_OPEN else "reassign"
-        return _give(ticket, action, "assigned", actor_username, discord_id, discord_username, user)
+        by = get_user_for_ticket(discord_id=actor_discord_id, user=actor)
+        return _give(ticket, action, "assigned", actor_username, discord_id, discord_username, user, by)
 
 
 aassign_ticket = _make_async(assign_ticket)
@@ -175,12 +214,17 @@ def unclaim_ticket(
     ticket_id: int,
     actor_username: str,
     user: User | None = None,
+    discord_id: int | None = None,
 ) -> tuple[Ticket | None, str | None]:
+    """Put a claimed ticket back in the open queue: its assignee or a ticketing admin (`user` or `discord_id`)."""
     with transaction.atomic():
         ticket = _lock(ticket_id)
         if not ticket:
             return None, "Ticket not found."
         if error := refusal(ticket, "unclaim"):
+            return None, error
+        actor = get_user_for_ticket(discord_id=discord_id, user=user)
+        if error := assignee_refusal(ticket, actor, "unclaim"):
             return None, error
 
         ticket.status = Ticket.STATUS_OPEN
@@ -188,7 +232,7 @@ def unclaim_ticket(
         ticket.assigned_at = None
         ticket.save()
 
-        _record(ticket, "unclaimed", user, actor_username, {"unclaimed_by": actor_username})
+        _record(ticket, "unclaimed", actor, actor_username, {"unclaimed_by": actor_username})
         return ticket, None
 
 
@@ -212,6 +256,9 @@ def resolve_ticket(
             return None, "Ticket not found."
         if error := refusal(ticket, "resolve"):
             return None, error
+        resolver = get_user_for_ticket(discord_id=discord_id, user=user)
+        if error := assignee_refusal(ticket, resolver, "resolve"):
+            return None, error
 
         cat_info = get_category_config(ticket.category_id) or {}
         if points_override is not None:
@@ -227,8 +274,6 @@ def resolve_ticket(
             return None, "This category requires an explicit point value."
         else:
             point_penalty = cat_info.get("points", 0)
-
-        resolver = get_user_for_ticket(discord_id=discord_id, user=user)
 
         ticket.status = Ticket.STATUS_RESOLVED
         ticket.resolved_at = timezone.now()

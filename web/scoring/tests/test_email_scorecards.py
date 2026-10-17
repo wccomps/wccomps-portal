@@ -84,13 +84,13 @@ class TestEmailScorecardsPermissions:
         client = Client()
         client.force_login(red_user)
         response = client.get(reverse("scoring:email_scorecards"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_non_gold_user_cannot_access_single_email(self, red_user, final_scores):
         client = Client()
         client.force_login(red_user)
         response = client.get(reverse("scoring:email_scorecard", args=[1]))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_gold_user_can_access_bulk_email(self, gold_user, final_scores, school_infos):
         client = Client()
@@ -262,7 +262,7 @@ class TestStreamEmailScorecards:
         client = Client()
         client.force_login(red_user)
         response = client.post(reverse("scoring:stream_email_scorecards"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
 
 class TestSendScorecardEmail:

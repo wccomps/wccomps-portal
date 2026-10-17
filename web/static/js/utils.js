@@ -48,7 +48,8 @@ function _toFormData(data) {
 async function wcPost(url, data = {}) {
     const response = await fetch(url, {
         method: 'POST',
-        headers: { 'X-CSRFToken': getCSRFToken() },
+        // Asking for JSON gets a refusal's reason as JSON on any browser (core.errors.wants_json_error)
+        headers: { 'X-CSRFToken': getCSRFToken(), 'Accept': 'application/json' },
         body: _toFormData(data),
     });
     return response.json();
@@ -58,9 +59,15 @@ async function wcPost(url, data = {}) {
 async function wcStream(url, data, onProgress, onDone) {
     const response = await fetch(url, {
         method: 'POST',
-        headers: { 'X-CSRFToken': getCSRFToken() },
+        // Asking for JSON gets a refusal's reason as JSON on any browser (core.errors.wants_json_error)
+        headers: { 'X-CSRFToken': getCSRFToken(), 'Accept': 'application/json' },
         body: _toFormData(data),
     });
+    if (!response.ok) {
+        // A refusal is a JSON error (core.errors), not a stream: the caller's catch shows it
+        const refusal = await response.json().catch(() => ({}));
+        throw new Error(refusal.error || 'the server answered ' + response.status);
+    }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';

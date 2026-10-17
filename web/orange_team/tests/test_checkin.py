@@ -57,5 +57,5 @@ class TestAdminToggleCheckIn:
         client = Client()
         client.force_login(User.objects.get(username="orange1"))
         response = client.post(f"/orange-team/check-in/{target.pk}/")
-        assert response.status_code == 302  # redirected to / by require_permission
+        assert response.status_code == 403
         assert not OrangeCheckIn.objects.filter(user=target).exists()

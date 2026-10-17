@@ -163,14 +163,14 @@
                                 </c-button>
                             </c-form>
                         {% elif item.ticket.status == "claimed" %}
-                            <c-form action="{% url 'ticket_resolve' item.ticket.ticket_number %}"
-                                    class="d-inline">
-                                {% csrf_token %}
-                                <c-button type="submit" variant="primary">
-                                    Resolve
-                                </c-button>
-                            </c-form>
-                            {% if item.ticket.assigned_to.username == authentik_username or is_ticketing_admin %}
+                            {% if item.actions.resolve %}
+                                <c-form action="{% url 'ticket_resolve' item.ticket.ticket_number %}"
+                                        class="d-inline">
+                                    {% csrf_token %}
+                                    <c-button type="submit" variant="primary">
+                                        Resolve
+                                    </c-button>
+                                </c-form>
                                 <c-form action="{% url 'ticket_unclaim' item.ticket.ticket_number %}"
                                         class="d-inline">
                                     {% csrf_token %}

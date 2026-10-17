@@ -219,7 +219,7 @@ class TestExportPermissions:
         client.force_login(regular_user)
 
         response = client.get(reverse("scoring:export_red_scores"))
-        assert response.status_code == 302  # Redirect to login/forbidden
+        assert response.status_code == 403
 
     def test_non_admin_user_cannot_access_incidents_export(self, regular_user):
         """Non-admin users should get 403 for incidents export."""
@@ -227,7 +227,7 @@ class TestExportPermissions:
         client.force_login(regular_user)
 
         response = client.get(reverse("scoring:export_incidents"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_non_admin_user_cannot_access_orange_adjustments_export(self, regular_user):
         """Non-admin users should get 403 for orange checks export."""
@@ -235,7 +235,7 @@ class TestExportPermissions:
         client.force_login(regular_user)
 
         response = client.get(reverse("scoring:export_orange_adjustments"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_non_admin_user_cannot_access_inject_grades_export(self, regular_user):
         """Non-admin users should get 403 for inject grades export."""
@@ -243,7 +243,7 @@ class TestExportPermissions:
         client.force_login(regular_user)
 
         response = client.get(reverse("scoring:export_inject_grades"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_non_admin_user_cannot_access_final_scores_export(self, regular_user):
         """Non-admin users should get 403 for final scores export."""
@@ -251,7 +251,7 @@ class TestExportPermissions:
         client.force_login(regular_user)
 
         response = client.get(reverse("scoring:export_final_scores"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_admin_user_can_access_all_exports(self, admin_user):
         """Admin users should be able to access all export endpoints."""
@@ -866,7 +866,7 @@ class TestExportIndexPermissions:
         client.force_login(non_gold)
 
         response = client.get(reverse("scoring:export_index"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_export_index_accessible_by_gold_team(self, admin_user):
         """Gold Team can access export index page."""

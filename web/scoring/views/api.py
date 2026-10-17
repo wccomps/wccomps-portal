@@ -1,17 +1,14 @@
 from django.http import HttpRequest, JsonResponse
 
-from core.auth_utils import has_permission
+from core.auth_utils import require_permission
+from core.errors import json_endpoint
 
 from ..calculator import get_leaderboard
 
 
-def _allowed(request: HttpRequest, *permissions: str) -> bool:
-    return any(has_permission(request.user, p) for p in permissions)
-
-
+@json_endpoint
+@require_permission("gold_team", "white_team", "ticketing_admin")
 def api_scores(request: HttpRequest) -> JsonResponse:
-    if not _allowed(request, "gold_team", "white_team", "ticketing_admin"):
-        return JsonResponse({"error": "Access denied"}, status=403)
     scores = get_leaderboard()
     data = [
         {

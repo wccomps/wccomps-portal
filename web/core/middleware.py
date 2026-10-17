@@ -3,14 +3,14 @@ import time
 import zoneinfo
 from collections.abc import Callable, Iterable
 from typing import Any
-from urllib.parse import quote
 
 from django.conf import settings
 from django.db import connection
 from django.http import HttpRequest, HttpResponse, HttpResponsePermanentRedirect, JsonResponse
 from django.shortcuts import redirect
 from django.utils import timezone
-from django.utils.http import url_has_allowed_host_and_scheme
+
+from .errors import sign_in_answer, wants_json_error
 
 logger = logging.getLogger("wccomps.access")
 error_logger = logging.getLogger("wccomps.errors")
@@ -38,14 +38,6 @@ class SecurityHeadersMiddleware:
             )
 
         return response
-
-
-def wants_json_error(request: HttpRequest) -> bool:
-    """A background fetch() gets a JSON error it can show; a navigation gets a page, and htmx (which doesn't swap in
-    an error answer; base_site.html alerts) gets text."""
-    return (
-        request.headers.get("HX-Request") != "true" and request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate"
-    )
 
 
 NUL_MESSAGE = "The request contains a NUL character."
@@ -196,19 +188,7 @@ class AuthentikRequiredMiddleware:
                 return self.get_response(request)
 
         if not request.user.is_authenticated:
-            # The login redirect ends at Authentik, another origin, which a fetch or htmx request can't
-            # follow: the browser reports a network error. An htmx poll reloads the page instead, which
-            # navigates through login; any other background request gets an error it can show.
-            if request.headers.get("HX-Request") == "true":
-                return HttpResponse(status=204, headers={"HX-Refresh": "true"})
-            if wants_json_error(request):
-                return JsonResponse({"error": "Your session expired. Reload the page to sign in again."}, status=401)
-            # Validate and sanitize the next parameter to prevent open redirect
-            next_url = request.path
-            if not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
-                next_url = "/"
-            safe_next = quote(next_url, safe="")
-            return redirect(f"/auth/login/?next={safe_next}")
+            return sign_in_answer(request)
 
         return self.get_response(request)
 

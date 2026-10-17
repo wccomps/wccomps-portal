@@ -359,7 +359,7 @@
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': getCSRFToken(),
-                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': 'application/json',
                     },
                     body: formData,
                 });
@@ -377,12 +377,12 @@
 
                     closeCreatePoolModal();
                 } else {
-                    // Show errors
+                    // The form's field errors, or a refusal's one reason (core.errors: a 403, 404 or CSRF failure)
                     let errorMsg = '';
-                    for (const [field, errors] of Object.entries(data.errors)) {
+                    for (const [field, errors] of Object.entries(data.errors || {})) {
                         errorMsg += `${field}: ${errors.join(', ')}\n`;
                     }
-                    errorDiv.textContent = errorMsg;
+                    errorDiv.textContent = errorMsg || data.error || 'Failed to create pool. Please try again.';
                     errorDiv.classList.remove('d-none');
                 }
             } catch (error) {

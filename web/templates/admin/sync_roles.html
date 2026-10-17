@@ -96,9 +96,24 @@
                     if (!this.taskId) return;
 
                     try {
-                        const response = await fetch(`/ops/admin/task/${this.taskId}/status/`);
+                        const response = await fetch(`/ops/admin/task/${this.taskId}/status/`, {
+                            headers: { 'Accept': 'application/json' },
+                        });
+                        if (response.status >= 500) {
+                            // A server error can pass: keep asking, a little slower
+                            this.message = 'The server had a problem; trying again...';
+                            setTimeout(() => this.pollTaskStatus(), 3000);
+                            return;
+                        }
                         const result = await response.json();
 
+                        if (!response.ok) {
+                            // The task is gone or the request was refused (4xx): asking again won't change that
+                            this.message = result.error || 'The server answered ' + response.status;
+                            this.messageType = 'error';
+                            this.loading = false;
+                            return;
+                        }
                         this.message = result.message;
 
                         if (result.status === 'completed') {

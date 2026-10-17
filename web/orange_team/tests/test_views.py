@@ -19,8 +19,7 @@ class TestDashboard:
         client = Client()
         client.force_login(User.objects.get(username="blue1"))
         response = client.get("/orange-team/")
-        assert response.status_code == 302
-        assert response.url == "/"
+        assert response.status_code == 403
 
     def test_orange_team_can_access(self) -> None:
         user = User.objects.create_user(username="orange1", password="test")

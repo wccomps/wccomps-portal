@@ -33,7 +33,7 @@ class TestIncidentReportFlow:
         client = Client()
         client.force_login(blue_team_user)
         response = client.get(reverse("scoring:review_incidents"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_incident_appears_in_gold_review(self, team, blue_team_user, gold_team_user, mock_quotient_client):
         """Blue team creates incident, gold team sees it in review."""
@@ -76,7 +76,7 @@ class TestRedTeamFindingFlow:
         client = Client()
         client.force_login(blue_team_user)
         response = client.get(reverse("scoring:red_team_findings"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
 
 class TestInjectGradingFlow:
@@ -98,4 +98,4 @@ class TestInjectGradingFlow:
         client = Client()
         client.force_login(red_team_user)
         response = client.get(reverse("scoring:inject_grading"))
-        assert response.status_code == 302
+        assert response.status_code == 403

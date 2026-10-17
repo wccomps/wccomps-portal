@@ -2,10 +2,12 @@
 
 A view module's property tests hold a table of ViewCase rows, one per URL pattern: how to build its path, query
 string and body, and which roles may get past its permission check. The properties (check_answer) hold for every
-row: no 5xx and every stream read to the end; a refused request (or one answered 4xx) changes nothing it can see
-(no row in any table, no mail sent, no request to another service; the cache isn't checked); a JSON
-endpoint answers every refusal and error with a JSON error; text a request carries is HTML-escaped wherever a page
-echoes it and never runs as template syntax; and no redirect leaves the site.
+row: no 5xx and every stream read to the end; a role the row refuses is sent to sign in (signed out) or answered 403
+(signed in); a refused request (or one answered 4xx) changes nothing it can see (no row in any table, no mail sent, no
+request to another service; the cache isn't checked); every refusal and error is a JSON error exactly when
+core.errors.wants_json_error says the request wants one (a JSON endpoint's, or a fetch's), and the page otherwise;
+text a request carries is HTML-escaped wherever a page echoes it and never runs as template syntax; and no redirect
+leaves the site.
 
 test_property_coverage fails when a URL pattern has no row (and isn't excepted with a reason).
 """
@@ -72,6 +74,7 @@ from scoring.models import (
     ServiceScore,
 )
 
+from core.errors import is_json_endpoint, wants_json_error
 from core.models import AuditLog, BotState, CompetitionConfig, DiscordTask
 from core.permission_constants import check_groups_for_permission
 from core.tests.roles import ROLE_GROUPS, role_user
@@ -432,7 +435,6 @@ class ViewCase:
     query: FieldsFor | None = None  # query string fields
     post: FieldsFor | None = None  # POST fields (str, list of str, an upload, or a list of uploads)
     methods: tuple[str, ...] = ("GET", "POST")
-    json: bool = False  # a JSON endpoint: every error and refusal is a JSON error, never a page or redirect
     # Why the view sends a signed-in visitor to sign in (check_answer fails on that otherwise)
     sends_to_sign_in: str = ""
     # Why the view answers JSON to some requests yet isn't a JSON endpoint (check_answer fails on JSON otherwise)
@@ -447,6 +449,8 @@ class ViewCase:
     gate_names: tuple[str, ...] = ()
     # A query a role let in needs to get past the view's own checks (every_allowed_role_gets_in)
     entry_query: Callable[[World], dict[str, list[str]]] | None = None
+    # Why the view answers 404 to every role it lets in (every_allowed_role_gets_in can't see one get in)
+    finds_none: str = ""
     patches: Callable[[World], ExitStack] | None = None  # what the case needs from outside (Quotient's injects)
 
     @property
@@ -454,26 +458,41 @@ class ViewCase:
         return ROUTES[self.name]
 
     @property
+    def json(self) -> bool:
+        """A JSON endpoint (core.errors.json_endpoint): its errors are JSON whoever calls it, and the harness calls it
+        as the page's fetch() does."""
+        return is_json_endpoint(CALLBACKS[self.name])
+
+    @property
     def entry_point(self) -> str:
         return self.covers or f"url:{self.route}"
 
 
-def _routes(resolver: URLResolver, prefix: str = "", namespace: str = "") -> Iterator[tuple[str, str]]:
+def _patterns(
+    resolver: URLResolver, prefix: str = "", namespace: str = ""
+) -> Iterator[tuple[str, str, Callable[..., object]]]:
     for entry in resolver.url_patterns:
         route = prefix + str(entry.pattern)
         if isinstance(entry, URLResolver):
-            yield from _routes(entry, route, f"{namespace}{entry.namespace}:" if entry.namespace else namespace)
+            yield from _patterns(entry, route, f"{namespace}{entry.namespace}:" if entry.namespace else namespace)
         elif isinstance(entry, URLPattern) and entry.name:
-            yield f"{namespace}{entry.name}", route
+            yield f"{namespace}{entry.name}", route, entry.callback
 
 
 class _Routes(dict[str, str]):
     def __missing__(self, name: str) -> str:
-        self.update(_routes(get_resolver()))
+        self.update((url_name, route) for url_name, route, _ in _patterns(get_resolver()))
+        return self[name]
+
+
+class _Callbacks(dict[str, Callable[..., object]]):
+    def __missing__(self, name: str) -> Callable[..., object]:
+        self.update((url_name, view) for url_name, _, view in _patterns(get_resolver()))
         return self[name]
 
 
 ROUTES = _Routes()  # URL name -> its route as test_property_coverage names URL patterns
+CALLBACKS = _Callbacks()  # URL name -> its view
 
 
 @dataclass
@@ -617,6 +636,8 @@ def requests(
         headers["HX-Request"] = "true"
     if draw(st.booleans(), label="xhr"):
         headers["X-Requested-With"] = "XMLHttpRequest"
+    if draw(st.booleans(), label="asks for json"):
+        headers["Accept"] = "application/json"
     if draw(st.booleans(), label="referer"):
         headers["Referer"] = draw(st.one_of(st.sampled_from(OFF_SITE), st.just("http://testserver/tickets/")))
     tz = draw(st.one_of(st.none(), st.sampled_from(TZ_COOKIES)), label="tz cookie")
@@ -675,6 +696,7 @@ class Answer:
     warnings: list[str] = field(default_factory=list)  # its warning messages
     mailed: int = 0  # emails it sent
     outbound: int = 0  # requests it tried to make to another service
+    wants_json: bool = False  # core.errors.wants_json_error for the request: its errors are JSON
 
 
 def client_for(world: World, role: str, tz: str | None = None) -> Client:
@@ -718,7 +740,8 @@ def send(world: World, drawn: Drawn) -> Answer:
     errors = [str(m) for m in queued if m.level >= message_levels.ERROR]
     warnings = [str(m) for m in queued if m.level == message_levels.WARNING]
     mailed = len(mail.outbox) - mail_before
-    return Answer(response, content, written, errors, warnings, mailed, len(OUTBOUND) - outbound_before)
+    wants_json = wants_json_error(response.wsgi_request)  # type: ignore[attr-defined]
+    return Answer(response, content, written, errors, warnings, mailed, len(OUTBOUND) - outbound_before, wants_json)
 
 
 def _is_upload(value: Any) -> bool:
@@ -737,8 +760,7 @@ class Kind(StrEnum):
     FORBIDDEN = "forbidden"  # 403
     MISSING = "missing"  # 404
     WRONG_METHOD = "wrong method"  # 405
-    REFUSED_HOME = "refused home"  # require_permission's redirect home with an error
-    REFUSED = "refused"  # another redirect with an error (a form's, an object's state)
+    REFUSED = "refused"  # a redirect with an error (a form's, an object's state)
     ANSWERED = "answered"
 
 
@@ -753,12 +775,14 @@ def kind_of(answer: Answer) -> Kind:
     if status in (403, 404, 405):
         return {403: Kind.FORBIDDEN, 404: Kind.MISSING, 405: Kind.WRONG_METHOD}[status]
     if 300 <= status < 400 and answer.errors:
-        return Kind.REFUSED_HOME if location == "/" else Kind.REFUSED
+        return Kind.REFUSED
     return Kind.ANSWERED
 
 
-# A permission check's answers
-PERMISSION_REFUSALS = {Kind.SIGN_IN, Kind.FORBIDDEN, Kind.MISSING, Kind.REFUSED_HOME}
+# A permission check's answers: signed out, sent to sign in; signed in, the 403; a record another team owns, the 404
+PERMISSION_REFUSALS = {Kind.SIGN_IN, Kind.FORBIDDEN, Kind.MISSING}
+# Statuses core.errors answers (and the sign-in gate's 401): JSON exactly when the request wants it
+ERROR_STATUSES = (400, 401, 403, 404, 405)
 
 # Words a refusal of the visitor uses, in a message or a page ("permission" alone is a page's subject too)
 REFUSAL_TEXT = re.compile(
@@ -796,10 +820,13 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
         # A signed-in role sent to sign in is a client that lost its session: every check after this would pass
         assert kind is not Kind.SIGN_IN, f"{where}: a signed-in role was sent to sign in ({status})"
     if drawn.role not in case.allowed:
-        # Only a NUL is refused with a 400 before the view's role check (core.middleware's NUL refusals)
-        refused_early = status == 400 and drawn.carries_nul()
+        # The one refusal: sent to sign in when signed out, the 403 when signed in. Only a NUL is refused (400) before
+        # the view's role check; a wrong method (405) comes first where the method check wraps the role check
+        # (require_POST outside require_permission), and after it elsewhere
+        early = (status == 400 and drawn.carries_nul()) or kind is Kind.WRONG_METHOD
+        refusal = Kind.SIGN_IN if drawn.role == "anonymous" else Kind.FORBIDDEN
         location = response.get("Location", "")
-        assert refused or refused_early, f"{where}: a role the page refuses got {status} {location}"
+        assert kind is refusal or early, f"{where}: a role the page refuses got {status} {location}"
     if refused or 400 <= status < 500:
         assert not answer.written, f"{where} refused ({status}, {answer.errors}) but wrote {answer.written}"
         assert not answer.mailed, f"{where} refused ({status}) but sent {answer.mailed} email(s)"
@@ -808,11 +835,16 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
     content_type = response.get("Content-Type", "")
     htmx_reload = kind is Kind.SIGN_IN and status == 204  # the gate reloads an htmx page into sign-in
     has_body = drawn.method != "HEAD"
-    if case.json and has_body and not htmx_reload and (400 <= status < 500 or drawn.role not in case.allowed):
-        assert content_type.startswith("application/json"), f"{where} answered {status} {content_type}, not JSON"
-        error = json.loads(answer.content).get("error")
-        assert isinstance(error, str) and error, f"{where}: a JSON {status} without an error message"
-        assert status in (400, 401, 403, 404, 405, 409, 413, 429), f"{where}: JSON error status {status}"
+    if has_body and not htmx_reload and status in ERROR_STATUSES:
+        is_json = content_type.startswith("application/json")
+        if answer.wants_json:
+            assert is_json, f"{where} answered {status} {content_type}, not the JSON error the request wants"
+            error = json.loads(answer.content).get("error")
+            assert isinstance(error, str) and error, f"{where}: a JSON {status} without an error message"
+        else:
+            assert not is_json, f"{where} answered a JSON {status} to a request that wants the page"
+    if case.json and has_body and content_type.startswith("application/json") and status >= 400:
+        assert status in (*ERROR_STATUSES, 409, 413, 429), f"{where}: JSON error status {status}"
     if response.streaming and content_type.startswith("application/x-ndjson"):
         # run_detached turns an operation's exception into a "Failed: ..." line: the stream raised
         failed = [line for line in answer.content.decode().splitlines() if '"Failed: ' in line]
@@ -820,7 +852,7 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
     if content_type.startswith("application/json") and has_body:
         json.loads(answer.content)
         if 200 <= status < 300:
-            assert case.json or case.json_sometimes, f"{where} answers JSON: mark its row json=True"
+            assert case.json or case.json_sometimes, f"{where} answers JSON: mark its view core.errors.json_endpoint"
 
     if content_type.startswith("text/html"):
         page = answer.content.decode("utf-8", "replace")
@@ -922,6 +954,8 @@ def every_allowed_role_gets_in(case: ViewCase, world: World) -> None:
     """Each role the row allows gets past the view's permission check on some real object: a GET (a POST with no
     fields where the view takes only POST) is not refused for at least one valid path. A row that lists a role its
     view refuses is too wide, and its oracle never checks that role's refusal."""
+    if case.finds_none:
+        return
     for name in case.gate_names or (case.name, *case.also):
         params = route_params(case, name)
         count = max((len(world.ids(kind)) for _, _, kind in params), default=1)

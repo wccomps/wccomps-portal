@@ -1,5 +1,5 @@
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 
 from ticketing.forms import TicketCategoryForm
 
@@ -44,10 +44,7 @@ def admin_category_create(request: HttpRequest) -> HttpResponse:
 def admin_category_edit(request: HttpRequest, category_id: int) -> HttpResponse:
     from ticketing.models import TicketCategory
 
-    try:
-        category = TicketCategory.objects.get(pk=category_id)
-    except TicketCategory.DoesNotExist:
-        return HttpResponse("Category not found", status=404)
+    category = get_object_or_404(TicketCategory, pk=category_id)
 
     if request.method == "POST":
         form = TicketCategoryForm(request.POST, instance=category)
@@ -77,10 +74,7 @@ def admin_category_edit(request: HttpRequest, category_id: int) -> HttpResponse:
 def admin_category_delete(request: HttpRequest, category_id: int) -> HttpResponse:
     from ticketing.models import TicketCategory
 
-    try:
-        category = TicketCategory.objects.get(pk=category_id)
-    except TicketCategory.DoesNotExist:
-        return HttpResponse("Category not found", status=404)
+    category = get_object_or_404(TicketCategory, pk=category_id)
 
     ticket_count = category.tickets.count()
 

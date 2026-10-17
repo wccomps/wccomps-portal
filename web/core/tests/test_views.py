@@ -177,7 +177,7 @@ class TestTicketDetailView:
 
         response = client.get(reverse("ticket_detail", args=[ticket.ticket_number]))
 
-        assert response.status_code == 403
+        assert response.status_code == 404
 
     def test_nonexistent_ticket_shows_error(self, blue_team_user, team1):
         """Accessing nonexistent ticket should show error."""
@@ -187,7 +187,7 @@ class TestTicketDetailView:
         response = client.get(reverse("ticket_detail", args=["T999-999"]))
 
         assert response.status_code == 404
-        assert b"Ticket not found" in response.content or b"does not exist" in response.content
+        assert "error.html" in [t.name for t in response.templates]
 
 
 class TestTicketCommentView:
