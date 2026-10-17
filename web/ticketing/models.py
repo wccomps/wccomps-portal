@@ -146,6 +146,8 @@ class Ticket(models.Model):
 
 
 class TicketAttachment(models.Model):
+    MAX_SIZE = 10 * 1024 * 1024  # 10MB, from the web or a ticket's Discord thread
+
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="attachments")
     file_data = models.BinaryField()
     filename = models.CharField(max_length=255)

@@ -9,6 +9,7 @@ from bot.cogs.admin_teams import AdminTeamsCog
 from bot.cogs.admin_tickets import AdminTicketsCog
 from bot.cogs.ticketing import TicketingCog
 from bot.tests.bot_harness import (
+    Attachment,
     Chosen,
     Command,
     Listener,
@@ -25,7 +26,7 @@ from bot.tests.bot_harness import (
     sent_problems,
 )
 from bot.ticket_dashboard import ResolveTicketModal
-from core.tests.strategies import rolled_back
+from core.tests.strategies import file_bytes, file_names, rolled_back
 
 BROADCAST = Command(AdminCompetitionCog, AdminCompetitionCog.admin_broadcast.callback, may("admin"))
 RESOLVE = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_resolve.callback, may("ticketing_support"))
@@ -192,3 +193,16 @@ def test_a_long_web_broadcast_is_sent_in_parts(bot_world: World, target: str, me
         for sent in fakes.sent:
             assert not sent_problems(sent), sent_problems(sent)
             assert not mention_problems(sent, fakes.bot.allowed_mentions)
+
+
+@example(filename="shot\x00.png", content_type="image/png" + "x" * 200, data=b"<svg onload=alert(1)>")
+@given(filename=file_names(), content_type=st.one_of(st.none(), option_text(0, 300)), data=file_bytes())
+def test_a_thread_attachment_is_stored_as_a_web_upload_is(
+    bot_world: World, filename: str, content_type: str | None, data: bytes
+) -> None:
+    """The listener stored an attachment's name and claimed content type as Discord gave them: a NUL or a name past
+    255 characters failed the insert (and a claimed image/png made an SVG preview inline). It now stores them as a
+    web upload is stored (core.stored_files)."""
+    attachment = Attachment(filename, content_type, len(data), data)
+    run = drive(THREAD_MESSAGE, bot_world, in_a_ticket_thread(bot_world, "see attached", attachments=[attachment]))
+    assert "ticketing_ticketattachment" in run.written

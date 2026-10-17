@@ -15,15 +15,13 @@ from ticketing.models import Ticket, TicketAttachment
 
 logger = logging.getLogger(__name__)
 
-MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10MB
-
 
 def _save_attachment(ticket: Ticket, uploaded_file: UploadedFile[bytes] | None, uploaded_by: str) -> None:
     """Validate and save an attachment; BadRequest says why one is refused."""
     if not uploaded_file:
         raise BadRequest("No file provided")
 
-    if uploaded_file.size is None or uploaded_file.size > MAX_ATTACHMENT_SIZE:
+    if uploaded_file.size is None or uploaded_file.size > TicketAttachment.MAX_SIZE:
         uploaded_file.close()
         raise BadRequest("File too large (max 10MB)")
 
