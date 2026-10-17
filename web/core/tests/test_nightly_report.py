@@ -16,13 +16,13 @@ nightly_report = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(nightly_report)
 
 
-def _junit(tmp: Path, message: str) -> Path:
-    from xml.sax.saxutils import escape
+def _junit(tmp: Path, message: str, error: str = "") -> Path:
+    from xml.sax.saxutils import escape, quoteattr
 
     path = tmp / "results.xml"
     path.write_text(
         '<testsuites><testsuite><testcase classname="web.core.tests.test_x" name="test_y[1]">'
-        f"<failure>{escape(message)}</failure></testcase>"
+        f"<failure message={quoteattr(error)}>{escape(message)}</failure></testcase>"
         '<testcase classname="a" name="passes"/></testsuite></testsuites>',
         encoding="utf-8",
     )
@@ -48,6 +48,14 @@ def test_a_failure_stays_inside_its_code_block(tmp_path_factory, message: str) -
     assert outside == "Run: https://run\nCommit: abc123\n\n", outside
     assert "web.core.tests.test_x::test_y[1]" in body
     assert len(body) < 65_536
+
+
+def test_the_error_line_survives_a_long_falsifying_example(tmp_path: Path) -> None:
+    """The text keeps only its end, where a long generated value can push the assertion out."""
+    results = _junit(tmp_path, "assert 400 == 403\n" + "y" * 5000, error="AssertionError: a role the page refuses")
+    body = nightly_report.body(results, "https://run", "abc123")
+    assert "AssertionError: a role the page refuses" in body
+    assert "assert 400 == 403" not in body
 
 
 def test_a_missing_results_file_is_reported(tmp_path: Path) -> None:
