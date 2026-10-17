@@ -26,7 +26,7 @@ def tickets_bulk_claim(request: HttpRequest) -> HttpResponse:
 
     form = TicketBulkActionForm(request.POST)
     if not form.is_valid():
-        messages.info(request, form.errors["ticket_numbers"][0])
+        messages.info(request, str(form.errors["ticket_numbers"][0]))
         return back_to_list(request)
 
     claimed = 0
@@ -52,7 +52,7 @@ def tickets_bulk_resolve(request: HttpRequest) -> HttpResponse:
 
     form = TicketBulkActionForm(request.POST)
     if not form.is_valid():
-        messages.info(request, form.errors["ticket_numbers"][0])
+        messages.info(request, str(form.errors["ticket_numbers"][0]))
         return back_to_list(request)
 
     requested = Ticket.objects.filter(ticket_number__in=form.cleaned_data["ticket_numbers"])
