@@ -16,6 +16,7 @@ from bot.utils import get_team_or_respond, log_to_ops_channel, send_lines
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import parse_team_range, reset_team_password
 from core.models import AuditLog, CompetitionConfig
+from core.utils import shorten
 from team.models import MAX_TEAMS, DiscordLink, Team, team_username
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ class AdminTeamsCog(commands.Cog):
 
         if members:
             # Build member list, respecting Discord's embed field char limit
-            member_lines = [f"• {m.discord_username} (ID: {m.discord_id}) - via `{m.user.username}`" for m in members]
+            member_lines = [f"• {m.discord_username} (ID: {m.discord_id}), via `{m.user.username}`" for m in members]
 
             member_list = ""
             shown_count = 0
@@ -143,13 +144,13 @@ class AdminTeamsCog(commands.Cog):
                 )
 
                 if not link:
-                    results.append(f"❌ {user_display}: Not linked to any team")
+                    results.append(f"{user_display}: not linked to any team")
                     error_count += 1
                     continue
 
                 team = link.team
                 if not team:
-                    results.append(f"❌ {user_display}: Link has no associated team")
+                    results.append(f"{user_display}: the link has no team")
                     error_count += 1
                     continue
 
@@ -173,12 +174,12 @@ class AdminTeamsCog(commands.Cog):
                     },
                 )
 
-                results.append(f"✓ {user_display}: Unlinked from **{team.team_name}**")
+                results.append(f"{user_display}: unlinked from **{team.team_name}**")
                 success_count += 1
 
             except Exception as e:
                 logger.exception(f"Error unlinking user {user_id}: {e}")
-                results.append(f"❌ User ID {user_id}: Error - {str(e)[:50]}")
+                results.append(f"User ID {user_id}: failed ({shorten(str(e), 50)})")
                 error_count += 1
 
         if len(user_ids) == 1:
@@ -186,13 +187,13 @@ class AdminTeamsCog(commands.Cog):
             if success_count > 0:
                 await log_to_ops_channel(
                     self.bot,
-                    f"User Unlinked: {results[0].split(':')[0].replace('✓ ', '')} by {interaction.user.mention}",
+                    f"User Unlinked: {results[0].split(':')[0]} by {interaction.user.mention}",
                 )
         else:
             summary = "**Unlink Results**\n\n"
-            summary += f"✓ Successfully unlinked: {success_count}\n"
+            summary += f"Unlinked: {success_count}\n"
             if error_count > 0:
-                summary += f"❌ Failed: {error_count}\n"
+                summary += f"Failed: {error_count}\n"
             summary += f"Total processed: {len(user_ids)}\n\n"
 
             await send_lines(interaction, summary.rstrip(), results, title="Details", filename="results.txt")
@@ -304,25 +305,25 @@ class AdminTeamsCog(commands.Cog):
             audit_reason="team_reset",
         )
 
-        results.append(f"✓ Unlinked {unlinked_count} Discord user(s)")
+        results.append(f"Unlinked {unlinked_count} Discord user(s)")
 
         from asgiref.sync import sync_to_async
 
         auth_manager = AuthentikManager()
         new_password, error = await sync_to_async(reset_team_password)(team_number)
         if new_password:
-            results.append("✓ Reset Authentik password")
+            results.append("Reset the Authentik password")
         else:
-            results.append(f"❌ Failed to reset password: {error}")
+            results.append(f"Failed to reset the password: {error}")
 
         username = team_username(team_number)
         session_success, session_error, sessions_revoked = await sync_to_async(auth_manager.revoke_user_sessions)(
             username
         )
         if session_success:
-            results.append(f"✓ Revoked {sessions_revoked} active session(s)")
+            results.append(f"Revoked {sessions_revoked} active session(s)")
         else:
-            results.append(f"❌ Failed to revoke sessions: {session_error}")
+            results.append(f"Failed to revoke sessions: {session_error}")
 
         if recreate_channels:
             deleted_items = await delete_team_infrastructure(
@@ -330,7 +331,7 @@ class AdminTeamsCog(commands.Cog):
             )
 
             if deleted_items:
-                results.append(f"✓ Deleted {', '.join(deleted_items)}")
+                results.append(f"Deleted {', '.join(deleted_items)}")
 
             from bot.discord_manager import DiscordManager
 
@@ -338,15 +339,15 @@ class AdminTeamsCog(commands.Cog):
             role, category = await discord_manager.setup_team_infrastructure(team_number)
 
             if role and category:
-                results.append(f"✓ Recreated role and category with {len(category.channels)} channels")
+                results.append(f"Recreated the role and category with {len(category.channels)} channels")
             elif role:
-                results.append("✓ Recreated role (category creation failed)")
+                results.append("Recreated the role (creating the category failed)")
             elif category:
-                results.append("✓ Recreated category (role creation failed)")
+                results.append("Recreated the category (creating the role failed)")
             else:
-                results.append("❌ Failed to recreate infrastructure")
+                results.append("Failed to recreate the role and category")
         else:
-            results.append("⊘ Skipped channel recreation (recreate_channels=False)")
+            results.append("Skipped recreating channels (recreate_channels=False)")
 
         await AuditLog.objects.acreate(
             action="team_reset",
@@ -370,7 +371,7 @@ class AdminTeamsCog(commands.Cog):
         response = f"**Team {team_number} Reset Complete**\n\n" + "\n".join(results)
         if new_password:
             response += f"\n\n**New Team Password:** `{new_password}`"
-            response += "\n\n⚠️ Make sure to securely share this password with the team."
+            response += "\n\nMake sure to securely share this password with the team."
         await interaction.followup.send(response, ephemeral=True)
 
     @teams_group.command(
@@ -398,16 +399,16 @@ class AdminTeamsCog(commands.Cog):
         for team_number in team_numbers:
             team = await Team.objects.filter(team_number=team_number).afirst()
             if not team:
-                results.append(f"❌ Team {team_number:02d}: Not found")
+                results.append(f"Team {team_number:02d}: not found")
                 continue
 
             if team.is_active:
-                results.append(f"⊘ Team {team_number:02d}: Already active")
+                results.append(f"Team {team_number:02d}: already active")
                 continue
 
             team.is_active = True
             await team.asave()
-            results.append(f"✓ Team {team_number:02d}: Activated")
+            results.append(f"Team {team_number:02d}: activated")
             success_count += 1
 
         await AuditLog.objects.acreate(
@@ -430,7 +431,7 @@ class AdminTeamsCog(commands.Cog):
         )
 
         summary = "**Team Activation Results**\n\n"
-        summary += f"✓ Activated: {success_count}/{len(team_numbers)}\n\n"
+        summary += f"Activated: {success_count}/{len(team_numbers)}\n\n"
 
         await send_lines(interaction, summary.rstrip(), results, title="Details", filename="results.txt")
 
@@ -459,16 +460,16 @@ class AdminTeamsCog(commands.Cog):
         for team_number in team_numbers:
             team = await Team.objects.filter(team_number=team_number).afirst()
             if not team:
-                results.append(f"❌ Team {team_number:02d}: Not found")
+                results.append(f"Team {team_number:02d}: not found")
                 continue
 
             if not team.is_active:
-                results.append(f"⊘ Team {team_number:02d}: Already inactive")
+                results.append(f"Team {team_number:02d}: already inactive")
                 continue
 
             team.is_active = False
             await team.asave()
-            results.append(f"✓ Team {team_number:02d}: Deactivated")
+            results.append(f"Team {team_number:02d}: deactivated")
             success_count += 1
 
         await AuditLog.objects.acreate(
@@ -491,7 +492,7 @@ class AdminTeamsCog(commands.Cog):
         )
 
         summary = "**Team Deactivation Results**\n\n"
-        summary += f"✓ Deactivated: {success_count}/{len(team_numbers)}\n"
+        summary += f"Deactivated: {success_count}/{len(team_numbers)}\n"
         summary += "Their members lose their team roles within a few minutes; reactivating restores them.\n\n"
 
         await send_lines(interaction, summary.rstrip(), results, title="Details", filename="results.txt")
@@ -532,7 +533,7 @@ class AdminTeamsCog(commands.Cog):
         for team_number in team_numbers:
             team = await Team.objects.filter(team_number=team_number).afirst()
             if not team:
-                results.append(f"❌ Team {team_number:02d}: Not found")
+                results.append(f"Team {team_number:02d}: not found")
                 failed_count += 1
                 continue
 
@@ -541,13 +542,13 @@ class AdminTeamsCog(commands.Cog):
             role, category = await discord_manager.setup_team_infrastructure(team_number)
 
             if role and category:
-                results.append(f"✓ Team {team_number:02d}: Recreated (role + {len(category.channels)} channels)")
+                results.append(f"Team {team_number:02d}: recreated (role and {len(category.channels)} channels)")
                 success_count += 1
             elif role or category:
-                results.append(f"⚠ Team {team_number:02d}: Partially recreated")
+                results.append(f"Team {team_number:02d}: partly recreated")
                 failed_count += 1
             else:
-                results.append(f"❌ Team {team_number:02d}: Failed to recreate")
+                results.append(f"Team {team_number:02d}: failed to recreate")
                 failed_count += 1
 
         await AuditLog.objects.acreate(
@@ -572,9 +573,9 @@ class AdminTeamsCog(commands.Cog):
         )
 
         summary = "**Team Recreation Results**\n\n"
-        summary += f"✓ Success: {success_count}/{len(team_numbers)}\n"
+        summary += f"Recreated: {success_count}/{len(team_numbers)}\n"
         if failed_count > 0:
-            summary += f"❌ Failed: {failed_count}/{len(team_numbers)}\n"
+            summary += f"Failed: {failed_count}/{len(team_numbers)}\n"
         summary += "\n"
 
         await send_lines(interaction, summary.rstrip(), results, title="Details", filename="results.txt")

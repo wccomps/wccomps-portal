@@ -116,7 +116,7 @@ class AdminTicketsCog(commands.Cog):
         await publish_new_ticket(self.bot, interaction.guild, ticket)
         await log_to_ops_channel(
             self.bot,
-            f"Admin Ticket Created: {ticket.ticket_number} - {cat_info['display_name']} "
+            f"Admin Ticket Created: {ticket.ticket_number} ({cat_info['display_name']}) "
             f"for **{team.team_name}** by {interaction.user.mention}",
         )
 
@@ -156,9 +156,9 @@ class AdminTicketsCog(commands.Cog):
         tickets = [t async for t in query.order_by("-created_at")[:display_limit]]
 
         if total_count > display_limit:
-            title = f"Tickets ({status}) - Showing {display_limit} of {total_count}"
+            title = f"Tickets ({status}): showing {display_limit} of {total_count}"
         else:
-            title = f"Tickets ({status}) - {total_count} total"
+            title = f"Tickets ({status}): {total_count} in all"
 
         embed = discord.Embed(title=title, color=discord.Color.blue())
 
@@ -311,8 +311,8 @@ class AdminTicketsCog(commands.Cog):
         await log_to_ops_channel(
             self.bot,
             f"Ticket Category Changed: {ticket.ticket_number} for **{ticket.team.team_name}**\n"
-            f"Changed by {interaction.user.mention}: {old_cat_name} → {new_cat_name}\n"
-            f"Point impact: {old_cat_info.get('points', 0)}pt → {new_cat_info.get('points', 0)}pt",
+            f"Changed by {interaction.user.mention}: from {old_cat_name} to {new_cat_name}\n"
+            f"Point impact: from {old_cat_info.get('points', 0)}pt to {new_cat_info.get('points', 0)}pt",
         )
 
         await interaction.response.send_message(
@@ -465,13 +465,13 @@ class AdminTicketsCog(commands.Cog):
         ticket_count, teams_to_reset = counts["tickets_deleted"], counts["teams_reset"]
 
         await interaction.edit_original_response(
-            content=f"✅ Cleared all tickets\n• Deleted {ticket_count} tickets\n• Reset {teams_to_reset} team counters",
+            content=f"Cleared all tickets\n• Deleted {ticket_count} tickets\n• Reset {teams_to_reset} team counters",
             view=None,
         )
 
         await log_to_ops_channel(
             self.bot,
-            f"🗑️ All tickets cleared by {interaction.user.mention}\n"
+            f"All tickets cleared by {interaction.user.mention}\n"
             f"• Tickets deleted: {ticket_count}\n"
             f"• Teams reset: {teams_to_reset}",
         )

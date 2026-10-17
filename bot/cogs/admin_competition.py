@@ -54,7 +54,7 @@ class AdminCompetitionCog(commands.Cog):
             active = await sync_to_async(active_team_numbers)()
             view = ConfirmView(confirm_label=f"Confirm Reset All {len(active)} Active Teams")
             await interaction.response.send_message(
-                f"⚠️ **WARNING: You are about to reset passwords for ALL {len(active)} active team accounts.**\n\n"
+                f"**WARNING: You are about to reset passwords for ALL {len(active)} active team accounts.**\n\n"
                 "This will:\n"
                 "• Generate new random passwords for them\n"
                 "• Invalidate all current passwords and end their Authentik sessions\n\n"
@@ -369,11 +369,11 @@ class AdminCompetitionCog(commands.Cog):
         view = ConfirmView(confirm_label="Confirm Cleanup")
         await interaction.response.send_message(
             "**This will permanently:**\n"
-            "- Delete all team Discord channels and categories\n"
-            "- Remove team roles from all members\n"
-            "- Deactivate all team member Discord links\n"
-            "- Remove the Room Judge role\n"
-            "- Clear queued announcements\n\n"
+            "• Delete all team Discord channels and categories\n"
+            "• Remove team roles from all members\n"
+            "• Deactivate all team member Discord links\n"
+            "• Remove the Room Judge role\n"
+            "• Clear queued announcements\n\n"
             "Are you sure you want to continue?",
             view=view,
             ephemeral=True,

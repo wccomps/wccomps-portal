@@ -85,7 +85,7 @@ async def report_missing_discord_settings(bot: discord.Client) -> None:
     if not missing:
         return
     message = (
-        f"⚠️ Discord settings missing from the environment (set to 0): {', '.join(missing)}. "
+        f"Discord settings missing from the environment (set to 0): {', '.join(missing)}. "
         "Role sync, /link roles, team channel access and announcements that depend on them will not work."
     )
     logger.error(message)

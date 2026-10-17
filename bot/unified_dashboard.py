@@ -206,11 +206,11 @@ class UnifiedDashboard:
 
             assignee = ""
             if ticket.assigned_to:
-                assignee = f" - {ticket.assigned_to.username}"
+                assignee = f", {ticket.assigned_to.username}"
 
             lines.append(
                 f"`{ticket.status.upper()}` {ticket_display} {ticket.team.team_name}{assignee}{stale}\n"
-                f"   ↳ *{desc_preview}* ({time_str})"
+                f"   *{desc_preview}* ({time_str})"
             )
 
         field_value = "\n".join(lines) if lines else "No tickets"

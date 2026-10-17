@@ -32,7 +32,7 @@ async def create_ticket(
     member = await linked_team_member(interaction.user.id)
     if not member:
         await interaction.followup.send(
-            "You must be linked to a competition team to create tickets.\nClick the **🔗 Link Account** button first.",
+            "You must be linked to a competition team to create tickets.\nClick the **Link Account** button first.",
             ephemeral=True,
         )
         return
@@ -83,7 +83,7 @@ async def create_ticket(
         return
 
     await interaction.followup.send(
-        f"✅ Ticket **{ticket.ticket_number}** created!\n"
+        f"Ticket **{ticket.ticket_number}** created.\n"
         f"Category: **{cat_info['display_name']}**\n"
         f"Points: **{cat_info.get('points', 0)}**\n\n"
         f"A volunteer will respond shortly.",
@@ -287,12 +287,10 @@ class TicketCategoryView(discord.ui.View):
 
 
 class LinkButton(discord.ui.Button["TeamHelpView"]):
+    CUSTOM_ID = "help_panel:link"
+
     def __init__(self) -> None:
-        super().__init__(
-            style=discord.ButtonStyle.primary,
-            label="🔗 Link Account",
-            custom_id="help_panel:link",
-        )
+        super().__init__(style=discord.ButtonStyle.primary, label="Link Account", custom_id=self.CUSTOM_ID)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if not self.view:
@@ -301,12 +299,10 @@ class LinkButton(discord.ui.Button["TeamHelpView"]):
 
 
 class TicketButton(discord.ui.Button["TeamHelpView"]):
+    CUSTOM_ID = "help_panel:ticket"
+
     def __init__(self) -> None:
-        super().__init__(
-            style=discord.ButtonStyle.success,
-            label="🎫 Create Ticket",
-            custom_id="help_panel:ticket",
-        )
+        super().__init__(style=discord.ButtonStyle.success, label="Create Ticket", custom_id=self.CUSTOM_ID)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if not self.view:
@@ -350,6 +346,15 @@ class TeamHelpView(discord.ui.View):
             view=TicketCategoryView(categories),
             ephemeral=True,
         )
+
+
+def _has_button(message: discord.Message, custom_id: str) -> bool:
+    """Whether the message carries the button: how a panel posted earlier is found, whatever its title was then."""
+    return any(
+        getattr(child, "custom_id", None) == custom_id
+        for row in message.components
+        for child in getattr(row, "children", ())
+    )
 
 
 class HelpPanelsCog(commands.Cog):
@@ -411,7 +416,7 @@ class HelpPanelsCog(commands.Cog):
             return
 
         embed = discord.Embed(
-            title="🔗 Link Your Discord Account",
+            title="Link Your Discord Account",
             description=(
                 "**Welcome to WCComps!**\n\n"
                 "Before you can participate, you need to link your Discord account to your Authentik account.\n\n"
@@ -432,7 +437,7 @@ class HelpPanelsCog(commands.Cog):
         view = TeamHelpView(self.bot, show_link=True, show_ticket=False)
 
         async for message in channel.history(limit=10):
-            if message.author == self.bot.user and message.embeds and message.embeds[0].title == embed.title:
+            if message.author == self.bot.user and _has_button(message, LinkButton.CUSTOM_ID):
                 await message.edit(embed=embed, view=view)
                 logger.info(f"Updated link panel in channel {channel_id}")
                 return
@@ -450,10 +455,10 @@ class HelpPanelsCog(commands.Cog):
         categories = await sync_to_async(get_all_categories)(user_creatable_only=True)
         for cat_info in categories.values():
             points = cat_info.get("points", 0)
-            categories_text.append(f"• **{cat_info['display_name']}** - {points}pt")
+            categories_text.append(f"• **{cat_info['display_name']}**: {points}pt")
 
         embed = discord.Embed(
-            title="🎫 Need Help?",
+            title="Need Help?",
             description=(
                 "**Create a support ticket and our volunteers will assist you!**\n\n"
                 "Click the button below to create a ticket. A volunteer will respond shortly.\n\n"
@@ -465,7 +470,7 @@ class HelpPanelsCog(commands.Cog):
         view = TeamHelpView(self.bot, show_link=False, show_ticket=True)
 
         async for message in channel.history(limit=10):
-            if message.author == self.bot.user and message.embeds and message.embeds[0].title == embed.title:
+            if message.author == self.bot.user and _has_button(message, TicketButton.CUSTOM_ID):
                 await message.edit(embed=embed, view=view)
                 logger.info(f"Updated ticket panel in channel {channel_id}")
                 return

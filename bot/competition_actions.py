@@ -251,13 +251,13 @@ async def run_competition_cleanup(
         )
 
         # After a close-out the links were deleted with the event's live data, so there is no count to report
-        links_line = "" if close_out else f"- Deactivated {deactivated} team links\n"
+        links_line = "" if close_out else f"• Deactivated {deactivated} team links\n"
         await log_to_ops_channel(
             bot,
             f"Competition Cleanup Complete\n"
             f"{links_line}"
-            f"- Deleted {deleted_count} team categories\n"
-            f"- Removed {stats['roles_removed']} roles",
+            f"• Deleted {deleted_count} team categories\n"
+            f"• Removed {stats['roles_removed']} roles",
         )
 
         await update_status_channel(bot)

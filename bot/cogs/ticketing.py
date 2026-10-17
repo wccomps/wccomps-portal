@@ -206,7 +206,7 @@ class TicketingCog(commands.Cog):
             return
 
         embed = discord.Embed(
-            title="✅ Ticket Created",
+            title="Ticket Created",
             description=f"Your {cat_info['display_name']} ticket has been created.",
             color=discord.Color.green(),
         )
@@ -217,7 +217,7 @@ class TicketingCog(commands.Cog):
         embed.add_field(name="Description", value=fit(description, DISCORD_EMBED_FIELD_CHAR_LIMIT), inline=False)
 
         embed.add_field(
-            name="📎 Need to attach files?",
+            name="Need to attach files?",
             value="Post screenshots, logs, or other files directly in the ticket thread.\n"
             "Find the thread in your team channels or #ticket-queue.",
             inline=False,

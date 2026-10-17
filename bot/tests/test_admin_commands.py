@@ -331,7 +331,7 @@ class TestAdminCommands:
             mock_interaction.response.defer.assert_called_once()
             mock_interaction.followup.send.assert_called_once()
             call_args = mock_interaction.followup.send.call_args
-            assert "Unlinked" in call_args.args[0] or "✓" in call_args.args[0]
+            assert "unlinked from" in call_args.args[0]
 
             mock_log_ops.assert_called_once()
 

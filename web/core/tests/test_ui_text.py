@@ -8,9 +8,8 @@ Where UI text appears: a template's text (titles and textareas included, a templ
 |default:"-" each read as a string of their own), its text attributes and component props (TEXT_ATTRIBUTES), the
 strings in its inline scripts and in static JavaScript, and every string literal in the web app's Python but
 docstrings and log lines (messages, form errors, strings returned for display and admin columns among them), with
-the bot's role sync, whose change list the Sync Roles page shows. A string there that isn't UI text, or a symbol that
-is the control itself, is in UI_TEXT_EXCEPTIONS with why. The rest of the bot writes Discord messages and is outside
-it.
+the bot's, whose strings are the Discord messages, embeds, buttons and modals it sends. A string there that isn't UI
+text, or a symbol that is the control itself, is in UI_TEXT_EXCEPTIONS with why.
 """
 
 import ast
@@ -88,6 +87,8 @@ UI_TEXT_EXCEPTIONS = {
     "web/core/middleware.py:SubdomainRedirectMiddleware.*:*:hyphen for no value": "an empty field in the legacy-host "
     "log line",
     "web/gunicorn.conf.py:<module>:*:hyphen for no value": "gunicorn's name for standard output",
+    "bot/cogs/ticketing.py:TicketingCog.on_message:*:\U0001f4ce": "the reaction that marks a message whose attachment "
+    "was saved: a reaction is an emoji",
 }
 
 
@@ -150,8 +151,9 @@ def template_sites(path: Path) -> Iterator[tuple[int, str, bool]]:
             yield start + line - 1, string, False
 
 
-# Python modules held to the rule: the web app (not its tests or migrations) and the bot's role sync
-PYTHON_UI_FILES_RE = re.compile(r"web/(?!.*/tests/|.*/migrations/|browser_tests/).*\.py|bot/role_sync\.py")
+# Python modules held to the rule: the web app (not its tests or migrations) and the bot (not its tests), whose
+# strings are the Discord messages, embeds, buttons and modals it sends
+PYTHON_UI_FILES_RE = re.compile(r"web/(?!.*/tests/|.*/migrations/|browser_tests/).*\.py|bot/(?!tests/).*\.py|main\.py")
 
 
 def is_log_call(node: ast.AST) -> bool:
