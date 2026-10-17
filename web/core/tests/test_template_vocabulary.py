@@ -41,6 +41,7 @@ from core.tests.guards import (
     text,
     tracked_files,
     tracked_templates,
+    with_open_elements,
 )
 
 COTTON_DIR = TEMPLATES_DIR / "cotton"
@@ -532,6 +533,18 @@ def test_no_hand_written_component_markup() -> None:
                     lines.setdefault(f"{template_name(path)}:{component}", []).append(str(tag.line))
     found = {key: f"line {', '.join(ln)}" for key, ln in lines.items()}
     fail_with("Markup a shared component renders, written by hand", found, RAW_MARKUP_EXCEPTIONS)
+
+
+def test_button_rows_end_a_section() -> None:
+    """A button row is a boxed bar that ends a section (cotton README, <c-button_row>); inside a detail grid it draws
+    the box among the label/value rows. Put it after the grid."""
+    found = {
+        f"{template_name(path)}:{tag.line}": "a c-button_row inside a c-detail_grid"
+        for path in page_templates()
+        for tag, open_tags in with_open_elements(path)
+        if tag.name == "c-button_row" and any(t.name in ("c-detail_grid", "c-detail_row") for t in open_tags)
+    }
+    fail_with("Button rows inside a detail grid", found, {})
 
 
 def test_no_inline_styles() -> None:

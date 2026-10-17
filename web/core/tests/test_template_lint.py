@@ -51,18 +51,6 @@ def test_no_nested_forms() -> None:
     fail_with("Nested forms", found, {})
 
 
-def test_no_button_row_in_a_detail_row() -> None:
-    """A button row is a boxed bar for the bottom of a section; inside a label/value row it boxes one button
-    mid-list. Put the buttons after the detail grid."""
-    found = {
-        f"{template_name(path)}:{tag.line}": "a c-button_row inside a c-detail_row"
-        for path in page_templates()
-        for tag, open_tags in with_open_elements(path)
-        if tag.name == "c-button_row" and any(t.name == "c-detail_row" for t in open_tags)
-    }
-    fail_with("Button rows in detail rows", found, {})
-
-
 # ---------------------------------------------------------------------------
 # 4. Alpine CSP compatibility: silent runtime failure
 # ---------------------------------------------------------------------------

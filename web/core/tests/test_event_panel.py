@@ -131,7 +131,7 @@ def test_played_and_stopped_the_event_section_points_at_the_scorecards(client):
 
     panel = _event_section(_page(client))
 
-    assert f'href="{reverse("scoring:email_scorecards")}"' in panel
+    assert _action(panel) == reverse("scoring:email_scorecards")
     assert "Teams can't sign in while stopped. Scores stay, so grading goes on." in _page(client)
 
 
@@ -369,7 +369,7 @@ def test_leftovers_open_advanced_where_clear_leftover_data_is(client):
     panel = _flat(_event_section(page))
 
     assert "Clear leftover data under Advanced on the Competition page" in panel
-    assert "<a " not in _row(panel, "Next step") and _action(panel) is None
+    assert _action(panel) is None
     assert "under Advanced below" in _flat(page[page.index('id="leftovers"') :])
     # The status sentence shows once, in the Event section
     assert _flat(page).count("there is live data with no scores") == 1

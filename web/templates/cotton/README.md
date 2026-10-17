@@ -17,6 +17,24 @@ Content container (card-like) with optional toolbar.
 </c-module>
 ```
 
+#### `<c-detail_grid>` and `<c-detail_row>`
+Label/value pairs for a record's details.
+```django
+<c-detail_grid>
+    <c-detail_row label="Status">Open</c-detail_row>
+</c-detail_grid>
+```
+
+#### `<c-button_row>`
+A boxed bar of buttons and links that ends a section: after its text, form or detail grid, never inside the grid
+(`core/tests/test_template_vocabulary.py` fails on one there).
+```django
+<c-button_row>
+    <c-button type="submit">Save</c-button>
+    <c-link href="/back">Cancel</c-link>
+</c-button_row>
+```
+
 #### `<c-page_header>`
 Page title with optional subtitle.
 ```django
