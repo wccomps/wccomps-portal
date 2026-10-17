@@ -10,7 +10,7 @@ from discord.ext import commands
 from bot.permissions import permission_check
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_dashboard import trigger_dashboard
-from bot.ticket_input import read_ticket
+from bot.ticket_input import read_resolution, read_ticket
 from bot.utils import (
     ConfirmView,
     get_team_or_respond,
@@ -207,12 +207,16 @@ class AdminTicketsCog(commands.Cog):
         if not ticket:
             await interaction.response.send_message(f"Ticket {ticket_number} not found", ephemeral=True)
             return
+        resolution = read_resolution(notes, "" if points is None else str(points))
+        if isinstance(resolution, str):
+            await interaction.response.send_message(resolution, ephemeral=True)
+            return
 
         resolved, error = await aresolve_ticket(
             ticket_id=ticket.id,
             actor_username=str(interaction.user),
-            resolution_notes=notes,
-            points_override=points,
+            resolution_notes=resolution[0],
+            points_override=resolution[1],
             discord_id=interaction.user.id,
             discord_username=str(interaction.user),
         )

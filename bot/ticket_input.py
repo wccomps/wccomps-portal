@@ -3,8 +3,10 @@ Discord holds only what one filed on the web may."""
 
 from dataclasses import dataclass
 
+from django import forms
+
 from core.tickets_config import TicketCategoryConfig, get_all_categories
-from ticketing.forms import CreateTicketForm
+from ticketing.forms import CreateTicketForm, TicketResolveForm
 from ticketing.models import TicketCategory
 
 
@@ -16,6 +18,20 @@ class TicketInput:
     hostname: str
     ip_address: str
     service_name: str
+
+
+def form_errors(form: forms.Form) -> str:
+    """A form's errors as one reply, each after its field's name."""
+    return " ".join(f"{name.replace('_', ' ')}: {error}" for name, errors in form.errors.items() for error in errors)
+
+
+def read_resolution(notes: str, points: str) -> tuple[str, int | None] | str:
+    """Resolution notes and points as the web's resolve form reads them (points within the column they are charged
+    to), or what is wrong with them."""
+    form = TicketResolveForm({"resolution_notes": notes, "points_override": points})
+    if not form.is_valid():
+        return form_errors(form)
+    return form.cleaned_data["resolution_notes"], form.cleaned_data["points_override"]
 
 
 def read_ticket(
@@ -40,9 +56,7 @@ def read_ticket(
         }
     )
     if not form.is_valid():
-        return " ".join(
-            f"{name.replace('_', ' ')}: {error}" for name, errors in form.errors.items() for error in errors
-        )
+        return form_errors(form)
     categories = get_all_categories(user_creatable_only=not staff)
     category_id = form.cleaned_data["category"]
     if category_id not in categories:

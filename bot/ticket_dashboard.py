@@ -313,21 +313,19 @@ class ResolveTicketModal(discord.ui.Modal, title="Resolve Ticket"):
         self.add_item(self.points)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        points_override = None
-        if self.points.value.strip():
-            try:
-                points_override = int(self.points.value.strip())
-            except ValueError:
-                await interaction.response.send_message("Invalid point value. Must be a number.", ephemeral=True)
-                return
-
+        from bot.ticket_input import read_resolution
         from ticketing.lifecycle import aresolve_ticket
+
+        resolution = read_resolution(self.notes.value, self.points.value)
+        if isinstance(resolution, str):
+            await interaction.response.send_message(resolution, ephemeral=True)
+            return
 
         ticket, error = await aresolve_ticket(
             ticket_id=self.ticket.id,
             actor_username=str(interaction.user),
-            resolution_notes=self.notes.value,
-            points_override=points_override,
+            resolution_notes=resolution[0],
+            points_override=resolution[1],
             discord_id=interaction.user.id,
             discord_username=str(interaction.user),
         )

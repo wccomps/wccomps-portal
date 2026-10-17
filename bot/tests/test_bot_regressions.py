@@ -1,6 +1,7 @@
 """Regression tests for bugs the bot's property tests found, each pinned with the input that showed it."""
 
 from hypothesis import example, given
+from hypothesis import strategies as st
 
 from bot.cogs.admin_competition import AdminCompetitionCog
 from bot.cogs.admin_tickets import AdminTicketsCog
@@ -9,6 +10,8 @@ from bot.tests.bot_harness import (
     Chosen,
     Command,
     Listener,
+    Modal,
+    Run,
     World,
     drive,
     may,
@@ -16,6 +19,7 @@ from bot.tests.bot_harness import (
     on_message_edit,
     option_text,
 )
+from bot.ticket_dashboard import ResolveTicketModal
 
 BROADCAST = Command(AdminCompetitionCog, AdminCompetitionCog.admin_broadcast.callback, may("admin"))
 RESOLVE = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_resolve.callback, may("ticketing_support"))
@@ -23,8 +27,16 @@ REASSIGN = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_reassign.callba
 TICKET = Command(TicketingCog, TicketingCog.create_ticket.callback, frozenset({"blue_team", "other_team"}))
 ADMIN_TICKET = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_create.callback, may("ticketing_admin"))
 CHANGE_CATEGORY = Command(AdminTicketsCog, AdminTicketsCog.admin_change_category.callback, may("ticketing_admin"))
+RESOLVE_MODAL = Modal(ResolveTicketModal, lambda run, data: resolve_modal(run, "claimed"), may("ticketing_support"))
 THREAD_MESSAGE = Listener(TicketingCog, TicketingCog.on_message, on_message)
 THREAD_EDIT = Listener(TicketingCog, TicketingCog.on_message_edit, on_message_edit)
+
+
+def resolve_modal(run: Run, name: str) -> ResolveTicketModal:
+    from core.tickets_config import get_category_config
+
+    ticket = run.world.tickets[name]
+    return ResolveTicketModal(ticket, get_category_config(ticket.category_id) or {})
 
 
 def in_a_ticket_thread(world: World, content: str, **more: object) -> Chosen:
@@ -94,3 +106,19 @@ def test_a_team_files_only_in_a_category_teams_may_create(bot_world: World, desc
     TicketCategory.objects.filter(pk=6).update(user_creatable=False)
     run = drive(TICKET, bot_world, Chosen({"role": "blue_team", "category": "6", "description": description}))
     assert "ticketing_ticket" not in run.written
+
+
+@example(points=2**31)
+@given(points=st.integers(2**31, 2**53))
+def test_resolve_points_past_the_column_are_refused(bot_world: World, points: int) -> None:
+    """/tickets resolve took any integer Discord sends (to 2**53) as the points charged, past their integer column
+    (DataError); the web's resolve form bounds them by the column, and now the bot reads them with it."""
+    drive(RESOLVE, bot_world, Chosen({"role": "admin", "ticket_number": "T001-002", "points": points}))
+
+
+@example(points="１２")
+@given(points=option_text(1, 5))
+def test_resolve_modal_points_are_read_as_the_web_reads_them(bot_world: World, points: str) -> None:
+    """The resolve modal read its points with int(), unlike the web form (and a NUL in its notes reached the
+    database): both now go through the web's resolve form."""
+    drive(RESOLVE_MODAL, bot_world, Chosen({"role": "admin", "Resolution Notes": "Fixed\x00", "Points": points}))
