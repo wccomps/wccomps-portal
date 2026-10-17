@@ -302,3 +302,22 @@ def _patch_group_role_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "BLACKTEAM_ROLE_ID", 779192640540639263)
     monkeypatch.setattr(settings, "ORANGETEAM_ROLE_ID", 647878925040615446)
     monkeypatch.setattr(settings, "DISCORD_TICKET_QUEUE_CHANNEL_ID", 9999)
+
+
+@pytest.fixture(scope="module")
+def module_bot_world(django_db_setup: Any, django_db_blocker: Any) -> Iterator[Any]:
+    """One world per test module for the bot property tests: each test runs in a savepoint inside the module's
+    transaction (pytest-django's db), and each example in one more (rolled_back), all rolled back."""
+    from django.db import transaction
+
+    from bot.tests.bot_harness import build_world
+
+    with django_db_blocker.unblock(), transaction.atomic():
+        yield build_world()
+        transaction.set_rollback(True)
+
+
+@pytest.fixture
+def bot_world(module_bot_world: Any, db: Any) -> Any:
+    """The rows the bot's handlers look up (bot_harness.World)."""
+    return module_bot_world
