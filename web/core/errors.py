@@ -104,7 +104,9 @@ def permission_denied(request: HttpRequest, exception: Exception) -> HttpRespons
 
 
 def page_not_found(request: HttpRequest, exception: Exception) -> HttpResponse:
-    return error_answer(request, 404)
+    # A script gets the plain words; the page keeps the red team line. Either way one text for every missing record,
+    # though what hides another team's records is the lookup filtered to the team (team_record_or_404)
+    return error_answer(request, 404, TITLES[404] if wants_json_error(request) else "")
 
 
 def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:

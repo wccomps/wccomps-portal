@@ -154,7 +154,7 @@ def test_json_endpoint_answers_403_as_json_without_a_fetch_header() -> None:
 def test_json_endpoint_answers_404_as_json() -> None:
     response = signed_in("admin").post(reverse("admin_team_action", args=[99]), {"action": "activate"})
     assert response.status_code == 404
-    assert response.json()["error"]
+    assert response.json() == {"error": "Not found"}  # the page's red team line is for people, not a script
 
 
 def test_json_endpoint_answers_405_as_json() -> None:
