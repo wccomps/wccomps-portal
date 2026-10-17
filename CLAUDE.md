@@ -50,8 +50,13 @@ the unparenthesized form is used intentionally throughout.
 
 ### Permissions
 - All authorization uses Authentik groups via `core.permission_constants.PERMISSION_MAP`
-- Use `@require_permission("role_name")` decorator for page views
-- Use manual `has_permission()` check for JSON API endpoints (return `JsonResponse` 403)
+- Use `@require_permission("role_name")` for a view's role check, pages and JSON endpoints alike: signed out, it sends
+  to sign in; signed in without the role, it raises `PermissionDenied` (the 403)
+- Views raise `PermissionDenied`, `Http404` and `BadRequest("why")` and never build an error answer; the
+  handlers in `core.errors` answer the error page, or `{"error": ...}` with the same status for a JSON endpoint
+  (`@json_endpoint`) or a fetch. A wrong method is `require_POST`/`require_http_methods`
+- A team's record (ticket, incident report, attachment) is looked up with `team_record_or_404`: another team's
+  record is a 404, the same as a missing one, never a 403
 - `WCComps_Discord_Admin` grants access to everything
 
 ### Discord Task Queue
