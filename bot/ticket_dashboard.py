@@ -12,6 +12,7 @@ from bot.utils import (
     fit,
 )
 from core.tickets_config import TicketCategoryConfig, get_category_config
+from ticketing.access import TICKET_STAFF
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -148,7 +149,7 @@ class TicketActionView(discord.ui.View):
             )
             return
 
-        if not await has_permission(interaction.user.id, "ticketing_support"):
+        if not await has_permission(interaction.user.id, TICKET_STAFF):
             await interaction.response.send_message(
                 "You don't have permission to claim tickets. "
                 "Contact an administrator if you need ticketing support access.",
@@ -194,7 +195,7 @@ class TicketActionView(discord.ui.View):
             )
             return
 
-        if not await has_permission(interaction.user.id, "ticketing_support"):
+        if not await has_permission(interaction.user.id, TICKET_STAFF):
             await interaction.response.send_message(
                 "You don't have permission to resolve tickets. "
                 "Contact an administrator if you need ticketing support access.",
@@ -202,14 +203,17 @@ class TicketActionView(discord.ui.View):
             )
             return
 
-        ticket = await Ticket.objects.filter(id=ticket_id).afirst()
+        ticket = await Ticket.objects.select_related("assigned_to").filter(id=ticket_id).afirst()
         if not ticket:
             await interaction.response.send_message("Ticket not found.", ephemeral=True)
             return
 
-        from ticketing.lifecycle import refusal
+        from ticketing.lifecycle import assignee_refusal, refusal
+        from ticketing.utils import get_user_for_ticket
 
-        if error := refusal(ticket, "resolve"):
+        # Asked before the modal so no one fills it in for nothing; the lifecycle asks again under its lock
+        actor = await sync_to_async(get_user_for_ticket)(discord_id=interaction.user.id)
+        if error := refusal(ticket, "resolve") or await sync_to_async(assignee_refusal)(ticket, actor, "resolve"):
             await interaction.response.send_message(error, ephemeral=True)
             return
 
@@ -238,7 +242,7 @@ class TicketActionView(discord.ui.View):
             )
             return
 
-        is_ops = await has_permission(interaction.user.id, "ticketing_support")
+        is_ops = await has_permission(interaction.user.id, TICKET_STAFF)
         member = await linked_team_member(interaction.user.id)
 
         if not is_ops and not member:

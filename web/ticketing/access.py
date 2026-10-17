@@ -1,21 +1,37 @@
-"""Who works tickets: one name for the ticket staff, and the rule for acting on a claimed ticket."""
+"""Who works tickets: the ticket staff's permission, and what a page offers a person on a ticket."""
 
-from django.contrib.auth.models import AnonymousUser, User
+from dataclasses import dataclass
+
+from django.contrib.auth.models import User
 
 from core.auth_utils import has_permission
+from ticketing.lifecycle import assignee_refusal, refusal
 from ticketing.models import Ticket
 
 # Ticketing staff see and work every team's tickets; the permission's groups hold ticketing admins and portal admins
 TICKET_STAFF = "ticketing_support"
 
-# What a staff member who neither holds the ticket nor is a ticketing admin is told (a ticket's state, not a role)
-NOT_YOUR_TICKET = "Only the support member it is assigned to, or a ticketing admin, can do that."
+
+@dataclass(frozen=True)
+class TicketActions:
+    """The ticket actions a page offers: the ones the lifecycle would let this person take now."""
+
+    resolve: bool
+    unclaim: bool
+    recategorize: bool
+    reassign: bool
 
 
-def is_ticket_staff(user: User | AnonymousUser) -> bool:
-    return has_permission(user, TICKET_STAFF)
-
-
-def works_ticket(user: User, ticket: Ticket) -> bool:
-    """Whether the person may resolve, unclaim or recategorize the ticket: its assignee, or a ticketing admin."""
-    return ticket.assigned_to_id == user.id or has_permission(user, "ticketing_admin")
+def ticket_actions(user: User, ticket: Ticket) -> TicketActions:
+    """What to offer on a claimed ticket (resolve, unclaim, change its category) and on any ticket (give it to
+    someone): each where its status allows it and assignee_refusal lets the person through."""
+    if not has_permission(user, TICKET_STAFF):
+        return TicketActions(resolve=False, unclaim=False, recategorize=False, reassign=False)
+    claimed = ticket.status == Ticket.STATUS_CLAIMED
+    held = claimed and assignee_refusal(ticket, user, "resolve") is None
+    return TicketActions(
+        resolve=held and refusal(ticket, "resolve") is None,
+        unclaim=held and refusal(ticket, "unclaim") is None,
+        recategorize=held,
+        reassign=assignee_refusal(ticket, user, "reassign") is None,
+    )

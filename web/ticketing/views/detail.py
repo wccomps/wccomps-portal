@@ -13,7 +13,7 @@ from core.auth_utils import get_user_team, has_permission, team_record_or_404
 from core.discord_tasks import PostComment
 from core.models import DiscordTask
 from core.tickets_config import get_all_categories, get_category_config
-from ticketing.access import TICKET_STAFF, is_ticket_staff
+from ticketing.access import TICKET_STAFF, ticket_actions
 from ticketing.forms import TicketCommentForm
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
@@ -36,7 +36,7 @@ def _ticketing_staff_usernames() -> list[str]:
     from core.models import UserGroups
     from core.permission_constants import PERMISSION_MAP
 
-    in_any_group = reduce(or_, (Q(groups__contains=[g]) for g in PERMISSION_MAP["ticketing_support"]))
+    in_any_group = reduce(or_, (Q(groups__contains=[g]) for g in PERMISSION_MAP[TICKET_STAFF]))
     return list(
         UserGroups.objects.filter(in_any_group).order_by("user__username").values_list("user__username", flat=True)
     )
@@ -55,9 +55,8 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
     user = cast(User, request.user)
     authentik_username = user.username
 
-    is_ops = is_ticket_staff(user)  # staff see a ticket's history; teams see only its comments
+    is_ops = has_permission(user, TICKET_STAFF)  # staff see a ticket's history; teams see only its comments
     team = get_user_team(user)
-    is_ticketing_admin = has_permission(user, "ticketing_admin")
 
     ticket = _visible_ticket(user, ticket_number)
 
@@ -67,8 +66,6 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
     context: dict[str, object] = {
         "is_ops": is_ops,
-        "is_ticketing_admin": is_ticketing_admin,
-        "is_ticketing_support": is_ops,
         "authentik_username": authentik_username,
         "team": team,
         "ticket": ticket,
@@ -77,6 +74,7 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
         "comments_version": list_version(comments),
         "attachments": attachments,
         "status_display": ticket.status.upper().replace("_", " "),
+        "actions": ticket_actions(user, ticket),
     }
 
     if is_ops:
@@ -135,7 +133,11 @@ def ticket_detail_dynamic(request: HttpRequest, ticket_number: str) -> HttpRespo
 
     comments = TicketComment.objects.filter(ticket=ticket).order_by("posted_at")
     # History holds staff notes, points and usernames; the team's own poll must not carry it
-    history = TicketHistory.objects.filter(ticket=ticket).order_by("-timestamp")[:20] if is_ticket_staff(user) else []
+    history = (
+        TicketHistory.objects.filter(ticket=ticket).order_by("-timestamp")[:20]
+        if has_permission(user, TICKET_STAFF)
+        else []
+    )
 
     versions = {"comments_version": list_version(comments), "history_version": list_version(history)}
     asked = {name: request.GET[name] for name in versions if name in request.GET}

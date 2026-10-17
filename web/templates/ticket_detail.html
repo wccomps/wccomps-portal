@@ -17,7 +17,7 @@
                 <c-badge variant="{{ ticket.status|badge_variant:'ticket' }}">{{ status_display }}</c-badge>
                     {# djlint:on #}
                     {% if is_ops %}
-                        {% if ticket.status == "claimed" and ticket.assigned_to.username == authentik_username or is_ticketing_admin %}
+                        {% if actions.recategorize %}
                             <c-form action="{% url 'ticket_change_category' ticket.ticket_number %}"
                                     class="d-inline-block m-0"
                                     x-data="categoryChanger"
@@ -55,7 +55,7 @@
                                     Claim
                                 </c-button>
                             </c-form>
-                        {% elif ticket.status == "claimed" and ticket.assigned_to.username == authentik_username or is_ticketing_admin %}
+                        {% elif actions.unclaim %}
                             <c-form action="{% url 'ticket_unclaim' ticket.ticket_number %}" class="m-0">
                                 {% csrf_token %}
                                 <c-button type="submit" variant="default">
@@ -83,7 +83,7 @@
                 {% endif %}
             </div>
             {% if is_ops and ticket.status == "claimed" %}
-                {% if ticket.assigned_to.username == authentik_username or is_ticketing_admin %}
+                {% if actions.resolve %}
                     <c-fieldset heading="Resolve Ticket">
                         <c-form action="{% url 'ticket_resolve' ticket.ticket_number %}">
                             {% csrf_token %}
@@ -122,11 +122,11 @@
                     </c-fieldset>
                 {% else %}
                     <p class="text-muted p-10">
-                        Assigned to <strong>{{ ticket.assigned_to.username }}</strong>. Only they or an admin can resolve it.
+                        Assigned to <strong>{{ ticket.assigned_to.username }}</strong>. Only they or a ticketing admin can resolve it.
                     </p>
                 {% endif %}
             {% endif %}
-            {% if is_ticketing_support or is_ticketing_admin %}
+            {% if actions.reassign %}
                 <c-fieldset heading="Assignment">
                     <c-form action="{% url 'ticket_reassign' ticket.ticket_number %}"
                             class="d-flex gap-10 items-center m-0">

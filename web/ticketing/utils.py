@@ -126,13 +126,25 @@ def change_ticket_category_atomic(
     new_category_id: int,
     actor_username: str,
     user: User | None = None,
+    discord_id: int | None = None,
 ) -> tuple[Ticket | None, str | None]:
-    """Move a ticket to another category atomically, recording both categories' names and points."""
+    """Move a ticket to another category atomically, recording both categories' names and points. Only its assignee
+    or a ticketing admin (`user` or `discord_id`) does (ticketing.lifecycle.assignee_refusal)."""
+    from ticketing.lifecycle import assignee_refusal
+
     with transaction.atomic():
-        ticket = Ticket.objects.select_for_update(of=("self",)).select_related("team").filter(id=ticket_id).first()
+        ticket = (
+            Ticket.objects.select_for_update(of=("self",))
+            .select_related("team", "assigned_to")
+            .filter(id=ticket_id)
+            .first()
+        )
 
         if not ticket:
             return None, "Ticket not found."
+        user = get_user_for_ticket(discord_id=discord_id, user=user)
+        if error := assignee_refusal(ticket, user, "recategorize"):
+            return None, error
 
         new_cat_info = get_category_config(new_category_id)
         if new_cat_info is None:

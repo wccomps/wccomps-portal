@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from core.auth_utils import require_permission, team_record_or_404
-from ticketing.access import NOT_YOUR_TICKET, TICKET_STAFF, works_ticket
+from ticketing.access import TICKET_STAFF
 from ticketing.forms import TicketChangeCategoryForm, TicketReassignForm, TicketReopenForm, TicketResolveForm
 from ticketing.lifecycle import (
     assign_ticket,
@@ -81,10 +81,6 @@ def ticket_unclaim(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
     ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
-    if not works_ticket(user, ticket_obj):
-        messages.error(request, NOT_YOUR_TICKET)
-        return redirect("ticket_detail", ticket_number=ticket_number)
-
     ticket, error = unclaim_ticket(
         ticket_id=ticket_obj.id,
         actor_username=authentik_username,
@@ -123,6 +119,7 @@ def ticket_reassign(request: HttpRequest, ticket_number: str) -> HttpResponse:
         ticket_id=ticket_obj.id,
         actor_username=authentik_username,
         user=new_assignee_user,
+        actor=user,
     )
 
     if error or ticket is None:
@@ -141,10 +138,6 @@ def ticket_resolve(request: HttpRequest, ticket_number: str) -> HttpResponse:
     authentik_username = user.username
 
     ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
-
-    if not works_ticket(user, ticket_obj):
-        messages.error(request, NOT_YOUR_TICKET)
-        return redirect("ticket_detail", ticket_number=ticket_number)
 
     form = TicketResolveForm(request.POST)
     if not form.is_valid():
@@ -207,10 +200,6 @@ def ticket_change_category(request: HttpRequest, ticket_number: str) -> HttpResp
     authentik_username = user.username
 
     ticket = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
-
-    if not works_ticket(user, ticket):
-        messages.error(request, NOT_YOUR_TICKET)
-        return redirect("ticket_detail", ticket_number=ticket_number)
 
     form = TicketChangeCategoryForm(request.POST)
     if not form.is_valid():

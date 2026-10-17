@@ -17,7 +17,7 @@ from core.errors import json_endpoint
 from core.tickets_config import get_all_categories, get_category_config
 from core.utils import by_team, chosen_team, list_filters, optional_int, team_numbers
 from team.models import Team
-from ticketing.access import TICKET_STAFF, is_ticket_staff
+from ticketing.access import TICKET_STAFF, ticket_actions
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)
     authentik_username = user.username
 
-    is_ops = is_ticket_staff(user)
+    is_ops = has_permission(user, TICKET_STAFF)
     team = get_user_team(user)
 
     if not is_ops and not team:
@@ -68,7 +68,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
 
     if is_ops:
         query = (
-            Ticket.objects.select_related("team")
+            Ticket.objects.select_related("team", "assigned_to")
             .exclude(ticket_number="")
             .annotate(
                 comment_count=Count("comments", distinct=True),
@@ -78,7 +78,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         )
     else:
         query = (
-            Ticket.objects.select_related("team")
+            Ticket.objects.select_related("team", "assigned_to")
             .filter(team=team)
             .annotate(
                 comment_count=Count("comments", distinct=True),
@@ -137,6 +137,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
                 "category_name": cat_info.get("display_name", "Unknown"),
                 "is_stale": is_stale,
                 "status_display": ticket.status.upper().replace("_", " "),
+                "actions": ticket_actions(user, ticket),
             }
         )
     page_obj.object_list = enriched  # type: ignore[assignment]  # templates iterate enriched dicts, keep pagination
@@ -144,11 +145,8 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     assignees = User.objects.filter(assigned_tickets__isnull=False).distinct().order_by("username") if is_ops else []
     teams = team_numbers(Team.objects.filter(tickets__isnull=False), team_chosen) if is_ops else []
 
-    is_ticketing_admin = has_permission(user, "ticketing_admin")
-
     context = {
         "is_ops": is_ops,
-        "is_ticketing_admin": is_ticketing_admin,
         "team": team,
         "authentik_username": authentik_username,
         "page_obj": page_obj,

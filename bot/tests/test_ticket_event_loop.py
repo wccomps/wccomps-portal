@@ -44,7 +44,10 @@ async def test_list_claimed_tickets_shows_assignee(
     assert "Assigned: volunteer21" in embed.fields[0].value
 
 
-async def test_unassign_claimed_ticket(claimed_ticket: Ticket, mock_interaction: Any, mock_bot: Any) -> None:
+async def test_unassign_claimed_ticket(
+    claimed_ticket: Ticket, mock_interaction: Any, mock_bot: Any, mock_admin_user: Any
+) -> None:
+    mock_interaction.user.id = mock_admin_user._discord_id  # a ticketing admin unclaims someone else's ticket
     cog = AdminTicketsCog(mock_bot)
     with patch("bot.cogs.admin_tickets.log_to_ops_channel", new_callable=AsyncMock):
         await cog.admin_ticket_reassign.callback(cog, mock_interaction, ticket_number="T021-001", volunteer=None)
@@ -56,8 +59,9 @@ async def test_unassign_claimed_ticket(claimed_ticket: Ticket, mock_interaction:
 
 
 async def test_resolve_button_opens_modal_and_rejects_out_of_range_points(
-    claimed_ticket: Ticket, mock_interaction: Any
+    claimed_ticket: Ticket, mock_interaction: Any, mock_admin_user: Any
 ) -> None:
+    mock_interaction.user.id = mock_admin_user._discord_id  # a ticketing admin resolves someone else's ticket
     view = TicketActionView(claimed_ticket.id)
     with patch("bot.permissions.has_permission", new=AsyncMock(return_value=True)):
         await view.resolve_button.callback(mock_interaction)

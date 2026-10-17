@@ -6,7 +6,8 @@ from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.views.decorators.http import require_POST
 
-from core.auth_utils import has_permission, require_permission
+from core.auth_utils import require_permission
+from ticketing.access import TICKET_STAFF
 from ticketing.forms import TicketBulkActionForm
 from ticketing.lifecycle import claim_ticket, resolve_ticket
 from ticketing.models import Ticket
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 @require_POST
-@require_permission("ticketing_support")
+@require_permission(TICKET_STAFF)
 def tickets_bulk_claim(request: HttpRequest) -> HttpResponse:
     """Bulk claim tickets (ticketing staff only)."""
     user = cast(User, request.user)
@@ -39,7 +40,7 @@ def tickets_bulk_claim(request: HttpRequest) -> HttpResponse:
 
 
 @require_POST
-@require_permission("ticketing_support")
+@require_permission(TICKET_STAFF)
 def tickets_bulk_resolve(request: HttpRequest) -> HttpResponse:
     """Bulk resolve tickets at their category's points; same rule as resolving one ticket."""
     user = cast(User, request.user)
@@ -49,14 +50,11 @@ def tickets_bulk_resolve(request: HttpRequest) -> HttpResponse:
         return back_to_list(request)
 
     requested = Ticket.objects.filter(ticket_number__in=form.cleaned_data["ticket_numbers"])
-    tickets = requested if has_permission(user, "ticketing_admin") else requested.filter(assigned_to=user)
 
+    # The lifecycle refuses a ticket someone else holds (assignee_refusal) and says who holds it
     resolved = 0
-    skipped = [
-        f"{number} (not assigned to you)"
-        for number in requested.exclude(pk__in=tickets.values("pk")).values_list("ticket_number", flat=True)
-    ]
-    for ticket_id, ticket_number in tickets.values_list("id", "ticket_number"):
+    skipped: list[str] = []
+    for ticket_id, ticket_number in requested.order_by("ticket_number").values_list("id", "ticket_number"):
         ticket, error = resolve_ticket(
             ticket_id=ticket_id,
             actor_username=user.username,

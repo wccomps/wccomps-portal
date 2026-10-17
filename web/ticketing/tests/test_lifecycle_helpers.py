@@ -58,18 +58,18 @@ def test_reopen_refunds_points(team):
     assert TicketHistory.objects.get(ticket=ticket, action="reopened").details["refunded_points"] == 60
 
 
-def test_change_category_records_both_categories(team):
+def test_change_category_records_both_categories(team, ticketing_admin_user):
     ticket = _ticket(team, "open")
-    changed, error = change_ticket_category_atomic(ticket.id, 3, "admin")
+    changed, error = change_ticket_category_atomic(ticket.id, 3, "admin", user=ticketing_admin_user)
     assert error is None and changed.category_id == 3
     details = TicketHistory.objects.get(ticket=ticket, action="category_changed").details
     assert (details["old_category"], details["new_category"], details["changed_by"]) == (2, 3, "admin")
 
     assert (
-        change_ticket_category_atomic(ticket.id, 3, "admin")[1]
+        change_ticket_category_atomic(ticket.id, 3, "admin", user=ticketing_admin_user)[1]
         == f"Ticket {ticket.ticket_number} is already in that category."
     )
-    assert change_ticket_category_atomic(ticket.id, 999, "admin")[1] == "Invalid category."
+    assert change_ticket_category_atomic(ticket.id, 999, "admin", user=ticketing_admin_user)[1] == "Invalid category."
 
 
 def test_web_cancel_tells_discord(blue_team_user, team):
