@@ -2,12 +2,13 @@ from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.http import HttpRequest, HttpResponse, HttpResponseForbidden
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
-from core.auth_utils import get_user_team, has_permission, require_permission
+from core.auth_utils import get_user_team, has_permission, require_permission, team_record_or_404
 from core.stored_files import file_response
 from core.utils import list_filters, optional_int
 from team.models import Team
@@ -17,6 +18,9 @@ from ..forms import IncidentMatchForm, IncidentReportForm
 from ..models import IncidentReport, IncidentScreenshot
 from ..quotient_sync import get_box_metadata
 from ..screenshots import ScreenshotError, read_screenshots
+
+# Who sees every team's incident reports
+STAFF = ("gold_team", "white_team")
 
 
 @transaction.atomic
@@ -30,12 +34,7 @@ def submit_incident_report(request: HttpRequest) -> HttpResponse:
     if not is_admin:
         team = get_user_team(user)
         if not team:
-            return render(
-                request,
-                "error.html",
-                {"error": "Access Denied", "message": "You must be assigned to a team to submit incident reports."},
-                status=403,
-            )
+            raise PermissionDenied("You must be assigned to a team to submit incident reports.")
 
     if request.method == "POST":
         form = IncidentReportForm(team, is_admin, request.POST, request.FILES)
@@ -88,12 +87,7 @@ def incident_list(request: HttpRequest) -> HttpResponse:
     else:
         user_team = get_user_team(user)
         if not user_team:
-            return render(
-                request,
-                "error.html",
-                {"error": "Access Denied", "message": "You do not have permission to access this page."},
-                status=403,
-            )
+            raise PermissionDenied
 
         incidents = (
             IncidentReport.objects.filter(team=user_team).select_related("team", "submitted_by").order_by("-created_at")
@@ -106,18 +100,8 @@ def incident_list(request: HttpRequest) -> HttpResponse:
 
 
 def view_incident_report(request: HttpRequest, incident_id: int) -> HttpResponse:
-    incident = get_object_or_404(IncidentReport, id=incident_id)
-
     user = cast(User, request.user)
-    if not has_permission(user, "gold_team") and not has_permission(user, "white_team"):
-        user_team = get_user_team(user)
-        if not user_team or incident.team != user_team:
-            return render(
-                request,
-                "error.html",
-                {"error": "Access Denied", "message": "You do not have permission to view this incident report."},
-                status=403,
-            )
+    incident = team_record_or_404(IncidentReport.objects.all(), user, staff=STAFF, id=incident_id)
 
     can_delete = incident.submitted_by == user and not incident.is_approved
 
@@ -132,8 +116,8 @@ def view_incident_report(request: HttpRequest, incident_id: int) -> HttpResponse
 @require_http_methods(["POST"])
 def delete_incident_report(request: HttpRequest, incident_id: int) -> HttpResponse:
     """Delete an incident report (owner only, before review)."""
-    incident = get_object_or_404(IncidentReport, id=incident_id)
     user = cast(User, request.user)
+    incident = team_record_or_404(IncidentReport.objects.all(), user, staff=STAFF, id=incident_id)
 
     if incident.submitted_by != user:
         messages.error(request, "You can only delete your own incident reports")
@@ -150,19 +134,15 @@ def delete_incident_report(request: HttpRequest, incident_id: int) -> HttpRespon
 
 
 def incident_screenshot_download(request: HttpRequest, screenshot_id: int) -> HttpResponse:
-    from django.http import Http404
-
-    screenshot = get_object_or_404(IncidentScreenshot, id=screenshot_id)
-
-    # Gold and White Team see every screenshot; a team sees its own incidents'
-    user = cast(User, request.user)
-    if not has_permission(user, "gold_team") and not has_permission(user, "white_team"):
-        user_team = get_user_team(user)
-        if not user_team or screenshot.incident.team != user_team:
-            return HttpResponseForbidden("You do not have permission to view this file")
-
+    screenshot = team_record_or_404(
+        IncidentScreenshot.objects.select_related("incident"),
+        cast(User, request.user),
+        staff=STAFF,
+        team_field="incident__team",
+        id=screenshot_id,
+    )
     if not screenshot.file_data:
-        raise Http404("File data not available (file was lost)")
+        raise Http404  # the file was lost
 
     return file_response(bytes(screenshot.file_data), screenshot.filename, inline=True)
 

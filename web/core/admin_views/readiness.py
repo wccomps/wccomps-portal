@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator
 from datetime import timedelta
 from typing import cast
 
+from django.core.exceptions import BadRequest
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.urls import reverse
 from django.utils import timezone
@@ -455,9 +456,9 @@ def action_readiness_fix(
 ) -> JsonResponse:
     form = ReadinessFixForm(request.POST)
     if not form.is_valid():
-        return JsonResponse({"error": "Missing fix parameter"}, status=400)
+        raise BadRequest("Missing fix parameter")
     fix_key = form.cleaned_data["fix"]
     handler = _FIX_HANDLERS.get(fix_key)
     if not handler:
-        return JsonResponse({"error": f"Unknown fix: {fix_key}"}, status=400)
+        raise BadRequest(f"Unknown fix: {fix_key}")
     return handler(request)

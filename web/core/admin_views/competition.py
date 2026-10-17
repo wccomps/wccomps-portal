@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from typing import cast
 
 from django.contrib.auth.models import User
+from django.core.exceptions import BadRequest
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
 from django.urls import reverse
+from django.views.decorators.http import require_POST
 from registration.close_out_checks import close_out_warnings
 from registration.models import Event, Season
 from registration.services import (
@@ -43,6 +45,7 @@ from core.authentik_manager import AuthentikManager
 from core.authentik_utils import credentials_csv, reset_team_credentials
 from core.competition_utils import WipedData, competition_data_counts
 from core.discord_tasks import LogToChannel
+from core.errors import json_endpoint
 from core.forms import (
     ActionForm,
     AppSlugForm,
@@ -60,7 +63,7 @@ from core.utils import ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
 from team.models import active_team_numbers, team_username
 
-from ..auth_utils import has_permission, require_permission
+from ..auth_utils import require_permission
 from ..utils import UnknownTimezoneError, parse_datetime_to_utc
 
 logger = logging.getLogger(__name__)
@@ -74,14 +77,10 @@ TIMEZONE_CHOICES = [
 ]
 
 
-def _has_admin_or_gold_access(user: User) -> bool:
-    return has_permission(user, "admin") or has_permission(user, "gold_team")
-
-
 def _action_set_max_members(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
     form = SetMaxMembersForm(request.POST)
     if not form.is_valid():
-        return JsonResponse({"error": "Max members must be 1-20"}, status=400)
+        raise BadRequest("Max members must be 1-20")
 
     max_members = form.cleaned_data["max_members"]
     old_max = config.max_team_members
@@ -102,7 +101,7 @@ def _action_set_max_members(request: HttpRequest, config: CompetitionConfig, aut
 def _action_set_start_message(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
     form = StartMessageForm(request.POST)
     if not form.is_valid():
-        return JsonResponse({"error": form.errors["start_message"][0]}, status=400)
+        raise BadRequest(form.errors["start_message"][0])
 
     message = form.cleaned_data["start_message"]
     CompetitionConfig.objects.filter(pk=config.pk).update(start_message=message)
@@ -127,11 +126,11 @@ def _edit_controlled_app(
     """Add or remove one controlled app against the CURRENT stored list, so a stale page can't drop others."""
     form = AppSlugForm(request.POST)
     if not form.is_valid():
-        return JsonResponse({"error": "Please provide an app slug"}, status=400)
+        raise BadRequest("Please provide an app slug")
     slug = form.cleaned_data["app_slug"]
     # Check with the lookup Start and Stop use; Authentik's app list omits apps the service account can't open
     if add and AuthentikManager().get_application_by_slug(slug) is None:
-        return JsonResponse({"error": f"No Authentik application with the slug '{slug}'"}, status=400)
+        raise BadRequest(f"No Authentik application with the slug '{slug}'")
 
     with transaction.atomic():
         config = CompetitionConfig.objects.select_for_update().get(pk=config.pk)
@@ -166,7 +165,7 @@ def _action_remove_app(request: HttpRequest, config: CompetitionConfig, authenti
 def _action_set_start_time(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
     form = SetTimeForm(request.POST)
     if not form.is_valid():
-        return JsonResponse({"error": "Please provide a datetime"}, status=400)
+        raise BadRequest("Please provide a datetime")
 
     datetime_str = form.cleaned_data["datetime"]
     tz_name = form.cleaned_data["timezone"]
@@ -174,7 +173,7 @@ def _action_set_start_time(request: HttpRequest, config: CompetitionConfig, auth
     try:
         start_time = parse_datetime_to_utc(datetime_str, tz_name)
         if error := config.schedule_error(start=start_time):
-            return JsonResponse({"error": error}, status=400)
+            raise BadRequest(error)
 
         config.competition_start_time = start_time
         config.save()
@@ -189,15 +188,15 @@ def _action_set_start_time(request: HttpRequest, config: CompetitionConfig, auth
 
         return JsonResponse({"success": True, "message": f"Start time set to {start_time.isoformat()}"})
     except UnknownTimezoneError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        raise BadRequest(str(e)) from e
     except ValueError:
-        return JsonResponse({"error": "Invalid datetime format"}, status=400)
+        raise BadRequest("Invalid datetime format") from None
 
 
 def _action_set_end_time(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
     form = SetTimeForm(request.POST)
     if not form.is_valid():
-        return JsonResponse({"error": "Please provide a datetime"}, status=400)
+        raise BadRequest("Please provide a datetime")
 
     datetime_str = form.cleaned_data["datetime"]
     tz_name = form.cleaned_data["timezone"]
@@ -205,7 +204,7 @@ def _action_set_end_time(request: HttpRequest, config: CompetitionConfig, authen
     try:
         end_time = parse_datetime_to_utc(datetime_str, tz_name)
         if error := config.schedule_error(end=end_time):
-            return JsonResponse({"error": error}, status=400)
+            raise BadRequest(error)
 
         config.competition_end_time = end_time
         config.save()
@@ -220,9 +219,9 @@ def _action_set_end_time(request: HttpRequest, config: CompetitionConfig, authen
 
         return JsonResponse({"success": True, "message": f"End time set to {end_time.isoformat()}"})
     except UnknownTimezoneError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        raise BadRequest(str(e)) from e
     except ValueError:
-        return JsonResponse({"error": "Invalid datetime format"}, status=400)
+        raise BadRequest("Invalid datetime format") from None
 
 
 def _action_set_schedule(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
@@ -232,7 +231,7 @@ def _action_set_schedule(request: HttpRequest, config: CompetitionConfig, authen
     form = SetScheduleForm(request.POST)
     if not form.is_valid():
         first_error = next(iter(form.errors.values()), ["Invalid schedule data"])
-        return JsonResponse({"error": str(first_error[0])}, status=400)
+        raise BadRequest(str(first_error[0]))
 
     start_dt = form.cleaned_data["start_datetime"]
     start_tz = form.cleaned_data.get("start_timezone") or "America/Los_Angeles"
@@ -243,11 +242,11 @@ def _action_set_schedule(request: HttpRequest, config: CompetitionConfig, authen
         start_time = parse_datetime_to_utc(start_dt, start_tz) if start_dt else None
         end_time = parse_datetime_to_utc(end_dt, end_tz) if end_dt else None
     except UnknownTimezoneError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        raise BadRequest(str(e)) from e
     except ValueError:
-        return JsonResponse({"error": "Invalid datetime format"}, status=400)
+        raise BadRequest("Invalid datetime format") from None
     if error := config.schedule_error(start_time, end_time):
-        return JsonResponse({"error": error}, status=400)
+        raise BadRequest(error)
 
     details: dict[str, str] = {}
     if start_time:
@@ -320,12 +319,11 @@ def _action_stop_competition(
 def _action_clear_leftover_data(
     request: HttpRequest, config: CompetitionConfig, authentik_username: str
 ) -> JsonResponse:
-    if error := _typed_confirmation_error(request):
-        return error
+    _require_typed_confirmation(request)
     try:
         wiped = clear_leftover_data(authentik_username)
     except CloseOutError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        raise BadRequest(str(e)) from e
     return JsonResponse(
         {
             "success": True,
@@ -337,21 +335,20 @@ def _action_clear_leftover_data(
 def _action_cancel_event(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
     form = CancelEventForm(request.POST)
     if not form.is_valid():
-        return JsonResponse({"error": form.first_error()}, status=400)
+        raise BadRequest(form.first_error())
     try:
         event = cancel_event(form.cleaned_data["open_event"], authentik_username)
     except CloseOutError as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        raise BadRequest(str(e)) from e
     return JsonResponse(
         {"success": True, "message": f"{event.name} cancelled. The school list stays. Next: {event_stage().next_step}"}
     )
 
 
-def _typed_confirmation_error(request: HttpRequest) -> JsonResponse | None:
+def _require_typed_confirmation(request: HttpRequest) -> None:
     form = TypedConfirmForm(request.POST)
-    if form.is_valid():
-        return None
-    return JsonResponse({"error": form.errors["confirm"][0]}, status=400)
+    if not form.is_valid():
+        raise BadRequest(form.errors["confirm"][0])
 
 
 def _wiped_summary(wiped: WipedData) -> str:
@@ -365,7 +362,7 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
     form = ResetPasswordsForm(request.POST)
     if not form.is_valid():
         error_msg = "; ".join(str(e) for errors in form.errors.values() for e in errors)
-        return JsonResponse({"error": error_msg}, status=400)
+        raise BadRequest(error_msg)
 
     team_numbers = form.cleaned_data["team_numbers"] or active_team_numbers()
 
@@ -591,33 +588,29 @@ def admin_competition_setup(request: HttpRequest) -> HttpResponse:
     )
 
 
+@json_endpoint
+@require_permission("admin", "gold_team")
 def admin_competition_apps(request: HttpRequest) -> JsonResponse:
     """Suggestions for the add-app field, fetched after the page renders (the call takes ~1s).
 
     Lists every app with a provider (see AuthentikManager.list_applications). A slug with no provider
     (e.g. a launcher-only app) won't appear but can still be typed; add validates it by direct lookup.
     """
-    user = cast(User, request.user)
-    if not _has_admin_or_gold_access(user):
-        return JsonResponse({"error": "Access denied"}, status=403)
     return JsonResponse({"apps": AuthentikManager().list_applications()})
 
 
+@json_endpoint
+@require_POST
+@require_permission("admin", "gold_team")
 def admin_competition_action(request: HttpRequest) -> HttpResponseBase:
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-
     user = cast(User, request.user)
-    if not _has_admin_or_gold_access(user):
-        return JsonResponse({"error": "Access denied"}, status=403)
-
     form = ActionForm(request.POST)
     if not form.is_valid():
-        return JsonResponse({"error": "No action specified"}, status=400)
+        raise BadRequest("No action specified")
     action = form.cleaned_data["action"]
     handler = _COMPETITION_ACTION_HANDLERS.get(action)
     if not handler:
-        return JsonResponse({"error": "Unknown action"}, status=400)
+        raise BadRequest("Unknown action")
 
     config = CompetitionConfig.get_config()
     return handler(request, config, user.username)

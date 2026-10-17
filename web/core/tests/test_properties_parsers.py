@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
+from django.core.exceptions import BadRequest, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.validators import validate_email
 from django.http import HttpResponse
@@ -341,9 +341,11 @@ def test_ticket_attachment_is_saved_or_refused_and_served_safely(
     upload: SimpleUploadedFile | None, ticket: Ticket
 ) -> None:
     with rolled_back():
-        refused = _save_attachment(ticket, upload, "blueteam01")
-        if refused is not None:
-            assert 400 <= refused.status_code < 500
+        try:
+            _save_attachment(ticket, upload, "blueteam01")
+        except BadRequest as refused:
+            assert str(refused)
+            assert not TicketAttachment.objects.filter(ticket=ticket).exists()
             return
         attachment = TicketAttachment.objects.get(ticket=ticket)
         assert attachment.filename == clean_name(upload.name, "")

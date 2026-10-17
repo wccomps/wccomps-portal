@@ -3,6 +3,7 @@ import logging
 from typing import cast
 
 from django.contrib.auth.models import User
+from django.core.exceptions import BadRequest, PermissionDenied
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
@@ -39,15 +40,7 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
                     team = Team.objects.get(id=admin_form.cleaned_data["team_id"], is_active=True)
 
     if not is_admin and not team:
-        return render(
-            request,
-            "error.html",
-            {
-                "error": "Access denied",
-                "message": "You must be a team member to create tickets.",
-            },
-            status=403,
-        )
+        raise PermissionDenied("You must be a team member to create tickets.")
 
     from quotient.client import QuotientAPIError, get_quotient_client
 
@@ -126,12 +119,7 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
             return form_page(" ".join(errors))
 
         if not team:
-            return render(
-                request,
-                "error.html",
-                {"error": "Bad Request", "message": "Team is required to create a ticket."},
-                status=400,
-            )
+            raise BadRequest("Team is required to create a ticket.")
 
         from ticketing.utils import TicketRateLimitError, create_ticket_atomic
 

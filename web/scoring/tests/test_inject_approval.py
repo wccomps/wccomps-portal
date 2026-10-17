@@ -65,7 +65,7 @@ class TestInjectScoresReviewAccess:
 
         response = client.get(reverse("scoring:inject_grades_review"))
 
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_blue_team_denied_access(self, create_user_with_groups: Callable[..., User]) -> None:
         """Blue Team members should be denied access."""
@@ -75,7 +75,7 @@ class TestInjectScoresReviewAccess:
 
         response = client.get(reverse("scoring:inject_grades_review"))
 
-        assert response.status_code == 302
+        assert response.status_code == 403
 
 
 @pytest.mark.django_db

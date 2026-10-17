@@ -8,8 +8,9 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 
-from core.auth_utils import has_permission
+from core.auth_utils import has_permission, require_permission
 from ticketing.forms import TicketBulkActionForm
 from ticketing.lifecycle import claim_ticket, resolve_ticket
 from ticketing.models import Ticket
@@ -26,15 +27,11 @@ def back_to_list(request: HttpRequest) -> HttpResponse:
     return redirect(f"{list_path}?{came_from.query}" if from_list and came_from.query else list_path)
 
 
+@require_POST
+@require_permission("ticketing_support")
 def tickets_bulk_claim(request: HttpRequest) -> HttpResponse:
     """Bulk claim tickets (ticketing staff only)."""
-    if request.method != "POST":
-        return HttpResponse("Method not allowed", status=405)
-
     user = cast(User, request.user)
-    if not has_permission(user, "ticketing_support"):
-        return HttpResponse("Access denied", status=403)
-
     form = TicketBulkActionForm(request.POST)
     if not form.is_valid():
         messages.info(request, "No tickets selected")
@@ -52,15 +49,11 @@ def tickets_bulk_claim(request: HttpRequest) -> HttpResponse:
     return back_to_list(request)
 
 
+@require_POST
+@require_permission("ticketing_support")
 def tickets_bulk_resolve(request: HttpRequest) -> HttpResponse:
     """Bulk resolve tickets at their category's points; same rule as resolving one ticket."""
-    if request.method != "POST":
-        return HttpResponse("Method not allowed", status=405)
-
     user = cast(User, request.user)
-    if not has_permission(user, "ticketing_support"):
-        return HttpResponse("Access denied", status=403)
-
     form = TicketBulkActionForm(request.POST)
     if not form.is_valid():
         messages.info(request, "No tickets selected")

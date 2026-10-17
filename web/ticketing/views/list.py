@@ -3,12 +3,14 @@ from datetime import timedelta
 from typing import cast
 
 from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Max, Q
-from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
 
-from core.auth_utils import get_user_team, has_permission
+from core.auth_utils import get_user_team, has_permission, require_permission
+from core.errors import json_endpoint
 from core.tickets_config import get_all_categories, get_category_config
 from core.utils import list_filters, optional_int
 from ticketing.models import Ticket
@@ -32,7 +34,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     team = get_user_team(user)
 
     if not is_ops and not team:
-        return HttpResponseForbidden("You do not have permission to view tickets.")
+        raise PermissionDenied("You do not have permission to view tickets.")
 
     from core.utils import filter_sort_paginate
 
@@ -150,16 +152,10 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     return render(request, "ticket_list.html", context)
 
 
+@json_endpoint
+@require_permission("admin", "ticketing_support", "ticketing_admin")
 def ticket_notifications(request: HttpRequest) -> JsonResponse:
     """JSON endpoint for ticket notification polling (ops staff only)."""
-    user = cast(User, request.user)
-    if not (
-        has_permission(user, "admin")
-        or has_permission(user, "ticketing_support")
-        or has_permission(user, "ticketing_admin")
-    ):
-        return JsonResponse({"error": "forbidden"}, status=403)
-
     since_id = optional_int(request.GET.get("since_id", "")) or 0
 
     open_count = Ticket.objects.filter(status="open").count()

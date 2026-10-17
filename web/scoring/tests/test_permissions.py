@@ -21,7 +21,7 @@ class TestLeaderboardPermissions:
         client = Client()
         client.force_login(blue_team_user)
         response = client.get(reverse("leaderboard_page"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_red_team_allowed(self, red_team_user):
         """Red Team should access leaderboard."""
@@ -94,8 +94,8 @@ class TestScorecardPermissions:
         """Blue Team should not access scorecard or PDF export."""
         client = Client()
         client.force_login(blue_team_user)
-        assert client.get(reverse("leaderboard_scorecard", args=[test_team.team_number])).status_code == 302
-        assert client.get(reverse("leaderboard_scorecard_pdf", args=[test_team.team_number])).status_code == 302
+        assert client.get(reverse("leaderboard_scorecard", args=[test_team.team_number])).status_code == 403
+        assert client.get(reverse("leaderboard_scorecard_pdf", args=[test_team.team_number])).status_code == 403
 
     def test_red_team_allowed(self, red_team_user, test_team):
         """Red Team should access scorecard and PDF export."""
@@ -175,7 +175,7 @@ class TestRedTeamFindingsPermissions:
         client = Client()
         client.force_login(blue_team_user)
         response = client.get(reverse("scoring:red_team_findings"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_red_team_allowed(self, red_team_user):
         """Red Team should access Red Team findings page for review."""
@@ -203,28 +203,28 @@ class TestRedTeamFindingsPermissions:
         client = Client()
         client.force_login(white_team_user)
         response = client.get(reverse("scoring:red_team_findings"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_orange_team_denied(self, orange_team_user):
         """Orange Team should not access Red Team findings page."""
         client = Client()
         client.force_login(orange_team_user)
         response = client.get(reverse("scoring:red_team_findings"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_ticketing_support_denied(self, ticketing_support_user):
         """Ticketing Support should not access Red Team findings page."""
         client = Client()
         client.force_login(ticketing_support_user)
         response = client.get(reverse("scoring:red_team_findings"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_ticketing_admin_denied(self, ticketing_admin_user):
         """Ticketing Admin should not access Red Team findings page."""
         client = Client()
         client.force_login(ticketing_admin_user)
         response = client.get(reverse("scoring:red_team_findings"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_admin_allowed(self, admin_user):
         """Admin (Gold Team) should access Red Team findings page."""
@@ -318,14 +318,14 @@ class TestInjectGradingPermissions:
         client = Client()
         client.force_login(blue_team_user)
         response = client.get(reverse("scoring:inject_grading"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_red_team_denied(self, red_team_user):
         """Red Team should not access Inject Grading."""
         client = Client()
         client.force_login(red_team_user)
         response = client.get(reverse("scoring:inject_grading"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_gold_team_allowed(self, gold_team_user, mock_quotient_client):
         """Gold Team should access Inject Grading."""
@@ -346,21 +346,21 @@ class TestInjectGradingPermissions:
         client = Client()
         client.force_login(orange_team_user)
         response = client.get(reverse("scoring:inject_grading"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_ticketing_support_denied(self, ticketing_support_user):
         """Ticketing Support should not access Inject Grading."""
         client = Client()
         client.force_login(ticketing_support_user)
         response = client.get(reverse("scoring:inject_grading"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_ticketing_admin_denied(self, ticketing_admin_user):
         """Ticketing Admin should not access Inject Grading."""
         client = Client()
         client.force_login(ticketing_admin_user)
         response = client.get(reverse("scoring:inject_grading"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_admin_allowed(self, admin_user, mock_quotient_client):
         """Admin (Gold Team) should access Inject Grading."""
@@ -384,14 +384,14 @@ class TestExportViewsPermissions:
         client = Client()
         client.force_login(blue_team_user)
         response = client.get(reverse("scoring:export_index"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_export_index_red_team_denied(self, red_team_user):
         """Red Team should not access export index."""
         client = Client()
         client.force_login(red_team_user)
         response = client.get(reverse("scoring:export_index"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_export_index_gold_team_allowed(self, gold_team_user):
         """Gold Team should access export index."""
@@ -405,14 +405,14 @@ class TestExportViewsPermissions:
         client = Client()
         client.force_login(white_team_user)
         response = client.get(reverse("scoring:export_index"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_export_index_orange_team_denied(self, orange_team_user):
         """Orange Team should not access export index."""
         client = Client()
         client.force_login(orange_team_user)
         response = client.get(reverse("scoring:export_index"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_export_index_admin_allowed(self, admin_user):
         """Admin (Gold Team) should access export index."""

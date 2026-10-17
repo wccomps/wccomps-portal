@@ -5,15 +5,17 @@ from typing import cast
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
+from django.core.exceptions import BadRequest, ValidationError
 from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from core.auth_utils import has_permission, require_permission
 from core.csv_export import csv_writer
+from core.errors import json_endpoint
 from orange_team.forms import (
     MAX_FOLLOW_UP_MINUTES,
     MAX_MINUTES,
@@ -439,29 +441,23 @@ def _criterion_result(body: bytes) -> tuple[int, bool] | None:
     return criterion_id, met
 
 
+@json_endpoint
+@require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
+@require_POST
 def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
     """Autosave a criterion result for an assignment."""
-    if not (has_permission(request.user, "orange_team") or has_permission(request.user, "orange_team_lead")):
-        return JsonResponse({"error": "Access denied"}, status=403)
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
-
     user = cast(User, request.user)
-    assignment = OrangeAssignment.objects.filter(pk=assignment_id, user=user).first()
-    if assignment is None:
-        return JsonResponse({"error": "Assignment not found"}, status=404)
+    assignment = get_object_or_404(OrangeAssignment, pk=assignment_id, user=user)
 
     if assignment.status in ("submitted", "approved"):
-        return JsonResponse({"error": "Assignment already submitted"}, status=400)
+        raise BadRequest("Assignment already submitted")
 
     posted = _criterion_result(request.body)
     if posted is None:
-        return JsonResponse({"error": "Invalid data"}, status=400)
+        raise BadRequest("Invalid data")
     criterion_id, met = posted
 
-    result = OrangeAssignmentResult.objects.filter(assignment=assignment, criterion_id=criterion_id).first()
-    if result is None:
-        return JsonResponse({"error": "Criterion not found"}, status=404)
+    result = get_object_or_404(OrangeAssignmentResult, assignment=assignment, criterion_id=criterion_id)
     result.met = met
     result.save()
 

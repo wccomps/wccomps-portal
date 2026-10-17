@@ -3,12 +3,13 @@ from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from core.auth_utils import get_authentik_id, get_user_team, has_permission
+from core.auth_utils import get_authentik_id, has_permission, team_record_or_404
 from ticketing.forms import TicketChangeCategoryForm, TicketReassignForm, TicketReopenForm, TicketResolveForm
 from ticketing.lifecycle import (
     assign_ticket,
@@ -28,31 +29,8 @@ def ticket_cancel(request: HttpRequest, ticket_number: str) -> HttpResponse:
     """Cancel an open ticket (team members only)."""
     user = cast(User, request.user)
     authentik_username = user.username
-    team = get_user_team(user)
-
-    if not team:
-        return render(
-            request,
-            "error.html",
-            {
-                "error": "Invalid account",
-                "message": "Your account is not associated with a team.",
-            },
-            status=403,
-        )
-
-    try:
-        ticket_obj = Ticket.objects.select_related("team").get(ticket_number=ticket_number, team=team)
-    except Ticket.DoesNotExist:
-        return render(
-            request,
-            "error.html",
-            {
-                "error": "Ticket not found",
-                "message": f"Ticket {ticket_number} does not exist or does not belong to your team.",
-            },
-            status=404,
-        )
+    # A team's own: staff file and work tickets but don't cancel them
+    ticket_obj = team_record_or_404(Ticket.objects.select_related("team"), user, staff=(), ticket_number=ticket_number)
 
     ticket, error = cancel_ticket(
         ticket_id=ticket_obj.id,
@@ -77,22 +55,9 @@ def ticket_claim(request: HttpRequest, ticket_number: str) -> HttpResponse:
     get_authentik_id(user)
 
     if not (has_permission(user, "ticketing_support") or has_permission(user, "ticketing_admin")):
-        return render(
-            request,
-            "error.html",
-            {"error": "Access Denied", "message": "You do not have permission to perform this action."},
-            status=403,
-        )
+        raise PermissionDenied
 
-    try:
-        ticket_obj = Ticket.objects.select_related("team").get(ticket_number=ticket_number)
-    except Ticket.DoesNotExist:
-        return render(
-            request,
-            "error.html",
-            {"error": "Not Found", "message": "The requested ticket was not found."},
-            status=404,
-        )
+    ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
     ticket, error = claim_ticket(
         ticket_id=ticket_obj.id,
@@ -118,22 +83,9 @@ def ticket_unclaim(request: HttpRequest, ticket_number: str) -> HttpResponse:
     authentik_username = user.username
 
     if not (has_permission(user, "ticketing_support") or has_permission(user, "ticketing_admin")):
-        return render(
-            request,
-            "error.html",
-            {"error": "Access Denied", "message": "You do not have permission to perform this action."},
-            status=403,
-        )
+        raise PermissionDenied
 
-    try:
-        ticket_obj = Ticket.objects.select_related("team").get(ticket_number=ticket_number)
-    except Ticket.DoesNotExist:
-        return render(
-            request,
-            "error.html",
-            {"error": "Not Found", "message": "The requested ticket was not found."},
-            status=404,
-        )
+    ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
     is_admin = has_permission(user, "ticketing_admin")
     has_claimed = ticket_obj.assigned_to and ticket_obj.assigned_to.username == authentik_username
@@ -166,22 +118,9 @@ def ticket_reassign(request: HttpRequest, ticket_number: str) -> HttpResponse:
     authentik_username = user.username
 
     if not (has_permission(user, "ticketing_support") or has_permission(user, "ticketing_admin")):
-        return render(
-            request,
-            "error.html",
-            {"error": "Access Denied", "message": "You do not have permission to perform this action."},
-            status=403,
-        )
+        raise PermissionDenied
 
-    try:
-        ticket_obj = Ticket.objects.select_related("team").get(ticket_number=ticket_number)
-    except Ticket.DoesNotExist:
-        return render(
-            request,
-            "error.html",
-            {"error": "Not Found", "message": "The requested ticket was not found."},
-            status=404,
-        )
+    ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
     form = TicketReassignForm(request.POST)
     if not form.is_valid():
@@ -221,35 +160,14 @@ def ticket_resolve(request: HttpRequest, ticket_number: str) -> HttpResponse:
     is_ticketing_admin = has_permission(user, "ticketing_admin")
 
     if not (has_permission(user, "ticketing_support") or is_ticketing_admin):
-        return render(
-            request,
-            "error.html",
-            {"error": "Access Denied", "message": "You do not have permission to perform this action."},
-            status=403,
-        )
+        raise PermissionDenied
 
-    try:
-        ticket_obj = Ticket.objects.select_related("team").get(ticket_number=ticket_number)
-    except Ticket.DoesNotExist:
-        return render(
-            request,
-            "error.html",
-            {"error": "Not Found", "message": "The requested ticket was not found."},
-            status=404,
-        )
+    ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
     # Verify ownership: only the assigned user or admins can resolve
     assigned_username = ticket_obj.assigned_to.username if ticket_obj.assigned_to else None
     if not is_ticketing_admin and assigned_username != authentik_username:
-        return render(
-            request,
-            "error.html",
-            {
-                "error": "Access Denied",
-                "message": "Only the assigned support member or administrators can resolve this ticket.",
-            },
-            status=403,
-        )
+        raise PermissionDenied("Only the assigned support member or administrators can resolve this ticket.")
 
     form = TicketResolveForm(request.POST)
     if not form.is_valid():
@@ -285,22 +203,9 @@ def ticket_reopen(request: HttpRequest, ticket_number: str) -> HttpResponse:
     authentik_username = user.username
 
     if not has_permission(user, "ticketing_admin"):
-        return render(
-            request,
-            "error.html",
-            {"error": "Access Denied", "message": "You do not have permission to perform this action."},
-            status=403,
-        )
+        raise PermissionDenied
 
-    try:
-        ticket_obj = Ticket.objects.select_related("team").get(ticket_number=ticket_number)
-    except Ticket.DoesNotExist:
-        return render(
-            request,
-            "error.html",
-            {"error": "Not Found", "message": "The requested ticket was not found."},
-            status=404,
-        )
+    ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
     form = TicketReopenForm(request.POST)
     form.is_valid()  # Always valid (optional field)
@@ -332,22 +237,9 @@ def ticket_change_category(request: HttpRequest, ticket_number: str) -> HttpResp
     authentik_username = user.username
 
     if not has_permission(user, "ticketing_support"):
-        return render(
-            request,
-            "error.html",
-            {"error": "Access Denied", "message": "You do not have permission to perform this action."},
-            status=403,
-        )
+        raise PermissionDenied
 
-    try:
-        ticket = Ticket.objects.select_related("team").get(ticket_number=ticket_number)
-    except Ticket.DoesNotExist:
-        return render(
-            request,
-            "error.html",
-            {"error": "Not Found", "message": "The requested ticket was not found."},
-            status=404,
-        )
+    ticket = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
 
     is_admin = has_permission(user, "ticketing_admin")
     has_claimed = ticket.assigned_to and ticket.assigned_to.username == authentik_username

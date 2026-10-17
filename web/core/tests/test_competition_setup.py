@@ -40,7 +40,7 @@ def test_other_roles_are_refused(user_fixture, request):
     client = Client()
     client.force_login(request.getfixturevalue(user_fixture))
 
-    assert client.get(reverse("admin_competition_setup")).status_code == 302
+    assert client.get(reverse("admin_competition_setup")).status_code == 403
 
 
 def test_anonymous_users_are_sent_to_sign_in(unauthenticated_client):

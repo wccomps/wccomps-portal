@@ -42,7 +42,7 @@ class TestAdminCompetitionView:
         client = Client()
         client.force_login(user)
         response = client.get(reverse("admin_competition"))
-        assert response.status_code == 302, f"{user_fixture} should be redirected"
+        assert response.status_code == 403, f"{user_fixture} should be refused"
 
     @pytest.mark.parametrize("user_fixture", ["gold_team_user", "admin_user"])
     def test_authorized_roles_allowed(self, user_fixture, request):
@@ -91,7 +91,7 @@ class TestAdminTeamsView:
         client = Client()
         client.force_login(user)
         response = client.get(reverse("admin_teams"))
-        assert response.status_code == 302, f"{user_fixture} should be redirected"
+        assert response.status_code == 403, f"{user_fixture} should be refused"
 
     @pytest.mark.parametrize("user_fixture", ["gold_team_user", "admin_user"])
     def test_authorized_roles_allowed(self, user_fixture, request):
@@ -163,7 +163,7 @@ class TestAdminBroadcastView:
         client = Client()
         client.force_login(user)
         response = client.get(reverse("admin_broadcast"))
-        assert response.status_code == 302, f"{user_fixture} should be redirected"
+        assert response.status_code == 403, f"{user_fixture} should be refused"
 
     @pytest.mark.parametrize("user_fixture", ["gold_team_user", "admin_user"])
     def test_authorized_roles_allowed(self, user_fixture, request):

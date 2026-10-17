@@ -1,19 +1,20 @@
 from typing import cast
 
 from django.contrib.auth.models import User
+from django.core.exceptions import BadRequest
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from core.auth_utils import require_permission
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import reset_team_credentials, reset_team_password
 from core.discord_tasks import SetupTeamInfrastructure, SyncMemberRoles
+from core.errors import json_endpoint
 from core.forms import TeamActionForm, TeamsBulkActionForm
 from core.models import AuditLog, DiscordTask
 from team.models import DiscordLink, Team, team_username
-
-from .competition import _has_admin_or_gold_access
 
 
 @require_permission("admin", "gold_team")
@@ -41,12 +42,7 @@ def admin_teams(request: HttpRequest) -> HttpResponse:
 
 @require_permission("admin", "gold_team")
 def admin_team_detail(request: HttpRequest, team_number: int) -> HttpResponse:
-    try:
-        team = Team.objects.get(team_number=team_number)
-    except Team.DoesNotExist:
-        return render(
-            request, "error.html", {"error": "Not found", "message": f"Team {team_number} not found."}, status=404
-        )
+    team = get_object_or_404(Team, team_number=team_number)
 
     members = DiscordLink.objects.filter(team=team, is_active=True).order_by("linked_at")
 
@@ -60,24 +56,17 @@ def admin_team_detail(request: HttpRequest, team_number: int) -> HttpResponse:
     return render(request, "admin/team_detail.html", context)
 
 
+@json_endpoint
+@require_POST
+@require_permission("admin", "gold_team")
 def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-
     user = cast(User, request.user)
     authentik_username = user.username
-
-    if not _has_admin_or_gold_access(user):
-        return JsonResponse({"error": "Access denied"}, status=403)
-
-    try:
-        team = Team.objects.get(team_number=team_number)
-    except Team.DoesNotExist:
-        return JsonResponse({"error": f"Team {team_number} not found"}, status=404)
+    team = get_object_or_404(Team, team_number=team_number)
 
     form = TeamActionForm(request.POST)
     if not form.is_valid():
-        return JsonResponse({"error": "Invalid action"}, status=400)
+        raise BadRequest("Invalid action")
 
     action = form.cleaned_data["action"]
 
@@ -118,7 +107,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
     elif action == "unlink_user":
         discord_id = form.cleaned_data.get("discord_id")
         if not discord_id:
-            return JsonResponse({"error": "Discord ID required"}, status=400)
+            raise BadRequest("Discord ID required")
 
         try:
             link = DiscordLink.objects.get(discord_id=discord_id, team=team, is_active=True)
@@ -141,7 +130,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
 
             return JsonResponse({"success": True, "message": f"User {link.discord_username} unlinked"})
         except DiscordLink.DoesNotExist:
-            return JsonResponse({"error": "User not found or not linked to this team"}, status=404)
+            raise BadRequest("User not found or not linked to this team") from None
 
     elif action == "reset":
         links = DiscordLink.objects.filter(team=team, is_active=True)
@@ -222,23 +211,20 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
 
         return JsonResponse({"success": True, "message": "Channel recreation task queued for Discord bot"})
 
-    return JsonResponse({"error": "Unknown action"}, status=400)
+    raise BadRequest("Unknown action")
 
 
+@json_endpoint
+@require_POST
+@require_permission("admin", "gold_team")
 def admin_teams_bulk_action(request: HttpRequest) -> HttpResponse:
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-
     user = cast(User, request.user)
     authentik_username = user.username
-
-    if not _has_admin_or_gold_access(user):
-        return JsonResponse({"error": "Access denied"}, status=403)
 
     form = TeamsBulkActionForm(request.POST)
     if not form.is_valid():
         error_msg = "; ".join(str(e) for errors in form.errors.values() for e in errors)
-        return JsonResponse({"error": error_msg or "Invalid input"}, status=400)
+        raise BadRequest(error_msg or "Invalid input")
 
     action = form.cleaned_data["action"]
     team_numbers = form.cleaned_data["team_numbers"]
@@ -289,4 +275,4 @@ def admin_teams_bulk_action(request: HttpRequest) -> HttpResponse:
 
         return JsonResponse({"success": True, "message": f"Queued {len(team_numbers)} channel recreation tasks"})
 
-    return JsonResponse({"error": "Unknown action"}, status=400)
+    raise BadRequest("Unknown action")

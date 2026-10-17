@@ -149,7 +149,7 @@ class TestTeamTicketDetail:
         client = Client()
         client.force_login(blue_team_user)
         response = client.get(reverse("ticket_detail", args=[ticket.ticket_number]))
-        assert response.status_code == 403
+        assert response.status_code == 404
 
 
 class TestTicketCancel:
@@ -193,8 +193,8 @@ class TestTicketCancel:
         client = Client()
         client.force_login(blue_team_user)
         response = client.post(reverse("ticket_cancel", args=[ticket.ticket_number]))
-        # Should show error (ticket not found for their team)
-        assert b"ticket not found" in response.content.lower() or b"access denied" in response.content.lower()
+        # Another team's ticket is answered as a missing one
+        assert response.status_code == 404
 
 
 class TestOpsTicketClaim:

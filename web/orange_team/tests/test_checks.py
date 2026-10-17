@@ -24,7 +24,7 @@ class TestCheckList:
         client = Client()
         client.login(username="orange1", password="test")
         response = client.get("/orange-team/checks/")
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_shows_checks_in_list(self) -> None:
         user = User.objects.create_user(username="gold2", password="test")
@@ -127,7 +127,7 @@ class TestCheckCreate:
                 "criterion_points_0": "3",
             },
         )
-        assert response.status_code == 302
+        assert response.status_code == 403
 
 
 class TestCheckDetail:
@@ -148,7 +148,7 @@ class TestCheckDetail:
         client = Client()
         client.login(username="orange1", password="test")
         response = client.get(f"/orange-team/checks/{check.pk}/")
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     def test_shows_criteria(self) -> None:
         user = User.objects.create_user(username="gold1", password="test")

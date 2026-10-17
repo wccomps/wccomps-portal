@@ -9,7 +9,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from core.auth_utils import get_user_team, has_permission
+from core.auth_utils import get_user_team, has_permission, team_record_or_404
 from core.discord_tasks import PostComment
 from core.models import DiscordTask
 from core.tickets_config import get_all_categories, get_category_config
@@ -41,12 +41,12 @@ def _ticketing_staff_usernames() -> list[str]:
     )
 
 
-def _can_access(user: User, ticket: Ticket) -> bool:
-    """Ticketing staff see every ticket; a team sees its own."""
-    if has_permission(user, "ticketing_support"):
-        return True
-    team = get_user_team(user)
-    return team is not None and ticket.team_id == team.id
+def _visible_ticket(user: User, ticket_number: str) -> Ticket:
+    """The ticket as the person may see it: ticketing staff see every ticket, a team its own (another team's is a
+    404, as a missing one is)."""
+    return team_record_or_404(
+        Ticket.objects.select_related("team"), user, staff=("ticketing_support",), ticket_number=ticket_number
+    )
 
 
 def _is_ops(user: User) -> bool:
@@ -68,26 +68,7 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
     is_ticketing_admin = has_permission(user, "ticketing_admin")
     is_ticketing_support = has_permission(user, "ticketing_support")
 
-    try:
-        ticket = Ticket.objects.select_related("team").get(ticket_number=ticket_number)
-    except Ticket.DoesNotExist:
-        return render(
-            request,
-            "error.html",
-            {
-                "error": "Ticket not found",
-                "message": f"Ticket {ticket_number} does not exist.",
-            },
-            status=404,
-        )
-
-    if not _can_access(user, ticket):
-        return render(
-            request,
-            "error.html",
-            {"error": "Access Denied", "message": "You do not have permission to view this ticket."},
-            status=403,
-        )
+    ticket = _visible_ticket(user, ticket_number)
 
     cat_info = get_category_config(ticket.category_id) or {}
     comments = TicketComment.objects.filter(ticket=ticket).order_by("posted_at")
@@ -126,23 +107,7 @@ def ticket_comment(request: HttpRequest, ticket_number: str) -> HttpResponse:
     user = cast(User, request.user)
     authentik_username = user.username
 
-    try:
-        ticket = Ticket.objects.select_related("team").get(ticket_number=ticket_number)
-    except Ticket.DoesNotExist:
-        return render(
-            request,
-            "error.html",
-            {"error": "Not Found", "message": "The requested ticket was not found."},
-            status=404,
-        )
-
-    if not _can_access(user, ticket):
-        return render(
-            request,
-            "error.html",
-            {"error": "Access Denied", "message": "You do not have permission to perform this action."},
-            status=403,
-        )
+    ticket = _visible_ticket(user, ticket_number)
 
     form = TicketCommentForm(request.POST)
     if not form.is_valid():
@@ -176,13 +141,7 @@ def ticket_detail_dynamic(request: HttpRequest, ticket_number: str) -> HttpRespo
     """Return dynamic ticket content (comments/history) for HTMX polling."""
     user = cast(User, request.user)
 
-    try:
-        ticket = Ticket.objects.select_related("team").get(ticket_number=ticket_number)
-    except Ticket.DoesNotExist:
-        return HttpResponse("Ticket not found", status=404)
-
-    if not _can_access(user, ticket):
-        return HttpResponse("Access denied", status=403)
+    ticket = _visible_ticket(user, ticket_number)
 
     comments = TicketComment.objects.filter(ticket=ticket).order_by("posted_at")
     # History holds staff notes, points and usernames; the team's own poll must not carry it

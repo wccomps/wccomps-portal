@@ -3,6 +3,7 @@ from typing import TypedDict, cast
 
 from django.contrib import messages
 from django.contrib.auth.models import User
+from django.core.exceptions import BadRequest, PermissionDenied
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -39,8 +40,7 @@ def team_packet(request: HttpRequest) -> HttpResponse:
 
     team = get_user_team(user)
     if not team:
-        messages.error(request, "You are not assigned to a team.")
-        return redirect("/")
+        raise PermissionDenied("You are not assigned to a team.")
 
     context = {
         "distributions": PacketDistribution.objects.visible_to(team)
@@ -175,13 +175,9 @@ def packet_detail(request: HttpRequest, packet_id: int) -> HttpResponse:
 
 
 @require_POST
+@require_permission("gold_team")
 def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
     """Dispatch packet actions (distribute, resend_failed, resend_pending, send_new_teams, cancel, test_email)."""
-    from core.auth_utils import has_permission
-
-    if not has_permission(cast(User, request.user), "gold_team"):
-        return HttpResponse("Access denied", status=403)
-
     packet = get_object_or_404(Packet, id=packet_id)
 
     form = PacketActionForm(request.POST)
@@ -250,7 +246,7 @@ def packet_action(request: HttpRequest, packet_id: int) -> HttpResponseBase:
 
         return StreamingHttpResponse(_stream_test(), content_type="application/x-ndjson")
 
-    return HttpResponse("Unknown action", status=400)
+    raise BadRequest("Unknown action")
 
 
 @require_POST

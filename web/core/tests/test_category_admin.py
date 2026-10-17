@@ -55,7 +55,7 @@ class TestAdminCategoriesList:
         client = Client()
         client.force_login(blue_team_user)
         response = client.get(reverse("admin_categories"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
     @pytest.mark.parametrize("user_fixture", ["gold_team_user", "admin_user", "ticketing_admin_user"])
     def test_accessible_by_authorized_users(self, user_fixture, request):
@@ -168,7 +168,7 @@ class TestAdminCategoryCreate:
         client = Client()
         client.force_login(blue_team_user)
         response = client.get(reverse("admin_category_create"))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
 
 class TestAdminCategoryEdit:
@@ -267,7 +267,7 @@ class TestAdminCategoryEdit:
         client = Client()
         client.force_login(blue_team_user)
         response = client.get(reverse("admin_category_edit", kwargs={"category_id": category.pk}))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
 
 class TestAdminCategoryDelete:
@@ -319,7 +319,7 @@ class TestAdminCategoryDelete:
         client = Client()
         client.force_login(blue_team_user)
         response = client.get(reverse("admin_category_delete", kwargs={"category_id": category.pk}))
-        assert response.status_code == 302
+        assert response.status_code == 403
 
 
 def test_the_category_page_and_the_admin_edit_categories_with_one_model_form():

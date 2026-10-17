@@ -257,7 +257,7 @@ class TestComments:
             reverse("ticket_comment", kwargs={"ticket_number": open_ticket.ticket_number}),
             {"comment": "Sneaky comment"},
         )
-        assert response.status_code == 403
+        assert response.status_code == 404
         assert not TicketComment.objects.filter(comment_text="Sneaky comment").exists()
 
 
