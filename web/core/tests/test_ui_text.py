@@ -62,7 +62,8 @@ JS_ESCAPE_RE = re.compile(r"\\(.)")
 JS_ESCAPES = {"n": "\n", "t": "\t"}
 CHROME = "labelled for screen readers"
 
-# "file:line:problem" (fnmatch) -> why that string reads right, or isn't UI text
+# "template:line:problem" or "file.py:function:line:problem" (fnmatch) -> why that string reads right, or isn't UI
+# text
 UI_TEXT_EXCEPTIONS = {
     "admin/base_site.html:*:☰": "the menu button's icon, " + CHROME,
     "admin/base_site.html:*:✕": "the menu's close icon, " + CHROME,

@@ -1,4 +1,4 @@
-"""Emailing every scorecard streams its progress and keeps the result on the page, with no reload."""
+"""Emailing the scorecards keeps the result on the page: no reload, no clearing."""
 
 import json
 

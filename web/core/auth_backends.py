@@ -9,17 +9,14 @@ from .auth_utils import uses_django_admin
 
 
 class PortalBackend(BaseBackend):
-    """Finds a signed-in session's user, and gives Django's model permissions (the Django admin's model pages check
-    user.has_perm) only to a user the admin site lets in, every one, sync and async. It authenticates no one, so
-    nothing signs in with a password. User.has_perm still answers True for an active superuser before asking any
-    backend, until production's superuser flags are cleared; the admin site's gate keeps such a user out.
+    """A session's user, and every Django model permission (has_perm and has_module_perms, sync and async) for a
+    user the admin site lets in, none for anyone else; get_all_permissions lists none. It authenticates no one, so
+    nothing signs in with a password. User.has_perm passes an active superuser before asking any backend, so a user
+    whose superuser flag is set still passes it; the admin site's gate keeps such a user out.
     """
 
     def get_user(self, user_id: int) -> User | None:
         return User.objects.filter(pk=user_id, is_active=True).first()
-
-    async def aget_user(self, user_id: int) -> User | None:
-        return await User.objects.filter(pk=user_id, is_active=True).afirst()
 
     def has_perm(self, user_obj: User | AnonymousUser, perm: str, obj: Model | None = None) -> bool:
         return uses_django_admin(user_obj)

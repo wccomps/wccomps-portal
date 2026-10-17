@@ -486,9 +486,8 @@ def test_an_admin_whose_admin_group_was_removed_holds_no_model_permission(admin_
 
 
 def test_no_backend_grants_a_superuser_without_the_admin_permission_anything(gold_team_user: User) -> None:
-    """Django permissions come only from the admin permission: ModelBackend granted a superuser every permission
-    (production still has superuser flags). User.has_perm's own superuser shortcut stays; the admin site's gate keeps
-    such a user out."""
+    """No backend grants from the superuser flag: ModelBackend granted a superuser every permission. User.has_perm's
+    own superuser shortcut stays; the admin site's gate keeps such a user out."""
     from asgiref.sync import async_to_sync
     from django.contrib.auth import get_backends
 
