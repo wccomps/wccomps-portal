@@ -11,7 +11,7 @@ from django.conf import settings
 
 from bot.competition_actions import run_competition_cleanup
 from bot.permissions import permission_check
-from bot.utils import ConfirmView, log_to_ops_channel, pinging, team_chat_channel
+from bot.utils import ConfirmView, announcement, log_to_ops_channel, pinging, send_parts, team_chat_channel
 from core.authentik_utils import credentials_csv, parse_team_range, reset_team_credentials
 from core.forms import AppSlugForm
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
@@ -484,7 +484,8 @@ class AdminCompetitionCog(commands.Cog):
             role_mention = blueteam_role.mention if blueteam_role else "@Blueteam"
 
             try:
-                await channel.send(
+                await send_parts(
+                    channel,
                     f"{role_mention}\n\n{message}",
                     allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
                 )
@@ -492,7 +493,7 @@ class AdminCompetitionCog(commands.Cog):
 
                 await log_to_ops_channel(
                     self.bot,
-                    f"Broadcast to Announcements by {interaction.user.mention}\nMessage: {message[:100]}...",
+                    f"Broadcast to Announcements by {interaction.user.mention}\nMessage: {shorten(message, 100)}",
                 )
 
                 await interaction.followup.send("Broadcast sent to announcements channel", ephemeral=True)
@@ -532,7 +533,7 @@ class AdminCompetitionCog(commands.Cog):
 
                 chat_channel = team_chat_channel(guild, team)
                 if chat_channel:
-                    await chat_channel.send(f"**Announcement from {interaction.user.name}:**\n\n{message}")
+                    await send_parts(chat_channel, announcement(interaction.user.name, message))
                     sent_count += 1
                 else:
                     # Queue announcement for later delivery when channel is created
@@ -545,7 +546,7 @@ class AdminCompetitionCog(commands.Cog):
 
             except Exception as e:
                 logger.exception(f"Failed to broadcast to team {team_number}: {e}")
-                failed_channels.append(f"Team {team_number:02d} ({str(e)[:50]})")
+                failed_channels.append(f"Team {team_number:02d} ({shorten(str(e), 50)})")
                 continue
 
         await AuditLog.objects.acreate(
@@ -555,7 +556,7 @@ class AdminCompetitionCog(commands.Cog):
             target_id=0,
             details={
                 "target": target,
-                "message_preview": message[:200],
+                "message_preview": shorten(message, 200),
                 "sent_count": sent_count,
                 "queued_count": queued_count,
                 "failed_count": len(failed_channels),
@@ -571,7 +572,7 @@ class AdminCompetitionCog(commands.Cog):
             ops_msg_parts.append(f"• Queued: {queued_count} (pending channel creation)")
         if failed_channels:
             ops_msg_parts.append(f"• Failed: {len(failed_channels)}")
-        ops_msg_parts.append(f"Message: {message[:100]}...")
+        ops_msg_parts.append(f"Message: {shorten(message, 100)}")
 
         await log_to_ops_channel(self.bot, "\n".join(ops_msg_parts))
 

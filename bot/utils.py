@@ -50,6 +50,20 @@ def split_message(text: str, limit: int = DISCORD_MESSAGE_CHAR_LIMIT) -> list[st
     return [*chunks, text] if text or not chunks else chunks
 
 
+def announcement(sender: str, message: str) -> str:
+    """A broadcast as a team's channel shows it."""
+    return f"**Announcement from {sender}:**\n\n{message}"
+
+
+async def send_parts(
+    channel: discord.abc.Messageable, text: str, *, allowed_mentions: discord.AllowedMentions = ALLOWED_MENTIONS
+) -> None:
+    """Send text in as many messages as it takes (split_message), so none is past Discord's 2000 characters. Only
+    the first may ping what allowed_mentions allows: the rest is the sender's text."""
+    for n, part in enumerate(split_message(text)):
+        await channel.send(part, allowed_mentions=allowed_mentions if n == 0 else ALLOWED_MENTIONS)
+
+
 async def log_to_ops_channel(bot: discord.Client, message: str, embed: discord.Embed | None = None) -> None:
     try:
         channel_id = settings.DISCORD_LOG_CHANNEL_ID

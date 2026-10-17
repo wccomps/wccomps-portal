@@ -15,13 +15,17 @@ from bot.tests.bot_harness import (
     Modal,
     Run,
     World,
+    discord_world,
     drive,
     may,
+    mention_problems,
     on_message,
     on_message_edit,
     option_text,
+    sent_problems,
 )
 from bot.ticket_dashboard import ResolveTicketModal
+from core.tests.strategies import rolled_back
 
 BROADCAST = Command(AdminCompetitionCog, AdminCompetitionCog.admin_broadcast.callback, may("admin"))
 RESOLVE = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_resolve.callback, may("ticketing_support"))
@@ -162,3 +166,29 @@ def test_app_slugs_are_read_as_the_competition_page_reads_them(bot_world: World,
 def test_a_reopen_reply_repeats_only_the_start_of_the_reason(bot_world: World, reason: str) -> None:
     """The reopen reply repeated the whole reason, past the 2000 characters a message takes."""
     drive(REOPEN, bot_world, Chosen({"role": "admin", "ticket_number": "T001-003", "reason": reason}))
+
+
+@example(target="announcements", message="m" * 3000)
+@example(target="1", message="m" * 3000)
+@given(target=st.sampled_from(("announcements", "1", "all-teams")), message=option_text(1900, 6000))
+def test_a_long_broadcast_is_sent_in_parts(bot_world: World, target: str, message: str) -> None:
+    """A broadcast over 2000 characters (with its header) went out as one message, which Discord refuses."""
+    drive(BROADCAST, bot_world, Chosen({"role": "admin", "target": target, "message": message}))
+
+
+@example(target="1", message="m" * 3000)
+@given(target=st.sampled_from(("announcements", "1")), message=option_text(1900, 6000))
+def test_a_long_web_broadcast_is_sent_in_parts(bot_world: World, target: str, message: str) -> None:
+    """The queue sent a broadcast from the portal as one message too, and Discord refused one over 2000."""
+    from asgiref.sync import async_to_sync
+
+    from bot.discord_queue import DiscordQueueProcessor
+    from core.discord_tasks import BroadcastMessage
+
+    with rolled_back(), discord_world(bot_world, confirm=True) as fakes:
+        processor = DiscordQueueProcessor(fakes.bot)
+        async_to_sync(processor._handle_broadcast_message)(BroadcastMessage(target=target, message=message, sender="g"))
+        assert fakes.sent
+        for sent in fakes.sent:
+            assert not sent_problems(sent), sent_problems(sent)
+            assert not mention_problems(sent, fakes.bot.allowed_mentions)

@@ -19,8 +19,10 @@ from bot.thread_creator import publish_new_ticket
 from bot.ticket_dashboard import trigger_dashboard
 from bot.utils import (
     DISCORD_EMBED_FIELD_CHAR_LIMIT,
+    announcement,
     pinging,
     recycle_db_connection,
+    send_parts,
     split_message,
     team_chat_channel,
 )
@@ -463,8 +465,10 @@ class DiscordQueueProcessor:
             blueteam_role = guild.get_role(settings.BLUETEAM_ROLE_ID)
             role_mention = blueteam_role.mention if blueteam_role else "@Blueteam"
 
-            await channel.send(
-                f"{role_mention}\n\n{message}", allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else [])
+            await send_parts(
+                channel,
+                f"{role_mention}\n\n{message}",
+                allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
             )
             sent_count = 1
             logger.info(f"Broadcast to announcements by {sender}")
@@ -515,7 +519,7 @@ class DiscordQueueProcessor:
         try:
             chat_channel = team_chat_channel(guild, team)
             if chat_channel:
-                await chat_channel.send(f"**Announcement from {sender}:**\n\n{message}")
+                await send_parts(chat_channel, announcement(sender, message))
                 return "sent"
             else:
                 await QueuedAnnouncement.objects.acreate(

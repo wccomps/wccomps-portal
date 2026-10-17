@@ -7,6 +7,8 @@ import discord
 from django.conf import settings
 from django.utils import timezone
 
+from bot.utils import announcement as announcement_text
+from bot.utils import send_parts
 from core.models import AuditLog
 from team.models import Team
 
@@ -354,7 +356,7 @@ class DiscordManager:
         delivered_count = 0
         for announcement in announcements:
             try:
-                await channel.send(f"**Announcement from {announcement.sender_name}:**\n\n{announcement.message}")
+                await send_parts(channel, announcement_text(announcement.sender_name, announcement.message))
                 announcement.delivered_at = timezone.now()
                 await announcement.asave()
                 delivered_count += 1
