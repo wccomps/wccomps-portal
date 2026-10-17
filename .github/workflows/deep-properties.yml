@@ -1,10 +1,8 @@
 name: Nightly deep property tests
 
 # The ci profile runs the same few Hypothesis examples on every PR; this runs the deep profile (many random
-# examples, conftest.py) on main every night and on demand, and reports through nightly-report.yml: one issue open
-# while it fails, closed when it passes. A run cancelled by someone or by the concurrency group reports nothing. A job
-# that hits timeout-minutes is cancelled, but the run isn't, so the report still runs and files it.
-# A PR touching the paths below runs it with the ci profile and prints the issue body it would send instead.
+# examples, conftest.py) on main every night and on demand (nightly.yml). A PR touching the paths below runs it with
+# the ci profile and prints the issue body it would send instead.
 
 on:
   schedule:
@@ -13,40 +11,23 @@ on:
   pull_request:
     paths:
       - .github/workflows/deep-properties.yml
+      - .github/workflows/nightly.yml
       - .github/workflows/tests.yml
-      - .github/workflows/nightly-report.yml
       - .github/scripts/nightly_report.py
 
 permissions:
   contents: read
   issues: write
 
-# The nightly and manual runs (from any ref) one at a time, so two can't both open an issue. A PR's dry run sends
-# nothing, so it has a group of its own, where a newer push cancels the older run.
+# The nightly and manual runs one at a time, so two can't both open an issue; each PR's dry run has a group of its own
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('deep-properties-pr-{0}', github.event.pull_request.number) || 'deep-properties' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  tests:
-    uses: ./.github/workflows/tests.yml
+  nightly:
+    uses: ./.github/workflows/nightly.yml
     with:
-      profile: ${{ github.event_name == 'pull_request' && 'ci' || 'deep' }}
-      lint: false
-      # The night's run tests main; a PR's run tests the PR's merge commit (an empty ref). Written this way round
-      # because an empty string is false in an expression: "pull_request && '' || 'main'" is always 'main'
-      ref: ${{ github.event_name != 'pull_request' && 'main' || '' }}
-      timeout-minutes: 300
-
-  report:
-    needs: tests
-    # After the tests whatever happened to them, but not when someone cancelled the run
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/nightly-report.yml
-    with:
-      title: Nightly deep property tests failed
       label: nightly-deep-properties
-      result: ${{ needs.tests.result }}
-      sha: ${{ needs.tests.outputs.sha || github.sha }}
-      results: ${{ needs.tests.outputs.results }}
-      dry-run: ${{ github.event_name == 'pull_request' }}
+      profile: ${{ github.event_name == 'pull_request' && 'ci' || 'deep' }}
+      timeout-minutes: 300

@@ -43,7 +43,7 @@ def _unpinned_jobs() -> list[str]:
 
 def test_every_workflow_job_that_runs_python_runs_the_pinned_version() -> None:
     """A job's bare python3 is the runner's own (older than 3.14, whose syntax nightly_report.py uses) unless the job
-    sets up the pinned version; uv run reads .python-version itself. The nightly report job failed on the runner's."""
+    sets up the pinned version; uv run reads .python-version itself."""
     assert not _unpinned_jobs(), f"Jobs running Python without the pinned version: {_unpinned_jobs()}"
 
 
