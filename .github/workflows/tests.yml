@@ -1,7 +1,8 @@
 name: Tests
 
-# The test job ci.yml runs on every PR and every push to main, and deep-properties.yml runs nightly with the deep
-# profile: one Postgres service, setup and test command for both.
+# The test job ci.yml runs on every PR and every push to main, deep-properties.yml runs nightly with the deep
+# profile, and nightly-browser.yml runs nightly with the browser suite: one Postgres service, setup and test command
+# for all three.
 
 on:
   workflow_call:
@@ -10,6 +11,10 @@ on:
         description: The Hypothesis profile (conftest.py)
         type: string
         default: ci
+      suite:
+        description: Which tests, "unit" (everything but the browser tests) or "browser" (Playwright, in Chromium)
+        type: string
+        default: unit
       lint:
         description: Also run the format, lint, type and migration checks
         type: boolean
@@ -74,7 +79,7 @@ jobs:
         id: sha
         run: |
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "results=test-results-${{ inputs.profile }}" >> "$GITHUB_OUTPUT"
+          echo "results=test-results-${{ inputs.suite }}-${{ inputs.profile }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -114,12 +119,22 @@ jobs:
         env:
           DJANGO_SECRET_KEY: test-secret-key-for-ci
 
+      - name: Install Chromium
+        if: inputs.suite == 'browser'
+        run: |
+          uv run playwright install --with-deps chromium
+
       - name: Run tests
         run: |
-          uv run pytest -m "not browser" --junitxml=test-results.xml
+          if [ "$SUITE" = "browser" ]; then
+            uv run pytest -m browser -n0 --junitxml=test-results.xml
+          else
+            uv run pytest -m "not browser" --junitxml=test-results.xml
+          fi
         env:
           PYTHONPATH: ${{ github.workspace }}/web:${{ github.workspace }}
           DJANGO_SECRET_KEY: test-secret-key-for-ci
+          SUITE: ${{ inputs.suite }}
 
       - name: Keep the results
         if: always()

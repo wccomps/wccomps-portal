@@ -1,7 +1,8 @@
-"""The nightly deep property run's issue body, from the tests' JUnit XML: python deep_report.py RESULTS RUN_URL SHA.
+"""A nightly run's issue body, from the tests' JUnit XML: python nightly_report.py RESULTS RUN_URL SHA.
 
-Each failing test and its message (Hypothesis's falsifying example) go in one code block, fenced with a longer run
-of backticks than any in the text, so a payload can't close it and nothing in it becomes a mention or markup.
+Each failing test and its message (a Hypothesis falsifying example, a browser test's call log) go in one code block,
+fenced with a longer run of backticks than any in the text, so a payload can't close it and nothing in it becomes a
+mention or markup.
 """
 
 import re

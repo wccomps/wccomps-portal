@@ -13,12 +13,14 @@ WCComps Portal is a competition management platform for WRCCDC. Three components
 # Run tests from the repo root (requires test DB: docker compose -f docker-compose.test.yml up -d --wait).
 # From web/ pytest ignores testpaths and skips bot/tests.
 PYTHONPATH="$(pwd)/web:$(pwd)" DB_HOST=localhost DB_PORT=5433 DB_USER=test_user DB_PASSWORD=test_password DB_NAME=wccomps_test uv run pytest -m "not browser"
-# Browser tests (Playwright): same env, `-m browser -n0`
+# Browser tests (Playwright): same env, `-m browser -n0`. CI doesn't run them; nightly-browser.yml runs them on main
+# every night, so run them by hand before a template or JS PR.
 # Hypothesis runs the "ci" profile: 25 fixed examples per test (10 for the view tests). HYPOTHESIS_PROFILE=deep runs
-# 2000 random ones (500 for the view tests), and runs nightly on main (deep-properties.yml keeps one issue open
-# while it fails, closed when it passes). No test pins its own count. GitHub turns a public repo's schedule off after
-# 60 days with no repo activity (it emails first): turn it back on under Actions, "Nightly deep property tests",
-# "Enable workflow" (or `gh workflow enable deep-properties.yml`).
+# 2000 random ones (500 for the view tests), and runs nightly on main (deep-properties.yml). No test pins its own
+# count. Each nightly run keeps one issue open while it fails, closed when it passes (nightly-report.yml). GitHub
+# turns a public repo's schedules off after 60 days with no repo activity (it emails first): turn each back on under
+# Actions, "Nightly deep property tests" and "Nightly browser tests", "Enable workflow" (or
+# `gh workflow enable deep-properties.yml` and `gh workflow enable nightly-browser.yml`).
 # User-input property tests: web/core/tests/test_properties_*.py; test_property_coverage.py fails on any input
 # without one (or an exceptions entry with a reason). A new URL pattern needs a row in its test_properties_views_*
 # table (views_harness.ViewCase).

@@ -1,0 +1,49 @@
+name: Nightly browser tests
+
+# CI runs everything but the browser tests (Playwright, in Chromium); this runs them on main every night and on
+# demand, and reports through nightly-report.yml: one issue open while they fail, closed when they pass. A run
+# cancelled by someone or by the concurrency group reports nothing.
+# A PR touching the paths below runs them and prints the issue body it would send instead.
+
+on:
+  schedule:
+    - cron: "47 9 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/nightly-browser.yml
+      - .github/workflows/tests.yml
+      - .github/workflows/nightly-report.yml
+      - .github/scripts/nightly_report.py
+
+permissions:
+  contents: read
+  issues: write
+
+# The nightly and manual runs one at a time, so two can't both open an issue; a PR's dry run has a group of its own
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('nightly-browser-pr-{0}', github.event.pull_request.number) || 'nightly-browser' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+    with:
+      suite: browser
+      lint: false
+      # The night's run tests main; a PR's run tests the PR's merge commit (an empty ref)
+      ref: ${{ github.event_name != 'pull_request' && 'main' || '' }}
+      timeout-minutes: 45
+
+  report:
+    needs: tests
+    # After the tests whatever happened to them, but not when someone cancelled the run
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/nightly-report.yml
+    with:
+      title: Nightly browser tests failed
+      label: nightly-browser
+      result: ${{ needs.tests.result }}
+      sha: ${{ needs.tests.outputs.sha || github.sha }}
+      results: ${{ needs.tests.outputs.results }}
+      dry-run: ${{ github.event_name == 'pull_request' }}
