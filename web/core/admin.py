@@ -2,12 +2,13 @@ from contextlib import suppress
 from functools import wraps
 from typing import TYPE_CHECKING, cast
 
+from django import forms
 from django.contrib import admin
 from django.contrib.admin.exceptions import DisallowedModelAdminToField
 from django.contrib.admin.options import TO_FIELD_VAR
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.contrib.auth.views import redirect_to_login
-from django.core.exceptions import FieldDoesNotExist, PermissionDenied, ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Model, QuerySet
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.urls import reverse
@@ -70,26 +71,28 @@ admin.sites.site = admin.site
 
 
 class PortalModelAdmin[ModelT: Model](admin.ModelAdmin[ModelT]):
-    """Every portal model's admin (test_admin_initial_data checks)."""
+    """Every portal model's admin (test_every_admin_is_a_portal_model_admin checks)."""
 
     # The stubs say text, but a form's initial value is any value its field takes (a datetime for a date widget)
     def get_changeform_initial_data(self, request: HttpRequest) -> dict[str, object]:  # type: ignore[override]
-        """An add form's values from its query (Django's prefill), each as its form field cleans it, or left out when
-        the field refuses it: Django passes the text on as it came, and a date widget given text fails the page
-        (a 500)."""
-        initial = super().get_changeform_initial_data(request)
-        kept: dict[str, object] = {}
-        for name, value in initial.items():
-            try:
-                form_field = self.opts.get_field(name).formfield()  # type: ignore[union-attr]
-            except FieldDoesNotExist:
-                kept[name] = value  # not a field: the admin's own parameters
-                continue
-            if form_field is None:
-                continue
-            with suppress(ValidationError):
-                kept[name] = form_field.clean(value)
-        return kept
+        """An add form's values from its query (Django's prefill), as Django gives them, but where a widget reads the
+        value and fails the page (a 500) on one its field refuses: a date-and-time field gets the text read as a date
+        and time, and a related record's field keeps the value only when it names a record (a number past Python's
+        digit limit failed the select)."""
+        fields = self.get_form(request).base_fields
+        initial: dict[str, object] = {}
+        for name, value in super().get_changeform_initial_data(request).items():
+            field = fields.get(name)
+            if isinstance(field, forms.DateTimeField | forms.SplitDateTimeField):
+                with suppress(ValidationError):
+                    initial[name] = forms.DateTimeField().clean(value)
+            elif isinstance(field, forms.ModelChoiceField):
+                with suppress(ValidationError):
+                    field.clean(value)
+                    initial[name] = value
+            else:
+                initial[name] = value
+        return initial
 
 
 @admin.register(AuditLog)

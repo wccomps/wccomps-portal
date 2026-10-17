@@ -303,8 +303,8 @@ def test_the_admin_list_shows_its_error_page_for_an_unknown_filter(admin_site_cl
 @example(value="0")
 @example(value="2027-01-02 03:04:05")
 def test_an_admin_add_form_takes_any_prefill(admin_site_client: Client, value: str) -> None:
-    """Django's add page hands a query value to the field's widget as text; a date widget given text failed the page
-    (/admin/team/linktoken/add/?expires_at=0 answered 500)."""
+    """Django's add page hands a query value to the field's widget as text; a date-and-time widget given text failed
+    the page (/admin/team/linktoken/add/?expires_at=0 answered 500)."""
     with rolled_back():
         response = admin_site_client.get(reverse("admin:team_linktoken_add"), {"expires_at": value})
     assert response.status_code == 200
@@ -314,6 +314,37 @@ def test_an_admin_add_form_keeps_a_prefill_its_field_accepts(admin_site_client: 
     with rolled_back():
         response = admin_site_client.get(reverse("admin:team_linktoken_add"), {"expires_at": "2027-01-02 03:04:05"})
     assert 'value="2027-01-02"' in response.content.decode()
+
+
+def test_an_admin_add_form_passes_other_prefills_on(admin_site_client: Client) -> None:
+    """A field whose widget takes text keeps Django's prefill: a category's required fields tick their boxes."""
+    from ticketing.forms import TICKET_FIELD_CHOICES
+
+    value = TICKET_FIELD_CHOICES[0][0]
+    with rolled_back():
+        response = admin_site_client.get(reverse("admin:ticketing_ticketcategory_add"), {"required_fields": value})
+    assert re.search(rf'name="required_fields" value="{value}"[^>]*checked', response.content.decode())
+
+
+def _add_page_fields() -> list[tuple[str, str]]:
+    """Each registered admin's add page with each of its model's field names, reverse relations included."""
+    from django.contrib import admin
+
+    return [
+        (f"admin:{model._meta.app_label}_{model._meta.model_name}_add", field.name)
+        for model in admin.site._registry
+        for field in model._meta.get_fields()
+    ]
+
+
+@pytest.mark.parametrize(("page", "name"), _add_page_fields())
+def test_every_add_page_takes_a_prefill_for_any_field(admin_site_client: Client, page: str, name: str) -> None:
+    """Any field name with text its field refuses, or a number past Python's 4300-digit limit (a JSON field's clean
+    raised ValueError): the page loads, or refuses to add with a 403."""
+    with rolled_back():
+        for value in ("0", "1" * 5000):
+            response = admin_site_client.get(reverse(page), {name: value})
+            assert response.status_code in (200, 403), (page, name, value[:10], response.status_code)
 
 
 def test_every_admin_is_a_portal_model_admin() -> None:
@@ -330,7 +361,8 @@ def test_every_admin_is_a_portal_model_admin() -> None:
 
 def test_django_still_fails_on_a_text_prefill_for_a_date(admin_user: User) -> None:
     """The canary for PortalModelAdmin.get_changeform_initial_data: Django's own add page, given a date field's
-    prefill as text, still fails. When this fails, Django has fixed it: drop the override in core/admin.py."""
+    prefill as text, still fails. When it stops failing, check whether Django fixed it, and if so drop that part of
+    the override in core/admin.py."""
     from django.contrib import admin
     from django.test import RequestFactory
 
@@ -357,7 +389,7 @@ latin1_with_nul = with_nul.map(lambda t: t.encode("latin-1", "replace").decode("
 
 @given(name=st.sampled_from(["sessionid", "csrftoken", "tz", "other"]), text=latin1_with_nul)
 @example(name="sessionid", text="abcdefgh\x00xyz")
-@example(name="sessionid", text=";\x00;0")  # a NUL in a chunk with no name, which Django's parser drops
+@example(name="sessionid", text=";\x00;0")  # a NUL in a nameless chunk, which the later nameless "0" replaces
 def test_a_nul_character_in_a_cookie_is_refused(name: str, text: str) -> None:
     """The session key reached PostgreSQL, so anyone got a 500 (and paged the error webhook) with one cookie."""
     client = Client(HTTP_COOKIE=f"{name}={text}")  # raw, as anyone can send it (the test client's jar refuses it)

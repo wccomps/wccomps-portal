@@ -31,12 +31,13 @@ from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.messages import constants as message_levels
 from django.core import mail
+from django.core.exceptions import SuspiciousOperation
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection, models
 from django.http import HttpResponseBase
-from django.http.multipartparser import MAX_TOTAL_HEADER_SIZE
+from django.http.multipartparser import MultiPartParserError
 from django.test import Client
-from django.test.client import BOUNDARY, MULTIPART_CONTENT, encode_file, encode_multipart
+from django.test.client import BOUNDARY, MULTIPART_CONTENT, RequestFactory, encode_multipart
 from django.urls import URLPattern, URLResolver, get_resolver, reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -523,20 +524,17 @@ class Drawn:
         fields = _texts({k: v for k, v in self.data.items() if not _is_upload(v)}) if posted else []
         return any("\x00" in text for text in (unquote(self.path), *self._query_texts(), *fields, self.tz or ""))
 
-    def overflows_part_headers(self) -> bool:
-        """An upload whose part headers, as the test client sends them, run past Django's limit
-        (MAX_TOTAL_HEADER_SIZE): Django refuses the whole body (a 400) where RejectNulFieldsMiddleware reads a
-        signed-in POST's form, before the view's role check."""
+    def body_refused(self) -> bool:
+        """Whether Django refuses the body as sent (a part's headers past its limit, too many fields): it answers 400
+        where RejectNulFieldsMiddleware reads a signed-in POST's form, before the view's role check. Asked of
+        Django's own parser."""
         if self.method != "POST" or self.role == "anonymous":
             return False
-        for key, value in self.data.items():
-            for upload in value if isinstance(value, list) else [value]:
-                if isinstance(upload, SimpleUploadedFile):
-                    _, disposition, content_type, *_ = encode_file(BOUNDARY, key, upload)
-                    upload.seek(0)
-                    # The block the parser measures: from the line end after the boundary to the blank line
-                    if len(b"\r\n" + disposition + b"\r\n" + content_type + b"\r\n\r\n") > MAX_TOTAL_HEADER_SIZE:
-                        return True
+        body, content_type = encoded(self)
+        try:
+            RequestFactory().generic("POST", "/", body, content_type).POST  # noqa: B018 - reading it parses the body
+        except MultiPartParserError, SuspiciousOperation:
+            return True
         return False
 
 
@@ -837,10 +835,10 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
         # A signed-in role sent to sign in is a client that lost its session: every check after this would pass
         assert kind is not Kind.SIGN_IN, f"{where}: a signed-in role was sent to sign in ({status})"
     if drawn.role not in case.allowed:
-        # The one refusal: sent to sign in when signed out, the 403 when signed in. Only a NUL, or a body Django won't
-        # parse, is refused (400) before the view's role check; a wrong method (405) comes first where the method
+        # The one refusal: sent to sign in when signed out, the 403 when signed in. Only a NUL, or a body Django
+        # refuses, is refused (400) before the view's role check; a wrong method (405) comes first where the method
         # check wraps the role check (require_POST outside require_permission), and after it elsewhere
-        early = (status == 400 and (drawn.carries_nul() or drawn.overflows_part_headers())) or kind is Kind.WRONG_METHOD
+        early = (status == 400 and (drawn.carries_nul() or drawn.body_refused())) or kind is Kind.WRONG_METHOD
         refusal = Kind.SIGN_IN if drawn.role == "anonymous" else Kind.FORBIDDEN
         location = response.get("Location", "")
         assert kind is refusal or early, f"{where}: a role the page refuses got {status} {location}"
