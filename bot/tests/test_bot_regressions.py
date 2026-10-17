@@ -7,25 +7,33 @@ from hypothesis import strategies as st
 from bot.cogs.admin_competition import AdminCompetitionCog
 from bot.cogs.admin_teams import AdminTeamsCog
 from bot.cogs.admin_tickets import AdminTicketsCog
+from bot.cogs.scoring import ScoringCog
 from bot.cogs.ticketing import TicketingCog
 from bot.tests.bot_harness import (
+    EVERYONE,
+    QUEUE_CHANNEL_ID,
     Attachment,
     Chosen,
     Command,
+    Draws,
+    Item,
     Listener,
     Modal,
     Run,
     World,
     discord_world,
     drive,
+    embed_problems,
     may,
     mention_problems,
     on_message,
     on_message_edit,
     option_text,
     sent_problems,
+    stored_text,
 )
-from bot.ticket_dashboard import ResolveTicketModal
+from bot.ticket_dashboard import ResolveTicketModal, format_ticket_embed
+from bot.unified_dashboard import DashboardControlView, UnifiedDashboard
 from core.tests.strategies import file_bytes, file_names, rolled_back
 
 BROADCAST = Command(AdminCompetitionCog, AdminCompetitionCog.admin_broadcast.callback, may("admin"))
@@ -110,8 +118,9 @@ def test_a_team_files_only_in_a_category_teams_may_create(bot_world: World, desc
     """/ticket took any category id, so a team could file a ticket in a staff-only category the web form hides."""
     from ticketing.models import TicketCategory
 
-    TicketCategory.objects.filter(pk=6).update(user_creatable=False)
-    run = drive(TICKET, bot_world, Chosen({"role": "blue_team", "category": "6", "description": description}))
+    with rolled_back():
+        TicketCategory.objects.filter(pk=6).update(user_creatable=False)
+        run = drive(TICKET, bot_world, Chosen({"role": "blue_team", "category": "6", "description": description}))
     assert "ticketing_ticket" not in run.written
 
 
@@ -206,3 +215,90 @@ def test_a_thread_attachment_is_stored_as_a_web_upload_is(
     attachment = Attachment(filename, content_type, len(data), data)
     run = drive(THREAD_MESSAGE, bot_world, in_a_ticket_thread(bot_world, "see attached", attachments=[attachment]))
     assert "ticketing_ticketattachment" in run.written
+
+
+def dashboard_view(run: Run, data: Draws) -> DashboardControlView:
+    dashboard = UnifiedDashboard(run.discord.bot)
+    dashboard.dashboard_message_id = 1
+    dashboard.dashboard_channel_id = QUEUE_CHANNEL_ID
+    return DashboardControlView(dashboard)
+
+
+DASHBOARD = Item("button", DashboardControlView.sort_created, dashboard_view, EVERYONE)
+TICKET_LIST = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_list.callback, may("ticketing_support"))
+TEAM_LIST = Command(AdminTeamsCog, AdminTeamsCog.admin_teams.callback, may("admin"))
+TEAM_INFO = Command(AdminTeamsCog, AdminTeamsCog.admin_team_info.callback, may("admin"))
+INCIDENT = Command(ScoringCog, ScoringCog.incident_report.callback, frozenset({"blue_team", "other_team"}))
+
+
+def long_tickets(text: str, count: int) -> Chosen:
+    return Chosen({"hostile rows": True, "a name": "Team", "a text": text, "more tickets": count})
+
+
+@example(text="x" * 5000, count=40)
+@given(text=stored_text(5000), count=st.integers(6, 40))
+def test_the_dashboard_fits_one_embed(bot_world: World, text: str, count: int) -> None:
+    """The dashboard put a field per category in one embed with no total in mind: many long tickets passed the
+    6000 characters an embed takes, and Discord refused the edit (the dashboard froze)."""
+    drive(DASHBOARD, bot_world, Chosen({**long_tickets(text, count).values, "role": "admin"}))
+
+
+@example(text="x" * 5000, count=30)
+@given(text=stored_text(5000), count=st.integers(0, 30))
+def test_the_ticket_list_fits_one_embed(bot_world: World, text: str, count: int) -> None:
+    """/tickets list named each field with the ticket's title (up to 255 characters, past the 256 a field name
+    takes with the number) and added 25 of them, past the 6000 characters an embed takes."""
+    drive(TICKET_LIST, bot_world, Chosen({**long_tickets(text, count).values, "role": "admin", "status": "all"}))
+
+
+@example(name="n" * 100)
+@given(name=stored_text(100).filter(str.strip))
+def test_the_team_list_fits_one_embed(bot_world: World, name: str) -> None:
+    """/teams list put up to 25 teams in one field, past the 1024 characters a field takes with long names."""
+    from team.models import Team
+
+    with rolled_back():
+        Team.objects.bulk_create(Team(team_number=n, team_name=name) for n in range(4, 26))
+        drive(TEAM_LIST, bot_world, Chosen({"role": "admin"}))
+
+
+@example(group="")
+@given(group=st.sampled_from(("", " ")))
+def test_team_info_shows_a_team_without_an_authentik_group(bot_world: World, group: str) -> None:
+    """/teams info showed the Authentik group as a field even when blank, which Discord refuses."""
+    from team.models import Team
+
+    with rolled_back():
+        Team.objects.filter(team_number=1).update(authentik_group=group)
+        drive(TEAM_INFO, bot_world, Chosen({"role": "admin", "team_number": 1}))
+
+
+@example(hostname=" \u2029", text="x" * 5000)
+@given(hostname=stored_text(255), text=stored_text(5000))
+def test_a_ticket_thread_embed_fits(bot_world: World, hostname: str, text: str) -> None:
+    """The ticket's thread embed added a blank hostname, service or IP as a field (Discord refuses one), and with
+    long fields and a long description passed the 6000 characters an embed takes."""
+    from ticketing.models import Ticket
+
+    with rolled_back():
+        Ticket.objects.filter(pk=bot_world.tickets["resolved"].pk).update(
+            hostname=hostname, service_name=hostname[:100], title=text[:255], description=text, resolution_notes=text
+        )
+        ticket = Ticket.objects.select_related("team", "assigned_to").get(pk=bot_world.tickets["resolved"].pk)
+        assert not embed_problems([format_ticket_embed(ticket)])
+
+
+@example(source_ip="not an address")
+@given(source_ip=option_text(1, 45))
+def test_an_incident_report_is_checked_as_the_model_checks_it(bot_world: World, source_ip: str) -> None:
+    """/incident-report saved any text as the source IP (a GenericIPAddressField) and any length of service, so the
+    insert failed (the bot answered "Failed to submit" for what was the reporter's typo)."""
+    chosen = {
+        "role": "blue_team",
+        "affected_box": "web",
+        "affected_service": "http",
+        "source_ip": source_ip,
+        "attack_vector": "SQL injection",
+        "description": "We saw a SQL injection in the web logs and blocked the address at the firewall.",
+    }
+    drive(INCIDENT, bot_world, Chosen(chosen))

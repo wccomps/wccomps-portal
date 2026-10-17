@@ -12,7 +12,15 @@ from django.utils import timezone
 from bot.discord_manager import delete_team_infrastructure, unlink_team_members
 from bot.permissions import permission_check
 from bot.role_sync import sync_member_roles
-from bot.utils import get_team_or_respond, log_to_ops_channel, send_lines
+from bot.utils import (
+    DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT,
+    DISCORD_EMBED_FIELD_CHAR_LIMIT,
+    add_field,
+    fit_lines,
+    get_team_or_respond,
+    log_to_ops_channel,
+    send_lines,
+)
 from core.authentik_manager import AuthentikManager
 from core.authentik_utils import parse_team_range, reset_team_password
 from core.models import AuditLog, CompetitionConfig
@@ -43,16 +51,11 @@ class AdminTeamsCog(commands.Cog):
             status = f"#{team.team_number:02d} {team.team_name}: {member_count}/{max_members} members"
             team_statuses.append(status)
 
-        embed = discord.Embed(title="Team Status", color=discord.Color.blue())
-
-        if len(team_statuses) <= 25:
-            embed.add_field(
-                name=f"All Teams ({len(team_statuses)})",
-                value="\n".join(team_statuses),
-                inline=False,
-            )
-        else:
-            embed.description = f"{len(team_statuses)} teams total (use /teams info for details)"
+        embed = discord.Embed(
+            title=f"Team Status ({len(team_statuses)} teams)",
+            description=fit_lines(team_statuses, DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT) or "No teams",
+            color=discord.Color.blue(),
+        )
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -72,27 +75,14 @@ class AdminTeamsCog(commands.Cog):
         embed = discord.Embed(title=f"{team.team_name} Details", color=discord.Color.blue())
         embed.add_field(name="Team Number", value=f"#{team.team_number}", inline=True)
         embed.add_field(name="Members", value=f"{member_count}/{max_members}", inline=True)
-        embed.add_field(name="Authentik Group", value=team.authentik_group, inline=False)
+        add_field(embed, "Authentik Group", team.authentik_group or "(none)")
 
         if members:
-            # Build member list, respecting Discord's embed field char limit
-            member_lines = [f"• {m.discord_username} (ID: {m.discord_id}), via `{m.user.username}`" for m in members]
-
-            member_list = ""
-            shown_count = 0
-            for line in member_lines:
-                test_list = member_list + line + "\n"
-                # Leave room for "... and N more" message
-                if len(test_list) > 950:
-                    break
-                member_list = test_list
-                shown_count += 1
-
-            if shown_count < len(members):
-                remaining = len(members) - shown_count
-                member_list += f"... and {remaining} more"
-
-            embed.add_field(name="Team Members", value=member_list.strip(), inline=False)
+            member_lines = [
+                f"• {shorten(m.discord_username, 40)} (ID: {m.discord_id}), via `{shorten(m.user.username, 40)}`"
+                for m in members
+            ]
+            add_field(embed, "Team Members", fit_lines(member_lines, DISCORD_EMBED_FIELD_CHAR_LIMIT))
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 

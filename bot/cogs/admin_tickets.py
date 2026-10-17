@@ -12,7 +12,9 @@ from bot.thread_creator import publish_new_ticket
 from bot.ticket_dashboard import trigger_dashboard
 from bot.ticket_input import read_resolution, read_ticket
 from bot.utils import (
+    DISCORD_EMBED_FIELD_COUNT_LIMIT,
     ConfirmView,
+    add_field,
     get_team_or_respond,
     log_to_ops_channel,
 )
@@ -155,19 +157,13 @@ class AdminTicketsCog(commands.Cog):
             await interaction.response.send_message("No tickets found matching criteria", ephemeral=True)
             return
 
-        # Fetch tickets (limit to 25 due to Discord embed field limit)
-        display_limit = 25
-        tickets = [t async for t in query.order_by("-created_at")[:display_limit]]
-
-        if total_count > display_limit:
-            title = f"Tickets ({status}): showing {display_limit} of {total_count}"
-        else:
-            title = f"Tickets ({status}): {total_count} in all"
-
-        embed = discord.Embed(title=title, color=discord.Color.blue())
+        # An embed holds 25 fields and 6000 characters: as many of the newest as fit
+        tickets = [t async for t in query.order_by("-created_at")[:DISCORD_EMBED_FIELD_COUNT_LIMIT]]
+        embed = discord.Embed(title=f"Tickets ({status}): {total_count} in all", color=discord.Color.blue())
 
         from core.tickets_config import get_category_config
 
+        shown = 0
         for ticket in tickets:
             cat_info = await sync_to_async(get_category_config)(ticket.category_id) or {}
             value = (
@@ -178,15 +174,12 @@ class AdminTicketsCog(commands.Cog):
             )
             if ticket.assigned_to:
                 value += f"\nAssigned: {ticket.assigned_to.username}"
+            if not add_field(embed, f"{ticket.ticket_number}: {ticket.title}", value, room=100):
+                break
+            shown += 1
 
-            embed.add_field(
-                name=f"{ticket.ticket_number}: {ticket.title}",
-                value=value,
-                inline=False,
-            )
-
-        if total_count > display_limit:
-            embed.set_footer(text=f"Use web interface to see all {total_count} tickets")
+        if shown < total_count:
+            embed.set_footer(text=f"Showing {shown} of {total_count}: the web interface lists them all")
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 

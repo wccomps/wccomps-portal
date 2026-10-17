@@ -12,7 +12,7 @@ from quotient.client import get_quotient_client
 from bot.permissions import check_blue_team, linked_team_member
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_input import read_ticket
-from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, fit, pinging
+from bot.utils import add_field, pinging
 from core.stored_files import clean_name, stored_type
 from core.utils import shorten
 from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketComment, TicketHistory
@@ -226,12 +226,9 @@ class TicketingCog(commands.Cog):
         )
         embed.add_field(name="Ticket Number", value=ticket.ticket_number, inline=True)
         embed.add_field(name="Status", value="Open", inline=True)
-        embed.add_field(name="Team", value=team.team_name, inline=True)
+        add_field(embed, "Team", team.team_name, inline=True)
         embed.add_field(name="Point Cost", value=f"{cat_info.get('points', 0)} points", inline=True)
-        if ticket_input.description:
-            embed.add_field(
-                name="Description", value=fit(ticket_input.description, DISCORD_EMBED_FIELD_CHAR_LIMIT), inline=False
-            )
+        add_field(embed, "Description", ticket_input.description)
 
         embed.add_field(
             name="Need to attach files?",

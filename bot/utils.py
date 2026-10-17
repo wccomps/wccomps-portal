@@ -20,6 +20,9 @@ DISCORD_EMBED_FIELD_CHAR_LIMIT = 1024
 DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT = 4096
 DISCORD_EMBED_TITLE_CHAR_LIMIT = 256
 DISCORD_MESSAGE_CHAR_LIMIT = 2000
+DISCORD_EMBED_FIELD_NAME_CHAR_LIMIT = 256
+DISCORD_EMBED_TOTAL_CHAR_LIMIT = 6000
+DISCORD_EMBED_FIELD_COUNT_LIMIT = 25
 
 # What a message may ping unless its send names more: nothing. Messages repeat user text (ticket descriptions,
 # broadcasts, team names), so @everyone, @here or a mention in it must not reach anyone.
@@ -36,6 +39,35 @@ def pinging(
 def fit(text: str, limit: int) -> str:
     """text cut to Discord's limit, marked with an ellipsis; Discord rejects the whole message otherwise."""
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def fit_lines(lines: list[str], limit: int) -> str:
+    """As many whole lines as fit in limit characters, and how many more there are."""
+    shown: list[str] = []
+    for line in lines:
+        more = len(lines) - len(shown) - 1
+        # Leave room for the "... and N more" line unless this is the last line
+        if len("\n".join([*shown, line])) + (len(f"\n... and {more} more") if more else 0) > limit:
+            break
+        shown.append(line)
+    rest = len(lines) - len(shown)
+    return "\n".join([*shown, f"... and {rest} more"] if rest else shown)
+
+
+def add_field(embed: discord.Embed, name: str, value: str, *, inline: bool = False, room: int = 0) -> bool:
+    """Add a field cut to Discord's limits for one, if the embed has room for it (25 fields, 6000 characters in
+    all, less `room` kept for what is added after); a blank value (which Discord refuses) adds nothing. Returns
+    whether it was added."""
+    name = fit(name.strip() or "Unnamed", DISCORD_EMBED_FIELD_NAME_CHAR_LIMIT)
+    value = fit(value, DISCORD_EMBED_FIELD_CHAR_LIMIT)
+    if not value.strip():
+        return False
+    if len(embed.fields) >= DISCORD_EMBED_FIELD_COUNT_LIMIT or len(embed) + len(name) + len(value) > (
+        DISCORD_EMBED_TOTAL_CHAR_LIMIT - room
+    ):
+        return False
+    embed.add_field(name=name, value=value, inline=inline)
+    return True
 
 
 def split_message(text: str, limit: int = DISCORD_MESSAGE_CHAR_LIMIT) -> list[str]:

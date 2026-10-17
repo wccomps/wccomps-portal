@@ -207,7 +207,7 @@ def seed_hostile(world: World, data: Draws) -> None:
         return
     name = data.draw(stored_text(100), label="a name")
     text = data.draw(stored_text(5000), label="a text")
-    Team.objects.filter(pk__in=[t.pk for t in world.teams]).update(team_name=name)
+    Team.objects.filter(pk__in=[t.pk for t in world.teams]).update(team_name=name.strip() or "Team")
     TicketCategory.objects.filter(pk__in=world.categories).update(
         display_name=name.strip() or "Category", playbook=text[:3000]
     )

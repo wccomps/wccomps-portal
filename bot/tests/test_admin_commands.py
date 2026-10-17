@@ -52,7 +52,7 @@ class TestAdminCommands:
 
         assert "embed" in call_args.kwargs
         embed = call_args.kwargs["embed"]
-        assert embed.title == "Team Status"
+        assert embed.title == "Team Status (2 teams)"
 
     async def test_admin_team_info_command(self, mock_interaction: Any, mock_admin_user: Any, mock_bot: Any) -> None:
         mock_interaction.user.id = mock_admin_user._discord_id

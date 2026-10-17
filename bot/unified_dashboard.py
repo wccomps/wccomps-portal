@@ -10,14 +10,16 @@ from django.conf import settings
 from django.utils import timezone
 
 from bot.heartbeat import record as record_heartbeat
-from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, recycle_db_connection
+from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, add_field, fit_lines, recycle_db_connection
 from core.models import BotState
 from core.tickets_config import get_category_config
+from core.utils import shorten
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
 
 DASHBOARD_DEBOUNCE_SECONDS = 10
+DASHBOARD_FOOTER_ROOM = 100  # kept for the footer counting the categories that don't fit
 
 
 class UnifiedDashboard:
@@ -188,8 +190,7 @@ class UnifiedDashboard:
         if playbook_steps:
             lines.append("**Playbook:**")
             for idx, step in enumerate(playbook_steps[:3], 1):
-                clean_step = step if len(step) <= 80 else f"{step[:77]}..."
-                lines.append(f"{idx}. {clean_step}")
+                lines.append(f"{idx}. {shorten(step, 80)}")
             if len(playbook_steps) > 3:
                 lines.append(f"*(+{len(playbook_steps) - 3} more)*")
         for ticket in tickets:
@@ -202,7 +203,7 @@ class UnifiedDashboard:
                 ticket_display = f"**{ticket.ticket_number}**"
 
             time_str = self._get_time_ago(ticket.created_at)
-            desc_preview = ticket.description[:40] + "..." if len(ticket.description) > 40 else ticket.description
+            desc_preview = shorten(ticket.description, 40)
 
             assignee = ""
             if ticket.assigned_to:
@@ -213,11 +214,7 @@ class UnifiedDashboard:
                 f"   *{desc_preview}* ({time_str})"
             )
 
-        field_value = "\n".join(lines) if lines else "No tickets"
-        if len(field_value) > DISCORD_EMBED_FIELD_CHAR_LIMIT:
-            field_value = field_value[: DISCORD_EMBED_FIELD_CHAR_LIMIT - 4] + "..."
-
-        return f"{category_name} ({len(tickets)})", field_value
+        return f"{category_name} ({len(tickets)})", fit_lines(lines, DISCORD_EMBED_FIELD_CHAR_LIMIT) or "No tickets"
 
     async def _update_dashboard(self) -> None:
         if not self.dashboard_message_id or not self.dashboard_channel_id:
@@ -287,16 +284,20 @@ class UnifiedDashboard:
                     inline=False,
                 )
             else:
-                categorized = self._categorize_tickets(tickets)
+                categorized = list(self._categorize_tickets(tickets).items())
                 guild_id = channel.guild.id
-                for category_id, cat_tickets in categorized.items():
+                for n, (category_id, cat_tickets) in enumerate(categorized):
                     cat_info = await sync_to_async(get_category_config)(category_id) or {
                         "display_name": f"Category {category_id}"
                     }
                     field_name, field_value = self._build_category_field(
                         cat_info["display_name"], cat_tickets, guild_id, cat_info.get("playbook_steps") or []
                     )
-                    embed.add_field(name=field_name, value=field_value, inline=False)
+                    # The embed holds 25 fields and 6000 characters: the categories past that are counted instead
+                    if not add_field(embed, field_name, field_value, room=DASHBOARD_FOOTER_ROOM):
+                        left = sum(len(rest) for _, rest in categorized[n:])
+                        embed.set_footer(text=f"{left} more tickets in other categories: see the portal's ticket list")
+                        break
 
             view = DashboardControlView(self)
             await message.edit(embed=embed, view=view)
