@@ -9,7 +9,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import get_user_team, has_permission, require_permission
 from core.stored_files import file_response
-from core.utils import by_approval, by_team, list_filters
+from core.utils import by_approval, by_team, list_filters, team_numbers
 from team.models import Team
 
 from ..calculator import calculate_suggested_recovery_points, suggest_red_score_matches
@@ -204,14 +204,12 @@ def review_incidents(request: HttpRequest) -> HttpResponse:
     approved_count = IncidentReport.objects.filter(is_approved=True).count()
     pending_count = total_incidents - approved_count
 
-    available_teams = Team.objects.filter(incident_reports__isnull=False).distinct().order_by("team_number")
-
     context = {
         "page_obj": page_obj,
         "total_incidents": total_incidents,
         "approved_count": approved_count,
         "pending_count": pending_count,
-        "available_teams": available_teams,
+        "team_numbers": team_numbers(Team.objects.filter(incident_reports__isnull=False), filters["team"]),
         "filters": filters,
         "filtered": filtered,
         "sort_by": sort_by,

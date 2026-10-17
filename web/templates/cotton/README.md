@@ -66,7 +66,7 @@ The review lists' approval-status filter and a list's team filter, which names a
 filter with `core.utils.by_approval` and `by_team`.
 ```django
 <c-approval_filter value="{{ filters.status }}" />
-<c-team_filter :teams="available_teams" value="{{ filters.team }}" />
+<c-team_filter :numbers="team_numbers" value="{{ filters.team }}" />
 ```
 
 ### Interactive Elements

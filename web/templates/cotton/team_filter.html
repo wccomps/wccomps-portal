@@ -1,15 +1,12 @@
 {# Team filter component - a list's ?team= select, which names a team by its number (core.utils.by_team) #}
-{# Usage: <c-team_filter :teams="available_teams" value="{{ filters.team }}" /> #}
-{# Props: teams (the teams to choose from), value (the team number chosen), label #}
-<c-vars teams value label="Team" />
+{# Usage: <c-team_filter :numbers="team_numbers" value="{{ filters.team }}" /> #}
+{# Props: numbers (the team numbers to choose from, core.utils.team_numbers), value (the team number chosen), label #}
+<c-vars numbers value label="Team" />
 <c-filter_field label="{{ label }}" id="id_team">
     <select name="team" id="id_team" aria-label="Filter by team" {{ attrs }}>
         <option value="">All Teams</option>
-        {% for team in teams %}
-            <option value="{{ team.team_number }}"
-                    {% if value == team.team_number|stringformat:"i" %}selected{% endif %}>
-                Team {{ team.team_number }}
-            </option>
+        {% for number in numbers %}
+            <option value="{{ number }}" {% if value == number|stringformat:"i" %}selected{% endif %}>Team {{ number }}</option>
         {% endfor %}
     </select>
 </c-filter_field>

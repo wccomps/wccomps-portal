@@ -222,10 +222,8 @@ class TestRedTeamFindingsFiltering:
 
         response = client.get(reverse("scoring:red_team_scores"))
         assert response.status_code == 200
-        assert "available_teams" in response.context
+        assert response.context["team_numbers"] == [1, 2]
         assert "available_submitters" in response.context
-        assert team1 in response.context["available_teams"]
-        assert team2 in response.context["available_teams"]
         assert red_user in response.context["available_submitters"]
 
     def test_approval_status_not_visible_to_red_team(self, create_user_with_groups: Callable[..., User]) -> None:

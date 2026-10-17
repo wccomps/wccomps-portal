@@ -82,7 +82,7 @@
                     </select>
                 </c-filter_field>
                 {% if is_ops %}
-                    <c-team_filter :teams="available_teams" value="{{ filters.team }}" />
+                    <c-team_filter :numbers="team_numbers" value="{{ filters.team }}" />
                     <c-filter_field label="Assigned To" id="id_assignee">
                         <select name="assignee" id="id_assignee" aria-label="Filter by assignee">
                             <option value="">All Assignees</option>

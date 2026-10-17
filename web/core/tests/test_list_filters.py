@@ -123,6 +123,14 @@ def test_the_team_filter_takes_a_team_number(client: Client, admin_user: User, n
     assert ("7", "Team 7") in selects(client, reverse(name))["team"]
 
 
+@pytest.mark.parametrize("name", TEAM_LISTS)
+def test_the_team_chosen_stays_chosen_with_no_rows(client: Client, name: str) -> None:
+    """The select listed only teams with rows, so a team with none read "All Teams" while the list was filtered."""
+    Team.objects.create(team_number=9, team_name="Team 09")
+    page = client.get(reverse(name), {"team": "9"}).content.decode()
+    assert re.search(r'<option value="9"\s+selected>\s*Team 9\s*</option>', page), name
+
+
 @pytest.mark.parametrize("name", APPROVAL_LISTS)
 def test_every_approval_filter_offers_the_same_statuses(client: Client, name: str) -> None:
     assert selects(client, reverse(name))["status"] == list(APPROVAL_STATUSES.items())

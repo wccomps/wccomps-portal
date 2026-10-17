@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
-from core.utils import by_approval, by_team, list_filters, requested_sort, stable_order
+from core.utils import by_approval, by_team, list_filters, requested_sort, stable_order, team_numbers
 from team.models import Team
 
 from ..forms import ApproveInjectFeedbackForm, SaveInjectFeedbackForm
@@ -229,7 +229,6 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
     unapproved_count = total_grades - approved_count
 
     available_injects = InjectScore.objects.values("inject_id", "inject_name").distinct().order_by("inject_name")
-    available_teams = Team.objects.filter(inject_grades__isnull=False).distinct().order_by("team_number")
 
     context = {
         "page_obj": page_obj,
@@ -238,7 +237,7 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
         "total_grades": total_grades,
         "has_unapproved": unapproved_count > 0,
         "available_injects": available_injects,
-        "available_teams": available_teams,
+        "team_numbers": team_numbers(Team.objects.filter(inject_grades__isnull=False), filters["team"]),
         "filters": filters,
         "filtered": filtered,
         "sort_by": sort_by,

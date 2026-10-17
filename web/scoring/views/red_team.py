@@ -52,7 +52,7 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
     """The filtered, sorted page of findings and the filter state for the table both findings pages show."""
     from django.db.models import Q
 
-    from core.utils import by_approval, by_team, filter_sort_paginate, list_filters
+    from core.utils import by_approval, by_team, filter_sort_paginate, list_filters, team_numbers
 
     filters, filtered = list_filters(
         request, {"status": default_status, "team": "", "attack_type": "", "submitter": "", "search": ""}
@@ -85,7 +85,7 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
         "sort_by": result["current_sort"],
         "filters": filters,
         "filtered": filtered,
-        "available_teams": Team.objects.filter(red_team_scores__isnull=False).distinct().order_by("team_number"),
+        "team_numbers": team_numbers(Team.objects.filter(red_team_scores__isnull=False), filters["team"]),
         "available_attack_types": AttackType.objects.filter(findings__isnull=False).distinct().order_by("name"),
         "available_submitters": User.objects.filter(red_scores_submitted__isnull=False).distinct().order_by("username"),
     }

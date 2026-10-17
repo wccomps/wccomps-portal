@@ -5,7 +5,7 @@ import queue
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping
 from datetime import datetime
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.contrib import messages
@@ -16,6 +16,9 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 
 from core.discord_tasks import SyncRolesResult
+
+if TYPE_CHECKING:
+    from team.models import Team
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +151,14 @@ def by_approval[M: Model](queryset: QuerySet[M], status: str, field: str = "is_a
     if status in ("pending", "approved"):
         return queryset.filter(**{field: status == "approved"})
     return queryset
+
+
+def team_numbers(teams: QuerySet[Team], team: str) -> list[int]:
+    """The team numbers a team filter offers: the teams with rows, and the one chosen (?team=) even with none."""
+    numbers = set(teams.values_list("team_number", flat=True))
+    if (number := optional_int(team)) is not None:
+        numbers.add(number)
+    return sorted(numbers)
 
 
 def by_team[M: Model](queryset: QuerySet[M], team: str, field: str = "team") -> QuerySet[M]:
