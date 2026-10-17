@@ -54,6 +54,29 @@ def parse_datetime_to_utc(datetime_str: str, tz_name: str = "America/Los_Angeles
         raise ValueError(f"{datetime_str} in {tz_name} is outside the calendar") from e
 
 
+def shorten(text: str, limit: int) -> str:
+    """The text cut to at most `limit` characters at a word break, ending "...", with a ")" for each parenthesis the
+    cut left open, so a list's preview still reads (Django's truncatechars cuts inside a parenthesis)."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if not text[limit].isspace() and " " in cut:
+        cut = cut[: cut.rindex(" ")]
+    cut = cut.rstrip(" ,;:.(")
+    return cut + "..." + ")" * open_parentheses(cut)
+
+
+def open_parentheses(text: str) -> int:
+    """How many of the text's parentheses are still open at its end."""
+    depth = 0
+    for char in text:
+        if char == "(":
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+    return depth
+
+
 def ndjson_progress(step: str, current: int, total: int, ok: bool = True) -> str:
     """Encode a single progress line as newline-delimited JSON for streaming views."""
     return json.dumps({"step": step, "current": current, "total": total, "ok": ok}) + "\n"

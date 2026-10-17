@@ -133,7 +133,7 @@
                         </div>
                     {% endif %}
                 </th>
-                <td role="gridcell">{{ item.ticket.title|truncatechars:50 }}</td>
+                <td role="gridcell">{{ item.ticket.title|shorten:50 }}</td>
                 {% if is_ops %}<td role="gridcell">Team {{ item.ticket.team.team_number }}</td>{% endif %}
                 <td role="gridcell">{{ item.category_name }}</td>
                 <td role="gridcell">

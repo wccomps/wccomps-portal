@@ -62,7 +62,7 @@
                         {{ incident.affected_boxes_display }}
                         <div class="text-sm text-muted">{{ incident.affected_service }}</div>
                     </td>
-                    <td>{{ incident.attack_description|truncatechars:50 }}</td>
+                    <td>{{ incident.attack_description|shorten:50 }}</td>
                     <td>
                         {{ incident.attack_detected_at|timesince }} ago
                         <div class="text-sm text-muted">Submitted: {{ incident.created_at|date:"m/d H:i" }}</div>

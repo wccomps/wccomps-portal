@@ -51,6 +51,17 @@ def test_no_nested_forms() -> None:
     fail_with("Nested forms", found, {})
 
 
+def test_long_text_is_cut_with_shorten() -> None:
+    """truncatechars and truncatewords cut inside a parenthesis and leave it open; |shorten closes it."""
+    found = {
+        f"{template_name(path)}:{n}": "truncatechars or truncatewords"
+        for path in tracked_templates()
+        for n, line in enumerate(text(path).splitlines(), 1)
+        if re.search(r"\|truncate(chars|words)", line)
+    }
+    fail_with("Text cut without |shorten", found, {})
+
+
 # ---------------------------------------------------------------------------
 # 4. Alpine CSP compatibility: silent runtime failure
 # ---------------------------------------------------------------------------

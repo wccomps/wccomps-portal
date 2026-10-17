@@ -1,6 +1,7 @@
 """Every page whose placeholders became blank renders readable text when its values are missing: no Python "None",
 and parentheses that close. The rows are sparse on purpose: unscored assignments, findings without an attack type,
-vector or boxes, a team without school info, a packet nobody has downloaded."""
+vector or boxes, a team without school info, a packet nobody has downloaded. Long text is the exception: an attack
+type, an incident and an orange score whose descriptions an admin list cuts inside a parenthesis."""
 
 import re
 from collections.abc import Iterable
@@ -57,10 +58,7 @@ def assert_readable(html: str, where: str) -> None:
 
 
 # "<page>:<problem>" -> why the page reads that way on purpose
-UNREADABLE_EXCEPTIONS = {
-    "/admin/scoring/attacktype/:parentheses": "the attack type admin's Description column cuts a long description at "
-    "50 characters, closing parenthesis and all (the rows fixture adds one)",
-}
+UNREADABLE_EXCEPTIONS: dict[str, str] = {}
 
 
 def read_every(client: Client, pages: Iterable[str]) -> dict[str, str]:
@@ -76,15 +74,11 @@ def read_every(client: Client, pages: Iterable[str]) -> dict[str, str]:
 def rows(admin_user: User) -> tuple[dict, dict]:
     """The seeded rows, and the same with sparse rows in place of those the registry's URLs name."""
     from orange_team.models import OrangeAssignment, OrangeCheck, OrangeFollowUp
-    from scoring.models import AttackType, IncidentReport, RedTeamScore
+    from scoring.models import AttackType, IncidentReport, OrangeTeamScore, RedTeamScore
 
     from team.models import Team
 
     data = seed_table_data(admin_user)
-    # Its own row, not the migrations' seeds: a transactional test's flush may have emptied the table (web/conftest.py)
-    AttackType.objects.get_or_create(
-        name="Long description", defaults={"description": "A description long enough to be cut (past fifty characters)"}
-    )
     team = Team.objects.create(team_number=7, team_name="Team 07")  # no school info
     check = OrangeCheck.objects.create(title="Unscheduled", description="")
     assignment = OrangeAssignment.objects.create(orange_check=check, user=admin_user, team=team, status="in_progress")
@@ -100,6 +94,16 @@ def rows(admin_user: User) -> tuple[dict, dict]:
         source_ip="10.0.0.9",
         attack_detected_at=timezone.now(),
     )
+    long_text = "A long description (whose parentheses run on past where any list cuts it short)"
+    AttackType.objects.create(name="Long description", description=long_text)
+    IncidentReport.objects.create(
+        team=team,
+        submitted_by=admin_user,
+        attack_description=long_text,
+        source_ip="10.0.0.9",
+        attack_detected_at=timezone.now(),
+    )
+    OrangeTeamScore.objects.create(team=team, submitted_by=admin_user, description=long_text, points_awarded=Decimal(1))
     return data, {**data, "team": team, "orange_check": check, "finding": finding, "incident": incident}
 
 

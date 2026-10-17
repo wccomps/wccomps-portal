@@ -102,6 +102,7 @@ TEMPLATES = [
             "builtins": [
                 "django_cotton.templatetags.cotton",
                 "core.templatetags.js_filters",
+                "core.templatetags.text_filters",
             ],
         },
     },

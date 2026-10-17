@@ -1,5 +1,11 @@
+from typing import Protocol
+
 from django.contrib import admin
+from django.db.models import Count, QuerySet
+from django.http import HttpRequest
 from django.utils.html import format_html
+
+from core.utils import shorten
 
 from .models import (
     AttackType,
@@ -18,6 +24,12 @@ from .models import (
 )
 
 
+class CountedAttackType(Protocol):
+    """An attack type with its findings counted in the list's query."""
+
+    findings_total: int
+
+
 @admin.register(AttackType)
 class AttackTypeAdmin(admin.ModelAdmin[AttackType]):
     list_display = ["name", "description_short", "is_active", "findings_count", "created_at"]
@@ -28,11 +40,14 @@ class AttackTypeAdmin(admin.ModelAdmin[AttackType]):
 
     @admin.display(description="Description")
     def description_short(self, obj: AttackType) -> str:
-        return obj.description[:50] + "..." if len(obj.description) > 50 else obj.description
+        return shorten(obj.description, 50)
 
-    @admin.display(description="Findings")
-    def findings_count(self, obj: AttackType) -> int:
-        return obj.findings.count()
+    def get_queryset(self, request: HttpRequest) -> QuerySet[AttackType]:
+        return super().get_queryset(request).annotate(findings_total=Count("findings"))
+
+    @admin.display(description="Findings", ordering="findings_total")
+    def findings_count(self, obj: CountedAttackType) -> int:
+        return obj.findings_total
 
 
 class RedTeamScreenshotInline(admin.TabularInline[RedTeamScreenshot, RedTeamScore]):
@@ -169,7 +184,7 @@ class IncidentReportAdmin(admin.ModelAdmin[IncidentReport]):
 
     @admin.display(description="Description")
     def attack_description_short(self, obj: IncidentReport) -> str:
-        return obj.attack_description[:50] + "..." if len(obj.attack_description) > 50 else obj.attack_description
+        return shorten(obj.attack_description, 50)
 
     @admin.display(description="Affected Boxes")
     def affected_boxes_display(self, obj: IncidentReport) -> str:
@@ -228,7 +243,7 @@ class OrangeTeamScoreAdmin(admin.ModelAdmin[OrangeTeamScore]):
 
     @admin.display(description="Description")
     def description_short(self, obj: OrangeTeamScore) -> str:
-        return obj.description[:50] + "..." if len(obj.description) > 50 else obj.description
+        return shorten(obj.description, 50)
 
 
 @admin.register(ServiceScore)
