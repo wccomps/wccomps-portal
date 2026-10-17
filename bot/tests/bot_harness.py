@@ -1175,8 +1175,8 @@ def drive(case: BotCase, world: World, data: Draws) -> None:
 class Chosen:
     """Stands in for Hypothesis's data in drive: each draw returns the value chosen for its label, so a regression
     test runs one input of a row (the label of an option, a text input or a draw in a row's helper). A label not
-    chosen takes a plain default (an optional option omitted, nothing typed, the plain world, a confirmation given,
-    a person's message with no attachments); any other label must be chosen."""
+    chosen takes a plain default (an optional option not chosen is omitted, nothing typed, the plain world, a
+    confirmation given, a person's message with no attachments); any other label must be chosen."""
 
     DEFAULTS: dict[str, Any] = {  # noqa: RUF012 - read only
         "hostile rows": False,
@@ -1194,7 +1194,7 @@ class Chosen:
         if label in self.values:
             return self.values[label]
         if label and label.startswith("omit "):
-            return True
+            return label.removeprefix("omit ") not in self.values
         if label and label.startswith("typing "):
             return ""
         if label in self.DEFAULTS:
