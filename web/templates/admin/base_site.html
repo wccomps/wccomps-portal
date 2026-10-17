@@ -31,7 +31,7 @@
         </button>
         <div id="nav-menu" class="nav-menu" :class="navMenuClass">
             <div class="nav-links">
-                {% if is_ticketing_support or is_ticketing_admin %}
+                {% if is_ticketing_support %}
                     <a href="{% url 'ticket_list' %}"
                        {% if nav_active == 'tickets' %}class="current"{% endif %}>Tickets
                         <span class="notif-count"
@@ -56,7 +56,7 @@
                     <a href="{% url 'orange_team:dashboard' %}"
                        {% if nav_active == 'orange' %}class="current"{% endif %}>Orange Team</a>
                 {% endif %}
-                {% if is_gold_team or is_white_team or is_red_team or is_ticketing_admin or is_orange_team or is_ticketing_support or is_admin %}
+                {% if is_gold_team or is_white_team or is_red_team or is_orange_team or is_ticketing_support %}
                     <a href="{% url 'leaderboard_page' %}"
                        {% if nav_active == 'leaderboard' %}class="current"{% endif %}>Leaderboard</a>
                 {% endif %}
@@ -86,7 +86,7 @@
                     <span class="light-icon">☀️</span>
                     <span class="dark-icon">🌙</span>
                 </button>
-                {% if is_ticketing_support or is_ticketing_admin %}
+                {% if is_ticketing_support %}
                     <button type="button"
                             class="audio-toggle"
                             x-data="audioToggle"
@@ -103,7 +103,7 @@
             </div>
         </div>
     </nav>
-    {% if is_ticketing_support or is_ticketing_admin %}
+    {% if is_ticketing_support %}
         <div class="ticket-toast"
              x-data="toastClicker"
              x-show="showToast"
@@ -198,7 +198,7 @@
         });
     });
     </script>
-    {% if is_ticketing_support or is_ticketing_admin %}
+    {% if is_ticketing_support %}
         <script>
         document.addEventListener('alpine:init', () => {
             Alpine.store('ticketNotifs', {

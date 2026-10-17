@@ -53,7 +53,6 @@ def _visible_ticket(user: User, ticket_number: str) -> Ticket:
 def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
     """Unified ticket detail view for both team members and ops staff."""
     user = cast(User, request.user)
-    authentik_username = user.username
 
     is_ops = has_permission(user, TICKET_STAFF)  # staff see a ticket's history; teams see only its comments
     team = get_user_team(user)
@@ -66,7 +65,6 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
     context: dict[str, object] = {
         "is_ops": is_ops,
-        "authentik_username": authentik_username,
         "team": team,
         "ticket": ticket,
         "category_name": cat_info.get("display_name", "Unknown"),

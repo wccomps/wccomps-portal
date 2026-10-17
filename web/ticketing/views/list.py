@@ -43,7 +43,6 @@ def back_to_list(request: HttpRequest, *also: str) -> HttpResponse:
 def ticket_list(request: HttpRequest) -> HttpResponse:
     """Unified ticket list view for both team members and ops staff."""
     user = cast(User, request.user)
-    authentik_username = user.username
 
     is_ops = has_permission(user, TICKET_STAFF)
     team = get_user_team(user)
@@ -148,7 +147,6 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     context = {
         "is_ops": is_ops,
         "team": team,
-        "authentik_username": authentik_username,
         "page_obj": page_obj,
         "selected_statuses": selected_statuses,
         "status_choices": Ticket.STATUS_CHOICES,
