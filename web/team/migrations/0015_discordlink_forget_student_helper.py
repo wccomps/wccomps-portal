@@ -5,8 +5,7 @@ class Migration(migrations.Migration):
     """Forget DiscordLink.is_student_helper, helper_role_name and helper_role_id: student helpers are retired.
 
     The columns stay for pods still on the previous release during a rolling deploy, the NOT NULL ones with a
-    database default so new code can insert links without them. test_rollout_leftovers_dropped.py lists them until
-    they are dropped.
+    database default so new code can insert links without them. 0016 drops them.
     """
 
     dependencies = [
