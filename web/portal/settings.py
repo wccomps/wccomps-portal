@@ -179,7 +179,7 @@ if not DEBUG:
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Django's model permissions come only from the admin permission (core.auth_backends)
+# Sessions, and Django's model permissions from the admin permission; no password sign-in (core.auth_backends)
 AUTHENTICATION_BACKENDS = ["core.auth_backends.PortalBackend"]
 
 LOGIN_URL = "/auth/login/"

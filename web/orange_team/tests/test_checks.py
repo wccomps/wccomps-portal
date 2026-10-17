@@ -14,7 +14,7 @@ class TestCheckList:
         user = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.get("/orange-team/checks/")
         assert response.status_code == 200
 
@@ -22,7 +22,7 @@ class TestCheckList:
         user = User.objects.create_user(username="orange1", password="test")
         UserGroups.objects.create(user=user, authentik_id="o1", groups=["WCComps_OrangeTeam"])
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         response = client.get("/orange-team/checks/")
         assert response.status_code == 302
 
@@ -31,7 +31,7 @@ class TestCheckList:
         UserGroups.objects.create(user=user, authentik_id="g2", groups=["WCComps_GoldTeam"])
         OrangeCheck.objects.create(title="Test Check", description="desc", created_by=user)
         client = Client()
-        client.login(username="gold2", password="test")
+        client.force_login(User.objects.get(username="gold2"))
         response = client.get("/orange-team/checks/")
         assert response.status_code == 200
         assert b"Test Check" in response.content
@@ -40,7 +40,7 @@ class TestCheckList:
         user = User.objects.create_user(username="gold3", password="test")
         UserGroups.objects.create(user=user, authentik_id="g3", groups=["WCComps_GoldTeam"])
         client = Client()
-        client.login(username="gold3", password="test")
+        client.force_login(User.objects.get(username="gold3"))
         response = client.get("/orange-team/checks/")
         assert response.status_code == 200
         assert b"No checks" in response.content
@@ -51,7 +51,7 @@ class TestCheckCreate:
         user = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.post(
             "/orange-team/checks/create/",
             {
@@ -74,7 +74,7 @@ class TestCheckCreate:
         user = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.post(
             "/orange-team/checks/create/",
             {
@@ -91,7 +91,7 @@ class TestCheckCreate:
         user = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.post(
             "/orange-team/checks/create/",
             {
@@ -109,7 +109,7 @@ class TestCheckCreate:
         user = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.get("/orange-team/checks/create/")
         assert response.status_code == 200
         assert b"Create Check" in response.content
@@ -118,7 +118,7 @@ class TestCheckCreate:
         user = User.objects.create_user(username="orange1", password="test")
         UserGroups.objects.create(user=user, authentik_id="o1", groups=["WCComps_OrangeTeam"])
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         response = client.post(
             "/orange-team/checks/create/",
             {
@@ -136,7 +136,7 @@ class TestCheckDetail:
         UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
         check = OrangeCheck.objects.create(title="Test", description="Desc", created_by=user)
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.get(f"/orange-team/checks/{check.pk}/")
         assert response.status_code == 200
         assert b"Test" in response.content
@@ -146,7 +146,7 @@ class TestCheckDetail:
         UserGroups.objects.create(user=user, authentik_id="o1", groups=["WCComps_OrangeTeam"])
         check = OrangeCheck.objects.create(title="Test", description="Desc")
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         response = client.get(f"/orange-team/checks/{check.pk}/")
         assert response.status_code == 302
 
@@ -156,7 +156,7 @@ class TestCheckDetail:
         check = OrangeCheck.objects.create(title="Test", description="Desc", created_by=user)
         OrangeCheckCriterion.objects.create(orange_check=check, label="Fast response", points=5)
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.get(f"/orange-team/checks/{check.pk}/")
         assert response.status_code == 200
         assert b"Fast response" in response.content
@@ -169,7 +169,7 @@ class TestCheckDuplicate:
         check = OrangeCheck.objects.create(title="Original", description="Desc", created_by=user)
         OrangeCheckCriterion.objects.create(orange_check=check, label="C1", points=5)
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.post(f"/orange-team/checks/{check.pk}/duplicate/")
         assert response.status_code == 302
         copy = OrangeCheck.objects.get(title="Original (copy)")
@@ -180,7 +180,7 @@ class TestCheckDuplicate:
         UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
         check = OrangeCheck.objects.create(title="Original", description="Desc", created_by=user)
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.get(f"/orange-team/checks/{check.pk}/duplicate/")
         assert response.status_code == 302
 
@@ -200,7 +200,7 @@ class TestCheckAssign:
         Team.objects.create(team_number=3, team_name="T3")
         Team.objects.create(team_number=4, team_name="T4")
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.post(f"/orange-team/checks/{check.pk}/auto-assign/")
         assert response.status_code == 302
         assert OrangeAssignment.objects.filter(orange_check=check).count() == 4
@@ -214,7 +214,7 @@ class TestCheckAssign:
         check = OrangeCheck.objects.create(title="Test", description="Desc", created_by=lead)
         Team.objects.create(team_number=1, team_name="T1")
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.post(f"/orange-team/checks/{check.pk}/auto-assign/")
         assert response.status_code == 302
         assert OrangeAssignment.objects.filter(orange_check=check).count() == 0
@@ -225,7 +225,7 @@ class TestCheckAssign:
         check = OrangeCheck.objects.create(title="Test", description="Desc", created_by=lead)
         Team.objects.create(team_number=1, team_name="T1")
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.get(f"/orange-team/checks/{check.pk}/assign/")
         assert response.status_code == 200
         assert b"Team 1" in response.content
@@ -238,7 +238,7 @@ class TestCheckEdit:
         check = OrangeCheck.objects.create(title="Original", description="Desc", created_by=user)
         OrangeCheckCriterion.objects.create(orange_check=check, label="C1", points=5)
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.get(f"/orange-team/checks/{check.pk}/edit/")
         assert response.status_code == 200
         assert b"Edit Check" in response.content
@@ -249,7 +249,7 @@ class TestCheckEdit:
         check = OrangeCheck.objects.create(title="Original", description="Desc", created_by=user)
         OrangeCheckCriterion.objects.create(orange_check=check, label="C1", points=5)
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.post(
             f"/orange-team/checks/{check.pk}/edit/",
             {

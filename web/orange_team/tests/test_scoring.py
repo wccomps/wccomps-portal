@@ -41,7 +41,7 @@ class TestAssignmentSave:
     def test_save_criterion(self) -> None:
         user, assignment, c1, c2, r1, r2 = self._setup()
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         response = client.post(
             f"/orange-team/assignments/{assignment.pk}/save/",
             data=json.dumps({"criterion_id": c1.pk, "met": True}),
@@ -58,7 +58,7 @@ class TestAssignmentSave:
         user, assignment, c1, c2, r1, r2 = self._setup()
         assert assignment.status == "pending"
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         client.post(
             f"/orange-team/assignments/{assignment.pk}/save/",
             data=json.dumps({"criterion_id": c1.pk, "met": True}),
@@ -72,7 +72,7 @@ class TestAssignmentSave:
         assignment.status = "submitted"
         assignment.save()
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         response = client.post(
             f"/orange-team/assignments/{assignment.pk}/save/",
             data=json.dumps({"criterion_id": c1.pk, "met": True}),
@@ -85,7 +85,7 @@ class TestAssignmentSave:
         other = User.objects.create_user(username="orange2", password="test")
         UserGroups.objects.create(user=other, authentik_id="o2", groups=["WCComps_OrangeTeam"])
         client = Client()
-        client.login(username="orange2", password="test")
+        client.force_login(User.objects.get(username="orange2"))
         response = client.post(
             f"/orange-team/assignments/{assignment.pk}/save/",
             data=json.dumps({"criterion_id": c1.pk, "met": True}),
@@ -104,7 +104,7 @@ class TestAssignmentSubmit:
         assignment = OrangeAssignment.objects.create(orange_check=check, user=user, team=team)
         OrangeAssignmentResult.objects.create(assignment=assignment, criterion=c1, met=True)
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         response = client.post(f"/orange-team/assignments/{assignment.pk}/submit/")
         assert response.status_code == 302
         assignment.refresh_from_db()
@@ -119,6 +119,6 @@ class TestAssignmentSubmit:
         check = OrangeCheck.objects.create(title="Test", description="Desc")
         assignment = OrangeAssignment.objects.create(orange_check=check, user=user, team=team, status="submitted")
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         response = client.post(f"/orange-team/assignments/{assignment.pk}/submit/")
         assert response.status_code == 302  # redirects with error message

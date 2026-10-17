@@ -495,10 +495,21 @@ def test_no_backend_grants_a_superuser_without_the_admin_permission_anything(gol
     User.objects.filter(pk=gold_team_user.pk).update(is_staff=True, is_superuser=True)
     user = User.objects.get(pk=gold_team_user.pk)
     for backend in get_backends():
-        assert not backend.get_all_permissions(user), backend
-        assert not async_to_sync(backend.aget_all_permissions)(user), backend
         assert not backend.has_perm(user, "core.view_botstate"), backend
         assert not backend.has_module_perms(user, "core"), backend
+        assert not async_to_sync(backend.ahas_perm)(user, "core.view_botstate"), backend
+        assert not async_to_sync(backend.ahas_module_perms)(user, "core"), backend
+
+
+def test_no_one_signs_in_with_a_password(admin_user: User) -> None:
+    """Signing in is Authentik's: ModelBackend also took a username and password (the Django admin's login form)."""
+    from django.contrib.auth import authenticate
+
+    admin_user.set_password("a-known-password")
+    admin_user.save()
+    assert authenticate(username=admin_user.username, password="a-known-password") is None
+    response = Client().post(reverse("admin:login"), {"username": admin_user.username, "password": "a-known-password"})
+    assert "_auth_user_id" not in response.wsgi_request.session
 
 
 def test_a_permission_row_grants_nothing(gold_team_user: User) -> None:
