@@ -42,7 +42,7 @@ def test_a_button_question_answered_no_posts_nothing(team_page):
     assert posts == []
 
 
-def test_a_bound_question_is_asked_and_yes_posts(team_page):
+def test_a_question_answered_yes_posts(team_page):
     page, posts = team_page
     questions: list[str] = []
 
@@ -59,8 +59,8 @@ def test_a_bound_question_is_asked_and_yes_posts(team_page):
         with page.expect_response(lambda r: r.url.endswith("/action/")):
             page.get_by_role("button", name="Reset Team").click()
     assert questions == [
-        "Reset this team? This will:\n- Unlink all members\n- Generate a new Authentik password\n"
-        "- Revoke all active sessions\n\nThis cannot be undone."
+        "Reset this team? This unlinks all members, generates a new Authentik password and revokes all active "
+        "sessions. It cannot be undone."
     ]
     assert len(posts) == 1
 

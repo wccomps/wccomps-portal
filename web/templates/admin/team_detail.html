@@ -67,7 +67,7 @@
                             Activate Team
                         </c-button>
                     {% endif %}
-                    <c-button variant="danger" @click="resetTeam" ::disabled="loading" ::data-confirm="resetQuestion">
+                    <c-button variant="danger" @click="resetTeam" ::disabled="loading" data-confirm="Reset this team? This unlinks all members, generates a new Authentik password and revokes all active sessions. It cannot be undone.">
                         Reset Team
                     </c-button>
                     <c-button variant="default"
@@ -150,10 +150,6 @@
                     this.doAction(e.currentTarget.dataset.action);
                 },
 
-                get resetQuestion() {
-                    return 'Reset this team? This will:\n- Unlink all members\n- Generate a new Authentik password\n'
-                        + '- Revoke all active sessions\n\nThis cannot be undone.';
-                },
                 async resetTeam() {
                     this.newPassword = '';
                     // No reload: it would wipe the new password before anyone copied it

@@ -22,6 +22,7 @@ from core.tests.guards import (
     REPO_DIR,
     fail_with,
     scripts,
+    static_scripts,
     tags,
     template_name,
     text,
@@ -56,6 +57,8 @@ TITLE_RE = re.compile(r"{%\s*block\s+\w*title\s*%}.*?{%\s*endblock|<title>.*?</t
 TEMPLATE_TAG_RE = re.compile(r"{%.*?%}|{{.*?}}", re.DOTALL)
 QUOTED_RE = re.compile(r""""([^"]*)"|'([^']*)'""")
 JS_STRING_RE = re.compile(r"""'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`""")
+JS_ESCAPE_RE = re.compile(r"\\(.)")
+JS_ESCAPES = {"n": "\n", "t": "\t"}
 CHROME = "labelled for screen readers"
 
 # "file:line:problem" (fnmatch) -> why that string reads right, or isn't UI text
@@ -107,6 +110,14 @@ def template_strings(string: str) -> list[str]:
     ]
 
 
+def js_strings(script: str) -> Iterator[tuple[int, str]]:
+    """Each string literal in the JavaScript with its line (from 1), its escapes read (a \\n is a line break)."""
+    for m in JS_STRING_RE.finditer(script):
+        string = next(g for g in m.groups() if g is not None)
+        string = JS_ESCAPE_RE.sub(lambda e: JS_ESCAPES.get(e.group(1), e.group(1)), string)
+        yield script.count("\n", 0, m.start()) + 1, string
+
+
 def title_lines(path: Path) -> set[int]:
     content = text(path)
     return {
@@ -129,9 +140,8 @@ def template_sites(path: Path) -> Iterator[tuple[int, str, bool]]:
                 for string in template_strings(value):
                     yield tag.line, string, False
     for start, script in scripts(path):
-        for m in JS_STRING_RE.finditer(script):
-            string = next(g for g in m.groups() if g is not None)
-            yield start + script.count("\n", 0, m.start()), string, False
+        for line, string in js_strings(script):
+            yield start + line - 1, string, False
 
 
 # Python modules held to the rule: the web app (not its tests or migrations) and the bot's role sync
@@ -186,6 +196,9 @@ def ui_text_sites() -> Iterator[tuple[str, int, str, bool]]:
     for path in tracked_templates():
         for line, string, is_title in template_sites(path):
             yield template_name(path), line, string, is_title
+    for name, script in static_scripts():
+        for line, string in js_strings(script):
+            yield name, line, string, False
     for name in tracked_files():
         if PYTHON_UI_FILES_RE.fullmatch(name):
             for line, string in string_constants(REPO_DIR / name):

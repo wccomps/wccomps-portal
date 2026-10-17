@@ -215,6 +215,16 @@ def scripts(path: Path) -> tuple[tuple[int, str], ...]:
     return tuple((line, without_js_comments(script)) for line, script in read(path).scripts)
 
 
+@cache
+def static_scripts() -> tuple[tuple[str, str], ...]:
+    """Each tracked static JavaScript file (repo-relative path) and its JavaScript, comments left out."""
+    return tuple(
+        (name, without_js_comments((REPO_DIR / name).read_text(encoding="utf-8")))
+        for name in tracked_files()
+        if name.startswith("web/static/js/") and name.endswith(".js")
+    )
+
+
 EXTENDS_RE = re.compile(r"""{%\s*extends\s+["']([^"']+)["']\s*%}""")
 
 

@@ -133,7 +133,7 @@
                 <c-button variant="primary"
                           @click="startCompetition"
                           ::disabled="loading"
-                          ::data-confirm="startQuestion">
+                          data-confirm="Start the competition? This opens the competition apps to the blue teams and turns on the active teams' accounts.">
                     Start Competition
                 </c-button>
                 {% if not panel.stage.running %}
@@ -262,10 +262,6 @@ document.addEventListener('alpine:init', () => {
         },
         get closeOutBlocked() { return this.loading || this.closeOutChecking || !!this.closeOutProblem; },
 
-        get startQuestion() {
-            return 'Start the competition?\n\n'
-                + 'This opens the competition apps to the blue teams and turns on the active teams\' accounts.';
-        },
         get stopQuestion() {
             return 'Stop the competition?\n\n'
                 + 'This closes the competition apps to the blue teams and turns off every team account.\n'
