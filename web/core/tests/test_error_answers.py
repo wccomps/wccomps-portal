@@ -8,7 +8,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from django.test import Client
+from django.test import Client, RequestFactory
 from django.urls import reverse
 from django.utils import timezone
 from scoring.models import IncidentReport
@@ -264,3 +264,14 @@ def test_a_failed_csrf_check_answers_a_fetch_with_json() -> None:
     response = _without_csrf("admin").post(reverse("admin_team_action", args=[1]), {"action": "activate"})
     assert response.status_code == 403
     assert "Reload the page" in response.json()["error"]
+
+
+def test_the_error_page_renders_for_a_request_with_no_user() -> None:
+    """A refusal before AuthenticationMiddleware sets request.user still gets the page (no AttributeError)."""
+    from core.errors import error_answer
+
+    request = RequestFactory().get("/somewhere/")
+    request.resolver_match = None
+    response = error_answer(request, 400, "Nope")
+    assert response.status_code == 400
+    assert "Nope" in response.content.decode()

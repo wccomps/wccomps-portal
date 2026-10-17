@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
+from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import BadRequest, PermissionDenied
 from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import redirect, render
@@ -80,7 +81,7 @@ def error_answer(request: HttpRequest, status: int, message: str = "") -> HttpRe
     message = message or MESSAGES[status]
     if wants_json_error(request):
         return JsonResponse({"error": message}, status=status)
-    home_url = get_role_based_landing_url(get_authentik_groups(request.user)) if hasattr(request, "user") else "/"
+    home_url = get_role_based_landing_url(get_authentik_groups(getattr(request, "user", AnonymousUser())))
     context = {"error": TITLES[status], "message": message, "home_url": home_url if home_url != request.path else ""}
     return render(request, "error.html", context, status=status)
 
