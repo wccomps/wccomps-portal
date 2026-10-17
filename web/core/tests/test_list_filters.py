@@ -15,7 +15,6 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.tests.guards import REPO_DIR, fail_with, template_name, text, tracked_files, tracked_templates
-from core.utils import APPROVAL_STATUSES
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
@@ -133,7 +132,11 @@ def test_the_team_chosen_stays_chosen_with_no_rows(client: Client, name: str) ->
 
 @pytest.mark.parametrize("name", APPROVAL_LISTS)
 def test_every_approval_filter_offers_the_same_statuses(client: Client, name: str) -> None:
-    assert selects(client, reverse(name))["status"] == list(APPROVAL_STATUSES.items())
+    assert selects(client, reverse(name))["status"] == [
+        ("pending", "Pending Only"),
+        ("approved", "Approved Only"),
+        ("all", "All"),
+    ]
 
 
 @pytest.mark.parametrize("name", FILTERED_LISTS)
@@ -162,7 +165,7 @@ def _filter_keys() -> set[str]:
 
 
 FILTERS_KEY_RE = re.compile(r"\bfilters\.(\w+)")
-FILTERS_KEY_EXCEPTIONS = {"*:chosen": "the values of the filters that take several (core.utils.ListFilters)"}
+FILTERS_KEY_EXCEPTIONS: dict[str, str] = {}
 
 
 def test_a_template_reads_only_filters_a_list_has() -> None:

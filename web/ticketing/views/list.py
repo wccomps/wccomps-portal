@@ -56,11 +56,14 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
 
     from core.utils import filter_sort_paginate
 
+    # Several statuses allowed (#37): checkboxes send ?status=a&status=b; a comma-separated value
+    # (an older link's) works too. Unknown values are ignored; none selected means all.
+    requested = {part for value in request.GET.getlist("status") for part in value.split(",")}
+    selected_statuses = [s for s, _label in Ticket.STATUS_CHOICES if s in requested]
     filters, filtered = list_filters(
-        request,
-        {"category": "all", "search": ""} | ({"team": "", "assignee": ""} if is_ops else {}),
-        several={"status": [status for status, _label in Ticket.STATUS_CHOICES]},
+        request, {"category": "all", "search": ""} | ({"team": "", "assignee": ""} if is_ops else {})
     )
+    filtered = filtered or bool(selected_statuses)
 
     page_size = optional_int(request.GET.get("page_size", ""))
     if page_size not in VALID_PAGE_SIZES:
@@ -87,8 +90,8 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             )
         )
 
-    if filters.chosen["status"]:
-        query = query.filter(status__in=filters.chosen["status"])
+    if selected_statuses:
+        query = query.filter(status__in=selected_statuses)
 
     if (category_id := optional_int(filters["category"])) is not None:
         query = query.filter(category_id=category_id)
@@ -151,6 +154,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         "team": team,
         "authentik_username": authentik_username,
         "page_obj": page_obj,
+        "selected_statuses": selected_statuses,
         "status_choices": Ticket.STATUS_CHOICES,
         "filters": filters,
         "filtered": filtered,

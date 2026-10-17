@@ -116,38 +116,16 @@ class FilterSortPage[M: Model](TypedDict):
     current_sort: str
 
 
-class ListFilters(dict[str, str]):
-    """A list page's filters by name, and in chosen the values of each filter that takes several."""
-
-    def __init__(self, values: Mapping[str, str], chosen: Mapping[str, list[str]]) -> None:
-        super().__init__(values)
-        self.chosen = dict(chosen)
-
-
-def list_filters(
-    request: HttpRequest, defaults: Mapping[str, str], several: Mapping[str, Collection[str]] | None = None
-) -> tuple[ListFilters, bool]:
+def list_filters(request: HttpRequest, defaults: Mapping[str, str]) -> tuple[dict[str, str], bool]:
     """A list page's filters from the request, each its default when absent or blank (values trimmed), and whether
-    any is set to something else: the page's empty state then says its filters hide rows.
-
-    A filter in several takes any of its allowed values, as ?name=a&name=b or one comma-separated value (an older
-    link's); an unknown value is ignored, and none chosen means all.
-    """
+    any is set to something else: the page's empty state then says its filters hide rows."""
     values = {name: request.GET.get(name, "").strip() or default for name, default in defaults.items()}
-    chosen = {}
-    for name, allowed in (several or {}).items():
-        requested = {part for value in request.GET.getlist(name) for part in value.split(",")}
-        chosen[name] = [value for value in allowed if value in requested]
-    filtered = any(values[name] != default for name, default in defaults.items()) or any(chosen.values())
-    return ListFilters(values, chosen), filtered
-
-
-# The review lists' approval-status filter (?status=): each value and its label, as the filter lists them
-APPROVAL_STATUSES = {"pending": "Pending Only", "approved": "Approved Only", "all": "All"}
+    return values, any(values[name] != default for name, default in defaults.items())
 
 
 def by_approval[M: Model](queryset: QuerySet[M], status: str, field: str = "is_approved") -> QuerySet[M]:
-    """The rows the approval-status filter shows: pending (not approved yet), approved, or all (any other value)."""
+    """The rows the approval-status filter (cotton/approval_filter.html) shows: pending (not approved yet), approved,
+    or all (any other value)."""
     if status in ("pending", "approved"):
         return queryset.filter(**{field: status == "approved"})
     return queryset

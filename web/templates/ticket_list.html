@@ -65,7 +65,7 @@
                                 <input type="checkbox"
                                        name="status"
                                        value="{{ value }}"
-                                       {% if value in filters.chosen.status %}checked{% endif %}>
+                                       {% if value in selected_statuses %}checked{% endif %}>
                                 {{ label }}
                             </label>
                         {% endfor %}
