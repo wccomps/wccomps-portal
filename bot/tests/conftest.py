@@ -238,9 +238,8 @@ def mock_discord_guild() -> Any:
 def reset_bot_module_references() -> None:
     """Reset bot module references that may be polluted by @patch on bot.utils.
 
-    Same pattern as web/conftest.py reset_has_permission_reference: if a module
-    is first imported while a patch on the source module is active, the local
-    binding captures the mock instead of the real function.
+    If a module is first imported while a patch on the source module is active,
+    its local binding captures the mock instead of the real function.
     """
     import bot.utils
     import core.authentik_utils

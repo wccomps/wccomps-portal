@@ -27,9 +27,7 @@ def back_to_list(request: HttpRequest, *also: str) -> HttpResponse:
     """Back to the page the request came from (its Referer) when that is the ticket list, as the person had it
     filtered, or one of the also paths; else to the plain list.
 
-    The ticket pages find their way back to the filtered list differently (utils.js keeps the list's query in
-    sessionStorage): they are a later visit, while this is the redirect straight after a POST from the page, and every
-    ticket action redirects to the bare ticket URL, so a query carried in the links wouldn't survive. Both stay.
+    The ticket pages' own way back is utils.js's sessionStorage copy of the list's query.
     """
     list_path = reverse("ticket_list")
     referer = request.headers.get("referer", "")

@@ -143,10 +143,8 @@ Color mapping:
 Empty state display for when no data is available.
 ```django
 <c-empty_state title="No incidents found" />
-<c-empty_state
-    title="No search results"
-    description="Try adjusting your filters.">
-    <a href="/reset/" class="button">Clear Filters</a>
+<c-empty_state title="No tickets yet" description="Tickets your team opens show here.">
+    <c-link href="{% url 'create_ticket' %}" variant="add">Create your first ticket</c-link>
 </c-empty_state>
 ```
 
@@ -155,15 +153,15 @@ Props:
 - `description` (optional): Secondary explanatory text in muted color
 - Slot: Optional action button or link
 
-Use cases: Empty lists, no search results, filtered views with zero matches.
-
-### Tables
+Use cases: an empty list. A list its filters empty uses `<c-no_matches>`.
 
 #### `<c-no_matches>`
 The empty state of a list whose filters hide every row, with a link that clears them.
 ```django
 <c-no_matches items="tickets" href="{% url 'ticket_list' %}" />
 ```
+
+### Tables
 
 #### `<c-table>`
 Data table with header and body slots.

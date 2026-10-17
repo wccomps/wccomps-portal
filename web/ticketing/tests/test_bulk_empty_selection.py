@@ -61,7 +61,7 @@ def test_a_bulk_action_returns_to_the_filtered_list(client: Client, name: str, r
 def test_a_ticket_action_returns_to_the_list_or_the_ticket_it_came_from(
     client: Client, referer: str, back: str
 ) -> None:
-    """Claiming went back to any page of the site the Referer named; now only the list or the ticket's own page."""
+    """Claiming went back to any page of the site the Referer named."""
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory
 
@@ -81,7 +81,7 @@ REFERER_EXCEPTIONS = {
 
 
 def test_only_back_to_list_follows_the_referer() -> None:
-    """Five ticket actions and the bulk views each followed the Referer their own way; one followed any page."""
+    """The five ticket actions followed the Referer to any page of the site; the bulk views had a copy of their own."""
     found = {
         f"{name}:{number}": line.strip()
         for name in tracked_files()

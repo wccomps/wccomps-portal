@@ -6,10 +6,11 @@ keeps its "Page - Section" separator.
 
 Where UI text appears: a template's text (titles and textareas included, a template tag's quoted strings such as a
 |default:"-" each read as a string of their own), its text attributes and component props (TEXT_ATTRIBUTES), the
-strings in its inline scripts, and every string literal in the web app's Python but docstrings (messages, form
-errors, strings returned for display and admin columns among them), with the bot's role sync, whose change list the
-Sync Roles page shows. A string there that isn't UI text, or a symbol that is the control itself, is in
-UI_TEXT_EXCEPTIONS with why. The rest of the bot writes Discord messages and is outside it.
+strings in its inline scripts and in static JavaScript, and every string literal in the web app's Python but
+docstrings and log lines (messages, form errors, strings returned for display and admin columns among them), with
+the bot's role sync, whose change list the Sync Roles page shows. A string there that isn't UI text, or a symbol that
+is the control itself, is in UI_TEXT_EXCEPTIONS with why. The rest of the bot writes Discord messages and is outside
+it.
 """
 
 import ast

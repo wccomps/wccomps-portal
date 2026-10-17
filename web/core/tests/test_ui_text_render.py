@@ -58,8 +58,8 @@ def assert_readable(html: str, where: str) -> None:
 
 # "<page>:<problem>" -> why the page reads that way on purpose
 UNREADABLE_EXCEPTIONS = {
-    "/admin/scoring/attacktype/:parentheses": "the Django admin cuts a long description short, closing parenthesis "
-    "and all (the seeded attack types)",
+    "/admin/scoring/attacktype/:parentheses": "the attack type admin's Description column cuts a long description at "
+    "50 characters, closing parenthesis and all (the seeded attack types)",
 }
 
 

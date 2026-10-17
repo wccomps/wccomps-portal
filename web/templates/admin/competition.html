@@ -320,11 +320,11 @@ document.addEventListener('alpine:init', () => {
             if (typed) this.doAction('clear_leftover_data', { confirm: typed });
         },
 
-        // The passwords are changed when the CSV arrives: keep it on screen (no reload), it is the only copy
         get resetQuestion() {
             const teamDesc = this.teamNumbers ? `teams ${this.teamNumbers}` : 'every active team';
             return `Reset passwords for ${teamDesc}?\n\nThis will generate new passwords and revoke existing sessions.`;
         },
+        // The passwords are changed when the CSV arrives: keep it on screen (no reload), it is the only copy
         async resetPasswords() {
             const result = await this.doAction('reset_passwords', { team_numbers: this.teamNumbers }, { reload: false });
             if (result && result.success) this.csvContent = result.csv;
