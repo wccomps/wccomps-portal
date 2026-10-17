@@ -77,11 +77,15 @@ UI_TEXT_EXCEPTIONS = {
     "scoring/scorecard_print.html:*:×": "multiplication in the score formula",
     # Hyphens in code, not text
     "cotton/table_header.html:*:hyphen for no value": "the descending sort prefix the sort links compare and add",
-    "web/core/utils.py:*:hyphen for no value": "the descending sort prefix",
-    "web/core/authentik_utils.py:*:hyphen for no value": "the separator in generated passwords and in team ranges",
-    "web/core/csv_export.py:*:hyphen for no value": "a cell starting with it is a spreadsheet formula, so it's escaped",
-    "web/core/middleware.py:*:hyphen for no value": "an empty field in the request log line",
-    "web/gunicorn.conf.py:*:hyphen for no value": "gunicorn's name for standard output",
+    "web/core/utils.py:requested_sort:*:hyphen for no value": "the descending sort prefix",
+    "web/core/authentik_utils.py:generate_blueteam_password:*:hyphen for no value": "the passwords' word separator",
+    "web/core/authentik_utils.py:parse_team_range:*:hyphen for no value": "the separator in a team range (5-10)",
+    "web/core/csv_export.py:<module>:*:hyphen for no value": "a cell starting with it is a spreadsheet formula",
+    "web/core/middleware.py:AccessLoggingMiddleware.__call__:*:hyphen for no value": "an empty field in the access "
+    "log line",
+    "web/core/middleware.py:SubdomainRedirectMiddleware.*:*:hyphen for no value": "an empty field in the legacy-host "
+    "log line",
+    "web/gunicorn.conf.py:<module>:*:hyphen for no value": "gunicorn's name for standard output",
 }
 
 
@@ -158,9 +162,9 @@ def is_log_call(node: ast.AST) -> bool:
     )
 
 
-def string_constants(path: Path) -> list[tuple[int, str]]:
-    """Every string literal in a module but its docstrings and log lines; an f-string reads as one string, each
-    placeholder standing for a word."""
+def string_constants(path: Path) -> list[tuple[str, int, str]]:
+    """Every string literal in a module but its docstrings and log lines, with the function it is in (Class.method;
+    <module> outside one); an f-string reads as one string, each placeholder standing for a word."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     docstrings = {
         id(node.body[0].value)
@@ -170,29 +174,32 @@ def string_constants(path: Path) -> list[tuple[int, str]]:
         and isinstance(node.body[0], ast.Expr)
         and isinstance(node.body[0].value, ast.Constant)
     }
-    found: list[tuple[int, str]] = []
+    found: list[tuple[str, int, str]] = []
 
-    def visit(node: ast.AST) -> None:
+    def visit(node: ast.AST, scope: str) -> None:
         if is_log_call(node):
             return
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            scope = node.name if scope == "<module>" else f"{scope}.{node.name}"
         if isinstance(node, ast.JoinedStr):
             parts = [v.value if isinstance(v, ast.Constant) else "x" for v in node.values]
-            found.append((node.lineno, "".join(str(part) for part in parts)))
+            found.append((scope, node.lineno, "".join(str(part) for part in parts)))
             for value in node.values:
                 if isinstance(value, ast.FormattedValue):
-                    visit(value.value)
+                    visit(value.value, scope)
             return
         if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
-            found.append((node.lineno, node.value))
+            found.append((scope, node.lineno, node.value))
         for child in ast.iter_child_nodes(node):
-            visit(child)
+            visit(child, scope)
 
-    visit(tree)
+    visit(tree, "<module>")
     return found
 
 
 def ui_text_sites() -> Iterator[tuple[str, int, str, bool]]:
-    """Every place UI text appears: (file, line, string, whether it is page title text)."""
+    """Every place UI text appears: (file, or file:function for Python, line, string, whether it is page title
+    text)."""
     for path in tracked_templates():
         for line, string, is_title in template_sites(path):
             yield template_name(path), line, string, is_title
@@ -201,8 +208,8 @@ def ui_text_sites() -> Iterator[tuple[str, int, str, bool]]:
             yield name, line, string, False
     for name in tracked_files():
         if PYTHON_UI_FILES_RE.fullmatch(name):
-            for line, string in string_constants(REPO_DIR / name):
-                yield name, line, string, False
+            for scope, line, string in string_constants(REPO_DIR / name):
+                yield f"{name}:{scope}", line, string, False
 
 
 def test_ui_text_follows_the_rule() -> None:
