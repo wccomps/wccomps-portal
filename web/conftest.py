@@ -162,28 +162,6 @@ def reset_quotient_client_cache():
     get_quotient_client.cache_clear()
 
 
-@pytest.fixture(autouse=True)
-def reset_has_permission_reference():
-    """Restore the real has_permission after each test; a module first imported under @patch keeps the mock bound."""
-    from core.auth_utils import has_permission as _real
-
-    yield
-    import core.auth_utils
-
-    core.auth_utils.has_permission = _real
-
-    import orange_team.views
-    import scoring.views.incidents
-    import scoring.views.red_team
-
-    import core.admin_views.competition
-
-    orange_team.views.has_permission = _real
-    core.admin_views.competition.has_permission = _real
-    scoring.views.incidents.has_permission = _real
-    scoring.views.red_team.has_permission = _real
-
-
 @pytest.fixture
 def mock_quotient_client():
     """Mock Quotient client to avoid API errors in tests."""

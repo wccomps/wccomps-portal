@@ -152,7 +152,7 @@ def test_the_ticket_lists_bulk_actions_ask_with_the_count(live_server, pw_browse
         page.locator('tbody input[type="checkbox"]').first.check()
         page.get_by_role("button", name=button).click()
         page.wait_for_load_state("networkidle")
-        assert questions == [f"{verb} 1 ticket(s)?"]
+        assert questions == [f"{verb} 1 ticket?"]
         ticket.refresh_from_db()
         assert ticket.status == "open"
     finally:

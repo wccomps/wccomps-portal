@@ -1,11 +1,14 @@
 {# Unified ticket list table - swappable content for htmx #}
 {% load cotton status_variants %}
-<div id="ticket-list-content"
-     {% if is_ops %}x-data="ticketBulkSelect"{% endif %}
-     hx-get="{% url 'ticket_list' %}{% querystring %}"
-     hx-trigger="every 30s"
-     hx-select="#ticket-list-content"
-     hx-swap="outerHTML">
+<div id="ticket-list-content" {% if is_ops %}x-data="ticketBulkSelect"{% endif %}>
+    {# The 30 s refresh swaps the rows and the page links: the selection and the bulk forms outside them stay #}
+    <div hidden
+         hx-get="{% url 'ticket_list' %}{% querystring %}"
+         hx-trigger="every 30s"
+         hx-select="#result_list > tbody"
+         hx-select-oob="#ticket-list-pages"
+         hx-target="#result_list > tbody"
+         hx-swap="outerHTML"></div>
     {% if is_ops %}
         <div class="actions"
              x-show="selectedCount"
@@ -15,7 +18,7 @@
              aria-label="Bulk actions">
             <div>
                 <span>
-                    <strong x-text="selectedCount" aria-live="polite">0</strong> tickets selected
+                    <strong x-text="selectedCount" aria-live="polite">0</strong> <span x-text="selectedNoun">tickets</span> selected
                 </span>
                 <c-form action="{% url 'tickets_bulk_claim' %}"
                         class="d-inline"
@@ -184,9 +187,9 @@
             <tr>
                 <td colspan="{% if is_ops %}9{% else %}5{% endif %}">
                     {% if filtered %}
-                        <c-empty_state title="No tickets match your filters">
-                            Try <c-link href="{% url 'ticket_list' %}">clearing all filters</c-link> or <c-link href="{% url 'create_ticket' %}" variant="add">create a new ticket</c-link>
-                        </c-empty_state>
+                        <c-no_matches items="tickets" href="{% url 'ticket_list' %}">
+                            or <c-link href="{% url 'create_ticket' %}" variant="add">create a new ticket</c-link>
+                        </c-no_matches>
                     {% else %}
                         <c-empty_state title="No tickets yet"
                                        description="Either everything is working perfectly, or nobody knows how to ask for help.">
@@ -197,5 +200,7 @@
             </tr>
         {% endfor %}
     </c-table>
-    <c-pagination :page_obj="page_obj" />
+    <div id="ticket-list-pages">
+        <c-pagination :page_obj="page_obj" />
+    </div>
 </div>

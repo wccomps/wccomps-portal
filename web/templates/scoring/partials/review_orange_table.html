@@ -88,7 +88,7 @@
                 <tr>
                     <td colspan="8" class="text-center p-20">
                         {% if filtered %}
-                            No checks match your filters. Try <a href="{% url 'scoring:review_orange' %}">clearing all filters</a>
+                            <c-no_matches items="checks" href="{% url 'scoring:review_orange' %}" />
                         {% else %}
                             No pending checks. All orange team checks have been approved.
                         {% endif %}

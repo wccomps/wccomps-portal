@@ -1,100 +1,172 @@
-"""UI text uses words. In templates and Django admin columns: no emoji, symbol marks or math signs standing for a
-status or a control, no em or en dashes, and no hyphen standing in for a dash (" - ", "--") or for a missing value;
-an empty value is left blank, and page titles keep their "Page - WCComps Portal" separator. In every string literal
-of the web app's Python (admin.py included) and the bot's role sync: no symbol marks, em or en dashes, or "--" (the
-spaced hyphen isn't checked there yet).
+"""UI text uses words: one rule (ui_text_problems) over one list of where UI text appears (ui_text_sites).
 
-A symbol that is the control itself (a menu toggle, a sort arrow) is listed in SYMBOL_EXCEPTIONS with why.
+The rule: no emoji, symbol marks or math signs standing for a status or a control, no em or en dashes, and no hyphen
+standing in for a dash (" - ", "--") or for a missing value (a lone "-": an empty value is left blank). A page title
+keeps its "Page - Section" separator.
+
+Where UI text appears: a template's text (titles and textareas included, a template tag's quoted strings such as a
+|default:"-" each read as a string of their own), its text attributes and component props (TEXT_ATTRIBUTES), the
+strings in its inline scripts and in static JavaScript, and every string literal in the web app's Python but
+docstrings and log lines (messages, form errors, strings returned for display and admin columns among them), with
+the bot's role sync, whose change list the Sync Roles page shows. A string there that isn't UI text, or a symbol that
+is the control itself, is in UI_TEXT_EXCEPTIONS with why. The rest of the bot writes Discord messages and is outside
+it.
 """
 
 import ast
 import re
 import unicodedata
+from collections.abc import Iterator
 from pathlib import Path
 
-from core.tests.guards import REPO_DIR, fail_with, template_name, text, text_nodes, tracked_files, tracked_templates
+from core.tests.guards import (
+    REPO_DIR,
+    fail_with,
+    scripts,
+    static_scripts,
+    tags,
+    template_name,
+    text,
+    text_nodes,
+    tracked_files,
+    tracked_templates,
+)
 
 DASHES = {"—": "em dash", "–": "en dash"}
-# A lone hyphen standing for "no value": a |default:"-", a cell or span holding only "-", or an admin column's "-"
-DASH_PLACEHOLDER_RE = re.compile(r"""default:\s*["']-["']|>\s*-\s*<|return\s+["']-["']""")
-# In a template's text: a hyphen alone (a missing value), one between spaces or doubled (a dash)
-TEXT_DASH_RE = re.compile(r"^\s*-\s*$|\s-\s|--")
-TITLE_RE = re.compile(r"{%\s*block\s+\w*title\s*%}.*?{%\s*endblock|<title>.*?</title>", re.DOTALL)
+LONE_HYPHEN_RE = re.compile(r"\s*-\s*")  # the whole string
+HYPHEN_DASH_RE = re.compile(r"\s-\s")
+DOUBLE_HYPHEN_RE = re.compile(r"(^|\s)--(\s|$)")
 
-# "file:character" -> why that symbol is the right UI there
-SYMBOL_EXCEPTIONS = {
-    "admin/base_site.html:☰": "the menu button's icon (labelled for screen readers)",
-    "admin/base_site.html:✕": "the menu's close icon (labelled for screen readers)",
-    "admin/base_site.html:☀": "the dark mode toggle's icon (labelled for screen readers)",
-    "admin/base_site.html:\U0001f319": "the dark mode toggle's icon (labelled for screen readers)",
-    "admin/base_site.html:\U0001f507": "the notification sound toggle's icon (labelled for screen readers)",
-    "admin/base_site.html:\U0001f514": "the notification sound toggle's icon (labelled for screen readers)",
-    "cotton/table_header.html:▲": "the sort direction arrow on the sorted column",
-    "cotton/table_header.html:▼": "the sort direction arrow on the sorted column",
-    "cotton/fieldset.html:▶": "the collapsible fieldset's expand arrow",
-    "registration/register.html:©": "the copyright line",
-    "scoring/_scorecard_body.html:×": "multiplication in the score formula",
-    "scoring/scorecard_print.html:×": "multiplication in the score formula",
+# Attributes and component props whose value a person reads
+TEXT_ATTRIBUTES = {
+    "alt",
+    "aria-label",
+    "aria_label",
+    "data-confirm",
+    "description",
+    "heading",
+    "help_text",
+    "label",
+    "parent_label",
+    "placeholder",
+    "subtitle",
+    "title",
+    "tooltip",
 }
 
+TITLE_RE = re.compile(r"{%\s*block\s+\w*title\s*%}.*?{%\s*endblock|<title>.*?</title>", re.DOTALL)
+TEMPLATE_TAG_RE = re.compile(r"{%.*?%}|{{.*?}}", re.DOTALL)
+QUOTED_RE = re.compile(r""""([^"]*)"|'([^']*)'""")
+JS_STRING_RE = re.compile(r"""'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`""")
+JS_ESCAPE_RE = re.compile(r"\\(.)")
+JS_ESCAPES = {"n": "\n", "t": "\t"}
+CHROME = "labelled for screen readers"
 
-def ui_files() -> list[tuple[str, Path]]:
-    admin_files = [REPO_DIR / p for p in tracked_files() if re.fullmatch(r"web/\w+/admin(/\w+)?\.py", p)]
-    return [(template_name(p), p) for p in tracked_templates()] + [
-        (p.relative_to(REPO_DIR).as_posix(), p) for p in admin_files
-    ]
-
-
-def lines_of(path: Path) -> list[str]:
-    """A template's lines without its template comments, or a Python file's lines."""
-    return (text(path) if path.suffix == ".html" else path.read_text(encoding="utf-8")).splitlines()
+# "template:line:problem" or "file.py:function:line:problem" (fnmatch) -> why that string reads right, or isn't UI
+# text
+UI_TEXT_EXCEPTIONS = {
+    "admin/base_site.html:*:☰": "the menu button's icon, " + CHROME,
+    "admin/base_site.html:*:✕": "the menu's close icon, " + CHROME,
+    "admin/base_site.html:*:☀": "the dark mode toggle's icon, " + CHROME,
+    "admin/base_site.html:*:\U0001f319": "the dark mode toggle's icon, " + CHROME,
+    "admin/base_site.html:*:\U0001f507": "the notification sound toggle's icon, " + CHROME,
+    "admin/base_site.html:*:\U0001f514": "the notification sound toggle's icon, " + CHROME,
+    "cotton/table_header.html:*:▲": "the sort direction arrow on the sorted column",
+    "cotton/table_header.html:*:▼": "the sort direction arrow on the sorted column",
+    "cotton/fieldset.html:*:▶": "the collapsible fieldset's expand arrow",
+    "registration/register.html:*:©": "the copyright line",
+    "scoring/_scorecard_body.html:*:×": "multiplication in the score formula",
+    "scoring/scorecard_print.html:*:×": "multiplication in the score formula",
+    # Hyphens in code, not text
+    "cotton/table_header.html:*:hyphen for no value": "the descending sort prefix the sort links compare and add",
+    "web/core/utils.py:requested_sort:*:hyphen for no value": "the descending sort prefix",
+    "web/core/authentik_utils.py:generate_blueteam_password:*:hyphen for no value": "the passwords' word separator",
+    "web/core/authentik_utils.py:parse_team_range:*:hyphen for no value": "the separator in a team range (5-10)",
+    "web/core/csv_export.py:<module>:*:hyphen for no value": "a cell starting with it is a spreadsheet formula",
+    "web/core/middleware.py:AccessLoggingMiddleware.__call__:*:hyphen for no value": "an empty field in the access "
+    "log line",
+    "web/core/middleware.py:SubdomainRedirectMiddleware.*:*:hyphen for no value": "an empty field in the legacy-host "
+    "log line",
+    "web/gunicorn.conf.py:<module>:*:hyphen for no value": "gunicorn's name for standard output",
+}
 
 
 def is_symbol(character: str) -> bool:
     return ord(character) > 127 and unicodedata.category(character) in ("So", "Sk", "Sm")
 
 
-def test_ui_text_has_no_symbol_marks() -> None:
-    found = {}
-    for name, path in ui_files():
-        for number, line in enumerate(lines_of(path), 1):
-            for character in line:
-                if is_symbol(character):
-                    found.setdefault(f"{name}:{character}", f"line {number}, {unicodedata.name(character, '?')}")
-    fail_with("Symbols in UI text (write the word)", found, SYMBOL_EXCEPTIONS)
+def ui_text_problems(string: str) -> list[str]:
+    """What in a string a person reads breaks the rule: each symbol mark or em/en dash (the character itself), and
+    each misused hyphen."""
+    problems = [c for c in dict.fromkeys(string) if c in DASHES or is_symbol(c)]
+    if LONE_HYPHEN_RE.fullmatch(string):
+        return [*problems, "hyphen for no value"]
+    for problem, pattern in (("hyphen as a dash", HYPHEN_DASH_RE), ("double hyphen", DOUBLE_HYPHEN_RE)):
+        if pattern.search(string):
+            problems.append(problem)
+    return problems
 
 
-def test_ui_text_has_no_dashes() -> None:
-    found = {}
-    for name, path in ui_files():
-        for number, line in enumerate(lines_of(path), 1):
-            for dash, what in DASHES.items():
-                if dash in line:
-                    found[f"{name}:{number}"] = what
-            if DASH_PLACEHOLDER_RE.search(line):
-                found[f"{name}:{number}"] = "a dash standing for no value (leave it blank)"
-        if path.suffix == ".html":
-            content = text(path)
-            titles = [
-                range(content.count("\n", 0, m.start()) + 1, content.count("\n", 0, m.end()) + 2)
-                for m in TITLE_RE.finditer(content)
-            ]
-            for start, words in text_nodes(path):
-                for offset, words_line in enumerate(words.split("\n")):
-                    number = start + offset
-                    if TEXT_DASH_RE.search(words_line) and not any(number in lines for lines in titles):
-                        found[f"{name}:{number}"] = f"a hyphen used as a dash or for no value: {words_line.strip()!r}"
-    fail_with("Dashes in UI text", found, {})
+def template_strings(string: str) -> list[str]:
+    """Template text as read: the text with each variable standing for a word (a tag for nothing), and each tag's
+    quoted strings."""
+    return [
+        TEMPLATE_TAG_RE.sub(lambda m: "x" if m.group().startswith("{{") else "", string),
+        *(a or b for tag in TEMPLATE_TAG_RE.findall(string) for a, b in QUOTED_RE.findall(tag)),
+    ]
 
 
-# Python modules held to the rule: every module in the web app (not its tests or migrations), Discord messages
-# built there included, and the bot's role sync, whose change list the Sync Roles page shows. The rest of the bot
-# writes Discord messages and is outside it.
+def js_strings(script: str) -> Iterator[tuple[int, str]]:
+    """Each string literal in the JavaScript with its line (from 1), its escapes read (a \\n is a line break)."""
+    for m in JS_STRING_RE.finditer(script):
+        string = next(g for g in m.groups() if g is not None)
+        string = JS_ESCAPE_RE.sub(lambda e: JS_ESCAPES.get(e.group(1), e.group(1)), string)
+        yield script.count("\n", 0, m.start()) + 1, string
+
+
+def title_lines(path: Path) -> set[int]:
+    content = text(path)
+    return {
+        line
+        for m in TITLE_RE.finditer(content)
+        for line in range(content.count("\n", 0, m.start()) + 1, content.count("\n", 0, m.end()) + 2)
+    }
+
+
+def template_sites(path: Path) -> Iterator[tuple[int, str, bool]]:
+    """Each string the template shows, with its line and whether it is page title text."""
+    titles = title_lines(path)
+    for start, words in text_nodes(path):
+        for offset, line in enumerate(words.split("\n")):
+            for string in template_strings(line):
+                yield start + offset, string, start + offset in titles
+    for tag in tags(path):
+        for name, value in tag.attrs.items():
+            if name in TEXT_ATTRIBUTES:
+                for string in template_strings(value):
+                    yield tag.line, string, False
+    for start, script in scripts(path):
+        for line, string in js_strings(script):
+            yield start + line - 1, string, False
+
+
+# Python modules held to the rule: the web app (not its tests or migrations) and the bot's role sync
 PYTHON_UI_FILES_RE = re.compile(r"web/(?!.*/tests/|.*/migrations/|browser_tests/).*\.py|bot/role_sync\.py")
 
 
-def string_constants(path: Path) -> list[tuple[int, str]]:
-    """Every string literal in a module but its docstrings."""
+def is_log_call(node: ast.AST) -> bool:
+    """logger.info(...), logging.warning(...) and the like: a log line, not UI text."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id in ("logger", "logging", "log")
+    )
+
+
+def string_constants(path: Path) -> list[tuple[str, int, str]]:
+    """Every string literal in a module but its docstrings and log lines, with the function it is in (Class.method;
+    <module> outside one); an f-string reads as one string, each placeholder standing for a word."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     docstrings = {
         id(node.body[0].value)
@@ -104,22 +176,73 @@ def string_constants(path: Path) -> list[tuple[int, str]]:
         and isinstance(node.body[0], ast.Expr)
         and isinstance(node.body[0].value, ast.Constant)
     }
-    return [
-        (node.lineno, node.value)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings
-    ]
+    found: list[tuple[str, int, str]] = []
+
+    def visit(node: ast.AST, scope: str) -> None:
+        if is_log_call(node):
+            return
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            scope = node.name if scope == "<module>" else f"{scope}.{node.name}"
+        if isinstance(node, ast.JoinedStr):
+            parts = [v.value if isinstance(v, ast.Constant) else "x" for v in node.values]
+            found.append((scope, node.lineno, "".join(str(part) for part in parts)))
+            for value in node.values:
+                if isinstance(value, ast.FormattedValue):
+                    visit(value.value, scope)
+            return
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
+            found.append((scope, node.lineno, node.value))
+        for child in ast.iter_child_nodes(node):
+            visit(child, scope)
+
+    visit(tree, "<module>")
+    return found
 
 
-def test_ui_text_built_in_python_has_no_symbol_marks_or_dashes() -> None:
-    """Every string literal in web/ (not tests, migrations or docstrings) and bot/role_sync.py: no symbol marks, em or
-    en dashes, or "--". Discord messages built in web/ are held to it too."""
-    found = {}
+def ui_text_sites() -> Iterator[tuple[str, int, str, bool]]:
+    """Every place UI text appears: (file, or file:function for Python, line, string, whether it is page title
+    text)."""
+    for path in tracked_templates():
+        for line, string, is_title in template_sites(path):
+            yield template_name(path), line, string, is_title
+    for name, script in static_scripts():
+        for line, string in js_strings(script):
+            yield name, line, string, False
     for name in tracked_files():
-        if not PYTHON_UI_FILES_RE.fullmatch(name):
-            continue
-        for number, value in string_constants(REPO_DIR / name):
-            marks = sorted({c for c in value if c in DASHES or is_symbol(c)})
-            if marks or re.search(r"(^|\s)--(\s|$)", value):
-                found[f"{name}:{number}"] = f"{''.join(marks) or '--'} in {value.strip()[:60]!r}"
-    fail_with("Symbols or dashes in UI text built in Python", found, {})
+        if PYTHON_UI_FILES_RE.fullmatch(name):
+            for scope, line, string in string_constants(REPO_DIR / name):
+                yield f"{name}:{scope}", line, string, False
+
+
+def test_ui_text_follows_the_rule() -> None:
+    found = {
+        f"{where}:{line}:{problem}": repr(string.strip()[:70])
+        for where, line, string, is_title in ui_text_sites()
+        for problem in ui_text_problems(string)
+        if not (is_title and problem == "hyphen as a dash")
+    }
+    fail_with("UI text breaking the rule (write the word; leave a missing value blank)", found, UI_TEXT_EXCEPTIONS)
+
+
+def test_the_rule_finds_each_kind_of_problem() -> None:
+    assert ui_text_problems("Done ✓") == ["✓"]
+    assert ui_text_problems("a — b") == ["—"]
+    assert ui_text_problems(" - ") == ["hyphen for no value"]
+    assert ui_text_problems("Approved - Team 4") == ["hyphen as a dash"]
+    assert ui_text_problems("wait -- what") == ["double hyphen"]
+    assert ui_text_problems("1,3,5-10, e-mail, -created_at, --flag") == []
+
+
+def test_template_sites_read_text_attributes_tags_and_scripts(tmp_path: Path) -> None:
+    page = tmp_path / "page.html"
+    page.write_text(
+        '{% block title %}Ops - Section{% endblock %}\n<c-module title="Edit - Team 4">{{ x|default:"-" }}</c-module>\n'
+        "<script>alert('Saved ✓');</script>\n<p class=\"a - b\">fine</p>",
+        encoding="utf-8",
+    )
+    sites = set(template_sites(page))
+    assert (1, "Ops - Section", True) in sites
+    assert (2, "Edit - Team 4", False) in sites
+    assert (2, "-", False) in sites
+    assert (3, "Saved ✓", False) in sites
+    assert not any("a - b" in string for _, string, _ in sites)

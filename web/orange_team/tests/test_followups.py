@@ -20,7 +20,7 @@ class TestFollowUpCreate:
         check = OrangeCheck.objects.create(title="Test", description="Desc")
         assignment = OrangeAssignment.objects.create(orange_check=check, user=user, team=team)
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         response = client.post(
             "/orange-team/followups/create/",
             {
@@ -43,7 +43,7 @@ class TestFollowUpCreate:
         check = OrangeCheck.objects.create(title="Test", description="Desc")
         assignment = OrangeAssignment.objects.create(orange_check=check, user=other, team=team)
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         response = client.post(
             "/orange-team/followups/create/",
             {
@@ -65,7 +65,7 @@ class TestFollowUpDismiss:
             user=user, assignment=assignment, remind_at=timezone.now() + timedelta(minutes=15)
         )
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         response = client.post(f"/orange-team/followups/{followup.pk}/dismiss/")
         assert response.status_code == 302
         followup.refresh_from_db()
@@ -82,7 +82,7 @@ class TestFollowUpDismiss:
             user=user, assignment=assignment, remind_at=timezone.now() + timedelta(minutes=15)
         )
         client = Client()
-        client.login(username="orange2", password="test")
+        client.force_login(User.objects.get(username="orange2"))
         response = client.post(f"/orange-team/followups/{followup.pk}/dismiss/")
         assert response.status_code == 404
 

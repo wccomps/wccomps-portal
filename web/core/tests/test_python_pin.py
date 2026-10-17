@@ -51,3 +51,37 @@ def test_bare_python_is_told_from_uv_run() -> None:
     assert BARE_PYTHON.search("python3 .github/scripts/deep_report.py")
     assert BARE_PYTHON.search("cd web && python manage.py check")
     assert not BARE_PYTHON.search("uv run python manage.py check")
+
+
+FROM_RE = re.compile(r"^FROM\s+(\S+?)(?::(\S+))?(?:\s+AS\s+(\S+))?\s*$", re.MULTILINE | re.IGNORECASE)
+MOUNT_RE = re.compile(r"--(?:mount=from|from)=([^,\s]+)")
+VERSION_TAG = re.compile(r"\d+(\.\d+)+(-\S+)?")
+
+
+def image_problems(dockerfile: str) -> list[str]:
+    """Each image the build uses that Dependabot's docker entry can't bump: a tag that isn't a version (latest), or
+    one named only in a --mount=from or COPY --from, which it doesn't read (name a FROM ... AS stage there)."""
+    stages = {m.group(3) for m in FROM_RE.finditer(dockerfile) if m.group(3)}
+    problems = [
+        f"FROM {m.group(1)}:{m.group(2) or ''} (not a version tag)"
+        for m in FROM_RE.finditer(dockerfile)
+        if not VERSION_TAG.fullmatch(m.group(2) or "")
+    ]
+    return problems + [f"{image} (not a FROM stage)" for image in MOUNT_RE.findall(dockerfile) if image not in stages]
+
+
+def test_every_image_the_build_uses_is_one_dependabot_bumps() -> None:
+    """The uv mount named ghcr.io/astral-sh/uv:latest: the build's refusals rested on whatever uv was newest, and
+    Dependabot's docker entry, with Python ignored, watched nothing."""
+    assert image_problems((REPO_DIR / "Dockerfile").read_text(encoding="utf-8")) == []
+    updates = yaml.safe_load((REPO_DIR / ".github" / "dependabot.yml").read_text(encoding="utf-8"))["updates"]
+    assert any(update["package-ecosystem"] == "docker" for update in updates)
+
+
+def test_an_unpinned_or_unstaged_image_is_found() -> None:
+    assert image_problems("FROM python:3.14.8-slim\nRUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv x") == [
+        "ghcr.io/astral-sh/uv:latest (not a FROM stage)"
+    ]
+    assert image_problems("FROM ghcr.io/astral-sh/uv:latest AS uv\nRUN --mount=from=uv,source=/uv x") == [
+        "FROM ghcr.io/astral-sh/uv:latest (not a version tag)"
+    ]

@@ -10,7 +10,7 @@
             <c-slot name="title">
                 Send Broadcast
             </c-slot>
-            <form @submit.prevent="sendBroadcast">
+            <form @submit.prevent="sendBroadcast" :data-confirm="sendQuestion">
                 <c-fieldset heading="Compose" aligned="true">
                     <c-form_field label="Target" id="target">
                         <select name="target"
@@ -38,9 +38,9 @@
                     </template>
                     <c-form_field label="Message" id="message">
                         <textarea name="message"
-                                  :value="message"
+                                  :value="text"
                                   @input="setField"
-                                  data-field="message"
+                                  data-field="text"
                                   class="vTextField"
                                   rows="6"
                                   placeholder="Enter your message here..."></textarea>
@@ -67,74 +67,37 @@
                 </ul>
             </div>
         </c-module>
-        <c-toast message="message_alert" />
+        <c-toast />
     </div>
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('broadcastAdmin', () => ({
-                loading: false,
-                message_alert: '',
-                messageType: 'success',
+        Alpine.data('broadcastAdmin', () => compose(actionMixin('{% url "admin_broadcast_action" %}'), {
                 target: 'announcements',
                 teamNumbers: '',
-                message: '',
-                setField(e) { this[e.target.dataset.field] = e.target.value; },
+                text: '',
                 get isCustomTarget() { return this.target === 'custom'; },
-                get sendDisabled() { return this.loading || !this.message.trim(); },
-                get previewText() { return this.message || '(No message entered)'; },
-                get alertClass() { return this.messageType === 'success' ? 'alert--success' : 'alert--error'; },
+                get sendDisabled() { return this.loading || !this.text.trim(); },
+                get previewText() { return this.text || '(No message entered)'; },
+                // Nothing to send asks nothing: sendBroadcast says what's missing
+                get sendQuestion() {
+                    if (!this.text.trim()) return '';
+                    if (this.target === 'all-teams') return 'Send this message to all team channels?';
+                    if (this.target === 'announcements') return 'Send this message to the announcements channel?';
+                    return this.teamNumbers.trim() ? `Send this message to teams ${this.teamNumbers}?` : '';
+                },
 
+                // As with every actionMixin page, a sent message's toast clears after 5 s and a problem stays until
+                // the next try: it says what wasn't sent
                 async sendBroadcast() {
-                    if (!this.message.trim()) {
-                        this.message_alert = 'Please enter a message';
+                    if (!this.text.trim() || (this.target === 'custom' && !this.teamNumbers.trim())) {
+                        this.message = this.text.trim() ? 'Please enter team numbers' : 'Please enter a message';
                         this.messageType = 'error';
-                        setTimeout(() => this.message_alert = '', 3000);
                         return;
                     }
-
-                    let targetDesc = this.target;
-                    if (this.target === 'all-teams') {
-                        targetDesc = 'all team channels';
-                    } else if (this.target === 'custom') {
-                        if (!this.teamNumbers.trim()) {
-                            this.message_alert = 'Please enter team numbers';
-                            this.messageType = 'error';
-                            setTimeout(() => this.message_alert = '', 3000);
-                            return;
-                        }
-                        targetDesc = `teams ${this.teamNumbers}`;
-                    }
-
-                    if (!confirm(`Send this message to ${targetDesc}?`)) {
-                        return;
-                    }
-
-                    this.loading = true;
-                    this.message_alert = '';
-
-                    let finalTarget = this.target;
-                    if (this.target === 'custom') {
-                        finalTarget = this.teamNumbers;
-                    }
-
-                    try {
-                        const result = await wcPost('{% url "admin_broadcast_action" %}', { target: finalTarget, message: this.message });
-                        if (result.success) {
-                            this.message_alert = result.message;
-                            this.messageType = 'success';
-                            this.message = '';
-                        } else {
-                            this.message_alert = result.error || 'Broadcast failed';
-                            this.messageType = 'error';
-                        }
-                    } catch (e) {
-                        this.message_alert = 'Request failed: ' + e.message;
-                        this.messageType = 'error';
-                    }
-
-                    this.loading = false;
-                    setTimeout(() => this.message_alert = '', 5000);
-                }
+                    const target = this.target === 'custom' ? this.teamNumbers : this.target;
+                    const result = await this.doAction('broadcast', { target, message: this.text }, { reload: false });
+                    if (result && result.success) this.text = '';
+                },
             }));
     });
     </script>

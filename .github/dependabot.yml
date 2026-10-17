@@ -18,6 +18,7 @@ updates:
       actions:
         patterns: ["*"]
 
+  # The Dockerfile's uv image (Python's tag moves with .python-version, below)
   - package-ecosystem: docker
     directory: /
     schedule:

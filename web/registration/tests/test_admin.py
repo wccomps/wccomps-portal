@@ -3,24 +3,12 @@
 from datetime import date
 
 import pytest
-from django.contrib.auth.models import User
-from django.test import Client
 from django.urls import reverse
 
-from core.models import UserGroups
 from registration.models import Event, EventTeamAssignment, School, Season, TeamRegistration
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture
-def admin_client():
-    admin = User.objects.create(username="admin")
-    UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
-    client = Client()
-    client.force_login(admin)
-    return client
 
 
 def test_the_event_page_cannot_add_change_or_delete_assignments(admin_client):

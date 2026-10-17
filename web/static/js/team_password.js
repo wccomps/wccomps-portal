@@ -7,9 +7,6 @@ document.addEventListener('alpine:init', () => {
         newPassword: '',
 
         async resetPassword() {
-            if (!confirm('Reset this team\'s password?\n\nThis will:\n- Generate a new password and set it in Authentik\n- End the team account\'s Authentik sessions\n\nDiscord links are kept. Anyone using the old password must use the new one.')) {
-                return;
-            }
             this.newPassword = '';
             // No reload: the new password stays on screen until you leave the page
             const result = await this.doAction('reset_password', {}, { reload: false, url: this.$root.dataset.url });

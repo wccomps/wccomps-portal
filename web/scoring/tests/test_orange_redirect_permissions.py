@@ -29,21 +29,21 @@ class OrangeTeamRedirectRedirectTests(TestCase):
 
     def test_orange_team_redirect_goes_to_dashboard(self) -> None:
         """Orange Team portal redirects to orange_team dashboard."""
-        self.client.login(username="orange1", password="test123")
+        self.client.force_login(User.objects.get(username="orange1"))
         response = self.client.get(reverse("scoring:orange_team_redirect"))
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("orange_team:dashboard"))
 
     def test_submit_orange_check_redirects(self) -> None:
         """Submit orange check redirects to orange_team dashboard."""
-        self.client.login(username="orange1", password="test123")
+        self.client.force_login(User.objects.get(username="orange1"))
         response = self.client.get(reverse("scoring:submit_orange_check"))
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("orange_team:dashboard"))
 
     def test_gold_team_redirects(self) -> None:
         """Gold Team accessing old portal also redirects."""
-        self.client.login(username="gold1", password="test123")
+        self.client.force_login(User.objects.get(username="gold1"))
         response = self.client.get(reverse("scoring:orange_team_redirect"))
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("orange_team:dashboard"))

@@ -179,11 +179,10 @@ if not DEBUG:
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-LOGIN_URL = "/auth/login/"
+# Sessions, and Django's model permissions from the admin permission; no password sign-in (core.auth_backends)
+AUTHENTICATION_BACKENDS = ["core.auth_backends.PortalBackend"]
 
-# The admin permission grants the Django model permissions the admin's model pages check (core.auth_backends);
-# superusers and Permission rows still grant them too, behind the admin site's gate
-AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend", "core.auth_backends.AuthentikAdminBackend"]
+LOGIN_URL = "/auth/login/"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 

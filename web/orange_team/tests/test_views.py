@@ -17,7 +17,7 @@ class TestDashboard:
         user = User.objects.create_user(username="blue1", password="test")
         UserGroups.objects.create(user=user, authentik_id="blue1-uid", groups=["WCComps_BlueTeam01"])
         client = Client()
-        client.login(username="blue1", password="test")
+        client.force_login(User.objects.get(username="blue1"))
         response = client.get("/orange-team/")
         assert response.status_code == 302
         assert response.url == "/"
@@ -26,7 +26,7 @@ class TestDashboard:
         user = User.objects.create_user(username="orange1", password="test")
         UserGroups.objects.create(user=user, authentik_id="orange1-uid", groups=["WCComps_OrangeTeam"])
         client = Client()
-        client.login(username="orange1", password="test")
+        client.force_login(User.objects.get(username="orange1"))
         response = client.get("/orange-team/")
         assert response.status_code == 200
         assert b"My Checks" in response.content
@@ -35,7 +35,7 @@ class TestDashboard:
         user = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=user, authentik_id="gold1-uid", groups=["WCComps_GoldTeam"])
         client = Client()
-        client.login(username="gold1", password="test")
+        client.force_login(User.objects.get(username="gold1"))
         response = client.get("/orange-team/")
         assert response.status_code == 200
 
@@ -43,7 +43,7 @@ class TestDashboard:
         user = User.objects.create_user(username="gold2", password="test")
         UserGroups.objects.create(user=user, authentik_id="gold2-uid", groups=["WCComps_GoldTeam"])
         client = Client()
-        client.login(username="gold2", password="test")
+        client.force_login(User.objects.get(username="gold2"))
         response = client.get("/orange-team/")
         assert response.status_code == 200
         assert b"Manage Checks" in response.content
@@ -52,7 +52,7 @@ class TestDashboard:
         user = User.objects.create_user(username="orange2", password="test")
         UserGroups.objects.create(user=user, authentik_id="orange2-uid", groups=["WCComps_OrangeTeam"])
         client = Client()
-        client.login(username="orange2", password="test")
+        client.force_login(User.objects.get(username="orange2"))
         response = client.get("/orange-team/")
         assert response.status_code == 200
         assert b"Manage Checks" not in response.content
@@ -61,7 +61,7 @@ class TestDashboard:
         user = User.objects.create_user(username="orange3", password="test")
         UserGroups.objects.create(user=user, authentik_id="orange3-uid", groups=["WCComps_OrangeTeam"])
         client = Client()
-        client.login(username="orange3", password="test")
+        client.force_login(User.objects.get(username="orange3"))
         response = client.get("/orange-team/")
         assert response.status_code == 200
         assert b"No checks" in response.content
@@ -70,7 +70,7 @@ class TestDashboard:
         user = User.objects.create_user(username="orange4", password="test")
         UserGroups.objects.create(user=user, authentik_id="orange4-uid", groups=["WCComps_OrangeTeam"])
         client = Client()
-        client.login(username="orange4", password="test")
+        client.force_login(User.objects.get(username="orange4"))
         response = client.get("/orange-team/")
         assert response.status_code == 200
         assert b"Checked Out" in response.content

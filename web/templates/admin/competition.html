@@ -53,7 +53,10 @@
                     {{ panel.stage.alternative }}
                     {% if panel.stage.running %}
                         <c-button_row class="mt-10">
-                            <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
+                            <c-button variant="warning"
+                                      @click="stopCompetition"
+                                      ::disabled="loading"
+                                      ::data-confirm="stopQuestion">
                                 Stop Competition
                             </c-button>
                         </c-button_row>
@@ -127,11 +130,17 @@
                 {% endif %}
             </p>
             <c-button_row>
-                <c-button variant="primary" @click="startCompetition" ::disabled="loading">
+                <c-button variant="primary"
+                          @click="startCompetition"
+                          ::disabled="loading"
+                          data-confirm="Start the competition? This opens the competition apps to the blue teams and turns on the active teams' accounts.">
                     Start Competition
                 </c-button>
                 {% if not panel.stage.running %}
-                    <c-button variant="warning" @click="stopCompetition" ::disabled="loading">
+                    <c-button variant="warning"
+                              @click="stopCompetition"
+                              ::disabled="loading"
+                              ::data-confirm="stopQuestion">
                         Stop Competition
                     </c-button>
                 {% endif %}
@@ -150,7 +159,7 @@
                     collapsed="{{ panel.advanced_open|yesno:'false,true' }}">
             <p class="help">Tools outside the normal run of an event.</p>
             <c-action_box heading="Reset Team Passwords">
-                <form @submit.prevent="resetPasswords">
+                <form @submit.prevent="resetPasswords" :data-confirm="resetQuestion">
                     <c-form_field label="Team Numbers"
                                   id="team_numbers"
                                   help_text="Leave empty to reset every active team. Generates new passwords and revokes sessions.">
@@ -253,17 +262,13 @@ document.addEventListener('alpine:init', () => {
         },
         get closeOutBlocked() { return this.loading || this.closeOutChecking || !!this.closeOutProblem; },
 
-        startCompetition() {
-            if (confirm('Start the competition?\n\nThis opens the competition apps to the blue teams and turns on the active teams\' accounts.')) {
-                this.doStreamAction('start_competition');
-            }
+        get stopQuestion() {
+            return 'Stop the competition?\n\n'
+                + 'This closes the competition apps to the blue teams and turns off every team account.\n'
+                + 'You can start again later.';
         },
-
-        stopCompetition() {
-            if (confirm('Stop the competition?\n\nThis closes the competition apps to the blue teams and turns off every team account.\nYou can start again later.')) {
-                this.doStreamAction('stop_competition');
-            }
-        },
+        startCompetition() { this.doStreamAction('start_competition'); },
+        stopCompetition() { this.doStreamAction('stop_competition'); },
 
         async checkCloseOut() {
             this.closeOutChecking = true;
@@ -315,13 +320,14 @@ document.addEventListener('alpine:init', () => {
             if (typed) this.doAction('clear_leftover_data', { confirm: typed });
         },
 
+        get resetQuestion() {
+            const teamDesc = this.teamNumbers ? `teams ${this.teamNumbers}` : 'every active team';
+            return `Reset passwords for ${teamDesc}?\n\nThis will generate new passwords and revoke existing sessions.`;
+        },
         // The passwords are changed when the CSV arrives: keep it on screen (no reload), it is the only copy
         async resetPasswords() {
-            const teamDesc = this.teamNumbers ? `teams ${this.teamNumbers}` : 'every active team';
-            if (confirm(`Reset passwords for ${teamDesc}?\n\nThis will generate new passwords and revoke existing sessions.`)) {
-                const result = await this.doAction('reset_passwords', { team_numbers: this.teamNumbers }, { reload: false });
-                if (result && result.success) this.csvContent = result.csv;
-            }
+            const result = await this.doAction('reset_passwords', { team_numbers: this.teamNumbers }, { reload: false });
+            if (result && result.success) this.csvContent = result.csv;
         },
 
         downloadCsv() {

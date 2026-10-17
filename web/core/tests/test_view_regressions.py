@@ -485,14 +485,69 @@ def test_an_admin_whose_admin_group_was_removed_holds_no_model_permission(admin_
     assert not _holds_any_model_permission(User.objects.get(pk=admin_user.pk))
 
 
-def test_the_permission_backend_reads_has_permission_when_asked(admin_user: User) -> None:
-    """The backend looks has_permission up at each check: holding the function it imported, a backend first loaded
-    while a test patched it kept that test's MagicMock (truthy) for its worker, and gave every user every permission."""
-    assert User.objects.get(pk=admin_user.pk).has_perm("core.view_botstate")  # the backend is loaded
-    with patch("core.auth_utils.has_permission", return_value=False):
-        assert not User.objects.get(pk=admin_user.pk).has_perm("core.view_botstate")
-    with patch("core.auth_utils.has_permission", return_value=True):
-        assert User.objects.get(pk=admin_user.pk).has_perm("core.view_botstate")
+def test_no_backend_grants_a_superuser_without_the_admin_permission_anything(gold_team_user: User) -> None:
+    """No backend grants from the superuser flag: ModelBackend granted a superuser every permission. User.has_perm's
+    own superuser shortcut stays; the admin site's gate keeps such a user out."""
+    from asgiref.sync import async_to_sync
+    from django.contrib.auth import get_backends
+
+    User.objects.filter(pk=gold_team_user.pk).update(is_staff=True, is_superuser=True)
+    user = User.objects.get(pk=gold_team_user.pk)
+    for backend in get_backends():
+        assert not backend.has_perm(user, "core.view_botstate"), backend
+        assert not backend.has_module_perms(user, "core"), backend
+        assert not async_to_sync(backend.ahas_perm)(user, "core.view_botstate"), backend
+        assert not async_to_sync(backend.ahas_module_perms)(user, "core"), backend
+
+
+def test_no_one_signs_in_with_a_password(admin_user: User) -> None:
+    """Signing in is Authentik's: ModelBackend also took a username and password (the Django admin's login form)."""
+    from django.contrib.auth import authenticate
+
+    admin_user.set_password("a-known-password")
+    admin_user.save()
+    assert authenticate(username=admin_user.username, password="a-known-password") is None
+    response = Client().post(reverse("admin:login"), {"username": admin_user.username, "password": "a-known-password"})
+    assert "_auth_user_id" not in response.wsgi_request.session
+
+
+def test_the_admin_sign_in_sends_a_visitor_to_the_portal_sign_in() -> None:
+    """The Django admin's login form took a password no one has: signing in is Authentik's, with the way back kept."""
+    from django.conf import settings
+
+    response = Client().get(reverse("admin:login"), {"next": "/admin/core/botstate/"})
+    assert response.status_code == 302
+    assert response.url == f"{settings.LOGIN_URL}?next=/admin/core/botstate/"
+    assert Client().post(reverse("admin:login"), {"username": "a", "password": "b"}).status_code == 302
+    assert Client().get(reverse("admin:index")).status_code == 302
+
+
+def test_a_permission_row_grants_nothing(gold_team_user: User) -> None:
+    """A Django Permission row (given in the Django admin) granted that permission outside the admin permission."""
+    from django.contrib.auth.models import Permission
+
+    gold_team_user.user_permissions.add(Permission.objects.get(codename="view_botstate"))
+    assert not User.objects.get(pk=gold_team_user.pk).has_perm("core.view_botstate")
+
+
+@pytest.mark.parametrize("state", ["admin", "inactive admin", "admin without groups", "gold_team", "superuser"])
+def test_the_admin_site_and_the_permission_backend_agree(state: str) -> None:
+    from django.contrib import admin
+    from django.contrib.auth import get_backends
+    from django.test import RequestFactory
+
+    user = role_user("gold_team" if state in ("gold_team", "superuser") else "admin")
+    if state == "inactive admin":
+        User.objects.filter(pk=user.pk).update(is_active=False)
+    if state == "admin without groups":
+        UserGroups.objects.filter(user=user).update(groups=[])
+    if state == "superuser":
+        User.objects.filter(pk=user.pk).update(is_superuser=True, is_staff=True)
+    request = RequestFactory().get("/admin/")
+    request.user = User.objects.get(pk=user.pk)
+    let_in = admin.site.has_permission(request)
+    assert let_in is (state == "admin")
+    assert any(backend.has_module_perms(request.user, "core") for backend in get_backends()) is let_in
 
 
 def test_the_async_permission_checks_follow_the_admin_permission(admin_user: User, gold_team_user: User) -> None:

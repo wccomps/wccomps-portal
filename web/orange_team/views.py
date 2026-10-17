@@ -504,7 +504,7 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
     messages.success(
         request,
         f"Assignment submitted: {assignment.orange_check.title}"
-        f" - Team {assignment.team.team_number}"
+        f" for Team {assignment.team.team_number}"
         f" ({assignment.score}/{assignment.orange_check.max_score})",
     )
     return redirect("orange_team:dashboard")
@@ -573,7 +573,7 @@ def assignment_approve(request: HttpRequest, assignment_id: int) -> HttpResponse
 
     messages.success(
         request,
-        f"Approved: {assignment.orange_check.title} - Team {assignment.team.team_number} ({assignment.score} pts)",
+        f"Approved: {assignment.orange_check.title} for Team {assignment.team.team_number} ({assignment.score} pts)",
     )
     return redirect("orange_team:review_queue")
 
@@ -605,7 +605,7 @@ def assignment_reject(request: HttpRequest, assignment_id: int) -> HttpResponse:
 
     messages.success(
         request,
-        f"Rejected: {assignment.orange_check.title} - Team {assignment.team.team_number}",
+        f"Rejected: {assignment.orange_check.title} for Team {assignment.team.team_number}",
     )
     return redirect("orange_team:review_queue")
 

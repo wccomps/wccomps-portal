@@ -53,8 +53,7 @@
             <tr>
                 <td colspan="6">
                     {% if filtered %}
-                        <c-empty_state title="No registrations found"
-                                       description="No registration requests have the selected status" />
+                        <c-no_matches items="registrations" href="{% url 'registration_review_list' %}" />
                     {% else %}
                         <c-empty_state title="No registrations found"
                                        description="Registration requests will appear here" />

@@ -44,6 +44,11 @@ def has_permission(user: User | AnonymousUser, permission_name: str) -> bool:
     return check_groups_for_permission(groups, permission_name)
 
 
+def uses_django_admin(user: User | AnonymousUser) -> bool:
+    """Who gets into the Django admin and holds Django's model permissions: an active user with the admin permission."""
+    return user.is_active and has_permission(user, "admin")
+
+
 def team_for_groups(groups: list[str]) -> Team | None:
     """The team whose Authentik group (Team.authentik_group) is among these groups, or None."""
     return Team.objects.filter(authentik_group__in=groups).first()

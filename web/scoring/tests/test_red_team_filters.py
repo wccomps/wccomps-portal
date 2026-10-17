@@ -53,7 +53,7 @@ class TestRedTeamFindingsFiltering:
         client.force_login(red_user)
 
         # Filter by team1 (default status is "all" for red team view)
-        response = client.get(reverse("scoring:red_team_scores"), {"team": team1.id, "status": "all"})
+        response = client.get(reverse("scoring:red_team_scores"), {"team": team1.team_number, "status": "all"})
         assert response.status_code == 200
         findings = list(response.context["page_obj"])
         finding_ids = {f.id for f in findings}
@@ -165,7 +165,7 @@ class TestRedTeamFindingsFiltering:
 
         # Filter by team AND submitter
         response = client.get(
-            reverse("scoring:red_team_scores"), {"team": team1.id, "submitter": red_user1.id, "status": "all"}
+            reverse("scoring:red_team_scores"), {"team": team1.team_number, "submitter": red_user1.id, "status": "all"}
         )
         assert response.status_code == 200
         findings = list(response.context["page_obj"])
@@ -222,10 +222,8 @@ class TestRedTeamFindingsFiltering:
 
         response = client.get(reverse("scoring:red_team_scores"))
         assert response.status_code == 200
-        assert "available_teams" in response.context
+        assert response.context["team_numbers"] == [1, 2]
         assert "available_submitters" in response.context
-        assert team1 in response.context["available_teams"]
-        assert team2 in response.context["available_teams"]
         assert red_user in response.context["available_submitters"]
 
     def test_approval_status_not_visible_to_red_team(self, create_user_with_groups: Callable[..., User]) -> None:
