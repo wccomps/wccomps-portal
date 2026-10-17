@@ -1,9 +1,11 @@
-"""One answer for every refusal and missing record.
+"""One answer for a refusal, a missing record, bad input and a wrong method.
 
 Views raise PermissionDenied (signed in without the role), Http404 (missing, or another team's record) and BadRequest
-(input the view refuses); the project's handlers (portal/urls.py) answer each, and a wrong method's 405, the same way:
-the error page, or {"error": ...} with the same status for a JSON endpoint or a fetch() (wants_json_error). A
-signed-out visitor is sent to sign in (sign_in_answer).
+(input the view refuses); the project's handlers (portal/urls.py) answer each, and a wrong method's 405 and a failed
+CSRF check, the same way: the error page, or {"error": ...} with the same status for a JSON endpoint, a script that
+asks for JSON, or a fetch() (wants_json_error). A signed-out visitor is sent to sign in (sign_in_answer). Not covered:
+a refusal that is a record's state (a ticket someone else holds) redirects back with a message, and the sign-in and
+Discord-link flows show their own pages.
 """
 
 from collections.abc import Callable
@@ -74,8 +76,8 @@ MESSAGES = {
 
 
 def error_answer(request: HttpRequest, status: int, message: str = "") -> HttpResponse:
-    """The error page, or JSON for wants_json_error, with this status. The page links to the person's own landing
-    page (the one a 403 sends them back to)."""
+    """The error page, or JSON for wants_json_error, with this status. The page links to the person's landing page
+    (core.auth_utils.get_role_based_landing_url), unless that is the page refusing them."""
     from .auth_utils import get_authentik_groups, get_role_based_landing_url
 
     message = message or MESSAGES[status]
@@ -87,15 +89,15 @@ def error_answer(request: HttpRequest, status: int, message: str = "") -> HttpRe
 
 
 def _reason(exception: Exception, kind: type[Exception]) -> str:
-    """The reason a view gave, for the exceptions views raise with one; never for another kind (a 404's reason
-    would tell a missing record from another team's)."""
+    """The reason a view gave with BadRequest or PermissionDenied. Only those exact classes: Django raises subclasses
+    whose messages aren't written for the person (SessionInterrupted is a BadRequest)."""
     return str(exception) if type(exception) is kind and exception.args else ""
 
 
 def bad_request(request: HttpRequest, exception: Exception) -> HttpResponse:
     if not isinstance(exception, BadRequest) and not wants_json_error(request):
-        # Django's own refusals (a disallowed host, a request too large) answer before the request is one a page can
-        # be rendered for: its plain page
+        # Django's own refusals (SuspiciousOperation: a disallowed host, a request too large) keep its plain page:
+        # rendering the portal's page reads the same request (the host, the body) and could fail again
         return defaults.bad_request(request, exception)
     return error_answer(request, 400, _reason(exception, BadRequest))
 

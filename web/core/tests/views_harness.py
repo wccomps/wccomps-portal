@@ -459,7 +459,8 @@ class ViewCase:
 
     @property
     def json(self) -> bool:
-        """A JSON endpoint (core.errors.json_endpoint): called by fetch(), and every error and refusal is JSON."""
+        """A JSON endpoint (core.errors.json_endpoint): its errors are JSON whoever calls it, and the harness calls it
+        as the page's fetch() does."""
         return is_json_endpoint(CALLBACKS[self.name])
 
     @property
@@ -819,8 +820,9 @@ def check_answer(case: ViewCase, drawn: Drawn, answer: Answer) -> None:
         # A signed-in role sent to sign in is a client that lost its session: every check after this would pass
         assert kind is not Kind.SIGN_IN, f"{where}: a signed-in role was sent to sign in ({status})"
     if drawn.role not in case.allowed:
-        # The one refusal: sent to sign in when signed out, the 403 when signed in. Only a NUL is refused (400) and a
-        # wrong method answered (405) before the view's role check
+        # The one refusal: sent to sign in when signed out, the 403 when signed in. Only a NUL is refused (400) before
+        # the view's role check; a wrong method (405) comes first where the method check wraps the role check
+        # (require_POST outside require_permission), and after it elsewhere
         early = (status == 400 and drawn.carries_nul()) or kind is Kind.WRONG_METHOD
         refusal = Kind.SIGN_IN if drawn.role == "anonymous" else Kind.FORBIDDEN
         location = response.get("Location", "")

@@ -163,7 +163,7 @@ def test_a_refused_signed_in_role_gets_only_the_403() -> None:
         with pytest.raises(AssertionError, match="a role the page refuses got"):
             check_answer(case, drawn, answer)
     check_answer(case, drawn, _answer(403))
-    check_answer(case, drawn, _answer(405))  # a wrong method is answered before the role check
+    check_answer(case, drawn, _answer(405))  # where the method check comes before the role check
 
 
 def test_a_refused_signed_out_visitor_is_only_sent_to_sign_in() -> None:
