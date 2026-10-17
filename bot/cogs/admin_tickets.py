@@ -16,10 +16,14 @@ from bot.utils import (
     get_team_or_respond,
     log_to_ops_channel,
 )
+from core.utils import shorten
 from ticketing.access import TICKET_STAFF
 from ticketing.models import Ticket, TicketHistory
 
 logger = logging.getLogger(__name__)
+
+# A ticket number option, as long as the column (Discord refuses a longer one)
+TicketNumber = app_commands.Range[str, 1, Ticket._meta.get_field("ticket_number").max_length]
 
 
 class UserOrIdTransformer(app_commands.Transformer):
@@ -196,7 +200,7 @@ class AdminTicketsCog(commands.Cog):
     async def admin_ticket_resolve(
         self,
         interaction: discord.Interaction,
-        ticket_number: str,
+        ticket_number: TicketNumber,
         notes: str = "",
         points: int | None = None,
     ) -> None:
@@ -241,7 +245,9 @@ class AdminTicketsCog(commands.Cog):
         reason="Reason for cancellation",
     )
     @app_commands.check(permission_check("ticketing_admin"))
-    async def admin_ticket_cancel(self, interaction: discord.Interaction, ticket_number: str, reason: str = "") -> None:
+    async def admin_ticket_cancel(
+        self, interaction: discord.Interaction, ticket_number: TicketNumber, reason: str = ""
+    ) -> None:
         """Cancel a ticket without point penalty."""
         from ticketing.lifecycle import acancel_ticket
 
@@ -281,7 +287,7 @@ class AdminTicketsCog(commands.Cog):
     @app_commands.autocomplete(new_category=admin_category_autocomplete)
     @app_commands.check(permission_check("ticketing_admin"))
     async def admin_change_category(
-        self, interaction: discord.Interaction, ticket_number: str, new_category: str
+        self, interaction: discord.Interaction, ticket_number: TicketNumber, new_category: str
     ) -> None:
         """Change the category of a ticket."""
         from core.tickets_config import get_category_config
@@ -342,7 +348,7 @@ class AdminTicketsCog(commands.Cog):
     async def admin_ticket_reassign(
         self,
         interaction: discord.Interaction,
-        ticket_number: str,
+        ticket_number: TicketNumber,
         volunteer: app_commands.Transform[discord.User, UserOrIdTransformer] | None = None,
     ) -> None:
         """Reassign a ticket to a different volunteer."""
@@ -397,7 +403,9 @@ class AdminTicketsCog(commands.Cog):
     @tickets_group.command(name="reopen", description="[ADMIN] Reopen a resolved ticket")
     @app_commands.describe(ticket_number="Ticket number (e.g., T050-003)", reason="Reason for reopening")
     @app_commands.check(permission_check("ticketing_admin"))
-    async def admin_ticket_reopen(self, interaction: discord.Interaction, ticket_number: str, reason: str) -> None:
+    async def admin_ticket_reopen(
+        self, interaction: discord.Interaction, ticket_number: TicketNumber, reason: str
+    ) -> None:
         """Reopen a resolved ticket."""
         from ticketing.lifecycle import areopen_ticket
 
@@ -418,7 +426,7 @@ class AdminTicketsCog(commands.Cog):
 
         refund_msg = f"\n• Refunded: {refunded} points" if refunded > 0 else ""
         await interaction.followup.send(
-            f"Ticket {reopened.ticket_number} reopened\n• Reason: {reason}{refund_msg}",
+            f"Ticket {reopened.ticket_number} reopened\n• Reason: {shorten(reason, 1500)}{refund_msg}",
             ephemeral=True,
         )
         await log_to_ops_channel(

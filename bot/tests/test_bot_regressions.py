@@ -1,9 +1,11 @@
 """Regression tests for bugs the bot's property tests found, each pinned with the input that showed it."""
 
+import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
 from bot.cogs.admin_competition import AdminCompetitionCog
+from bot.cogs.admin_teams import AdminTeamsCog
 from bot.cogs.admin_tickets import AdminTicketsCog
 from bot.cogs.ticketing import TicketingCog
 from bot.tests.bot_harness import (
@@ -122,3 +124,41 @@ def test_resolve_modal_points_are_read_as_the_web_reads_them(bot_world: World, p
     """The resolve modal read its points with int(), unlike the web form (and a NUL in its notes reached the
     database): both now go through the web's resolve form."""
     drive(RESOLVE_MODAL, bot_world, Chosen({"role": "admin", "Resolution Notes": "Fixed\x00", "Points": points}))
+
+
+@pytest.mark.parametrize("name", ["resolve", "cancel", "change-category", "reassign", "reopen"])
+def test_a_ticket_number_option_is_as_long_as_the_column(name: str) -> None:
+    """The ticket number options took up to Discord's 6000 characters, and "Ticket ... not found" repeated all of
+    them, past the 2000 a message takes: Discord now refuses a number longer than the column."""
+    from ticketing.models import Ticket
+
+    command = next(c for c in AdminTicketsCog.tickets_group.walk_commands() if c.name == name)
+    param = next(p for p in command.parameters if p.name == "ticket_number")
+    assert param.max_value == Ticket._meta.get_field("ticket_number").max_length
+
+
+ACTIVATE = Command(AdminTeamsCog, AdminTeamsCog.admin_activate_teams.callback, may("admin"))
+SET_APPS = Command(AdminCompetitionCog, AdminCompetitionCog.admin_competition_set_apps.callback, may("admin"))
+REOPEN = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_reopen.callback, may("ticketing_admin"))
+
+
+@example(teams="1," + "x" * 3000)
+@given(teams=option_text(2000, 6000))
+def test_a_team_range_error_repeats_only_the_start_of_the_range(bot_world: World, teams: str) -> None:
+    """parse_team_range's error repeated the whole part it couldn't read, and the reply went past 2000 characters."""
+    drive(ACTIVATE, bot_world, Chosen({"role": "admin", "teams": teams}))
+
+
+@example(app_slugs="netbird," + "x" * 3000)
+@given(app_slugs=option_text(2000, 6000))
+def test_app_slugs_are_read_as_the_competition_page_reads_them(bot_world: World, app_slugs: str) -> None:
+    """/competition set-apps stored any text as application slugs (the competition page takes only slugs) and
+    repeated them all in its reply, past 2000 characters."""
+    drive(SET_APPS, bot_world, Chosen({"role": "admin", "app_slugs": app_slugs}))
+
+
+@example(reason="r" * 3000)
+@given(reason=option_text(2000, 6000))
+def test_a_reopen_reply_repeats_only_the_start_of_the_reason(bot_world: World, reason: str) -> None:
+    """The reopen reply repeated the whole reason, past the 2000 characters a message takes."""
+    drive(REOPEN, bot_world, Chosen({"role": "admin", "ticket_number": "T001-003", "reason": reason}))

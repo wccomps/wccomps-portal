@@ -13,8 +13,9 @@ from bot.competition_actions import run_competition_cleanup
 from bot.permissions import permission_check
 from bot.utils import ConfirmView, log_to_ops_channel, pinging, team_chat_channel
 from core.authentik_utils import credentials_csv, parse_team_range, reset_team_credentials
+from core.forms import AppSlugForm
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
-from core.utils import UnknownTimezoneError, parse_datetime_to_utc
+from core.utils import UnknownTimezoneError, parse_datetime_to_utc, shorten
 from team.models import Team, active_team_numbers, team_username
 
 logger = logging.getLogger(__name__)
@@ -400,10 +401,25 @@ class AdminCompetitionCog(commands.Cog):
     )
     @app_commands.describe(app_slugs="Comma-separated list of application slugs (e.g., netbird,scoring)")
     @app_commands.check(permission_check("admin"))
-    async def admin_competition_set_apps(self, interaction: discord.Interaction, app_slugs: str) -> None:
+    async def admin_competition_set_apps(
+        self, interaction: discord.Interaction, app_slugs: app_commands.Range[str, 1, 1000]
+    ) -> None:
         """Set which applications to control."""
 
-        slugs = [s.strip() for s in app_slugs.split(",") if s.strip()]
+        slugs = []
+        for raw in app_slugs.split(","):
+            if not raw.strip():
+                continue
+            # Each read as the competition page reads an app slug
+            form = AppSlugForm({"app_slug": raw})
+            if not form.is_valid():
+                await interaction.response.send_message(
+                    f"Not an application slug: {shorten(raw.strip(), 40)} "
+                    "(use letters, digits, hyphens and underscores).",
+                    ephemeral=True,
+                )
+                return
+            slugs.append(form.cleaned_data["app_slug"])
 
         if not slugs:
             await interaction.response.send_message("Please provide at least one application slug.", ephemeral=True)
