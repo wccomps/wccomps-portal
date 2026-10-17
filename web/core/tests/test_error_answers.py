@@ -275,3 +275,15 @@ def test_the_error_page_renders_for_a_request_with_no_user() -> None:
     response = error_answer(request, 400, "Nope")
     assert response.status_code == 400
     assert "Nope" in response.content.decode()
+
+
+def test_a_request_from_another_site_is_told_so_not_to_reload() -> None:
+    """An Origin the portal doesn't trust isn't a stale page: reloading won't help, so the 403 says where it came
+    from instead."""
+    response = _without_csrf("admin").post(
+        reverse("admin_team_action", args=[1]), {"action": "activate"}, headers={"Origin": "https://evil.example"}
+    )
+    assert response.status_code == 403
+    error = response.json()["error"]
+    assert "another site" in error
+    assert "Reload" not in error

@@ -113,8 +113,11 @@ def page_not_found(request: HttpRequest, exception: Exception) -> HttpResponse:
 
 
 def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:
-    """CSRF_FAILURE_VIEW: a form or fetch whose CSRF token didn't check out (most often a page open since before its
-    session changed)."""
+    """CSRF_FAILURE_VIEW. An Origin or Referer the portal doesn't trust (Django's reasons start with "Origin checking
+    failed" or "Referer checking failed") means the request came from somewhere else, which reloading won't fix; any
+    other reason is the token or its cookie, most often a page open since before its session changed."""
+    if reason.startswith(("Origin checking failed", "Referer checking failed")):
+        return error_answer(request, 403, "This request came from another site, so it was refused.")
     return error_answer(request, 403, "Your session changed since this page loaded. Reload the page and try again.")
 
 
