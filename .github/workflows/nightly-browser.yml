@@ -1,0 +1,32 @@
+name: Nightly browser tests
+
+# CI runs everything but the browser tests (Playwright, in Chromium); this runs them on main every night and on
+# demand (nightly.yml). A PR touching the paths below runs them and prints the issue body it would send instead.
+
+on:
+  schedule:
+    - cron: "47 9 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/nightly-browser.yml
+      - .github/workflows/nightly.yml
+      - .github/workflows/tests.yml
+      - .github/scripts/nightly_report.py
+
+permissions:
+  contents: read
+  issues: write
+
+# The nightly and manual runs one at a time, so two can't both open an issue; each PR's dry run has a group of its own
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  nightly:
+    uses: ./.github/workflows/nightly.yml
+    with:
+      label: nightly-browser
+      browser: true
+      timeout-minutes: 45

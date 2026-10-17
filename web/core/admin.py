@@ -1,13 +1,15 @@
+from contextlib import suppress
 from functools import wraps
 from typing import TYPE_CHECKING, cast
 
+from django import forms
 from django.contrib import admin
 from django.contrib.admin.exceptions import DisallowedModelAdminToField
 from django.contrib.admin.options import TO_FIELD_VAR
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.contrib.auth.views import redirect_to_login
-from django.core.exceptions import PermissionDenied
-from django.db.models import QuerySet
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db.models import Model, QuerySet
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.urls import reverse
 
@@ -68,8 +70,33 @@ admin.site = AuthentikAdminSite()
 admin.sites.site = admin.site
 
 
+class PortalModelAdmin[ModelT: Model](admin.ModelAdmin[ModelT]):
+    """Every portal model's admin (test_every_admin_is_a_portal_model_admin checks)."""
+
+    # The stubs say text, but a form's initial value is any value its field takes (a datetime for a date widget)
+    def get_changeform_initial_data(self, request: HttpRequest) -> dict[str, object]:  # type: ignore[override]
+        """An add form's values from its query (Django's prefill), as Django gives them, but where a widget reads the
+        value and fails the page (a 500) on one its field refuses: a date-and-time field gets the text read as a date
+        and time, and a related record's field keeps the value only when it names a record (a number past Python's
+        digit limit failed the select)."""
+        fields = self.get_form(request).base_fields
+        initial: dict[str, object] = {}
+        for name, value in super().get_changeform_initial_data(request).items():
+            field = fields.get(name)
+            if isinstance(field, forms.DateTimeField | forms.SplitDateTimeField):
+                with suppress(ValidationError):
+                    initial[name] = forms.DateTimeField().clean(value)
+            elif isinstance(field, forms.ModelChoiceField):
+                with suppress(ValidationError):
+                    field.clean(value)
+                    initial[name] = value
+            else:
+                initial[name] = value
+        return initial
+
+
 @admin.register(AuditLog)
-class AuditLogAdmin(admin.ModelAdmin[AuditLog]):
+class AuditLogAdmin(PortalModelAdmin[AuditLog]):
     list_display = ["action", "admin_user", "target_entity", "target_id", "created_at"]
     list_filter = ["action", "target_entity"]
     search_fields = ["admin_user", "action"]
@@ -87,7 +114,7 @@ class AuditLogAdmin(admin.ModelAdmin[AuditLog]):
 
 
 @admin.register(DiscordTask)
-class DiscordTaskAdmin(admin.ModelAdmin[DiscordTask]):
+class DiscordTaskAdmin(PortalModelAdmin[DiscordTask]):
     list_display = ["task_type", "status", "retry_count", "created_at", "completed_at"]
     list_filter = ["status", "task_type"]
     search_fields = ["task_type", "error_message"]
@@ -110,7 +137,7 @@ class DiscordTaskAdmin(admin.ModelAdmin[DiscordTask]):
 
 
 @admin.register(BotState)
-class BotStateAdmin(admin.ModelAdmin[BotState]):
+class BotStateAdmin(PortalModelAdmin[BotState]):
     list_display = ["key", "value", "updated_at"]
     search_fields = ["key", "value"]
     ordering = ["key"]
@@ -124,7 +151,7 @@ class BotStateAdmin(admin.ModelAdmin[BotState]):
 
 
 @admin.register(CompetitionConfig)
-class CompetitionConfigAdmin(admin.ModelAdmin[CompetitionConfig]):
+class CompetitionConfigAdmin(PortalModelAdmin[CompetitionConfig]):
     list_display = [
         "competition_status",
         "competition_start_time",
@@ -193,7 +220,7 @@ class CompetitionConfigAdmin(admin.ModelAdmin[CompetitionConfig]):
 
 
 @admin.register(UserGroups)
-class UserGroupsAdmin(admin.ModelAdmin[UserGroups]):
+class UserGroupsAdmin(PortalModelAdmin[UserGroups]):
     list_display = ["user", "authentik_id", "group_count"]
     search_fields = ["user__username", "authentik_id"]
     readonly_fields = ["user", "authentik_id", "groups"]

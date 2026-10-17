@@ -1,11 +1,8 @@
 name: Nightly deep property tests
 
 # The ci profile runs the same few Hypothesis examples on every PR; this runs the deep profile (many random
-# examples, conftest.py) on main every night and on demand. When a run doesn't pass (a test fails, an earlier step
-# fails, or the job times out) it opens one issue, or comments on the open one; when a run passes, it closes it. A
-# run cancelled by someone or by the concurrency group reports nothing. A job that hits timeout-minutes is
-# cancelled, but the run isn't, so the report still runs and files it.
-# A PR touching the paths below runs it with the ci profile and prints the issue body it would send instead.
+# examples, conftest.py) on main every night and on demand (nightly.yml). A PR touching the paths below runs it with
+# the ci profile and prints the issue body it would send instead.
 
 on:
   schedule:
@@ -14,78 +11,23 @@ on:
   pull_request:
     paths:
       - .github/workflows/deep-properties.yml
+      - .github/workflows/nightly.yml
       - .github/workflows/tests.yml
-      - .github/scripts/deep_report.py
+      - .github/scripts/nightly_report.py
 
 permissions:
   contents: read
   issues: write
 
-# The nightly and manual runs (from any ref) one at a time, so two can't both open an issue. A PR's dry run sends
-# nothing, so it has a group of its own, where a newer push cancels the older run.
+# The nightly and manual runs one at a time, so two can't both open an issue; each PR's dry run has a group of its own
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('deep-properties-pr-{0}', github.event.pull_request.number) || 'deep-properties' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  tests:
-    uses: ./.github/workflows/tests.yml
+  nightly:
+    uses: ./.github/workflows/nightly.yml
     with:
+      label: nightly-deep-properties
       profile: ${{ github.event_name == 'pull_request' && 'ci' || 'deep' }}
-      lint: false
-      # The night's run tests main; a PR's run tests the PR's merge commit (an empty ref). Written this way round
-      # because an empty string is false in an expression: "pull_request && '' || 'main'" is always 'main'
-      ref: ${{ github.event_name != 'pull_request' && 'main' || '' }}
       timeout-minutes: 300
-
-  report:
-    needs: tests
-    # After the tests whatever happened to them, but not when someone cancelled the run
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      ISSUE_TITLE: "Nightly deep property tests failed"
-      # The issue this workflow keeps: opened by github-actions with this label, so it never touches anyone else's
-      ISSUE_LABEL: nightly-deep-properties
-      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      SHA: ${{ needs.tests.outputs.sha || github.sha }}
-      RESULT: ${{ needs.tests.result }}
-      DRY_RUN: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      # The report script is 3.14 syntax; the runner's own python3 is older
-      - uses: actions/setup-python@v7
-        with:
-          python-version-file: .python-version
-
-      - uses: actions/download-artifact@v8
-        continue-on-error: true
-        with:
-          name: ${{ needs.tests.outputs.results }}
-
-      - name: Open, update or close the failure issue
-        run: |
-          python .github/scripts/deep_report.py test-results.xml "$RUN_URL" "$SHA" > issue-body.md
-          if [ "$DRY_RUN" = "true" ]; then
-            echo "Tests: $RESULT. The issue body a failing night would send:"
-            cat issue-body.md
-            exit 0
-          fi
-          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --author app/github-actions \
-            --label "$ISSUE_LABEL" --json number --jq '.[0].number // empty')
-          if [ "$RESULT" = "success" ]; then
-            if [ -n "$number" ]; then
-              gh issue close "$number" --repo "$GITHUB_REPOSITORY" --comment "Passed at $SHA: $RUN_URL"
-            fi
-          elif [ -n "$number" ]; then
-            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body-file issue-body.md
-          else
-            gh label create "$ISSUE_LABEL" --repo "$GITHUB_REPOSITORY" --force \
-              --description "Opened and closed by the nightly deep property run"
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" \
-              --body-file issue-body.md
-          fi

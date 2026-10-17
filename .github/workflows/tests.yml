@@ -1,7 +1,7 @@
 name: Tests
 
-# The test job ci.yml runs on every PR and every push to main, and deep-properties.yml runs nightly with the deep
-# profile: one Postgres service, setup and test command for both.
+# The test job ci.yml runs on every PR and every push to main, and nightly.yml runs on main every night (the deep
+# Hypothesis profile, and the browser tests): one Postgres service, setup and test step for all of them.
 
 on:
   workflow_call:
@@ -10,6 +10,10 @@ on:
         description: The Hypothesis profile (conftest.py)
         type: string
         default: ci
+      browser:
+        description: Run the browser tests (Playwright, in Chromium) instead of everything else
+        type: boolean
+        default: false
       lint:
         description: Also run the format, lint, type and migration checks
         type: boolean
@@ -24,11 +28,8 @@ on:
         default: 30
     outputs:
       sha:
-        description: The commit the tests ran on
+        description: The commit the tests ran on (their JUnit XML is the artifact test-results)
         value: ${{ jobs.lint-and-test.outputs.sha }}
-      results:
-        description: The name of the artifact holding the tests' JUnit XML (test-results.xml)
-        value: ${{ jobs.lint-and-test.outputs.results }}
 
 permissions:
   contents: read
@@ -39,7 +40,6 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     outputs:
       sha: ${{ steps.sha.outputs.sha }}
-      results: ${{ steps.sha.outputs.results }}
 
     services:
       postgres:
@@ -74,7 +74,6 @@ jobs:
         id: sha
         run: |
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "results=test-results-${{ inputs.profile }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -114,9 +113,20 @@ jobs:
         env:
           DJANGO_SECRET_KEY: test-secret-key-for-ci
 
+      - name: Install Chromium
+        if: inputs.browser
+        run: uv run playwright install --with-deps chromium
+
       - name: Run tests
-        run: |
-          uv run pytest -m "not browser" --junitxml=test-results.xml
+        if: ${{ !inputs.browser }}
+        run: uv run pytest -m "not browser" --junitxml=test-results.xml
+        env:
+          PYTHONPATH: ${{ github.workspace }}/web:${{ github.workspace }}
+          DJANGO_SECRET_KEY: test-secret-key-for-ci
+
+      - name: Run the browser tests
+        if: inputs.browser
+        run: uv run pytest -m browser -n0 --junitxml=test-results.xml
         env:
           PYTHONPATH: ${{ github.workspace }}/web:${{ github.workspace }}
           DJANGO_SECRET_KEY: test-secret-key-for-ci
@@ -125,6 +135,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.sha.outputs.results }}
+          name: test-results
           path: test-results.xml
           if-no-files-found: ignore

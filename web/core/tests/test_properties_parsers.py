@@ -22,7 +22,7 @@ from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.test import Client
 from django.urls import reverse
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from packets.forms import PacketUploadForm, parse_team_extras
 from packets.models import Packet
@@ -31,6 +31,7 @@ from registration.services import ImportBlockedError, SchoolListRow, import_scho
 from scoring.models import IncidentScreenshot, RedTeamScreenshot, validate_file_size
 from scoring.screenshots import MAX_SCREENSHOTS, ScreenshotError, read_screenshot, read_screenshots
 
+from core.csv_export import safe_cell
 from core.forms import SchoolInfoEditForm
 from core.stored_files import clean_name, detect_inline_type, file_response, stored_type
 from core.tests.strategies import (
@@ -160,11 +161,16 @@ def test_school_list_csv_gives_rows_or_errors_for_any_bytes(content: bytes) -> N
 
 
 @given(rows=school_rows(), newline=st.sampled_from(("\r\n", "\n", "\r")), bom=st.booleans())
+@example(
+    rows=[{"school_name": "0", "contact_email": "'@A.ad", "secondary_email": "", "notes": ""}],
+    newline="\r\n",
+    bom=False,
+)
 def test_school_list_csv_round_trips_valid_rows(rows: list[dict[str, str]], newline: str, bom: bool) -> None:
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=SCHOOL_HEADERS, lineterminator=newline)
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows(_exported(rows))
     content = out.getvalue().encode("utf-8")
 
     result = parse_csv_file(_upload((b"\xef\xbb\xbf" if bom else b"") + content))
@@ -211,11 +217,17 @@ def test_school_list_import_stores_whatever_the_csv_gives(content: bytes, school
             )
 
 
+def _exported(rows: list[dict[str, str]]) -> list[dict[str, object]]:
+    """The rows' cells as the school info export writes them (safe_cell), which the parser reads back exactly: a
+    plain CSV writer leaves a value like "'@A.ad" looking like the export's quoted "@A.ad"."""
+    return [{name: safe_cell(value) for name, value in row.items()} for row in rows]
+
+
 def _write_school_csv(rows: list[dict[str, str]]) -> bytes:
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=SCHOOL_HEADERS)
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows(_exported(rows))
     return out.getvalue().encode("utf-8")
 
 

@@ -3,6 +3,8 @@ from django.db.models import QuerySet
 from django.forms import ModelForm
 from django.http import HttpRequest
 
+from core.admin import PortalModelAdmin
+
 from .models import (
     Event,
     EventTeamAssignment,
@@ -25,7 +27,7 @@ class RegistrationEventEnrollmentInline(admin.TabularInline[RegistrationEventEnr
 
 
 @admin.register(TeamRegistration)
-class TeamRegistrationAdmin(admin.ModelAdmin[TeamRegistration]):
+class TeamRegistrationAdmin(PortalModelAdmin[TeamRegistration]):
     list_display = [
         "school_name",
         "status",
@@ -42,7 +44,7 @@ class TeamRegistrationAdmin(admin.ModelAdmin[TeamRegistration]):
 
 
 @admin.register(Season)
-class SeasonAdmin(admin.ModelAdmin[Season]):
+class SeasonAdmin(PortalModelAdmin[Season]):
     list_display = ["name", "year", "is_active", "created_at"]
     list_filter = ["is_active"]
     ordering = ["-year"]
@@ -94,7 +96,7 @@ class EventTeamAssignmentInline(admin.TabularInline[EventTeamAssignment, Event])
 
 
 @admin.register(Event)
-class EventAdmin(admin.ModelAdmin[Event]):
+class EventAdmin(PortalModelAdmin[Event]):
     list_display = [
         "name",
         "season",
@@ -127,7 +129,7 @@ class EventAdmin(admin.ModelAdmin[Event]):
 
 
 @admin.register(RegistrationContact)
-class RegistrationContactAdmin(admin.ModelAdmin[RegistrationContact]):
+class RegistrationContactAdmin(PortalModelAdmin[RegistrationContact]):
     list_display = ["name", "email", "role", "registration"]
     list_filter = ["role"]
     search_fields = ["name", "email", "registration__school_name"]
