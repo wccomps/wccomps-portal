@@ -18,6 +18,12 @@ from ticketing.utils import TicketRateLimitError, acreate_ticket_atomic, get_use
 logger = logging.getLogger(__name__)
 
 
+def storable(text: str) -> str:
+    """A message's text as a comment stores it: without NUL characters, which PostgreSQL text can't hold. The
+    message is already in Discord, so it is kept rather than refused."""
+    return text.replace("\x00", "")
+
+
 class TicketingCog(commands.Cog):
     """Commands for creating and managing tickets."""
 
@@ -270,7 +276,7 @@ class TicketingCog(commands.Cog):
                 await TicketComment.objects.acreate(
                     ticket=ticket,
                     author=author,
-                    comment_text=message.content,
+                    comment_text=storable(message.content),
                     discord_message_id=message.id,
                 )
                 logger.info(f"Saved Discord message as comment for ticket #{ticket.id}")
@@ -324,7 +330,7 @@ class TicketingCog(commands.Cog):
         comment = await TicketComment.objects.filter(ticket=ticket, discord_message_id=after.id).afirst()
 
         if comment:
-            comment.comment_text = after.content
+            comment.comment_text = storable(after.content)
             await comment.asave()
 
             logger.info(f"Synced edit to comment {comment.id} for ticket #{ticket.id}")

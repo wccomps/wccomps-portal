@@ -1000,7 +1000,7 @@ def channel_for(run: Run, data: Draws) -> Any:
 
 def message_for(run: Run, data: Draws, *, channel: Any = None, message_id: int | None = None) -> Any:
     author = run.discord.member_for(run.role)
-    author.bot = data.draw(st.booleans(), label="author is a bot") and data.draw(st.booleans())
+    author.bot = data.draw(st.sampled_from((False, False, False, True)), label="author is a bot")
     message = run.discord.message_object(channel or channel_for(run, data))
     if message_id is not None:
         message.id = message_id
@@ -1009,6 +1009,49 @@ def message_for(run: Run, data: Draws, *, channel: Any = None, message_id: int |
     message.attachments = data.draw(attachments(), label="attachments")
     run.texts += [message.content, *(a.filename for a in message.attachments)]
     return message
+
+
+def on_message(run: Run, data: Draws, cog: Any) -> Go:
+    message = message_for(run, data)
+
+    async def go() -> None:
+        await cog.on_message(message)
+
+    return go
+
+
+def saved_message(run: Run, data: Draws) -> tuple[Any, int]:
+    """A channel and a message id, the message saved as a ticket comment when the channel is a ticket's thread."""
+    from ticketing.models import TicketComment
+
+    channel = channel_for(run, data)
+    ticket = Ticket.objects.filter(discord_thread_id=channel.id).first()
+    message_id = data.draw(st.integers(1, 2**63 - 1), label="message id")
+    if ticket and data.draw(st.booleans(), label="was saved"):
+        TicketComment.objects.create(ticket=ticket, comment_text="before", discord_message_id=message_id)
+    return channel, message_id
+
+
+def on_message_edit(run: Run, data: Draws, cog: Any) -> Go:
+    channel, message_id = saved_message(run, data)
+    before = message_for(run, data, channel=channel, message_id=message_id)
+    after = message_for(run, data, channel=channel, message_id=message_id)
+    after.author = before.author
+
+    async def go() -> None:
+        await cog.on_message_edit(before, after)
+
+    return go
+
+
+def on_message_delete(run: Run, data: Draws, cog: Any) -> Go:
+    channel, message_id = saved_message(run, data)
+    message = message_for(run, data, channel=channel, message_id=message_id)
+
+    async def go() -> None:
+        await cog.on_message_delete(message)
+
+    return go
 
 
 # ---------------------------------------------------------------------------------------------------------------

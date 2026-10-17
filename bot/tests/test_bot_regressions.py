@@ -4,11 +4,29 @@ from hypothesis import example, given
 
 from bot.cogs.admin_competition import AdminCompetitionCog
 from bot.cogs.admin_tickets import AdminTicketsCog
-from bot.tests.bot_harness import Chosen, Command, World, drive, may, option_text
+from bot.cogs.ticketing import TicketingCog
+from bot.tests.bot_harness import (
+    Chosen,
+    Command,
+    Listener,
+    World,
+    drive,
+    may,
+    on_message,
+    on_message_edit,
+    option_text,
+)
 
 BROADCAST = Command(AdminCompetitionCog, AdminCompetitionCog.admin_broadcast.callback, may("admin"))
 RESOLVE = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_resolve.callback, may("ticketing_support"))
 REASSIGN = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_reassign.callback, may("ticketing_admin"))
+THREAD_MESSAGE = Listener(TicketingCog, TicketingCog.on_message, on_message)
+THREAD_EDIT = Listener(TicketingCog, TicketingCog.on_message_edit, on_message_edit)
+
+
+def in_a_ticket_thread(world: World, content: str, **more: object) -> Chosen:
+    thread = world.tickets["open"].discord_thread_id
+    return Chosen({"role": "blue_team", "channel": "ticket thread", "thread": thread, "content": content, **more})
 
 
 @example(message="@everyone the scoring engine is back")
@@ -33,3 +51,11 @@ def test_an_option_the_bot_cannot_read_is_answered(bot_world: World, volunteer: 
     """A volunteer that isn't a user or an id fails the option's transformer, and the command tree only logged it:
     Discord showed "The application did not respond"."""
     drive(REASSIGN, bot_world, Chosen({"role": "admin", "ticket_number": "T001-002", "volunteer": volunteer}))
+
+
+@example(content="logs\x00")
+@given(content=option_text(1, 2000).map(lambda s: s + "\x00"))
+def test_a_thread_message_with_a_nul_is_saved_without_it(bot_world: World, content: str) -> None:
+    """A ticket thread message holding a NUL failed to save as a comment (ValueError), so the listener raised."""
+    drive(THREAD_MESSAGE, bot_world, in_a_ticket_thread(bot_world, content))
+    drive(THREAD_EDIT, bot_world, in_a_ticket_thread(bot_world, content, **{"message id": 1, "was saved": True}))
