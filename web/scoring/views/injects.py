@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
-from core.utils import by_approval, by_team, list_filters, requested_sort, stable_order, team_numbers
+from core.utils import by_approval, by_team, chosen_team, list_filters, requested_sort, stable_order, team_numbers
 from team.models import Team
 
 from ..forms import ApproveInjectFeedbackForm, SaveInjectFeedbackForm
@@ -177,7 +177,8 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
 
     base_query = InjectScore.objects.select_related("team", "graded_by")
 
-    base_query = by_team(by_approval(base_query, filters["status"]), filters["team"])
+    team = chosen_team(filters["team"])
+    base_query = by_team(by_approval(base_query, filters["status"]), team)
 
     if filters["inject"]:
         base_query = base_query.filter(inject_id=filters["inject"])
@@ -237,7 +238,8 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
         "total_grades": total_grades,
         "has_unapproved": unapproved_count > 0,
         "available_injects": available_injects,
-        "team_numbers": team_numbers(Team.objects.filter(inject_grades__isnull=False), filters["team"]),
+        "team_numbers": team_numbers(Team.objects.filter(inject_grades__isnull=False), team),
+        "chosen_team": team,
         "filters": filters,
         "filtered": filtered,
         "sort_by": sort_by,

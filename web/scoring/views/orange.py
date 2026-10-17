@@ -7,7 +7,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import require_permission
-from core.utils import by_approval, by_team, list_filters, optional_int, team_numbers
+from core.utils import by_approval, by_team, chosen_team, list_filters, optional_int, team_numbers
 
 from ..models import OrangeTeamScore
 
@@ -28,7 +28,8 @@ def review_orange(request: HttpRequest) -> HttpResponse:
 
     base_query = OrangeTeamScore.objects.select_related("team", "submitted_by", "approved_by", "orange_check")
 
-    base_query = by_team(by_approval(base_query, filters["status"]), filters["team"])
+    team = chosen_team(filters["team"])
+    base_query = by_team(by_approval(base_query, filters["status"]), team)
 
     if filters["check"]:
         if filters["check"] == "manual":
@@ -60,7 +61,8 @@ def review_orange(request: HttpRequest) -> HttpResponse:
         "pending_count": pending_count,
         "approved_count": approved_count,
         "has_pending": pending_count > 0,
-        "team_numbers": team_numbers(Team.objects.filter(orange_team_scores__isnull=False), filters["team"]),
+        "team_numbers": team_numbers(Team.objects.filter(orange_team_scores__isnull=False), team),
+        "chosen_team": team,
         "available_checks": available_checks,
         "filters": filters,
         "filtered": filtered,

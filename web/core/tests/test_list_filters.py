@@ -130,6 +130,23 @@ def test_the_team_chosen_stays_chosen_with_no_rows(client: Client, name: str) ->
     assert re.search(r'<option value="9"\s+selected>\s*Team 9\s*</option>', page), name
 
 
+@pytest.mark.parametrize("name", TEAM_LISTS)
+@pytest.mark.parametrize("written", ["07", "+7", " 7 "])
+def test_a_team_number_written_another_way_shows_as_chosen(client: Client, name: str, written: str) -> None:
+    """?team=07 filtered on team 7 while the select read "All Teams": the option compared the text as written."""
+    Team.objects.create(team_number=7, team_name="Team 07")
+    page = client.get(reverse(name), {"team": written}).content.decode()
+    assert re.search(r'<option value="7"\s+selected>\s*Team 7\s*</option>', page), name
+
+
+@pytest.mark.parametrize("name", TEAM_LISTS)
+def test_a_team_number_no_team_has_adds_no_option(client: Client, name: str) -> None:
+    """?team=-3 added a "Team -3" option."""
+    page = client.get(reverse(name), {"team": "-3"}).content.decode()
+    assert "Team -3" not in page
+    assert 'value="-3"' not in page
+
+
 @pytest.mark.parametrize("name", APPROVAL_LISTS)
 def test_every_approval_filter_offers_the_same_statuses(client: Client, name: str) -> None:
     assert selects(client, reverse(name))["status"] == [

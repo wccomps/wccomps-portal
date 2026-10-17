@@ -39,7 +39,7 @@
                         {% endfor %}
                     </select>
                 </c-filter_field>
-                <c-team_filter :numbers="team_numbers" value="{{ filters.team }}" />
+                <c-team_filter :numbers="team_numbers" value="{{ chosen_team|default_if_none:'' }}" />
                 <c-filter_field label="Outliers Only" id="id_outliers">
                     <select name="outliers" id="id_outliers" aria-label="Filter outliers">
                         <option value="" {% if filters.outliers != "1" %}selected{% endif %}>All Grades</option>

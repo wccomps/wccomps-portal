@@ -24,7 +24,7 @@
                 </c-slot>
             {% endif %}
             <c-approval_filter value="{{ filters.status }}" />
-            <c-team_filter :numbers="team_numbers" value="{{ filters.team }}" />
+            <c-team_filter :numbers="team_numbers" value="{{ chosen_team|default_if_none:'' }}" />
             <c-filter_field label="Check" id="id_check">
                 <select name="check" id="id_check" aria-label="Filter by check">
                     <option value="">All Checks</option>

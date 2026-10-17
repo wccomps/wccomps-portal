@@ -131,19 +131,27 @@ def by_approval[M: Model](queryset: QuerySet[M], status: str, field: str = "is_a
     return queryset
 
 
-def team_numbers(teams: QuerySet[Team], team: str) -> list[int]:
-    """The team numbers a team filter offers: the teams with rows, and the one chosen (?team=) even with none."""
+def chosen_team(team: str) -> int | None:
+    """The team number the team filter (?team=) names (07 and +7 name team 7), or None when it names no team."""
+    from team.models import Team
+
+    number = optional_int(team)
+    return number if number is not None and Team.objects.filter(team_number=number).exists() else None
+
+
+def team_numbers(teams: QuerySet[Team], team: int | None) -> list[int]:
+    """The team numbers a team filter offers: the teams with rows, and the one chosen (chosen_team) even with none."""
     numbers = set(teams.values_list("team_number", flat=True))
-    if (number := optional_int(team)) is not None:
-        numbers.add(number)
+    if team is not None:
+        numbers.add(team)
     return sorted(numbers)
 
 
-def by_team[M: Model](queryset: QuerySet[M], team: str, field: str = "team") -> QuerySet[M]:
-    """The rows of the team the team filter (?team=) names by its number, or every row when it names none."""
-    if (number := optional_int(team)) is None:
+def by_team[M: Model](queryset: QuerySet[M], team: int | None, field: str = "team") -> QuerySet[M]:
+    """The rows of the chosen team (chosen_team), or every row when none is chosen."""
+    if team is None:
         return queryset
-    return queryset.filter(**{f"{field}__team_number": number})
+    return queryset.filter(**{f"{field}__team_number": team})
 
 
 def requested_sort(request: HttpRequest, sort_fields: Collection[str], default_sort: str) -> str:

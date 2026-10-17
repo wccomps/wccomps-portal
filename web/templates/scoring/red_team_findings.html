@@ -12,7 +12,7 @@
                           hx_swap="outerHTML"
                           hx_push_url="true">
             <c-approval_filter value="{{ filters.status }}" />
-            <c-team_filter :numbers="team_numbers" value="{{ filters.team }}" label="Target Team" />
+            <c-team_filter :numbers="team_numbers" value="{{ chosen_team|default_if_none:'' }}" label="Target Team" />
             <c-filter_field label="Attack Type" id="id_attack_type" min_width="150px">
                 <select name="attack_type"
                         id="id_attack_type"
