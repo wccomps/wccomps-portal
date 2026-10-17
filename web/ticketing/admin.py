@@ -2,6 +2,8 @@ from django.contrib import admin
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 
+from core.admin import PortalModelAdmin
+
 from .forms import TicketCategoryForm
 from .models import (
     CommentRateLimit,
@@ -35,7 +37,7 @@ class TicketHistoryInline(admin.TabularInline[TicketHistory, Ticket]):
 
 
 @admin.register(TicketCategory)
-class TicketCategoryAdmin(admin.ModelAdmin[TicketCategory]):
+class TicketCategoryAdmin(PortalModelAdmin[TicketCategory]):
     form = TicketCategoryForm
     list_display = ["display_name", "points", "get_steps_count", "variable_points", "user_creatable", "sort_order"]
     list_filter = ["variable_points", "user_creatable"]
@@ -70,7 +72,7 @@ class TicketCategoryAdmin(admin.ModelAdmin[TicketCategory]):
 
 
 @admin.register(Ticket)
-class TicketAdmin(admin.ModelAdmin[Ticket]):
+class TicketAdmin(PortalModelAdmin[Ticket]):
     list_display = [
         "ticket_number",
         "team",
@@ -217,7 +219,7 @@ class TicketAdmin(admin.ModelAdmin[Ticket]):
 
 
 @admin.register(TicketAttachment)
-class TicketAttachmentAdmin(admin.ModelAdmin[TicketAttachment]):
+class TicketAttachmentAdmin(PortalModelAdmin[TicketAttachment]):
     list_display = ["filename", "ticket", "uploaded_by", "uploaded_at"]
     list_filter = ["uploaded_at"]
     search_fields = ["filename", "ticket__ticket_number"]
@@ -226,7 +228,7 @@ class TicketAttachmentAdmin(admin.ModelAdmin[TicketAttachment]):
 
 
 @admin.register(TicketComment)
-class TicketCommentAdmin(admin.ModelAdmin[TicketComment]):
+class TicketCommentAdmin(PortalModelAdmin[TicketComment]):
     list_display = ["ticket", "author", "posted_at"]
     list_filter = ["posted_at"]
     search_fields = ["ticket__ticket_number", "comment_text"]
@@ -235,7 +237,7 @@ class TicketCommentAdmin(admin.ModelAdmin[TicketComment]):
 
 
 @admin.register(TicketHistory)
-class TicketHistoryAdmin(admin.ModelAdmin[TicketHistory]):
+class TicketHistoryAdmin(PortalModelAdmin[TicketHistory]):
     list_display = ["ticket", "action", "actor", "timestamp"]
     list_filter = ["action", "timestamp"]
     search_fields = ["ticket__ticket_number"]
@@ -244,7 +246,7 @@ class TicketHistoryAdmin(admin.ModelAdmin[TicketHistory]):
 
 
 @admin.register(CommentRateLimit)
-class CommentRateLimitAdmin(admin.ModelAdmin[CommentRateLimit]):
+class CommentRateLimitAdmin(PortalModelAdmin[CommentRateLimit]):
     list_display = ["ticket", "discord_id", "posted_at"]
     list_filter = ["posted_at"]
     search_fields = ["ticket__ticket_number", "discord_id"]

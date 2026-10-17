@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.utils.html import format_html
 
+from core.admin import PortalModelAdmin
+
 from .models import (
     AttackType,
     IncidentReport,
@@ -19,7 +21,7 @@ from .models import (
 
 
 @admin.register(AttackType)
-class AttackTypeAdmin(admin.ModelAdmin[AttackType]):
+class AttackTypeAdmin(PortalModelAdmin[AttackType]):
     list_display = ["name", "description_short", "is_active", "findings_count", "created_at"]
     list_filter = ["is_active"]
     search_fields = ["name", "description"]
@@ -42,7 +44,7 @@ class RedTeamScreenshotInline(admin.TabularInline[RedTeamScreenshot, RedTeamScor
 
 
 @admin.register(RedTeamScore)
-class RedTeamScoreAdmin(admin.ModelAdmin[RedTeamScore]):
+class RedTeamScoreAdmin(PortalModelAdmin[RedTeamScore]):
     list_display = [
         "id",
         "attack_type",
@@ -110,7 +112,7 @@ class IncidentScreenshotInline(admin.TabularInline[IncidentScreenshot, IncidentR
 
 
 @admin.register(IncidentReport)
-class IncidentReportAdmin(admin.ModelAdmin[IncidentReport]):
+class IncidentReportAdmin(PortalModelAdmin[IncidentReport]):
     list_display = [
         "id",
         "team",
@@ -183,7 +185,7 @@ class IncidentReportAdmin(admin.ModelAdmin[IncidentReport]):
 
 
 @admin.register(InjectScore)
-class InjectScoreAdmin(admin.ModelAdmin[InjectScore]):
+class InjectScoreAdmin(PortalModelAdmin[InjectScore]):
     list_display = [
         "team",
         "inject_name",
@@ -214,7 +216,7 @@ class InjectScoreAdmin(admin.ModelAdmin[InjectScore]):
 
 
 @admin.register(OrangeTeamScore)
-class OrangeTeamScoreAdmin(admin.ModelAdmin[OrangeTeamScore]):
+class OrangeTeamScoreAdmin(PortalModelAdmin[OrangeTeamScore]):
     list_display = [
         "team",
         "description_short",
@@ -232,7 +234,7 @@ class OrangeTeamScoreAdmin(admin.ModelAdmin[OrangeTeamScore]):
 
 
 @admin.register(ServiceScore)
-class ServiceScoreAdmin(admin.ModelAdmin[ServiceScore]):
+class ServiceScoreAdmin(PortalModelAdmin[ServiceScore]):
     list_display = [
         "team",
         "service_points",
@@ -253,14 +255,14 @@ class ServiceScoreAdmin(admin.ModelAdmin[ServiceScore]):
 
 
 @admin.register(ScoringExclusion)
-class ScoringExclusionAdmin(admin.ModelAdmin[ScoringExclusion]):
+class ScoringExclusionAdmin(PortalModelAdmin[ScoringExclusion]):
     list_display = ["team", "created_at"]
     search_fields = ["team__team_name"]
     readonly_fields = ["created_at"]
 
 
 @admin.register(ScoringTemplate)
-class ScoringTemplateAdmin(admin.ModelAdmin[ScoringTemplate]):
+class ScoringTemplateAdmin(PortalModelAdmin[ScoringTemplate]):
     list_display = [
         "service_weight",
         "inject_weight",
@@ -298,14 +300,14 @@ class ScoringTemplateAdmin(admin.ModelAdmin[ScoringTemplate]):
 
 
 @admin.register(QuotientMetadataCache)
-class QuotientMetadataCacheAdmin(admin.ModelAdmin[QuotientMetadataCache]):
+class QuotientMetadataCacheAdmin(PortalModelAdmin[QuotientMetadataCache]):
     list_display = ["event_name", "team_count", "last_synced", "synced_by"]
     readonly_fields = ["last_synced"]
     search_fields = ["event_name"]
 
 
 @admin.register(RedTeamIPPool)
-class RedTeamIPPoolAdmin(admin.ModelAdmin[RedTeamIPPool]):
+class RedTeamIPPoolAdmin(PortalModelAdmin[RedTeamIPPool]):
     list_display = ["name", "ip_count", "findings_count", "created_by", "created_at"]
     search_fields = ["name", "created_by__username"]
     readonly_fields = ["created_at", "updated_at"]

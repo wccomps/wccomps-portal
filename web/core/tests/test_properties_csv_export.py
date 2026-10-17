@@ -47,6 +47,13 @@ def test_an_exported_text_cell_never_starts_a_formula_and_reads_back_with_only_t
 
 @pytest.mark.django_db
 # Team.save runs full_clean: a blank, too long or NUL name can't be stored, so it can't be exported either
+@given(text=TEXT.filter(lambda t: not t.startswith("'")))
+def test_a_cell_without_the_export_quote_reads_back_unchanged(text: str) -> None:
+    """A hand-made CSV's cell that starts like a formula keeps its first character: only the export's quote comes
+    off."""
+    assert unquote_cell(text) == text
+
+
 @given(team_name=request_text(100).filter(lambda s: s.strip() and len(s) <= 100 and "\x00" not in s))
 @example(team_name='=HYPERLINK("http://x","y")')
 def test_a_team_name_in_the_school_list_export_is_not_a_formula(team_name: str, gold_team_user: User) -> None:

@@ -67,7 +67,10 @@ class RejectNulMiddleware:
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         query = ((key, value) for key, values in request.GET.lists() for value in values)
-        if "\x00" in request.path or _holds_nul(query) or _holds_nul(request.COOKIES.items()):
+        # The cookie header as sent (in the parsed cookies a later chunk with the same name, or none, replaces one with
+        # a NUL) and as parsed (a quoted octal escape becomes a NUL)
+        cookies = request.META.get("HTTP_COOKIE", "")
+        if "\x00" in request.path or _holds_nul(query) or "\x00" in cookies or _holds_nul(request.COOKIES.items()):
             return _nul_refusal(request)
         return self.get_response(request)
 

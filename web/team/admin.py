@@ -5,6 +5,8 @@ from django.http import HttpRequest, HttpResponse
 from django.template.loader import render_to_string
 from django.utils.html import format_html
 
+from core.admin import PortalModelAdmin
+
 from .models import (
     DiscordLink,
     LinkAttempt,
@@ -22,7 +24,7 @@ def _password_reset_button(team: Team) -> str:
 
 
 @admin.register(Team)
-class TeamAdmin(admin.ModelAdmin[Team]):
+class TeamAdmin(PortalModelAdmin[Team]):
     list_display = [
         "team_number",
         "team_name",
@@ -50,7 +52,7 @@ class TeamAdmin(admin.ModelAdmin[Team]):
 
 
 @admin.register(DiscordLink)
-class DiscordLinkAdmin(admin.ModelAdmin[DiscordLink]):
+class DiscordLinkAdmin(PortalModelAdmin[DiscordLink]):
     list_display = [
         "discord_username",
         "get_username",
@@ -69,7 +71,7 @@ class DiscordLinkAdmin(admin.ModelAdmin[DiscordLink]):
 
 
 @admin.register(LinkToken)
-class LinkTokenAdmin(admin.ModelAdmin[LinkToken]):
+class LinkTokenAdmin(PortalModelAdmin[LinkToken]):
     list_display = ["token", "discord_username", "used", "expires_at", "created_at"]
     list_filter = ["used", "expires_at"]
     search_fields = ["discord_username", "token"]
@@ -78,7 +80,7 @@ class LinkTokenAdmin(admin.ModelAdmin[LinkToken]):
 
 
 @admin.register(LinkAttempt)
-class LinkAttemptAdmin(admin.ModelAdmin[LinkAttempt]):
+class LinkAttemptAdmin(PortalModelAdmin[LinkAttempt]):
     list_display = [
         "discord_username",
         "authentik_username",
@@ -96,7 +98,7 @@ class LinkAttemptAdmin(admin.ModelAdmin[LinkAttempt]):
 
 
 @admin.register(LinkRateLimit)
-class LinkRateLimitAdmin(admin.ModelAdmin[LinkRateLimit]):
+class LinkRateLimitAdmin(PortalModelAdmin[LinkRateLimit]):
     list_display = ["discord_id", "attempted_at"]
     list_filter = ["attempted_at"]
     search_fields = ["discord_id"]
@@ -108,7 +110,7 @@ class LinkRateLimitAdmin(admin.ModelAdmin[LinkRateLimit]):
 
 
 @admin.register(SchoolInfo)
-class SchoolInfoAdmin(admin.ModelAdmin[SchoolInfo]):
+class SchoolInfoAdmin(PortalModelAdmin[SchoolInfo]):
     list_display = [
         "school_display",
         "team",
