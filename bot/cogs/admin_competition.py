@@ -11,7 +11,7 @@ from django.conf import settings
 
 from bot.competition_actions import run_competition_cleanup
 from bot.permissions import permission_check
-from bot.utils import ConfirmView, log_to_ops_channel, team_chat_channel
+from bot.utils import ConfirmView, log_to_ops_channel, pinging, team_chat_channel
 from core.authentik_utils import credentials_csv, parse_team_range, reset_team_credentials
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.utils import UnknownTimezoneError, parse_datetime_to_utc
@@ -468,7 +468,10 @@ class AdminCompetitionCog(commands.Cog):
             role_mention = blueteam_role.mention if blueteam_role else "@Blueteam"
 
             try:
-                await channel.send(f"{role_mention}\n\n{message}")
+                await channel.send(
+                    f"{role_mention}\n\n{message}",
+                    allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
+                )
                 sent_count = 1
 
                 await log_to_ops_channel(

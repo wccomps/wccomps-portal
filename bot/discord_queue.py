@@ -17,7 +17,13 @@ from bot.heartbeat import record as record_heartbeat
 from bot.role_sync import competition_guild
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_dashboard import trigger_dashboard
-from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, recycle_db_connection, split_message, team_chat_channel
+from bot.utils import (
+    DISCORD_EMBED_FIELD_CHAR_LIMIT,
+    pinging,
+    recycle_db_connection,
+    split_message,
+    team_chat_channel,
+)
 from core.discord_tasks import (
     PAYLOAD_TYPES,
     AddUserToThread,
@@ -457,7 +463,9 @@ class DiscordQueueProcessor:
             blueteam_role = guild.get_role(settings.BLUETEAM_ROLE_ID)
             role_mention = blueteam_role.mention if blueteam_role else "@Blueteam"
 
-            await channel.send(f"{role_mention}\n\n{message}")
+            await channel.send(
+                f"{role_mention}\n\n{message}", allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else [])
+            )
             sent_count = 1
             logger.info(f"Broadcast to announcements by {sender}")
 

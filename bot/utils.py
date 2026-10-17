@@ -21,6 +21,17 @@ DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT = 4096
 DISCORD_EMBED_TITLE_CHAR_LIMIT = 256
 DISCORD_MESSAGE_CHAR_LIMIT = 2000
 
+# What a message may ping unless its send names more: nothing. Messages repeat user text (ticket descriptions,
+# broadcasts, team names), so @everyone, @here or a mention in it must not reach anyone.
+ALLOWED_MENTIONS = discord.AllowedMentions.none()
+
+
+def pinging(
+    *, users: list[discord.abc.Snowflake] | None = None, roles: list[discord.abc.Snowflake] | None = None
+) -> discord.AllowedMentions:
+    """Allowed mentions for a message meant to ping these users or roles, and no one else its text names."""
+    return discord.AllowedMentions(everyone=False, users=users or False, roles=roles or False, replied_user=False)
+
 
 def fit(text: str, limit: int) -> str:
     """text cut to Discord's limit, marked with an ellipsis; Discord rejects the whole message otherwise."""

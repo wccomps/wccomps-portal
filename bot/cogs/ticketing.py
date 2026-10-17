@@ -11,7 +11,7 @@ from quotient.client import get_quotient_client
 
 from bot.permissions import check_blue_team, linked_team_member
 from bot.thread_creator import publish_new_ticket
-from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, fit
+from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, fit, pinging
 from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
 from ticketing.utils import TicketRateLimitError, acreate_ticket_atomic, get_user_for_ticket
 
@@ -251,6 +251,7 @@ class TicketingCog(commands.Cog):
                 await message.channel.send(
                     f"{message.author.mention} {reason}. Please slow down.",
                     delete_after=10,
+                    allowed_mentions=pinging(users=[message.author]),
                 )
                 logger.warning(f"Rate limit exceeded for user {message.author.id} on ticket #{ticket.id}")
                 return
