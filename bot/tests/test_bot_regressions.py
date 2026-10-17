@@ -20,6 +20,9 @@ from bot.tests.bot_harness import (
 BROADCAST = Command(AdminCompetitionCog, AdminCompetitionCog.admin_broadcast.callback, may("admin"))
 RESOLVE = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_resolve.callback, may("ticketing_support"))
 REASSIGN = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_reassign.callback, may("ticketing_admin"))
+TICKET = Command(TicketingCog, TicketingCog.create_ticket.callback, frozenset({"blue_team", "other_team"}))
+ADMIN_TICKET = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_create.callback, may("ticketing_admin"))
+CHANGE_CATEGORY = Command(AdminTicketsCog, AdminTicketsCog.admin_change_category.callback, may("ticketing_admin"))
 THREAD_MESSAGE = Listener(TicketingCog, TicketingCog.on_message, on_message)
 THREAD_EDIT = Listener(TicketingCog, TicketingCog.on_message_edit, on_message_edit)
 
@@ -59,3 +62,35 @@ def test_a_thread_message_with_a_nul_is_saved_without_it(bot_world: World, conte
     """A ticket thread message holding a NUL failed to save as a comment (ValueError), so the listener raised."""
     drive(THREAD_MESSAGE, bot_world, in_a_ticket_thread(bot_world, content))
     drive(THREAD_EDIT, bot_world, in_a_ticket_thread(bot_world, content, **{"message id": 1, "was saved": True}))
+
+
+@example(category="Box Reset")
+@given(category=option_text(1, 100))
+def test_a_category_that_is_not_a_number_is_refused(bot_world: World, category: str) -> None:
+    """Every command that files a ticket or changes its category read the option with int() and raised on
+    anything else (autocomplete offers ids, but Discord sends whatever was typed)."""
+    drive(TICKET, bot_world, Chosen({"role": "blue_team", "category": category, "description": "Down"}))
+    drive(
+        ADMIN_TICKET, bot_world, Chosen({"role": "admin", "team_number": 1, "category": category, "description": "x"})
+    )
+    drive(CHANGE_CATEGORY, bot_world, Chosen({"role": "admin", "ticket_number": "T001-002", "new_category": category}))
+
+
+@example(hostname="web" * 100)
+@given(hostname=option_text(256, 6000))
+def test_a_ticket_field_longer_than_its_column_is_refused(bot_world: World, hostname: str) -> None:
+    """A slash command option has no length unless it declares one, so a long hostname, service or IP reached the
+    database's varchar column (DataError); the web form refuses it, and now so does the bot."""
+    chosen = {"role": "blue_team", "category": "2", "description": "Down", "hostname": hostname}
+    drive(TICKET, bot_world, Chosen(chosen))
+
+
+@example(description="Help")
+@given(description=option_text(1, 1000))
+def test_a_team_files_only_in_a_category_teams_may_create(bot_world: World, description: str) -> None:
+    """/ticket took any category id, so a team could file a ticket in a staff-only category the web form hides."""
+    from ticketing.models import TicketCategory
+
+    TicketCategory.objects.filter(pk=6).update(user_creatable=False)
+    run = drive(TICKET, bot_world, Chosen({"role": "blue_team", "category": "6", "description": description}))
+    assert "ticketing_ticket" not in run.written

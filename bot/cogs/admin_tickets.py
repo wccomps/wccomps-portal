@@ -10,13 +10,14 @@ from discord.ext import commands
 from bot.permissions import permission_check
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_dashboard import trigger_dashboard
+from bot.ticket_input import read_ticket
 from bot.utils import (
     ConfirmView,
     get_team_or_respond,
     log_to_ops_channel,
 )
 from ticketing.access import TICKET_STAFF
-from ticketing.models import Ticket, TicketCategory, TicketHistory
+from ticketing.models import Ticket, TicketHistory
 
 logger = logging.getLogger(__name__)
 
@@ -81,27 +82,26 @@ class AdminTicketsCog(commands.Cog):
         if not team:
             return
 
-        from core.tickets_config import get_category_config
-
-        category_id = int(category)
-        cat_info = await sync_to_async(get_category_config)(category_id)
-        if not cat_info:
-            await interaction.response.send_message("Invalid ticket category.", ephemeral=True)
+        ticket_input = await sync_to_async(read_ticket)(category, staff=True, description=description)
+        if not isinstance(ticket_input, str) and "hostname" in ticket_input.config.get("required_fields", []):
+            # Categories that need a hostname take it from the description
+            ticket_input = await sync_to_async(read_ticket)(
+                category, staff=True, description=description, hostname=description
+            )
+        if isinstance(ticket_input, str):
+            await interaction.response.send_message(ticket_input, ephemeral=True)
             return
-
-        # Categories that need a hostname take it from the description
-        hostname = description if "hostname" in cat_info.get("required_fields", []) else ""
+        cat_info = ticket_input.config
 
         # Create ticket atomically to prevent race conditions
         from ticketing.utils import acreate_ticket_atomic
 
-        category_obj = await TicketCategory.objects.aget(pk=category_id)
         ticket = await acreate_ticket_atomic(
             team=team,
-            category=category_obj,
+            category=ticket_input.category,
             title=cat_info["display_name"],
-            description=description,
-            hostname=hostname,
+            description=ticket_input.description,
+            hostname=ticket_input.hostname,
             actor_username=f"admin:{interaction.user}",
             enforce_team_limit=False,
         )
@@ -281,6 +281,7 @@ class AdminTicketsCog(commands.Cog):
     ) -> None:
         """Change the category of a ticket."""
         from core.tickets_config import get_category_config
+        from ticketing.forms import TicketChangeCategoryForm
         from ticketing.utils import achange_ticket_category_atomic
 
         ticket = await Ticket.objects.filter(ticket_number=ticket_number).afirst()
@@ -288,8 +289,13 @@ class AdminTicketsCog(commands.Cog):
             await interaction.response.send_message(f"Ticket {ticket_number} not found", ephemeral=True)
             return
 
+        # The web's form reads the category as the change category page does
+        form = TicketChangeCategoryForm({"new_category": new_category})
+        if not form.is_valid():
+            await interaction.response.send_message("Invalid ticket category.", ephemeral=True)
+            return
         old_category_id = ticket.category_id
-        new_category_id = int(new_category)
+        new_category_id = form.cleaned_data["new_category"]
         changed, error = await achange_ticket_category_atomic(
             ticket_id=ticket.id,
             new_category_id=new_category_id,

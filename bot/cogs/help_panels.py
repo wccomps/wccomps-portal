@@ -11,8 +11,8 @@ from django.conf import settings
 
 from bot.permissions import linked_team_member
 from bot.thread_creator import publish_new_ticket
-from core.tickets_config import TicketCategoryConfig, get_all_categories, get_category_config
-from ticketing.models import TicketCategory
+from bot.ticket_input import read_ticket
+from core.tickets_config import TicketCategoryConfig, get_all_categories
 from ticketing.utils import TicketRateLimitError
 
 logger = logging.getLogger(__name__)
@@ -38,17 +38,24 @@ async def create_ticket(
         return
 
     try:
-        cat_id_int = int(category_id)
-        cat_info = await sync_to_async(get_category_config)(cat_id_int)
-        if not cat_info:
-            await interaction.followup.send("Invalid ticket category.", ephemeral=True)
+        ticket_input = await sync_to_async(read_ticket)(
+            category_id,
+            staff=False,
+            description=description,
+            hostname=hostname,
+            ip_address=ip_address,
+            service_name=service_name,
+        )
+        if isinstance(ticket_input, str):
+            await interaction.followup.send(ticket_input, ephemeral=True)
             return
+        cat_info = ticket_input.config
 
         field_values = {
-            "service_name": service_name,
-            "description": description,
-            "hostname": hostname,
-            "ip_address": ip_address,
+            "service_name": ticket_input.service_name,
+            "description": ticket_input.description,
+            "hostname": ticket_input.hostname,
+            "ip_address": ticket_input.ip_address,
         }
         required_fields = cat_info.get("required_fields", [])
         missing_fields = [f for f in required_fields if not field_values.get(f)]
@@ -61,15 +68,14 @@ async def create_ticket(
 
         from ticketing.utils import acreate_ticket_atomic
 
-        category_obj = await TicketCategory.objects.aget(pk=cat_id_int)
         ticket = await acreate_ticket_atomic(
             team=member.team,
-            category=category_obj,
+            category=ticket_input.category,
             title=cat_info["display_name"],
-            description=description,
-            hostname=hostname,
-            ip_address=ip_address,
-            service_name=service_name,
+            description=ticket_input.description,
+            hostname=ticket_input.hostname,
+            ip_address=ticket_input.ip_address,
+            service_name=ticket_input.service_name,
             actor_username=f"discord:{interaction.user.name}",
         )
 

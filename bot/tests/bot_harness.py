@@ -734,6 +734,7 @@ class Run:
     interaction: Any = None
     refused: bool = False  # refused before the handler: a check, or the command tree's guard
     texts: list[str] = field(default_factory=list)  # the user text sent
+    written: list[str] = field(default_factory=list)  # the tables the handler wrote to
 
     def cog(self, cls: type[commands.Cog]) -> Any:
         return next(c for c in self.discord.cogs.values() if isinstance(c, cls))
@@ -1185,13 +1186,14 @@ def check_run(case: BotCase, run: Run, writes_before: dict[str, Any], *, answers
         assert not pings, f"{where}: {sent.method} to {sent.where} may ping {pings}: {str(sent.content)[:200]!r}"
     if answers and run.interaction is not None:
         assert run.discord.answered(run.interaction), f"{where}: the interaction was never answered"
+    run.written = sorted(name for name, counts in table_writes().items() if writes_before.get(name) != counts)
     if run.refused or run.role not in case.allowed:
-        written = sorted(name for name, counts in table_writes().items() if writes_before.get(name) != counts)
-        assert not written, f"{where} was refused but wrote {written}"
+        assert not run.written, f"{where} was refused but wrote {run.written}"
 
 
-def drive(case: BotCase, world: World, data: Draws) -> None:
-    """One example of a row: a role, the inputs, the handler run, the properties checked. Everything is drawn
+def drive(case: BotCase, world: World, data: Draws) -> Run:
+    """One example of a row: a role, the inputs, the handler run, the properties checked; returns the run (what was
+    sent, and the tables written, rolled back by now). Everything is drawn
     before the handler runs: Hypothesis draws only on the test's thread, and the handler runs on async_to_sync's
     event loop (its ORM calls come back to the test's thread, and its transaction)."""
     reached_by = getattr(case, "reached_by", EVERYONE)
@@ -1213,6 +1215,7 @@ def drive(case: BotCase, world: World, data: Draws) -> None:
         before = table_writes()
         async_to_sync(go)()
         check_run(case, run, before, answers=not isinstance(case, Listener))
+        return run
 
 
 class Chosen:

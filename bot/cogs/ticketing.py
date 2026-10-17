@@ -11,8 +11,9 @@ from quotient.client import get_quotient_client
 
 from bot.permissions import check_blue_team, linked_team_member
 from bot.thread_creator import publish_new_ticket
+from bot.ticket_input import read_ticket
 from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, fit, pinging
-from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
+from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketComment, TicketHistory
 from ticketing.utils import TicketRateLimitError, acreate_ticket_atomic, get_user_for_ticket
 
 logger = logging.getLogger(__name__)
@@ -150,25 +151,46 @@ class TicketingCog(commands.Cog):
             return
         team = member.team
 
-        from core.tickets_config import get_category_config
+        # The IP is filled in from the hostname, and the hostname and IP from the service, as Quotient knows them
+        resolved_ip = ip_address
+        if hostname and not ip_address:
+            _, box_ip_map, _ = await self._get_infrastructure_data()
+            resolved_ip = box_ip_map.get(hostname)
 
-        category_id = int(category)
-        cat_info = await sync_to_async(get_category_config)(category_id)
-        if not cat_info:
-            await interaction.response.send_message("Invalid ticket category.", ephemeral=True)
+        resolved_hostname = hostname
+        if service and not hostname:
+            _, _, service_choices = await self._get_infrastructure_data()
+            for svc in service_choices:
+                if svc["value"] == service:
+                    resolved_hostname = svc.get("box_name", "")
+                    if not resolved_ip:
+                        resolved_ip = svc.get("box_ip")
+                    break
+
+        ticket_input = await sync_to_async(read_ticket)(
+            category,
+            staff=False,
+            description=description,
+            hostname=resolved_hostname or "",
+            ip_address=resolved_ip or "",
+            service_name=service or "",
+        )
+        if isinstance(ticket_input, str):
+            await interaction.response.send_message(ticket_input, ephemeral=True)
             return
+        cat_info = ticket_input.config
 
         required_fields = cat_info.get("required_fields", [])
         missing_fields = []
 
-        if "hostname" in required_fields and not hostname:
+        if "hostname" in required_fields and not ticket_input.hostname:
             missing_fields.append("hostname")
-        if "service_name" in required_fields and not service:
+        if "service_name" in required_fields and not ticket_input.service_name:
             missing_fields.append("service (e.g., 'web:http')")
-        # IP address can be auto-populated from hostname, so only require if no hostname provided
-        if "ip_address" in required_fields and not ip_address and not hostname:
+        # An IP filled in from a hostname may not exist; a hostname is enough then
+        if "ip_address" in required_fields and not ticket_input.ip_address and not ticket_input.hostname:
             missing_fields.append("ip_address (or select a hostname)")
-        if "description" in required_fields and not description.strip():
+        if "description" in required_fields and not ticket_input.description:
             missing_fields.append("description")
 
         if missing_fields:
@@ -179,31 +201,15 @@ class TicketingCog(commands.Cog):
             )
             return
 
-        resolved_ip = ip_address
-        if hostname and not ip_address:
-            _, box_ip_map, _ = await self._get_infrastructure_data()
-            resolved_ip = box_ip_map.get(hostname)
-
-        if service and not hostname:
-            _, _, service_choices = await self._get_infrastructure_data()
-            for svc in service_choices:
-                if svc["value"] == service:
-                    hostname = svc.get("box_name", "")
-                    if not resolved_ip:
-                        resolved_ip = svc.get("box_ip")
-                    break
-
-        # Create ticket atomically to prevent race conditions
-        category_obj = await TicketCategory.objects.aget(pk=category_id)
         try:
             ticket = await acreate_ticket_atomic(
                 team=team,
-                category=category_obj,
+                category=ticket_input.category,
                 title=cat_info["display_name"],
-                description=description,
-                hostname=hostname or "",
-                ip_address=resolved_ip,
-                service_name=service or "",
+                description=ticket_input.description,
+                hostname=ticket_input.hostname,
+                ip_address=ticket_input.ip_address,
+                service_name=ticket_input.service_name,
                 actor_username=f"discord:{interaction.user}",
             )
         except TicketRateLimitError as e:
@@ -220,7 +226,10 @@ class TicketingCog(commands.Cog):
         embed.add_field(name="Status", value="Open", inline=True)
         embed.add_field(name="Team", value=team.team_name, inline=True)
         embed.add_field(name="Point Cost", value=f"{cat_info.get('points', 0)} points", inline=True)
-        embed.add_field(name="Description", value=fit(description, DISCORD_EMBED_FIELD_CHAR_LIMIT), inline=False)
+        if ticket_input.description:
+            embed.add_field(
+                name="Description", value=fit(ticket_input.description, DISCORD_EMBED_FIELD_CHAR_LIMIT), inline=False
+            )
 
         embed.add_field(
             name="Need to attach files?",
