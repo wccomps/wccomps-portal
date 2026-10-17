@@ -48,7 +48,8 @@ function _toFormData(data) {
 async function wcPost(url, data = {}) {
     const response = await fetch(url, {
         method: 'POST',
-        headers: { 'X-CSRFToken': getCSRFToken() },
+        // Asking for JSON gets a refusal's reason as JSON on any browser (core.errors.wants_json_error)
+        headers: { 'X-CSRFToken': getCSRFToken(), 'Accept': 'application/json' },
         body: _toFormData(data),
     });
     return response.json();
@@ -58,7 +59,8 @@ async function wcPost(url, data = {}) {
 async function wcStream(url, data, onProgress, onDone) {
     const response = await fetch(url, {
         method: 'POST',
-        headers: { 'X-CSRFToken': getCSRFToken() },
+        // Asking for JSON gets a refusal's reason as JSON on any browser (core.errors.wants_json_error)
+        headers: { 'X-CSRFToken': getCSRFToken(), 'Accept': 'application/json' },
         body: _toFormData(data),
     });
     if (!response.ok) {
