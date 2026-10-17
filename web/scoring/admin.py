@@ -25,7 +25,7 @@ from .models import (
 
 
 class CountedAttackType(Protocol):
-    """An attack type with its findings counted in the list's query."""
+    """An attack type with its findings counted by the admin's queryset."""
 
     findings_total: int
 

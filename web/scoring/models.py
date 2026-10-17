@@ -6,6 +6,8 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
+from core.utils import shorten
+
 
 def format_boxes_display(boxes: list[str] | str | None) -> str:
     """Format an affected_boxes field value for display."""
@@ -353,7 +355,7 @@ class RedTeamScore(Approvable):
     def __str__(self) -> str:
         if self.attack_type:
             return f"RF-{self.pk}: {self.attack_type.name}"
-        return f"RF-{self.pk}: {self.attack_vector[:50] if self.attack_vector else 'Unknown'}"
+        return f"RF-{self.pk}: {shorten(self.attack_vector, 50) if self.attack_vector else 'Unknown'}"
 
     @property
     def source_ip_display(self) -> str:
@@ -534,7 +536,7 @@ class IncidentReport(Approvable):
         ]
 
     def __str__(self) -> str:
-        return f"IR-{self.pk} ({self.team.team_name}): {self.attack_description[:50]}"
+        return f"IR-{self.pk} ({self.team.team_name}): {shorten(self.attack_description, 50)}"
 
     @property
     def affected_boxes_display(self) -> str:
@@ -689,7 +691,7 @@ class OrangeTeamScore(Approvable):
 
     def __str__(self) -> str:
         sign = "+" if self.points_awarded >= 0 else ""
-        return f"{self.team.team_name}, {self.description[:50]}: {sign}{self.points_awarded}"
+        return f"{self.team.team_name}, {shorten(self.description, 50)}: {sign}{self.points_awarded}"
 
 
 class ServiceScore(models.Model):

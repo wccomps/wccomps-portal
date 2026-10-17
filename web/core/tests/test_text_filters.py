@@ -18,14 +18,22 @@ def test_a_word_longer_than_the_limit_is_cut_inside_it() -> None:
     assert shorten("a" * 30, 10) == "a" * 10 + "..."
 
 
-def test_the_filter_reads_any_value() -> None:
-    template = Template("{{ text|shorten:12 }}|{{ missing|shorten:12 }}")
-    assert template.render(Context({"text": "one two (three four)", "missing": None})) == "one two...|"
+def test_a_break_early_in_the_text_is_not_used() -> None:
+    assert shorten("My screenshot_from_competition_day.png", 25) == "My screenshot_from_compet..."
+
+
+def test_any_whitespace_is_a_break() -> None:
+    assert shorten("Line one here\nSecond line", 15) == "Line one here..."
+
+
+def test_the_filter_cuts_in_a_template() -> None:
+    template = Template("{{ text|shorten:12 }}")
+    assert template.render(Context({"text": "one two (three four)"})) == "one two..."
 
 
 @example(text="a (b c (d e f) g h", limit=8)
 @example(text=") a (b c d", limit=6)
-@given(text=st.text(alphabet=st.sampled_from("ab ()., "), max_size=80), limit=st.integers(1, 60))
+@given(text=st.text(alphabet=st.sampled_from("ab ()., \n"), max_size=80), limit=st.integers(1, 60))
 def test_a_cut_is_a_prefix_that_leaves_no_parenthesis_open(text: str, limit: int) -> None:
     result = shorten(text, limit)
     if len(text) <= limit:

@@ -2,6 +2,7 @@ import ipaddress
 import json
 import logging
 import queue
+import re
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping
 from datetime import datetime
@@ -55,14 +56,17 @@ def parse_datetime_to_utc(datetime_str: str, tz_name: str = "America/Los_Angeles
 
 
 def shorten(text: str, limit: int) -> str:
-    """The text cut to at most `limit` characters at a word break, ending "...", with a ")" for each parenthesis the
-    cut left open, so a list's preview still reads (Django's truncatechars cuts inside a parenthesis)."""
+    """A preview of the text: its first `limit` characters, back to the last whitespace in their second half (inside a
+    word when there is none), then "..." and a ")" for each parenthesis the cut left open. truncatechars and
+    truncatewords can leave one open."""
     if len(text) <= limit:
         return text
     cut = text[:limit]
-    if not text[limit].isspace() and " " in cut:
-        cut = cut[: cut.rindex(" ")]
-    cut = cut.rstrip(" ,;:.(")
+    if not text[limit].isspace():
+        last_break = max((m.start() for m in re.finditer(r"\s", cut)), default=-1)
+        if last_break >= limit // 2:
+            cut = cut[:last_break]
+    cut = re.sub(r"[\s,;:.(]+$", "", cut)
     return cut + "..." + ")" * open_parentheses(cut)
 
 
