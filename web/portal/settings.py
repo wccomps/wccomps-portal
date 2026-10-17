@@ -77,6 +77,7 @@ MIDDLEWARE = [
     "core.middleware.AuthentikRequiredMiddleware",
     "core.middleware.RejectNulFieldsMiddleware",
     "core.middleware.UserTimezoneMiddleware",
+    "core.errors.MethodNotAllowedMiddleware",
     "core.middleware.AccessLoggingMiddleware",
 ]
 

@@ -1,19 +1,23 @@
 {% extends "admin/base_site.html" %}
 {% load cotton %}
 {% block title %}
-    Error - WCComps Portal
+    {{ error }} - WCComps Portal
 {% endblock title %}
 {% block content %}
     <div id="content-main">
         <c-page_header title="{{ error }}" />
         <c-module>
             <c-alert variant="error">
-                <p class="m-0">{{ error }}</p>
+                <p class="m-0">{{ message }}</p>
             </c-alert>
-            <c-fieldset>
-                <p>{{ message }}</p>
-            </c-fieldset>
             <p class="mt-20">If you believe this is an error, please contact an administrator for assistance.</p>
+            {% if home_url %}
+                <c-button_row>
+                    <c-link href="{{ home_url }}" variant="default">
+                        Go to your home page
+                    </c-link>
+                </c-button_row>
+            {% endif %}
         </c-module>
     </div>
 {% endblock content %}

@@ -417,15 +417,17 @@ def test_an_incident_report_refuses_a_role_it_doesnt_let_in_with_a_403(red_team_
 
 @pytest.mark.parametrize("page", ["index", "login"])
 def test_the_admin_site_refuses_a_signed_in_non_admin_itself(gold_team_user: User, page: str) -> None:
-    """The admin site answers a signed-in visitor it refuses with a 403, not its login form (signing in is
-    Authentik's), so the sign-in gate needs no admin rule of its own."""
+    """The admin site refuses a signed-in visitor it doesn't let in with the 403 (core.errors), not its login form
+    (signing in is Authentik's), so the sign-in gate needs no admin rule of its own."""
     from django.contrib import admin
+    from django.core.exceptions import PermissionDenied
     from django.test import RequestFactory
 
     request = RequestFactory().get(reverse(f"admin:{page}"))
     request.user = gold_team_user
     view = admin.site.login if page == "login" else admin.site.admin_view(admin.site.index)
-    assert view(request).status_code == 403
+    with pytest.raises(PermissionDenied):
+        view(request)
 
 
 def _registered_models() -> list[type[Model]]:

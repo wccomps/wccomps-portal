@@ -3,8 +3,13 @@ from django.shortcuts import redirect
 from django.urls import include, path
 from scoring.views.leaderboard import leaderboard, scorecard, scorecard_pdf
 
-from core import admin_views, oauth, views
+from core import admin_views, errors, oauth, views
 from ticketing import views as ticketing_views
+
+handler400 = errors.bad_request
+handler403 = errors.permission_denied
+handler404 = errors.page_not_found
+handler500 = errors.server_error
 
 urlpatterns = [
     path("", views.home, name="home"),

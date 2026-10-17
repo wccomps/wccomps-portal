@@ -61,6 +61,11 @@ async function wcStream(url, data, onProgress, onDone) {
         headers: { 'X-CSRFToken': getCSRFToken() },
         body: _toFormData(data),
     });
+    if (!response.ok) {
+        // A refusal is a JSON error (core.errors), not a stream: the caller's catch shows it
+        const refusal = await response.json().catch(() => ({}));
+        throw new Error(refusal.error || 'the server answered ' + response.status);
+    }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
