@@ -46,10 +46,8 @@ def test_a_c_form_posts_once_and_sends_the_button_pressed(live_server, pw_browse
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
     posted = []
-    # A 204 keeps the page where it is, so the second submit happens on the same, posting form
-    page.route(
-        "**/ip-pools/*/delete/", lambda route: (posted.append(route.request.post_data), route.fulfill(status=204))
-    )
+    # The post is stopped (as the browser's Stop does): the page stays, its form still posting
+    page.route("**/ip-pools/*/delete/", lambda route: (posted.append(route.request.post_data), route.abort("aborted")))
     try:
         page.goto(f"{live_server.url}{reverse('scoring:ip_pool_list')}")
         delete = page.get_by_role("button", name="Delete")
@@ -75,7 +73,7 @@ def test_a_submit_button_outside_its_form_is_disabled_while_it_posts(live_server
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
-    page.route("**/bulk-approve/", lambda route: route.fulfill(status=204))  # keeps the page in place
+    page.route("**/bulk-approve/", lambda route: route.abort("aborted"))  # stopped: the page stays
     try:
         page.goto(f"{live_server.url}{reverse('scoring:red_team_findings')}")
         page.locator('input[name="finding_ids"]').first.check()
