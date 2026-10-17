@@ -34,7 +34,7 @@
             </div>
             <div x-show="done" x-cloak x-transition class="mb-10">
                 <div class="alert" :class="alertClass" role="alert">
-                    <span x-text="message"></span>
+                    <span x-text="result"></span>
                 </div>
             </div>
             <c-table id="email_preview" aria_label="Teams to email">
@@ -84,48 +84,21 @@
     </div>
     <script>
     document.addEventListener('alpine:init', () => {
-        Alpine.data('emailScorecards', () => compose(actionMixin(), progressMixin(), {
+        Alpine.data('emailScorecards', () => compose(streamMixin('{% url "scoring:stream_email_scorecards" %}'), {
             showWarning: true,
             showForm: true,
             done: false,
             customMessage: '',
-            setField(e) { this[e.target.dataset.field] = e.target.value; },
+            result: '',
 
+            // No reload: the result stays, with the way back to the leaderboard; a failed request offers Send again
             async sendEmails() {
-                this.loading = true;
                 this.showWarning = false;
-                this.message = '';
-                this.progressStep = 'Starting...';
-                this.progressCurrent = 0;
-                this.progressTotal = 1;
-                this.progressFailed = 0;
-
-                try {
-                    await wcStream(
-                        '{% url "scoring:stream_email_scorecards" %}',
-                        { custom_message: this.customMessage },
-                        (msg) => {
-                            this.progressStep = msg.step;
-                            this.progressCurrent = msg.current;
-                            this.progressTotal = msg.total;
-                            if (!msg.ok) this.progressFailed++;
-                        },
-                        (msg) => {
-                            this.message = msg.message;
-                            this.messageType = msg.success ? 'success' : 'error';
-                            this.loading = false;
-                            this.showForm = false;
-                            this.done = true;
-                        },
-                    );
-                } catch (e) {
-                    this.message = 'Request failed: ' + e.message;
-                    this.messageType = 'error';
-                    this.loading = false;
-                    this.showForm = true;
-                    this.done = true;
-                }
-            }
+                const done = await this.doStreamAction('send', { custom_message: this.customMessage }, { reload: false });
+                this.result = this.message;
+                this.showForm = !done;
+                this.done = true;
+            },
         }));
     });
     </script>

@@ -163,7 +163,9 @@ function streamMixin(url) {
             return this.doStreamAction(e.currentTarget.dataset.action);
         },
 
-        async doStreamAction(action, extraData = {}) {
+        // Streams the action and shows its progress and message; returns the stream's last message, or null if the
+        // request failed. A success reloads the page unless reload is false, as with doAction.
+        async doStreamAction(action, extraData = {}, { reload = true } = {}) {
             this.streamAction = action;
             this.loading = true;
             this.message = '';
@@ -171,6 +173,7 @@ function streamMixin(url) {
             this.progressCurrent = 0;
             this.progressTotal = 1;
             this.progressFailed = 0;
+            let done = null;
 
             try {
                 await wcStream(
@@ -183,9 +186,10 @@ function streamMixin(url) {
                         if (!msg.ok) this.progressFailed++;
                     },
                     (msg) => {
+                        done = msg;
                         this.message = msg.message;
                         this.messageType = msg.success ? 'success' : 'error';
-                        if (msg.success) setTimeout(() => location.reload(), 2000);
+                        if (msg.success && reload) setTimeout(() => location.reload(), 2000);
                     },
                 );
             } catch (e) {
@@ -197,6 +201,7 @@ function streamMixin(url) {
             if (!this.message) this.progressTotal = 0;
             // A failure stays until the next action: it says what didn't happen
             if (this.messageType === 'success') setTimeout(() => { this.message = ''; }, 5000);
+            return done;
         },
     });
 }
