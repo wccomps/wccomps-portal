@@ -524,6 +524,16 @@ def test_the_admin_sign_in_sends_a_visitor_to_the_portal_sign_in() -> None:
     assert Client().get(reverse("admin:index")).status_code == 302
 
 
+def test_the_admin_sign_in_answers_a_signed_in_non_admin_with_the_403_page(gold_team_user: User) -> None:
+    """Signed out, the admin's sign-in goes to the portal's; signed in without the admin role, it is the 403 page
+    (core.errors), never the admin's own login form."""
+    client = Client()
+    client.force_login(gold_team_user)
+    response = client.get(reverse("admin:login"))
+    assert response.status_code == 403
+    assert "error.html" in [t.name for t in response.templates]
+
+
 def test_a_permission_row_grants_nothing(gold_team_user: User) -> None:
     """A Django Permission row (given in the Django admin) granted that permission outside the admin permission."""
     from django.contrib.auth.models import Permission
