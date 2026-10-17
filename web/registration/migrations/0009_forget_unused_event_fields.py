@@ -6,8 +6,7 @@ class Migration(migrations.Migration):
     nothing read (no reminder was ever sent; no password was ever stored).
 
     The columns stay for pods still on the previous release during a rolling deploy, the NOT NULL ones with a
-    database default so new code can insert rows without them. test_rollout_leftovers_dropped.py lists them until
-    they are dropped.
+    database default so new code can insert rows without them. 0012 and 0013 drop them.
     """
 
     dependencies = [
