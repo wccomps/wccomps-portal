@@ -1,4 +1,4 @@
-"""The nightly deep property run's issue body (.github/scripts/deep_report.py)."""
+"""A nightly run's issue body (.github/scripts/nightly_report.py)."""
 
 import importlib.util
 import re
@@ -10,19 +10,19 @@ from hypothesis import strategies as st
 from core.tests.guards import REPO_DIR
 from core.tests.strategies import request_text
 
-_spec = importlib.util.spec_from_file_location("deep_report", REPO_DIR / ".github/scripts/deep_report.py")
+_spec = importlib.util.spec_from_file_location("nightly_report", REPO_DIR / ".github/scripts/nightly_report.py")
 assert _spec is not None and _spec.loader is not None
-deep_report = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(deep_report)
+nightly_report = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(nightly_report)
 
 
-def _junit(tmp: Path, message: str) -> Path:
-    from xml.sax.saxutils import escape
+def _junit(tmp: Path, message: str, error: str = "") -> Path:
+    from xml.sax.saxutils import escape, quoteattr
 
     path = tmp / "results.xml"
     path.write_text(
         '<testsuites><testsuite><testcase classname="web.core.tests.test_x" name="test_y[1]">'
-        f"<failure>{escape(message)}</failure></testcase>"
+        f"<failure message={quoteattr(error)}>{escape(message)}</failure></testcase>"
         '<testcase classname="a" name="passes"/></testsuite></testsuites>',
         encoding="utf-8",
     )
@@ -43,13 +43,21 @@ def test_a_failure_stays_inside_its_code_block(tmp_path_factory, message: str) -
     """Falsifying examples print payloads: three backticks closed the old fence and an @name became a mention."""
     # pytest writes JUnit XML, which can't hold control characters (it escapes them), and XML reads CR as LF
     message = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff\r]", "", message)
-    body = deep_report.body(_junit(tmp_path_factory.mktemp("r"), message), "https://run", "abc123")
+    body = nightly_report.body(_junit(tmp_path_factory.mktemp("r"), message), "https://run", "abc123")
     outside = _outside_the_fence(body)
     assert outside == "Run: https://run\nCommit: abc123\n\n", outside
     assert "web.core.tests.test_x::test_y[1]" in body
     assert len(body) < 65_536
 
 
+def test_the_error_line_survives_a_long_falsifying_example(tmp_path: Path) -> None:
+    """The text keeps only its end, where a long generated value can push the assertion out."""
+    results = _junit(tmp_path, "assert 400 == 403\n" + "y" * 5000, error="AssertionError: a role the page refuses")
+    body = nightly_report.body(results, "https://run", "abc123")
+    assert "AssertionError: a role the page refuses" in body
+    assert "assert 400 == 403" not in body
+
+
 def test_a_missing_results_file_is_reported(tmp_path: Path) -> None:
-    body = deep_report.body(tmp_path / "none.xml", "https://run", "abc123")
+    body = nightly_report.body(tmp_path / "none.xml", "https://run", "abc123")
     assert "no readable test results" in body

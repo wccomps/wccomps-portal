@@ -1,7 +1,8 @@
-"""The nightly deep property run's issue body, from the tests' JUnit XML: python deep_report.py RESULTS RUN_URL SHA.
+"""A nightly run's issue body, from the tests' JUnit XML: python nightly_report.py RESULTS RUN_URL SHA.
 
-Each failing test and its message (Hypothesis's falsifying example) go in one code block, fenced with a longer run
-of backticks than any in the text, so a payload can't close it and nothing in it becomes a mention or markup.
+Each failing test and its message (a Hypothesis falsifying example, a browser test's call log) go in one code block,
+fenced with a longer run of backticks than any in the text, so a payload can't close it and nothing in it becomes a
+mention or markup.
 """
 
 import re
@@ -13,8 +14,9 @@ LIMIT = 60_000  # GitHub refuses an issue or comment body over 65536 characters
 
 
 def failures(results: Path) -> list[str]:
-    """Each failing or erroring test with its message (its last 3000 characters); a missing or unreadable results
-    file is one failure saying so."""
+    """Each failing or erroring test with the first line of its message (the error, which a long falsifying example
+    can push out of the rest) and the last 3000 characters of its text; a missing or unreadable results file is one
+    failure saying so."""
     try:
         cases = ET.parse(results).getroot().iter("testcase")  # noqa: S314 - the run's own pytest output
     except OSError, ET.ParseError:
@@ -22,8 +24,11 @@ def failures(results: Path) -> list[str]:
     found = []
     for case in cases:
         for problem in (*case.findall("failure"), *case.findall("error")):
-            text = (problem.text or problem.get("message") or "")[-3000:]
-            found.append(f"{case.get('classname')}::{case.get('name')}\n{text}")
+            error = (problem.get("message") or "").partition("\n")[0][:300]
+            text = (problem.text or "")[-3000:]
+            found.append(
+                "\n".join(part for part in (f"{case.get('classname')}::{case.get('name')}", error, text) if part)
+            )
     return found
 
 
