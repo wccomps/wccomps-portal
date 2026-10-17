@@ -12,16 +12,14 @@ from django.conf import settings
 from django.urls import URLPattern, URLResolver, get_resolver
 
 from core.tests.guards import (
-    REPO_DIR,
     TEMPLATES_DIR,
     elements,
     extends_chain,
     fail_with,
     scripts,
+    static_scripts,
     text,
-    tracked_files,
     tracked_templates,
-    without_js_comments,
 )
 
 # Renders the token in <meta name="csrf-token">, which also sets the csrftoken cookie
@@ -106,11 +104,9 @@ def test_javascript_posts_can_find_the_token():
 
 
 def test_static_js_fetch_posts_send_csrf_header():
-    js_files = [REPO_DIR / p for p in tracked_files() if p.startswith("web/static/js/") and p.endswith(".js")]
     problems = {
-        f"{path.name}:{js.count(chr(10), 0, m.start()) + 1}": "fetch POST without X-CSRFToken"
-        for path in js_files
-        for js in [without_js_comments(path.read_text())]
+        f"{name}:{js.count(chr(10), 0, m.start()) + 1}": "fetch POST without X-CSRFToken"
+        for name, js in static_scripts()
         for m in fetch_posts(js)
         if "X-CSRFToken" not in m.group(0)
     }

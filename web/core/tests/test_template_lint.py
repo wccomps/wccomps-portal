@@ -6,19 +6,17 @@ Catches issues that are silent at runtime or hard to spot in code review.
 import re
 
 from core.tests.guards import (
-    REPO_DIR,
     Tag,
     component_templates,
     fail_with,
     page_templates,
     scripts,
+    static_scripts,
     tags,
     template_name,
     text,
-    tracked_files,
     tracked_templates,
     with_open_elements,
-    without_js_comments,
 )
 
 # ---------------------------------------------------------------------------
@@ -268,9 +266,7 @@ def test_a_page_asks_through_data_confirm() -> None:
         for line, script in scripts(path):
             for m in BARE_CONFIRM_RE.finditer(script):
                 found[f"web/templates/{template_name(path)}"] = f"line {line + script.count(chr(10), 0, m.start())}"
-    for name in tracked_files():
-        if name.startswith("web/static/js/") and name.endswith(".js"):
-            js = without_js_comments((REPO_DIR / name).read_text(encoding="utf-8"))
-            if m := BARE_CONFIRM_RE.search(js):
-                found[name] = f"line {js.count(chr(10), 0, m.start()) + 1}"
+    for name, js in static_scripts():
+        if m := BARE_CONFIRM_RE.search(js):
+            found[name] = f"line {js.count(chr(10), 0, m.start()) + 1}"
     fail_with("confirm() called outside the data-confirm listener", found, BARE_CONFIRM_EXCEPTIONS)
