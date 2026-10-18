@@ -164,3 +164,44 @@ def test_scores_that_dont_fit_refuse_the_sync(points: int, name: str) -> None:
             with contextlib.suppress(ValueError):
                 sync_service_scores()
         assert Team.objects.filter(team_number=1).exists()  # the transaction still works
+
+
+OAUTH_CONFIG = {
+    "client_id": "property-client",
+    "client_secret": "property-secret",
+    "authorization_endpoint": "https://auth.test/authorize/",
+    "token_endpoint": "https://auth.test/token/",
+    "userinfo_endpoint": "https://auth.test/userinfo/",
+    "end_session_endpoint": "https://auth.test/end-session/",
+}
+TOKENS = answer({"access_token": "access"})
+USERINFO = {"sub": "sub-1", "preferred_username": "player", "email": "player@example.edu", "groups": ["G"]}
+
+
+@pytest.mark.django_db
+@example(answers=[Answer(200, b"<html>502 Bad Gateway</html>")])
+@example(answers=[answer(["access"])])
+@example(answers=[TOKENS, answer({**USERINFO, "groups": "WCComps_BlueTeam01"})])
+@example(answers=[TOKENS, answer({**USERINFO, "sub": 7})])
+@example(answers=[TOKENS, answer({**USERINFO, "preferred_username": "p" * 200})])
+@given(answers=answer_lists({"access_token": "access"}, USERINFO))
+def test_a_sign_in_takes_only_usable_answers(answers: list[Answer]) -> None:
+    """The OAuth callback caught only HTTP errors: a token or userinfo answer that wasn't JSON, or wasn't an object,
+    raised (500), and userinfo claims of the wrong type were stored (groups as a string, read as one group per
+    letter; a sub that wasn't text; a username past its column failed the insert)."""
+    from unittest.mock import patch
+    from urllib.parse import parse_qs, urlparse
+
+    from django.test import Client
+
+    from core.models import UserGroups
+
+    with rolled_back():
+        client = Client()
+        with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
+            state = parse_qs(urlparse(client.get("/auth/login/")["Location"]).query)["state"][0]
+            with serving(answers):
+                response = client.get("/auth/callback/", {"code": "code", "state": state})
+        assert response.status_code < 500
+        for row in UserGroups.objects.all():
+            assert isinstance(row.groups, list) and all(isinstance(g, str) for g in row.groups)
