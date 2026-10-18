@@ -1,11 +1,10 @@
 """What the bot takes for a new ticket: the web form's rules (ticketing.forms.CreateTicketForm), so a ticket filed in
 Discord holds only what one filed on the web may."""
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-from django import forms
-
-from core.tickets_config import TicketCategoryConfig, get_all_categories
+from core.tickets_config import TicketCategoryConfig
 from ticketing.forms import CreateTicketForm, TicketResolveForm
 from ticketing.models import TicketCategory
 
@@ -20,9 +19,9 @@ class TicketInput:
     service_name: str
 
 
-def form_errors(form: forms.Form) -> str:
-    """A form's errors as one reply, each after its field's name."""
-    return " ".join(f"{name.replace('_', ' ')}: {error}" for name, errors in form.errors.items() for error in errors)
+def form_errors(errors: Mapping[str, Iterable[object]]) -> str:
+    """A form's or model's errors as one reply, each after its field's name."""
+    return " ".join(f"{name.replace('_', ' ')}: {error}" for name, messages in errors.items() for error in messages)
 
 
 def read_resolution(notes: str, points: str) -> tuple[str, int | None] | str:
@@ -30,7 +29,7 @@ def read_resolution(notes: str, points: str) -> tuple[str, int | None] | str:
     to), or what is wrong with them."""
     form = TicketResolveForm({"resolution_notes": notes, "points_override": points})
     if not form.is_valid():
-        return form_errors(form)
+        return form_errors(form.errors)
     return form.cleaned_data["resolution_notes"], form.cleaned_data["points_override"]
 
 
@@ -45,25 +44,30 @@ def read_ticket(
 ) -> TicketInput | str:
     """The ticket these fields describe, cleaned as the web form cleans them, or what is wrong with them. A team
     files only in the categories teams may create; staff in any (as on the web)."""
+    box_ip_map: dict[str, str] | None = None
+    service_choices: list[dict[str, str]] = []
+    if (hostname.strip() and not ip_address.strip()) or (service_name.strip() and not hostname.strip()):
+        from bot.cogs.ticketing import TicketingCog
+
+        _, box_ip_map, service_choices = TicketingCog._load_infrastructure_data()
     form = CreateTicketForm(
         {
-            "title": "ticket",  # the category's name is the title
+            "title": "ticket",
             "category": category,
             "description": description,
             "hostname": hostname,
             "ip_address": ip_address,
             "service_name": service_name,
-        }
+        },
+        staff=staff,
+        box_ip_map=box_ip_map,
+        service_choices=service_choices,
     )
-    if not form.is_valid():
-        return form_errors(form)
-    categories = get_all_categories(user_creatable_only=not staff)
-    category_id = form.cleaned_data["category"]
-    if category_id not in categories:
-        return "Invalid ticket category."
+    if not form.is_valid() or not form.category_obj or form.category_config is None:
+        return form_errors(form.errors)
     return TicketInput(
-        category=TicketCategory.objects.get(pk=category_id),
-        config=categories[category_id],
+        category=form.category_obj,
+        config=form.category_config,
         description=form.cleaned_data["description"],
         hostname=form.cleaned_data["hostname"],
         ip_address=form.cleaned_data["ip_address"],

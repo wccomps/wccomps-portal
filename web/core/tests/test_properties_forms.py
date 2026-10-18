@@ -416,16 +416,14 @@ def _import_event_make(w: World, draw: st.DataObject) -> Factory:
     return lambda data, files: ImportEventForm(data, files, season=season)
 
 
-def _create_ticket(w: World, form: Any) -> None:
+def _create_ticket(w: World, form: CreateTicketForm) -> None:
     from ticketing.utils import create_ticket_atomic
 
+    assert form.category_obj is not None
     cd = form.cleaned_data
-    category = TicketCategory.objects.filter(pk=cd["category"]).first()
-    if category is None:
-        return  # the view refuses a category it doesn't offer
     create_ticket_atomic(
         team=w.teams[0],
-        category=category,
+        category=form.category_obj,
         title=cd["title"],
         description=cd["description"],
         hostname=cd["hostname"],
@@ -682,7 +680,13 @@ CASES = [
     FormCase(
         CreateTicketForm,
         hints=lambda w: {
-            "category": st.sampled_from([str(pk) for pk in TicketCategory.objects.values_list("pk", flat=True)])
+            "category": st.sampled_from(
+                [str(pk) for pk in TicketCategory.objects.filter(user_creatable=True).values_list("pk", flat=True)]
+            ),
+            "description": st.text(min_size=1, max_size=200),
+            "hostname": st.text(min_size=1, max_size=50),
+            "ip_address": st.ip_addresses().map(str),
+            "service_name": st.text(min_size=1, max_size=50),
         },
         use=lambda w, f: _create_ticket(w, f),
     ),

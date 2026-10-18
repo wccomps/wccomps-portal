@@ -76,3 +76,29 @@ def test_box_reset_keeps_the_teams_description_and_the_hostname(blue_team_user, 
     ticket = Ticket.objects.get()
     assert ticket.description == "Stuck at the boot loader since the last round"
     assert ticket.hostname == "web01"
+
+
+def test_known_hostname_satisfies_required_ip_and_unknown_does_not(blue_team_user, team_1, box_reset_category):
+    box = MagicMock()
+    box.name, box.ip = "web01", "10.0.1.5"
+    client = MagicMock()
+    client.get_infrastructure.return_value = MagicMock(boxes=[box])
+    client.get_box_names.return_value = ["web01"]
+    client.get_service_choices.return_value = []
+
+    with patch("quotient.client.get_quotient_client", return_value=client):
+        unknown = _client(blue_team_user).post(
+            reverse("create_ticket"),
+            {"title": "Reset", "category": box_reset_category.pk, "hostname": "unknown01"},
+        )
+        assert "IP Address is required for this category." in unknown.content.decode()
+        assert not Ticket.objects.exists()
+
+        known = _client(blue_team_user).post(
+            reverse("create_ticket"),
+            {"title": "Reset", "category": box_reset_category.pk, "hostname": "web01"},
+        )
+        assert known.status_code == 302
+        ticket = Ticket.objects.get()
+        assert ticket.hostname == "web01"
+        assert ticket.ip_address == "10.0.1.5"

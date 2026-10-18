@@ -133,6 +133,52 @@ def test_a_team_files_only_in_a_category_teams_may_create(bot_world: World, desc
     assert "ticketing_ticket" not in run.written
 
 
+@example(description="need reset")
+@views_profile()
+@given(description=stored_text(200).filter(str.strip))
+def test_ticket_commands_require_the_categorys_required_fields(bot_world: World, description: str) -> None:
+    """/tickets create never checked the category's required fields, and /ticket let an unknown hostname without an
+    IP satisfy a required IP; a hostname Quotient knows satisfies a required IP in commands and modals alike."""
+    from unittest.mock import patch
+
+    from bot.cogs.help_panels import BoxResetModal
+
+    def build_box_modal(run: Run, data: object) -> BoxResetModal:
+        modal = BoxResetModal()
+        modal.category_id = "2"
+        return modal
+
+    box_modal = Modal(BoxResetModal, build_box_modal, frozenset({"blue_team"}))
+    infra = (["web01"], {"web01": "10.0.1.5"}, [])
+    with patch.object(TicketingCog, "_load_infrastructure_data", return_value=infra):
+        admin = drive(
+            ADMIN_TICKET,
+            bot_world,
+            Chosen({"role": "admin", "team_number": 1, "category": "2", "description": description}),
+        )
+        team = drive(
+            TICKET,
+            bot_world,
+            Chosen({"role": "blue_team", "category": "2", "description": description, "hostname": "unknown01"}),
+        )
+        unknown_modal = drive(
+            box_modal, bot_world, Chosen({"role": "blue_team", "Hostname": "unknown01", "IP Address": ""})
+        )
+        known_modal = drive(box_modal, bot_world, Chosen({"role": "blue_team", "Hostname": "web01", "IP Address": " "}))
+        admin_ok = drive(
+            ADMIN_TICKET,
+            bot_world,
+            Chosen(
+                {"role": "admin", "team_number": 1, "category": "2", "description": description, "hostname": "web01"}
+            ),
+        )
+    assert "ticketing_ticket" not in admin.written
+    assert "ticketing_ticket" not in team.written
+    assert "ticketing_ticket" not in unknown_modal.written
+    assert "ticketing_ticket" in known_modal.written
+    assert "ticketing_ticket" in admin_ok.written
+
+
 @example(points=2**31)
 @views_profile()
 @given(points=st.integers(2**31, 2**53))

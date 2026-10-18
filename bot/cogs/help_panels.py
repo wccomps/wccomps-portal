@@ -52,21 +52,6 @@ async def create_ticket(
             return
         cat_info = ticket_input.config
 
-        field_values = {
-            "service_name": ticket_input.service_name,
-            "description": ticket_input.description,
-            "hostname": ticket_input.hostname,
-            "ip_address": ticket_input.ip_address,
-        }
-        required_fields = cat_info.get("required_fields", [])
-        missing_fields = [f for f in required_fields if not field_values.get(f)]
-        if missing_fields:
-            await interaction.followup.send(
-                f"Missing required fields: {', '.join(missing_fields)}",
-                ephemeral=True,
-            )
-            return
-
         from ticketing.utils import acreate_ticket_atomic
 
         ticket = await acreate_ticket_atomic(
@@ -141,8 +126,8 @@ class BoxResetModal(discord.ui.Modal, title="Box Reset / Scrub"):
     ip_address: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
         label="IP Address",
         placeholder="e.g., 10.0.1.50",
-        required=True,
-        max_length=50,
+        required=False,
+        max_length=45,
     )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:

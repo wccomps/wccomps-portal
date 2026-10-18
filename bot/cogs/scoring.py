@@ -11,6 +11,7 @@ from django.utils import timezone
 from scoring.models import IncidentReport
 
 from bot.permissions import check_blue_team, linked_team_member
+from bot.ticket_input import form_errors
 from bot.utils import add_field
 
 logger = logging.getLogger(__name__)
@@ -76,13 +77,10 @@ class ScoringCog(commands.Cog):
             submitted_by=submitted_by_user,
         )
         try:
-            # The model's own checks, which the web form runs too: an address the column takes, among them
+            # Validates source_ip as an IP address, as the web form does
             await sync_to_async(incident.full_clean)()
         except ValidationError as e:
-            problems = [
-                f"{name.replace('_', ' ')}: {error}" for name, errors in e.message_dict.items() for error in errors
-            ]
-            await interaction.response.send_message(" ".join(problems), ephemeral=True)
+            await interaction.response.send_message(form_errors(e.message_dict), ephemeral=True)
             return
 
         try:

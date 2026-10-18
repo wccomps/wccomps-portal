@@ -152,55 +152,18 @@ class TicketingCog(commands.Cog):
             return
         team = member.team
 
-        # The IP is filled in from the hostname, and the hostname and IP from the service, as Quotient knows them
-        resolved_ip = ip_address
-        if hostname and not ip_address:
-            _, box_ip_map, _ = await self._get_infrastructure_data()
-            resolved_ip = box_ip_map.get(hostname)
-
-        resolved_hostname = hostname
-        if service and not hostname:
-            _, _, service_choices = await self._get_infrastructure_data()
-            for svc in service_choices:
-                if svc["value"] == service:
-                    resolved_hostname = svc.get("box_name", "")
-                    if not resolved_ip:
-                        resolved_ip = svc.get("box_ip")
-                    break
-
         ticket_input = await sync_to_async(read_ticket)(
             category,
             staff=False,
             description=description,
-            hostname=resolved_hostname or "",
-            ip_address=resolved_ip or "",
+            hostname=hostname or "",
+            ip_address=ip_address or "",
             service_name=service or "",
         )
         if isinstance(ticket_input, str):
             await interaction.response.send_message(ticket_input, ephemeral=True)
             return
         cat_info = ticket_input.config
-
-        required_fields = cat_info.get("required_fields", [])
-        missing_fields = []
-
-        if "hostname" in required_fields and not ticket_input.hostname:
-            missing_fields.append("hostname")
-        if "service_name" in required_fields and not ticket_input.service_name:
-            missing_fields.append("service (e.g., 'web:http')")
-        # An IP filled in from a hostname may not exist; a hostname is enough then
-        if "ip_address" in required_fields and not ticket_input.ip_address and not ticket_input.hostname:
-            missing_fields.append("ip_address (or select a hostname)")
-        if "description" in required_fields and not ticket_input.description:
-            missing_fields.append("description")
-
-        if missing_fields:
-            await interaction.response.send_message(
-                f"**{cat_info['display_name']}** requires: {', '.join(missing_fields)}\n"
-                f"Please provide these fields when creating the ticket.",
-                ephemeral=True,
-            )
-            return
 
         try:
             ticket = await acreate_ticket_atomic(

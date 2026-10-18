@@ -71,6 +71,9 @@ class AdminTicketsCog(commands.Cog):
         team_number="Team number (1-50)",
         category="Ticket category",
         description="Description of the issue",
+        hostname="Hostname/box name (required for box-reset, hands-on consultation)",
+        service="Service name like 'web:http' (required for scoring validation, service check)",
+        ip_address="IP address (auto-filled from hostname, or enter manually)",
     )
     @app_commands.autocomplete(category=admin_category_autocomplete)
     @app_commands.check(permission_check("ticketing_admin"))
@@ -80,6 +83,9 @@ class AdminTicketsCog(commands.Cog):
         team_number: int,
         category: str,
         description: str,
+        hostname: str | None = None,
+        service: str | None = None,
+        ip_address: str | None = None,
     ) -> None:
         """Create a ticket as admin."""
         if not interaction.guild:
@@ -90,12 +96,14 @@ class AdminTicketsCog(commands.Cog):
         if not team:
             return
 
-        ticket_input = await sync_to_async(read_ticket)(category, staff=True, description=description)
-        if not isinstance(ticket_input, str) and "hostname" in ticket_input.config.get("required_fields", []):
-            # Categories that need a hostname take it from the description
-            ticket_input = await sync_to_async(read_ticket)(
-                category, staff=True, description=description, hostname=description
-            )
+        ticket_input = await sync_to_async(read_ticket)(
+            category,
+            staff=True,
+            description=description,
+            hostname=hostname or "",
+            ip_address=ip_address or "",
+            service_name=service or "",
+        )
         if isinstance(ticket_input, str):
             await interaction.response.send_message(ticket_input, ephemeral=True)
             return
@@ -110,6 +118,8 @@ class AdminTicketsCog(commands.Cog):
             title=cat_info["display_name"],
             description=ticket_input.description,
             hostname=ticket_input.hostname,
+            ip_address=ticket_input.ip_address,
+            service_name=ticket_input.service_name,
             actor_username=f"admin:{interaction.user}",
             enforce_team_limit=False,
         )
