@@ -1,8 +1,10 @@
 """Regression tests for bugs the reader property tests found (test_properties_readers), each pinned with the
 answer that showed it."""
 
+import contextlib
 import json
 
+import pytest
 from django.core.cache import cache
 from django.test import override_settings
 from hypothesis import example, given
@@ -11,6 +13,7 @@ from quotient.client import QuotientClient
 
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
 from core.tests.external_json import Answer, answer_lists, deep, near, serving
+from core.tests.strategies import rolled_back
 
 USER = {"pk": 7, "username": "team01", "uid": "uid-7", "is_active": True, "groups": ["g1"], "groups_obj": []}
 USERS = {"results": [USER], "pagination": {"next": 0}}
@@ -136,3 +139,28 @@ def test_json_too_deep_to_read_is_no_answer(answers: list[Answer]) -> None:
     """JSON nested past Python's recursion limit raised RecursionError out of every Quotient reader."""
     with override_settings(**QUOTIENT), serving(answers):
         assert quotient().get_injects(force_refresh=True) is None
+
+
+@pytest.mark.django_db
+@example(points=10**30, name="web")
+@example(points=1, name="s" * 101)
+@given(points=st.integers(), name=st.text(min_size=1, max_size=150).filter(lambda s: "\x00" not in s))
+def test_scores_that_dont_fit_refuse_the_sync(points: int, name: str) -> None:
+    """sync_service_scores wrote Quotient's points and service names to their columns unchecked: points past
+    decimal(10, 2), or a name past 100 characters, failed the write halfway (DataError) instead of the sync saying
+    why."""
+    from scoring.quotient_sync import sync_service_scores
+
+    from team.models import Team
+
+    body = [{"team_name": "team01", "services": [{"service_name": name, "service_points": points}], "gross_points": 1}]
+    with rolled_back():
+        Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01"})
+        with (
+            override_settings(QUOTIENT_API_URL="https://quotient.test", **QUOTIENT),
+            serving([LOGIN, answer(body), answer({"series": []})]),
+        ):
+            cache.clear()
+            with contextlib.suppress(ValueError):
+                sync_service_scores()
+        assert Team.objects.filter(team_number=1).exists()  # the transaction still works

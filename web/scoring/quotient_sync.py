@@ -2,6 +2,8 @@ from decimal import Decimal
 from typing import TypedDict
 
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
 from quotient.client import QuotientClient
 
 from team.models import Team
@@ -89,8 +91,20 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
     return metadata
 
 
+UPTIME_PLACES = Decimal("0.0001")  # ServiceDetail.uptime's decimal places
+
+
+def _check_storable(row: models.Model, where: str) -> None:
+    """ValueError when a value Quotient sent doesn't fit its column (a name too long, points too large)."""
+    try:
+        row.clean_fields(exclude=["team", "synced_by"])
+    except ValidationError as e:
+        raise ValueError(f"Quotient's scores for {where} don't fit the portal's: {'; '.join(e.messages)}") from e
+
+
 def sync_service_scores(user: User | None = None) -> dict[str, int]:
-    """Sync every team's aggregate ServiceScore and per-service ServiceDetail records from Quotient."""
+    """Sync every team's aggregate ServiceScore and per-service ServiceDetail records from Quotient. Raises
+    ValueError, writing nothing, when a value Quotient sends doesn't fit the portal's columns."""
     client = QuotientClient()
 
     export_data = client.get_service_export(force_refresh=True)
@@ -107,40 +121,51 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
     teams_created = 0
     details_synced = 0
 
+    # Everything is checked against the columns before anything is written, so numbers Quotient sends that the
+    # scores can't hold refuse the whole sync (ValueError) instead of failing it halfway
+    rows: list[tuple[Team, ServiceScore, list[ServiceDetail]]] = []
     for team_export in export_data:
-        try:
-            team = Team.objects.get(team_number=team_export.team_number)
-        except Team.DoesNotExist:
+        team = Team.objects.filter(team_number=team_export.team_number).first() if team_export.team_number else None
+        if team is None:
             continue
-
-        _service_score, created = ServiceScore.objects.update_or_create(
+        score = ServiceScore(
             team=team,
-            defaults={
-                "service_points": Decimal(str(team_export.gross_points)),
-                "sla_violations": Decimal(str(-team_export.total_sla_penalty)),
-                "synced_by": user,
-            },
+            service_points=Decimal(team_export.gross_points),
+            sla_violations=Decimal(-team_export.total_sla_penalty),
+            synced_by=user,
         )
-
-        if created:
-            teams_created += 1
-        else:
-            teams_updated += 1
-
         team_uptimes = uptimes_by_team.get(team_export.team_number, {})
-        ServiceDetail.objects.filter(team=team).delete()
         details = [
             ServiceDetail(
                 team=team,
                 service_name=svc.service_name,
-                points=Decimal(str(svc.service_points)),
-                uptime=Decimal(str(team_uptimes.get(svc.service_name, 0))),
+                points=Decimal(svc.service_points),
+                uptime=Decimal(str(team_uptimes.get(svc.service_name, 0))).quantize(UPTIME_PLACES),
                 sla_violations=svc.sla_violations,
             )
             for svc in team_export.services
         ]
-        ServiceDetail.objects.bulk_create(details)
-        details_synced += len(details)
+        for row in (score, *details):
+            _check_storable(row, f"team {team.team_number}")
+        rows.append((team, score, details))
+
+    with transaction.atomic():
+        for team, score, details in rows:
+            _service_score, created = ServiceScore.objects.update_or_create(
+                team=team,
+                defaults={
+                    "service_points": score.service_points,
+                    "sla_violations": score.sla_violations,
+                    "synced_by": user,
+                },
+            )
+            if created:
+                teams_created += 1
+            else:
+                teams_updated += 1
+            ServiceDetail.objects.filter(team=team).delete()
+            ServiceDetail.objects.bulk_create(details)
+            details_synced += len(details)
 
     # Keep the reactive service scaling current: the max service points at full uptime.
     set_template_max("service_max", service_max_from_details())
