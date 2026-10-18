@@ -587,7 +587,7 @@ HUGE_EXPORT = [
     data=[Answer(200, b"{}"), Answer(200, json.dumps(HUGE_EXPORT).encode()), Answer(200, json.dumps(UPTIMES).encode())]
 )
 def test_callers_answer_or_log_whatever_the_service_says(caller: Caller, data: st.DataObject | list[Answer]) -> None:
-    """The caller returns, or raises only its documented error (refresh_user_groups: anything, as its loops catch
+    """The caller returns, or raises only its documented error (refresh_user_groups: anything, as its callers catch
     every error), and leaves the database usable: a database error it swallowed would break the transaction."""
     from team.models import Team
 

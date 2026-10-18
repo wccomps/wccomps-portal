@@ -8,9 +8,9 @@ another service answered (a response's .json(), or json.loads of a response's te
 
 Each must be registered against property tests (FORM_CASES, PARSERS, a row in a VIEW_MODULES module's CASES for a
 URL pattern or admin model, a row in the bot's CASES, or a case in READERS) or listed in EXCEPTIONS with the
-reason. A
-registry entry or exception that matches no entry point fails too, so neither can go stale. Fix a failure by adding
-a property test case for the new entry point (the test module's docstring says how), or an exception with a reason.
+reason. A registry entry or exception that matches no entry point fails too, so neither can go stale. Fix a failure by
+adding a property test case for the new entry point (the test module's docstring says how), or an exception with a
+reason.
 """
 
 import ast

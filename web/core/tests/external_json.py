@@ -1,8 +1,9 @@
 """What another service (Authentik, Quotient) can answer: any status, and any body, JSON or not.
 
 A reader's property test serves these answers to every request the reader makes (serving) and checks the reader
-returns its documented result or raises its documented error. near(example) leans to answers shaped like the real
-one with any part wrong: a key missing, a value of another type or null, extra keys, huge numbers, deep nesting.
+returns its documented result or raises its documented error. near(example) leans to JSON shaped like the real
+one with any part wrong (a key missing, a value of another type or null, extra keys, huge numbers), and bodies(example)
+adds deeply nested JSON and bytes that aren't JSON.
 """
 
 import json
@@ -80,8 +81,7 @@ def answers(example: Any) -> st.SearchStrategy[Answer]:
 
 
 def answer_lists(*examples: Any) -> st.SearchStrategy[list[Answer]]:
-    """The answers to a reader's requests in order, each shaped like its example (the last one repeats, so a reader
-    that pages on gets the same page again)."""
+    """The answers to a reader's requests in order, each shaped like its example."""
     return st.tuples(*(answers(example) for example in examples)).map(list)
 
 
@@ -95,7 +95,8 @@ MAX_REQUESTS = 200
 
 @contextmanager
 def serving(answers_: list[Answer]) -> Iterator[list[str]]:
-    """Every outgoing request (httpx's transport) gets the next answer; yields the URLs requested."""
+    """Every outgoing request (httpx's transport) gets the next answer (the last one repeats, so a reader that pages on
+    gets the same page again); yields the URLs requested."""
     requested: list[str] = []
 
     def handle(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:

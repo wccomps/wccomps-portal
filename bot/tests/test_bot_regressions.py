@@ -114,8 +114,8 @@ def test_a_category_that_is_not_a_number_is_refused(bot_world: World, category: 
 @views_profile()
 @given(hostname=option_text(256, 6000))
 def test_a_ticket_field_longer_than_its_column_is_refused(bot_world: World, hostname: str) -> None:
-    """A slash command option has no length unless it declares one, so a long hostname, service or IP reached the
-    database's varchar column (DataError); the web form refuses it, and now so does the bot."""
+    """A slash command option has no length below Discord's 6000 unless it declares one, so a long hostname, service
+    or IP reached the database's varchar column (DataError)."""
     chosen = {"role": "blue_team", "category": "2", "description": "Down", "hostname": hostname}
     drive(TICKET, bot_world, Chosen(chosen))
 
@@ -184,7 +184,7 @@ def test_ticket_commands_require_the_categorys_required_fields(bot_world: World,
 @given(points=st.integers(2**31, 2**53))
 def test_resolve_points_past_the_column_are_refused(bot_world: World, points: int) -> None:
     """/tickets resolve took any integer Discord sends (to 2**53) as the points charged, past their integer column
-    (DataError); the web's resolve form bounds them by the column, and now the bot reads them with it."""
+    (DataError)."""
     drive(RESOLVE, bot_world, Chosen({"role": "admin", "ticket_number": "T001-002", "points": points}))
 
 
@@ -192,15 +192,15 @@ def test_resolve_points_past_the_column_are_refused(bot_world: World, points: in
 @views_profile()
 @given(points=option_text(1, 5))
 def test_resolve_modal_points_are_read_as_the_web_reads_them(bot_world: World, points: str) -> None:
-    """The resolve modal read its points with int(), unlike the web form (and a NUL in its notes reached the
-    database): both now go through the web's resolve form."""
+    """The resolve modal read its points with int(), unlike the web form, and a NUL in its notes reached the
+    database."""
     drive(RESOLVE_MODAL, bot_world, Chosen({"role": "admin", "Resolution Notes": "Fixed\x00", "Points": points}))
 
 
 @pytest.mark.parametrize("name", ["resolve", "cancel", "change-category", "reassign", "reopen"])
 def test_a_ticket_number_option_is_as_long_as_the_column(name: str) -> None:
     """The ticket number options took up to Discord's 6000 characters, and "Ticket ... not found" repeated all of
-    them, past the 2000 a message takes: Discord now refuses a number longer than the column."""
+    them, past the 2000 a message takes."""
     from ticketing.models import Ticket
 
     command = next(c for c in AdminTicketsCog.tickets_group.walk_commands() if c.name == name)
@@ -273,8 +273,8 @@ def test_a_thread_attachment_is_stored_as_a_web_upload_is(
     bot_world: World, filename: str, content_type: str | None, data: bytes
 ) -> None:
     """The listener stored an attachment's name and claimed content type as Discord gave them: a NUL or a name past
-    255 characters failed the insert (and a claimed image/png made an SVG preview inline). It now stores them as a
-    web upload is stored (core.stored_files)."""
+    255 characters or a content type past 100 failed the insert, and a claimed image/* gave a non-image a broken
+    <img> preview on the ticket page."""
     attachment = Attachment(filename, content_type, len(data), data)
     run = drive(THREAD_MESSAGE, bot_world, in_a_ticket_thread(bot_world, "see attached", attachments=[attachment]))
     assert "ticketing_ticketattachment" in run.written
@@ -370,9 +370,8 @@ def test_an_incident_report_is_checked_as_the_model_checks_it(bot_world: World, 
 @views_profile()
 @given(name=stored_text(100).filter(lambda s: len(s.strip()) > 80))
 def test_thread_names_and_autocomplete_choices_fit_in_100_characters(bot_world: World, name: str) -> None:
-    """A ticket's thread name (cut with shorten, which adds "..." past its limit) reached 103 characters, and the
-    category autocomplete named a choice "<category> (<points>pt)", past the 100 Discord takes: Discord refused the
-    thread, and showed no choices."""
+    """The category autocomplete named a choice "<category> (<points>pt)", past the 100 characters Discord takes:
+    Discord showed no choices."""
     chosen = {"hostile rows": True, "a name": name, "a text": "t", "more categories": 0, "more tickets": 0}
     admin = {**chosen, "role": "admin", "team_number": 1, "category": "6", "description": "x"}
     drive(ADMIN_TICKET, bot_world, Chosen(admin))

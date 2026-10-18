@@ -243,7 +243,7 @@ CASES: list[BotCase] = [
 @given(data=st.data())
 def test_any_input_is_answered_within_discords_limits(case: BotCase, bot_world: World, data: st.DataObject) -> None:
     """Each example runs a whole handler against the fakes, so the rows run the view tests' fewer examples (the
-    -views profile: 10 in ci, 500 in deep)."""
+    -views profile)."""
     drive(case, bot_world, data)
 
 

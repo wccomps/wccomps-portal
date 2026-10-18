@@ -115,7 +115,6 @@ def _json_object(response: httpx.Response) -> dict[str, object]:
 
 
 def _fits(text: str, model: type[models.Model], name: str) -> bool:
-    """Whether the text fits the model field's column."""
     length: int | None = getattr(model._meta.get_field(name), "max_length", None)
     return length is None or len(text) <= length
 
