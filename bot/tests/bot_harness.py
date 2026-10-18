@@ -25,7 +25,7 @@ from datetime import timedelta
 from functools import cache
 from pathlib import Path
 from typing import Any, Protocol
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import discord
 from asgiref.sync import async_to_sync
@@ -462,7 +462,7 @@ class Discord:
         bot.user = self.user(BOT_USER_ID, "wccomps-bot", bot=True)
         bot.allowed_mentions = portal_bot().allowed_mentions
         bot.unified_dashboard = None
-        bot.get_channel.side_effect = lambda cid: self._channels.get(cid)
+        bot.get_channel.side_effect = lambda cid: self.channel(cid)
         bot.get_cog.side_effect = lambda name: self.cogs.get(name)
         bot.wait_until_ready = AsyncMock()
 
@@ -495,23 +495,27 @@ class Discord:
         chat = self.text_channel(TEAM_CHAT_ID, "team01-chat", team_category)
         team_category.channels.append(chat)
         guild.categories = [team_category]
-        self._channels: dict[int, Any] = {
-            LOG_CHANNEL_ID: self.text_channel(LOG_CHANNEL_ID, "ops-log"),
-            QUEUE_CHANNEL_ID: self.text_channel(QUEUE_CHANNEL_ID, "ticket-queue"),
-            ANNOUNCEMENT_CHANNEL_ID: self.text_channel(ANNOUNCEMENT_CHANNEL_ID, "announcements"),
-            LINK_CHANNEL_ID: self.text_channel(LINK_CHANNEL_ID, "link"),
-            TEAM_CATEGORY_ID: team_category,
-            TEAM_CHAT_ID: chat,
+        self._channels: dict[int, Any] = {TEAM_CATEGORY_ID: team_category, TEAM_CHAT_ID: chat}
+        # The rest are made when first looked up: most handlers touch few of them, and each fake costs time
+        self._made_on_lookup: dict[int, Callable[[], Any]] = {
+            LOG_CHANNEL_ID: lambda: self.text_channel(LOG_CHANNEL_ID, "ops-log"),
+            QUEUE_CHANNEL_ID: lambda: self.text_channel(QUEUE_CHANNEL_ID, "ticket-queue"),
+            ANNOUNCEMENT_CHANNEL_ID: lambda: self.text_channel(ANNOUNCEMENT_CHANNEL_ID, "announcements"),
+            LINK_CHANNEL_ID: lambda: self.text_channel(LINK_CHANNEL_ID, "link"),
+            **{tid: (lambda tid=tid: self.thread(tid, parent=chat)) for tid in self.world.thread_ids},
         }
-        for thread_id in self.world.thread_ids:
-            self._channels[thread_id] = self.thread(thread_id, parent=chat)
-        guild.get_channel.side_effect = lambda cid: self._channels.get(cid)
+        guild.get_channel.side_effect = self.channel
         guild.get_role.side_effect = lambda rid: next((r for r in guild.roles if r.id == rid), None)
-        members = {
-            discord_id: self.user(discord_id, f"{role}_player") for role, discord_id in self.world.discord_ids.items()
-        }
-        guild.get_member.side_effect = members.get
-        guild.members = list(members.values())
+        roles_by_id = {discord_id: role for role, discord_id in self.world.discord_ids.items()}
+        members: dict[int, Any] = {}
+
+        def get_member(discord_id: int) -> Any:
+            if discord_id in roles_by_id and discord_id not in members:
+                members[discord_id] = self.user(discord_id, f"{roles_by_id[discord_id]}_player")
+            return members.get(discord_id)
+
+        guild.get_member.side_effect = get_member
+        type(guild).members = PropertyMock(side_effect=lambda: [get_member(i) for i in roles_by_id])
 
         async def create_role(name: str, **_: Any) -> Any:
             role = self.role(next(self._next_id), name)
@@ -528,6 +532,12 @@ class Discord:
         guild.create_category = AsyncMock(side_effect=create_category)
         return guild
 
+    def channel(self, channel_id: int) -> Any:
+        """The channel or thread with this id, made when first looked up; None for one the guild doesn't have."""
+        if channel_id not in self._channels and channel_id in self._made_on_lookup:
+            self._channels[channel_id] = self._made_on_lookup.pop(channel_id)()
+        return self._channels.get(channel_id)
+
     # What a handler gets
 
     def interaction(
@@ -538,7 +548,7 @@ class Discord:
         interaction.user = self.member_for(role)
         interaction.guild = self.guild
         interaction.guild_id = GUILD_ID
-        interaction.channel = self._channels[TEAM_CHAT_ID]
+        interaction.channel = self.channel(TEAM_CHAT_ID)
         interaction.client = self.bot
         interaction.message = message
         interaction.data = data or {}
@@ -575,8 +585,9 @@ STRING_OPTION_MAX = 6000
 
 
 def option_text(min_length: int = 0, max_length: int = STRING_OPTION_MAX) -> st.SearchStrategy[str]:
-    """Text Discord delivers for a string option or a text input: anything within its declared length."""
-    return request_text(max_length).filter(lambda s: min_length <= len(s) <= max_length)
+    """Text Discord delivers for a string option or a text input: anything within its declared length (longer text
+    is cut to it, so the hostile start of a long value stays, rather than drawn again)."""
+    return request_text(max_length).map(lambda s: s[:max_length]).filter(lambda s: len(s) >= min_length)
 
 
 Hint = Callable[[World], st.SearchStrategy[Any]]
@@ -988,15 +999,24 @@ def attachments() -> st.SearchStrategy[list[Attachment]]:
     return st.lists(one, max_size=3)
 
 
+def dashboard_view(run: Run, data: Draws) -> discord.ui.View:
+    """The dashboard's buttons, on a dashboard whose message is in the ticket queue channel."""
+    from bot.unified_dashboard import DashboardControlView, UnifiedDashboard
+
+    dashboard = UnifiedDashboard(run.discord.bot)
+    dashboard.dashboard_message_id = 1
+    dashboard.dashboard_channel_id = QUEUE_CHANNEL_ID
+    return DashboardControlView(dashboard)
+
+
 def channel_for(run: Run, data: Draws) -> Any:
     """Where a message is posted: a ticket's thread, a thread no ticket has, the link channel or a team chat."""
     choice = data.draw(st.sampled_from(("ticket thread", "other thread", "link", "chat")), label="channel")
-    channels = run.discord._channels
     if choice == "ticket thread":
-        return channels[data.draw(st.sampled_from(run.world.thread_ids), label="thread")]
+        return run.discord.channel(data.draw(st.sampled_from(run.world.thread_ids), label="thread"))
     if choice == "other thread":
         return run.discord.thread(next(run.discord._next_id))
-    return channels[LINK_CHANNEL_ID if choice == "link" else TEAM_CHAT_ID]
+    return run.discord.channel(LINK_CHANNEL_ID if choice == "link" else TEAM_CHAT_ID)
 
 
 def message_for(run: Run, data: Draws, *, channel: Any = None, message_id: int | None = None) -> Any:

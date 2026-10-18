@@ -5,8 +5,8 @@ every function that parses CSV or an uploaded file (found by what it does: calls
 UploadedFile, reads request.FILES, or reads an upload, file or attachment); every URL pattern and admin model page;
 and the bot's slash commands, modals, buttons, selects and message listeners.
 
-Each must be registered against property tests (FORM_CASES, PARSERS, or a row in a VIEW_MODULES module's CASES for a
-URL pattern or admin model) or listed in EXCEPTIONS with the reason. A
+Each must be registered against property tests (FORM_CASES, PARSERS, a row in a VIEW_MODULES module's CASES for a
+URL pattern or admin model, or a row in the bot's CASES) or listed in EXCEPTIONS with the reason. A
 registry entry or exception that matches no entry point fails too, so neither can go stale. Fix a failure by adding
 a property test case for the new entry point (the test module's docstring says how), or an exception with a reason.
 """
@@ -24,6 +24,7 @@ from django.apps import apps
 from django.contrib import admin
 from django.urls import URLPattern, URLResolver, get_resolver
 
+from bot.tests import test_properties_bot
 from core.tests import test_properties_forms, test_properties_parsers
 from core.tests.test_no_unused_code import REPO_DIR, Unused, fail_with, python_trees
 from core.tests.view_rows import VIEW_MODULES
@@ -186,70 +187,7 @@ FORM_TESTS = (
     test_properties_forms.test_valid_post_fits_its_fields_is_stored_and_cleans_the_same,
 )
 
-PR_C = "covered in PR C (the Discord bot)"
-
-
-BOT_FOR_PR_C = [
-    "bot:button:bot/cogs/help_panels.py:LinkButton",
-    "bot:button:bot/cogs/help_panels.py:TicketButton",
-    "bot:button:bot/ticket_dashboard.py:TicketActionView.cancel_button",
-    "bot:button:bot/ticket_dashboard.py:TicketActionView.claim_button",
-    "bot:button:bot/ticket_dashboard.py:TicketActionView.resolve_button",
-    "bot:button:bot/unified_dashboard.py:DashboardControlView.filter_all",
-    "bot:button:bot/unified_dashboard.py:DashboardControlView.filter_claimed",
-    "bot:button:bot/unified_dashboard.py:DashboardControlView.filter_open",
-    "bot:button:bot/unified_dashboard.py:DashboardControlView.sort_created",
-    "bot:button:bot/unified_dashboard.py:DashboardControlView.sort_stale",
-    "bot:button:bot/unified_dashboard.py:DashboardControlView.sort_team",
-    "bot:button:bot/utils.py:CancelButton",
-    "bot:button:bot/utils.py:ConfirmButton",
-    "bot:command:bot/cogs/admin.py:AdminCog.admin_sync_roles",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_broadcast",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_cleanup_competition",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_competition_set_apps",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_reset_blueteam_passwords",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_set_end_time",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_set_max_members",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_set_start_time",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_start_competition",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_stop_competition",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_activate_teams",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_deactivate_teams",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_recreate_teams",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_remove_team",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_reset_team",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_team_info",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_teams",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_unlink",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_change_category",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_cancel",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_clear",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_create",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_list",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_reassign",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_reopen",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_resolve",
-    "bot:command:bot/cogs/linking.py:LinkingCog.link_command",
-    "bot:command:bot/cogs/scoring.py:ScoringCog.incident_report",
-    "bot:command:bot/cogs/ticketing.py:TicketingCog.create_ticket",
-    "bot:listener:bot/cogs/help_panels.py:HelpPanelsCog.on_message",
-    "bot:listener:bot/cogs/ticketing.py:TicketingCog.on_message",
-    "bot:listener:bot/cogs/ticketing.py:TicketingCog.on_message_delete",
-    "bot:listener:bot/cogs/ticketing.py:TicketingCog.on_message_edit",
-    "bot:modal:bot/cogs/help_panels.py:BoxResetModal",
-    "bot:modal:bot/cogs/help_panels.py:ConsultationModal",
-    "bot:modal:bot/cogs/help_panels.py:OtherModal",
-    "bot:modal:bot/cogs/help_panels.py:ScoringServiceCheckModal",
-    "bot:modal:bot/cogs/help_panels.py:ServiceScoringModal",
-    "bot:modal:bot/ticket_dashboard.py:ResolveTicketModal",
-    "bot:select:bot/cogs/help_panels.py:CategorySelect",
-]
-
-EXCEPTIONS: dict[str, str] = {
-    **dict.fromkeys(BOT_FOR_PR_C, PR_C),
-    # The bot's ticket thread listener reads an attachment's bytes to copy it to the web ticket
-    "bot/cogs/ticketing.py:TicketingCog.on_message": PR_C,
-}
+EXCEPTIONS: dict[str, str] = {}
 
 
 @pytest.mark.django_db
@@ -269,7 +207,9 @@ def test_every_form_has_property_tests() -> None:
 
 def test_every_upload_and_csv_parser_has_property_tests() -> None:
     found = parser_entry_points()
-    registry = test_properties_parsers.PARSERS
+    # The bot's listeners that read an attachment are driven by their rows in the bot's CASES
+    bot_listeners = {case.function for case in test_properties_bot.CASES if hasattr(case, "function")}
+    registry = {**test_properties_parsers.PARSERS, **dict.fromkeys(bot_listeners & set(found), ())}
     uncovered = [Unused(key, reasons) for key, reasons in found.items() if key not in registry]
     parser_exceptions = {k: v for k, v in EXCEPTIONS.items() if not k.startswith(("url:", "admin:", "bot:"))}
     fail_with("Parsers of uploads or CSV without a property test (add them to PARSERS)", uncovered, parser_exceptions)
@@ -277,7 +217,7 @@ def test_every_upload_and_csv_parser_has_property_tests() -> None:
     assert not stale, f"PARSERS lists functions that no longer parse uploads or CSV: {stale}"
     not_properties = [
         f"{key}: {test.__name__}"
-        for key, tests in registry.items()
+        for key, tests in test_properties_parsers.PARSERS.items()
         for test in tests
         if not getattr(test, "is_hypothesis_test", False)
     ]
@@ -310,13 +250,19 @@ def test_every_url_pattern_has_property_tests() -> None:
             assert cases == [module.CASES], f"{module.__name__}.{test.__name__} must run every row of CASES"
 
 
-def test_every_bot_entry_point_is_covered_or_left_for_pr_c() -> None:
+def test_every_bot_entry_point_has_property_tests() -> None:
     found = bot_entry_points()
+    covered = {case.entry_point for case in test_properties_bot.CASES}
     fail_with(
-        "Bot commands, modals, buttons and listeners without property tests",
-        [Unused(key, where) for key, where in found.items()],
+        "Bot commands, modals, buttons and listeners without property tests (add a row to the bot's CASES)",
+        [Unused(key, where) for key, where in found.items() if key not in covered],
         {k: v for k, v in EXCEPTIONS.items() if k.startswith("bot:")},
     )
+    stale = sorted(covered - set(found))
+    assert not stale, f"Bot property rows for entry points that no longer exist: {stale}"
+    test = test_properties_bot.test_any_input_is_answered_within_discords_limits
+    cases = [m.args[1] for m in getattr(test, "pytestmark", []) if m.name == "parametrize"]
+    assert cases == [test_properties_bot.CASES], f"{test.__name__} must run every row of CASES"
 
 
 CSV_EXPORT_MODULE = "web/core/csv_export.py"

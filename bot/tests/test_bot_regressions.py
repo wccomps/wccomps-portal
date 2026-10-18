@@ -1,4 +1,5 @@
-"""Regression tests for bugs the bot's property tests found, each pinned with the input that showed it."""
+"""Regression tests for bugs the bot's property tests found, each pinned with the input that showed it. Each example
+runs a whole handler, so they run the view tests' fewer examples (the -views profile)."""
 
 import pytest
 from hypothesis import example, given
@@ -11,16 +12,15 @@ from bot.cogs.scoring import ScoringCog
 from bot.cogs.ticketing import TicketingCog
 from bot.tests.bot_harness import (
     EVERYONE,
-    QUEUE_CHANNEL_ID,
     Attachment,
     Chosen,
     Command,
-    Draws,
     Item,
     Listener,
     Modal,
     Run,
     World,
+    dashboard_view,
     discord_world,
     drive,
     embed_problems,
@@ -33,8 +33,9 @@ from bot.tests.bot_harness import (
     stored_text,
 )
 from bot.ticket_dashboard import ResolveTicketModal, format_ticket_embed
-from bot.unified_dashboard import DashboardControlView, UnifiedDashboard
+from bot.unified_dashboard import DashboardControlView
 from core.tests.strategies import file_bytes, file_names, rolled_back
+from core.tests.views_harness import views_profile
 
 BROADCAST = Command(AdminCompetitionCog, AdminCompetitionCog.admin_broadcast.callback, may("admin"))
 RESOLVE = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_resolve.callback, may("ticketing_support"))
@@ -60,6 +61,7 @@ def in_a_ticket_thread(world: World, content: str, **more: object) -> Chosen:
 
 
 @example(message="@everyone the scoring engine is back")
+@views_profile()
 @given(message=option_text(1, 1000))
 def test_an_announcement_pings_only_the_blueteam_role(bot_world: World, message: str) -> None:
     """The bot set no default allowed mentions, so any message it sent pinged everything it named: @everyone in a
@@ -68,6 +70,7 @@ def test_an_announcement_pings_only_the_blueteam_role(bot_world: World, message:
 
 
 @example(ticket_number="T001-001\x00")
+@views_profile()
 @given(ticket_number=option_text(1, 20).map(lambda s: s + "\x00"))
 def test_an_option_with_a_nul_is_refused(bot_world: World, ticket_number: str) -> None:
     """PostgreSQL text can't hold a NUL, so a ticket number with one failed the lookup (ValueError) and the command
@@ -76,6 +79,7 @@ def test_an_option_with_a_nul_is_refused(bot_world: World, ticket_number: str) -
 
 
 @example(volunteer="not a user")
+@views_profile()
 @given(volunteer=option_text(1, 100).filter(lambda s: not s.strip().isdigit()))
 def test_an_option_the_bot_cannot_read_is_answered(bot_world: World, volunteer: str) -> None:
     """A volunteer that isn't a user or an id fails the option's transformer, and the command tree only logged it:
@@ -84,6 +88,7 @@ def test_an_option_the_bot_cannot_read_is_answered(bot_world: World, volunteer: 
 
 
 @example(content="logs\x00")
+@views_profile()
 @given(content=option_text(1, 2000).map(lambda s: s + "\x00"))
 def test_a_thread_message_with_a_nul_is_saved_without_it(bot_world: World, content: str) -> None:
     """A ticket thread message holding a NUL failed to save as a comment (ValueError), so the listener raised."""
@@ -92,6 +97,7 @@ def test_a_thread_message_with_a_nul_is_saved_without_it(bot_world: World, conte
 
 
 @example(category="Box Reset")
+@views_profile()
 @given(category=option_text(1, 100))
 def test_a_category_that_is_not_a_number_is_refused(bot_world: World, category: str) -> None:
     """Every command that files a ticket or changes its category read the option with int() and raised on
@@ -104,6 +110,7 @@ def test_a_category_that_is_not_a_number_is_refused(bot_world: World, category: 
 
 
 @example(hostname="web" * 100)
+@views_profile()
 @given(hostname=option_text(256, 6000))
 def test_a_ticket_field_longer_than_its_column_is_refused(bot_world: World, hostname: str) -> None:
     """A slash command option has no length unless it declares one, so a long hostname, service or IP reached the
@@ -113,6 +120,7 @@ def test_a_ticket_field_longer_than_its_column_is_refused(bot_world: World, host
 
 
 @example(description="Help")
+@views_profile()
 @given(description=option_text(1, 1000))
 def test_a_team_files_only_in_a_category_teams_may_create(bot_world: World, description: str) -> None:
     """/ticket took any category id, so a team could file a ticket in a staff-only category the web form hides."""
@@ -125,6 +133,7 @@ def test_a_team_files_only_in_a_category_teams_may_create(bot_world: World, desc
 
 
 @example(points=2**31)
+@views_profile()
 @given(points=st.integers(2**31, 2**53))
 def test_resolve_points_past_the_column_are_refused(bot_world: World, points: int) -> None:
     """/tickets resolve took any integer Discord sends (to 2**53) as the points charged, past their integer column
@@ -133,6 +142,7 @@ def test_resolve_points_past_the_column_are_refused(bot_world: World, points: in
 
 
 @example(points="１２")
+@views_profile()
 @given(points=option_text(1, 5))
 def test_resolve_modal_points_are_read_as_the_web_reads_them(bot_world: World, points: str) -> None:
     """The resolve modal read its points with int(), unlike the web form (and a NUL in its notes reached the
@@ -157,6 +167,7 @@ REOPEN = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_reopen.callback, 
 
 
 @example(teams="1," + "x" * 3000)
+@views_profile()
 @given(teams=option_text(2000, 6000))
 def test_a_team_range_error_repeats_only_the_start_of_the_range(bot_world: World, teams: str) -> None:
     """parse_team_range's error repeated the whole part it couldn't read, and the reply went past 2000 characters."""
@@ -164,6 +175,7 @@ def test_a_team_range_error_repeats_only_the_start_of_the_range(bot_world: World
 
 
 @example(app_slugs="netbird," + "x" * 3000)
+@views_profile()
 @given(app_slugs=option_text(2000, 6000))
 def test_app_slugs_are_read_as_the_competition_page_reads_them(bot_world: World, app_slugs: str) -> None:
     """/competition set-apps stored any text as application slugs (the competition page takes only slugs) and
@@ -172,6 +184,7 @@ def test_app_slugs_are_read_as_the_competition_page_reads_them(bot_world: World,
 
 
 @example(reason="r" * 3000)
+@views_profile()
 @given(reason=option_text(2000, 6000))
 def test_a_reopen_reply_repeats_only_the_start_of_the_reason(bot_world: World, reason: str) -> None:
     """The reopen reply repeated the whole reason, past the 2000 characters a message takes."""
@@ -180,6 +193,7 @@ def test_a_reopen_reply_repeats_only_the_start_of_the_reason(bot_world: World, r
 
 @example(target="announcements", message="m" * 3000)
 @example(target="1", message="m" * 3000)
+@views_profile()
 @given(target=st.sampled_from(("announcements", "1", "all-teams")), message=option_text(1900, 6000))
 def test_a_long_broadcast_is_sent_in_parts(bot_world: World, target: str, message: str) -> None:
     """A broadcast over 2000 characters (with its header) went out as one message, which Discord refuses."""
@@ -187,6 +201,7 @@ def test_a_long_broadcast_is_sent_in_parts(bot_world: World, target: str, messag
 
 
 @example(target="1", message="m" * 3000)
+@views_profile()
 @given(target=st.sampled_from(("announcements", "1")), message=option_text(1900, 6000))
 def test_a_long_web_broadcast_is_sent_in_parts(bot_world: World, target: str, message: str) -> None:
     """The queue sent a broadcast from the portal as one message too, and Discord refused one over 2000."""
@@ -205,6 +220,7 @@ def test_a_long_web_broadcast_is_sent_in_parts(bot_world: World, target: str, me
 
 
 @example(filename="shot\x00.png", content_type="image/png" + "x" * 200, data=b"<svg onload=alert(1)>")
+@views_profile()
 @given(filename=file_names(), content_type=st.one_of(st.none(), option_text(0, 300)), data=file_bytes())
 def test_a_thread_attachment_is_stored_as_a_web_upload_is(
     bot_world: World, filename: str, content_type: str | None, data: bytes
@@ -215,13 +231,6 @@ def test_a_thread_attachment_is_stored_as_a_web_upload_is(
     attachment = Attachment(filename, content_type, len(data), data)
     run = drive(THREAD_MESSAGE, bot_world, in_a_ticket_thread(bot_world, "see attached", attachments=[attachment]))
     assert "ticketing_ticketattachment" in run.written
-
-
-def dashboard_view(run: Run, data: Draws) -> DashboardControlView:
-    dashboard = UnifiedDashboard(run.discord.bot)
-    dashboard.dashboard_message_id = 1
-    dashboard.dashboard_channel_id = QUEUE_CHANNEL_ID
-    return DashboardControlView(dashboard)
 
 
 DASHBOARD = Item("button", DashboardControlView.sort_created, dashboard_view, EVERYONE)
@@ -236,6 +245,7 @@ def long_tickets(text: str, count: int) -> Chosen:
 
 
 @example(text="x" * 5000, count=40)
+@views_profile()
 @given(text=stored_text(5000), count=st.integers(6, 40))
 def test_the_dashboard_fits_one_embed(bot_world: World, text: str, count: int) -> None:
     """The dashboard put a field per category in one embed with no total in mind: many long tickets passed the
@@ -244,6 +254,7 @@ def test_the_dashboard_fits_one_embed(bot_world: World, text: str, count: int) -
 
 
 @example(text="x" * 5000, count=30)
+@views_profile()
 @given(text=stored_text(5000), count=st.integers(0, 30))
 def test_the_ticket_list_fits_one_embed(bot_world: World, text: str, count: int) -> None:
     """/tickets list named each field with the ticket's title (up to 255 characters, past the 256 a field name
@@ -252,6 +263,7 @@ def test_the_ticket_list_fits_one_embed(bot_world: World, text: str, count: int)
 
 
 @example(name="n" * 100)
+@views_profile()
 @given(name=stored_text(100).filter(str.strip))
 def test_the_team_list_fits_one_embed(bot_world: World, name: str) -> None:
     """/teams list put up to 25 teams in one field, past the 1024 characters a field takes with long names."""
@@ -263,6 +275,7 @@ def test_the_team_list_fits_one_embed(bot_world: World, name: str) -> None:
 
 
 @example(group="")
+@views_profile()
 @given(group=st.sampled_from(("", " ")))
 def test_team_info_shows_a_team_without_an_authentik_group(bot_world: World, group: str) -> None:
     """/teams info showed the Authentik group as a field even when blank, which Discord refuses."""
@@ -274,6 +287,7 @@ def test_team_info_shows_a_team_without_an_authentik_group(bot_world: World, gro
 
 
 @example(hostname=" \u2029", text="x" * 5000)
+@views_profile()
 @given(hostname=stored_text(255), text=stored_text(5000))
 def test_a_ticket_thread_embed_fits(bot_world: World, hostname: str, text: str) -> None:
     """The ticket's thread embed added a blank hostname, service or IP as a field (Discord refuses one), and with
@@ -289,6 +303,7 @@ def test_a_ticket_thread_embed_fits(bot_world: World, hostname: str, text: str) 
 
 
 @example(source_ip="not an address")
+@views_profile()
 @given(source_ip=option_text(1, 45))
 def test_an_incident_report_is_checked_as_the_model_checks_it(bot_world: World, source_ip: str) -> None:
     """/incident-report saved any text as the source IP (a GenericIPAddressField) and any length of service, so the
@@ -305,6 +320,7 @@ def test_an_incident_report_is_checked_as_the_model_checks_it(bot_world: World, 
 
 
 @example(name="n" * 100)
+@views_profile()
 @given(name=stored_text(100).filter(lambda s: len(s.strip()) > 80))
 def test_thread_names_and_autocomplete_choices_fit_in_100_characters(bot_world: World, name: str) -> None:
     """A ticket's thread name (cut with shorten, which adds "..." past its limit) reached 103 characters, and the
