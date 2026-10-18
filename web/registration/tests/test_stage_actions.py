@@ -1,6 +1,6 @@
 """The lifecycle table: for each stage, whether the competition runs and what is done, the one next action."""
 
-from datetime import date
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -89,7 +89,7 @@ def test_with_no_event_only_sends_since_the_last_clear_count():
         action="scorecards_emailed", admin_user="gold", target_entity="event", target_id=0, details={"event": None}
     )
     AuditLog.objects.create(action="event_closed_out", admin_user="gold", target_entity="event", target_id=1)
-    AuditLog.objects.filter(pk=old.pk).update(created_at=date(2026, 1, 1))
+    AuditLog.objects.filter(pk=old.pk).update(created_at=datetime(2026, 1, 1, tzinfo=UTC))
     assert not event_stage().scorecards_emailed
 
     AuditLog.objects.create(

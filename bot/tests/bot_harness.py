@@ -955,17 +955,22 @@ def text_inputs(modal: discord.ui.Modal) -> list[discord.ui.TextInput[Any]]:
     return [item for item in modal.children if isinstance(item, discord.ui.TextInput)]
 
 
+def input_label(text_input: discord.ui.TextInput[Any]) -> str:
+    return str(text_input.to_component_dict().get("label") or "")
+
+
 def prepare_modal(run: Run, case: Modal, data: Draws) -> Go:
     modal = case.build(run, data)
     for text_input in text_inputs(modal):
         # Discord enforces a text input's limits, and sends a required one filled
         low = max(text_input.min_length or 0, 1 if text_input.required else 0)
         high = text_input.max_length or 4000
-        hint = case.hints.get(str(text_input.label))
+        label = input_label(text_input)
+        hint = case.hints.get(label)
         strategy = option_text(low, high)
         if hint is not None:
             strategy = st.one_of(hint(run.world).filter(lambda s, lo=low, hi=high: lo <= len(s) <= hi), strategy)
-        text_input._value = data.draw(strategy, label=str(text_input.label))
+        text_input._value = data.draw(strategy, label=label)
         run.texts.append(text_input.value)
     interaction = run.discord.interaction(run.role)
     run.interaction = interaction
@@ -1150,7 +1155,7 @@ def modal_problems(modal: discord.ui.Modal) -> list[str]:
     if len(inputs) > 5:
         problems.append(f"a modal with {len(inputs)} text inputs (Discord takes 5)")
     for text_input in inputs:
-        label = str(text_input.label)
+        label = input_label(text_input)
         if not 1 <= len(label) <= 45:
             problems.append(f"a text input label of {len(label)} characters (Discord takes 45)")
         if text_input.placeholder and len(text_input.placeholder) > 100:
