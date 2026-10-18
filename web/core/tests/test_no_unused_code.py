@@ -420,8 +420,8 @@ def test_every_url_name_is_linked() -> None:
 # 5. Settings
 # ---------------------------------------------------------------------------------------------------------------
 
-# Settings Django reads: every one it has a default for, plus ROOT_URLCONF, which has none
-DJANGO_SETTINGS = {name for name in dir(global_settings) if name.isupper()} | {"ROOT_URLCONF"}
+# Settings Django reads: every one it has a default for, plus ROOT_URLCONF and MAILERS, which have none
+DJANGO_SETTINGS = {name for name in dir(global_settings) if name.isupper()} | {"ROOT_URLCONF", "MAILERS"}
 
 # setting -> why it stays although nothing reads it
 SETTING_EXCEPTIONS: dict[str, str] = {}

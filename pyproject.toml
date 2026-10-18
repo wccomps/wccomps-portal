@@ -89,10 +89,6 @@ module = "xkcdpass.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "psycopg2.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
 module = "*.migrations.*"
 ignore_errors = true
 

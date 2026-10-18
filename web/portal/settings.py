@@ -241,14 +241,27 @@ QUOTIENT_API_URL = os.environ.get("QUOTIENT_API_URL", "https://scoring.wccomps.o
 QUOTIENT_USERNAME = os.environ.get("QUOTIENT_USERNAME", "")
 QUOTIENT_PASSWORD = os.environ.get("QUOTIENT_PASSWORD", "")
 
-# Email configuration for packet distribution
-EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
-EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
-EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "False") == "True"
-EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+# Email configuration for packet and scorecard distribution
+_EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+MAILERS = {
+    "default": {
+        "BACKEND": _EMAIL_BACKEND,
+        **(
+            {
+                "OPTIONS": {
+                    "host": os.environ.get("EMAIL_HOST", "localhost"),
+                    "port": int(os.environ.get("EMAIL_PORT", "587")),
+                    "use_tls": os.environ.get("EMAIL_USE_TLS", "True") == "True",
+                    "use_ssl": os.environ.get("EMAIL_USE_SSL", "False") == "True",
+                    "username": os.environ.get("EMAIL_HOST_USER", ""),
+                    "password": os.environ.get("EMAIL_HOST_PASSWORD", ""),
+                }
+            }
+            if _EMAIL_BACKEND == "django.core.mail.backends.smtp.EmailBackend"
+            else {}
+        ),
+    }
+}
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@wccomps.org")
 DEFAULT_REPLY_TO_EMAIL = os.environ.get("DEFAULT_REPLY_TO_EMAIL", "info@wccomps.org")
 SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)

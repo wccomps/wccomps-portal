@@ -1,6 +1,5 @@
 """Browser test fixtures: Playwright + session injection, no OAuth required."""
 
-import logging
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
@@ -11,8 +10,6 @@ from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
     from pytest_django.live_server_helper import LiveServer
-
-logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(scope="session")
@@ -29,20 +26,12 @@ def _allow_sync_orm_under_playwright() -> Iterator[None]:
 
 
 @pytest.fixture(scope="session")
-def pw_browser(_allow_sync_orm_under_playwright: None):
-    """Launch a single browser instance for the whole test session."""
+def pw_browser(_allow_sync_orm_under_playwright: None) -> Iterator[Browser]:
+    """Launch a single Chromium browser instance for the whole test session."""
     with sync_playwright() as p:
-        # Try Chromium first, fall back to Firefox if it fails to launch
-        for launch_fn in [p.chromium, p.firefox]:
-            try:
-                browser = launch_fn.launch(headless=True)
-                yield browser
-                browser.close()
-                return
-            except Exception:
-                logger.debug("Failed to launch %s, trying next", launch_fn)
-                continue
-        raise RuntimeError("No browser could be launched. Run: playwright install")
+        browser = p.chromium.launch(headless=True)
+        yield browser
+        browser.close()
 
 
 def create_session_context(

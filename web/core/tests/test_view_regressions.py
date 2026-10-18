@@ -657,3 +657,19 @@ def test_the_async_permission_checks_follow_the_admin_permission(admin_user: Use
     assert async_to_sync(admin.ahas_module_perms)("core")
     assert not async_to_sync(other.ahas_perm)("core.view_botstate")
     assert not async_to_sync(other.ahas_module_perms)("core")
+
+
+def test_migration_clears_legacy_superuser_and_staff_flags(gold_team_user: User) -> None:
+    """Migration 0017 clears legacy is_superuser and is_staff flags so User.has_perm cannot short-circuit."""
+    import importlib
+
+    from django.apps import apps
+
+    User.objects.filter(pk=gold_team_user.pk).update(is_superuser=True, is_staff=True)
+    migration = importlib.import_module("core.migrations.0017_clear_superuser_and_staff_flags")
+    migration.clear_superuser_and_staff_flags(apps, None)
+
+    refreshed = User.objects.get(pk=gold_team_user.pk)
+    assert not refreshed.is_superuser
+    assert not refreshed.is_staff
+    assert not refreshed.has_perm("core.view_botstate")

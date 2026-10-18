@@ -187,10 +187,7 @@ class ConsultationModal(discord.ui.Modal, title="Consultation Request"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         # Only include hostname if it's still in the modal
-        has_hostname = any(
-            isinstance(item, discord.ui.TextInput) and item.label == "Hostname (hands-on only)"
-            for item in self.children
-        )
+        has_hostname = self.hostname in self.children
         await create_ticket(
             interaction,
             category_id=self.category_id,
