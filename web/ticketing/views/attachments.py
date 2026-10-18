@@ -9,7 +9,7 @@ from django.shortcuts import redirect
 from django.views.decorators.http import require_POST
 
 from core.auth_utils import team_record_or_404
-from core.stored_files import clean_name, file_response, stored_type
+from core.stored_files import clean_name, file_response
 from ticketing.access import TICKET_STAFF
 from ticketing.models import Ticket, TicketAttachment
 
@@ -31,14 +31,7 @@ def _save_attachment(ticket: Ticket, uploaded_file: UploadedFile[bytes] | None, 
         raise BadRequest("File must have a name")
 
     try:
-        data = uploaded_file.read()
-        TicketAttachment.objects.create(
-            ticket=ticket,
-            file_data=data,
-            filename=filename,
-            mime_type=stored_type(data, filename),
-            uploaded_by=uploaded_by,
-        )
+        TicketAttachment.store(ticket, uploaded_file.read(), filename, uploaded_by)
     finally:
         uploaded_file.close()
 

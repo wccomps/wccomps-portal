@@ -13,7 +13,7 @@ from bot.permissions import check_blue_team, linked_team_member
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_input import read_ticket
 from bot.utils import add_field, choices, pinging
-from core.stored_files import clean_name, stored_type
+from core.stored_files import clean_name
 from core.utils import shorten
 from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketComment, TicketHistory
 from ticketing.utils import TicketRateLimitError, acreate_ticket_atomic, get_user_for_ticket
@@ -266,15 +266,7 @@ class TicketingCog(commands.Cog):
                     continue
 
                 try:
-                    file_data = await attachment.read()
-
-                    await TicketAttachment.objects.acreate(
-                        ticket=ticket,
-                        file_data=file_data,
-                        filename=filename,
-                        mime_type=stored_type(file_data, filename),
-                        uploaded_by=str(message.author),
-                    )
+                    await TicketAttachment.astore(ticket, await attachment.read(), filename, str(message.author))
 
                     logger.info(f"Stored attachment {filename} for ticket #{ticket.id}")
 

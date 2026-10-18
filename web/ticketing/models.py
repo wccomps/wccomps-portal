@@ -161,6 +161,27 @@ class TicketAttachment(models.Model):
     def __str__(self) -> str:
         return f"{self.filename} ({self.ticket.ticket_number})"
 
+    @classmethod
+    def store(cls, ticket: Ticket, data: bytes, filename: str, uploaded_by: str) -> TicketAttachment:
+        """Save an attachment with its filename cleaned and its MIME type derived from its bytes (or filename)."""
+        from core.stored_files import clean_name, stored_type
+
+        cleaned = clean_name(filename, "attachment")
+        return cls.objects.create(
+            ticket=ticket,
+            file_data=data,
+            filename=cleaned,
+            mime_type=stored_type(data, cleaned),
+            uploaded_by=uploaded_by,
+        )
+
+    @classmethod
+    async def astore(cls, ticket: Ticket, data: bytes, filename: str, uploaded_by: str) -> TicketAttachment:
+        """Async counterpart of store."""
+        from asgiref.sync import sync_to_async
+
+        return await sync_to_async(cls.store)(ticket, data, filename, uploaded_by)
+
 
 class TicketComment(models.Model):
     """Comment on ticket (bidirectional with Discord)."""
