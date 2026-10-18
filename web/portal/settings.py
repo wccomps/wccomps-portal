@@ -241,6 +241,11 @@ QUOTIENT_API_URL = os.environ.get("QUOTIENT_API_URL", "https://scoring.wccomps.o
 QUOTIENT_USERNAME = os.environ.get("QUOTIENT_USERNAME", "")
 QUOTIENT_PASSWORD = os.environ.get("QUOTIENT_PASSWORD", "")
 
+PROXMOX_API_URL = os.environ.get("PROXMOX_API_URL", "")
+PROXMOX_API_TOKEN = os.environ.get("PROXMOX_API_TOKEN", "")
+PROXMOX_VERIFY_SSL = os.environ.get("PROXMOX_VERIFY_SSL", "True") == "True"
+PROXMOX_DEFAULT_SNAPSHOT = os.environ.get("PROXMOX_DEFAULT_SNAPSHOT", "clean")
+
 # Email configuration for packet and scorecard distribution
 _EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
 MAILERS = {

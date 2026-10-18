@@ -23,6 +23,10 @@ def parse_playbook_steps(text: str) -> list[str]:
     return steps
 
 
+# Seeded in 0009_seed_ticket_categories.py ("Box Reset / Scrub")
+BOX_RESET_CATEGORY_ID = 2
+
+
 class TicketCategory(models.Model):
     display_name = models.CharField(max_length=100)
     points = models.IntegerField(default=0)

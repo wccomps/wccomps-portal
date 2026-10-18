@@ -34,6 +34,7 @@ from quotient.client import (
 )
 
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
+from core.proxmox import ProxmoxAPIError, ProxmoxClient, ProxmoxSnapshot, ProxmoxTaskStatus, ProxmoxVM
 from core.tests.external_json import Answer, answer_lists, deep, serving
 from core.tests.strategies import rolled_back
 
@@ -80,6 +81,21 @@ SERVICE_CHECKS = [
         "Error": "unexpected status code",
     }
 ]
+PROXMOX_POOL = {
+    "data": {
+        "members": [
+            {"type": "qemu", "vmid": 10105, "name": "team01-web", "node": "pve01", "status": "running", "template": 0}
+        ]
+    }
+}
+PROXMOX_SNAPSHOTS = {
+    "data": [
+        {"name": "clean", "description": "Clean baseline", "snaptime": 1700000000},
+        {"name": "current", "description": "You are here!"},
+    ]
+}
+PROXMOX_UPID = {"data": "UPID:pve01:00001A2B:00000001:65000000:qmrollback:10105:user@pam!token:"}
+PROXMOX_TASK_STATUS = {"data": {"status": "stopped", "exitstatus": "OK"}}
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -254,6 +270,51 @@ def check_service_checks(result: object) -> None:
     )
 
 
+def check_proxmox_vms(result: object) -> None:
+    outcome(
+        result,
+        lambda r: (
+            r is None
+            or (
+                isinstance(r, list)
+                and all(
+                    isinstance(v, ProxmoxVM)
+                    and is_int(v.vmid)
+                    and 10100 <= v.vmid <= 10199
+                    and all(is_str(s) and s for s in (v.name, v.host, v.node, v.status))
+                    for v in r
+                )
+            )
+        ),
+        "None or team VMs with vmid, name, host, node and status",
+    )
+
+
+def check_proxmox_snapshots(result: object) -> None:
+    outcome(
+        result,
+        lambda r: (
+            r is None
+            or (
+                isinstance(r, list)
+                and all(
+                    isinstance(s, ProxmoxSnapshot) and is_str(s.name) and s.name != "current" and is_str(s.description)
+                    for s in r
+                )
+            )
+        ),
+        "None or snapshots with a non-current name, and description",
+    )
+
+
+def check_proxmox_task(result: object) -> None:
+    outcome(
+        result,
+        lambda r: isinstance(r, ProxmoxTaskStatus) and is_str(r.status) and is_str(r.exitstatus),
+        "a ProxmoxTaskStatus with status and exitstatus",
+    )
+
+
 @dataclass(frozen=True)
 class Reader:
     """One reader: how to call it, the JSON its requests get in order, its documented result and errors, and the
@@ -277,6 +338,10 @@ def authentik() -> AuthentikManager:
 def quotient() -> QuotientClient:
     cache.clear()
     return QuotientClient(base_url="https://quotient.test")
+
+
+def proxmox() -> ProxmoxClient:
+    return ProxmoxClient(base_url="https://proxmox.test", api_token="user@pam!token=secret")
 
 
 def error_from_answer() -> object:
@@ -310,6 +375,8 @@ def check_choices(result: object) -> None:
 AM = "web/core/authentik_manager.py:AuthentikManager"
 QC = "web/quotient/client.py:QuotientClient"
 QJ = "web/quotient/client.py:_json"
+PX = "web/core/proxmox.py:ProxmoxClient"
+PJ = "web/core/proxmox.py:_json"
 READ = (f"{AM}._results", f"{AM}._json")
 USER = (f"{AM}._first_user", *READ)
 READERS = [
@@ -502,6 +569,44 @@ READERS = [
         (DONE, SERVICE_CHECKS),
         check_service_checks,
         (f"{QC}.get_service_checks", QJ),
+    ),
+    Reader(
+        "proxmox_list_team_vms",
+        lambda: proxmox().list_team_vms(1),
+        (PROXMOX_POOL,),
+        check_proxmox_vms,
+        (f"{PX}.list_team_vms", PJ),
+    ),
+    Reader(
+        "proxmox_list_snapshots",
+        lambda: proxmox().list_snapshots("pve01", 10105),
+        (PROXMOX_SNAPSHOTS,),
+        check_proxmox_snapshots,
+        (f"{PX}.list_snapshots", PJ),
+    ),
+    Reader(
+        "proxmox_rollback_snapshot",
+        lambda: proxmox().rollback_snapshot("pve01", 10105, "clean"),
+        (PROXMOX_UPID,),
+        lambda r: outcome(r, lambda u: is_str(u) and bool(u), "a non-empty task UPID"),
+        (f"{PX}.rollback_snapshot", PJ),
+        raises=(ProxmoxAPIError,),
+    ),
+    Reader(
+        "proxmox_start_vm",
+        lambda: proxmox().start_vm("pve01", 10105),
+        (PROXMOX_UPID,),
+        lambda r: outcome(r, lambda u: is_str(u) and bool(u), "a non-empty task UPID"),
+        (f"{PX}.start_vm", PJ),
+        raises=(ProxmoxAPIError,),
+    ),
+    Reader(
+        "proxmox_wait_for_task",
+        lambda: proxmox().wait_for_task("pve01", "UPID:pve01:1", timeout_seconds=0.0, poll_interval=0.0),
+        (PROXMOX_TASK_STATUS,),
+        check_proxmox_task,
+        (f"{PX}.wait_for_task", f"{PX}.get_task_status", PJ),
+        raises=(ProxmoxAPIError,),
     ),
 ]
 

@@ -186,3 +186,15 @@ class TicketBulkActionForm(forms.Form):
         if not numbers:
             raise forms.ValidationError("No tickets selected")
         return numbers
+
+
+class TicketBoxResetForm(forms.Form):
+    snapshot = forms.CharField(max_length=128)
+
+    def clean_snapshot(self) -> str:
+        from core.proxmox import is_valid_snapshot_name
+
+        snapshot = str(self.cleaned_data["snapshot"]).strip()
+        if not is_valid_snapshot_name(snapshot):
+            raise forms.ValidationError("Invalid snapshot name.")
+        return snapshot

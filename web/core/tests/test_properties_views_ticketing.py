@@ -20,6 +20,7 @@ from core.tests.views_harness import (
 )
 from ticketing.forms import (
     CreateTicketForm,
+    TicketBoxResetForm,
     TicketBulkActionForm,
     TicketChangeCategoryForm,
     TicketCommentForm,
@@ -87,6 +88,12 @@ CASES = [
         "ticket_service_checks",
         STAFF,
         query=lambda w: {"refresh": st.sampled_from(["1", "0"])},
+    ),
+    ViewCase("ticket_box_reset_panel", STAFF),
+    ViewCase(
+        "ticket_box_reset",
+        STAFF,
+        post=_form(TicketBoxResetForm(), snapshot=st.sampled_from(["clean", "pre_comp"])),
     ),
     ViewCase("ticket_comment", TICKET_USERS, post=_form(TicketCommentForm())),
     ViewCase("ticket_cancel", frozenset({"blue_team"})),

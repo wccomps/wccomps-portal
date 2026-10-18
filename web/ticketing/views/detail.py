@@ -16,7 +16,7 @@ from core.models import DiscordTask
 from core.tickets_config import get_all_categories, get_category_config
 from ticketing.access import TICKET_STAFF, ticket_actions
 from ticketing.forms import TicketCommentForm
-from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
+from ticketing.models import BOX_RESET_CATEGORY_ID, Ticket, TicketAttachment, TicketComment, TicketHistory
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
     if is_ops:
         history = TicketHistory.objects.filter(ticket=ticket).order_by("-timestamp")[:20]
+        context["is_box_reset"] = ticket.category_id == BOX_RESET_CATEGORY_ID
         context["variable_points"] = cat_info.get("variable_points", False)
         context["categories"] = get_all_categories()
         context["history"] = history
@@ -182,5 +183,45 @@ def ticket_service_checks(request: HttpRequest, ticket_number: str) -> HttpRespo
             "checks": checks,
             "streak_count": streak_count,
             "last_passed": last_passed,
+        },
+    )
+
+
+@require_permission(TICKET_STAFF)
+def ticket_box_reset_panel(request: HttpRequest, ticket_number: str) -> HttpResponse:
+    """Return the matched Proxmox VM and snapshot selector for a Box Reset ticket."""
+    from django.conf import settings
+
+    from core.proxmox import get_proxmox_client, match_team_vm
+
+    user = cast(User, request.user)
+    ticket = get_object_or_404(
+        Ticket.objects.select_related("team", "assigned_to"),
+        ticket_number=ticket_number,
+        category_id=BOX_RESET_CATEGORY_ID,
+    )
+    client = get_proxmox_client()
+    vms = client.list_team_vms(ticket.team.team_number)
+    matched_vm = match_team_vm(vms, ticket.team.team_number, ticket.hostname) if vms is not None else None
+    snapshots = client.list_snapshots(matched_vm.node, matched_vm.vmid) if matched_vm is not None else None
+    proxmox_unreachable = vms is None or (matched_vm is not None and snapshots is None)
+
+    default_snapshot = str(getattr(settings, "PROXMOX_DEFAULT_SNAPSHOT", "clean"))
+    selected_snapshot = next(
+        (s.name for s in (snapshots or ()) if s.name == default_snapshot),
+        snapshots[0].name if snapshots else "",
+    )
+
+    return render(
+        request,
+        "ticketing/box_reset_panel.html",
+        {
+            "ticket": ticket,
+            "actions": ticket_actions(user, ticket),
+            "proxmox_unreachable": proxmox_unreachable,
+            "matched_vm": matched_vm,
+            "snapshots": snapshots,
+            "selected_snapshot": selected_snapshot,
+            "pool_name": f"pool-{ticket.team.team_number:02d}",
         },
     )
