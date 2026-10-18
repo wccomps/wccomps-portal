@@ -91,7 +91,7 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
     return metadata
 
 
-UPTIME_PLACES = Decimal("0.0001")  # ServiceDetail.uptime's decimal places
+UPTIME_PLACES = Decimal(10) ** -ServiceDetail._meta.get_field("uptime").decimal_places
 
 
 def _check_storable(row: models.Model, where: str) -> None:
@@ -104,25 +104,24 @@ def _check_storable(row: models.Model, where: str) -> None:
 
 def sync_service_scores(user: User | None = None) -> dict[str, int]:
     """Sync every team's aggregate ServiceScore and per-service ServiceDetail records from Quotient. Raises
-    ValueError, writing nothing, when a value Quotient sends doesn't fit the portal's columns."""
+    ValueError, writing nothing, when Quotient's scores or uptimes can't be read or don't fit the portal's columns."""
     client = QuotientClient()
 
     export_data = client.get_service_export(force_refresh=True)
+    if export_data is None:
+        raise ValueError("Failed to retrieve service scores from Quotient")
     if not export_data:
         return {"teams_created": 0, "teams_updated": 0, "total": 0, "details_synced": 0}
 
     uptimes_data = client.get_uptimes(force_refresh=True)
-    uptimes_by_team: dict[int, dict[str, float]] = {}
-    if uptimes_data:
-        for tu in uptimes_data:
-            uptimes_by_team[tu.team_number] = tu.uptimes
+    if uptimes_data is None:
+        raise ValueError("Failed to retrieve uptimes from Quotient")
+    uptimes_by_team = {tu.team_number: tu.uptimes for tu in uptimes_data}
 
     teams_updated = 0
     teams_created = 0
     details_synced = 0
 
-    # Everything is checked against the columns before anything is written, so numbers Quotient sends that the
-    # scores can't hold refuse the whole sync (ValueError) instead of failing it halfway
     rows: list[tuple[Team, ServiceScore, list[ServiceDetail]]] = []
     for team_export in export_data:
         team = Team.objects.filter(team_number=team_export.team_number).first() if team_export.team_number else None

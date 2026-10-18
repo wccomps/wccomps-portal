@@ -166,6 +166,54 @@ def test_scores_that_dont_fit_refuse_the_sync(points: int, name: str) -> None:
         assert Team.objects.filter(team_number=1).exists()  # the transaction still works
 
 
+@pytest.mark.django_db
+@example(export=Answer(500, b""), uptimes=answer({"series": []}))
+@example(
+    export=answer(
+        [{"team_name": "team01", "services": [{"service_name": "web", "service_points": 10}], "gross_points": 10}]
+    ),
+    uptimes=Answer(500, b""),
+)
+@given(
+    export=st.sampled_from(
+        (
+            Answer(500, b""),
+            answer(
+                [
+                    {
+                        "team_name": "team01",
+                        "services": [{"service_name": "web", "service_points": 10}],
+                        "gross_points": 10,
+                    }
+                ]
+            ),
+        )
+    ),
+    uptimes=st.one_of(
+        st.builds(Answer, st.sampled_from((400, 404, 429, 500, 502, 503)), st.binary(max_size=40)),
+        st.text(max_size=20).map(answer),
+    ),
+)
+def test_unreadable_export_or_uptimes_refuses_the_sync(export: Answer, uptimes: Answer) -> None:
+    """When the score export failed, sync_service_scores returned 0 teams (a green "Synced 0 teams" banner); when
+    uptimes failed, it overwrote every service's uptime with 0."""
+    from decimal import Decimal
+
+    from scoring.models import ServiceDetail
+    from scoring.quotient_sync import sync_service_scores
+
+    from team.models import Team
+
+    with rolled_back():
+        team, _ = Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01"})
+        ServiceDetail.objects.create(team=team, service_name="web", points=Decimal("5.00"), uptime=Decimal("0.9500"))
+        with override_settings(QUOTIENT_API_URL="https://quotient.test", **QUOTIENT), serving([LOGIN, export, uptimes]):
+            cache.clear()
+            with pytest.raises(ValueError):
+                sync_service_scores()
+        assert ServiceDetail.objects.get(team=team, service_name="web").uptime == Decimal("0.9500")
+
+
 OAUTH_CONFIG = {
     "client_id": "property-client",
     "client_secret": "property-secret",
