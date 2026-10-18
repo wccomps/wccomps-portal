@@ -1,0 +1,93 @@
+{% load cotton %}
+<div class="d-flex justify-between items-center flex-wrap gap-10 mb-10">
+    {% if checks is None %}
+        <p class="text-muted m-0">Quotient isn't reachable.</p>
+    {% elif not quotient_service %}
+        <p class="text-muted m-0">No service specified for this ticket.</p>
+    {% elif not checks %}
+        <p class="text-muted m-0">No service checks recorded for {{ quotient_service }}.</p>
+    {% else %}
+        <div class="d-flex items-center flex-wrap gap-20 text-sm">
+            <span>
+                <strong>Current Streak:</strong>
+                {% if checks.0.passed %}
+                    <c-badge variant="success">
+                        Passing
+                    </c-badge>
+                {% else %}
+                    <c-badge variant="danger">
+                        Failing
+                    </c-badge>
+                {% endif %}
+                for {{ streak_count }} round{{ streak_count|pluralize }}
+            </span>
+            <span>
+                <strong>Last Passed:</strong>
+                {% if last_passed %}
+                    Round {{ last_passed.round_number }}{% if last_passed.timestamp %} ({{ last_passed.timestamp|date:"Y-m-d H:i:s" }}){% endif %}
+                {% else %}
+                    Never
+                {% endif %}
+            </span>
+        </div>
+    {% endif %}
+    <c-button type="button"
+              variant="default"
+              hx-get="{% url 'ticket_service_checks' ticket.ticket_number %}?refresh=1"
+              hx-target="closest #service-checks-panel"
+              hx-swap="innerHTML">
+        Refresh
+    </c-button>
+</div>
+{% if checks %}
+    <c-table aria_label="Service check history"
+             class="table-fixed"
+             widths="80px 160px 90px auto">
+        <c-slot name="headers">
+            <tr>
+                <c-table_header sortable="false">
+                    Round
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Time
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Result
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Output
+                </c-table_header>
+            </tr>
+        </c-slot>
+        {% for check in checks %}
+            <tr>
+                <td>{{ check.round_number }}</td>
+                <td>{{ check.timestamp|date:"Y-m-d H:i:s" }}</td>
+                <td>
+                    {% if check.passed %}
+                        <c-badge variant="success">
+                            Passed
+                        </c-badge>
+                    {% else %}
+                        <c-badge variant="danger">
+                            Failed
+                        </c-badge>
+                    {% endif %}
+                </td>
+                <td class="font-mono text-sm" hx-disable x-ignore>
+                    {% if check.error %}<div class="text-danger whitespace-pre-wrap">{{ check.error }}</div>{% endif %}
+                    {% if check.debug %}
+                        {% if check.debug|length > 200 %}
+                            <details class="mt-5">
+                                <summary>{{ check.debug|shorten:100 }}</summary>
+                                <pre class="code-block font-mono text-xs whitespace-pre-wrap max-h-300 overflow-y-auto m-0 mt-5">{{ check.debug }}</pre>
+                            </details>
+                        {% else %}
+                            <div class="whitespace-pre-wrap">{{ check.debug }}</div>
+                        {% endif %}
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+    </c-table>
+{% endif %}

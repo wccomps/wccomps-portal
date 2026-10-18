@@ -183,6 +183,16 @@
                     {% endif %}
                 </c-detail_grid>
             </c-fieldset>
+            {% if is_ops and ticket.service_name %}
+                <c-fieldset heading="Service Check History" collapsible="true" collapsed="false">
+                    <div id="service-checks-panel"
+                         hx-get="{% url 'ticket_service_checks' ticket.ticket_number %}"
+                         hx-trigger="load"
+                         hx-swap="innerHTML">
+                        <p class="text-muted m-0">Loading service check history from Quotient...</p>
+                    </div>
+                </c-fieldset>
+            {% endif %}
             {# djlint:off #}
         <c-fieldset heading="Comments" collapsible="true" collapsed="{% if not comments %}true{% else %}false{% endif %}">
             {# djlint:on #}

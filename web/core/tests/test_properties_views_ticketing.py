@@ -83,6 +83,11 @@ CASES = [
         TICKET_USERS,
         query=lambda w: {"comments_version": hostile_text(), "history_version": hostile_text()},
     ),
+    ViewCase(
+        "ticket_service_checks",
+        STAFF,
+        query=lambda w: {"refresh": st.sampled_from(["1", "0"])},
+    ),
     ViewCase("ticket_comment", TICKET_USERS, post=_form(TicketCommentForm())),
     ViewCase("ticket_cancel", frozenset({"blue_team"})),
     ViewCase("ticket_claim", STAFF, idempotent=(Ticket,), idempotent_as="ticketing_support"),

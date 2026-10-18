@@ -1,15 +1,16 @@
 import hashlib
 import logging
 from collections.abc import Iterable
+from itertools import takewhile
 from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from core.auth_utils import get_user_team, has_permission, team_record_or_404
+from core.auth_utils import get_user_team, has_permission, require_permission, team_record_or_404
 from core.discord_tasks import PostComment
 from core.models import DiscordTask
 from core.tickets_config import get_all_categories, get_category_config
@@ -146,4 +147,40 @@ def ticket_detail_dynamic(request: HttpRequest, ticket_number: str) -> HttpRespo
         request,
         "ops_ticket_detail_dynamic.html",
         {"ticket": ticket, "comments": comments, "history": history, **versions},
+    )
+
+
+@require_permission(TICKET_STAFF)
+def ticket_service_checks(request: HttpRequest, ticket_number: str) -> HttpResponse:
+    """Return recent Quotient service check results for a ticket."""
+    from quotient.client import get_quotient_client, quotient_service_name
+
+    ticket = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
+    quotient_service = quotient_service_name(ticket.service_name, ticket.hostname)
+    raw_checks = (
+        get_quotient_client().get_service_checks(
+            ticket.team.team_number,
+            quotient_service,
+            force_refresh=request.GET.get("refresh") == "1",
+        )
+        if quotient_service
+        else []
+    )
+
+    checks = raw_checks[:10] if raw_checks is not None else None
+    streak_count = (
+        sum(1 for _ in takewhile(lambda c: c.passed == raw_checks[0].passed, raw_checks)) if raw_checks else 0
+    )
+    last_passed = next((c for c in raw_checks if c.passed), None) if raw_checks else None
+
+    return render(
+        request,
+        "ticketing/service_checks.html",
+        {
+            "ticket": ticket,
+            "quotient_service": quotient_service,
+            "checks": checks,
+            "streak_count": streak_count,
+            "last_passed": last_passed,
+        },
     )

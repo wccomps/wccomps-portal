@@ -176,6 +176,8 @@ def build_world() -> World:
                 ticket_number=number,
                 title=f"Ticket {number}",
                 status=status,
+                hostname="web" if number == "T001-001" else "",
+                service_name="web:http" if number == "T001-001" else "",
                 assigned_to=users["ticketing_support"] if status != "open" else None,
                 assigned_at=timezone.now() if status != "open" else None,
                 resolved_at=timezone.now() if status == "resolved" else None,
