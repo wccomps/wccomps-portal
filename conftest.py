@@ -1,8 +1,19 @@
-"""Hypothesis profiles for every test under the repo, chosen by HYPOTHESIS_PROFILE (default "ci")."""
+"""Hypothesis profiles and migration-seed restoration for every test under the repo."""
 
 import os
+from typing import Any
 
+from django.db.models.signals import post_migrate
 from hypothesis import HealthCheck, settings
+
+
+def _restore_migration_seeds(app_config: Any, **kwargs: Any) -> None:
+    from ticketing.tests.seeded_categories import restore_migration_seeds
+
+    restore_migration_seeds(app_config, **kwargs)
+
+
+post_migrate.connect(_restore_migration_seeds, dispatch_uid="restore_migration_seeds")
 
 # Property tests take pytest fixtures once per test and roll each example back themselves
 # (core.tests.strategies.rolled_back), so the function-scoped fixture check doesn't apply. Hostile inputs are

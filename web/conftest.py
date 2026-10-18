@@ -136,23 +136,6 @@ def phone_consult_category(db):
 
 
 @pytest.fixture(autouse=True)
-def ensure_seeded_ticket_categories(request):
-    """Restore migration-seeded ticket categories if a transactional test's flush removed them.
-
-    pytest-django runs transactional tests last in a single process, but under xdist worksteal a
-    worker can run ordinary tests after a flush, which made category-dependent tests flaky.
-    """
-    uses_db = request.node.get_closest_marker("django_db") or {"db", "transactional_db"} & set(request.fixturenames)
-    if not uses_db:
-        return
-    from ticketing.tests.seeded_categories import ensure_seeded_categories
-
-    request.getfixturevalue("django_db_setup")
-    with request.getfixturevalue("django_db_blocker").unblock():
-        ensure_seeded_categories()
-
-
-@pytest.fixture(autouse=True)
 def reset_quotient_client_cache():
     """Reset the QuotientClient LRU cache before each test for proper isolation."""
     from quotient.client import get_quotient_client

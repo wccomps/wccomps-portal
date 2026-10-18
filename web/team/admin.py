@@ -150,36 +150,9 @@ class SchoolInfoAdmin(PortalModelAdmin[SchoolInfo]):
 
     @admin.action(description="Export as CSV")
     def export_as_csv(self, request: HttpRequest, queryset: QuerySet[SchoolInfo]) -> HttpResponse:
-        from core.csv_export import csv_writer
+        from .forms import school_info_csv_response
 
-        response = HttpResponse(content_type="text/csv")
-        response["Content-Disposition"] = 'attachment; filename="school_info.csv"'
-
-        writer = csv_writer(response)
-        writer.writerow(
-            [
-                "team_number",
-                "team_name",
-                "school_name",
-                "contact_email",
-                "secondary_email",
-                "notes",
-            ]
-        )
-
-        for school_info in queryset.select_related("team", "school"):
-            writer.writerow(
-                [
-                    school_info.team.team_number,
-                    school_info.team.team_name,
-                    school_info.school_name,
-                    school_info.contact_email,
-                    school_info.secondary_email or "",
-                    school_info.notes or "",
-                ]
-            )
-
-        return response
+        return school_info_csv_response(queryset.select_related("team", "school"))
 
     @admin.action(description="Import from CSV")
     def import_from_csv(self, request: HttpRequest, queryset: QuerySet[SchoolInfo]) -> HttpResponse:

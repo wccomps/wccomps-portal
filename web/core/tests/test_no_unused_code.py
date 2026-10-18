@@ -248,6 +248,7 @@ CODE_EXCEPTIONS = {
     "*:indexes": DJANGO_MODEL_OPTION,
     "*:unique_together": DJANGO_MODEL_OPTION,
     "*:default_auto_field": "Django reads AppConfig.default_auto_field",
+    "*:default_site": "Django reads AdminConfig.default_site",
     "*:list_display": DJANGO_ADMIN_OPTION,
     "*:list_filter": DJANGO_ADMIN_OPTION,
     "*:list_select_related": DJANGO_ADMIN_OPTION,
@@ -333,11 +334,10 @@ def template_reference_re(template: str) -> re.Pattern[str]:
 
 
 def built_partials() -> set[str]:
-    """Templates named at run time: the guide's section for each action, and the competition page's sections."""
-    from core.admin_views.competition import guide_partial
-    from core.admin_views.places import PLACES, Section, section_partial
+    """Templates named at run time: the competition page's sections."""
+    from core.admin_views.places import Section, section_partial
 
-    return {guide_partial(action) for action in PLACES} | {section_partial(section) for section in Section}
+    return {section_partial(section) for section in Section}
 
 
 def test_every_template_is_used() -> None:

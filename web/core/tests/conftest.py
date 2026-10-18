@@ -13,10 +13,7 @@ from core.tests.views_harness import World, build_world, offline
 def module_world(django_db_setup: Any, django_db_blocker: Any) -> Iterator[World]:
     """One world per test module: each test runs in a savepoint inside the module's transaction (pytest-django's
     db), and each example in one more (rolled_back), all rolled back."""
-    from ticketing.tests.seeded_categories import ensure_seeded_categories
-
     with django_db_blocker.unblock(), transaction.atomic(), offline():
-        ensure_seeded_categories()  # a transactional test's flush may have run on this worker (web/conftest.py)
         yield build_world()
         transaction.set_rollback(True)
 

@@ -201,7 +201,7 @@ def build_world() -> World:
     pending_task = DiscordTask.enqueue(SyncRoles(requested_by="prop-admin", dry_run=False))
 
     # Red team: findings by red (pending and approved), one by admin that red contributes to, a pool, screenshots
-    attack = AttackType.objects.filter(is_active=True).first() or AttackType.objects.create(name="Default creds")
+    attack = AttackType.objects.filter(is_active=True).first()
     pool = RedTeamIPPool.objects.create(name="Pool A", ip_addresses="10.0.0.1", created_by=users["red_team"])
     # Each red role edits only its own pools: one for admin too
     admin_pool = RedTeamIPPool.objects.create(name="Pool B", ip_addresses="10.0.0.2", created_by=users["admin"])

@@ -44,6 +44,7 @@ from core.tests.strategies import (
     rolled_back,
     uploaded_files,
 )
+from team.forms import SCHOOL_COLUMNS as SCHOOL_HEADERS
 from team.forms import parse_csv_file, validate_csv_data
 from team.models import Team
 from ticketing.models import Ticket, TicketAttachment, TicketCategory
@@ -58,7 +59,6 @@ PROBE = '<b data-probe="1">'
 # CSV text
 # ---------------------------------------------------------------------------------------------------------------
 
-SCHOOL_HEADERS = ("school_name", "contact_email", "secondary_email", "notes")
 HEADER_SPELLINGS = (
     *SCHOOL_HEADERS,
     "School Name",
@@ -433,7 +433,8 @@ def test_red_finding_view_answers_any_screenshots(files: list[SimpleUploadedFile
     from scoring.models import AttackType
 
     team, _ = Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01"})
-    attack = AttackType.objects.filter(is_active=True).first() or AttackType.objects.create(name="Default")
+    attack = AttackType.objects.filter(is_active=True).first()
+    assert attack is not None
     client = _client_for(red_team_user)
     post = {
         "attack_type": str(attack.pk),

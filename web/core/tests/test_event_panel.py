@@ -1,4 +1,4 @@
-"""The competition page's Event and Steps sections, and the Running an event guide."""
+"""The competition page's Event and Steps sections."""
 
 import re
 from contextlib import ExitStack
@@ -90,13 +90,11 @@ def test_with_no_event_the_event_section_points_at_the_import(client):
     assert ">No event</span>" in _row(panel, "Status")
 
 
-def test_the_toolbar_links_the_setup_page_and_the_section_nav_the_guide(client):
+def test_the_toolbar_links_the_setup_page(client):
     page = _flat(_page(client))
     toolbar = page[page.index('<div class="toolbar">') : page.index('id="event-panel"')]
 
     assert re.search(f'<a href="{reverse("admin_competition_setup")}"[^>]*>Competition setup</a>', toolbar)
-    assert f'href="{reverse("admin_competition_guide")}"' not in toolbar
-    assert re.search(f'<a href="{reverse("admin_competition_guide")}"[^>]*>Running an Event</a>', page)
 
 
 def test_an_open_event_names_its_season_schools_and_date_and_points_at_the_packets(client):
@@ -258,15 +256,14 @@ def _ids(html):
 
 
 @pytest.mark.parametrize("stage", ALL_STAGES)
-def test_no_link_on_the_page_or_in_the_guide_lands_on_a_missing_section(client, stage):
+def test_no_link_on_the_page_lands_on_a_missing_section(client, stage):
     _arrange(stage)
     pages = {
         reverse("admin_competition"): _page(client),
         reverse("admin_competition_setup"): client.get(reverse("admin_competition_setup")).content.decode(),
     }
-    guide = client.get(reverse("admin_competition_guide")).content.decode()
 
-    for html in (*pages.values(), guide):
+    for html in pages.values():
         for path, anchor in re.findall(r'href="(/ops/admin/competition/(?:setup/)?)#([^"]+)"', html):
             assert anchor in _ids(pages[path]), f"{path}#{anchor} in stage {stage}"
 
@@ -476,43 +473,17 @@ def test_a_page_a_step_links_names_itself_with_the_title_the_step_shows(admin_cl
     assert re.search(rf'class="breadcrumbs">{parent}{re.escape(place.page_title)}<', page)
 
 
-def test_the_guide_walks_the_steps_in_order_with_their_links(client):
-    response = client.get(reverse("admin_competition_guide"))
-
-    assert response.status_code == 200
-    page = response.content.decode()
-    headings = re.findall(r'<h2 class="mt-20" id="([a-z_]+)">', page)
-    assert headings == [action.value for action in PLACES]
-    hrefs = set(re.findall(r'href="([^"]*)"', page))
-    for action in PLACES:
-        assert action_url(action) in hrefs, action
-    assert f"{reverse('admin_competition')}#advanced" in hrefs
-    # Where each action under Advanced is taken, and only those
-    assert _flat(page).count("under Advanced on the Competition page") == sum(p.in_advanced for p in PLACES.values())
-    assert "Danger Zone" not in page
-    assert "\u2014" not in page and "\u2013" not in page
-
-
-def test_every_guide_link_resolves(client):
-    page = client.get(reverse("admin_competition_guide")).content.decode()
-    main = page[page.index('id="event-guide"') :]
-    for href in set(re.findall(r'href="(/[^"#]*)', main)):
-        assert client.get(href).status_code in (200, 302), href
-
-
-def test_the_guide_is_for_gold_team_and_admins_only(blue_team_user, white_team_user, admin_user):
-    for user, allowed in ((blue_team_user, False), (white_team_user, False), (admin_user, True)):
-        client = Client()
-        client.force_login(user)
-        response = client.get(reverse("admin_competition_guide"))
-        assert (response.status_code == 200) == allowed, user.username
-
-
-def test_the_guide_is_in_the_ops_navigation(client):
-    page = client.get(reverse("admin_competition_guide")).content.decode()
-    assert 'aria-current="page"' in page
+def test_the_guide_page_is_gone(client):
+    assert client.get("/ops/admin/competition/guide/").status_code == 404
     with pytest.raises(NoReverseMatch):
-        reverse("admin_competition_guide", args=[1])
+        reverse("admin_competition_guide")
+
+
+def test_competition_setup_links_scoring_setup_and_orange_checks(client):
+    page = client.get(reverse("admin_competition_setup")).content.decode()
+
+    assert f'href="{reverse("scoring:scoring_config")}"' in page
+    assert f'href="{reverse("orange_team:check_list")}"' in page
 
 
 def test_the_competition_page_uses_words_not_symbol_marks(client):
@@ -532,14 +503,6 @@ def test_with_no_active_season_close_out_links_the_seasons_page(client):
     assert "No season is active" in close_out
     assert f'href="{reverse("registration_season_list")}"' in close_out
     assert "Registration, Seasons" not in page
-
-
-def test_the_guide_links_the_seasons_page_and_says_where_the_checks_show(client):
-    page = client.get(reverse("admin_competition_guide")).content.decode()
-
-    assert f'href="{reverse("registration_season_list")}"' in page
-    assert "If you already emailed them, you can close out." in page
-    assert "this step and the next" not in page
 
 
 @pytest.mark.parametrize(("end_in_hours", "shown"), [(None, True), (2, True), (-1, False)])

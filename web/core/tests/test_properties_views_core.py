@@ -133,7 +133,6 @@ CASES = [
         idempotent=(CompetitionConfig,),
     ),
     ViewCase("admin_competition_apps", OPS),
-    ViewCase("admin_competition_guide", OPS),
     ViewCase("admin_competition_setup", OPS),
     ViewCase("admin_teams", OPS),
     ViewCase(
