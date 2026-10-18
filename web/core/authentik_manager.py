@@ -1,7 +1,7 @@
 """Authentik API manager for application control."""
 
 import logging
-from typing import TypedDict
+from typing import TypedDict, cast
 from urllib.parse import quote
 
 import httpx
@@ -24,6 +24,15 @@ class AuthentikUser(TypedDict):
 
 
 logger = logging.getLogger(__name__)
+
+MAX_PAGES = 100  # of 100 results each: a list endpoint still saying "next" past this is broken, not long
+
+
+def _holds(value: object, kind: type) -> bool:
+    """Whether a JSON value is of this type (a list: of strings; True is no int)."""
+    if kind is list:
+        return isinstance(value, list) and all(isinstance(v, str) for v in value)
+    return type(value) is kind
 
 
 class AuthentikAPIError(Exception):
@@ -90,9 +99,10 @@ class AuthentikManager:
     def _handle_response_error(self, response: httpx.Response, context: str) -> AuthentikAPIError:
         try:
             error_data = response.json()
-            error_detail = error_data.get("detail", str(error_data))
-        except ValueError, httpx.DecodingError:
-            error_detail = response.text
+        except ValueError, RecursionError:
+            error_data = None
+        detail = error_data.get("detail") if isinstance(error_data, dict) else None
+        error_detail = detail if isinstance(detail, str) else response.text
 
         status_messages = {
             401: "Authentication failed (check AUTHENTIK_TOKEN)",
@@ -114,6 +124,39 @@ class AuthentikManager:
             url=str(response.url),
         )
 
+    def _json(self, response: httpx.Response, context: str) -> object:
+        """The answer's JSON; AuthentikAPIError when it isn't JSON (or is nested too deep to read)."""
+        try:
+            return response.json()
+        except ValueError, RecursionError:
+            raise AuthentikAPIError(
+                f"{context}: the answer isn't JSON", response.status_code, url=str(response.url)
+            ) from None
+
+    def _results(self, response: httpx.Response, context: str) -> tuple[list[dict[str, object]], bool]:
+        """A list endpoint's results (objects only) and whether another page follows; AuthentikAPIError for an
+        answer of any other shape."""
+        data = self._json(response, context)
+        results = data.get("results") if isinstance(data, dict) else None
+        if not isinstance(results, list) or not all(isinstance(r, dict) for r in results):
+            raise AuthentikAPIError(f"{context}: the answer has no list of results", url=str(response.url))
+        pagination = data.get("pagination") if isinstance(data, dict) else None
+        has_next = bool(pagination.get("next")) if isinstance(pagination, dict) else False
+        return results, has_next
+
+    def _first_user(self, response: httpx.Response, context: str) -> AuthentikUser | None:
+        """The first user a users query found, or None; AuthentikAPIError if it has no int pk, or a username that
+        isn't text."""
+        users, _ = self._results(response, context)
+        if not users:
+            return None
+        user = users[0]
+        if type(user.get("pk")) is not int or not isinstance(user.get("username", ""), str):
+            raise AuthentikAPIError(
+                f"{context}: the user has no pk, or a username that isn't text", url=str(response.url)
+            )
+        return cast(AuthentikUser, user)
+
     def list_applications(self) -> list[str]:
         """App slugs for the add-app picker, via /providers/all/.
 
@@ -125,20 +168,20 @@ class AuthentikManager:
         url = f"{self.base_url}/api/v3/providers/all/"
         slugs: set[str] = set()
         try:
-            page = 1
-            while True:
+            for page in range(1, MAX_PAGES + 1):
                 params: dict[str, str | int] = {"page_size": 100, "page": page}
                 self._log_request("GET", url, params=params)
                 response = self.client.get(url, params=params)
                 response.raise_for_status()
-                data = response.json()
-                for provider in data.get("results", []):
+                providers, has_next = self._results(response, "List providers")
+                for provider in providers:
                     slug = provider.get("assigned_application_slug")
-                    if slug:
+                    if isinstance(slug, str) and slug:
                         slugs.add(slug)
-                if not data.get("pagination", {}).get("next"):
+                if not has_next:
                     break
-                page += 1
+            else:
+                raise AuthentikAPIError(f"List providers: more than {MAX_PAGES} pages")
             logger.info(f"Found {len(slugs)} application slugs via providers")
             return sorted(slugs)
         except Exception as e:
@@ -159,9 +202,12 @@ class AuthentikManager:
                 logger.warning(f"Application '{slug}' not found in Authentik")
                 return None
             response.raise_for_status()
-            app: AuthentikApplication = response.json()
-            logger.info(f"Found application '{slug}' with pk={app.get('pk')}")
-            return app
+            app = self._json(response, f"Get application '{slug}'")
+            if not isinstance(app, dict) or not isinstance(app.get("pk"), str):
+                logger.error(f"Application '{slug}': Authentik's answer has no pk")
+                return None
+            logger.info(f"Found application '{slug}' with pk={app['pk']}")
+            return cast(AuthentikApplication, app)
         except httpx.HTTPStatusError as e:
             error = self._handle_response_error(e.response, f"Get application '{slug}'")
             logger.exception(str(error))
@@ -182,21 +228,21 @@ class AuthentikManager:
 
             response = self.client.get(url, params={"target": app_pk})
             response.raise_for_status()
-            bindings = response.json().get("results", [])
+            bindings, _ = self._results(response, f"Query bindings for app {app_pk}")
 
             logger.debug(f"Found {len(bindings)} binding(s) for application {app_pk}")
 
             for binding in bindings:
-                group_obj = binding.get("group_obj", {})
+                group_obj = binding.get("group_obj")
                 binding_pk = binding.get("pk")
+                group_name = group_obj.get("name") if isinstance(group_obj, dict) else None
 
-                if group_obj:
-                    group_name = group_obj.get("name", "")
+                if isinstance(group_name, str) and isinstance(binding_pk, str):
                     logger.debug(f"Found group binding: {group_name} (pk={binding_pk})")
 
                     if "blueteam" in group_name.lower():
                         logger.info(f"Found blueteam group binding: {binding_pk} (group={group_name})")
-                        return binding, None
+                        return cast(AuthentikBinding, binding), None
 
             error_msg = (
                 f"No BlueTeam group binding found for application {app_pk}. "
@@ -299,13 +345,12 @@ class AuthentikManager:
                 f"{self.base_url}/api/v3/core/users/?username={quote(username, safe='')}",
             )
             response.raise_for_status()
-            users = response.json().get("results", [])
+            user = self._first_user(response, f"Find user {username}")
 
-            if not users:
+            if not user:
                 logger.warning(f"Authentik user not found for username {username}")
                 return False
 
-            user = users[0]
             if user.get("uid") != uid:
                 logger.warning(f"Authentik user {username} is a different identity now; not storing discord_id")
                 return False
@@ -342,12 +387,12 @@ class AuthentikManager:
                 params={"username": username},
             )
             response.raise_for_status()
-            users = response.json().get("results", [])
+            user = self._first_user(response, f"Find user {username}")
 
-            if not users:
+            if not user:
                 return False, f"User {username} not found", 0
 
-            user_pk = users[0]["pk"]
+            user_pk = user["pk"]
             logger.info(f"Found user {username} with pk={user_pk}")
 
             response = self.client.get(
@@ -355,14 +400,14 @@ class AuthentikManager:
                 params={"user": user_pk},
             )
             response.raise_for_status()
-            sessions = response.json().get("results", [])
+            sessions, _ = self._results(response, f"List sessions of {username}")
 
             logger.info(f"Found {len(sessions)} session(s) for user {username}")
 
             revoked_count = 0
             for session in sessions:
                 session_uuid = session.get("uuid")
-                if not session_uuid:
+                if not isinstance(session_uuid, str) or not session_uuid:
                     continue
 
                 try:
@@ -399,12 +444,10 @@ class AuthentikManager:
                 f"{self.base_url}/api/v3/core/users/?username={quote(username, safe='')}",
             )
             response.raise_for_status()
-            users: list[AuthentikUser] = response.json().get("results", [])
+            user = self._first_user(response, f"Find user {username}")
 
-            if not users:
+            if not user:
                 return (False, "User not found")
-
-            user: AuthentikUser = users[0]
 
             is_valid, error = validate_team_account(user, username)
             if not is_valid:
@@ -438,12 +481,11 @@ class AuthentikManager:
                 f"{self.base_url}/api/v3/core/users/?username={quote(username, safe='')}",
             )
             response.raise_for_status()
-            users: list[AuthentikUser] = response.json().get("results", [])
+            user = self._first_user(response, f"Find user {username}")
 
-            if not users:
+            if not user:
                 return (False, f"User {username} not found")
 
-            user: AuthentikUser = users[0]
             user_pk: int = user["pk"]
 
             is_valid, error = validate_team_account(user, username)
@@ -462,28 +504,36 @@ class AuthentikManager:
             logger.exception(f"Failed to reset password for {username}: {e}")
             return (False, "see the server logs")  # the callers say what failed
 
-    def _list_all(self, path: str, params: dict[str, str]) -> list[dict[str, object]]:
-        """Fetch every page of an Authentik list endpoint. Raises on any HTTP error."""
+    def _list_all(self, path: str, params: dict[str, str], fields: dict[str, type]) -> list[dict[str, object]]:
+        """Fetch every page of an Authentik list endpoint, each result holding these fields of these types (a list
+        field: of strings). Raises AuthentikAPIError on any HTTP error or an answer of another shape."""
         results: list[dict[str, object]] = []
-        page: int | None = 1
-        while page:
+        for page in range(1, MAX_PAGES + 1):
             response = self.client.get(
                 f"{self.base_url}{path}", params={**params, "page": str(page), "page_size": "100"}
             )
             if response.is_error:
                 raise self._handle_response_error(response, f"List {path}")
-            data = response.json()
-            results.extend(data["results"])
-            page = data["pagination"]["next"] or None
-        return results
+            found, has_next = self._results(response, f"List {path}")
+            for result in found:
+                if not all(_holds(result.get(name), kind) for name, kind in fields.items()):
+                    raise AuthentikAPIError(f"List {path}: a result without {', '.join(fields)}", url=str(response.url))
+            results.extend(found)
+            if not has_next:
+                return results
+        raise AuthentikAPIError(f"List {path}: more than {MAX_PAGES} pages")
 
     def list_all_users(self) -> list[dict[str, object]]:
         """Every Authentik user, with ``uid``, ``is_active`` and direct group pks in ``groups``."""
-        return self._list_all("/api/v3/core/users/", {"include_groups": "false"})
+        return self._list_all(
+            "/api/v3/core/users/", {"include_groups": "false"}, {"uid": str, "is_active": bool, "groups": list}
+        )
 
     def list_all_groups(self) -> list[dict[str, object]]:
         """Every Authentik group, with ``pk``, ``name`` and parent pks in ``parents``."""
-        return self._list_all("/api/v3/core/groups/", {"include_users": "false"})
+        return self._list_all(
+            "/api/v3/core/groups/", {"include_users": "false"}, {"pk": str, "name": str, "parents": list}
+        )
 
     def get_user_with_groups(self, username: str) -> dict[str, object] | None:
         """Get an Authentik user with their groups_obj, or None if not found or the lookup failed (logged)."""
@@ -493,11 +543,15 @@ class AuthentikManager:
                 params={"username": username},
             )
             response.raise_for_status()
-            users = response.json().get("results", [])
-            if not users:
+            user = self._first_user(response, f"Find user {username}")
+            if user is None:
                 return None
-            result: dict[str, object] = users[0]
-            return result
+            groups = cast(dict[str, object], user).get("groups_obj", [])
+            if not isinstance(groups, list) or not all(
+                isinstance(g, dict) and isinstance(g.get("name"), str) for g in groups
+            ):
+                raise AuthentikAPIError(f"Find user {username}: groups without names", url=str(response.url))
+            return cast(dict[str, object], user)
         except Exception as e:
             logger.exception(f"Failed to get user {username}: {e}")
             return None
@@ -510,12 +564,8 @@ class AuthentikManager:
                 params={"name": name},
             )
             response.raise_for_status()
-            results = response.json().get("results", [])
-            for group in results:
-                if group.get("name") == name:
-                    result: dict[str, object] = group
-                    return result
-            return None
+            groups, _ = self._results(response, f"Find group {name}")
+            return next((g for g in groups if g.get("name") == name and isinstance(g.get("pk"), str)), None)
         except Exception as e:
             logger.exception(f"Failed to look up group {name}: {e}")
             return None
