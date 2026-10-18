@@ -8,6 +8,7 @@ from hypothesis import strategies as st
 from bot.cogs.admin_competition import AdminCompetitionCog
 from bot.cogs.admin_teams import AdminTeamsCog
 from bot.cogs.admin_tickets import AdminTicketsCog
+from bot.cogs.help_panels import TeamHelpView, TicketButton
 from bot.cogs.scoring import ScoringCog
 from bot.cogs.ticketing import TicketingCog
 from bot.tests.bot_harness import (
@@ -241,7 +242,7 @@ INCIDENT = Command(ScoringCog, ScoringCog.incident_report.callback, frozenset({"
 
 
 def long_tickets(text: str, count: int) -> Chosen:
-    return Chosen({"hostile rows": True, "a name": "Team", "a text": text, "more tickets": count})
+    return Chosen({"hostile rows": True, "a name": "Team", "a text": text, "more categories": 0, "more tickets": count})
 
 
 @example(text="x" * 5000, count=40)
@@ -326,7 +327,22 @@ def test_thread_names_and_autocomplete_choices_fit_in_100_characters(bot_world: 
     """A ticket's thread name (cut with shorten, which adds "..." past its limit) reached 103 characters, and the
     category autocomplete named a choice "<category> (<points>pt)", past the 100 Discord takes: Discord refused the
     thread, and showed no choices."""
-    chosen = {"hostile rows": True, "a name": name, "a text": "t", "more tickets": 0}
+    chosen = {"hostile rows": True, "a name": name, "a text": "t", "more categories": 0, "more tickets": 0}
     admin = {**chosen, "role": "admin", "team_number": 1, "category": "6", "description": "x"}
     drive(ADMIN_TICKET, bot_world, Chosen(admin))
     drive(TICKET, bot_world, Chosen({**chosen, "role": "blue_team", "category": "6", "description": "Help"}))
+
+
+TICKET_BUTTON = Item("button", TicketButton, lambda run, data: TeamHelpView(run.discord.bot), EVERYONE)
+RECREATE = Command(AdminTeamsCog, AdminTeamsCog.admin_recreate_teams.callback, may("admin"))
+
+
+@example(count=30, name="c" * 100)
+@views_profile()
+@given(count=st.integers(25, 60), name=stored_text(100).filter(str.strip))
+def test_the_ticket_panel_and_its_select_fit_many_categories(bot_world: World, count: int, name: str) -> None:
+    """The category select offered every category a team may create, and Discord takes 25 options; the ticket
+    panel listed them all in its embed, past the 4096 characters a description takes."""
+    chosen = {"hostile rows": True, "a name": name, "a text": "t", "more categories": count, "more tickets": 0}
+    drive(TICKET_BUTTON, bot_world, Chosen({**chosen, "role": "blue_team"}))
+    drive(RECREATE, bot_world, Chosen({**chosen, "role": "admin", "teams": "2"}))

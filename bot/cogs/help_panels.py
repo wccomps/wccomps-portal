@@ -12,6 +12,7 @@ from django.conf import settings
 from bot.permissions import linked_team_member
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_input import read_ticket
+from bot.utils import DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT, DISCORD_SELECT_OPTION_LIMIT, fit_lines
 from core.tickets_config import TicketCategoryConfig, get_all_categories
 from ticketing.utils import TicketRateLimitError
 
@@ -236,7 +237,8 @@ class CategorySelect(discord.ui.Select["TicketCategoryView"]):
     def __init__(self, categories: dict[int, TicketCategoryConfig]) -> None:
         self.categories = categories
         options = []
-        for cat_id, cat_info in categories.items():
+        # A select holds 25 options: the first 25 categories in their sort order
+        for cat_id, cat_info in list(categories.items())[:DISCORD_SELECT_OPTION_LIMIT]:
             points = cat_info.get("points", 0)
             options.append(
                 discord.SelectOption(
@@ -463,13 +465,14 @@ class HelpPanelsCog(commands.Cog):
             points = cat_info.get("points", 0)
             categories_text.append(f"• **{cat_info['display_name']}**: {points}pt")
 
+        intro = (
+            "**Create a support ticket and our volunteers will assist you!**\n\n"
+            "Click the button below to create a ticket. A volunteer will respond shortly.\n\n"
+            "**Available Categories:**\n"
+        )
         embed = discord.Embed(
             title="Need Help?",
-            description=(
-                "**Create a support ticket and our volunteers will assist you!**\n\n"
-                "Click the button below to create a ticket. A volunteer will respond shortly.\n\n"
-                "**Available Categories:**\n" + "\n".join(categories_text)
-            ),
+            description=intro + fit_lines(categories_text, DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT - len(intro)),
             color=discord.Color.green(),
         )
 

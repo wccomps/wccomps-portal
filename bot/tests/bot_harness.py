@@ -221,6 +221,10 @@ def seed_hostile(world: World, data: Draws) -> None:
         ip_address=text[:45],
         resolution_notes=text,
     )
+    TicketCategory.objects.bulk_create(
+        TicketCategory(display_name=f"{n} {name}"[:100].strip() or "Category", sort_order=100 + n, user_creatable=True)
+        for n in range(data.draw(st.integers(0, 30), label="more categories"))
+    )
     extra = data.draw(st.integers(0, 40), label="more tickets")
     Ticket.objects.bulk_create(
         Ticket(

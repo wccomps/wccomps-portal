@@ -44,6 +44,7 @@ def fit(text: str, limit: int) -> str:
 
 DISCORD_CHOICE_CHAR_LIMIT = 100
 DISCORD_CHOICE_COUNT_LIMIT = 25
+DISCORD_SELECT_OPTION_LIMIT = 25
 
 
 def choices(options: list[tuple[str, str]]) -> list[app_commands.Choice[str]]:
