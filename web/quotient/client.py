@@ -55,9 +55,15 @@ def _whole(value: object, what: str) -> int:
 
 
 def _fraction(value: object, what: str) -> float:
-    if type(value) not in (int, float) or not 0 <= value <= 1:  # type: ignore[operator]
+    if isinstance(value, bool) or not isinstance(value, int | float) or not 0 <= value <= 1:
         raise ValueError(f"{what} isn't a fraction from 0 to 1: {value!r:.80}")
-    return float(value)  # type: ignore[arg-type]
+    return float(value)
+
+
+def _object(value: object, what: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{what} isn't an object: {value!r:.80}")
+    return value
 
 
 def _objects(value: object, what: str) -> list[dict[str, object]]:
@@ -67,11 +73,10 @@ def _objects(value: object, what: str) -> list[dict[str, object]]:
 
 
 def _field(data: object, key: str, what: str) -> object:
-    if not isinstance(data, dict):
-        raise ValueError(f"{what} isn't an object: {data!r:.80}")
-    if key not in data:
-        raise KeyError(key)
-    return data[key]
+    obj = _object(data, what)
+    if key not in obj:
+        raise ValueError(f"{what} has no {key!r}")
+    return obj[key]
 
 
 def _team_number(team_name: str) -> int:
@@ -219,7 +224,7 @@ class QuotientClient:
 
             # /api/metadata returns: {"boxes": [{"name": str, "ip": str, "services": [str]}]}
             boxes = []
-            box_list = data.get("boxes", []) if isinstance(data, dict) else _field(data, "boxes", "the metadata")
+            box_list = _object(data, "the metadata").get("boxes", [])
             for box_data in _objects(box_list, "boxes"):
                 svc_names = box_data.get("services", [])
                 if not isinstance(svc_names, list):
@@ -256,7 +261,7 @@ class QuotientClient:
         except (httpx.HTTPError, QuotientAPIError) as e:
             _log_failure("Failed to fetch infrastructure from Quotient", e)
             return None
-        except (KeyError, ValueError) as e:
+        except ValueError as e:
             logger.exception(f"Failed to parse infrastructure response: {e}")
             return None
 
@@ -293,7 +298,7 @@ class QuotientClient:
         except (httpx.HTTPError, QuotientAPIError) as e:
             _log_failure("Failed to fetch injects from Quotient", e)
             return None
-        except (KeyError, ValueError) as e:
+        except ValueError as e:
             logger.exception(f"Failed to parse injects response: {e}")
             return None
 
@@ -341,7 +346,7 @@ class QuotientClient:
         except (httpx.HTTPError, QuotientAPIError) as e:
             _log_failure("Failed to fetch service export", e)
             return None
-        except (KeyError, ValueError) as e:
+        except ValueError as e:
             logger.exception(f"Failed to parse service export: {e}")
             return None
 
@@ -360,7 +365,7 @@ class QuotientClient:
 
             data = _json(response)
             result = []
-            series = data.get("series", []) if isinstance(data, dict) else _field(data, "series", "the uptimes")
+            series = _object(data, "the uptimes").get("series", [])
             for team_data in _objects(series, "the uptimes"):
                 team_name = _text(_field(team_data, "Name", "a team"), "a team's name")
                 uptimes = {
@@ -384,12 +389,12 @@ class QuotientClient:
         except (httpx.HTTPError, QuotientAPIError) as e:
             _log_failure("Failed to fetch uptimes", e)
             return None
-        except (KeyError, ValueError) as e:
+        except ValueError as e:
             logger.exception(f"Failed to parse uptimes: {e}")
             return None
 
     def get_service_choices(self) -> list[dict[str, str]]:
-        """Service choices for the ticket dropdown, as dicts with 'value', 'label' and 'box_ip' keys."""
+        """Service choices for the ticket dropdown, as dicts with 'value', 'label', 'box_ip' and 'box_name' keys."""
         infrastructure = self.get_infrastructure()
         if not infrastructure:
             return []

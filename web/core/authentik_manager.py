@@ -23,13 +23,36 @@ class AuthentikUser(TypedDict):
     username: str
 
 
+class AuthentikGroup(TypedDict):
+    pk: str
+    name: str
+
+
+class AuthentikGroupEntry(AuthentikGroup):
+    parents: list[str]
+
+
+class AuthentikUserEntry(TypedDict):
+    uid: str
+    is_active: bool
+    groups: list[str]
+
+
+class AuthentikGroupName(TypedDict):
+    name: str
+
+
+class AuthentikUserWithGroups(AuthentikUser):
+    groups_obj: list[AuthentikGroupName]
+
+
 logger = logging.getLogger(__name__)
 
 MAX_PAGES = 100  # of 100 results each: a list endpoint still saying "next" past this is broken, not long
 
 
 def _holds(value: object, kind: type) -> bool:
-    """Whether a JSON value is of this type (a list: of strings; True is no int)."""
+    """Whether a JSON value matches kind: list means list[str]; exact type check so bool does not match int."""
     if kind is list:
         return isinstance(value, list) and all(isinstance(v, str) for v in value)
     return type(value) is kind
@@ -523,19 +546,25 @@ class AuthentikManager:
                 return results
         raise AuthentikAPIError(f"List {path}: more than {MAX_PAGES} pages")
 
-    def list_all_users(self) -> list[dict[str, object]]:
+    def list_all_users(self) -> list[AuthentikUserEntry]:
         """Every Authentik user, with ``uid``, ``is_active`` and direct group pks in ``groups``."""
-        return self._list_all(
-            "/api/v3/core/users/", {"include_groups": "false"}, {"uid": str, "is_active": bool, "groups": list}
+        return cast(
+            list[AuthentikUserEntry],
+            self._list_all(
+                "/api/v3/core/users/", {"include_groups": "false"}, {"uid": str, "is_active": bool, "groups": list}
+            ),
         )
 
-    def list_all_groups(self) -> list[dict[str, object]]:
+    def list_all_groups(self) -> list[AuthentikGroupEntry]:
         """Every Authentik group, with ``pk``, ``name`` and parent pks in ``parents``."""
-        return self._list_all(
-            "/api/v3/core/groups/", {"include_users": "false"}, {"pk": str, "name": str, "parents": list}
+        return cast(
+            list[AuthentikGroupEntry],
+            self._list_all(
+                "/api/v3/core/groups/", {"include_users": "false"}, {"pk": str, "name": str, "parents": list}
+            ),
         )
 
-    def get_user_with_groups(self, username: str) -> dict[str, object] | None:
+    def get_user_with_groups(self, username: str) -> AuthentikUserWithGroups | None:
         """Get an Authentik user with their groups_obj, or None if not found or the lookup failed (logged)."""
         try:
             response = self.client.get(
@@ -546,17 +575,18 @@ class AuthentikManager:
             user = self._first_user(response, f"Find user {username}")
             if user is None:
                 return None
-            groups = cast(dict[str, object], user).get("groups_obj", [])
+            raw = cast(dict[str, object], user)
+            groups = raw.setdefault("groups_obj", [])
             if not isinstance(groups, list) or not all(
                 isinstance(g, dict) and isinstance(g.get("name"), str) for g in groups
             ):
                 raise AuthentikAPIError(f"Find user {username}: groups without names", url=str(response.url))
-            return cast(dict[str, object], user)
+            return cast(AuthentikUserWithGroups, raw)
         except Exception as e:
             logger.exception(f"Failed to get user {username}: {e}")
             return None
 
-    def get_group_by_name(self, name: str) -> dict[str, object] | None:
+    def get_group_by_name(self, name: str) -> AuthentikGroup | None:
         """Look up an Authentik group by exact name, or None if not found."""
         try:
             response = self.client.get(
@@ -565,7 +595,8 @@ class AuthentikManager:
             )
             response.raise_for_status()
             groups, _ = self._results(response, f"Find group {name}")
-            return next((g for g in groups if g.get("name") == name and isinstance(g.get("pk"), str)), None)
+            found = next((g for g in groups if g.get("name") == name and isinstance(g.get("pk"), str)), None)
+            return cast(AuthentikGroup | None, found)
         except Exception as e:
             logger.exception(f"Failed to look up group {name}: {e}")
             return None

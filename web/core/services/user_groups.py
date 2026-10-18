@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 from django.db import transaction
 
@@ -50,18 +50,13 @@ def refresh_user_groups(manager: AuthentikManager | None = None) -> GroupRefresh
 
     Logins only refresh the logging-in user, so removals, deactivations and deletions in
     Authentik never reached permission checks (web or Discord). Inactive or deleted users
-    get no groups. Raises GroupRefreshAbortedError, changing nothing, if Authentik's answer
-    doesn't recognise most users who currently hold groups, or refers to groups missing from its group list.
+    get no groups. Raises GroupRefreshAbortedError or AuthentikAPIError, changing nothing,
+    if Authentik's answer is invalid, doesn't recognise most users who currently hold groups,
+    or refers to groups missing from its group list.
     """
     manager = manager or AuthentikManager()
-    groups = {
-        str(g["pk"]): _Group(str(g["name"]), [str(p) for p in cast(list[object], g.get("parents") or [])])
-        for g in manager.list_all_groups()
-    }
-    users = {
-        str(u["uid"]): _User(bool(u["is_active"]), [str(pk) for pk in cast(list[object], u.get("groups") or [])])
-        for u in manager.list_all_users()
-    }
+    groups = {g["pk"]: _Group(g["name"], g["parents"]) for g in manager.list_all_groups()}
+    users = {u["uid"]: _User(u["is_active"], u["groups"]) for u in manager.list_all_users()}
     if not users:
         raise GroupRefreshAbortedError("Authentik returned no users")
     # A short group listing would silently strip those groups from everyone (and, via the role sync,

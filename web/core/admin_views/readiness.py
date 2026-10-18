@@ -99,9 +99,7 @@ def _check_team_group_membership() -> CheckResult:
         if not user:
             continue  # handled by account existence check
 
-        groups_obj = user.get("groups_obj", [])
-        group_names = [g.get("name", "") for g in groups_obj] if isinstance(groups_obj, list) else []
-        if expected_group not in group_names:
+        if all(g["name"] != expected_group for g in user["groups_obj"]):
             misconfigured.append(username)
 
     if misconfigured:
@@ -397,9 +395,7 @@ def _fix_group_membership(request: HttpRequest) -> JsonResponse:
         if not user:
             continue
 
-        groups_obj = user.get("groups_obj", [])
-        group_names = [g.get("name", "") for g in groups_obj] if isinstance(groups_obj, list) else []
-        if expected_group in group_names:
+        if any(g["name"] == expected_group for g in user["groups_obj"]):
             continue
 
         group = mgr.get_group_by_name(expected_group)
@@ -407,7 +403,7 @@ def _fix_group_membership(request: HttpRequest) -> JsonResponse:
             failed.append(f"{username}: group {expected_group} not found")
             continue
 
-        success, error = mgr.add_user_to_group(cast(int, user["pk"]), cast(str, group["pk"]))
+        success, error = mgr.add_user_to_group(user["pk"], group["pk"])
         if success:
             fixed += 1
         else:
