@@ -66,10 +66,6 @@ class AuthentikAdminSite(admin.AdminSite):
         return cast("_ViewType", refusing)  # type: ignore[explicit-any]
 
 
-admin.site = AuthentikAdminSite()
-admin.sites.site = admin.site
-
-
 class PortalModelAdmin[ModelT: Model](admin.ModelAdmin[ModelT]):
     """Every portal model's admin (test_every_admin_is_a_portal_model_admin checks)."""
 

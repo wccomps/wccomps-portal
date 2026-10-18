@@ -69,9 +69,6 @@ PAGES: list[PageDef] = [
         url_name="admin_competition_setup",
     ),
     PageDef(
-        url_name="admin_competition_guide",
-    ),
-    PageDef(
         url_name="admin_teams",
     ),
     PageDef(

@@ -19,8 +19,8 @@ from registration.models import School
 from core.authentik_utils import credentials_csv, generate_blueteam_password
 from core.csv_export import FORMULA_STARTS, csv_writer, unquote_cell
 from core.tests.strategies import PAYLOADS, request_text, rolled_back
-from core.tests.test_properties_parsers import SCHOOL_HEADERS, school_rows
-from team.forms import parse_csv_file
+from core.tests.test_properties_parsers import school_rows
+from team.forms import parse_csv_file, school_info_csv_response
 from team.models import SchoolInfo, Team
 
 TEXT = st.one_of(request_text(), st.sampled_from(PAYLOADS), st.sampled_from(FORMULA_STARTS).map(lambda c: c + "1+1"))
@@ -93,12 +93,19 @@ def test_every_generated_password_reads_back_from_its_csv_exactly() -> None:
 @example(rows=[{"school_name": "'=x", "contact_email": "a@b.co", "secondary_email": "", "notes": "''@y"}])
 def test_a_school_list_exported_then_imported_comes_back_the_same(rows: list[dict[str, str]]) -> None:
     """The import reads what the export wrote: the formula guard's quote comes off again, once."""
-    out = io.StringIO()
-    writer = csv_writer(out)
-    writer.writerow(SCHOOL_HEADERS)
-    writer.writerows([row[h] for h in SCHOOL_HEADERS] for row in rows)
+    records = [
+        SchoolInfo(
+            team=Team(team_number=i, team_name=f"Team {i:02d}"),
+            school=School(name=row["school_name"]),
+            contact_email=row["contact_email"],
+            secondary_email=row["secondary_email"],
+            notes=row["notes"],
+        )
+        for i, row in enumerate(rows, 1)
+    ]
+    exported = school_info_csv_response(records)
 
-    parsed = parse_csv_file(SimpleUploadedFile("s.csv", out.getvalue().encode()))
+    parsed = parse_csv_file(SimpleUploadedFile("s.csv", exported.content))
 
     assert parsed["errors"] == []
     assert [dict(r) for r in parsed["rows"]] == rows

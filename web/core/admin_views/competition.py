@@ -25,17 +25,15 @@ from registration.services import (
     close_out_fixes,
     close_out_problem,
 )
-from registration.stage import ACTIONS, Action, EventStage, event_stage
+from registration.stage import EventStage, event_stage
 from scoring.models import QuotientMetadataCache
 from scoring.quotient_sync import sync_quotient_metadata
 
 from core.admin_views.event_panel import event_facts, event_panel
 from core.admin_views.places import (
-    PLACES,
     Anchor,
     Section,
     SetupSection,
-    action_url,
     ids,
     section_partial,
     setup_url,
@@ -614,26 +612,3 @@ def admin_competition_action(request: HttpRequest) -> HttpResponseBase:
 
     config = CompetitionConfig.get_config()
     return handler(request, config, user.username)
-
-
-def guide_partial(action: Action) -> str:
-    """The guide's section of prose for an action, named after it."""
-    return f"admin/guide/{action}.html"
-
-
-@require_permission("admin", "gold_team")
-def admin_competition_guide(request: HttpRequest) -> HttpResponse:
-    """Running an event, action by action, in plain words: the competition page's steps, then the rare actions."""
-    rows = [
-        {
-            "key": action.value,
-            "heading": place.heading,
-            "rare": place.rare,
-            "in_advanced": place.in_advanced,
-            "url": action_url(action),
-            "link_label": ACTIONS[action].link_label,
-            "partial": guide_partial(action),
-        }
-        for action, place in PLACES.items()
-    ]
-    return render(request, "admin/competition_guide.html", {"rows": rows})

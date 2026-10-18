@@ -45,14 +45,14 @@ LEGACY_HOSTS = [
 
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    "core.apps.PortalAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django_cotton",
-    "core",
+    "core.apps.CoreConfig",
     "team",
     "ticketing",
     "quotient",

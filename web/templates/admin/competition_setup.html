@@ -10,8 +10,10 @@
                        parent_label="Competition">
             <p class="mt-10">
                 Check these before each event. Close Out clears the schedule, the start message and the scoring
-                engine's box list, so set those again for each event; people per team and the apps carry over. The
-                readiness check below says if something is missing.
+                engine's box list, so set those again for each event; people per team and the apps carry over. Set
+                category weights on <a href="{% url 'scoring:scoring_config' %}">Scoring setup</a> and orange check
+                rubrics under <a href="{% url 'orange_team:check_list' %}">Orange Team</a>. The readiness check below
+                says if something is missing.
             </p>
         </c-page_header>
         <c-module class="mt-20" id="{{ sections.SCHEDULE }}">

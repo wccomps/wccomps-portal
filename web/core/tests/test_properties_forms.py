@@ -165,8 +165,6 @@ def world(db: Any, create_user_with_groups: Callable[..., User]) -> World:
         services=[{"name": "web-http", "display_name": "HTTP"}],
         team_count=3,
     )
-    if not AttackType.objects.filter(is_active=True).exists():
-        AttackType.objects.create(name="Default credentials")
     pool = RedTeamIPPool.objects.create(name="Pool A", ip_addresses="10.0.0.1", created_by=user)
     finding = RedTeamScore.objects.create(
         attack_type=AttackType.objects.filter(is_active=True).first(),

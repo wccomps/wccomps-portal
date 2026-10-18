@@ -9,6 +9,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
 from django.db.models import Count, Q
+from django.http import HttpResponse
 from registration.forms import NewEventFields
 from registration.models import Event, School, Season, normalize_school_name
 from registration.services import (
@@ -24,9 +25,33 @@ from registration.services import (
     import_school_list,
 )
 
-from core.csv_export import unquote_cell
+from core.csv_export import csv_writer, unquote_cell
 from core.forms import SchoolInfoEditForm
 from team.models import SchoolInfo, Team, default_team_name
+
+SCHOOL_COLUMNS = ("school_name", "contact_email", "secondary_email", "notes")
+REQUIRED_SCHOOL_COLUMNS = ("school_name", "contact_email")
+EXPORT_COLUMNS = ("team_number", "team_name", *SCHOOL_COLUMNS)
+
+
+def school_info_csv_response(records: Iterable[SchoolInfo]) -> HttpResponse:
+    """Write the school list CSV download that School Info and the SchoolInfo admin export share."""
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="school_info.csv"'
+    writer = csv_writer(response)
+    writer.writerow(EXPORT_COLUMNS)
+    for info in records:
+        writer.writerow(
+            [
+                info.team.team_number,
+                info.team.team_name,
+                info.school_name,
+                info.contact_email,
+                info.secondary_email or "",
+                info.notes or "",
+            ]
+        )
+    return response
 
 
 def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str] | None:
@@ -36,7 +61,7 @@ def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str] | None:
     secondary_email is still free; any beyond those are ignored. Assigns the remaining
     unmapped column as school_name. Returns None if headers already canonical.
     """
-    canonical = {"school_name", "contact_email", "secondary_email", "notes"}
+    canonical = set(SCHOOL_COLUMNS)
     normalized = {f: f.strip().lower().replace(" ", "_") for f in fieldnames}
 
     if set(normalized.values()) <= canonical:
@@ -192,9 +217,8 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
         # newline="": the csv module reads line ends itself, so CR alone, LF and CRLF all end a row
         reader = csv.DictReader(io.StringIO(content, newline=""))
 
-        required_headers = {"school_name", "contact_email"}
-        optional_headers = {"secondary_email", "notes"}
-        all_headers = required_headers | optional_headers
+        required_headers = set(REQUIRED_SCHOOL_COLUMNS)
+        all_headers = set(SCHOOL_COLUMNS)
 
         if not reader.fieldnames:
             errors.append("CSV file is empty or has no headers")

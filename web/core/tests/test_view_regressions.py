@@ -348,11 +348,16 @@ def test_every_add_page_takes_a_prefill_for_any_field(admin_site_client: Client,
 
 
 def test_every_admin_is_a_portal_model_admin() -> None:
-    """PortalModelAdmin keeps a prefill the add form can show; every registered admin needs it."""
+    """PortalModelAdmin keeps a prefill the add form can show; every registered admin needs it, and Django's User and
+    Group admins stay unregistered (Authentik and UserGroups own accounts and groups)."""
     from django.contrib import admin
+    from django.contrib.auth.models import Group, User
 
-    from core.admin import PortalModelAdmin
+    from core.admin import AuthentikAdminSite, PortalModelAdmin
 
+    assert isinstance(admin.site, AuthentikAdminSite)
+    assert User not in admin.site._registry
+    assert Group not in admin.site._registry
     others = [
         model._meta.label for model, kind in admin.site._registry.items() if not isinstance(kind, PortalModelAdmin)
     ]
@@ -479,7 +484,7 @@ def test_the_admin_site_alone_decides_who_gets_into_the_django_admin(gold_team_u
 
     client = signed_in(gold_team_user)
     assert client.get(reverse("admin:index")).status_code == 403
-    with patch.object(type(admin.site), "has_permission", lambda self, request: True):
+    with patch.object(admin.site.__class__, "has_permission", lambda self, request: True):
         assert client.get(reverse("admin:index")).status_code == 200
 
 

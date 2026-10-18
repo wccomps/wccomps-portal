@@ -130,9 +130,6 @@ class World:
 
 
 def build_world() -> World:
-    from ticketing.tests.seeded_categories import ensure_seeded_categories
-
-    ensure_seeded_categories()
     teams = [
         Team.objects.update_or_create(
             team_number=n,
