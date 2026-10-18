@@ -24,6 +24,7 @@ DISCORD_MESSAGE_CHAR_LIMIT = 2000
 DISCORD_EMBED_FIELD_NAME_CHAR_LIMIT = 256
 DISCORD_EMBED_TOTAL_CHAR_LIMIT = 6000
 DISCORD_EMBED_FIELD_COUNT_LIMIT = 25
+DISCORD_THREAD_NAME_CHAR_LIMIT = 100
 
 # What a message may ping unless its send names more: nothing. Messages repeat user text (ticket descriptions,
 # broadcasts, team names), so @everyone, @here or a mention in it must not reach anyone.
@@ -38,7 +39,7 @@ def pinging(
 
 
 def fit(text: str, limit: int) -> str:
-    """text cut to Discord's limit, marked with an ellipsis; Discord rejects the whole message otherwise."""
+    """text cut to at most limit characters (with "…", unlike core.utils.shorten, never past limit)."""
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
@@ -49,7 +50,7 @@ DISCORD_SELECT_OPTION_LIMIT = 25
 
 def choices(options: list[tuple[str, str]]) -> list[app_commands.Choice[str]]:
     """Autocomplete choices from (name, value) pairs as Discord takes them: at most 25, each name cut to 100
-    characters. A value past 100 characters is left out: Discord couldn't send it back."""
+    characters, and values past 100 characters omitted (Discord refuses a choice value over 100 characters)."""
     return [
         app_commands.Choice(name=fit(name.strip() or value, DISCORD_CHOICE_CHAR_LIMIT), value=value)
         for name, value in options
@@ -71,9 +72,8 @@ def fit_lines(lines: list[str], limit: int) -> str:
 
 
 def add_field(embed: discord.Embed, name: str, value: str, *, inline: bool = False, room: int = 0) -> bool:
-    """Add a field cut to Discord's limits for one, if the embed has room for it (25 fields, 6000 characters in
-    all, less `room` kept for what is added after); a blank value (which Discord refuses) adds nothing. Returns
-    whether it was added."""
+    """Add a field fit to Discord's limits if the embed has room (25 fields, 6000 - room chars) and value is
+    non-blank; returns whether added."""
     name = fit(name.strip() or "Unnamed", DISCORD_EMBED_FIELD_NAME_CHAR_LIMIT)
     value = fit(value, DISCORD_EMBED_FIELD_CHAR_LIMIT)
     if not value.strip():
@@ -110,6 +110,17 @@ async def send_parts(
     the first may ping what allowed_mentions allows: the rest is the sender's text."""
     for n, part in enumerate(split_message(text)):
         await channel.send(part, allowed_mentions=allowed_mentions if n == 0 else ALLOWED_MENTIONS)
+
+
+async def send_announcement(guild: discord.Guild, channel: discord.abc.Messageable, message: str) -> None:
+    """Send a broadcast to the announcements channel, pinging only the blue team role."""
+    blueteam_role = guild.get_role(settings.BLUETEAM_ROLE_ID)
+    role_mention = blueteam_role.mention if blueteam_role else "@Blueteam"
+    await send_parts(
+        channel,
+        f"{role_mention}\n\n{message}",
+        allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
+    )
 
 
 async def log_to_ops_channel(bot: discord.Client, message: str, embed: discord.Embed | None = None) -> None:

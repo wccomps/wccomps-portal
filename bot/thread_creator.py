@@ -5,19 +5,11 @@ import logging
 import discord
 from asgiref.sync import sync_to_async
 
-from bot.utils import THREAD_AUTO_ARCHIVE_MINUTES, fit, team_chat_channel
+from bot.utils import DISCORD_THREAD_NAME_CHAR_LIMIT, THREAD_AUTO_ARCHIVE_MINUTES, fit, team_chat_channel
 from team.models import Team
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
-
-
-THREAD_NAME_LIMIT = 100
-
-
-def thread_name(ticket: Ticket, team: Team) -> str:
-    """The ticket's thread name, cut to the length Discord takes."""
-    return fit(f"{ticket.ticket_number}: Team {team.team_number:02d}, {ticket.title}", THREAD_NAME_LIMIT)
 
 
 async def create_ticket_thread(
@@ -42,7 +34,9 @@ async def create_ticket_thread(
         return None
 
     thread = await chat_channel.create_thread(
-        name=thread_name(ticket, team),
+        name=fit(
+            f"{ticket.ticket_number}: Team {team.team_number:02d}, {ticket.title}", DISCORD_THREAD_NAME_CHAR_LIMIT
+        ),
         auto_archive_duration=THREAD_AUTO_ARCHIVE_MINUTES,
     )
 

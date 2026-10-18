@@ -1,5 +1,6 @@
 """The bot's command tree: what every slash command gets before and after its own handler."""
 
+import contextlib
 import logging
 
 import discord
@@ -39,12 +40,13 @@ class PortalCommandTree(app_commands.CommandTree):
         has answered already; an option the bot couldn't read (a transformer's error) says why."""
         if isinstance(error, app_commands.CheckFailure):
             return
-        if isinstance(error, app_commands.TransformerError) or type(error) is app_commands.AppCommandError:
+        if not isinstance(error, app_commands.CommandInvokeError):
             message = str(error)
         else:
             logger.error(f"Command {interaction.command and interaction.command.name} failed", exc_info=error)
             message = FAILED
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=True)
-        else:
-            await interaction.response.send_message(message, ephemeral=True)
+        with contextlib.suppress(discord.HTTPException):
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)

@@ -287,7 +287,7 @@ def _sent(where: str, method: str, args: tuple[Any, ...], kwargs: dict[str, Any]
 
 
 class FakeResponse:
-    """interaction.response: answered once (a second answer raises, as Discord's InteractionResponded)."""
+    """interaction.response: answered once (a second answer raises discord.InteractionResponded)."""
 
     def __init__(self, discord_: Discord, interaction: Any) -> None:
         self._discord = discord_
@@ -873,8 +873,9 @@ Go = Callable[[], Awaitable[None]]
 
 
 def prepare_command(run: Run, case: Command, data: Draws) -> Go:
-    """Draw the options (and what the user types into each autocompleted one), then, run: the autocompletes, the
-    command tree's guard, the command's checks, its transformers and its callback, as discord.py does."""
+    """Draw the options (and what the user types into each autocompleted one), then run the tree's guard and
+    autocompletes, followed by the tree's guard, the command's checks, its transformers and its callback, as
+    discord.py does."""
     command = bound_command(run, case)
     values: dict[str, Any] = {}
     for param in command.parameters:
@@ -893,17 +894,20 @@ def prepare_command(run: Run, case: Command, data: Draws) -> Go:
     cog = run.cog(case.cog)
 
     async def go() -> None:
+        tree = command_tree(run.discord)
         for name, current in typed.items():
             autocomplete = command._params[name].autocomplete
             assert autocomplete is not None
-            typing = run.discord.interaction(run.role)
+            typing = run.discord.interaction(run.role, data={"options": [{"name": name, "value": current}]})
+            typing.type = discord.InteractionType.autocomplete
+            if not await tree.interaction_check(typing):
+                continue
             if getattr(autocomplete, "pass_command_binding", False):
                 choices = await autocomplete(cog, typing, current)
             else:
                 choices = await autocomplete(typing, current)
             run.discord.sent.append(Sent(where="autocomplete", method="autocomplete", choices=list(choices)))
 
-        tree = command_tree(run.discord)
         if not await tree.interaction_check(interaction) or not await command._check_can_run(interaction):
             run.refused = True
             return
@@ -1217,9 +1221,9 @@ def check_run(case: BotCase, run: Run, writes_before: dict[str, Any], *, answers
 
 def drive(case: BotCase, world: World, data: Draws) -> Run:
     """One example of a row: a role, the inputs, the handler run, the properties checked; returns the run (what was
-    sent, and the tables written, rolled back by now). Everything is drawn
-    before the handler runs: Hypothesis draws only on the test's thread, and the handler runs on async_to_sync's
-    event loop (its ORM calls come back to the test's thread, and its transaction)."""
+    sent, and the tables written, rolled back by now). Everything is drawn before the handler runs: Hypothesis draws
+    only on the test's thread, and the handler runs on async_to_sync's event loop (its ORM calls come back to the
+    test's thread, and its transaction)."""
     reached_by = getattr(case, "reached_by", EVERYONE)
     role = data.draw(st.sampled_from(sorted(reached_by)), label="role")
     confirm = data.draw(st.sampled_from((True, False, None)), label="confirmation")

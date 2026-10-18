@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 # A ticket number option, as long as the column (Discord refuses a longer one)
 TicketNumber = app_commands.Range[str, 1, Ticket._meta.get_field("ticket_number").max_length]
+LIST_FOOTER_ROOM = 100  # room in the list embed's 6000-char budget for the "Showing N of M" footer
 
 
 class UserOrIdTransformer(app_commands.Transformer):
@@ -186,7 +187,7 @@ class AdminTicketsCog(commands.Cog):
             )
             if ticket.assigned_to:
                 value += f"\nAssigned: {ticket.assigned_to.username}"
-            if not add_field(embed, f"{ticket.ticket_number}: {ticket.title}", value, room=100):
+            if not add_field(embed, f"{ticket.ticket_number}: {ticket.title}", value, room=LIST_FOOTER_ROOM):
                 break
             shown += 1
 
@@ -304,7 +305,6 @@ class AdminTicketsCog(commands.Cog):
             await interaction.response.send_message(f"Ticket {ticket_number} not found", ephemeral=True)
             return
 
-        # The web's form reads the category as the change category page does
         form = TicketChangeCategoryForm({"new_category": new_category})
         if not form.is_valid():
             await interaction.response.send_message("Invalid ticket category.", ephemeral=True)

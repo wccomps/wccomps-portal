@@ -11,7 +11,7 @@ from django.conf import settings
 
 from bot.competition_actions import run_competition_cleanup
 from bot.permissions import permission_check
-from bot.utils import ConfirmView, announcement, log_to_ops_channel, pinging, send_parts, team_chat_channel
+from bot.utils import ConfirmView, announcement, log_to_ops_channel, send_announcement, send_parts, team_chat_channel
 from core.authentik_utils import credentials_csv, parse_team_range, reset_team_credentials
 from core.forms import AppSlugForm
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
@@ -410,12 +410,11 @@ class AdminCompetitionCog(commands.Cog):
         for raw in app_slugs.split(","):
             if not raw.strip():
                 continue
-            # Each read as the competition page reads an app slug
             form = AppSlugForm({"app_slug": raw})
             if not form.is_valid():
                 await interaction.response.send_message(
                     f"Not an application slug: {shorten(raw.strip(), 40)} "
-                    "(use letters, digits, hyphens and underscores).",
+                    "(use 1 to 100 letters, digits, hyphens and underscores).",
                     ephemeral=True,
                 )
                 return
@@ -480,15 +479,8 @@ class AdminCompetitionCog(commands.Cog):
                 )
                 return
 
-            blueteam_role = guild.get_role(settings.BLUETEAM_ROLE_ID)
-            role_mention = blueteam_role.mention if blueteam_role else "@Blueteam"
-
             try:
-                await send_parts(
-                    channel,
-                    f"{role_mention}\n\n{message}",
-                    allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
-                )
+                await send_announcement(guild, channel, message)
                 sent_count = 1
 
                 await log_to_ops_channel(
