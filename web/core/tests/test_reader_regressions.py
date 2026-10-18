@@ -3,11 +3,14 @@ answer that showed it."""
 
 import json
 
+from django.core.cache import cache
+from django.test import override_settings
 from hypothesis import example, given
 from hypothesis import strategies as st
+from quotient.client import QuotientClient
 
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
-from core.tests.external_json import Answer, answer_lists, deep, serving
+from core.tests.external_json import Answer, answer_lists, deep, near, serving
 
 USER = {"pk": 7, "username": "team01", "uid": "uid-7", "is_active": True, "groups": ["g1"], "groups_obj": []}
 USERS = {"results": [USER], "pagination": {"next": 0}}
@@ -77,3 +80,59 @@ def test_an_application_without_a_text_pk_is_not_found(slug: object) -> None:
     with serving([answer({"pk": slug, "slug": "netbird"})]):
         app = authentik().get_application_by_slug("netbird")
     assert app is None or isinstance(app["pk"], str)
+
+
+QUOTIENT = {"QUOTIENT_USERNAME": "property", "QUOTIENT_PASSWORD": "property"}
+LOGIN = answer({})
+METADATA = {"boxes": [{"name": "web", "ip": "10.0.0.5", "services": ["http"]}]}
+EXPORT = [{"team_name": "team01", "services": [{"service_name": "web", "service_points": 1}], "gross_points": 1}]
+
+
+def quotient() -> QuotientClient:
+    cache.clear()
+    return QuotientClient(base_url="https://quotient.test")
+
+
+@example(body=[{"name": 5, "ip": "10.0.0.5"}])
+@example(body={"boxes": [{"name": "web", "ip": None, "services": [7]}]})
+@example(body={"boxes": "web"})
+@given(body=near(METADATA))
+def test_infrastructure_of_another_shape_is_none(body: object) -> None:
+    """get_infrastructure caught only KeyError and ValueError: metadata that was a list (AttributeError), or boxes
+    of another type (TypeError), escaped; a box name or IP that wasn't text came back, and the ticket form and the
+    bot's autocomplete called .lower() on it."""
+    with override_settings(**QUOTIENT), serving([LOGIN, answer(body)]):
+        infrastructure = quotient().get_infrastructure(force_refresh=True)
+    assert infrastructure is None or all(
+        isinstance(b.name, str) and isinstance(b.ip, str) for b in infrastructure.boxes
+    )
+
+
+@example(body=[{**EXPORT[0], "gross_points": "1"}])
+@example(body=[{**EXPORT[0], "gross_points": 1.5}])
+@example(body={"team_name": "team01"})
+@given(body=near(EXPORT))
+def test_scores_of_another_shape_are_none(body: object) -> None:
+    """get_service_export passed any JSON value along as points, and the sync wrote it to a decimal column."""
+    with override_settings(**QUOTIENT), serving([LOGIN, answer(body)]):
+        exports = quotient().get_service_export(force_refresh=True)
+    assert exports is None or all(type(t.gross_points) is int for t in exports)
+
+
+@example(uptime=float("nan"))
+@example(uptime=7)
+@given(uptime=st.one_of(st.floats(), st.integers(), st.text(max_size=3)))
+def test_an_uptime_that_is_no_fraction_is_refused(uptime: object) -> None:
+    """get_uptimes passed NaN, numbers past 1 and text along as uptimes."""
+    body = {"series": [{"Name": "team01", "Data": [{"Service": "web", "Uptime": uptime}]}]}
+    with override_settings(**QUOTIENT), serving([LOGIN, Answer(200, json.dumps(body).encode())]):
+        uptimes = quotient().get_uptimes(force_refresh=True)
+    assert uptimes is None or all(0 <= u <= 1 for t in uptimes for u in t.uptimes.values())
+
+
+@example(answers=[LOGIN, Answer(200, deep(100_000))])
+@given(answers=st.just([LOGIN, Answer(200, deep(100_000))]))
+def test_json_too_deep_to_read_is_no_answer(answers: list[Answer]) -> None:
+    """JSON nested past Python's recursion limit raised RecursionError out of every Quotient reader."""
+    with override_settings(**QUOTIENT), serving(answers):
+        assert quotient().get_injects(force_refresh=True) is None
