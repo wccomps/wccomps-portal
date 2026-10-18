@@ -10,6 +10,7 @@ urlpatterns = [
     path("notifications/", views.ticket_notifications, name="ticket_notifications"),
     path("<str:ticket_number>/", views.ticket_detail, name="ticket_detail"),
     path("<str:ticket_number>/dynamic/", views.ticket_detail_dynamic, name="ticket_detail_dynamic"),
+    path("<str:ticket_number>/service-checks/", views.ticket_service_checks, name="ticket_service_checks"),
     path("<str:ticket_number>/comment/", views.ticket_comment, name="ticket_comment"),
     path("<str:ticket_number>/cancel/", views.ticket_cancel, name="ticket_cancel"),
     path("<str:ticket_number>/claim/", views.ticket_claim, name="ticket_claim"),

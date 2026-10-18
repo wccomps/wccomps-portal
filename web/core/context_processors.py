@@ -27,6 +27,7 @@ NAV_MAPPING: dict[str, tuple[str, str]] = {
     "tickets_bulk_claim": ("tickets", ""),
     "tickets_bulk_resolve": ("tickets", ""),
     "ticket_detail_dynamic": ("tickets", ""),
+    "ticket_service_checks": ("tickets", ""),
     "ticket_notifications": ("tickets", ""),
     "create_ticket": ("tickets", ""),
     "ticket_cancel": ("tickets", ""),

@@ -11,6 +11,7 @@ import contextlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
@@ -27,6 +28,7 @@ from quotient.client import (
     QuotientClient,
     QuotientInfrastructure,
     QuotientService,
+    ServiceCheck,
     TeamServiceExport,
     TeamUptime,
 )
@@ -70,6 +72,14 @@ EXPORT = [
     }
 ]
 UPTIMES = {"series": [{"Name": "team01", "Data": [{"Service": "web-http", "Uptime": 0.95}]}]}
+SERVICE_CHECKS = [
+    {
+        "Round": {"ID": 12, "StartTime": "2026-10-18T19:30:00Z"},
+        "Result": False,
+        "Debug": "HTTP 502 from upstream",
+        "Error": "unexpected status code",
+    }
+]
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -220,6 +230,27 @@ def check_uptimes(result: object) -> None:
             )
         ),
         "None or teams' uptimes as fractions",
+    )
+
+
+def check_service_checks(result: object) -> None:
+    outcome(
+        result,
+        lambda r: (
+            r is None
+            or (
+                isinstance(r, list)
+                and all(
+                    isinstance(c, ServiceCheck)
+                    and is_int(c.round_number)
+                    and (c.timestamp is None or isinstance(c.timestamp, datetime))
+                    and type(c.passed) is bool
+                    and all(is_str(s) for s in (c.debug, c.error))
+                    for c in r
+                )
+            )
+        ),
+        "None or service checks with a round, timestamp, pass/fail, debug and error",
     )
 
 
@@ -464,6 +495,13 @@ READERS = [
         (DONE, UPTIMES),
         check_uptimes,
         (f"{QC}.get_uptimes", QJ),
+    ),
+    Reader(
+        "get_service_checks",
+        lambda: quotient().get_service_checks(1, "web:http", force_refresh=True),
+        (DONE, SERVICE_CHECKS),
+        check_service_checks,
+        (f"{QC}.get_service_checks", QJ),
     ),
 ]
 
