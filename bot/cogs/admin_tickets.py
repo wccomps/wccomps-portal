@@ -10,15 +10,24 @@ from discord.ext import commands
 from bot.permissions import permission_check
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_dashboard import trigger_dashboard
+from bot.ticket_input import read_resolution, read_ticket
 from bot.utils import (
+    DISCORD_EMBED_FIELD_COUNT_LIMIT,
     ConfirmView,
+    add_field,
+    choices,
+    fit,
     get_team_or_respond,
     log_to_ops_channel,
 )
 from ticketing.access import TICKET_STAFF
-from ticketing.models import Ticket, TicketCategory, TicketHistory
+from ticketing.models import Ticket, TicketHistory
 
 logger = logging.getLogger(__name__)
+
+# A ticket number option, as long as the column (Discord refuses a longer one)
+TicketNumber = app_commands.Range[str, 1, Ticket._meta.get_field("ticket_number").max_length]
+LIST_FOOTER_ROOM = 100  # room in the list embed's 6000-char budget for the "Showing N of M" footer
 
 
 class UserOrIdTransformer(app_commands.Transformer):
@@ -50,18 +59,22 @@ class AdminTicketsCog(commands.Cog):
         from core.tickets_config import get_all_categories
 
         categories = await sync_to_async(get_all_categories)()
-        choices = []
-        for cat_id, cat_info in categories.items():
-            name = cat_info["display_name"]
-            if not current or current.lower() in name.lower():
-                choices.append(app_commands.Choice(name=name, value=str(cat_id)))
-        return choices[:25]
+        return choices(
+            [
+                (cat_info["display_name"], str(cat_id))
+                for cat_id, cat_info in categories.items()
+                if not current or current.lower() in cat_info["display_name"].lower()
+            ]
+        )
 
     @tickets_group.command(name="create", description="[ADMIN] Create a ticket for a team")
     @app_commands.describe(
         team_number="Team number (1-50)",
         category="Ticket category",
         description="Description of the issue",
+        hostname="Hostname/box name (required for box-reset, hands-on consultation)",
+        service="Service name like 'web:http' (required for scoring validation, service check)",
+        ip_address="IP address (auto-filled from hostname, or enter manually)",
     )
     @app_commands.autocomplete(category=admin_category_autocomplete)
     @app_commands.check(permission_check("ticketing_admin"))
@@ -71,6 +84,9 @@ class AdminTicketsCog(commands.Cog):
         team_number: int,
         category: str,
         description: str,
+        hostname: str | None = None,
+        service: str | None = None,
+        ip_address: str | None = None,
     ) -> None:
         """Create a ticket as admin."""
         if not interaction.guild:
@@ -81,27 +97,30 @@ class AdminTicketsCog(commands.Cog):
         if not team:
             return
 
-        from core.tickets_config import get_category_config
-
-        category_id = int(category)
-        cat_info = await sync_to_async(get_category_config)(category_id)
-        if not cat_info:
-            await interaction.response.send_message("Invalid ticket category.", ephemeral=True)
+        ticket_input = await sync_to_async(read_ticket)(
+            category,
+            staff=True,
+            description=description,
+            hostname=hostname or "",
+            ip_address=ip_address or "",
+            service_name=service or "",
+        )
+        if isinstance(ticket_input, str):
+            await interaction.response.send_message(ticket_input, ephemeral=True)
             return
-
-        # Categories that need a hostname take it from the description
-        hostname = description if "hostname" in cat_info.get("required_fields", []) else ""
+        cat_info = ticket_input.config
 
         # Create ticket atomically to prevent race conditions
         from ticketing.utils import acreate_ticket_atomic
 
-        category_obj = await TicketCategory.objects.aget(pk=category_id)
         ticket = await acreate_ticket_atomic(
             team=team,
-            category=category_obj,
+            category=ticket_input.category,
             title=cat_info["display_name"],
-            description=description,
-            hostname=hostname,
+            description=ticket_input.description,
+            hostname=ticket_input.hostname,
+            ip_address=ticket_input.ip_address,
+            service_name=ticket_input.service_name,
             actor_username=f"admin:{interaction.user}",
             enforce_team_limit=False,
         )
@@ -116,7 +135,7 @@ class AdminTicketsCog(commands.Cog):
         await publish_new_ticket(self.bot, interaction.guild, ticket)
         await log_to_ops_channel(
             self.bot,
-            f"Admin Ticket Created: {ticket.ticket_number} - {cat_info['display_name']} "
+            f"Admin Ticket Created: {ticket.ticket_number} ({cat_info['display_name']}) "
             f"for **{team.team_name}** by {interaction.user.mention}",
         )
 
@@ -151,19 +170,13 @@ class AdminTicketsCog(commands.Cog):
             await interaction.response.send_message("No tickets found matching criteria", ephemeral=True)
             return
 
-        # Fetch tickets (limit to 25 due to Discord embed field limit)
-        display_limit = 25
-        tickets = [t async for t in query.order_by("-created_at")[:display_limit]]
-
-        if total_count > display_limit:
-            title = f"Tickets ({status}) - Showing {display_limit} of {total_count}"
-        else:
-            title = f"Tickets ({status}) - {total_count} total"
-
-        embed = discord.Embed(title=title, color=discord.Color.blue())
+        # An embed holds 25 fields and 6000 characters: as many of the newest as fit
+        tickets = [t async for t in query.order_by("-created_at")[:DISCORD_EMBED_FIELD_COUNT_LIMIT]]
+        embed = discord.Embed(title=f"Tickets ({status}): {total_count} in all", color=discord.Color.blue())
 
         from core.tickets_config import get_category_config
 
+        shown = 0
         for ticket in tickets:
             cat_info = await sync_to_async(get_category_config)(ticket.category_id) or {}
             value = (
@@ -174,15 +187,12 @@ class AdminTicketsCog(commands.Cog):
             )
             if ticket.assigned_to:
                 value += f"\nAssigned: {ticket.assigned_to.username}"
+            if not add_field(embed, f"{ticket.ticket_number}: {ticket.title}", value, room=LIST_FOOTER_ROOM):
+                break
+            shown += 1
 
-            embed.add_field(
-                name=f"{ticket.ticket_number}: {ticket.title}",
-                value=value,
-                inline=False,
-            )
-
-        if total_count > display_limit:
-            embed.set_footer(text=f"Use web interface to see all {total_count} tickets")
+        if shown < total_count:
+            embed.set_footer(text=f"Showing {shown} of {total_count}: the web interface lists them all")
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -196,7 +206,7 @@ class AdminTicketsCog(commands.Cog):
     async def admin_ticket_resolve(
         self,
         interaction: discord.Interaction,
-        ticket_number: str,
+        ticket_number: TicketNumber,
         notes: str = "",
         points: int | None = None,
     ) -> None:
@@ -207,12 +217,16 @@ class AdminTicketsCog(commands.Cog):
         if not ticket:
             await interaction.response.send_message(f"Ticket {ticket_number} not found", ephemeral=True)
             return
+        resolution = read_resolution(notes, "" if points is None else str(points))
+        if isinstance(resolution, str):
+            await interaction.response.send_message(resolution, ephemeral=True)
+            return
 
         resolved, error = await aresolve_ticket(
             ticket_id=ticket.id,
             actor_username=str(interaction.user),
-            resolution_notes=notes,
-            points_override=points,
+            resolution_notes=resolution[0],
+            points_override=resolution[1],
             discord_id=interaction.user.id,
             discord_username=str(interaction.user),
         )
@@ -237,7 +251,9 @@ class AdminTicketsCog(commands.Cog):
         reason="Reason for cancellation",
     )
     @app_commands.check(permission_check("ticketing_admin"))
-    async def admin_ticket_cancel(self, interaction: discord.Interaction, ticket_number: str, reason: str = "") -> None:
+    async def admin_ticket_cancel(
+        self, interaction: discord.Interaction, ticket_number: TicketNumber, reason: str = ""
+    ) -> None:
         """Cancel a ticket without point penalty."""
         from ticketing.lifecycle import acancel_ticket
 
@@ -277,10 +293,11 @@ class AdminTicketsCog(commands.Cog):
     @app_commands.autocomplete(new_category=admin_category_autocomplete)
     @app_commands.check(permission_check("ticketing_admin"))
     async def admin_change_category(
-        self, interaction: discord.Interaction, ticket_number: str, new_category: str
+        self, interaction: discord.Interaction, ticket_number: TicketNumber, new_category: str
     ) -> None:
         """Change the category of a ticket."""
         from core.tickets_config import get_category_config
+        from ticketing.forms import TicketChangeCategoryForm
         from ticketing.utils import achange_ticket_category_atomic
 
         ticket = await Ticket.objects.filter(ticket_number=ticket_number).afirst()
@@ -288,8 +305,12 @@ class AdminTicketsCog(commands.Cog):
             await interaction.response.send_message(f"Ticket {ticket_number} not found", ephemeral=True)
             return
 
+        form = TicketChangeCategoryForm({"new_category": new_category})
+        if not form.is_valid():
+            await interaction.response.send_message("Invalid ticket category.", ephemeral=True)
+            return
         old_category_id = ticket.category_id
-        new_category_id = int(new_category)
+        new_category_id = form.cleaned_data["new_category"]
         changed, error = await achange_ticket_category_atomic(
             ticket_id=ticket.id,
             new_category_id=new_category_id,
@@ -311,8 +332,8 @@ class AdminTicketsCog(commands.Cog):
         await log_to_ops_channel(
             self.bot,
             f"Ticket Category Changed: {ticket.ticket_number} for **{ticket.team.team_name}**\n"
-            f"Changed by {interaction.user.mention}: {old_cat_name} → {new_cat_name}\n"
-            f"Point impact: {old_cat_info.get('points', 0)}pt → {new_cat_info.get('points', 0)}pt",
+            f"Changed by {interaction.user.mention}: from {old_cat_name} to {new_cat_name}\n"
+            f"Point impact: from {old_cat_info.get('points', 0)}pt to {new_cat_info.get('points', 0)}pt",
         )
 
         await interaction.response.send_message(
@@ -332,7 +353,7 @@ class AdminTicketsCog(commands.Cog):
     async def admin_ticket_reassign(
         self,
         interaction: discord.Interaction,
-        ticket_number: str,
+        ticket_number: TicketNumber,
         volunteer: app_commands.Transform[discord.User, UserOrIdTransformer] | None = None,
     ) -> None:
         """Reassign a ticket to a different volunteer."""
@@ -387,7 +408,9 @@ class AdminTicketsCog(commands.Cog):
     @tickets_group.command(name="reopen", description="[ADMIN] Reopen a resolved ticket")
     @app_commands.describe(ticket_number="Ticket number (e.g., T050-003)", reason="Reason for reopening")
     @app_commands.check(permission_check("ticketing_admin"))
-    async def admin_ticket_reopen(self, interaction: discord.Interaction, ticket_number: str, reason: str) -> None:
+    async def admin_ticket_reopen(
+        self, interaction: discord.Interaction, ticket_number: TicketNumber, reason: str
+    ) -> None:
         """Reopen a resolved ticket."""
         from ticketing.lifecycle import areopen_ticket
 
@@ -408,7 +431,7 @@ class AdminTicketsCog(commands.Cog):
 
         refund_msg = f"\n• Refunded: {refunded} points" if refunded > 0 else ""
         await interaction.followup.send(
-            f"Ticket {reopened.ticket_number} reopened\n• Reason: {reason}{refund_msg}",
+            f"Ticket {reopened.ticket_number} reopened\n• Reason: {fit(reason, 1500)}{refund_msg}",
             ephemeral=True,
         )
         await log_to_ops_channel(
@@ -465,13 +488,13 @@ class AdminTicketsCog(commands.Cog):
         ticket_count, teams_to_reset = counts["tickets_deleted"], counts["teams_reset"]
 
         await interaction.edit_original_response(
-            content=f"✅ Cleared all tickets\n• Deleted {ticket_count} tickets\n• Reset {teams_to_reset} team counters",
+            content=f"Cleared all tickets\n• Deleted {ticket_count} tickets\n• Reset {teams_to_reset} team counters",
             view=None,
         )
 
         await log_to_ops_channel(
             self.bot,
-            f"🗑️ All tickets cleared by {interaction.user.mention}\n"
+            f"All tickets cleared by {interaction.user.mention}\n"
             f"• Tickets deleted: {ticket_count}\n"
             f"• Teams reset: {teams_to_reset}",
         )

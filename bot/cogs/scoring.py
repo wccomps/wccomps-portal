@@ -3,12 +3,16 @@
 import logging
 
 import discord
+from asgiref.sync import sync_to_async
 from discord import app_commands
 from discord.ext import commands
+from django.core.exceptions import ValidationError
 from django.utils import timezone
+from scoring.models import IncidentReport
 
 from bot.permissions import check_blue_team, linked_team_member
-from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT
+from bot.ticket_input import form_errors
+from bot.utils import add_field
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +37,10 @@ class ScoringCog(commands.Cog):
     async def incident_report(
         self,
         interaction: discord.Interaction,
-        affected_box: str,
-        affected_service: str,
-        source_ip: str,
-        attack_vector: str,
+        affected_box: app_commands.Range[str, 1, 100],
+        affected_service: app_commands.Range[str, 1, IncidentReport._meta.get_field("affected_service").max_length],
+        source_ip: app_commands.Range[str, 1, 45],
+        attack_vector: app_commands.Range[str, 1, 200],
         description: str,
     ) -> None:
         """Submit an incident report for red team activity."""
@@ -44,9 +48,6 @@ class ScoringCog(commands.Cog):
         if not member:
             return
         team, submitted_by_user = member.team, member.user
-
-        # Import models here to avoid circular imports
-        from scoring.models import IncidentReport
 
         if not source_ip.strip():
             await interaction.response.send_message(
@@ -65,17 +66,25 @@ class ScoringCog(commands.Cog):
             )
             return
 
+        incident = IncidentReport(
+            team=team,
+            affected_boxes=[affected_box] if affected_box else [],
+            affected_service=affected_service,
+            source_ip=source_ip.strip(),
+            destination_ip=None,
+            attack_description=f"{attack_vector}\n\n{description}",
+            attack_detected_at=timezone.now(),
+            submitted_by=submitted_by_user,
+        )
         try:
-            incident = await IncidentReport.objects.acreate(
-                team=team,
-                affected_boxes=[affected_box] if affected_box else [],
-                affected_service=affected_service,
-                source_ip=source_ip,
-                destination_ip="",
-                attack_description=f"{attack_vector}\n\n{description}",
-                attack_detected_at=timezone.now(),
-                submitted_by=submitted_by_user,
-            )
+            # Validates source_ip as an IP address, as the web form does
+            await sync_to_async(incident.full_clean)()
+        except ValidationError as e:
+            await interaction.response.send_message(form_errors(e.message_dict), ephemeral=True)
+            return
+
+        try:
+            await incident.asave()
 
             embed = discord.Embed(
                 title="Incident Report Submitted",
@@ -85,11 +94,11 @@ class ScoringCog(commands.Cog):
             embed.add_field(name="Report ID", value=f"#{incident.id}", inline=True)
             embed.add_field(name="Team", value=team.team_name, inline=True)
             embed.add_field(name="Status", value="Pending Review", inline=True)
-            embed.add_field(name="Affected Box", value=affected_box, inline=True)
-            embed.add_field(name="Affected Service", value=affected_service, inline=True)
-            embed.add_field(name="Source IP", value=f"`{source_ip}`", inline=True)
-            embed.add_field(name="Attack Vector", value=attack_vector, inline=False)
-            embed.add_field(name="Description", value=description[:DISCORD_EMBED_FIELD_CHAR_LIMIT], inline=False)
+            add_field(embed, "Affected Box", affected_box, inline=True)
+            add_field(embed, "Affected Service", affected_service, inline=True)
+            add_field(embed, "Source IP", f"`{incident.source_ip}`", inline=True)
+            add_field(embed, "Attack Vector", attack_vector)
+            add_field(embed, "Description", description)
 
             embed.add_field(
                 name="Evidence",

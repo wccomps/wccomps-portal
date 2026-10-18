@@ -53,7 +53,7 @@ def permission_check(permission: str) -> Check:
         if await has_permission(interaction.user.id, permission):
             return True
         await interaction.response.send_message(
-            f"❌ {title} permissions required.\n\n"
+            f"{title} permissions required.\n\n"
             f"You need one of these Authentik groups: {groups}.\n"
             "If you have one, link your account with `/link`.",
             ephemeral=True,
@@ -67,7 +67,7 @@ async def check_blue_team(interaction: discord.Interaction) -> bool:
     if await linked_team_member(interaction.user.id):
         return True
     await interaction.response.send_message(
-        "❌ Blue Team membership required.\n\n"
+        "Blue Team membership required.\n\n"
         "You must be linked to a competition team to use this command.\n"
         "Use `/link` to connect your Discord account to your team.",
         ephemeral=True,

@@ -11,8 +11,9 @@ from django.conf import settings
 
 from bot.permissions import linked_team_member
 from bot.thread_creator import publish_new_ticket
-from core.tickets_config import TicketCategoryConfig, get_all_categories, get_category_config
-from ticketing.models import TicketCategory
+from bot.ticket_input import read_ticket
+from bot.utils import DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT, DISCORD_SELECT_OPTION_LIMIT, fit_lines
+from core.tickets_config import TicketCategoryConfig, get_all_categories
 from ticketing.utils import TicketRateLimitError
 
 logger = logging.getLogger(__name__)
@@ -32,44 +33,35 @@ async def create_ticket(
     member = await linked_team_member(interaction.user.id)
     if not member:
         await interaction.followup.send(
-            "You must be linked to a competition team to create tickets.\nClick the **🔗 Link Account** button first.",
+            "You must be linked to a competition team to create tickets.\nClick the **Link Account** button first.",
             ephemeral=True,
         )
         return
 
     try:
-        cat_id_int = int(category_id)
-        cat_info = await sync_to_async(get_category_config)(cat_id_int)
-        if not cat_info:
-            await interaction.followup.send("Invalid ticket category.", ephemeral=True)
-            return
-
-        field_values = {
-            "service_name": service_name,
-            "description": description,
-            "hostname": hostname,
-            "ip_address": ip_address,
-        }
-        required_fields = cat_info.get("required_fields", [])
-        missing_fields = [f for f in required_fields if not field_values.get(f)]
-        if missing_fields:
-            await interaction.followup.send(
-                f"Missing required fields: {', '.join(missing_fields)}",
-                ephemeral=True,
-            )
-            return
-
-        from ticketing.utils import acreate_ticket_atomic
-
-        category_obj = await TicketCategory.objects.aget(pk=cat_id_int)
-        ticket = await acreate_ticket_atomic(
-            team=member.team,
-            category=category_obj,
-            title=cat_info["display_name"],
+        ticket_input = await sync_to_async(read_ticket)(
+            category_id,
+            staff=False,
             description=description,
             hostname=hostname,
             ip_address=ip_address,
             service_name=service_name,
+        )
+        if isinstance(ticket_input, str):
+            await interaction.followup.send(ticket_input, ephemeral=True)
+            return
+        cat_info = ticket_input.config
+
+        from ticketing.utils import acreate_ticket_atomic
+
+        ticket = await acreate_ticket_atomic(
+            team=member.team,
+            category=ticket_input.category,
+            title=cat_info["display_name"],
+            description=ticket_input.description,
+            hostname=ticket_input.hostname,
+            ip_address=ticket_input.ip_address,
+            service_name=ticket_input.service_name,
             actor_username=f"discord:{interaction.user.name}",
         )
 
@@ -83,7 +75,7 @@ async def create_ticket(
         return
 
     await interaction.followup.send(
-        f"✅ Ticket **{ticket.ticket_number}** created!\n"
+        f"Ticket **{ticket.ticket_number}** created.\n"
         f"Category: **{cat_info['display_name']}**\n"
         f"Points: **{cat_info.get('points', 0)}**\n\n"
         f"A volunteer will respond shortly.",
@@ -134,8 +126,8 @@ class BoxResetModal(discord.ui.Modal, title="Box Reset / Scrub"):
     ip_address: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
         label="IP Address",
         placeholder="e.g., 10.0.1.50",
-        required=True,
-        max_length=50,
+        required=False,
+        max_length=45,
     )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
@@ -230,7 +222,8 @@ class CategorySelect(discord.ui.Select["TicketCategoryView"]):
     def __init__(self, categories: dict[int, TicketCategoryConfig]) -> None:
         self.categories = categories
         options = []
-        for cat_id, cat_info in categories.items():
+        # A select holds 25 options: the first 25 categories in their sort order
+        for cat_id, cat_info in list(categories.items())[:DISCORD_SELECT_OPTION_LIMIT]:
             points = cat_info.get("points", 0)
             options.append(
                 discord.SelectOption(
@@ -287,12 +280,10 @@ class TicketCategoryView(discord.ui.View):
 
 
 class LinkButton(discord.ui.Button["TeamHelpView"]):
+    CUSTOM_ID = "help_panel:link"
+
     def __init__(self) -> None:
-        super().__init__(
-            style=discord.ButtonStyle.primary,
-            label="🔗 Link Account",
-            custom_id="help_panel:link",
-        )
+        super().__init__(style=discord.ButtonStyle.primary, label="Link Account", custom_id=self.CUSTOM_ID)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if not self.view:
@@ -301,12 +292,10 @@ class LinkButton(discord.ui.Button["TeamHelpView"]):
 
 
 class TicketButton(discord.ui.Button["TeamHelpView"]):
+    CUSTOM_ID = "help_panel:ticket"
+
     def __init__(self) -> None:
-        super().__init__(
-            style=discord.ButtonStyle.success,
-            label="🎫 Create Ticket",
-            custom_id="help_panel:ticket",
-        )
+        super().__init__(style=discord.ButtonStyle.success, label="Create Ticket", custom_id=self.CUSTOM_ID)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if not self.view:
@@ -350,6 +339,15 @@ class TeamHelpView(discord.ui.View):
             view=TicketCategoryView(categories),
             ephemeral=True,
         )
+
+
+def _has_button(message: discord.Message, custom_id: str) -> bool:
+    """Whether the message carries the button: how a panel posted earlier is found, whatever its title was then."""
+    return any(
+        getattr(child, "custom_id", None) == custom_id
+        for row in message.components
+        for child in getattr(row, "children", ())
+    )
 
 
 class HelpPanelsCog(commands.Cog):
@@ -411,7 +409,7 @@ class HelpPanelsCog(commands.Cog):
             return
 
         embed = discord.Embed(
-            title="🔗 Link Your Discord Account",
+            title="Link Your Discord Account",
             description=(
                 "**Welcome to WCComps!**\n\n"
                 "Before you can participate, you need to link your Discord account to your Authentik account.\n\n"
@@ -432,7 +430,7 @@ class HelpPanelsCog(commands.Cog):
         view = TeamHelpView(self.bot, show_link=True, show_ticket=False)
 
         async for message in channel.history(limit=10):
-            if message.author == self.bot.user and message.embeds and message.embeds[0].title == embed.title:
+            if message.author == self.bot.user and _has_button(message, LinkButton.CUSTOM_ID):
                 await message.edit(embed=embed, view=view)
                 logger.info(f"Updated link panel in channel {channel_id}")
                 return
@@ -450,22 +448,23 @@ class HelpPanelsCog(commands.Cog):
         categories = await sync_to_async(get_all_categories)(user_creatable_only=True)
         for cat_info in categories.values():
             points = cat_info.get("points", 0)
-            categories_text.append(f"• **{cat_info['display_name']}** - {points}pt")
+            categories_text.append(f"• **{cat_info['display_name']}**: {points}pt")
 
+        intro = (
+            "**Create a support ticket and our volunteers will assist you!**\n\n"
+            "Click the button below to create a ticket. A volunteer will respond shortly.\n\n"
+            "**Available Categories:**\n"
+        )
         embed = discord.Embed(
-            title="🎫 Need Help?",
-            description=(
-                "**Create a support ticket and our volunteers will assist you!**\n\n"
-                "Click the button below to create a ticket. A volunteer will respond shortly.\n\n"
-                "**Available Categories:**\n" + "\n".join(categories_text)
-            ),
+            title="Need Help?",
+            description=intro + fit_lines(categories_text, DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT - len(intro)),
             color=discord.Color.green(),
         )
 
         view = TeamHelpView(self.bot, show_link=False, show_ticket=True)
 
         async for message in channel.history(limit=10):
-            if message.author == self.bot.user and message.embeds and message.embeds[0].title == embed.title:
+            if message.author == self.bot.user and _has_button(message, TicketButton.CUSTOM_ID):
                 await message.edit(embed=embed, view=view)
                 logger.info(f"Updated ticket panel in channel {channel_id}")
                 return

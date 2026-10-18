@@ -89,6 +89,13 @@ def _injects(w: World) -> ExitStack:
     return stack
 
 
+def _scores(w: World) -> ExitStack:
+    """Quotient lists no service scores, so the score sync can run."""
+    stack = ExitStack()
+    stack.enter_context(patch("quotient.client.QuotientClient.get_service_export", return_value=[]))
+    return stack
+
+
 def _feedback(form: Any) -> Any:
     return lambda w: form_fields(form, {"score_id": st.sampled_from([str(g) for g in w.ids("grade_id")])})
 
@@ -193,7 +200,7 @@ CASES = [
         post=lambda w: form_fields(ScoringTemplateForm(instance=ScoringTemplate.objects.first())),
         idempotent=(ScoringTemplate,),
     ),
-    ViewCase("scoring:sync_scores", GOLD),
+    ViewCase("scoring:sync_scores", GOLD, patches=_scores),
     ViewCase("scoring:api_scores", may("gold_team", "white_team", "ticketing_admin")),
     ViewCase("scoring:export_index", GOLD),
     ViewCase("scoring:export_all", GOLD, methods=("GET",)),

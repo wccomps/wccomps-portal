@@ -14,7 +14,6 @@ from core.models import DiscordTask
 from core.tickets_config import get_all_categories
 from team.models import Team
 from ticketing.forms import CreateTicketForm
-from ticketing.models import TicketCategory
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +28,7 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
     is_admin = (
         has_permission(user, "gold_team") or has_permission(user, "admin") or has_permission(user, "ticketing_admin")
     )
-    teams = None
-
-    if is_admin:
-        teams = Team.objects.filter(is_active=True).order_by("team_number")
-        if request.method == "POST":
-            admin_form = CreateTicketForm(request.POST)
-            if admin_form.is_valid() and admin_form.cleaned_data.get("team_id"):
-                with contextlib.suppress(Team.DoesNotExist):
-                    team = Team.objects.get(id=admin_form.cleaned_data["team_id"], is_active=True)
+    teams = Team.objects.filter(is_active=True).order_by("team_number") if is_admin else None
 
     if not is_admin and not team:
         raise PermissionDenied("You must be a team member to create tickets.")
@@ -78,62 +69,40 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
         return render(request, "create_ticket.html", context, status=status)
 
     if request.method == "POST":
-        form = CreateTicketForm(request.POST)
-        if not form.is_valid():
+        form = CreateTicketForm(
+            request.POST,
+            staff=is_admin,
+            categories=categories,
+            box_ip_map=box_ip_map,
+            service_choices=service_choices,
+        )
+        valid = form.is_valid()
+        if is_admin and form.cleaned_data.get("team_id"):
+            with contextlib.suppress(Team.DoesNotExist):
+                team = Team.objects.get(id=form.cleaned_data["team_id"], is_active=True)
+        if not valid:
             return form_page(" ".join(str(err) for errors in form.errors.values() for err in errors))
-
-        title = form.cleaned_data["title"]
-        description = form.cleaned_data["description"]
-        hostname = form.cleaned_data["hostname"]
-        ip_address = form.cleaned_data["ip_address"]
-        service_name = form.cleaned_data["service_name"]
-        category_id = form.cleaned_data["category"]
 
         if is_admin and not team:
             return form_page("Please select a team.")
 
-        if category_id not in categories:
-            return form_page("Invalid ticket category selected.")
-
-        category_obj = TicketCategory.objects.get(pk=category_id)
-        cat_info = categories[category_id]
-
-        errors = []
-        if not title:
-            errors.append("Title is required.")
-
-        required_fields = cat_info.get("required_fields", [])
-        if "hostname" in required_fields and not hostname:
-            errors.append("Hostname is required for this category.")
-
-        if "ip_address" in required_fields and not ip_address:
-            errors.append("IP Address is required for this category.")
-
-        if "service_name" in required_fields and not service_name:
-            errors.append("Service Name is required for this category.")
-
-        if "description" in required_fields and not description:
-            errors.append("Description is required for this category.")
-
-        if errors:
-            return form_page(" ".join(errors))
-
-        if not team:
+        if not team or not form.category_obj:
             raise BadRequest("Team is required to create a ticket.")
 
         from ticketing.utils import TicketRateLimitError, create_ticket_atomic
 
+        cd = form.cleaned_data
         try:
             # One transaction, so a ticket never exists without the task that gives it a thread.
             with transaction.atomic():
                 ticket = create_ticket_atomic(
                     team=team,
-                    category=category_obj,
-                    title=title,
-                    description=description,
-                    hostname=hostname,
-                    ip_address=ip_address,
-                    service_name=service_name,
+                    category=form.category_obj,
+                    title=cd["title"],
+                    description=cd["description"],
+                    hostname=cd["hostname"],
+                    ip_address=cd["ip_address"],
+                    service_name=cd["service_name"],
                     actor_username=authentik_username,
                     enforce_team_limit=not is_admin,
                 )

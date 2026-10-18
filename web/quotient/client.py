@@ -34,6 +34,51 @@ def _log_failure(message: str, exc: Exception) -> None:
         logger.warning(f"{message}: Quotient unavailable ({str(exc).splitlines()[0]})")
 
 
+def _json(response: httpx.Response) -> object:
+    """The answer's JSON; ValueError when it isn't JSON (or is nested too deep to read)."""
+    try:
+        return response.json()
+    except RecursionError as e:
+        raise ValueError("the answer is nested too deep to read") from e
+
+
+def _text(value: object, what: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{what} isn't text: {value!r:.80}")
+    return value
+
+
+def _whole(value: object, what: str) -> int:
+    if type(value) is not int:
+        raise ValueError(f"{what} isn't a whole number: {value!r:.80}")
+    return value
+
+
+def _fraction(value: object, what: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float) or not 0 <= value <= 1:
+        raise ValueError(f"{what} isn't a fraction from 0 to 1: {value!r:.80}")
+    return float(value)
+
+
+def _object(value: object, what: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{what} isn't an object: {value!r:.80}")
+    return value
+
+
+def _objects(value: object, what: str) -> list[dict[str, object]]:
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        raise ValueError(f"{what} isn't a list of objects: {value!r:.80}")
+    return value
+
+
+def _field(data: object, key: str, what: str) -> object:
+    obj = _object(data, what)
+    if key not in obj:
+        raise ValueError(f"{what} has no {key!r}")
+    return obj[key]
+
+
 def _team_number(team_name: str) -> int:
     """Portal team number from a Quotient team name ("team09" -> 9); 0 if the name has no digits."""
     return int("".join(c for c in team_name if c.isdigit()) or "0")
@@ -175,25 +220,29 @@ class QuotientClient:
             response = self._request("get", "/api/metadata")
             response.raise_for_status()
 
-            data = response.json()
+            data = _json(response)
 
             # /api/metadata returns: {"boxes": [{"name": str, "ip": str, "services": [str]}]}
             boxes = []
-            for box_data in data.get("boxes", []):
+            box_list = _object(data, "the metadata").get("boxes", [])
+            for box_data in _objects(box_list, "boxes"):
+                svc_names = box_data.get("services", [])
+                if not isinstance(svc_names, list):
+                    raise ValueError(f"a box's services aren't a list: {svc_names!r:.80}")
                 # Services are just strings (display names) in metadata endpoint
                 services = [
                     QuotientService(
-                        name=svc_name,
-                        display_name=svc_name,
+                        name=_text(svc_name, "a service"),
+                        display_name=_text(svc_name, "a service"),
                         type="custom",  # Type not provided by metadata endpoint
                     )
-                    for svc_name in box_data.get("services", [])
+                    for svc_name in svc_names
                 ]
 
                 boxes.append(
                     QuotientBox(
-                        name=box_data["name"],
-                        ip=box_data["ip"],
+                        name=_text(_field(box_data, "name", "a box"), "a box's name"),
+                        ip=_text(_field(box_data, "ip", "a box"), "a box's IP"),
                         services=services,
                     )
                 )
@@ -212,7 +261,7 @@ class QuotientClient:
         except (httpx.HTTPError, QuotientAPIError) as e:
             _log_failure("Failed to fetch infrastructure from Quotient", e)
             return None
-        except (KeyError, ValueError) as e:
+        except ValueError as e:
             logger.exception(f"Failed to parse infrastructure response: {e}")
             return None
 
@@ -229,17 +278,17 @@ class QuotientClient:
             response = self._request("get", "/api/injects")
             response.raise_for_status()
 
-            data = response.json()
+            data = _json(response)
             # API returns a list directly
-            inject_list = data if isinstance(data, list) else data.get("injects", [])
+            inject_list = data if isinstance(data, list) else _field(data, "injects", "the injects")
 
             injects = [
                 Inject(
-                    inject_id=i["ID"],
-                    title=i["Title"],
-                    description=i["Description"],
+                    inject_id=_whole(_field(i, "ID", "an inject"), "an inject's ID"),
+                    title=_text(_field(i, "Title", "an inject"), "an inject's title"),
+                    description=_text(_field(i, "Description", "an inject"), "an inject's description"),
                 )
-                for i in inject_list
+                for i in _objects(inject_list, "injects")
             ]
 
             cache.set(cache_key, injects, 60)
@@ -249,7 +298,7 @@ class QuotientClient:
         except (httpx.HTTPError, QuotientAPIError) as e:
             _log_failure("Failed to fetch injects from Quotient", e)
             return None
-        except (KeyError, ValueError) as e:
+        except ValueError as e:
             logger.exception(f"Failed to parse injects response: {e}")
             return None
 
@@ -266,26 +315,27 @@ class QuotientClient:
             response = self._request("get", "/api/engine/export/scores")
             response.raise_for_status()
 
-            data = response.json()
+            data = _json(response)
             exports = []
-            for team_data in data:
+            for team_data in _objects(data, "the export"):
                 services = [
                     ServiceExportEntry(
-                        service_name=s["service_name"],
-                        service_points=s["service_points"],
-                        sla_violations=s.get("sla_violations", 0),
-                        sla_penalty=s.get("sla_penalty", 0),
+                        service_name=_text(_field(s, "service_name", "a service"), "a service's name"),
+                        service_points=_whole(_field(s, "service_points", "a service"), "a service's points"),
+                        sla_violations=_whole(s.get("sla_violations", 0), "a service's SLA violations"),
+                        sla_penalty=_whole(s.get("sla_penalty", 0), "a service's SLA penalty"),
                     )
-                    for s in team_data.get("services", [])
+                    for s in _objects(team_data.get("services", []), "a team's services")
                 ]
+                team_name = _text(_field(team_data, "team_name", "a team"), "a team's name")
                 exports.append(
                     TeamServiceExport(
-                        team_name=team_data["team_name"],
-                        team_number=_team_number(team_data["team_name"]),
+                        team_name=team_name,
+                        team_number=_team_number(team_name),
                         services=services,
-                        gross_points=team_data.get("gross_points", 0),
-                        total_sla_penalty=team_data.get("total_sla_penalty", 0),
-                        total_points=team_data.get("total_points", 0),
+                        gross_points=_whole(team_data.get("gross_points", 0), "a team's points"),
+                        total_sla_penalty=_whole(team_data.get("total_sla_penalty", 0), "a team's SLA penalty"),
+                        total_points=_whole(team_data.get("total_points", 0), "a team's total"),
                     )
                 )
 
@@ -296,7 +346,7 @@ class QuotientClient:
         except (httpx.HTTPError, QuotientAPIError) as e:
             _log_failure("Failed to fetch service export", e)
             return None
-        except (KeyError, ValueError) as e:
+        except ValueError as e:
             logger.exception(f"Failed to parse service export: {e}")
             return None
 
@@ -313,11 +363,17 @@ class QuotientClient:
             response = self._request("get", "/api/graphs/uptimes")
             response.raise_for_status()
 
-            data = response.json()
+            data = _json(response)
             result = []
-            for team_data in data.get("series", []):
-                team_name = team_data["Name"]
-                uptimes = {entry["Service"]: entry["Uptime"] for entry in team_data.get("Data", [])}
+            series = _object(data, "the uptimes").get("series", [])
+            for team_data in _objects(series, "the uptimes"):
+                team_name = _text(_field(team_data, "Name", "a team"), "a team's name")
+                uptimes = {
+                    _text(_field(entry, "Service", "an uptime"), "a service"): _fraction(
+                        _field(entry, "Uptime", "an uptime"), "an uptime"
+                    )
+                    for entry in _objects(team_data.get("Data", []), "a team's uptimes")
+                }
                 result.append(
                     TeamUptime(
                         team_name=team_name,
@@ -333,12 +389,12 @@ class QuotientClient:
         except (httpx.HTTPError, QuotientAPIError) as e:
             _log_failure("Failed to fetch uptimes", e)
             return None
-        except (KeyError, ValueError) as e:
+        except ValueError as e:
             logger.exception(f"Failed to parse uptimes: {e}")
             return None
 
     def get_service_choices(self) -> list[dict[str, str]]:
-        """Service choices for the ticket dropdown, as dicts with 'value', 'label' and 'box_ip' keys."""
+        """Service choices for the ticket dropdown, as dicts with 'value', 'label', 'box_ip' and 'box_name' keys."""
         infrastructure = self.get_infrastructure()
         if not infrastructure:
             return []

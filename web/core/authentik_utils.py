@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from team.models import MAX_TEAMS, team_username
 
 from .authentik_manager import AuthentikUser
+from .utils import shorten
 
 logger = logging.getLogger(__name__)
 
@@ -106,22 +107,22 @@ def parse_team_range(range_str: str) -> list[int]:
                 start_num = int(start_str.strip())
                 end_num = int(end_str.strip())
             except ValueError as e:
-                raise ValueError(f"Invalid range format: {part}") from e
+                raise ValueError(f"Invalid range format: {shorten(part, 30)}") from e
 
             if start_num > end_num:
-                raise ValueError(f"Invalid range: {part} (start > end)")
+                raise ValueError(f"Invalid range: {shorten(part, 30)} (start > end)")
             if start_num < 1 or end_num > MAX_TEAMS:
-                raise ValueError(f"Team numbers must be 1-{MAX_TEAMS}, got: {part}")
+                raise ValueError(f"Team numbers must be 1-{MAX_TEAMS}, got: {shorten(part, 30)}")
 
             team_numbers.update(range(start_num, end_num + 1))
         else:
             try:
                 num = int(part)
             except ValueError as e:
-                raise ValueError(f"Invalid team number: {part}") from e
+                raise ValueError(f"Invalid team number: {shorten(part, 30)}") from e
 
             if num < 1 or num > MAX_TEAMS:
-                raise ValueError(f"Team number must be 1-{MAX_TEAMS}, got: {num}")
+                raise ValueError(f"Team number must be 1-{MAX_TEAMS}, got: {shorten(str(num), 30)}")
             team_numbers.add(num)
 
     return sorted(team_numbers)

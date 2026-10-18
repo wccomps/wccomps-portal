@@ -228,6 +228,7 @@ CODE_EXCEPTIONS = {
     "*:setup_hook": "discord.py calls it while the bot starts",
     "*:on_*": "discord.py calls event listeners and modal callbacks by name",
     "*:transform": "discord.py calls an app command Transformer's transform",
+    "*:interaction_check": "discord.py calls a command tree's interaction_check before every command",
     # Django
     "@admin.register": "Django admin registers the class through its decorator",
     "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",

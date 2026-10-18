@@ -5,7 +5,7 @@ import logging
 import discord
 from asgiref.sync import sync_to_async
 
-from bot.utils import THREAD_AUTO_ARCHIVE_MINUTES, team_chat_channel
+from bot.utils import DISCORD_THREAD_NAME_CHAR_LIMIT, THREAD_AUTO_ARCHIVE_MINUTES, fit, team_chat_channel
 from team.models import Team
 from ticketing.models import Ticket
 
@@ -34,7 +34,9 @@ async def create_ticket_thread(
         return None
 
     thread = await chat_channel.create_thread(
-        name=f"{ticket.ticket_number} - Team {team.team_number:02d} - {ticket.title[:60]}",
+        name=fit(
+            f"{ticket.ticket_number}: Team {team.team_number:02d}, {ticket.title}", DISCORD_THREAD_NAME_CHAR_LIMIT
+        ),
         auto_archive_duration=THREAD_AUTO_ARCHIVE_MINUTES,
     )
 
@@ -57,7 +59,7 @@ async def create_ticket_thread(
     embed = await sync_to_async(format_ticket_embed)(ticket)
     view = TicketActionView(ticket.id)
     message = await thread.send(
-        f"**Ticket #{ticket.ticket_number}** - Use buttons below to manage this ticket.",
+        f"**Ticket #{ticket.ticket_number}**: use the buttons below to manage this ticket.",
         embed=embed,
         view=view,
     )

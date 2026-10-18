@@ -11,10 +11,11 @@ from django.conf import settings
 
 from bot.competition_actions import run_competition_cleanup
 from bot.permissions import permission_check
-from bot.utils import ConfirmView, log_to_ops_channel, team_chat_channel
+from bot.utils import ConfirmView, announcement, log_to_ops_channel, send_announcement, send_parts, team_chat_channel
 from core.authentik_utils import credentials_csv, parse_team_range, reset_team_credentials
+from core.forms import AppSlugForm
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
-from core.utils import UnknownTimezoneError, parse_datetime_to_utc
+from core.utils import UnknownTimezoneError, parse_datetime_to_utc, shorten
 from team.models import Team, active_team_numbers, team_username
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ class AdminCompetitionCog(commands.Cog):
             active = await sync_to_async(active_team_numbers)()
             view = ConfirmView(confirm_label=f"Confirm Reset All {len(active)} Active Teams")
             await interaction.response.send_message(
-                f"⚠️ **WARNING: You are about to reset passwords for ALL {len(active)} active team accounts.**\n\n"
+                f"**WARNING: You are about to reset passwords for ALL {len(active)} active team accounts.**\n\n"
                 "This will:\n"
                 "• Generate new random passwords for them\n"
                 "• Invalidate all current passwords and end their Authentik sessions\n\n"
@@ -369,11 +370,11 @@ class AdminCompetitionCog(commands.Cog):
         view = ConfirmView(confirm_label="Confirm Cleanup")
         await interaction.response.send_message(
             "**This will permanently:**\n"
-            "- Delete all team Discord channels and categories\n"
-            "- Remove team roles from all members\n"
-            "- Deactivate all team member Discord links\n"
-            "- Remove the Room Judge role\n"
-            "- Clear queued announcements\n\n"
+            "• Delete all team Discord channels and categories\n"
+            "• Remove team roles from all members\n"
+            "• Deactivate all team member Discord links\n"
+            "• Remove the Room Judge role\n"
+            "• Clear queued announcements\n\n"
             "Are you sure you want to continue?",
             view=view,
             ephemeral=True,
@@ -400,10 +401,24 @@ class AdminCompetitionCog(commands.Cog):
     )
     @app_commands.describe(app_slugs="Comma-separated list of application slugs (e.g., netbird,scoring)")
     @app_commands.check(permission_check("admin"))
-    async def admin_competition_set_apps(self, interaction: discord.Interaction, app_slugs: str) -> None:
+    async def admin_competition_set_apps(
+        self, interaction: discord.Interaction, app_slugs: app_commands.Range[str, 1, 1000]
+    ) -> None:
         """Set which applications to control."""
 
-        slugs = [s.strip() for s in app_slugs.split(",") if s.strip()]
+        slugs = []
+        for raw in app_slugs.split(","):
+            if not raw.strip():
+                continue
+            form = AppSlugForm({"app_slug": raw})
+            if not form.is_valid():
+                await interaction.response.send_message(
+                    f"Not an application slug: {shorten(raw.strip(), 40)} "
+                    "(use 1 to 100 letters, digits, hyphens and underscores).",
+                    ephemeral=True,
+                )
+                return
+            slugs.append(form.cleaned_data["app_slug"])
 
         if not slugs:
             await interaction.response.send_message("Please provide at least one application slug.", ephemeral=True)
@@ -464,16 +479,13 @@ class AdminCompetitionCog(commands.Cog):
                 )
                 return
 
-            blueteam_role = guild.get_role(settings.BLUETEAM_ROLE_ID)
-            role_mention = blueteam_role.mention if blueteam_role else "@Blueteam"
-
             try:
-                await channel.send(f"{role_mention}\n\n{message}")
+                await send_announcement(guild, channel, message)
                 sent_count = 1
 
                 await log_to_ops_channel(
                     self.bot,
-                    f"Broadcast to Announcements by {interaction.user.mention}\nMessage: {message[:100]}...",
+                    f"Broadcast to Announcements by {interaction.user.mention}\nMessage: {shorten(message, 100)}",
                 )
 
                 await interaction.followup.send("Broadcast sent to announcements channel", ephemeral=True)
@@ -513,7 +525,7 @@ class AdminCompetitionCog(commands.Cog):
 
                 chat_channel = team_chat_channel(guild, team)
                 if chat_channel:
-                    await chat_channel.send(f"**Announcement from {interaction.user.name}:**\n\n{message}")
+                    await send_parts(chat_channel, announcement(interaction.user.name, message))
                     sent_count += 1
                 else:
                     # Queue announcement for later delivery when channel is created
@@ -526,7 +538,7 @@ class AdminCompetitionCog(commands.Cog):
 
             except Exception as e:
                 logger.exception(f"Failed to broadcast to team {team_number}: {e}")
-                failed_channels.append(f"Team {team_number:02d} ({str(e)[:50]})")
+                failed_channels.append(f"Team {team_number:02d} ({shorten(str(e), 50)})")
                 continue
 
         await AuditLog.objects.acreate(
@@ -536,7 +548,7 @@ class AdminCompetitionCog(commands.Cog):
             target_id=0,
             details={
                 "target": target,
-                "message_preview": message[:200],
+                "message_preview": shorten(message, 200),
                 "sent_count": sent_count,
                 "queued_count": queued_count,
                 "failed_count": len(failed_channels),
@@ -552,7 +564,7 @@ class AdminCompetitionCog(commands.Cog):
             ops_msg_parts.append(f"• Queued: {queued_count} (pending channel creation)")
         if failed_channels:
             ops_msg_parts.append(f"• Failed: {len(failed_channels)}")
-        ops_msg_parts.append(f"Message: {message[:100]}...")
+        ops_msg_parts.append(f"Message: {shorten(message, 100)}")
 
         await log_to_ops_channel(self.bot, "\n".join(ops_msg_parts))
 

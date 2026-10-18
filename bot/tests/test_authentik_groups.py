@@ -31,7 +31,11 @@ def test_list_all_users_follows_pagination():
     def handler(request: httpx.Request) -> httpx.Response:
         page = int(request.url.params["page"])
         return httpx.Response(
-            200, json={"results": [{"uid": f"u{page}"}], "pagination": {"next": page + 1 if page < 3 else 0}}
+            200,
+            json={
+                "results": [{"uid": f"u{page}", "is_active": True, "groups": []}],
+                "pagination": {"next": page + 1 if page < 3 else 0},
+            },
         )
 
     assert [u["uid"] for u in _manager(handler).list_all_users()] == ["u1", "u2", "u3"]

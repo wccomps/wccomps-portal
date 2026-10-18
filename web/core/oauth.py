@@ -9,7 +9,7 @@ from django.conf import settings
 from django.contrib.auth import login, logout
 from django.contrib.auth.models import User
 from django.core import signing
-from django.db import connection, transaction
+from django.db import connection, models, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -103,6 +103,42 @@ def _free_username(username: str, keep_pk: int | None = None) -> None:
     )
 
 
+def _json_object(response: httpx.Response) -> dict[str, object]:
+    """The answer's JSON object; ValueError when it isn't one (not JSON, nested too deep to read, or another type)."""
+    try:
+        data = response.json()
+    except RecursionError as e:
+        raise ValueError("the answer is nested too deep to read") from e
+    if not isinstance(data, dict):
+        raise ValueError(f"the answer isn't a JSON object: {type(data).__name__}")
+    return data
+
+
+def _fits(text: str, model: type[models.Model], name: str) -> bool:
+    length: int | None = getattr(model._meta.get_field(name), "max_length", None)
+    return length is None or len(text) <= length
+
+
+def _claims(userinfo: dict[str, object]) -> tuple[str, str, str, list[str]]:
+    """The sub, username (the email when there is none), email and group names the account is made from;
+    ValueError when they can't make one: missing, not text, a NUL, or longer than their columns."""
+    sub = userinfo.get("sub")
+    email = userinfo.get("email") or ""
+    username = userinfo.get("preferred_username") or email
+    groups = userinfo.get("groups", [])
+    if not isinstance(sub, str) or not sub or not _fits(sub, UserGroups, "authentik_id"):
+        raise ValueError("no usable sub claim")
+    if not isinstance(username, str) or not username or not _fits(username, User, "username"):
+        raise ValueError("no usable username")
+    if not isinstance(email, str) or not _fits(email, User, "email"):
+        raise ValueError("an unusable email")
+    if not isinstance(groups, list) or not all(isinstance(g, str) for g in groups):
+        raise ValueError("groups that aren't a list of names")
+    if "\x00" in sub + username + email + "".join(groups):
+        raise ValueError("a NUL character")
+    return sub, username, email, groups
+
+
 def oauth_callback(request: HttpRequest) -> HttpResponse:
     config = _get_oauth_config()
 
@@ -181,8 +217,8 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
                 },
             )
             token_response.raise_for_status()
-            tokens = token_response.json()
-    except httpx.HTTPError as e:
+            tokens = _json_object(token_response)
+    except (httpx.HTTPError, ValueError) as e:
         logger.error(f"Token exchange failed: {e}")
         return render(
             request,
@@ -191,7 +227,7 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
         )
 
     access_token = tokens.get("access_token")
-    if not access_token:
+    if not isinstance(access_token, str) or not access_token:
         logger.error("No access token in response")
         return render(
             request,
@@ -206,8 +242,8 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             userinfo_response.raise_for_status()
-            userinfo = userinfo_response.json()
-    except httpx.HTTPError as e:
+            userinfo = _json_object(userinfo_response)
+    except (httpx.HTTPError, ValueError) as e:
         logger.error(f"Userinfo fetch failed: {e}")
         return render(
             request,
@@ -215,13 +251,10 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
             {"error_title": "Authentication Failed", "error_message": "Please try again."},
         )
 
-    authentik_id = userinfo.get("sub")
-    username = userinfo.get("preferred_username") or userinfo.get("email", "")
-    groups = userinfo.get("groups", [])
-    email = userinfo.get("email", "")
-
-    if not authentik_id:
-        logger.error("No sub claim in userinfo")
+    try:
+        authentik_id, username, email, groups = _claims(userinfo)
+    except ValueError as e:
+        logger.error(f"Userinfo unusable: {e}")
         return render(
             request,
             "core/oauth_error.html",

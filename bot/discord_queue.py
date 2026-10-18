@@ -17,7 +17,15 @@ from bot.heartbeat import record as record_heartbeat
 from bot.role_sync import competition_guild
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_dashboard import trigger_dashboard
-from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, recycle_db_connection, split_message, team_chat_channel
+from bot.utils import (
+    add_field,
+    announcement,
+    recycle_db_connection,
+    send_announcement,
+    send_parts,
+    split_message,
+    team_chat_channel,
+)
 from core.discord_tasks import (
     PAYLOAD_TYPES,
     AddUserToThread,
@@ -361,8 +369,7 @@ class DiscordQueueProcessor:
             )
             embed.add_field(name="Resolved By", value=actor, inline=True)
             embed.add_field(name="Points Charged", value=str(points), inline=True)
-            if notes:
-                embed.add_field(name="Resolution Notes", value=notes[:DISCORD_EMBED_FIELD_CHAR_LIMIT], inline=False)
+            add_field(embed, "Resolution Notes", notes, inline=False)
             await thread.send(embed=embed)
         elif action == "claimed":
             await thread.send(f"Ticket claimed by **{actor}**")
@@ -379,7 +386,7 @@ class DiscordQueueProcessor:
             msg = f"Ticket reopened by **{actor}**"
             if payload.reason:
                 msg += f"\nReason: {payload.reason}"
-            await thread.send(msg)
+            await send_parts(thread, msg)
         else:
             await thread.send(f"Ticket updated: {action} by **{actor}**")
 
@@ -454,10 +461,7 @@ class DiscordQueueProcessor:
             if not channel or not isinstance(channel, discord.TextChannel):
                 raise RuntimeError("Announcements channel not found")
 
-            blueteam_role = guild.get_role(settings.BLUETEAM_ROLE_ID)
-            role_mention = blueteam_role.mention if blueteam_role else "@Blueteam"
-
-            await channel.send(f"{role_mention}\n\n{message}")
+            await send_announcement(guild, channel, message)
             sent_count = 1
             logger.info(f"Broadcast to announcements by {sender}")
 
@@ -507,7 +511,7 @@ class DiscordQueueProcessor:
         try:
             chat_channel = team_chat_channel(guild, team)
             if chat_channel:
-                await chat_channel.send(f"**Announcement from {sender}:**\n\n{message}")
+                await send_parts(chat_channel, announcement(sender, message))
                 return "sent"
             else:
                 await QueuedAnnouncement.objects.acreate(

@@ -16,9 +16,11 @@ django.setup()
 
 from django.conf import settings
 
+from bot.command_tree import PortalCommandTree
 from bot.competition_timer import CompetitionTimer
 from bot.discord_queue import DiscordQueueProcessor
 from bot.unified_dashboard import UnifiedDashboard
+from bot.utils import ALLOWED_MENTIONS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,7 +39,9 @@ class PortalBot(commands.Bot):
         intents.members = True
         intents.guilds = True
 
-        super().__init__(command_prefix="!", intents=intents)
+        super().__init__(
+            command_prefix="!", intents=intents, allowed_mentions=ALLOWED_MENTIONS, tree_cls=PortalCommandTree
+        )
 
         self.queue_processor: DiscordQueueProcessor | None = None
         self.unified_dashboard: UnifiedDashboard | None = None

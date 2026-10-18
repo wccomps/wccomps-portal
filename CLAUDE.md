@@ -15,14 +15,16 @@ WCComps Portal is a competition management platform for WRCCDC. Three components
 PYTHONPATH="$(pwd)/web:$(pwd)" DB_HOST=localhost DB_PORT=5433 DB_USER=test_user DB_PASSWORD=test_password DB_NAME=wccomps_test uv run pytest -m "not browser"
 # Browser tests (Playwright): same env, `-m browser -n0`. CI doesn't run them (nightly-browser.yml does, on main after
 # the merge), so run them by hand before a template or JS PR.
-# Hypothesis runs the "ci" profile: 25 fixed examples per test (10 for the view tests). HYPOTHESIS_PROFILE=deep runs
-# 2000 random ones (500 for the view tests), and runs nightly on main (deep-properties.yml). No test pins its own
-# count. Each nightly workflow keeps one issue open while it fails and closes it when it passes (nightly.yml). GitHub
-# turns a public repo's schedules off after 60 days with no repo activity (it emails first): `gh workflow list --all`
-# shows each scheduled workflow's state, and `gh workflow enable <file>` turns one back on.
-# User-input property tests: web/core/tests/test_properties_*.py; test_property_coverage.py fails on any input
-# without one (or an exceptions entry with a reason). A new URL pattern needs a row in its test_properties_views_*
-# table (views_harness.ViewCase).
+# Hypothesis runs the "ci" profile: 25 fixed examples per test (10 for the view and bot tests). HYPOTHESIS_PROFILE=deep
+# runs 2000 random ones (500 for the view and bot tests), and runs nightly on main (deep-properties.yml). No test pins
+# its own count. Each nightly workflow keeps one issue open while it fails and closes it when it passes (nightly.yml).
+# GitHub turns a public repo's schedules off after 60 days with no repo activity (it emails first):
+# `gh workflow list --all` shows each scheduled workflow's state, and `gh workflow enable <file>` turns one back on.
+# Input and external-JSON property tests: web/core/tests/test_properties_*.py and bot/tests/test_properties_bot.py;
+# test_property_coverage.py fails on any entry point without one (or an exceptions entry with a reason). A new URL
+# pattern needs a row in its test_properties_views_* table (views_harness.ViewCase); a new bot command, component or
+# listener needs a row in bot/tests/test_properties_bot.py (CASES); a new external JSON reader needs a case in
+# test_properties_readers.py (READERS).
 
 # Lint and type checks (CI runs these plus the tests on every PR)
 uv run ruff check . && uv run djlint web/templates --lint && DJANGO_SETTINGS_MODULE=portal.settings uv run mypy

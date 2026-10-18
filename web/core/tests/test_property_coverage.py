@@ -3,12 +3,14 @@
 The entry points: every Django form class in the project (imported, so a form in an admin or view module counts);
 every function that parses CSV or an uploaded file (found by what it does: calls a csv reader, takes an
 UploadedFile, reads request.FILES, or reads an upload, file or attachment); every URL pattern and admin model page;
-and the bot's slash commands, modals, buttons, selects and message listeners.
+the bot's slash commands, modals, buttons, selects and message listeners; and every function that reads JSON
+another service answered (a response's .json(), or json.loads of a response's text or content).
 
-Each must be registered against property tests (FORM_CASES, PARSERS, or a row in a VIEW_MODULES module's CASES for a
-URL pattern or admin model) or listed in EXCEPTIONS with the reason. A
-registry entry or exception that matches no entry point fails too, so neither can go stale. Fix a failure by adding
-a property test case for the new entry point (the test module's docstring says how), or an exception with a reason.
+Each must be registered against property tests (FORM_CASES, PARSERS, a row in a VIEW_MODULES module's CASES for a
+URL pattern or admin model, a row in the bot's CASES, or a case in READERS) or listed in EXCEPTIONS with the
+reason. A registry entry or exception that matches no entry point fails too, so neither can go stale. Fix a failure by
+adding a property test case for the new entry point (the test module's docstring says how), or an exception with a
+reason.
 """
 
 import ast
@@ -24,7 +26,8 @@ from django.apps import apps
 from django.contrib import admin
 from django.urls import URLPattern, URLResolver, get_resolver
 
-from core.tests import test_properties_forms, test_properties_parsers
+from bot.tests import test_properties_bot
+from core.tests import test_properties_forms, test_properties_parsers, test_properties_readers
 from core.tests.test_no_unused_code import REPO_DIR, Unused, fail_with, python_trees
 from core.tests.view_rows import VIEW_MODULES
 
@@ -186,70 +189,9 @@ FORM_TESTS = (
     test_properties_forms.test_valid_post_fits_its_fields_is_stored_and_cleans_the_same,
 )
 
-PR_C = "covered in PR C (the Discord bot)"
-
-
-BOT_FOR_PR_C = [
-    "bot:button:bot/cogs/help_panels.py:LinkButton",
-    "bot:button:bot/cogs/help_panels.py:TicketButton",
-    "bot:button:bot/ticket_dashboard.py:TicketActionView.cancel_button",
-    "bot:button:bot/ticket_dashboard.py:TicketActionView.claim_button",
-    "bot:button:bot/ticket_dashboard.py:TicketActionView.resolve_button",
-    "bot:button:bot/unified_dashboard.py:DashboardControlView.filter_all",
-    "bot:button:bot/unified_dashboard.py:DashboardControlView.filter_claimed",
-    "bot:button:bot/unified_dashboard.py:DashboardControlView.filter_open",
-    "bot:button:bot/unified_dashboard.py:DashboardControlView.sort_created",
-    "bot:button:bot/unified_dashboard.py:DashboardControlView.sort_stale",
-    "bot:button:bot/unified_dashboard.py:DashboardControlView.sort_team",
-    "bot:button:bot/utils.py:CancelButton",
-    "bot:button:bot/utils.py:ConfirmButton",
-    "bot:command:bot/cogs/admin.py:AdminCog.admin_sync_roles",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_broadcast",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_cleanup_competition",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_competition_set_apps",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_reset_blueteam_passwords",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_set_end_time",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_set_max_members",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_set_start_time",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_start_competition",
-    "bot:command:bot/cogs/admin_competition.py:AdminCompetitionCog.admin_stop_competition",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_activate_teams",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_deactivate_teams",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_recreate_teams",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_remove_team",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_reset_team",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_team_info",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_teams",
-    "bot:command:bot/cogs/admin_teams.py:AdminTeamsCog.admin_unlink",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_change_category",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_cancel",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_clear",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_create",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_list",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_reassign",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_reopen",
-    "bot:command:bot/cogs/admin_tickets.py:AdminTicketsCog.admin_ticket_resolve",
-    "bot:command:bot/cogs/linking.py:LinkingCog.link_command",
-    "bot:command:bot/cogs/scoring.py:ScoringCog.incident_report",
-    "bot:command:bot/cogs/ticketing.py:TicketingCog.create_ticket",
-    "bot:listener:bot/cogs/help_panels.py:HelpPanelsCog.on_message",
-    "bot:listener:bot/cogs/ticketing.py:TicketingCog.on_message",
-    "bot:listener:bot/cogs/ticketing.py:TicketingCog.on_message_delete",
-    "bot:listener:bot/cogs/ticketing.py:TicketingCog.on_message_edit",
-    "bot:modal:bot/cogs/help_panels.py:BoxResetModal",
-    "bot:modal:bot/cogs/help_panels.py:ConsultationModal",
-    "bot:modal:bot/cogs/help_panels.py:OtherModal",
-    "bot:modal:bot/cogs/help_panels.py:ScoringServiceCheckModal",
-    "bot:modal:bot/cogs/help_panels.py:ServiceScoringModal",
-    "bot:modal:bot/ticket_dashboard.py:ResolveTicketModal",
-    "bot:select:bot/cogs/help_panels.py:CategorySelect",
-]
-
-EXCEPTIONS: dict[str, str] = {
-    **dict.fromkeys(BOT_FOR_PR_C, PR_C),
-    # The bot's ticket thread listener reads an attachment's bytes to copy it to the web ticket
-    "bot/cogs/ticketing.py:TicketingCog.on_message": PR_C,
-}
+EXCEPTIONS: dict[str, str] = {}
+# Readers of another service's JSON that can't have a property test, each with why
+READER_EXCEPTIONS: dict[str, str] = {}
 
 
 @pytest.mark.django_db
@@ -269,7 +211,9 @@ def test_every_form_has_property_tests() -> None:
 
 def test_every_upload_and_csv_parser_has_property_tests() -> None:
     found = parser_entry_points()
-    registry = test_properties_parsers.PARSERS
+    # The bot's listeners that read an attachment are driven by their rows in the bot's CASES
+    bot_listeners = {case.function for case in test_properties_bot.CASES if hasattr(case, "function")}
+    registry = {**test_properties_parsers.PARSERS, **dict.fromkeys(bot_listeners & set(found), ())}
     uncovered = [Unused(key, reasons) for key, reasons in found.items() if key not in registry]
     parser_exceptions = {k: v for k, v in EXCEPTIONS.items() if not k.startswith(("url:", "admin:", "bot:"))}
     fail_with("Parsers of uploads or CSV without a property test (add them to PARSERS)", uncovered, parser_exceptions)
@@ -277,7 +221,7 @@ def test_every_upload_and_csv_parser_has_property_tests() -> None:
     assert not stale, f"PARSERS lists functions that no longer parse uploads or CSV: {stale}"
     not_properties = [
         f"{key}: {test.__name__}"
-        for key, tests in registry.items()
+        for key, tests in test_properties_parsers.PARSERS.items()
         for test in tests
         if not getattr(test, "is_hypothesis_test", False)
     ]
@@ -310,13 +254,93 @@ def test_every_url_pattern_has_property_tests() -> None:
             assert cases == [module.CASES], f"{module.__name__}.{test.__name__} must run every row of CASES"
 
 
-def test_every_bot_entry_point_is_covered_or_left_for_pr_c() -> None:
+def test_every_bot_entry_point_has_property_tests() -> None:
     found = bot_entry_points()
+    covered = {case.entry_point for case in test_properties_bot.CASES}
     fail_with(
-        "Bot commands, modals, buttons and listeners without property tests",
-        [Unused(key, where) for key, where in found.items()],
+        "Bot commands, modals, buttons and listeners without property tests (add a row to the bot's CASES)",
+        [Unused(key, where) for key, where in found.items() if key not in covered],
         {k: v for k, v in EXCEPTIONS.items() if k.startswith("bot:")},
     )
+    stale = sorted(covered - set(found))
+    assert not stale, f"Bot property rows for entry points that no longer exist: {stale}"
+    test = test_properties_bot.test_any_input_is_answered_within_discords_limits
+    cases = [m.args[1] for m in getattr(test, "pytestmark", []) if m.name == "parametrize"]
+    assert cases == [test_properties_bot.CASES], f"{test.__name__} must run every row of CASES"
+
+
+def _reads_json(node: ast.AST, aliases: dict[str, str]) -> str | None:
+    """How the call reads another service's JSON, or None: a response's .json(), or json.loads of a response's
+    text or content."""
+    if not isinstance(node, ast.Call):
+        return None
+    if isinstance(node.func, ast.Attribute) and node.func.attr == "json" and not node.args and not node.keywords:
+        return f"{ast.unparse(node.func)}()"
+    if _resolved(node.func, aliases) == "json.loads" and node.args:
+        read = node.args[0]
+        if isinstance(read, ast.Attribute) and read.attr in {"text", "content"}:
+            return f"json.loads({ast.unparse(read)})"
+    return None
+
+
+def json_reader_entry_points() -> dict[str, str]:
+    """Every function (path:qualname) that reads JSON another service answered, with how: itself, or by calling a
+    function of its module that does (a helper such as AuthentikManager._results, or a method built on another)."""
+    found: dict[str, str] = {}
+    for path, tree in python_trees().items():
+        aliases = import_aliases(tree)
+        calls: dict[str, set[str]] = {}
+        for scope, node in _nodes_in_scope(tree):
+            if how := _reads_json(node, aliases):
+                found.setdefault(f"{path}:{scope}", how)
+            elif isinstance(node, ast.Call):
+                called = node.func.attr if isinstance(node.func, ast.Attribute) else ast.unparse(node.func)
+                calls.setdefault(scope, set()).add(called)
+        while True:
+            readers = {key.rsplit(":", 1)[1].rsplit(".", 1)[-1]: key for key in found if key.startswith(f"{path}:")}
+            more = {
+                f"{path}:{scope}": f"calls {readers[name].rsplit(':', 1)[1]}"
+                for scope, names in calls.items()
+                for name in names & readers.keys()
+                if f"{path}:{scope}" not in found and scope != "<module>"
+            }
+            if not more:
+                break
+            found |= more
+    return found
+
+
+def test_every_json_reader_has_property_tests() -> None:
+    """A reader of another service's JSON gets a case in test_properties_readers.READERS (or, for one read in a
+    view, a property of its own there), so a new one is checked against any answer the service can give."""
+    found = json_reader_entry_points()
+    covered = {key for reader in test_properties_readers.READERS for key in reader.keys} | set(
+        test_properties_readers.VIEW_READERS
+    )
+    fail_with(
+        "Readers of another service's JSON without property tests (add a case to READERS in "
+        "test_properties_readers.py)",
+        [Unused(key, how) for key, how in found.items() if key not in covered],
+        READER_EXCEPTIONS,
+    )
+    stale = sorted(covered - set(found))
+    assert not stale, f"READERS has cases for functions that no longer read another service's JSON: {stale}"
+
+
+@pytest.mark.parametrize(
+    ("source", "reads"),
+    [
+        ("def f(c):\n    return c.get('u').json()\n", True),
+        ("import json\ndef f(r):\n    return json.loads(r.text)\n", True),
+        ("from json import loads\ndef f(r):\n    return loads(r.content)\n", True),
+        ("import json\ndef f(request):\n    return json.loads(request.body)\n", False),
+        ("def f(d):\n    return d.json(indent=2)\n", False),
+    ],
+)
+def test_the_reader_guard_finds_json_reads_however_they_are_written(source: str, reads: bool) -> None:
+    tree = ast.parse(source)
+    aliases = import_aliases(tree)
+    assert any(_reads_json(node, aliases) for _, node in _nodes_in_scope(tree)) is reads
 
 
 CSV_EXPORT_MODULE = "web/core/csv_export.py"

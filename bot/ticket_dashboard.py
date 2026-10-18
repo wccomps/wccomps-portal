@@ -7,8 +7,9 @@ from asgiref.sync import sync_to_async
 
 from bot.utils import (
     DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT,
-    DISCORD_EMBED_FIELD_CHAR_LIMIT,
     DISCORD_EMBED_TITLE_CHAR_LIMIT,
+    DISCORD_EMBED_TOTAL_CHAR_LIMIT,
+    add_field,
     fit,
 )
 from core.tickets_config import TicketCategoryConfig, get_category_config
@@ -29,60 +30,37 @@ def get_ticket_color(status: str) -> discord.Color:
 
 
 def format_ticket_embed(ticket: Ticket) -> discord.Embed:
+    """The ticket as its thread shows it. A blank field is left out (Discord refuses one), each is cut to its
+    limit, and the description takes what is left of the embed's 6000 characters."""
     cat_info = get_category_config(ticket.category_id) or {}
 
     embed = discord.Embed(
         title=fit(f"Ticket {ticket.ticket_number}: {ticket.title}", DISCORD_EMBED_TITLE_CHAR_LIMIT),
-        description=fit(ticket.description, DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT),
         color=get_ticket_color(ticket.status),
         timestamp=ticket.created_at,
     )
 
-    embed.add_field(
-        name="Team",
-        value=f"{ticket.team.team_name} (#{ticket.team.team_number})",
-        inline=True,
-    )
-
-    status_display = ticket.status.replace("_", " ").title()
-    embed.add_field(name="Status", value=status_display, inline=True)
-
-    if ticket.hostname:
-        embed.add_field(name="Hostname", value=ticket.hostname, inline=True)
-    if ticket.service_name:
-        embed.add_field(name="Service", value=ticket.service_name, inline=True)
-    if ticket.ip_address:
-        embed.add_field(name="IP Address", value=ticket.ip_address, inline=True)
-
+    add_field(embed, "Team", f"{ticket.team.team_name} (#{ticket.team.team_number})", inline=True)
+    add_field(embed, "Status", ticket.status.replace("_", " ").title(), inline=True)
+    add_field(embed, "Hostname", ticket.hostname, inline=True)
+    add_field(embed, "Service", ticket.service_name, inline=True)
+    add_field(embed, "IP Address", ticket.ip_address or "", inline=True)
     if ticket.assigned_to:
-        embed.add_field(
-            name="Assigned To",
-            value=ticket.assigned_to.username,
-            inline=False,
-        )
+        add_field(embed, "Assigned To", ticket.assigned_to.username)
 
     points = cat_info.get("points", 0)
     if cat_info.get("variable_points", False):
-        point_text = "Variable"
-        embed.add_field(name="Point Impact", value=point_text, inline=True)
+        add_field(embed, "Point Impact", "Variable", inline=True)
     elif points > 0:
-        point_text = f"{points} points"
-        embed.add_field(name="Point Impact", value=point_text, inline=True)
+        add_field(embed, "Point Impact", f"{points} points", inline=True)
 
     if ticket.resolved_at:
-        embed.add_field(
-            name="Resolved At",
-            value=discord.utils.format_dt(ticket.resolved_at, style="R"),
-            inline=True,
-        )
-        if ticket.resolution_notes:
-            embed.add_field(
-                name="Resolution Notes",
-                value=ticket.resolution_notes[:DISCORD_EMBED_FIELD_CHAR_LIMIT],
-                inline=False,
-            )
+        add_field(embed, "Resolved At", discord.utils.format_dt(ticket.resolved_at, style="R"), inline=True)
+        add_field(embed, "Resolution Notes", ticket.resolution_notes)
 
-    embed.set_footer(text=f"Category: {cat_info.get('display_name', f'Category {ticket.category_id}')}")
+    embed.set_footer(text=fit(f"Category: {cat_info.get('display_name', f'Category {ticket.category_id}')}", 2048))
+    room = DISCORD_EMBED_TOTAL_CHAR_LIMIT - len(embed)
+    embed.description = fit(ticket.description, min(DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT, room)) or None
 
     return embed
 
@@ -313,21 +291,19 @@ class ResolveTicketModal(discord.ui.Modal, title="Resolve Ticket"):
         self.add_item(self.points)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        points_override = None
-        if self.points.value.strip():
-            try:
-                points_override = int(self.points.value.strip())
-            except ValueError:
-                await interaction.response.send_message("Invalid point value. Must be a number.", ephemeral=True)
-                return
-
+        from bot.ticket_input import read_resolution
         from ticketing.lifecycle import aresolve_ticket
+
+        resolution = read_resolution(self.notes.value, self.points.value)
+        if isinstance(resolution, str):
+            await interaction.response.send_message(resolution, ephemeral=True)
+            return
 
         ticket, error = await aresolve_ticket(
             ticket_id=self.ticket.id,
             actor_username=str(interaction.user),
-            resolution_notes=self.notes.value,
-            points_override=points_override,
+            resolution_notes=resolution[0],
+            points_override=resolution[1],
             discord_id=interaction.user.id,
             discord_username=str(interaction.user),
         )

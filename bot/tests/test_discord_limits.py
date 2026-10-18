@@ -95,16 +95,17 @@ async def test_thread_embed_fits_a_long_web_description() -> None:
 @pytest.mark.asyncio
 async def test_ticket_reply_fits_a_long_description_and_still_opens_the_thread(mock_interaction: Any) -> None:
     from bot.cogs.ticketing import TicketingCog
+    from bot.ticket_input import TicketInput
 
     description = "w" * 3000
     member = SimpleNamespace(team=SimpleNamespace(team_name="Team 05"))
     ticket = SimpleNamespace(ticket_number="T005-001")
+    read = TicketInput(MagicMock(), {"display_name": "Other", "points": 0}, description, "", "", "")
     cog = TicketingCog.__new__(TicketingCog)
     cog.bot = MagicMock()
     with (
         patch("bot.cogs.ticketing.linked_team_member", AsyncMock(return_value=member)),
-        patch("core.tickets_config.get_category_config", return_value={"display_name": "Other", "points": 0}),
-        patch("bot.cogs.ticketing.TicketCategory.objects.aget", AsyncMock()),
+        patch("bot.cogs.ticketing.read_ticket", return_value=read),
         patch("bot.cogs.ticketing.acreate_ticket_atomic", AsyncMock(return_value=ticket)),
         patch("bot.cogs.ticketing.publish_new_ticket", AsyncMock()) as publish,
     ):

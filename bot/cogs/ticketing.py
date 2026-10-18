@@ -11,11 +11,20 @@ from quotient.client import get_quotient_client
 
 from bot.permissions import check_blue_team, linked_team_member
 from bot.thread_creator import publish_new_ticket
-from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, fit
-from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
+from bot.ticket_input import read_ticket
+from bot.utils import add_field, choices, pinging
+from core.stored_files import clean_name
+from core.utils import shorten
+from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketComment, TicketHistory
 from ticketing.utils import TicketRateLimitError, acreate_ticket_atomic, get_user_for_ticket
 
 logger = logging.getLogger(__name__)
+
+
+def storable(text: str) -> str:
+    """A message's text as a comment stores it: without NUL characters, which PostgreSQL text can't hold. The
+    message is already in Discord, so it is kept rather than refused."""
+    return text.replace("\x00", "")
 
 
 class TicketingCog(commands.Cog):
@@ -91,14 +100,14 @@ class TicketingCog(commands.Cog):
     ) -> list[app_commands.Choice[str]]:
         box_names, box_ip_map, _ = await self._get_infrastructure_data()
         matches = [name for name in box_names if current.lower() in name.lower()]
-        return [app_commands.Choice(name=f"{name} ({box_ip_map.get(name, '')})", value=name) for name in matches[:25]]
+        return choices([(f"{name} ({box_ip_map.get(name, '')})", name) for name in matches])
 
     async def service_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
         _, _, service_choices = await self._get_infrastructure_data()
         matches = [s for s in service_choices if current.lower() in s["label"].lower()]
-        return [app_commands.Choice(name=s["label"], value=s["value"]) for s in matches[:25]]
+        return choices([(s["label"], s["value"]) for s in matches])
 
     async def category_autocomplete(
         self, interaction: discord.Interaction, current: str
@@ -106,12 +115,11 @@ class TicketingCog(commands.Cog):
         from core.tickets_config import get_all_categories
 
         categories = await sync_to_async(get_all_categories)(user_creatable_only=True)
-        choices = []
-        for cat_id, cat_info in categories.items():
-            name = f"{cat_info['display_name']} ({cat_info.get('points', 0)}pt)"
-            if not current or current.lower() in name.lower():
-                choices.append(app_commands.Choice(name=name, value=str(cat_id)))
-        return choices[:25]
+        named = [
+            (f"{cat_info['display_name']} ({cat_info.get('points', 0)}pt)", str(cat_id))
+            for cat_id, cat_info in categories.items()
+        ]
+        return choices([(name, value) for name, value in named if not current or current.lower() in name.lower()])
 
     @app_commands.command(name="ticket", description="[BLUE TEAM] Create a support ticket for your team")
     @app_commands.describe(
@@ -144,60 +152,28 @@ class TicketingCog(commands.Cog):
             return
         team = member.team
 
-        from core.tickets_config import get_category_config
-
-        category_id = int(category)
-        cat_info = await sync_to_async(get_category_config)(category_id)
-        if not cat_info:
-            await interaction.response.send_message("Invalid ticket category.", ephemeral=True)
+        ticket_input = await sync_to_async(read_ticket)(
+            category,
+            staff=False,
+            description=description,
+            hostname=hostname or "",
+            ip_address=ip_address or "",
+            service_name=service or "",
+        )
+        if isinstance(ticket_input, str):
+            await interaction.response.send_message(ticket_input, ephemeral=True)
             return
+        cat_info = ticket_input.config
 
-        required_fields = cat_info.get("required_fields", [])
-        missing_fields = []
-
-        if "hostname" in required_fields and not hostname:
-            missing_fields.append("hostname")
-        if "service_name" in required_fields and not service:
-            missing_fields.append("service (e.g., 'web:http')")
-        # IP address can be auto-populated from hostname, so only require if no hostname provided
-        if "ip_address" in required_fields and not ip_address and not hostname:
-            missing_fields.append("ip_address (or select a hostname)")
-        if "description" in required_fields and not description.strip():
-            missing_fields.append("description")
-
-        if missing_fields:
-            await interaction.response.send_message(
-                f"**{cat_info['display_name']}** requires: {', '.join(missing_fields)}\n"
-                f"Please provide these fields when creating the ticket.",
-                ephemeral=True,
-            )
-            return
-
-        resolved_ip = ip_address
-        if hostname and not ip_address:
-            _, box_ip_map, _ = await self._get_infrastructure_data()
-            resolved_ip = box_ip_map.get(hostname)
-
-        if service and not hostname:
-            _, _, service_choices = await self._get_infrastructure_data()
-            for svc in service_choices:
-                if svc["value"] == service:
-                    hostname = svc.get("box_name", "")
-                    if not resolved_ip:
-                        resolved_ip = svc.get("box_ip")
-                    break
-
-        # Create ticket atomically to prevent race conditions
-        category_obj = await TicketCategory.objects.aget(pk=category_id)
         try:
             ticket = await acreate_ticket_atomic(
                 team=team,
-                category=category_obj,
+                category=ticket_input.category,
                 title=cat_info["display_name"],
-                description=description,
-                hostname=hostname or "",
-                ip_address=resolved_ip,
-                service_name=service or "",
+                description=ticket_input.description,
+                hostname=ticket_input.hostname,
+                ip_address=ticket_input.ip_address,
+                service_name=ticket_input.service_name,
                 actor_username=f"discord:{interaction.user}",
             )
         except TicketRateLimitError as e:
@@ -206,18 +182,18 @@ class TicketingCog(commands.Cog):
             return
 
         embed = discord.Embed(
-            title="✅ Ticket Created",
+            title="Ticket Created",
             description=f"Your {cat_info['display_name']} ticket has been created.",
             color=discord.Color.green(),
         )
         embed.add_field(name="Ticket Number", value=ticket.ticket_number, inline=True)
         embed.add_field(name="Status", value="Open", inline=True)
-        embed.add_field(name="Team", value=team.team_name, inline=True)
+        add_field(embed, "Team", team.team_name, inline=True)
         embed.add_field(name="Point Cost", value=f"{cat_info.get('points', 0)} points", inline=True)
-        embed.add_field(name="Description", value=fit(description, DISCORD_EMBED_FIELD_CHAR_LIMIT), inline=False)
+        add_field(embed, "Description", ticket_input.description)
 
         embed.add_field(
-            name="📎 Need to attach files?",
+            name="Need to attach files?",
             value="Post screenshots, logs, or other files directly in the ticket thread.\n"
             "Find the thread in your team channels or #ticket-queue.",
             inline=False,
@@ -251,6 +227,7 @@ class TicketingCog(commands.Cog):
                 await message.channel.send(
                     f"{message.author.mention} {reason}. Please slow down.",
                     delete_after=10,
+                    allowed_mentions=pinging(users=[message.author]),
                 )
                 logger.warning(f"Rate limit exceeded for user {message.author.id} on ticket #{ticket.id}")
                 return
@@ -269,42 +246,39 @@ class TicketingCog(commands.Cog):
                 await TicketComment.objects.acreate(
                     ticket=ticket,
                     author=author,
-                    comment_text=message.content,
+                    comment_text=storable(message.content),
                     discord_message_id=message.id,
                 )
                 logger.info(f"Saved Discord message as comment for ticket #{ticket.id}")
 
         if message.attachments:
             for attachment in message.attachments:
-                if attachment.size > 10 * 1024 * 1024:
+                # Stored as a web upload is: the name cleaned, the type from the bytes (or the name), never the type
+                # the client claimed (core.stored_files)
+                filename = clean_name(attachment.filename, "attachment")
+                if attachment.size > TicketAttachment.MAX_SIZE:
                     await message.channel.send(
-                        f"{message.author.mention} File `{attachment.filename}` is too large (max 10MB). "
+                        f"{message.author.mention} File `{shorten(filename, 100)}` is too large (max 10MB). "
                         "Please use a file sharing service.",
                         delete_after=30,
+                        allowed_mentions=pinging(users=[message.author]),
                     )
                     continue
 
                 try:
-                    file_data = await attachment.read()
+                    await TicketAttachment.astore(ticket, await attachment.read(), filename, str(message.author))
 
-                    await TicketAttachment.objects.acreate(
-                        ticket=ticket,
-                        file_data=file_data,
-                        filename=attachment.filename,
-                        mime_type=attachment.content_type or "application/octet-stream",
-                        uploaded_by=str(message.author),
-                    )
-
-                    logger.info(f"Stored attachment {attachment.filename} for ticket #{ticket.id}")
+                    logger.info(f"Stored attachment {filename} for ticket #{ticket.id}")
 
                     await message.add_reaction("📎")
 
                 except Exception as e:
-                    logger.exception(f"Failed to store attachment {attachment.filename}: {e}")
+                    logger.exception(f"Failed to store attachment {filename}: {e}")
                     await message.channel.send(
-                        f"{message.author.mention} Failed to store attachment `{attachment.filename}`. "
+                        f"{message.author.mention} Failed to store attachment `{shorten(filename, 100)}`. "
                         "Please try again.",
                         delete_after=30,
+                        allowed_mentions=pinging(users=[message.author]),
                     )
 
     @commands.Cog.listener()
@@ -323,7 +297,7 @@ class TicketingCog(commands.Cog):
         comment = await TicketComment.objects.filter(ticket=ticket, discord_message_id=after.id).afirst()
 
         if comment:
-            comment.comment_text = after.content
+            comment.comment_text = storable(after.content)
             await comment.asave()
 
             logger.info(f"Synced edit to comment {comment.id} for ticket #{ticket.id}")

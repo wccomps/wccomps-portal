@@ -6,6 +6,7 @@ from typing import Final, Literal
 
 import discord
 from asgiref.sync import sync_to_async
+from discord import app_commands
 from django.conf import settings
 from django.db import close_old_connections
 
@@ -20,11 +21,69 @@ DISCORD_EMBED_FIELD_CHAR_LIMIT = 1024
 DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT = 4096
 DISCORD_EMBED_TITLE_CHAR_LIMIT = 256
 DISCORD_MESSAGE_CHAR_LIMIT = 2000
+DISCORD_EMBED_FIELD_NAME_CHAR_LIMIT = 256
+DISCORD_EMBED_TOTAL_CHAR_LIMIT = 6000
+DISCORD_EMBED_FIELD_COUNT_LIMIT = 25
+DISCORD_THREAD_NAME_CHAR_LIMIT = 100
+
+# What a message may ping unless its send names more: nothing. Messages repeat user text (ticket descriptions,
+# broadcasts, team names), so @everyone, @here or a mention in it must not reach anyone.
+ALLOWED_MENTIONS = discord.AllowedMentions.none()
+
+
+def pinging(
+    *, users: list[discord.abc.Snowflake] | None = None, roles: list[discord.abc.Snowflake] | None = None
+) -> discord.AllowedMentions:
+    """Allowed mentions for a message meant to ping these users or roles, and no one else its text names."""
+    return discord.AllowedMentions(everyone=False, users=users or False, roles=roles or False, replied_user=False)
 
 
 def fit(text: str, limit: int) -> str:
-    """text cut to Discord's limit, marked with an ellipsis; Discord rejects the whole message otherwise."""
+    """text cut to at most limit characters (with "…", unlike core.utils.shorten, never past limit)."""
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+DISCORD_CHOICE_CHAR_LIMIT = 100
+DISCORD_CHOICE_COUNT_LIMIT = 25
+DISCORD_SELECT_OPTION_LIMIT = 25
+
+
+def choices(options: list[tuple[str, str]]) -> list[app_commands.Choice[str]]:
+    """Autocomplete choices from (name, value) pairs as Discord takes them: at most 25, each name cut to 100
+    characters, and values past 100 characters omitted (Discord refuses a choice value over 100 characters)."""
+    return [
+        app_commands.Choice(name=fit(name.strip() or value, DISCORD_CHOICE_CHAR_LIMIT), value=value)
+        for name, value in options
+        if 0 < len(value) <= DISCORD_CHOICE_CHAR_LIMIT
+    ][:DISCORD_CHOICE_COUNT_LIMIT]
+
+
+def fit_lines(lines: list[str], limit: int) -> str:
+    """As many whole lines as fit in limit characters, and how many more there are."""
+    shown: list[str] = []
+    for line in lines:
+        more = len(lines) - len(shown) - 1
+        # Leave room for the "... and N more" line unless this is the last line
+        if len("\n".join([*shown, line])) + (len(f"\n... and {more} more") if more else 0) > limit:
+            break
+        shown.append(line)
+    rest = len(lines) - len(shown)
+    return "\n".join([*shown, f"... and {rest} more"] if rest else shown)
+
+
+def add_field(embed: discord.Embed, name: str, value: str, *, inline: bool = False, room: int = 0) -> bool:
+    """Add a field fit to Discord's limits if the embed has room (25 fields, 6000 - room chars) and value is
+    non-blank; returns whether added."""
+    name = fit(name.strip() or "Unnamed", DISCORD_EMBED_FIELD_NAME_CHAR_LIMIT)
+    value = fit(value, DISCORD_EMBED_FIELD_CHAR_LIMIT)
+    if not value.strip():
+        return False
+    if len(embed.fields) >= DISCORD_EMBED_FIELD_COUNT_LIMIT or len(embed) + len(name) + len(value) > (
+        DISCORD_EMBED_TOTAL_CHAR_LIMIT - room
+    ):
+        return False
+    embed.add_field(name=name, value=value, inline=inline)
+    return True
 
 
 def split_message(text: str, limit: int = DISCORD_MESSAGE_CHAR_LIMIT) -> list[str]:
@@ -37,6 +96,31 @@ def split_message(text: str, limit: int = DISCORD_MESSAGE_CHAR_LIMIT) -> list[st
         chunks.append(text[:cut])
         text = text[cut:].lstrip("\n")
     return [*chunks, text] if text or not chunks else chunks
+
+
+def announcement(sender: str, message: str) -> str:
+    """A broadcast as a team's channel shows it."""
+    return f"**Announcement from {sender}:**\n\n{message}"
+
+
+async def send_parts(
+    channel: discord.abc.Messageable, text: str, *, allowed_mentions: discord.AllowedMentions = ALLOWED_MENTIONS
+) -> None:
+    """Send text in as many messages as it takes (split_message), so none is past Discord's 2000 characters. Only
+    the first may ping what allowed_mentions allows: the rest is the sender's text."""
+    for n, part in enumerate(split_message(text)):
+        await channel.send(part, allowed_mentions=allowed_mentions if n == 0 else ALLOWED_MENTIONS)
+
+
+async def send_announcement(guild: discord.Guild, channel: discord.abc.Messageable, message: str) -> None:
+    """Send a broadcast to the announcements channel, pinging only the blue team role."""
+    blueteam_role = guild.get_role(settings.BLUETEAM_ROLE_ID)
+    role_mention = blueteam_role.mention if blueteam_role else "@Blueteam"
+    await send_parts(
+        channel,
+        f"{role_mention}\n\n{message}",
+        allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
+    )
 
 
 async def log_to_ops_channel(bot: discord.Client, message: str, embed: discord.Embed | None = None) -> None:
@@ -85,7 +169,7 @@ async def report_missing_discord_settings(bot: discord.Client) -> None:
     if not missing:
         return
     message = (
-        f"⚠️ Discord settings missing from the environment (set to 0): {', '.join(missing)}. "
+        f"Discord settings missing from the environment (set to 0): {', '.join(missing)}. "
         "Role sync, /link roles, team channel access and announcements that depend on them will not work."
     )
     logger.error(message)
