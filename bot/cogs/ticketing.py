@@ -12,7 +12,7 @@ from quotient.client import get_quotient_client
 from bot.permissions import check_blue_team, linked_team_member
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_input import read_ticket
-from bot.utils import add_field, pinging
+from bot.utils import add_field, choices, pinging
 from core.stored_files import clean_name, stored_type
 from core.utils import shorten
 from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketComment, TicketHistory
@@ -100,14 +100,14 @@ class TicketingCog(commands.Cog):
     ) -> list[app_commands.Choice[str]]:
         box_names, box_ip_map, _ = await self._get_infrastructure_data()
         matches = [name for name in box_names if current.lower() in name.lower()]
-        return [app_commands.Choice(name=f"{name} ({box_ip_map.get(name, '')})", value=name) for name in matches[:25]]
+        return choices([(f"{name} ({box_ip_map.get(name, '')})", name) for name in matches])
 
     async def service_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
         _, _, service_choices = await self._get_infrastructure_data()
         matches = [s for s in service_choices if current.lower() in s["label"].lower()]
-        return [app_commands.Choice(name=s["label"], value=s["value"]) for s in matches[:25]]
+        return choices([(s["label"], s["value"]) for s in matches])
 
     async def category_autocomplete(
         self, interaction: discord.Interaction, current: str
@@ -115,12 +115,11 @@ class TicketingCog(commands.Cog):
         from core.tickets_config import get_all_categories
 
         categories = await sync_to_async(get_all_categories)(user_creatable_only=True)
-        choices = []
-        for cat_id, cat_info in categories.items():
-            name = f"{cat_info['display_name']} ({cat_info.get('points', 0)}pt)"
-            if not current or current.lower() in name.lower():
-                choices.append(app_commands.Choice(name=name, value=str(cat_id)))
-        return choices[:25]
+        named = [
+            (f"{cat_info['display_name']} ({cat_info.get('points', 0)}pt)", str(cat_id))
+            for cat_id, cat_info in categories.items()
+        ]
+        return choices([(name, value) for name, value in named if not current or current.lower() in name.lower()])
 
     @app_commands.command(name="ticket", description="[BLUE TEAM] Create a support ticket for your team")
     @app_commands.describe(

@@ -302,3 +302,15 @@ def test_an_incident_report_is_checked_as_the_model_checks_it(bot_world: World, 
         "description": "We saw a SQL injection in the web logs and blocked the address at the firewall.",
     }
     drive(INCIDENT, bot_world, Chosen(chosen))
+
+
+@example(name="n" * 100)
+@given(name=stored_text(100).filter(lambda s: len(s.strip()) > 80))
+def test_thread_names_and_autocomplete_choices_fit_in_100_characters(bot_world: World, name: str) -> None:
+    """A ticket's thread name (cut with shorten, which adds "..." past its limit) reached 103 characters, and the
+    category autocomplete named a choice "<category> (<points>pt)", past the 100 Discord takes: Discord refused the
+    thread, and showed no choices."""
+    chosen = {"hostile rows": True, "a name": name, "a text": "t", "more tickets": 0}
+    admin = {**chosen, "role": "admin", "team_number": 1, "category": "6", "description": "x"}
+    drive(ADMIN_TICKET, bot_world, Chosen(admin))
+    drive(TICKET, bot_world, Chosen({**chosen, "role": "blue_team", "category": "6", "description": "Help"}))

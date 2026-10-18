@@ -15,10 +15,11 @@ from bot.utils import (
     DISCORD_EMBED_FIELD_COUNT_LIMIT,
     ConfirmView,
     add_field,
+    choices,
+    fit,
     get_team_or_respond,
     log_to_ops_channel,
 )
-from core.utils import shorten
 from ticketing.access import TICKET_STAFF
 from ticketing.models import Ticket, TicketHistory
 
@@ -57,12 +58,13 @@ class AdminTicketsCog(commands.Cog):
         from core.tickets_config import get_all_categories
 
         categories = await sync_to_async(get_all_categories)()
-        choices = []
-        for cat_id, cat_info in categories.items():
-            name = cat_info["display_name"]
-            if not current or current.lower() in name.lower():
-                choices.append(app_commands.Choice(name=name, value=str(cat_id)))
-        return choices[:25]
+        return choices(
+            [
+                (cat_info["display_name"], str(cat_id))
+                for cat_id, cat_info in categories.items()
+                if not current or current.lower() in cat_info["display_name"].lower()
+            ]
+        )
 
     @tickets_group.command(name="create", description="[ADMIN] Create a ticket for a team")
     @app_commands.describe(
@@ -419,7 +421,7 @@ class AdminTicketsCog(commands.Cog):
 
         refund_msg = f"\n• Refunded: {refunded} points" if refunded > 0 else ""
         await interaction.followup.send(
-            f"Ticket {reopened.ticket_number} reopened\n• Reason: {shorten(reason, 1500)}{refund_msg}",
+            f"Ticket {reopened.ticket_number} reopened\n• Reason: {fit(reason, 1500)}{refund_msg}",
             ephemeral=True,
         )
         await log_to_ops_channel(

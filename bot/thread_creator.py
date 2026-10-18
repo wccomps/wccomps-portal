@@ -5,8 +5,7 @@ import logging
 import discord
 from asgiref.sync import sync_to_async
 
-from bot.utils import THREAD_AUTO_ARCHIVE_MINUTES, team_chat_channel
-from core.utils import shorten
+from bot.utils import THREAD_AUTO_ARCHIVE_MINUTES, fit, team_chat_channel
 from team.models import Team
 from ticketing.models import Ticket
 
@@ -18,7 +17,7 @@ THREAD_NAME_LIMIT = 100
 
 def thread_name(ticket: Ticket, team: Team) -> str:
     """The ticket's thread name, cut to the length Discord takes."""
-    return shorten(f"{ticket.ticket_number}: Team {team.team_number:02d}, {ticket.title}", THREAD_NAME_LIMIT)
+    return fit(f"{ticket.ticket_number}: Team {team.team_number:02d}, {ticket.title}", THREAD_NAME_LIMIT)
 
 
 async def create_ticket_thread(

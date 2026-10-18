@@ -6,6 +6,7 @@ from typing import Final, Literal
 
 import discord
 from asgiref.sync import sync_to_async
+from discord import app_commands
 from django.conf import settings
 from django.db import close_old_connections
 
@@ -39,6 +40,20 @@ def pinging(
 def fit(text: str, limit: int) -> str:
     """text cut to Discord's limit, marked with an ellipsis; Discord rejects the whole message otherwise."""
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+DISCORD_CHOICE_CHAR_LIMIT = 100
+DISCORD_CHOICE_COUNT_LIMIT = 25
+
+
+def choices(options: list[tuple[str, str]]) -> list[app_commands.Choice[str]]:
+    """Autocomplete choices from (name, value) pairs as Discord takes them: at most 25, each name cut to 100
+    characters. A value past 100 characters is left out: Discord couldn't send it back."""
+    return [
+        app_commands.Choice(name=fit(name.strip() or value, DISCORD_CHOICE_CHAR_LIMIT), value=value)
+        for name, value in options
+        if 0 < len(value) <= DISCORD_CHOICE_CHAR_LIMIT
+    ][:DISCORD_CHOICE_COUNT_LIMIT]
 
 
 def fit_lines(lines: list[str], limit: int) -> str:
