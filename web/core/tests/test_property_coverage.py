@@ -3,10 +3,12 @@
 The entry points: every Django form class in the project (imported, so a form in an admin or view module counts);
 every function that parses CSV or an uploaded file (found by what it does: calls a csv reader, takes an
 UploadedFile, reads request.FILES, or reads an upload, file or attachment); every URL pattern and admin model page;
-and the bot's slash commands, modals, buttons, selects and message listeners.
+the bot's slash commands, modals, buttons, selects and message listeners; and every function that reads JSON
+another service answered (a response's .json(), or json.loads of a response's text or content).
 
 Each must be registered against property tests (FORM_CASES, PARSERS, a row in a VIEW_MODULES module's CASES for a
-URL pattern or admin model, or a row in the bot's CASES) or listed in EXCEPTIONS with the reason. A
+URL pattern or admin model, a row in the bot's CASES, or a case in READERS) or listed in EXCEPTIONS with the
+reason. A
 registry entry or exception that matches no entry point fails too, so neither can go stale. Fix a failure by adding
 a property test case for the new entry point (the test module's docstring says how), or an exception with a reason.
 """
@@ -25,7 +27,7 @@ from django.contrib import admin
 from django.urls import URLPattern, URLResolver, get_resolver
 
 from bot.tests import test_properties_bot
-from core.tests import test_properties_forms, test_properties_parsers
+from core.tests import test_properties_forms, test_properties_parsers, test_properties_readers
 from core.tests.test_no_unused_code import REPO_DIR, Unused, fail_with, python_trees
 from core.tests.view_rows import VIEW_MODULES
 
@@ -188,6 +190,8 @@ FORM_TESTS = (
 )
 
 EXCEPTIONS: dict[str, str] = {}
+# Readers of another service's JSON that can't have a property test, each with why
+READER_EXCEPTIONS: dict[str, str] = {}
 
 
 @pytest.mark.django_db
@@ -263,6 +267,80 @@ def test_every_bot_entry_point_has_property_tests() -> None:
     test = test_properties_bot.test_any_input_is_answered_within_discords_limits
     cases = [m.args[1] for m in getattr(test, "pytestmark", []) if m.name == "parametrize"]
     assert cases == [test_properties_bot.CASES], f"{test.__name__} must run every row of CASES"
+
+
+def _reads_json(node: ast.AST, aliases: dict[str, str]) -> str | None:
+    """How the call reads another service's JSON, or None: a response's .json(), or json.loads of a response's
+    text or content."""
+    if not isinstance(node, ast.Call):
+        return None
+    if isinstance(node.func, ast.Attribute) and node.func.attr == "json" and not node.args and not node.keywords:
+        return f"{ast.unparse(node.func)}()"
+    if _resolved(node.func, aliases) == "json.loads" and node.args:
+        read = node.args[0]
+        if isinstance(read, ast.Attribute) and read.attr in {"text", "content"}:
+            return f"json.loads({ast.unparse(read)})"
+    return None
+
+
+def json_reader_entry_points() -> dict[str, str]:
+    """Every function (path:qualname) that reads JSON another service answered, with how: itself, or by calling a
+    function of its module that does (a helper such as AuthentikManager._results, or a method built on another)."""
+    found: dict[str, str] = {}
+    for path, tree in python_trees().items():
+        aliases = import_aliases(tree)
+        calls: dict[str, set[str]] = {}
+        for scope, node in _nodes_in_scope(tree):
+            if how := _reads_json(node, aliases):
+                found.setdefault(f"{path}:{scope}", how)
+            elif isinstance(node, ast.Call):
+                called = node.func.attr if isinstance(node.func, ast.Attribute) else ast.unparse(node.func)
+                calls.setdefault(scope, set()).add(called)
+        while True:
+            readers = {key.rsplit(":", 1)[1].rsplit(".", 1)[-1]: key for key in found if key.startswith(f"{path}:")}
+            more = {
+                f"{path}:{scope}": f"calls {readers[name].rsplit(':', 1)[1]}"
+                for scope, names in calls.items()
+                for name in names & readers.keys()
+                if f"{path}:{scope}" not in found and scope != "<module>"
+            }
+            if not more:
+                break
+            found |= more
+    return found
+
+
+def test_every_json_reader_has_property_tests() -> None:
+    """A reader of another service's JSON gets a case in test_properties_readers.READERS (or, for one read in a
+    view, a property of its own there), so a new one is checked against any answer the service can give."""
+    found = json_reader_entry_points()
+    covered = {key for reader in test_properties_readers.READERS for key in reader.keys} | set(
+        test_properties_readers.VIEW_READERS
+    )
+    fail_with(
+        "Readers of another service's JSON without property tests (add a case to READERS in "
+        "test_properties_readers.py)",
+        [Unused(key, how) for key, how in found.items() if key not in covered],
+        READER_EXCEPTIONS,
+    )
+    stale = sorted(covered - set(found))
+    assert not stale, f"READERS has cases for functions that no longer read another service's JSON: {stale}"
+
+
+@pytest.mark.parametrize(
+    ("source", "reads"),
+    [
+        ("def f(c):\n    return c.get('u').json()\n", True),
+        ("import json\ndef f(r):\n    return json.loads(r.text)\n", True),
+        ("from json import loads\ndef f(r):\n    return loads(r.content)\n", True),
+        ("import json\ndef f(request):\n    return json.loads(request.body)\n", False),
+        ("def f(d):\n    return d.json(indent=2)\n", False),
+    ],
+)
+def test_the_reader_guard_finds_json_reads_however_they_are_written(source: str, reads: bool) -> None:
+    tree = ast.parse(source)
+    aliases = import_aliases(tree)
+    assert any(_reads_json(node, aliases) for _, node in _nodes_in_scope(tree)) is reads
 
 
 CSV_EXPORT_MODULE = "web/core/csv_export.py"
