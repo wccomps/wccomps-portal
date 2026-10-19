@@ -35,12 +35,10 @@ def test_normalize_ticket_host() -> None:
 
 
 def test_classify_team_vm_enforces_rangekiln_name_and_vmid_bounds() -> None:
-    # Valid Team 5 VM: team05-<host> and VMID in [10500, 10599]
     assert classify_team_vm(5, 10505, "team05-web") == "web"
     assert classify_team_vm(5, 10500, "team05-router") == "router"
     assert classify_team_vm(5, 10599, "team05-db-01") == "db-01"
 
-    # Rejects templates, wrong team name prefix, or VMID outside team's block
     assert classify_team_vm(5, 10505, "team05-web", is_template=True) is None
     assert classify_team_vm(5, 10605, "team05-web") is None
     assert classify_team_vm(5, 9005, "team05-web") is None
@@ -66,7 +64,6 @@ def test_match_team_vm_prevents_cross_team_selection() -> None:
     ]
     assert match_team_vm(vms, 1, "web") == vms[0]
     assert match_team_vm(vms, 1, "team01-dns.example.com") == vms[1]
-    # Team 1 filing a ticket with "team02-web" does not strip team02 prefix for Team 1
     assert match_team_vm(vms, 1, "team02-web") is None
 
 
@@ -76,11 +73,8 @@ def test_proxmox_client_filters_pool_members_and_snapshots() -> None:
         "data": {
             "members": [
                 {"type": "qemu", "vmid": 10505, "name": "team05-web", "node": "pve01", "status": "running"},
-                # Wrong team VMID in pool: rejected
                 {"type": "qemu", "vmid": 10605, "name": "team05-db", "node": "pve01", "status": "running"},
-                # Wrong team name in pool: rejected
                 {"type": "qemu", "vmid": 10506, "name": "team06-dns", "node": "pve01", "status": "running"},
-                # Template VM: rejected
                 {
                     "type": "qemu",
                     "vmid": 10507,
@@ -89,7 +83,6 @@ def test_proxmox_client_filters_pool_members_and_snapshots() -> None:
                     "status": "stopped",
                     "template": 1,
                 },
-                # Non-qemu resource: ignored
                 {"type": "storage", "id": "storage/pve01/local"},
             ]
         }
@@ -143,6 +136,22 @@ def test_proxmox_client_wait_for_task_raises_on_error_exitstatus() -> None:
         pytest.raises(ProxmoxAPIError, match="rollback failed"),
     ):
         client.wait_for_task("pve01", "UPID:pve01:1", timeout_seconds=1.0, poll_interval=0.0)
+
+
+def test_proxmox_client_wait_for_task_already_running_requires_opt_in() -> None:
+    client = ProxmoxClient(base_url="https://proxmox.test", api_token="user@pam!tok=secret")
+    already_running = ProxmoxTaskStatus(status="stopped", exitstatus="VM 10105 already running")
+    with patch.object(client, "get_task_status", return_value=already_running):
+        with pytest.raises(ProxmoxAPIError, match="already running"):
+            client.wait_for_task("pve01", "UPID:pve01:1", timeout_seconds=1.0, poll_interval=0.0)
+        result = client.wait_for_task(
+            "pve01",
+            "UPID:pve01:1",
+            timeout_seconds=1.0,
+            poll_interval=0.0,
+            allow_already_running=True,
+        )
+        assert result.finished is True
 
 
 @pytest.mark.django_db

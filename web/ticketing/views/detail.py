@@ -192,7 +192,7 @@ def ticket_box_reset_panel(request: HttpRequest, ticket_number: str) -> HttpResp
     """Return the matched Proxmox VM and snapshot selector for a Box Reset ticket."""
     from django.conf import settings
 
-    from core.proxmox import get_proxmox_client, match_team_vm
+    from core.proxmox import get_proxmox_client, match_team_vm, normalize_ticket_host, team_pool_id
 
     user = cast(User, request.user)
     ticket = get_object_or_404(
@@ -200,11 +200,16 @@ def ticket_box_reset_panel(request: HttpRequest, ticket_number: str) -> HttpResp
         ticket_number=ticket_number,
         category_id=BOX_RESET_CATEGORY_ID,
     )
-    client = get_proxmox_client()
-    vms = client.list_team_vms(ticket.team.team_number)
-    matched_vm = match_team_vm(vms, ticket.team.team_number, ticket.hostname) if vms is not None else None
-    snapshots = client.list_snapshots(matched_vm.node, matched_vm.vmid) if matched_vm is not None else None
-    proxmox_unreachable = vms is None or (matched_vm is not None and snapshots is None)
+    team_number = ticket.team.team_number
+    matched_vm = None
+    snapshots = None
+    proxmox_unreachable = False
+    if normalize_ticket_host(team_number, ticket.hostname) is not None:
+        client = get_proxmox_client()
+        vms = client.list_team_vms(team_number)
+        matched_vm = match_team_vm(vms, team_number, ticket.hostname) if vms is not None else None
+        snapshots = client.list_snapshots(matched_vm.node, matched_vm.vmid) if matched_vm is not None else None
+        proxmox_unreachable = vms is None or (matched_vm is not None and snapshots is None)
 
     default_snapshot = str(getattr(settings, "PROXMOX_DEFAULT_SNAPSHOT", "clean"))
     selected_snapshot = next(
@@ -222,6 +227,6 @@ def ticket_box_reset_panel(request: HttpRequest, ticket_number: str) -> HttpResp
             "matched_vm": matched_vm,
             "snapshots": snapshots,
             "selected_snapshot": selected_snapshot,
-            "pool_name": f"pool-{ticket.team.team_number:02d}",
+            "pool_name": team_pool_id(team_number),
         },
     )

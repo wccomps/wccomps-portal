@@ -168,7 +168,6 @@ def build_world() -> World:
     )
     ScoringTemplate.objects.first() or ScoringTemplate.objects.create()
 
-    # Tickets: team 1's open, claimed (by support, a Box Reset) and resolved ones, and team 2's
     category = TicketCategory.objects.get(pk=6)
     box_reset = TicketCategory.objects.get(pk=BOX_RESET_CATEGORY_ID)
     tickets = []

@@ -4,7 +4,6 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import cast
 from urllib.parse import quote
 
 import httpx
@@ -52,6 +51,11 @@ class ProxmoxTaskStatus:
         return self.finished and (self.exitstatus == "OK" or self.exitstatus.startswith("WARNINGS"))
 
 
+def team_pool_id(team_number: int) -> str:
+    """Return the Proxmox resource pool ID for `team_number` under RangeKiln's convention."""
+    return f"pool-{team_number:02d}"
+
+
 def is_safe_identifier(value: str) -> bool:
     """True when `value` is a safe Proxmox node or snapshot identifier with no dot-segments."""
     return bool(value and len(value) <= 128 and ".." not in value and _IDENTIFIER_RE.match(value))
@@ -77,16 +81,11 @@ def normalize_ticket_host(team_number: int, raw_hostname: str) -> str | None:
 
 
 def classify_team_vm(team_number: int, vmid: int, name: str, *, is_template: bool = False) -> str | None:
-    """Return the bare host name when `(vmid, name)` belongs to `team_number` under RangeKiln's rules, else None.
-
-    Requires both a `team{team:02d}-{host}` name and a VMID inside `[10000 + team*100, 10000 + team*100 + 99]`
-    on a non-template VM.
-    """
+    """Return the bare host name when `(vmid, name)` belongs to `team_number` under RangeKiln's rules, else None."""
     if is_template or not 1 <= team_number <= 99:
         return None
     vmid_min = CLONE_VMID_BASE + team_number * CLONE_VMID_TEAM_STRIDE
-    vmid_max = vmid_min + CLONE_VMID_TEAM_STRIDE - 1
-    if not vmid_min <= vmid <= vmid_max:
+    if not vmid_min <= vmid < vmid_min + CLONE_VMID_TEAM_STRIDE:
         return None
     prefix = f"team{team_number:02d}-"
     lowered = name.lower()
@@ -103,10 +102,7 @@ def match_team_vm(vms: list[ProxmoxVM], team_number: int, raw_hostname: str) -> 
     target_host = normalize_ticket_host(team_number, raw_hostname)
     if not target_host:
         return None
-    for vm in vms:
-        if vm.host == target_host:
-            return vm
-    return None
+    return next((vm for vm in vms if vm.host == target_host), None)
 
 
 def _is_unavailable(exc: BaseException | None) -> bool:
@@ -192,19 +188,17 @@ class ProxmoxClient:
             )
         return self.client
 
-    def _request(self, method: str, endpoint: str, **kwargs: object) -> httpx.Response:
+    def _request(self, method: str, endpoint: str, *, timeout: float | None = None) -> httpx.Response:
         client = self._get_client()
         url = f"{self.base_url}{endpoint}"
-        if "timeout" not in kwargs:
-            kwargs["timeout"] = getattr(settings, "HTTPX_DEFAULT_TIMEOUT", 10)
-        request_func = getattr(client, method)
-        return cast(httpx.Response, request_func(url, **kwargs))
+        req_timeout = timeout if timeout is not None else float(getattr(settings, "HTTPX_DEFAULT_TIMEOUT", 10))
+        return client.request(method, url, timeout=req_timeout)
 
     def list_team_vms(self, team_number: int) -> list[ProxmoxVM] | None:
         """Fetch the team's VMs from its Proxmox pool, filtered by RangeKiln naming and VMID rules."""
         if not 1 <= team_number <= 99:
             return []
-        pool_id = f"pool-{team_number:02d}"
+        pool_id = team_pool_id(team_number)
         try:
             response = self._request("get", f"/api2/json/pools/{quote(pool_id, safe='')}")
             response.raise_for_status()
@@ -324,13 +318,14 @@ class ProxmoxClient:
         *,
         timeout_seconds: float = 120.0,
         poll_interval: float = 1.0,
+        allow_already_running: bool = False,
     ) -> ProxmoxTaskStatus:
         """Poll `get_task_status` until the task stops or `timeout_seconds` elapses."""
         deadline = time.monotonic() + timeout_seconds
         while True:
             task = self.get_task_status(node, upid)
             if task.finished:
-                if task.ok or "already running" in task.exitstatus.lower():
+                if task.ok or (allow_already_running and "already running" in task.exitstatus.lower()):
                     return task
                 raise ProxmoxAPIError(f"Proxmox task failed: {task.exitstatus or 'unknown error'}")
             if time.monotonic() >= deadline:

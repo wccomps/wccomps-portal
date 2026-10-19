@@ -232,173 +232,192 @@ def ticket_change_category(request: HttpRequest, ticket_number: str) -> HttpResp
     return redirect("ticket_detail", ticket_number=ticket_number)
 
 
+def _record_box_reset_outcome(
+    *,
+    ticket: Ticket,
+    user: User,
+    authentik_username: str,
+    vm_name: str,
+    vmid: int,
+    node: str,
+    snapshot: str,
+    rollback_upid: str,
+    start_upid: str,
+    error: str = "",
+) -> None:
+    from core.models import AuditLog
+    from ticketing.models import TicketHistory
+
+    result = "failed" if error else "ok"
+    common: dict[str, object] = {
+        "vm_name": vm_name,
+        "vmid": vmid,
+        "node": node,
+        "snapshot": snapshot,
+        "rollback_upid": rollback_upid,
+        "start_upid": start_upid,
+        "result": result,
+    }
+    if error:
+        common["error"] = error
+    TicketHistory.objects.create(
+        ticket=ticket,
+        action="box_reset_failed" if error else "box_reset",
+        actor=user,
+        details={"reset_by": authentik_username, **common},
+    )
+    AuditLog.objects.create(
+        action="box_reset",
+        admin_user=authentik_username,
+        target_entity="ticket",
+        target_id=ticket.id,
+        details={
+            "ticket_number": ticket.ticket_number,
+            "team_number": ticket.team.team_number,
+            **common,
+        },
+    )
+
+
 def _stream_box_reset(ticket_id: int, user_id: int, authentik_username: str, snapshot: str) -> Iterator[str]:
     from django.core.cache import cache
+
+    from core.discord_tasks import PostComment
+    from core.models import DiscordTask
+    from core.proxmox import ProxmoxAPIError, get_proxmox_client, match_team_vm, normalize_ticket_host
+    from ticketing.models import TicketComment
 
     # Held across the state check and the reset, so a second submission sees the resolved ticket
     lock_key = f"box_reset_lock_{ticket_id}"
     if not cache.add(lock_key, user_id, timeout=300):
         yield ndjson_done("A box reset is already running for this ticket.", success=False)
         return
+
     try:
-        yield from _box_reset_steps(ticket_id, user_id, authentik_username, snapshot)
-    finally:
-        cache.delete(lock_key)
-
-
-def _box_reset_steps(ticket_id: int, user_id: int, authentik_username: str, snapshot: str) -> Iterator[str]:
-    from core.discord_tasks import PostComment
-    from core.models import AuditLog, DiscordTask
-    from core.proxmox import ProxmoxAPIError, get_proxmox_client, match_team_vm
-    from ticketing.models import TicketComment, TicketHistory
-
-    ticket = Ticket.objects.select_related("team", "assigned_to").filter(id=ticket_id).first()
-    user = User.objects.filter(id=user_id).first()
-    if not ticket or not user:
-        yield ndjson_done("Ticket or user not found.", success=False)
-        return
-
-    if ticket.category_id != BOX_RESET_CATEGORY_ID:
-        yield ndjson_done("Box reset is only available on Box Reset tickets.", success=False)
-        return
-
-    if error := refusal(ticket, "resolve") or assignee_refusal(ticket, user, "resolve"):
-        yield ndjson_done(error, success=False)
-        return
-
-    client = get_proxmox_client()
-    vms = client.list_team_vms(ticket.team.team_number)
-    if vms is None:
-        yield ndjson_done("Proxmox isn't reachable.", success=False)
-        return
-
-    vm = match_team_vm(vms, ticket.team.team_number, ticket.hostname)
-    if vm is None:
-        yield ndjson_done(
-            f"No Proxmox VM matched hostname '{ticket.hostname}' for Team {ticket.team.team_number}.",
-            success=False,
-        )
-        return
-
-    snapshots = client.list_snapshots(vm.node, vm.vmid)
-    if snapshots is None:
-        yield ndjson_done("Proxmox isn't reachable.", success=False)
-        return
-    if snapshot not in {s.name for s in snapshots}:
-        yield ndjson_done(f"Snapshot '{snapshot}' not found on {vm.name}.", success=False)
-        return
-
-    rollback_upid = ""
-    start_upid = ""
-    try:
-        start_comment = TicketComment.objects.create(
-            ticket=ticket,
-            author=user,
-            comment_text=f"Starting box reset of {vm.name} to snapshot '{snapshot}'.",
-        )
-        DiscordTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=start_comment.id))
-
-        yield ndjson_progress(f"Rolling back {vm.name} to '{snapshot}'...", 1, 4)
-        rollback_upid = client.rollback_snapshot(vm.node, vm.vmid, snapshot)
-
-        yield ndjson_progress(f"Waiting for rollback of {vm.name}...", 2, 4)
-        client.wait_for_task(vm.node, rollback_upid)
-
-        yield ndjson_progress(f"Starting {vm.name}...", 3, 4)
-        start_upid = client.start_vm(vm.node, vm.vmid)
-        client.wait_for_task(vm.node, start_upid)
-
-        yield ndjson_progress(f"Resolving ticket {ticket.ticket_number}...", 4, 4)
-        done_comment = TicketComment.objects.create(
-            ticket=ticket,
-            author=user,
-            comment_text=f"Box reset of {vm.name} to snapshot '{snapshot}' complete; VM is started.",
-        )
-        DiscordTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=done_comment.id))
-
-        TicketHistory.objects.create(
-            ticket=ticket,
-            action="box_reset",
-            actor=user,
-            details={
-                "reset_by": authentik_username,
-                "vm_name": vm.name,
-                "vmid": vm.vmid,
-                "node": vm.node,
-                "snapshot": snapshot,
-                "rollback_upid": rollback_upid,
-                "start_upid": start_upid,
-                "result": "ok",
-            },
-        )
-        AuditLog.objects.create(
-            action="box_reset",
-            admin_user=authentik_username,
-            target_entity="ticket",
-            target_id=ticket.id,
-            details={
-                "ticket_number": ticket.ticket_number,
-                "team_number": ticket.team.team_number,
-                "vm_name": vm.name,
-                "vmid": vm.vmid,
-                "node": vm.node,
-                "snapshot": snapshot,
-                "rollback_upid": rollback_upid,
-                "start_upid": start_upid,
-                "result": "ok",
-            },
-        )
-
-        _, resolve_err = resolve_ticket(
-            ticket_id=ticket.id,
-            actor_username=authentik_username,
-            resolution_notes=f"Reset {vm.name} to snapshot '{snapshot}'.",
-            user=user,
-        )
-        if resolve_err:
-            yield ndjson_done(f"VM reset completed, but ticket could not be resolved: {resolve_err}", success=False)
+        ticket = Ticket.objects.select_related("team", "assigned_to").filter(id=ticket_id).first()
+        user = User.objects.filter(id=user_id).first()
+        if not ticket or not user:
+            yield ndjson_done("Ticket or user not found.", success=False)
             return
 
-        logger.info(
-            f"Box reset of {vm.name} to '{snapshot}' completed on {ticket.ticket_number} by {authentik_username}"
-        )
-        yield ndjson_done(f"Reset {vm.name} to '{snapshot}' and resolved {ticket.ticket_number}.")
-    except ProxmoxAPIError as e:
-        TicketHistory.objects.create(
-            ticket=ticket,
-            action="box_reset_failed",
-            actor=user,
-            details={
-                "reset_by": authentik_username,
-                "vm_name": vm.name,
-                "vmid": vm.vmid,
-                "node": vm.node,
-                "snapshot": snapshot,
-                "rollback_upid": rollback_upid,
-                "start_upid": start_upid,
-                "result": "failed",
-                "error": str(e),
-            },
-        )
-        AuditLog.objects.create(
-            action="box_reset",
-            admin_user=authentik_username,
-            target_entity="ticket",
-            target_id=ticket.id,
-            details={
-                "ticket_number": ticket.ticket_number,
-                "team_number": ticket.team.team_number,
-                "vm_name": vm.name,
-                "vmid": vm.vmid,
-                "node": vm.node,
-                "snapshot": snapshot,
-                "rollback_upid": rollback_upid,
-                "start_upid": start_upid,
-                "result": "failed",
-                "error": str(e),
-            },
-        )
-        yield ndjson_done(f"Box reset error: {e}", success=False)
+        if ticket.category_id != BOX_RESET_CATEGORY_ID:
+            yield ndjson_done("Box reset is only available on Box Reset tickets.", success=False)
+            return
+
+        if error := refusal(ticket, "resolve") or assignee_refusal(ticket, user, "resolve"):
+            yield ndjson_done(error, success=False)
+            return
+
+        if normalize_ticket_host(ticket.team.team_number, ticket.hostname) is None:
+            yield ndjson_done(
+                f"No Proxmox VM matched hostname '{ticket.hostname}' for Team {ticket.team.team_number}.",
+                success=False,
+            )
+            return
+
+        client = get_proxmox_client()
+        vms = client.list_team_vms(ticket.team.team_number)
+        if vms is None:
+            yield ndjson_done("Proxmox isn't reachable.", success=False)
+            return
+
+        vm = match_team_vm(vms, ticket.team.team_number, ticket.hostname)
+        if vm is None:
+            yield ndjson_done(
+                f"No Proxmox VM matched hostname '{ticket.hostname}' for Team {ticket.team.team_number}.",
+                success=False,
+            )
+            return
+
+        snapshots = client.list_snapshots(vm.node, vm.vmid)
+        if snapshots is None:
+            yield ndjson_done("Proxmox isn't reachable.", success=False)
+            return
+        if snapshot not in {s.name for s in snapshots}:
+            yield ndjson_done(f"Snapshot '{snapshot}' not found on {vm.name}.", success=False)
+            return
+
+        rollback_upid = ""
+        start_upid = ""
+        try:
+            start_comment = TicketComment.objects.create(
+                ticket=ticket,
+                author=user,
+                comment_text=f"Starting box reset of {vm.name} to snapshot '{snapshot}'.",
+            )
+            DiscordTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=start_comment.id))
+
+            yield ndjson_progress(f"Rolling back {vm.name} to '{snapshot}'...", 1, 4)
+            rollback_upid = client.rollback_snapshot(vm.node, vm.vmid, snapshot)
+
+            yield ndjson_progress(f"Waiting for rollback of {vm.name}...", 2, 4)
+            client.wait_for_task(vm.node, rollback_upid)
+
+            yield ndjson_progress(f"Starting {vm.name}...", 3, 4)
+            start_upid = client.start_vm(vm.node, vm.vmid)
+            client.wait_for_task(vm.node, start_upid, allow_already_running=True)
+
+            yield ndjson_progress(f"Resolving ticket {ticket.ticket_number}...", 4, 4)
+            _, resolve_err = resolve_ticket(
+                ticket_id=ticket.id,
+                actor_username=authentik_username,
+                resolution_notes=f"Reset {vm.name} to snapshot '{snapshot}'.",
+                user=user,
+            )
+            if resolve_err:
+                _record_box_reset_outcome(
+                    ticket=ticket,
+                    user=user,
+                    authentik_username=authentik_username,
+                    vm_name=vm.name,
+                    vmid=vm.vmid,
+                    node=vm.node,
+                    snapshot=snapshot,
+                    rollback_upid=rollback_upid,
+                    start_upid=start_upid,
+                    error=resolve_err,
+                )
+                yield ndjson_done(f"VM reset completed, but ticket could not be resolved: {resolve_err}", success=False)
+                return
+
+            done_comment = TicketComment.objects.create(
+                ticket=ticket,
+                author=user,
+                comment_text=f"Box reset of {vm.name} to snapshot '{snapshot}' complete; VM is started.",
+            )
+            DiscordTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=done_comment.id))
+            _record_box_reset_outcome(
+                ticket=ticket,
+                user=user,
+                authentik_username=authentik_username,
+                vm_name=vm.name,
+                vmid=vm.vmid,
+                node=vm.node,
+                snapshot=snapshot,
+                rollback_upid=rollback_upid,
+                start_upid=start_upid,
+            )
+
+            logger.info(
+                f"Box reset of {vm.name} to '{snapshot}' completed on {ticket.ticket_number} by {authentik_username}"
+            )
+            yield ndjson_done(f"Reset {vm.name} to '{snapshot}' and resolved {ticket.ticket_number}.")
+        except ProxmoxAPIError as e:
+            _record_box_reset_outcome(
+                ticket=ticket,
+                user=user,
+                authentik_username=authentik_username,
+                vm_name=vm.name,
+                vmid=vm.vmid,
+                node=vm.node,
+                snapshot=snapshot,
+                rollback_upid=rollback_upid,
+                start_upid=start_upid,
+                error=str(e),
+            )
+            yield ndjson_done(f"Box reset error: {e}", success=False)
+    finally:
+        cache.delete(lock_key)
 
 
 @require_POST
@@ -411,7 +430,7 @@ def ticket_box_reset(request: HttpRequest, ticket_number: str) -> StreamingHttpR
     form = TicketBoxResetForm(request.POST)
     if not form.is_valid():
         return StreamingHttpResponse(
-            iter([ndjson_done("Invalid snapshot name.", success=False)]),
+            [ndjson_done("Invalid snapshot name.", success=False)],
             content_type="application/x-ndjson",
         )
 
