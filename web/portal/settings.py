@@ -243,6 +243,7 @@ QUOTIENT_PASSWORD = os.environ.get("QUOTIENT_PASSWORD", "")
 
 PROXMOX_API_URL = os.environ.get("PROXMOX_API_URL", "")
 PROXMOX_API_TOKEN = os.environ.get("PROXMOX_API_TOKEN", "")
+PROXMOX_CA_FILE = os.environ.get("PROXMOX_CA_FILE", "")
 PROXMOX_VERIFY_SSL = os.environ.get("PROXMOX_VERIFY_SSL", "True") == "True"
 PROXMOX_DEFAULT_SNAPSHOT = os.environ.get("PROXMOX_DEFAULT_SNAPSHOT", "clean")
 

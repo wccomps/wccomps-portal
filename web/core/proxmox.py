@@ -2,6 +2,7 @@
 
 import logging
 import re
+import ssl
 import time
 from dataclasses import dataclass
 from urllib.parse import quote
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 CLONE_VMID_BASE = 10000
 CLONE_VMID_TEAM_STRIDE = 100
+_PROXY_DOWN_STATUSES = frozenset({502, 503, 504, 595, 596, 599})
 _HOST_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
@@ -167,32 +169,58 @@ class ProxmoxClient:
         base_url: str | None = None,
         api_token: str | None = None,
         verify_ssl: bool | None = None,
+        ca_file: str | None = None,
     ) -> None:
         base = base_url if base_url is not None else str(getattr(settings, "PROXMOX_API_URL", ""))
         token = api_token if api_token is not None else str(getattr(settings, "PROXMOX_API_TOKEN", ""))
-        self.base_url = base.rstrip("/")
+        ca = ca_file if ca_file is not None else str(getattr(settings, "PROXMOX_CA_FILE", ""))
+        self.base_urls = [u.strip().rstrip("/") for u in base.split(",") if u.strip()]
+        self.base_url = self.base_urls[0] if self.base_urls else ""
         self.api_token = token.strip()
+        self.ca_file = ca.strip()
         self.verify_ssl = verify_ssl if verify_ssl is not None else bool(getattr(settings, "PROXMOX_VERIFY_SSL", True))
         self.client: httpx.Client | None = None
 
     def _get_client(self) -> httpx.Client:
-        if not self.base_url or not self.api_token:
+        if not self.base_urls or not self.api_token:
             raise ProxmoxAPIError("Proxmox API credentials not configured")
         if self.client is None:
             auth_header = (
                 self.api_token if self.api_token.startswith("PVEAPIToken=") else f"PVEAPIToken={self.api_token}"
             )
+            verify: ssl.SSLContext | bool = self.verify_ssl
+            if self.verify_ssl and self.ca_file:
+                ctx = ssl.create_default_context(cafile=self.ca_file)
+                # Python 3.13+ enables strict X.509 checks, which reject Proxmox's cluster CA
+                # because it has no keyUsage extension. The chain is still verified against it.
+                ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+                verify = ctx
             self.client = httpx.Client(
-                verify=self.verify_ssl,
+                verify=verify,
                 headers={"Authorization": auth_header},
             )
         return self.client
 
     def _request(self, method: str, endpoint: str, *, timeout: float | None = None) -> httpx.Response:
         client = self._get_client()
-        url = f"{self.base_url}{endpoint}"
         req_timeout = timeout if timeout is not None else float(getattr(settings, "HTTPX_DEFAULT_TIMEOUT", 10))
-        return client.request(method, url, timeout=req_timeout)
+        is_read = method.upper() == "GET"
+        for idx, base_url in enumerate(self.base_urls):
+            is_last = idx + 1 == len(self.base_urls)
+            try:
+                resp = client.request(method, f"{base_url}{endpoint}", timeout=req_timeout)
+            except httpx.ConnectError:
+                if is_last:
+                    raise
+                continue
+            except httpx.TransportError:
+                if is_last or not is_read:
+                    raise
+                continue
+            if is_read and resp.status_code in _PROXY_DOWN_STATUSES and not is_last:
+                continue
+            return resp
+        raise ProxmoxAPIError("Proxmox API credentials not configured")
 
     def list_team_vms(self, team_number: int) -> list[ProxmoxVM] | None:
         """Fetch the team's VMs from its Proxmox pool, filtered by Battleship naming and VMID rules."""
