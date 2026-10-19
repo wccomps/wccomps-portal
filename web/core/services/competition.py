@@ -16,6 +16,8 @@ START_MESSAGE_SENDER = "Black Team"
 
 # The audit action a start records, with the team accounts it turned on (accounts_ok) and could not (accounts_failed)
 COMPETITION_STARTED = "competition_started"
+# The audit action a stop records, with the same details
+COMPETITION_STOPPED = "competition_stopped"
 
 
 @dataclass(frozen=True)
@@ -158,7 +160,7 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
             result.start_message_queued = True
 
     AuditLog.objects.create(
-        action=COMPETITION_STARTED if enable else "competition_stopped",
+        action=COMPETITION_STARTED if enable else COMPETITION_STOPPED,
         admin_user=actor,
         target_entity="competition_config",
         target_id=config.pk,
@@ -197,3 +199,20 @@ def run_competition_to_completion(
             return result
         if on_step:
             on_step()
+
+
+def incomplete_run() -> bool | None:
+    """Whether the last recorded run was a start (True) or a stop (False) that left an app or team account
+    unchanged, so it needs running again; None when it changed everything, or no run is recorded."""
+    last = (
+        AuditLog.objects.filter(action__in=(COMPETITION_STARTED, COMPETITION_STOPPED))
+        .order_by("-created_at")
+        .values_list("action", "details")
+        .first()
+    )
+    if last is None:
+        return None
+    action, details = last
+    if not details.get("apps_failed") and not details.get("accounts_failed"):
+        return None
+    return action == COMPETITION_STARTED

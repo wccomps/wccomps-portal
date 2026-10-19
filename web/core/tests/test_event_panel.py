@@ -111,7 +111,7 @@ def test_an_open_event_names_its_season_schools_and_date_and_points_at_the_packe
     assert _action(panel) == reverse("packets_list")
 
 
-def test_while_running_the_event_section_offers_stop(client):
+def test_while_running_the_event_section_says_to_stop_and_leaves_the_button_to_the_controls(client):
     _event(is_active=True)
     _teams(1, score=True)
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
@@ -119,8 +119,8 @@ def test_while_running_the_event_section_offers_stop(client):
     panel = _flat(_event_section(_page(client)))
 
     assert ">Running<" in panel
-    assert '@click="stopCompetition"' in panel
     assert "When the competition ends, stop it" in panel
+    assert "Stop Competition</button>" not in panel
 
 
 def test_played_and_stopped_the_event_section_points_at_the_scorecards(client):
@@ -235,10 +235,11 @@ def test_the_page_shows_only_the_next_steps_section(client, stage, section):
 
     shown = [key for key, heading in SECTION_HEADINGS.items() if heading in page and f'id="{key}"' in page]
     assert shown == ([section] if section else [])
-    # Stop is in one place: the next-step button while running, the Start/Stop row otherwise. Start is always there,
-    # so an incomplete start can be run again
-    assert page.count('@click="stopCompetition"') == 1
-    assert page.count('@click="startCompetition"') == 1
+    # One Start and one Stop, both in Competition Controls; the one the state already matches is disabled
+    assert page.count(">Start Competition</button>") == 1
+    assert page.count(">Stop Competition</button>") == 1
+    assert page.count('@click="startCompetition"') == (0 if stage == "running" else 1)
+    assert page.count('@click="stopCompetition"') == (1 if stage == "running" else 0)
     # Close Out is the section's button only: no next-step link to it, no step link
     assert page.count('@click="closeOutEvent"') == (1 if section == "close-out" else 0)
     for label in ("Close out the event", "Check readiness and start"):
@@ -518,7 +519,22 @@ def test_the_scheduled_start_shows_only_while_the_timer_will_still_fire_it(clien
         pk=1, defaults={"competition_start_time": now - timedelta(hours=2), "competition_end_time": end}
     )
 
-    assert ("The schedule starts it at" in _page(client)) == shown
+    page = _flat(_page(client))
+    assert ("The schedule starts it at" in page) == shown
+    assert (", or you can start it below." in page) == shown
+
+
+def test_the_scheduled_stop_shows_above_the_stop_buttons_while_running(client):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    _arrange("running")
+    CompetitionConfig.objects.filter(pk=1).update(competition_end_time=timezone.now() + timedelta(hours=2))
+
+    page = _flat(_page(client))
+    assert page.count(", or you can stop it below.") == 1
+    assert page.index(", or you can stop it below.") > page.index('id="controls"')
 
 
 @pytest.mark.parametrize("stage", ALL_STAGES)
@@ -558,3 +574,40 @@ def test_rendering_the_page_builds_no_scorecard_pdf_or_email(client, stage):
 
     for name, mock in zip(builders, mocks, strict=True):
         assert not mock.called, name
+
+
+def _last_run(action, accounts_failed):
+    from core.models import AuditLog
+
+    AuditLog.objects.create(
+        action=action,
+        admin_user="admin",
+        target_entity="competition_config",
+        target_id=1,
+        details={"apps_ok": [], "apps_failed": [], "accounts_ok": 1, "accounts_failed": accounts_failed},
+    )
+
+
+@pytest.mark.parametrize("accounts_failed", [0, 1])
+def test_while_running_start_is_offered_again_only_after_a_start_that_left_something_off(client, accounts_failed):
+    _arrange("running")
+    _last_run("competition_started", accounts_failed)
+
+    page = _flat(_page(client))
+
+    assert ('@click="startCompetition"' in page) == bool(accounts_failed)
+    assert ("The last start didn't turn everything on" in page) == bool(accounts_failed)
+    assert page.count('@click="stopCompetition"') == 1
+
+
+@pytest.mark.parametrize("accounts_failed", [0, 1])
+def test_while_stopped_stop_is_offered_again_only_after_a_stop_that_left_something_on(client, accounts_failed):
+    _arrange("played")
+    _last_run("competition_started", 0)
+    _last_run("competition_stopped", accounts_failed)
+
+    page = _flat(_page(client))
+
+    assert ('@click="stopCompetition"' in page) == bool(accounts_failed)
+    assert ("The last stop didn't turn everything off" in page) == bool(accounts_failed)
+    assert page.count('@click="startCompetition"') == 1

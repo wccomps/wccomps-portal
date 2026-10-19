@@ -71,13 +71,13 @@
             </c-table>
             <c-button_row class="mt-20 justify-end">
                 <div x-show="showForm" class="d-flex gap-10 items-center">
-                    <c-link href="{% url 'leaderboard_page' %}">Cancel</c-link>
+                    <c-link href="{% url 'leaderboard_page' %}" variant="cancel">Cancel</c-link>
                     <c-button variant="primary" @click="sendEmails" ::disabled="loading">
                         Send {{ teams_with_email }} Email(s)
                     </c-button>
                 </div>
                 <div x-show="done" x-cloak>
-                    <c-link href="{% url 'leaderboard_page' %}">Back to Leaderboard</c-link>
+                    <c-link href="{% url 'leaderboard_page' %}" variant="secondary">Back to Leaderboard</c-link>
                 </div>
             </c-button_row>
         </c-module>

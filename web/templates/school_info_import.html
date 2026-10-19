@@ -27,8 +27,8 @@
                     {% endif %}
                 </c-alert>
                 <c-button_row class="justify-end">
-                    <c-link href="{% url 'school_info_import' %}">Import Another File</c-link>
-                    <c-link href="{% url 'school_info' %}" variant="default">View School Information</c-link>
+                    <c-link href="{% url 'school_info_import' %}" variant="secondary">Import Another File</c-link>
+                    <c-link href="{% url 'school_info' %}" variant="primary">View School Information</c-link>
                 </c-button_row>
             {% elif preview_data %}
                 {# Step 2: Show preview and confirmation #}
@@ -98,7 +98,7 @@
                         <input type="hidden" name="confirm" value="true">
                         <input type="hidden" name="preview" value="{{ preview_data.token }}">
                         <c-button_row class="mt-20 justify-end">
-                            <c-link href="{% url 'school_info_import' %}">Cancel</c-link>
+                            <c-link href="{% url 'school_info_import' %}" variant="cancel">Cancel</c-link>
                             <c-button type="submit" variant="primary">
                                 Confirm and Import
                             </c-button>
@@ -106,7 +106,7 @@
                     </c-form>
                 {% else %}
                     <c-button_row class="justify-end">
-                        <c-link href="{% url 'school_info_import' %}" variant="default">Try Again</c-link>
+                        <c-link href="{% url 'school_info_import' %}" variant="primary">Try Again</c-link>
                     </c-button_row>
                 {% endif %}
             {% else %}
@@ -222,7 +222,7 @@ Tech Institute,admin@techinst.edu,,</pre>
                             </c-form_field>
                         </c-fieldset>
                         <c-button_row class="justify-end">
-                            <c-link href="{% url 'school_info' %}">Cancel</c-link>
+                            <c-link href="{% url 'school_info' %}" variant="cancel">Cancel</c-link>
                             <c-button type="submit" variant="primary">
                                 Upload and Preview
                             </c-button>

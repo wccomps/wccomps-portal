@@ -24,7 +24,8 @@
                               rows="5"></textarea>
                 </c-form_field>
                 <c-button_row class="mt-20 justify-end">
-                    <c-link href="{% url 'leaderboard_scorecard' team.team_number %}">Cancel</c-link>
+                    <c-link href="{% url 'leaderboard_scorecard' team.team_number %}"
+                            variant="cancel">Cancel</c-link>
                     <c-button type="submit" variant="primary">
                         Send Email
                     </c-button>

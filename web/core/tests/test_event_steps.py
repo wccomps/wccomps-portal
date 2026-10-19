@@ -44,6 +44,7 @@ def _panel(stage, **facts):
             members_linked=0,
             starts_at=None,
             ends_at=None,
+            incomplete_run=None,
         )
     )
 
@@ -89,11 +90,11 @@ def test_cancel_and_clear_are_the_actions_taken_under_advanced():
     [
         (Action.IMPORT, "school_info_import", ""),
         (Action.SEND_PACKETS, "packets_list", ""),
-        # Start is taken at the Start/Stop row, which is always there
+        # Start and Stop are taken at the Start/Stop row, which is always there
         (Action.START, "admin_competition", "#controls"),
-        # Stop and Close Out are on the competition page, in parts shown only while they are next: no anchor
-        (Action.STOP, "admin_competition", ""),
+        (Action.STOP, "admin_competition", "#controls"),
         (Action.FINISH, "scoring:email_scorecards", ""),
+        # Close Out is on the competition page, in a part shown only while it is next: no anchor
         (Action.CLOSE_OUT, "admin_competition", ""),
         # Cancel and Clear are under Advanced, which is always there
         (Action.CANCEL, "admin_competition", "#advanced"),

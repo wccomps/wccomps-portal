@@ -53,16 +53,7 @@
                     {{ panel.stage.alternative }}
                 </c-detail_row>
             </c-detail_grid>
-            {% if panel.stage.running %}
-                <c-button_row>
-                    <c-button variant="warning"
-                              @click="stopCompetition"
-                              ::disabled="loading"
-                              ::data-confirm="stopQuestion">
-                        Stop Competition
-                    </c-button>
-                </c-button_row>
-            {% elif panel.action_elsewhere %}
+            {% if panel.action_elsewhere %}
                 <c-button_row>
                     <c-link href="{{ panel.action_url }}" variant="primary">
                         {{ panel.action_label }}
@@ -115,32 +106,51 @@
                 Competition Controls
             </c-slot>
             <p class="help">
-                {% if panel.stage.running %}
-                    If a start didn't turn everything on, press Start again: it retries the apps and accounts and doesn't
-                    post the start message twice.
+                {% if panel.stage.running and panel.start_offered %}
+                    The last start didn't turn everything on: press Start again. It retries the apps and accounts and
+                    doesn't post the start message twice.
+                {% elif panel.stage.running %}
+                    The competition is running.
+                {% elif panel.stop_offered %}
+                    The last stop didn't turn everything off: press Stop again.
                 {% elif panel.stage.played %}
                     Teams can't sign in while stopped. Scores stay, so grading goes on.
                 {% else %}
                     Start turns on the active teams' accounts and opens the competition apps to them.
                 {% endif %}
+                {% if panel.stage.running and panel.facts.ends_at %}
+                    The schedule stops it at <span x-data="formatTime"
+       data-iso="{{ panel.facts.ends_at|date:'c' }}"
+       x-text="formatted"></span>, or you can stop it below.
+                {% endif %}
                 {% if not panel.stage.running and panel.facts.starts_at %}
                     The schedule starts it at <span x-data="formatTime"
        data-iso="{{ panel.facts.starts_at|date:'c' }}"
-       x-text="formatted"></span>.
+       x-text="formatted"></span>, or you can start it below.
                 {% endif %}
             </p>
             <c-button_row>
-                <c-button variant="primary"
-                          @click="startCompetition"
-                          ::disabled="loading"
-                          data-confirm="Start the competition? This opens the competition apps to the blue teams and turns on the active teams' accounts.">
-                    Start Competition
-                </c-button>
-                {% if not panel.stage.running %}
+                {% if panel.start_offered %}
+                    <c-button variant="primary"
+                              @click="startCompetition"
+                              ::disabled="loading"
+                              data-confirm="Start the competition? This opens the competition apps to the blue teams and turns on the active teams' accounts.">
+                        Start Competition
+                    </c-button>
+                {% else %}
+                    <c-button variant="primary" disabled>
+                        Start Competition
+                    </c-button>
+                {% endif %}
+                {% if panel.stop_offered %}
                     <c-button variant="warning"
                               @click="stopCompetition"
                               ::disabled="loading"
                               ::data-confirm="stopQuestion">
+                        Stop Competition
+                    </c-button>
+                {% else %}
+                    <c-button variant="warning" disabled>
                         Stop Competition
                     </c-button>
                 {% endif %}

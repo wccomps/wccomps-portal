@@ -536,8 +536,8 @@ def test_no_hand_written_component_markup() -> None:
 
 
 def test_button_rows_end_a_section() -> None:
-    """A button row is a boxed bar that ends a section (cotton README, <c-button_row>); inside a detail grid it draws
-    the box among the label/value rows. Put it after the grid."""
+    """A button row is a row of buttons that ends a section (cotton README, <c-button_row>); inside a detail grid it
+    sits among the label/value rows. Put it after the grid."""
     found = {
         f"{template_name(path)}:{tag.line}": "a c-button_row inside a c-detail_grid"
         for path in page_templates()
@@ -545,6 +545,26 @@ def test_button_rows_end_a_section() -> None:
         if tag.name == "c-button_row" and any(t.name in ("c-detail_grid", "c-detail_row") for t in open_tags)
     }
     fail_with("Button rows inside a detail grid", found, {})
+
+
+BUTTON_ROW_LINK_VARIANTS = {"primary", "secondary", "danger", "cancel"}
+
+
+def test_button_row_links_have_a_button_variant() -> None:
+    """c-link's default variant renders a plain text link; inside a c-button_row every link is an action button."""
+    found = {
+        f"{template_name(path)}:{tag.line}": f"variant={tag.attrs.get('variant', 'default')!r}"
+        for path in page_templates()
+        for tag, open_tags in with_open_elements(path)
+        if tag.name == "c-link"
+        and any(t.name == "c-button_row" for t in open_tags)
+        and tag.attrs.get("variant") not in BUTTON_ROW_LINK_VARIANTS
+    }
+    fail_with(
+        f"c-link in a c-button_row without a button variant ({', '.join(sorted(BUTTON_ROW_LINK_VARIANTS))})",
+        found,
+        {},
+    )
 
 
 def test_no_inline_styles() -> None:
