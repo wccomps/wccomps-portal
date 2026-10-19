@@ -1,0 +1,80 @@
+{% load cotton %}
+<div class="d-flex justify-between items-center flex-wrap gap-10">
+    {% if proxmox_unreachable %}
+        <p class="text-muted m-0">Proxmox isn't reachable.</p>
+    {% elif not ticket.hostname %}
+        <p class="text-muted m-0">No hostname specified for this ticket.</p>
+    {% elif not matched_vm %}
+        <p class="text-muted m-0">No Proxmox VM matched hostname "{{ ticket.hostname }}" in {{ pool_name }}.</p>
+    {% else %}
+        <div class="d-flex items-center flex-wrap gap-20 text-sm"
+             data-vm-name="{{ matched_vm.name }}">
+            <span>
+                <strong>VM:</strong> <code>{{ matched_vm.name }}</code> ({{ matched_vm.vmid }} on {{ matched_vm.node }})
+            </span>
+            <span>
+                <strong>Status:</strong>
+                {% if matched_vm.status == "running" %}
+                    <c-badge variant="success">
+                        Running
+                    </c-badge>
+                {% else %}
+                    <c-badge variant="default">
+                        {{ matched_vm.status|title }}
+                    </c-badge>
+                {% endif %}
+            </span>
+        </div>
+    {% endif %}
+    <c-button type="button"
+              variant="default"
+              hx-get="{% url 'ticket_box_reset_panel' ticket.ticket_number %}"
+              hx-target="closest #box-reset-panel"
+              hx-swap="innerHTML">
+        Refresh
+    </c-button>
+</div>
+{% if matched_vm and not proxmox_unreachable %}
+    {% if not snapshots %}
+        <p class="text-muted mt-10 m-0">No snapshots available for {{ matched_vm.name }}.</p>
+    {% elif actions.resolve %}
+        <div class="d-flex items-center flex-wrap gap-10 mt-10">
+            <label for="box-reset-snapshot" class="font-semibold text-sm">Snapshot:</label>
+            <select name="snapshot"
+                    id="box-reset-snapshot"
+                    @change="onSnapshotChange"
+                    aria-label="Snapshot to roll back to"
+                    class="py-5 px-10">
+                {% for snap in snapshots %}
+                    <option value="{{ snap.name }}"
+                            {% if snap.name == selected_snapshot %}selected{% endif %}>
+                        {{ snap.name }}{% if snap.description %} ({{ snap.description|shorten:60 }}){% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+            <c-button type="button"
+                      variant="danger"
+                      @click="resetBox"
+                      ::disabled="loading"
+                      ::data-confirm="confirmQuestion">
+                Reset Box
+            </c-button>
+        </div>
+    {% else %}
+        <div class="text-sm mt-10">
+            <span>
+                <strong>Snapshots:</strong>
+                {% for snap in snapshots %}
+                    <code>{{ snap.name }}</code>{% if not forloop.last %},{% endif %}
+                {% endfor %}
+            </span>
+            {% if ticket.status == "open" %}
+                <p class="text-muted mt-5 m-0">Claim this ticket first to reset the box.</p>
+            {% elif ticket.status == "claimed" and ticket.assigned_to %}
+                <p class="text-muted mt-5 m-0">
+                    Assigned to <strong>{{ ticket.assigned_to.username }}</strong>. Only they or a ticketing admin can reset it.
+                </p>
+            {% endif %}
+        </div>
+    {% endif %}
+{% endif %}

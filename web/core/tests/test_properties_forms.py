@@ -108,6 +108,7 @@ from team.forms import CSVUploadForm, ImportConfirmForm, ImportEventForm, parse_
 from team.models import DiscordLink, LinkToken, Team
 from ticketing.forms import (
     CreateTicketForm,
+    TicketBoxResetForm,
     TicketBulkActionForm,
     TicketCategoryForm,
     TicketChangeCategoryForm,
@@ -715,6 +716,12 @@ CASES = [
         TicketBulkActionForm,
         use=lambda w, f: Ticket.objects.filter(ticket_number__in=f.cleaned_data["ticket_numbers"]).exists(),
         resubmit=_resubmit_ticket_numbers,
+    ),
+    FormCase(
+        TicketBoxResetForm,
+        hints=lambda w: {"snapshot": st.sampled_from(("clean", "pre_comp", "snap-1", "current", "../bad"))},
+        examples=({"snapshot": "clean"},),
+        use=lambda w, f: assert_str(f.cleaned_data["snapshot"]),
     ),
 ]
 FORM_CASES = {case.key: case for case in CASES}

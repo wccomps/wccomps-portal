@@ -183,6 +183,20 @@
                     {% endif %}
                 </c-detail_grid>
             </c-fieldset>
+            {% if is_ops and is_box_reset %}
+                <c-fieldset heading="Box Reset" collapsible="true" collapsed="false">
+                    <div x-data="boxReset">
+                        <div id="box-reset-panel"
+                             hx-get="{% url 'ticket_box_reset_panel' ticket.ticket_number %}"
+                             hx-trigger="load"
+                             hx-swap="innerHTML">
+                            <p class="text-muted m-0">Loading Proxmox VM and snapshots...</p>
+                        </div>
+                        <c-progress_bar class="mt-10" />
+                        <c-toast />
+                    </div>
+                </c-fieldset>
+            {% endif %}
             {% if is_ops and ticket.service_name %}
                 <c-fieldset heading="Service Check History" collapsible="true" collapsed="false">
                     <div id="service-checks-panel"
@@ -310,6 +324,34 @@
             init() { this.newCat = this.$el.dataset.initialCat; },
             onCatChange(e) { this.newCat = e.target.value; this.$el.closest('form').requestSubmit(); }
         }));
+        {% if is_ops and is_box_reset %}
+        Alpine.data('boxReset', () => compose(streamMixin('{% url "ticket_box_reset" ticket.ticket_number %}'), {
+            vmName: '',
+            snapshot: '',
+            init() {
+                this.syncFromDom();
+                this.$el.addEventListener('htmx:afterSettle', () => this.syncFromDom());
+            },
+            syncFromDom() {
+                const select = this.$el.querySelector('select[name="snapshot"]');
+                this.snapshot = select ? select.value : '';
+                const vmEl = this.$el.querySelector('[data-vm-name]');
+                this.vmName = vmEl ? vmEl.dataset.vmName : '';
+            },
+            onSnapshotChange(e) {
+                this.snapshot = e.target.value;
+            },
+            get confirmQuestion() {
+                return this.vmName && this.snapshot
+                    ? 'Reset ' + this.vmName + ' to snapshot "' + this.snapshot + '"? This will revert the VM, start it, and resolve the ticket.'
+                    : '';
+            },
+            resetBox() {
+                if (!this.snapshot) return;
+                return this.doStreamAction('reset', { snapshot: this.snapshot });
+            }
+        }));
+        {% endif %}
     });
     </script>
 {% endblock content %}

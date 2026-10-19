@@ -82,7 +82,15 @@ from core.permission_constants import check_groups_for_permission
 from core.tests.roles import ROLE_GROUPS, role_user
 from core.tests.strategies import PAYLOADS, field_values, request_text, rolled_back, uploaded_files, valid_values
 from team.models import LinkAttempt, LinkRateLimit, LinkToken, Team
-from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
+from ticketing.models import (
+    BOX_RESET_CATEGORY_ID,
+    CommentRateLimit,
+    Ticket,
+    TicketAttachment,
+    TicketCategory,
+    TicketComment,
+    TicketHistory,
+)
 
 # ---------------------------------------------------------------------------------------------------------------
 # Roles
@@ -160,8 +168,8 @@ def build_world() -> World:
     )
     ScoringTemplate.objects.first() or ScoringTemplate.objects.create()
 
-    # Tickets: team 1's open, claimed (by support) and resolved ones, and team 2's
     category = TicketCategory.objects.get(pk=6)
+    box_reset = TicketCategory.objects.get(pk=BOX_RESET_CATEGORY_ID)
     tickets = []
     for team, status, number in (
         (teams[0], "open", "T001-001"),
@@ -172,7 +180,7 @@ def build_world() -> World:
         tickets.append(
             Ticket.objects.create(
                 team=team,
-                category=category,
+                category=box_reset if number == "T001-002" else category,
                 ticket_number=number,
                 title=f"Ticket {number}",
                 status=status,
@@ -915,6 +923,8 @@ def offline() -> Iterator[None]:
                 AUTHENTIK_SECRET="property-secret",
                 QUOTIENT_USERNAME="property",
                 QUOTIENT_PASSWORD="property",
+                PROXMOX_API_URL="https://proxmox.test",
+                PROXMOX_API_TOKEN="property@pam!token=secret",
             )
         )
         yield
