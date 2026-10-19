@@ -1,4 +1,4 @@
-"""Client for the Proxmox VE REST API and RangeKiln team VM mapping."""
+"""Client for the Proxmox VE REST API and Battleship team VM mapping."""
 
 import logging
 import re
@@ -52,7 +52,7 @@ class ProxmoxTaskStatus:
 
 
 def team_pool_id(team_number: int) -> str:
-    """Return the Proxmox resource pool ID for `team_number` under RangeKiln's convention."""
+    """Return the Proxmox resource pool ID for `team_number` under Battleship's convention."""
     return f"pool-{team_number:02d}"
 
 
@@ -81,7 +81,7 @@ def normalize_ticket_host(team_number: int, raw_hostname: str) -> str | None:
 
 
 def classify_team_vm(team_number: int, vmid: int, name: str, *, is_template: bool = False) -> str | None:
-    """Return the bare host name when `(vmid, name)` belongs to `team_number` under RangeKiln's rules, else None."""
+    """Return the bare host name when `(vmid, name)` belongs to `team_number` under Battleship's rules, else None."""
     if is_template or not 1 <= team_number <= 99:
         return None
     vmid_min = CLONE_VMID_BASE + team_number * CLONE_VMID_TEAM_STRIDE
@@ -195,7 +195,7 @@ class ProxmoxClient:
         return client.request(method, url, timeout=req_timeout)
 
     def list_team_vms(self, team_number: int) -> list[ProxmoxVM] | None:
-        """Fetch the team's VMs from its Proxmox pool, filtered by RangeKiln naming and VMID rules."""
+        """Fetch the team's VMs from its Proxmox pool, filtered by Battleship naming and VMID rules."""
         if not 1 <= team_number <= 99:
             return []
         pool_id = team_pool_id(team_number)

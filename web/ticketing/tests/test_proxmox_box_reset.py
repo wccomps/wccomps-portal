@@ -1,4 +1,4 @@
-"""Tests for Proxmox VE API client, RangeKiln VM classification, and ticket box resets."""
+"""Tests for Proxmox VE API client, Battleship VM classification, and ticket box resets."""
 
 import json
 from unittest.mock import MagicMock, patch
@@ -34,7 +34,7 @@ def test_normalize_ticket_host() -> None:
     assert normalize_ticket_host(100, "web") is None
 
 
-def test_classify_team_vm_enforces_rangekiln_name_and_vmid_bounds() -> None:
+def test_classify_team_vm_enforces_battleship_name_and_vmid_bounds() -> None:
     assert classify_team_vm(5, 10505, "team05-web") == "web"
     assert classify_team_vm(5, 10500, "team05-router") == "router"
     assert classify_team_vm(5, 10599, "team05-db-01") == "db-01"
