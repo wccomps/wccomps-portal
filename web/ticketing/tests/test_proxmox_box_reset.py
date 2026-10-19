@@ -1,8 +1,10 @@
 """Tests for Proxmox VE API client, Battleship VM classification, and ticket box resets."""
 
 import json
+import ssl
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from django.core.cache import cache
 from django.test import Client, override_settings
@@ -152,6 +154,44 @@ def test_proxmox_client_wait_for_task_already_running_requires_opt_in() -> None:
             allow_already_running=True,
         )
         assert result.finished is True
+
+
+def test_proxmox_client_ca_file_clears_strict_x509_flag() -> None:
+    fake_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    fake_ctx.verify_flags |= ssl.VERIFY_X509_STRICT
+    client = ProxmoxClient(
+        base_url="https://proxmox.test",
+        api_token="user@pam!tok=secret",
+        verify_ssl=True,
+        ca_file="/config/pve-root-ca.pem",
+    )
+    with (
+        patch("core.proxmox.ssl.create_default_context", return_value=fake_ctx) as mock_ctx,
+        patch("core.proxmox.httpx.Client") as mock_http_client,
+    ):
+        client._get_client()
+    mock_ctx.assert_called_once_with(cafile="/config/pve-root-ca.pem")
+    assert not (fake_ctx.verify_flags & ssl.VERIFY_X509_STRICT)
+    mock_http_client.assert_called_once_with(
+        verify=fake_ctx,
+        headers={"Authorization": "PVEAPIToken=user@pam!tok=secret"},
+    )
+
+
+def test_proxmox_client_fails_over_across_comma_separated_urls() -> None:
+    client = ProxmoxClient(
+        base_url="https://10.1.1.123:8006, https://10.1.1.121:8006",
+        api_token="user@pam!tok=secret",
+    )
+    ok_resp = MagicMock(status_code=200)
+    http_client = MagicMock()
+    http_client.request.side_effect = [httpx.ConnectError("node down"), ok_resp]
+    with patch.object(client, "_get_client", return_value=http_client):
+        resp = client._request("GET", "/api2/json/pools/blue-team-05")
+    assert resp is ok_resp
+    assert http_client.request.call_count == 2
+    assert http_client.request.call_args_list[0].args == ("GET", "https://10.1.1.123:8006/api2/json/pools/blue-team-05")
+    assert http_client.request.call_args_list[1].args == ("GET", "https://10.1.1.121:8006/api2/json/pools/blue-team-05")
 
 
 @pytest.mark.django_db
