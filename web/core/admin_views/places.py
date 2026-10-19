@@ -80,8 +80,7 @@ PLACES: dict[Action, ActionPlace] = {
     Action.START: ActionPlace(
         "Check readiness and start the competition", Kind.HERE, Anchor.CONTROLS, Section.READINESS
     ),
-    # While it runs Stop is the next-step button at the top of the competition page
-    Action.STOP: ActionPlace("Stop the competition", Kind.HERE, shows=Section.LIVE),
+    Action.STOP: ActionPlace("Stop the competition", Kind.HERE, Anchor.CONTROLS, Section.LIVE),
     Action.FINISH: ActionPlace(
         "Finish scoring and email scorecards", Kind.ELSEWHERE, "scoring:email_scorecards", Section.CLOSE_OUT
     ),

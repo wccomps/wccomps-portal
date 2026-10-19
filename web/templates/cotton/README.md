@@ -26,12 +26,14 @@ Label/value pairs for a record's details.
 ```
 
 #### `<c-button_row>`
-A boxed bar of buttons and links that ends a section: after its text, form or detail grid, never inside the grid
-(`core/tests/test_template_vocabulary.py` fails on one there).
+A row of buttons and links that ends a section: after its text, form or detail grid, never inside the grid
+(`core/tests/test_template_vocabulary.py` fails on one there). Every `<c-link>` inside a button row must set a
+button `variant` (`primary`, `secondary`, `danger`, or `cancel`). A row sits inside its module with no box of its own;
+`boxed="true"` gives it a grey bar, for a row that is the whole section (the team page's Actions).
 ```django
-<c-button_row>
-    <c-button type="submit">Save</c-button>
-    <c-link href="/back">Cancel</c-link>
+<c-button_row class="justify-end">
+    <c-link href="/back" variant="cancel">Cancel</c-link>
+    <c-button type="submit" variant="primary">Save</c-button>
 </c-button_row>
 ```
 
@@ -116,7 +118,7 @@ Styled links.
 <c-link href="/add" variant="add">Add New</c-link>
 ```
 
-Props: `href`, `variant` (default|primary|add|change|danger|cancel)
+Props: `href`, `variant` (default|primary|secondary|add|change|danger|cancel)
 
 ### Display
 

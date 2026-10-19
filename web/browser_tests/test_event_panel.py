@@ -58,6 +58,8 @@ def test_with_no_event_the_event_section_sends_you_to_the_import(live_server, pw
                 "/ops/school-info/import/",
             )
             assert _controls(page) == {"start": 1, "stop": 1, "close out": 0}
+            assert page.locator("#controls").get_by_role("button", name="Start Competition").is_enabled()
+            assert page.locator("#controls").get_by_role("button", name="Stop Competition").is_disabled()
             assert not errors, errors
     finally:
         context.close()
@@ -90,6 +92,8 @@ def test_played_and_stopped_the_page_checks_unfinished_work(live_server, pw_brow
             ]
             assert page.locator("#readiness").count() == 0 and page.locator("#live").count() == 0
             assert _controls(page) == {"start": 1, "stop": 1, "close out": 1}
+            assert page.locator("#controls").get_by_role("button", name="Start Competition").is_enabled()
+            assert page.locator("#controls").get_by_role("button", name="Stop Competition").is_disabled()
             assert page.locator("#steps_list td a", has_text="Close Out").count() == 0
             assert (action.inner_text(), action.get_attribute("href")) == (
                 "Email scorecards",
@@ -112,8 +116,10 @@ def test_while_running_the_page_offers_stop_and_shows_the_live_numbers(live_serv
         panel = page.locator("#event-panel")
         assert status == 200
         assert "RUNNING" in panel.inner_text().upper()
-        assert panel.get_by_role("button", name="Stop Competition").is_visible()
-        # One Stop, the next-step button; Start stays, so an incomplete start can be run again
+        # Stop is in Competition Controls only; Start there is disabled, since no start has left anything off
+        assert panel.get_by_role("button", name="Stop Competition").count() == 0
+        assert page.locator("#controls").get_by_role("button", name="Start Competition").is_disabled()
+        assert page.locator("#controls").get_by_role("button", name="Stop Competition").is_enabled()
         assert _controls(page) == {"start": 1, "stop": 1, "close out": 0}
         live = page.locator("#live")
         assert "Open or claimed tickets" in live.inner_text()

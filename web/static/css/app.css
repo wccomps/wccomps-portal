@@ -343,16 +343,29 @@ a.button:active {
 /* Toast placement (c-toast) */
 .toast-position { position: fixed; bottom: 16px; right: 16px; z-index: 50; }
 
-/* Secondary button */
+/* Secondary button (c-link variant secondary or cancel): sized like .button, so it matches the button beside it */
 .btn-secondary {
-    padding: 5px 10px;
+    display: inline-block;
+    box-sizing: border-box;
+    min-width: 80px;
+    padding: 8px 16px;
     font-size: 13px;
+    line-height: normal;
+    text-align: center;
+    vertical-align: middle;
     border: 1px solid var(--hairline-color, #ddd);
     background: var(--body-bg, white);
+    color: var(--body-fg, #333);
     border-radius: 4px;
     cursor: pointer;
+    text-decoration: none;
 }
-.btn-secondary:hover { background: var(--darkened-bg, #f8f8f8); }
+.btn-secondary:hover,
+.btn-secondary:focus-visible {
+    background: var(--darkened-bg, #f8f8f8);
+    color: var(--body-fg, #333);
+    text-decoration: none;
+}
 
 /* Toggle button (c-toggle_button): pressed while its choice is picked */
 .box-toggle--selected {
@@ -361,9 +374,16 @@ a.button:active {
     color: white;
 }
 
-/* Override admin forms.css float clearfix - Cotton components don't use floats */
+/* Override admin forms.css float clearfix: Cotton components don't use floats */
 .form-row {
     overflow: visible;
+}
+/* Admin's submit-row draws a grey box, a second one inside the module a button row sits in; a boxed row
+   (c-button_row boxed) keeps it. Two classes, so responsive.css's later padding doesn't put it back. */
+.submit-row:not(.submit-row--boxed) {
+    background: none;
+    border: none;
+    padding: 0;
 }
 
 /* Common component patterns */
