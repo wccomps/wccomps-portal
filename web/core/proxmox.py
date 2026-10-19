@@ -55,7 +55,7 @@ class ProxmoxTaskStatus:
 
 def team_pool_id(team_number: int) -> str:
     """Return the Proxmox resource pool ID for `team_number` under Battleship's convention."""
-    return f"pool-{team_number:02d}"
+    return f"blue-team-{team_number:02d}"
 
 
 def is_safe_identifier(value: str) -> bool:
