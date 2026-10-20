@@ -5,7 +5,9 @@
 {% endblock title %}
 {% block registration_content %}
     <div id="content-main">
-        <c-page_header title="{{ title }}" />
+        <c-page_header title="{{ title }}"
+                       parent_url="{% url 'registration_season_list' %}"
+                       parent_label="Seasons" />
         <c-module>
             <c-form>
                 {% csrf_token %}

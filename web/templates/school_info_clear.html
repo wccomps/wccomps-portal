@@ -6,7 +6,7 @@
 {% block admin_content %}
     <c-page_header title="Clear School Information"
                    parent_url="{% url 'school_info' %}"
-                   parent_label="School Information" />
+                   parent_label="Schools" />
     <c-module>
         {% if error %}<c-alert variant="error">{{ error }}</c-alert>{% endif %}
         <c-alert variant="warning">

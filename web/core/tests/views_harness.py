@@ -13,8 +13,10 @@ test_property_coverage fails when a URL pattern has no row (and isn't excepted w
 """
 
 import json
+import logging
 import os
 import re
+import ssl
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
@@ -908,26 +910,36 @@ def _offline(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Respons
     raise httpx.ConnectError("offline: property tests reach no other service", request=request)
 
 
+_OFFLINE_SSL_CONTEXT = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+
 @contextmanager
 def offline() -> Iterator[None]:
     """Every other service down (Authentik, Quotient, Discord webhooks), configured as in production. (Streamed
     operations run inline in the test's transaction, core.utils.run_detached; packet emails still go out from worker
     threads, packets.services, with connections of their own.)"""
+    import httpx._config
     from django.test import override_settings
 
-    with ExitStack() as stack:
-        stack.enter_context(patch.object(httpx.HTTPTransport, "handle_request", _offline))
-        stack.enter_context(
-            override_settings(
-                AUTHENTIK_CLIENT_ID="property-client",
-                AUTHENTIK_SECRET="property-secret",
-                QUOTIENT_USERNAME="property",
-                QUOTIENT_PASSWORD="property",
-                PROXMOX_API_URL="https://proxmox.test",
-                PROXMOX_API_TOKEN="property@pam!token=secret",
+    previous_disable = logging.root.manager.disable
+    logging.disable(logging.CRITICAL)
+    try:
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(httpx.HTTPTransport, "handle_request", _offline))
+            stack.enter_context(patch.object(httpx._config, "create_ssl_context", return_value=_OFFLINE_SSL_CONTEXT))
+            stack.enter_context(
+                override_settings(
+                    AUTHENTIK_CLIENT_ID="property-client",
+                    AUTHENTIK_SECRET="property-secret",
+                    QUOTIENT_USERNAME="property",
+                    QUOTIENT_PASSWORD="property",
+                    PROXMOX_API_URL="https://proxmox.test",
+                    PROXMOX_API_TOKEN="property@pam!token=secret",
+                )
             )
-        )
-        yield
+            yield
+    finally:
+        logging.disable(previous_disable)
 
 
 def uploads(max_files: int = 1) -> st.SearchStrategy[Any]:

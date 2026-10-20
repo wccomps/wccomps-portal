@@ -380,6 +380,10 @@ def _no_server_error(response: HttpResponse) -> None:
     assert PROBE.encode() not in response.content
 
 
+from core.tests.views_harness import views_profile
+
+
+@views_profile()
 @given(
     content=st.one_of(SCHOOL_CSV, st.just(f"school_name,contact_email\n{PROBE},a@b.co\n".encode())),
     name=st.sampled_from(("s.csv", f"{PROBE}.csv", "s.txt")),
@@ -406,6 +410,7 @@ PACKET_POST = st.fixed_dictionaries(
 )
 
 
+@views_profile()
 @given(post=PACKET_POST)
 def test_packet_upload_view_answers_any_file(post: dict[str, Any], gold_team_user: User) -> None:
     client = _client_for(gold_team_user)
@@ -413,6 +418,7 @@ def test_packet_upload_view_answers_any_file(post: dict[str, Any], gold_team_use
         _no_server_error(client.post(reverse("upload_packet"), post))
 
 
+@views_profile()
 @given(files=st.lists(uploaded_files(), max_size=3), source_ip=st.one_of(st.ip_addresses().map(str), request_text(45)))
 def test_incident_report_view_answers_any_screenshots(
     files: list[SimpleUploadedFile], source_ip: str, blue_team_user: User, blue_team: Team
@@ -428,6 +434,7 @@ def test_incident_report_view_answers_any_screenshots(
         _no_server_error(client.post(reverse("scoring:submit_incident_report"), post))
 
 
+@views_profile()
 @given(files=st.lists(uploaded_files(), max_size=3))
 def test_red_finding_view_answers_any_screenshots(files: list[SimpleUploadedFile], red_team_user: User) -> None:
     from scoring.models import AttackType
@@ -448,6 +455,7 @@ def test_red_finding_view_answers_any_screenshots(files: list[SimpleUploadedFile
         _no_server_error(client.post(reverse("scoring:submit_red_score"), post))
 
 
+@views_profile()
 @given(upload=uploaded_files())
 def test_ticket_attachment_view_answers_any_file(
     upload: SimpleUploadedFile, ticket: Ticket, ticketing_support_user: User

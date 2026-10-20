@@ -39,7 +39,7 @@ def test_seasons_and_events_pages(live_server, pw_browser):
         page.wait_for_load_state("networkidle")
         assert page.get_by_text(f'Are you sure you want to delete the event "{event.name}"?').is_visible()
         assert page.get_by_role("button", name="Delete Event").is_visible()
-        page.get_by_role("link", name="Cancel", exact=True).click()
+        page.get_by_role("button", name="Cancel", exact=True).click()
         page.wait_for_load_state("networkidle")
         assert Event.objects.filter(pk=event.pk).exists()
         assert not errors, errors

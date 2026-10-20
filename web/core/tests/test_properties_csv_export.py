@@ -54,6 +54,10 @@ def test_a_cell_without_the_export_quote_reads_back_unchanged(text: str) -> None
     assert unquote_cell(text) == text
 
 
+from core.tests.views_harness import views_profile
+
+
+@views_profile()
 @given(team_name=request_text(100).filter(lambda s: s.strip() and len(s) <= 100 and "\x00" not in s))
 @example(team_name='=HYPERLINK("http://x","y")')
 def test_a_team_name_in_the_school_list_export_is_not_a_formula(team_name: str, gold_team_user: User) -> None:

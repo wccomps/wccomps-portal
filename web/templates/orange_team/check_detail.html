@@ -4,7 +4,9 @@
     {{ orange_check.title }} - Orange Team
 {% endblock orange_title %}
 {% block orange_content %}
-    <c-page_header title="{{ orange_check.title }}">
+    <c-page_header title="{{ orange_check.title }}"
+                   parent_url="{% url 'orange_team:check_list' %}"
+                   parent_label="Manage Checks">
         <c-slot name="subtitle">
             {% if orange_check.window_state == "open" %}
                 <c-badge variant="info">

@@ -226,7 +226,11 @@ TOKENS = answer({"access_token": "access"})
 USERINFO = {"sub": "sub-1", "preferred_username": "player", "email": "player@example.edu", "groups": ["G"]}
 
 
+from core.tests.views_harness import views_profile
+
+
 @pytest.mark.django_db
+@views_profile()
 @example(answers=[Answer(200, b"<html>502 Bad Gateway</html>")])
 @example(answers=[answer(["access"])])
 @example(answers=[TOKENS, answer({**USERINFO, "groups": "WCComps_BlueTeam01"})])

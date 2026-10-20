@@ -1,10 +1,10 @@
 {% extends "orange_team/base.html" %}
 {% load cotton %}
 {% block orange_title %}
-    Orange Team Dashboard
+    Manage Checks - Orange Team
 {% endblock orange_title %}
 {% block orange_content %}
-    <c-page_header title="Orange Team Dashboard" subtitle="Coverage and volunteers" />
+    <c-page_header title="Manage Checks" subtitle="Coverage and volunteers" />
     <c-module title="Checks">
         <c-slot name="toolbar">
             <c-link href="{% url 'orange_team:check_create' %}" variant="add">Create Check</c-link>

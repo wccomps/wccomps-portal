@@ -23,6 +23,7 @@ from core.middleware import NUL_MESSAGE
 from core.models import BotState, UserGroups
 from core.tests.roles import role_user
 from core.tests.strategies import request_text, rolled_back
+from core.tests.views_harness import views_profile
 from team.models import Team
 from ticketing.models import Ticket
 
@@ -426,16 +427,21 @@ def test_an_anonymous_post_body_is_not_parsed_for_a_nul(path: str) -> None:
 JS_STRING = re.compile(r"selectedHostname: '((?:[^'\\\n\r\u2028\u2029]|\\.)*)',\n")
 
 
+@pytest.fixture
+def blue_client(blue_team_user: User) -> Client:
+    return signed_in(blue_team_user)
+
+
+@views_profile()
 @given(hostname=request_text(60).filter(lambda h: "\x00" not in h))
 @example(hostname="a\\")
 @example(hostname="a\nb")
 def test_the_ticket_form_writes_posted_text_into_its_script_as_a_string(
-    blue_team_user: User, tickets: dict[str, Any], hostname: str
+    blue_client: Client, tickets: dict[str, Any], hostname: str
 ) -> None:
     """HTML escaping left a backslash or a line break that ended or broke the JavaScript string (self only)."""
-    client = signed_in(blue_team_user)
     with rolled_back():
-        response = client.post(reverse("create_ticket"), {"hostname": hostname})  # no title: the form comes back
+        response = blue_client.post(reverse("create_ticket"), {"hostname": hostname})  # no title: the form comes back
     assert JS_STRING.search(response.content.decode()), "the posted hostname broke the script's string"
 
 
@@ -454,6 +460,7 @@ def test_the_django_admin_lets_in_only_the_admin_permission(role: str, let_in: b
 JS_STRING_LIST = re.compile(r"apps: \[((?:'(?:[^'\\\n\r\u2028\u2029]|\\.)*'(?:, )?)*)\],\n")
 
 
+@views_profile()
 @given(names=st.lists(request_text(30).filter(lambda n: "\x00" not in n), min_size=1, max_size=3))
 @example(names=["a'b", "c\\d", "e\nf"])
 def test_the_setup_page_writes_app_names_into_its_script_as_strings(admin_client: Client, names: list[str]) -> None:

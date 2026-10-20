@@ -43,7 +43,7 @@
                     </a>
                 {% endif %}
                 {% if is_blue_team or is_white_team or is_gold_team or is_admin %}
-                    <a href="{% url 'scoring:submit_incident_report' %}"
+                    <a href="{% url 'scoring:incident_list' %}"
                        {% if nav_active == 'incident' %}class="current"{% endif %}>Incident Report</a>
                 {% endif %}
                 {% if is_blue_team %}

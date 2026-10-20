@@ -7,7 +7,7 @@
     <div id="content-main">
         <c-page_header title="Edit School Information for Team {{ team.team_number }}"
                        parent_url="{% url 'school_info' %}"
-                       parent_label="School Info" />
+                       parent_label="Schools" />
         <c-form>
             {% csrf_token %}
             <c-module>
@@ -50,7 +50,8 @@
                 </c-fieldset>
                 <c-button_row class="justify-end">
                     {% if school_info %}
-                        <c-link href="{% url 'school_info_remove' team.team_number %}" variant="danger">Remove</c-link>
+                        <c-link href="{% url 'school_info_remove' team.team_number %}"
+                                variant="danger">Remove</c-link>
                     {% endif %}
                     <c-link href="{% url 'school_info' %}" variant="cancel">Cancel</c-link>
                     <c-button type="submit" variant="primary">

@@ -7,6 +7,7 @@ adds deeply nested JSON and bytes that aren't JSON.
 """
 
 import json
+import ssl
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from typing import Any
 from unittest.mock import patch
 
 import httpx
+import httpx._config
 from hypothesis import strategies as st
 
 from core.tests.strategies import request_text
@@ -91,6 +93,7 @@ class EndlessRequests(BaseException):
 
 
 MAX_REQUESTS = 200
+_SERVING_SSL_CONTEXT = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
 
 @contextmanager
@@ -106,5 +109,8 @@ def serving(answers_: list[Answer]) -> Iterator[list[str]]:
         requested.append(str(request.url))
         return httpx.Response(answer.status, content=answer.body, request=request)
 
-    with patch.object(httpx.HTTPTransport, "handle_request", handle):
+    with (
+        patch.object(httpx.HTTPTransport, "handle_request", handle),
+        patch.object(httpx._config, "create_ssl_context", return_value=_SERVING_SSL_CONTEXT),
+    ):
         yield requested

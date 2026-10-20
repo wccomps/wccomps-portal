@@ -7,7 +7,7 @@
     <c-page_header title="Assign Volunteers"
                    subtitle="{{ orange_check.title }}"
                    parent_url="{% url 'orange_team:check_list' %}"
-                   parent_label="Orange Team Dashboard" />
+                   parent_label="Manage Checks" />
     <c-module title="Teams">
         <c-slot name="toolbar">
             <c-form action="{% url 'orange_team:check_auto_assign' orange_check.pk %}"
