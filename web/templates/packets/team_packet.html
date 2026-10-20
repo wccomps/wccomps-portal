@@ -87,9 +87,7 @@
                                 <br>
                                 <small>{{ dist.packet.file_size|filesizeformat }}</small>
                             </td>
-                            <td>
-                                {{ dist.packet.actual_distribution_time|date:"Y-m-d H:i" }}
-                            </td>
+                            <td>{{ dist.packet.actual_distribution_time|date:"Y-m-d H:i" }}</td>
                             <td>
                                 {% if dist.downloaded_at %}
                                     <c-badge variant="success">
@@ -114,8 +112,5 @@
                                description="Packets will appear here when distributed" />
             {% endif %}
         </c-module>
-        <c-button_row class="mt-20">
-            <c-link href="{% url 'home' %}" variant="secondary">Back to Home</c-link>
-        </c-button_row>
     </div>
 {% endblock content %}

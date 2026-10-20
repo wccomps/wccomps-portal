@@ -359,6 +359,7 @@ def test_every_template_is_used() -> None:
 
 # URL name (with namespace) -> who requests it without the portal linking to it by name
 URL_EXCEPTIONS = {
+    "home": "The site root (/), requested when someone opens the portal domain",
     "admin:login": "The Django admin's own login page: Django links it (AuthentikAdminSite overrides the view to "
     "refuse a signed-in non-admin)",
     "health_check": "The Kubernetes readiness probe and the uptime probe request /health/ by path",
