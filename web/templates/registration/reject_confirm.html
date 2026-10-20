@@ -5,7 +5,9 @@
 {% endblock title %}
 {% block registration_content %}
     <div id="content-main">
-        <c-page_header title="Reject Registration" />
+        <c-page_header title="Reject Registration"
+                       parent_url="{% url 'registration_review_list' %}"
+                       parent_label="Registrations" />
         <c-module>
             <p>You are about to reject the registration for:</p>
             <c-detail_grid>

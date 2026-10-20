@@ -1,13 +1,8 @@
-{% extends "admin/base_site.html" %}
-{% load cotton %}
+{% extends "admin/base.html" %}
 {% block title %}
     Registration Admin - WCComps Portal
 {% endblock title %}
-{% block content %}
-    <c-nav current="{{ subnav_active }}">
-        <c-nav_item name="registrations" href="{% url 'registration_review_list' %}">Registrations</c-nav_item>
-        <c-nav_item name="seasons" href="{% url 'registration_season_list' %}">Seasons</c-nav_item>
-    </c-nav>
+{% block admin_content %}
     {% block registration_content %}
     {% endblock registration_content %}
-{% endblock content %}
+{% endblock admin_content %}

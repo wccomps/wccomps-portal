@@ -15,9 +15,12 @@
         Edit Check
     {% endif %}
     "
-                   subtitle="Define a check with a max, a window, and optional criteria" />
+                   subtitle="Define a check with a max, a window, and optional criteria"
+                   parent_url="{% url 'orange_team:check_list' %}"
+                   parent_label="Manage Checks" />
     <c-module>
-        <c-form x-data="criteriaForm" action="{% if mode == 'edit' %}{% url 'orange_team:check_edit' orange_check.pk %}{% endif %}">
+        <c-form x-data="criteriaForm"
+                action="{% if mode == 'edit' %}{% url 'orange_team:check_edit' orange_check.pk %}{% endif %}">
             {% csrf_token %}
             <c-fieldset heading="Check Details">
                 <c-form_field label="Title" required="true" id="id_title">

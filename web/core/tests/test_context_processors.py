@@ -10,7 +10,7 @@ from django.test import RequestFactory
 
 from core.context_processors import NAV_MAPPING, permissions
 from core.models import UserGroups
-from core.tests.guards import extends_chain, fail_with, page_templates, tags, template_name
+from core.tests.guards import TEMPLATES_DIR, extends_chain, fail_with, page_templates, tags, template_name, text
 
 pytestmark = pytest.mark.django_db
 
@@ -136,7 +136,22 @@ class TestPermissionsContextProcessor:
 
 
 RENDER_RE = re.compile(r"""render\s*\(\s*request\s*,\s*["']([^"']+)["']""")
+HELPER_CALL_RE = re.compile(r"\b(_\w+)\s*\(")
+PRIMARY_NAV_ACTIVE_RE = re.compile(r"""nav_active\s*==\s*["']([^"']+)["']""")
 NAV_MAPPING_EXCEPTIONS: dict[str, str] = {}
+NAV_TARGET_EXCEPTIONS: dict[str, str] = {
+    "registration_edit": "Public token-authenticated school registration edit page outside the staff primary nav",
+}
+
+
+def _view_renders(view: object) -> set[str]:
+    source = inspect.getsource(view)  # type: ignore[arg-type]
+    templates = set(RENDER_RE.findall(source))
+    ns = getattr(view, "__globals__", {})
+    for helper_name in HELPER_CALL_RE.findall(source):
+        if inspect.isfunction(helper := ns.get(helper_name)):
+            templates.update(RENDER_RE.findall(inspect.getsource(helper)))
+    return templates
 
 
 def _url_templates() -> dict[str, set[str]]:
@@ -150,7 +165,7 @@ def _url_templates() -> dict[str, set[str]]:
             if isinstance(pattern, URLResolver):
                 extract(pattern.url_patterns)
             elif pattern.name and inspect.isfunction(view := inspect.unwrap(pattern.callback)):
-                found.setdefault(pattern.name, set()).update(RENDER_RE.findall(inspect.getsource(view)))
+                found.setdefault(pattern.name, set()).update(_view_renders(view))
 
     extract(get_resolver().url_patterns)
     return found
@@ -175,3 +190,22 @@ def test_subnav_pages_have_nav_mapping() -> None:
         if url_name not in NAV_MAPPING
     }
     fail_with("URLs with a sub-nav missing from NAV_MAPPING", missing, NAV_MAPPING_EXCEPTIONS)
+
+
+def test_nav_mapping_targets_real_nav_items() -> None:
+    """Every NAV_MAPPING entry names a real primary nav section in admin/base_site.html and, when its subnav is
+    non-empty, a real <c-nav_item name="..."> in a sub-nav base template."""
+    primary_sections = set(PRIMARY_NAV_ACTIVE_RE.findall(text(TEMPLATES_DIR / "admin/base_site.html")))
+    subnav_items = {
+        tag.attrs["name"]
+        for p in page_templates()
+        for tag in tags(p)
+        if tag.name == "c-nav_item" and "name" in tag.attrs
+    }
+    problems: dict[str, str] = {}
+    for url_name, (nav, subnav) in NAV_MAPPING.items():
+        if nav not in primary_sections:
+            problems[url_name] = f"nav={nav!r} is not a nav_active section in admin/base_site.html"
+        elif subnav and subnav not in subnav_items:
+            problems[url_name] = f"subnav={subnav!r} is not a <c-nav_item name=...> in any template"
+    fail_with("NAV_MAPPING entries pointing to nonexistent nav or subnav items", problems, NAV_TARGET_EXCEPTIONS)

@@ -548,6 +548,20 @@ def test_button_rows_end_a_section() -> None:
 
 
 BUTTON_ROW_LINK_VARIANTS = {"primary", "secondary", "danger", "cancel"}
+BOXED_BUTTON_ROW_EXCEPTIONS = {
+    "admin/team_detail.html": "The multi-action team actions bar (a row that is the whole section)",
+}
+STANDALONE_HEADER_EXCEPTIONS = {
+    "core/oauth_error.html": "Standalone OAuth error page outside the section hierarchy",
+    "error.html": "Central error page outside the section hierarchy",
+    "link_confirm.html": "Discord link token flow page outside the section hierarchy",
+    "link_error.html": "Discord link token flow page outside the section hierarchy",
+    "link_success.html": "Discord link token flow page outside the section hierarchy",
+    "registration/edit.html": "Public token-authenticated school registration edit page",
+    "registration/edit_locked.html": "Public token-authenticated school registration locked page",
+}
+URL_TAG_NAME_RE = re.compile(r"""{%\s*url\s+["']([^"']+)["']""")
+VAR_PLACEHOLDER_RE = re.compile(r"{{.*?}}")
 
 
 def test_button_row_links_have_a_button_variant() -> None:
@@ -565,6 +579,71 @@ def test_button_row_links_have_a_button_variant() -> None:
         found,
         {},
     )
+
+
+def test_boxed_button_rows_are_action_toolbars() -> None:
+    """c-button_row's boxed grey background is only for standalone action bars, not regular form submit rows."""
+    found = {
+        template_name(path): f"line {tag.line}"
+        for path in page_templates()
+        for tag in tags(path)
+        if tag.name == "c-button_row" and tag.attrs.get("boxed") == "true"
+    }
+    fail_with("Templates using c-button_row boxed='true'", found, BOXED_BUTTON_ROW_EXCEPTIONS)
+
+
+def test_page_header_hierarchy() -> None:
+    """Nav and sub-nav root pages have no parent_url or page-level Cancel link; child pages have both parent_url and
+    parent_label, and every child of the same parent URL uses the same parent_label."""
+    from core.tests.test_context_processors import _url_templates
+
+    tpl_to_urls: dict[str, set[str]] = {}
+    for url_name, tpls in _url_templates().items():
+        for tpl in tpls:
+            tpl_to_urls.setdefault(tpl, set()).add(url_name)
+
+    base_site = text(TEMPLATES_DIR / "admin/base_site.html")
+    nav_links_match = re.search(r'<div class="nav-links">(.*?)</div>', base_site, re.DOTALL)
+    nav_links_html = nav_links_match.group(1) if nav_links_match else ""
+    nav_root_urls = {u.split(":")[-1] for u in URL_TAG_NAME_RE.findall(nav_links_html)}
+    for path in page_templates():
+        for tag in tags(path):
+            if tag.name == "c-nav_item":
+                nav_root_urls.update(u.split(":")[-1] for u in URL_TAG_NAME_RE.findall(tag.attrs.get("href", "")))
+
+    problems: dict[str, str] = {}
+    labels_by_parent: dict[str, dict[str, list[str]]] = {}
+
+    for path in page_templates():
+        name = template_name(path)
+        headers = [t for t in tags(path) if t.name == "c-page_header"]
+        if not headers:
+            continue
+        is_root = bool(tpl_to_urls.get(name, set()) & nav_root_urls)
+        cancel_links = [t for t in tags(path) if t.name == "c-link" and t.attrs.get("variant") == "cancel"]
+        for header in headers:
+            has_url = bool(header.attrs.get("parent_url"))
+            has_label = bool(header.attrs.get("parent_label"))
+            if is_root:
+                if has_url or has_label:
+                    problems[name] = f"line {header.line}: nav root page has parent_url/parent_label"
+                if cancel_links:
+                    problems[name] = f"line {cancel_links[0].line}: nav root page has a Cancel link"
+            elif not (has_url and has_label):
+                problems[name] = f"line {header.line}: child page missing parent_url or parent_label"
+            if has_url and has_label:
+                for parent_target in URL_TAG_NAME_RE.findall(header.attrs["parent_url"]):
+                    norm_label = VAR_PLACEHOLDER_RE.sub("{{ x }}", header.attrs["parent_label"].strip())
+                    labels_by_parent.setdefault(parent_target.split(":")[-1], {}).setdefault(norm_label, []).append(
+                        name
+                    )
+
+    for parent_url, label_map in labels_by_parent.items():
+        if len(label_map) > 1:
+            detail = ", ".join(f"{lbl!r} ({', '.join(files)})" for lbl, files in sorted(label_map.items()))
+            problems[f"parent_label:{parent_url}"] = f"inconsistent parent_label across child pages: {detail}"
+
+    fail_with("Page header hierarchy or parent_label inconsistency", problems, STANDALONE_HEADER_EXCEPTIONS)
 
 
 def test_no_inline_styles() -> None:

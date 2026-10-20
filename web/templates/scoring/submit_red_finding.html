@@ -208,9 +208,7 @@
                                         data-team-id="{{ checkbox.data.value }}"
                                         data-team-label="{{ checkbox.choice_label }}"
                                         data-checkbox-id="{{ checkbox.id_for_label }}"
-                                        @click="toggle">
-                                    {{ checkbox.choice_label }}
-                                </button>
+                                        @click="toggle">{{ checkbox.choice_label }}</button>
                             {% endfor %}
                         </div>
                     </div>
@@ -254,7 +252,6 @@
                 </div>
             </c-fieldset>
             <c-button_row class="justify-end">
-                <c-link href="{% url 'scoring:red_team_scores' %}" variant="cancel">Cancel</c-link>
                 <c-button type="submit" variant="primary">
                     Submit Finding
                 </c-button>

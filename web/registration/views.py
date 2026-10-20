@@ -116,7 +116,6 @@ def review_list(request: HttpRequest) -> HttpResponse:
         "filters": filters,
         "filtered": filtered,
         "status_choices": TeamRegistration.STATUS_CHOICES,
-        "subnav_active": "registrations",
     }
 
     if request.headers.get("HX-Request"):
@@ -143,7 +142,7 @@ def approve_registration(request: HttpRequest, registration_id: int) -> HttpResp
 def reject_registration(request: HttpRequest, registration_id: int) -> HttpResponse:
     registration = get_object_or_404(TeamRegistration, id=registration_id)
 
-    context = {"registration": registration, "subnav_active": "registrations"}
+    context = {"registration": registration}
 
     if request.method == "POST":
         form = RejectRegistrationForm(request.POST)
@@ -162,7 +161,7 @@ def reject_registration(request: HttpRequest, registration_id: int) -> HttpRespo
 @require_permission("gold_team")
 def season_list(request: HttpRequest) -> HttpResponse:
     seasons = Season.objects.prefetch_related("events").all()
-    return render(request, "registration/seasons/list.html", {"seasons": seasons, "subnav_active": "seasons"})
+    return render(request, "registration/seasons/list.html", {"seasons": seasons})
 
 
 @require_permission("gold_team")
@@ -176,9 +175,7 @@ def season_create(request: HttpRequest) -> HttpResponse:
     else:
         form = SeasonForm()
 
-    return render(
-        request, "registration/seasons/form.html", {"form": form, "title": "Create Season", "subnav_active": "seasons"}
-    )
+    return render(request, "registration/seasons/form.html", {"form": form, "title": "Create Season"})
 
 
 @require_permission("gold_team")
@@ -197,7 +194,7 @@ def season_edit(request: HttpRequest, season_id: int) -> HttpResponse:
     return render(
         request,
         "registration/seasons/form.html",
-        {"form": form, "title": "Edit Season", "season": season, "subnav_active": "seasons"},
+        {"form": form, "title": "Edit Season", "season": season},
     )
 
 
@@ -218,7 +215,7 @@ def season_delete(request: HttpRequest, season_id: int) -> HttpResponse:
     return render(
         request,
         "registration/seasons/delete_confirm.html",
-        {"season": season, "problem": season_delete_problem(season), "subnav_active": "seasons"},
+        {"season": season, "problem": season_delete_problem(season)},
     )
 
 
@@ -227,9 +224,7 @@ def event_list(request: HttpRequest, season_id: int) -> HttpResponse:
     season = get_object_or_404(Season, id=season_id)
     events = season.events.annotate_enrollment_count()
 
-    return render(
-        request, "registration/events/list.html", {"season": season, "events": events, "subnav_active": "seasons"}
-    )
+    return render(request, "registration/events/list.html", {"season": season, "events": events})
 
 
 @require_permission("gold_team")
@@ -248,7 +243,7 @@ def event_create(request: HttpRequest, season_id: int) -> HttpResponse:
     return render(
         request,
         "registration/events/form.html",
-        {"form": form, "season": season, "title": "Create Event", "subnav_active": "seasons"},
+        {"form": form, "season": season, "title": "Create Event"},
     )
 
 
@@ -269,7 +264,7 @@ def event_edit(request: HttpRequest, event_id: int) -> HttpResponse:
     return render(
         request,
         "registration/events/form.html",
-        {"form": form, "season": event.season, "event": event, "title": "Edit Event", "subnav_active": "seasons"},
+        {"form": form, "season": event.season, "event": event, "title": "Edit Event"},
     )
 
 
@@ -291,7 +286,7 @@ def event_delete(request: HttpRequest, event_id: int) -> HttpResponse:
     return render(
         request,
         "registration/events/delete_confirm.html",
-        {"event": event, "problem": event_delete_problem(event), "subnav_active": "seasons"},
+        {"event": event, "problem": event_delete_problem(event)},
     )
 
 
@@ -334,7 +329,6 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         "packets_sent": sent,
         # Only the open event's teams can be unassigned, and only until packets go out
         "can_unassign": event.is_active and not sent,
-        "subnav_active": "seasons",
     }
 
     return render(request, "registration/events/detail.html", context)

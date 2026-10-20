@@ -5,7 +5,9 @@
 {% endblock title %}
 {% block registration_content %}
     <div id="content-main">
-        <c-page_header title="Delete Event" />
+        <c-page_header title="Delete Event"
+                       parent_url="{% url 'registration_event_list' season_id=event.season_id %}"
+                       parent_label="{{ event.season.name }} Events" />
         <c-module>
             {% if problem %}
                 <c-alert variant="error">
@@ -13,7 +15,7 @@
                 </c-alert>
                 <c-button_row class="mt-20 justify-end">
                     <c-link href="{% url 'registration_event_list' season_id=event.season_id %}"
-                            variant="cancel">Back</c-link>
+                            variant="cancel">Cancel</c-link>
                 </c-button_row>
             {% else %}
                 <c-alert variant="warning">
