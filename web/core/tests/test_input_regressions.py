@@ -168,7 +168,11 @@ def test_a_packets_per_team_csv_parses_or_says_why_not(text: str) -> None:
         assert result == {"1": {"key": "x"}}
 
 
+from core.tests.views_harness import views_profile
+
+
 @pytest.mark.django_db
+@views_profile()
 @given(name=file_names(), content_type=content_types())
 @example(name="a.pdf", content_type="application/" + "x" * 100)
 @example(name='a"b.pdf', content_type="application/pdf")
@@ -192,6 +196,7 @@ def test_an_uploaded_packet_is_stored_and_downloads(name: str, content_type: str
 
 
 @pytest.mark.django_db
+@views_profile()
 @given(name=file_names(), content_type=content_types(), content=file_bytes())
 @example(name="a.png", content_type="image/" + "x" * 100, content=b"\x89PNG\r\n\x1a\n")
 @example(name="a.png", content_type="image/png", content=b"<script>alert(1)</script>")
@@ -233,6 +238,7 @@ def scoring_template(db: object) -> ScoringTemplate:
 
 
 @pytest.mark.django_db
+@views_profile()
 @given(name=file_names())
 @example(name="a\x00.png")
 @example(name="a\x1f\u202e.png")

@@ -17,9 +17,9 @@ def test_cancel_matches_save_and_the_row_has_no_box(live_server, pw_browser):
     context = create_session_context(pw_browser, live_server, role_user("admin"))
     page = context.new_page()
     try:
-        page.goto(live_server.url + reverse("scoring:scoring_config"))
+        page.goto(live_server.url + reverse("orange_team:check_create"))
         cancel = page.get_by_role("button", name="Cancel")
-        save = page.get_by_role("button", name="Save Scoring Setup")
+        save = page.get_by_role("button", name="Create Check")
         cancel_box, save_box = cancel.bounding_box(), save.bounding_box()
         assert abs(cancel_box["height"] - save_box["height"]) <= 2
         assert abs(cancel_box["y"] - save_box["y"]) <= 2

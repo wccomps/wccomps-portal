@@ -22,7 +22,7 @@ def test_a_refused_role_gets_the_403_page_with_a_link_home(live_server, pw_brows
         page, status, errors = visit_and_capture_errors(context, live_server.url + reverse("admin_teams"))
         assert status == 403
         assert page.locator(".breadcrumbs", has_text="No access").count() == 1
-        home = page.get_by_role("link", name="Go to your home page")
+        home = page.get_by_role("button", name="Go to your home page")
         assert home.get_attribute("href") == reverse("ticket_list")
         home.click()
         page.wait_for_url(f"**{reverse('ticket_list')}")
@@ -37,7 +37,7 @@ def test_a_missing_page_gets_the_404_page(live_server, pw_browser):
         page, status, errors = visit_and_capture_errors(context, live_server.url + "/no/such/page/")
         assert status == 404
         assert page.locator(".breadcrumbs", has_text="Not found").count() == 1
-        assert page.get_by_role("link", name="Go to your home page").get_attribute("href") == reverse(
+        assert page.get_by_role("button", name="Go to your home page").get_attribute("href") == reverse(
             "scoring:submit_red_score"
         )
         assert not _script_errors(errors)

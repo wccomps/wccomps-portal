@@ -9,7 +9,8 @@ that request gets (external_json), calls the reader, and checks what comes back.
 
 import contextlib
 import json
-from collections.abc import Callable
+import logging
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -37,6 +38,18 @@ from core.authentik_manager import AuthentikAPIError, AuthentikManager
 from core.proxmox import ProxmoxAPIError, ProxmoxClient, ProxmoxSnapshot, ProxmoxTaskStatus, ProxmoxVM
 from core.tests.external_json import Answer, answer_lists, deep, serving
 from core.tests.strategies import rolled_back
+from core.tests.views_harness import views_profile
+
+
+@pytest.fixture(autouse=True)
+def _silence_reader_logs() -> Iterator[None]:
+    previous = logging.root.manager.disable
+    logging.disable(logging.CRITICAL)
+    try:
+        yield
+    finally:
+        logging.disable(previous)
+
 
 # ---------------------------------------------------------------------------------------------------------------
 # What each request gets, in its real shape
@@ -725,6 +738,7 @@ HUGE_EXPORT = [
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("caller", CALLERS, ids=repr)
+@views_profile()
 @given(data=st.data())
 @example(
     data=[Answer(200, b"{}"), Answer(200, json.dumps(HUGE_EXPORT).encode()), Answer(200, json.dumps(UPTIMES).encode())]
@@ -776,6 +790,7 @@ def signed_in_after(answers: list[Answer]) -> tuple[int, Client]:
 
 
 @pytest.mark.django_db
+@views_profile()
 @given(answers=answer_lists(TOKENS, USERINFO))
 @example(answers=[Answer(200, b"<html>502 Bad Gateway</html>")])
 @example(

@@ -34,6 +34,6 @@ def test_sending_keeps_the_result_up(live_server, pw_browser):
         page.get_by_text("Sent 1 scorecard").wait_for()
         page.wait_for_timeout(6000)
         assert page.get_by_text("Sent 1 scorecard").is_visible(), "the result must stay (no reload, no clearing)"
-        assert page.get_by_role("link", name="Back to Leaderboard").is_visible()
+        assert page.get_by_role("button", name="Back to Leaderboard").is_visible()
     finally:
         context.close()
