@@ -40,7 +40,7 @@ SCORING_TEST_PAGE = "scoring:review_incidents"
 # Expected nav links per role (the single source of truth for what's correct)
 # ---------------------------------------------------------------------------
 EXPECTED_PRIMARY_NAV: dict[str, set[str]] = {
-    "blue_team": {"Incident Report", "Packets"},
+    "blue_team": {"Tickets", "Incident Report", "Packets"},
     "red_team": {"Red Team Findings", "Leaderboard"},
     "gold_team": {
         "Incident Report",

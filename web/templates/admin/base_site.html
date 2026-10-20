@@ -31,13 +31,15 @@
         </button>
         <div id="nav-menu" class="nav-menu" :class="navMenuClass">
             <div class="nav-links">
-                {% if is_ticketing_support %}
+                {% if is_ticketing_support or is_blue_team and not is_gold_team %}
                     <a href="{% url 'ticket_list' %}"
                        {% if nav_active == 'tickets' %}class="current"{% endif %}>Tickets
-                        <span class="notif-count"
-                              x-text="openCount"
-                              x-show="hasOpenTickets"
-                              x-cloak></span>
+                        {% if is_ticketing_support %}
+                            <span class="notif-count"
+                                  x-text="openCount"
+                                  x-show="hasOpenTickets"
+                                  x-cloak></span>
+                        {% endif %}
                     </a>
                 {% endif %}
                 {% if is_blue_team or is_white_team or is_gold_team or is_admin %}
