@@ -74,10 +74,10 @@
                 <c-filter_field label="Category" id="id_category">
                     <select name="category" id="id_category" aria-label="Filter by category">
                         <option value="all" {% if filters.category == 'all' %}selected{% endif %}>All Categories</option>
-                        {% for cat_id, cat_info in categories.items %}
-                            <option value="{{ cat_id }}"
-                                    {% if filters.category == cat_id|stringformat:"i" %}selected{% endif %}>
-                                {{ cat_info.display_name }}
+                        {% for cat in categories %}
+                            <option value="{{ cat.id }}"
+                                    {% if filters.category == cat.id|stringformat:"i" %}selected{% endif %}>
+                                {{ cat.display_name }}
                             </option>
                         {% endfor %}
                     </select>

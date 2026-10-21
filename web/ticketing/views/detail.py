@@ -13,10 +13,16 @@ from django.views.decorators.http import require_POST
 from core.auth_utils import get_user_team, has_permission, require_permission, team_record_or_404
 from core.discord_tasks import PostComment
 from core.models import DiscordTask
-from core.tickets_config import get_all_categories, get_category_config
 from ticketing.access import TICKET_STAFF, ticket_actions
 from ticketing.forms import TicketCommentForm
-from ticketing.models import BOX_RESET_CATEGORY_ID, Ticket, TicketAttachment, TicketComment, TicketHistory
+from ticketing.models import (
+    BOX_RESET_CATEGORY_ID,
+    Ticket,
+    TicketAttachment,
+    TicketCategory,
+    TicketComment,
+    TicketHistory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +53,7 @@ def _visible_ticket(user: User, ticket_number: str) -> Ticket:
     """The ticket as the person may see it: ticketing staff see every ticket, a team its own (another team's is a
     404, as a missing one is)."""
     return team_record_or_404(
-        Ticket.objects.select_related("team"), user, staff=(TICKET_STAFF,), ticket_number=ticket_number
+        Ticket.objects.select_related("team", "category"), user, staff=(TICKET_STAFF,), ticket_number=ticket_number
     )
 
 
@@ -59,8 +65,8 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
     team = get_user_team(user)
 
     ticket = _visible_ticket(user, ticket_number)
+    category = ticket.category
 
-    cat_info = get_category_config(ticket.category_id) or {}
     comments = TicketComment.objects.filter(ticket=ticket).order_by("posted_at")
     attachments = TicketAttachment.objects.filter(ticket=ticket).order_by("uploaded_at")
 
@@ -68,7 +74,7 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
         "is_ops": is_ops,
         "team": team,
         "ticket": ticket,
-        "category_name": cat_info.get("display_name", "Unknown"),
+        "category_name": category.display_name if category else "Unknown",
         "comments": comments,
         "comments_version": list_version(comments),
         "attachments": attachments,
@@ -79,11 +85,11 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
     if is_ops:
         history = TicketHistory.objects.filter(ticket=ticket).order_by("-timestamp")[:20]
         context["is_box_reset"] = ticket.category_id == BOX_RESET_CATEGORY_ID
-        context["variable_points"] = cat_info.get("variable_points", False)
-        context["categories"] = get_all_categories()
+        context["variable_points"] = bool(category and category.variable_points)
+        context["categories"] = TicketCategory.objects.all()
         context["history"] = history
         context["history_version"] = list_version(history)
-        context["playbook_steps"] = cat_info.get("playbook_steps", [])
+        context["playbook_steps"] = category.steps if category else []
         context["staff_usernames"] = _ticketing_staff_usernames()
 
     return render(request, "ticket_detail.html", context)

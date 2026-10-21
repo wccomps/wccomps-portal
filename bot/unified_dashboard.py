@@ -12,7 +12,6 @@ from django.utils import timezone
 from bot.heartbeat import record as record_heartbeat
 from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, add_field, fit_lines, recycle_db_connection
 from core.models import BotState
-from core.tickets_config import get_category_config
 from core.utils import shorten
 from ticketing.models import Ticket
 
@@ -234,7 +233,7 @@ class UnifiedDashboard:
                     query = Ticket.objects.filter(status__in=["open", "claimed"])
                 else:
                     query = Ticket.objects.filter(status=self.filter_status)
-                return list(query.select_related("team", "assigned_to").order_by("created_at"))
+                return list(query.select_related("team", "assigned_to", "category").order_by("created_at"))
 
             @sync_to_async
             def get_stats() -> tuple[int, int]:
@@ -287,11 +286,10 @@ class UnifiedDashboard:
                 categorized = list(self._categorize_tickets(tickets).items())
                 guild_id = channel.guild.id
                 for n, (category_id, cat_tickets) in enumerate(categorized):
-                    cat_info = await sync_to_async(get_category_config)(category_id) or {
-                        "display_name": f"Category {category_id}"
-                    }
+                    cat = cat_tickets[0].category
+                    cat_name = cat.display_name if cat else f"Category {category_id}"
                     field_name, field_value = self._build_category_field(
-                        cat_info["display_name"], cat_tickets, guild_id, cat_info.get("playbook_steps") or []
+                        cat_name, cat_tickets, guild_id, cat.steps if cat else []
                     )
                     # The embed holds 25 fields and 6000 characters: the categories past that are counted instead
                     if not add_field(embed, field_name, field_value, room=DASHBOARD_FOOTER_ROOM):

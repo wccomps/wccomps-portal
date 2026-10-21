@@ -21,7 +21,7 @@ from bot.utils import (
     log_to_ops_channel,
 )
 from ticketing.access import TICKET_STAFF
-from ticketing.models import Ticket, TicketHistory
+from ticketing.models import Ticket, TicketCategory, TicketHistory
 
 logger = logging.getLogger(__name__)
 
@@ -56,14 +56,12 @@ class AdminTicketsCog(commands.Cog):
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
         """Autocomplete for ticket category (admin - all categories)."""
-        from core.tickets_config import get_all_categories
-
-        categories = await sync_to_async(get_all_categories)()
+        categories = [cat async for cat in TicketCategory.objects.order_by("sort_order", "id")]
         return choices(
             [
-                (cat_info["display_name"], str(cat_id))
-                for cat_id, cat_info in categories.items()
-                if not current or current.lower() in cat_info["display_name"].lower()
+                (cat.display_name, str(cat.id))
+                for cat in categories
+                if not current or current.lower() in cat.display_name.lower()
             ]
         )
 
@@ -108,15 +106,15 @@ class AdminTicketsCog(commands.Cog):
         if isinstance(ticket_input, str):
             await interaction.response.send_message(ticket_input, ephemeral=True)
             return
-        cat_info = ticket_input.config
+        cat = ticket_input.category
 
         # Create ticket atomically to prevent race conditions
         from ticketing.utils import acreate_ticket_atomic
 
         ticket = await acreate_ticket_atomic(
             team=team,
-            category=ticket_input.category,
-            title=cat_info["display_name"],
+            category=cat,
+            title=cat.display_name,
             description=ticket_input.description,
             hostname=ticket_input.hostname,
             ip_address=ticket_input.ip_address,
@@ -127,15 +125,15 @@ class AdminTicketsCog(commands.Cog):
 
         await interaction.response.send_message(
             f"Created ticket **{ticket.ticket_number}** for **{team.team_name}**\n"
-            f"Category: {cat_info['display_name']}\n"
-            f"Point cost: {cat_info.get('points', 0)} points",
+            f"Category: {cat.display_name}\n"
+            f"Point cost: {cat.points} points",
             ephemeral=True,
         )
 
         await publish_new_ticket(self.bot, interaction.guild, ticket)
         await log_to_ops_channel(
             self.bot,
-            f"Admin Ticket Created: {ticket.ticket_number} ({cat_info['display_name']}) "
+            f"Admin Ticket Created: {ticket.ticket_number} ({cat.display_name}) "
             f"for **{team.team_name}** by {interaction.user.mention}",
         )
 
@@ -158,7 +156,7 @@ class AdminTicketsCog(commands.Cog):
     ) -> None:
         """List tickets with optional filters."""
 
-        query = Ticket.objects.select_related("team", "assigned_to")
+        query = Ticket.objects.select_related("team", "assigned_to", "category")
         if status != "all":
             query = query.filter(status=status)
         if team_number:
@@ -174,14 +172,12 @@ class AdminTicketsCog(commands.Cog):
         tickets = [t async for t in query.order_by("-created_at")[:DISCORD_EMBED_FIELD_COUNT_LIMIT]]
         embed = discord.Embed(title=f"Tickets ({status}): {total_count} in all", color=discord.Color.blue())
 
-        from core.tickets_config import get_category_config
-
         shown = 0
         for ticket in tickets:
-            cat_info = await sync_to_async(get_category_config)(ticket.category_id) or {}
+            cat_name = ticket.category.display_name if ticket.category else f"Category {ticket.category_id}"
             value = (
                 f"Team: {ticket.team.team_name}\n"
-                f"Category: {cat_info.get('display_name', f'Category {ticket.category_id}')}\n"
+                f"Category: {cat_name}\n"
                 f"Status: {ticket.status}\n"
                 f"Created: {discord.utils.format_dt(ticket.created_at, style='R')}"
             )
@@ -296,11 +292,10 @@ class AdminTicketsCog(commands.Cog):
         self, interaction: discord.Interaction, ticket_number: TicketNumber, new_category: str
     ) -> None:
         """Change the category of a ticket."""
-        from core.tickets_config import get_category_config
         from ticketing.forms import TicketChangeCategoryForm
         from ticketing.utils import achange_ticket_category_atomic
 
-        ticket = await Ticket.objects.filter(ticket_number=ticket_number).afirst()
+        ticket = await Ticket.objects.select_related("category").filter(ticket_number=ticket_number).afirst()
         if not ticket:
             await interaction.response.send_message(f"Ticket {ticket_number} not found", ephemeral=True)
             return
@@ -309,6 +304,7 @@ class AdminTicketsCog(commands.Cog):
         if not form.is_valid():
             await interaction.response.send_message("Invalid ticket category.", ephemeral=True)
             return
+        old_cat = ticket.category
         old_category_id = ticket.category_id
         new_category_id = form.cleaned_data["new_category"]
         changed, error = await achange_ticket_category_atomic(
@@ -322,18 +318,19 @@ class AdminTicketsCog(commands.Cog):
             return
         ticket = changed
 
-        old_cat_info = await sync_to_async(get_category_config)(old_category_id) or {}
-        new_cat_info = await sync_to_async(get_category_config)(new_category_id) or {}
+        new_cat = ticket.category
         trigger_dashboard(self.bot)
 
-        old_cat_name = old_cat_info.get("display_name", str(old_category_id))
-        new_cat_name = new_cat_info.get("display_name", str(new_category_id))
+        old_cat_name = old_cat.display_name if old_cat else str(old_category_id)
+        new_cat_name = new_cat.display_name if new_cat else str(new_category_id)
+        old_pts = old_cat.points if old_cat else 0
+        new_pts = new_cat.points if new_cat else 0
 
         await log_to_ops_channel(
             self.bot,
             f"Ticket Category Changed: {ticket.ticket_number} for **{ticket.team.team_name}**\n"
             f"Changed by {interaction.user.mention}: from {old_cat_name} to {new_cat_name}\n"
-            f"Point impact: from {old_cat_info.get('points', 0)}pt to {new_cat_info.get('points', 0)}pt",
+            f"Point impact: from {old_pts}pt to {new_pts}pt",
         )
 
         await interaction.response.send_message(

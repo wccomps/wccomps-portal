@@ -9,10 +9,9 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import require_permission
-from core.tickets_config import get_all_categories, get_category_config
 from core.utils import by_approval, by_team, chosen_team, list_filters, optional_int, team_numbers
 from team.models import Team
-from ticketing.models import Ticket, TicketHistory
+from ticketing.models import Ticket, TicketCategory, TicketHistory
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,7 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
 
     filters, filtered = list_filters(request, {"status": "pending", "team": "", "search": "", "category": ""})
 
-    query = Ticket.objects.filter(status="resolved").select_related("team", "approved_by")
+    query = Ticket.objects.filter(status="resolved").select_related("team", "approved_by", "category")
 
     team = chosen_team(filters["team"])
     query = by_team(by_approval(query, filters["status"]), team)
@@ -53,16 +52,14 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
     sort_by = result["current_sort"]
 
     # Enrich only the current page with category info
-    enriched = []
-    for ticket in page_obj.object_list:
-        cat_info = get_category_config(ticket.category_id) or {}
-        enriched.append(
-            {
-                "ticket": ticket,
-                "category_name": cat_info.get("display_name", "Unknown"),
-                "expected_points": cat_info.get("points", 0),
-            }
-        )
+    enriched = [
+        {
+            "ticket": ticket,
+            "category_name": ticket.category.display_name if ticket.category else "Unknown",
+            "expected_points": ticket.category.points if ticket.category else 0,
+        }
+        for ticket in page_obj.object_list
+    ]
     page_obj.object_list = enriched  # type: ignore[assignment]  # templates iterate enriched dicts, keep pagination
 
     context = {
@@ -70,7 +67,7 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
         "filters": filters,
         "filtered": filtered,
         "sort_by": sort_by,
-        "categories": get_all_categories(),
+        "categories": TicketCategory.objects.all(),
         "team_numbers": team_numbers(Team.objects.filter(tickets__status="resolved"), team),
         "chosen_team": team,
         "has_pending": Ticket.objects.filter(status="resolved", is_approved=False).exists(),

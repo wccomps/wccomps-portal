@@ -11,9 +11,9 @@ from django.shortcuts import redirect, render
 from core.auth_utils import get_user_team, has_permission
 from core.discord_tasks import TicketCreatedWeb
 from core.models import DiscordTask
-from core.tickets_config import get_all_categories
 from team.models import Team
 from ticketing.forms import CreateTicketForm
+from ticketing.models import TicketCategory
 
 logger = logging.getLogger(__name__)
 
@@ -52,13 +52,19 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
         logger.warning("Quotient API unavailable, ticket form will have limited functionality")
 
     # Staff file tickets in any category; teams only in user-creatable ones.
-    categories = get_all_categories(user_creatable_only=not is_admin)
+    categories = list(
+        TicketCategory.objects.all() if is_admin else TicketCategory.objects.filter(user_creatable=True)
+    )
+    categories_json = {
+        cat.pk: {"required_fields": cat.required_fields, "optional_fields": cat.optional_fields} for cat in categories
+    }
 
     def form_page(error: str | None = None, status: int = 200) -> HttpResponse:
         context: dict[str, object] = {
             "team": team,
             "teams": teams,
             "categories": categories,
+            "categories_json": categories_json,
             "service_choices": service_choices,
             "box_names": box_names,
             "box_ip_map": box_ip_map,

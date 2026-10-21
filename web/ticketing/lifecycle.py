@@ -17,7 +17,6 @@ from django.utils import timezone
 from core.auth_utils import has_permission
 from core.discord_tasks import AddUserToThread, PostTicketUpdate
 from core.models import DiscordTask
-from core.tickets_config import get_category_config
 from team.models import DiscordLink
 from ticketing.models import Ticket, TicketHistory
 from ticketing.utils import _make_async, get_user_for_ticket
@@ -74,7 +73,7 @@ def assignee_refusal(ticket: Ticket, actor: User | None, action: str) -> str | N
 def _lock(ticket_id: int) -> Ticket | None:
     return (
         Ticket.objects.select_for_update(of=("self",))
-        .select_related("team", "assigned_to")
+        .select_related("team", "assigned_to", "category")
         .filter(id=ticket_id)
         .first()
     )
@@ -260,20 +259,19 @@ def resolve_ticket(
         if error := assignee_refusal(ticket, resolver, "resolve"):
             return None, error
 
-        cat_info = get_category_config(ticket.category_id) or {}
+        category = ticket.category
+        variable_points = bool(category and category.variable_points)
         if points_override is not None:
-            if cat_info.get("variable_points", False):
-                min_pts = int(cat_info.get("min_points", 0))
-                max_pts = int(cat_info.get("max_points", 0))
-                if points_override < min_pts:
-                    return None, f"Point value must be at least {min_pts}."
-                if max_pts and points_override > max_pts:
-                    return None, f"Point value must be at most {max_pts}."
+            if variable_points and category:
+                if points_override < category.min_points:
+                    return None, f"Point value must be at least {category.min_points}."
+                if category.max_points and points_override > category.max_points:
+                    return None, f"Point value must be at most {category.max_points}."
             point_penalty = points_override
-        elif cat_info.get("variable_points", False):
+        elif variable_points:
             return None, "This category requires an explicit point value."
         else:
-            point_penalty = cat_info.get("points", 0)
+            point_penalty = category.points if category else 0
 
         ticket.status = Ticket.STATUS_RESOLVED
         ticket.resolved_at = timezone.now()

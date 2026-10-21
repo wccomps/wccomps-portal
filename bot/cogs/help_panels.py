@@ -1,7 +1,7 @@
 """Help panels cog - persistent button panels for blue teams."""
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import cast
 
 import discord
@@ -12,8 +12,8 @@ from django.conf import settings
 from bot.permissions import linked_team_member
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_input import read_ticket
-from bot.utils import DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT, DISCORD_SELECT_OPTION_LIMIT, fit_lines
-from core.tickets_config import TicketCategoryConfig, get_all_categories
+from bot.utils import DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT, DISCORD_SELECT_OPTION_LIMIT, fit, fit_lines
+from ticketing.models import TicketCategory
 from ticketing.utils import TicketRateLimitError
 
 logger = logging.getLogger(__name__)
@@ -50,14 +50,14 @@ async def create_ticket(
         if isinstance(ticket_input, str):
             await interaction.followup.send(ticket_input, ephemeral=True)
             return
-        cat_info = ticket_input.config
+        category = ticket_input.category
 
         from ticketing.utils import acreate_ticket_atomic
 
         ticket = await acreate_ticket_atomic(
             team=member.team,
-            category=ticket_input.category,
-            title=cat_info["display_name"],
+            category=category,
+            title=category.display_name,
             description=ticket_input.description,
             hostname=ticket_input.hostname,
             ip_address=ticket_input.ip_address,
@@ -76,159 +76,75 @@ async def create_ticket(
 
     await interaction.followup.send(
         f"Ticket **{ticket.ticket_number}** created.\n"
-        f"Category: **{cat_info['display_name']}**\n"
-        f"Points: **{cat_info.get('points', 0)}**\n\n"
+        f"Category: **{category.display_name}**\n"
+        f"Points: **{category.points}**\n\n"
         f"A volunteer will respond shortly.",
         ephemeral=True,
     )
     await publish_new_ticket(interaction.client, interaction.guild, ticket)
 
 
-class ServiceScoringModal(discord.ui.Modal, title="Service Scoring Validation"):
-    """Modal for service scoring validation tickets."""
-
-    category_id: str = ""
-
-    service_name: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
-        label="Service Name",
-        placeholder="e.g., HTTP, DNS, SSH",
-        required=True,
-        max_length=100,
-    )
-
-    description: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
-        label="Description (optional)",
-        placeholder="Additional details about the issue",
-        style=discord.TextStyle.paragraph,
-        required=False,
-        max_length=1000,
-    )
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        await create_ticket(
-            interaction,
-            category_id=self.category_id,
-            service_name=self.service_name.value,
-            description=self.description.value,
-        )
+_MODAL_FIELD_SPECS: dict[str, tuple[str, str, discord.TextStyle, int]] = {
+    "service_name": ("Service Name", "e.g., HTTP, DNS, SSH", discord.TextStyle.short, 100),
+    "hostname": ("Hostname", "e.g., web01, dc01", discord.TextStyle.short, 255),
+    "ip_address": ("IP Address", "e.g., 10.0.1.50", discord.TextStyle.short, 45),
+    "description": ("Description", "Describe your issue or request", discord.TextStyle.paragraph, 1000),
+}
 
 
-class BoxResetModal(discord.ui.Modal, title="Box Reset / Scrub"):
-    category_id: str = ""
+class TicketModal(discord.ui.Modal):
+    """Modal for creating a ticket in a category, showing its required and optional fields."""
 
-    hostname: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
-        label="Hostname",
-        placeholder="e.g., web01, dc01",
-        required=True,
-        max_length=255,
-    )
+    def __init__(self, category: TicketCategory) -> None:
+        super().__init__(title=fit(category.display_name, 45))
+        self.category_id = str(category.pk)
+        self.inputs: dict[str, discord.ui.TextInput[TicketModal]] = {}
 
-    ip_address: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
-        label="IP Address",
-        placeholder="e.g., 10.0.1.50",
-        required=False,
-        max_length=45,
-    )
+        required = set(category.required_fields)
+        fields = [
+            f for f in dict.fromkeys([*category.required_fields, *category.optional_fields]) if f in _MODAL_FIELD_SPECS
+        ]
+        if not fields:
+            fields = ["description"]
+            required.add("description")
+
+        for name in fields:
+            label, placeholder, style, max_length = _MODAL_FIELD_SPECS[name]
+            # IP Address is left optional in the modal when Hostname is present so Quotient can auto-fill it
+            is_required = name in required and not (name == "ip_address" and "hostname" in fields)
+            text_input: discord.ui.TextInput[TicketModal] = discord.ui.TextInput(
+                label=label,
+                placeholder=placeholder,
+                style=style,
+                required=is_required,
+                max_length=max_length,
+            )
+            self.inputs[name] = text_input
+            self.add_item(text_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await create_ticket(
             interaction,
             category_id=self.category_id,
-            hostname=self.hostname.value,
-            ip_address=self.ip_address.value,
-        )
-
-
-class ScoringServiceCheckModal(discord.ui.Modal, title="Scoring Service Check"):
-    """Modal for scoring service check tickets."""
-
-    category_id: str = ""
-
-    service_name: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
-        label="Service Name",
-        placeholder="e.g., HTTP, DNS, SSH",
-        required=True,
-        max_length=100,
-    )
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        await create_ticket(
-            interaction,
-            category_id=self.category_id,
-            service_name=self.service_name.value,
-        )
-
-
-class ConsultationModal(discord.ui.Modal, title="Consultation Request"):
-    """Modal for consultation tickets."""
-
-    description: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
-        label="Description",
-        placeholder="Describe what you need help with",
-        style=discord.TextStyle.paragraph,
-        required=True,
-        max_length=1000,
-    )
-
-    hostname: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
-        label="Hostname (hands-on only)",
-        placeholder="Leave blank for phone consultation",
-        required=False,
-        max_length=255,
-    )
-
-    def __init__(self, category_id: str, cat_info: TicketCategoryConfig):
-        super().__init__()
-        self.category_id = category_id
-        # Remove hostname field if not required (e.g., phone consultation)
-        if "hostname" not in cat_info.get("required_fields", []):
-            self.title = cat_info["display_name"]
-            self.remove_item(self.hostname)
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        # Only include hostname if it's still in the modal
-        has_hostname = self.hostname in self.children
-        await create_ticket(
-            interaction,
-            category_id=self.category_id,
-            description=self.description.value,
-            hostname=self.hostname.value if has_hostname else "",
-        )
-
-
-class OtherModal(discord.ui.Modal, title="Other / General Issue"):
-    category_id: str = ""
-
-    description: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
-        label="Description",
-        placeholder="Describe your issue or request",
-        style=discord.TextStyle.paragraph,
-        required=True,
-        max_length=1000,
-    )
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        await create_ticket(
-            interaction,
-            category_id=self.category_id,
-            description=self.description.value,
+            service_name=self.inputs["service_name"].value if "service_name" in self.inputs else "",
+            description=self.inputs["description"].value if "description" in self.inputs else "",
+            hostname=self.inputs["hostname"].value if "hostname" in self.inputs else "",
+            ip_address=self.inputs["ip_address"].value if "ip_address" in self.inputs else "",
         )
 
 
 class CategorySelect(discord.ui.Select["TicketCategoryView"]):
-    def __init__(self, categories: dict[int, TicketCategoryConfig]) -> None:
-        self.categories = categories
-        options = []
+    def __init__(self, categories: Iterable[TicketCategory]) -> None:
         # A select holds 25 options: the first 25 categories in their sort order
-        for cat_id, cat_info in list(categories.items())[:DISCORD_SELECT_OPTION_LIMIT]:
-            points = cat_info.get("points", 0)
-            options.append(
-                discord.SelectOption(
-                    label=cat_info["display_name"],
-                    value=str(cat_id),
-                    description=f"{points} points",
-                )
+        self.categories = {cat.pk: cat for cat in list(categories)[:DISCORD_SELECT_OPTION_LIMIT]}
+        options = [
+            discord.SelectOption(
+                label=cat.display_name,
+                value=str(cat.pk),
+                description=f"{cat.points} points",
             )
+            for cat in self.categories.values()
+        ]
 
         super().__init__(
             placeholder="Select a ticket category...",
@@ -238,40 +154,12 @@ class CategorySelect(discord.ui.Select["TicketCategoryView"]):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        category_id = self.values[0]
-
-        cat_info = self.categories[int(category_id)]
-        required = cat_info.get("required_fields", [])
-
-        modal: ServiceScoringModal | BoxResetModal | ScoringServiceCheckModal | ConsultationModal | OtherModal
-        if "service_name" in required and "description" in required:
-            modal = ServiceScoringModal()
-            modal.category_id = category_id
-        elif "hostname" in required and "ip_address" in required:
-            modal = BoxResetModal()
-            modal.category_id = category_id
-        elif "service_name" in required:
-            modal = ScoringServiceCheckModal()
-            modal.category_id = category_id
-        elif "hostname" in required:
-            modal = ConsultationModal(category_id, cat_info)
-        elif "description" in required:
-            # Check if it's a consultation type (has optional hostname)
-            optional = cat_info.get("optional_fields", [])
-            if "hostname" in optional:
-                modal = ConsultationModal(category_id, cat_info)
-            else:
-                modal = OtherModal()
-                modal.category_id = category_id
-        else:
-            modal = OtherModal()
-            modal.category_id = category_id
-
-        await interaction.response.send_modal(modal)
+        category = self.categories[int(self.values[0])]
+        await interaction.response.send_modal(TicketModal(category))
 
 
 class TicketCategoryView(discord.ui.View):
-    def __init__(self, categories: dict[int, TicketCategoryConfig]) -> None:
+    def __init__(self, categories: Iterable[TicketCategory]) -> None:
         super().__init__(timeout=300)
         self.add_item(CategorySelect(categories))
 
@@ -330,7 +218,13 @@ class TeamHelpView(discord.ui.View):
 
     async def create_ticket(self, interaction: discord.Interaction) -> None:
         """Handle create ticket button click - show category selection."""
-        categories = await sync_to_async(get_all_categories)(user_creatable_only=True)
+        categories = [cat async for cat in TicketCategory.objects.filter(user_creatable=True)]
+        if not categories:
+            await interaction.response.send_message(
+                "No ticket categories are currently available.",
+                ephemeral=True,
+            )
+            return
         await interaction.response.send_message(
             "Select a ticket category:",
             view=TicketCategoryView(categories),
@@ -441,11 +335,10 @@ class HelpPanelsCog(commands.Cog):
             logger.warning(f"Ticket channel {channel_id} not found or not a text channel")
             return
 
-        categories_text = []
-        categories = await sync_to_async(get_all_categories)(user_creatable_only=True)
-        for cat_info in categories.values():
-            points = cat_info.get("points", 0)
-            categories_text.append(f"• **{cat_info['display_name']}**: {points}pt")
+        categories_text = [
+            f"• **{cat.display_name}**: {cat.points}pt"
+            async for cat in TicketCategory.objects.filter(user_creatable=True)
+        ]
 
         intro = (
             "**Create a support ticket and our volunteers will assist you!**\n\n"

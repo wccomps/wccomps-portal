@@ -4,7 +4,6 @@ Discord holds only what one filed on the web may."""
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-from core.tickets_config import TicketCategoryConfig
 from ticketing.forms import CreateTicketForm, TicketResolveForm
 from ticketing.models import TicketCategory
 
@@ -12,7 +11,6 @@ from ticketing.models import TicketCategory
 @dataclass(frozen=True)
 class TicketInput:
     category: TicketCategory
-    config: TicketCategoryConfig
     description: str
     hostname: str
     ip_address: str
@@ -63,11 +61,10 @@ def read_ticket(
         box_ip_map=box_ip_map,
         service_choices=service_choices,
     )
-    if not form.is_valid() or not form.category_obj or form.category_config is None:
+    if not form.is_valid() or not form.category_obj:
         return form_errors(form.errors)
     return TicketInput(
         category=form.category_obj,
-        config=form.category_config,
         description=form.cleaned_data["description"],
         hostname=form.cleaned_data["hostname"],
         ip_address=form.cleaned_data["ip_address"],

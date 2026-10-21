@@ -12,7 +12,6 @@ from bot.utils import (
     add_field,
     fit,
 )
-from core.tickets_config import TicketCategoryConfig, get_category_config
 from ticketing.access import TICKET_STAFF
 from ticketing.models import Ticket
 
@@ -32,7 +31,7 @@ def get_ticket_color(status: str) -> discord.Color:
 def format_ticket_embed(ticket: Ticket) -> discord.Embed:
     """The ticket as its thread shows it. A blank field is left out (Discord refuses one), each is cut to its
     limit, and the description takes what is left of the embed's 6000 characters."""
-    cat_info = get_category_config(ticket.category_id) or {}
+    cat = ticket.category
 
     embed = discord.Embed(
         title=fit(f"Ticket {ticket.ticket_number}: {ticket.title}", DISCORD_EMBED_TITLE_CHAR_LIMIT),
@@ -48,8 +47,8 @@ def format_ticket_embed(ticket: Ticket) -> discord.Embed:
     if ticket.assigned_to:
         add_field(embed, "Assigned To", ticket.assigned_to.username)
 
-    points = cat_info.get("points", 0)
-    if cat_info.get("variable_points", False):
+    points = cat.points if cat else 0
+    if cat and cat.variable_points:
         add_field(embed, "Point Impact", "Variable", inline=True)
     elif points > 0:
         add_field(embed, "Point Impact", f"{points} points", inline=True)
@@ -58,7 +57,8 @@ def format_ticket_embed(ticket: Ticket) -> discord.Embed:
         add_field(embed, "Resolved At", discord.utils.format_dt(ticket.resolved_at, style="R"), inline=True)
         add_field(embed, "Resolution Notes", ticket.resolution_notes)
 
-    embed.set_footer(text=fit(f"Category: {cat_info.get('display_name', f'Category {ticket.category_id}')}", 2048))
+    cat_name = cat.display_name if cat else f"Category {ticket.category_id}"
+    embed.set_footer(text=fit(f"Category: {cat_name}", 2048))
     room = DISCORD_EMBED_TOTAL_CHAR_LIMIT - len(embed)
     embed.description = fit(ticket.description, min(DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT, room)) or None
 
@@ -181,7 +181,7 @@ class TicketActionView(discord.ui.View):
             )
             return
 
-        ticket = await Ticket.objects.select_related("assigned_to").filter(id=ticket_id).afirst()
+        ticket = await Ticket.objects.select_related("assigned_to", "category").filter(id=ticket_id).afirst()
         if not ticket:
             await interaction.response.send_message("Ticket not found.", ephemeral=True)
             return
@@ -195,8 +195,7 @@ class TicketActionView(discord.ui.View):
             await interaction.response.send_message(error, ephemeral=True)
             return
 
-        cat_info = await sync_to_async(get_category_config)(ticket.category_id) or {}
-        modal = ResolveTicketModal(ticket, cat_info)
+        modal = ResolveTicketModal(ticket)
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(
@@ -254,9 +253,10 @@ class TicketActionView(discord.ui.View):
 
 
 class ResolveTicketModal(discord.ui.Modal, title="Resolve Ticket"):
-    def __init__(self, ticket: Ticket, cat_info: TicketCategoryConfig) -> None:
+    def __init__(self, ticket: Ticket) -> None:
         super().__init__()
         self.ticket = ticket
+        cat = ticket.category
 
         self.notes: discord.ui.TextInput[ResolveTicketModal] = discord.ui.TextInput(
             label="Resolution Notes",
@@ -267,9 +267,9 @@ class ResolveTicketModal(discord.ui.Modal, title="Resolve Ticket"):
         )
 
         self.points: discord.ui.TextInput[ResolveTicketModal]
-        if cat_info.get("variable_points", False):
-            min_pts = cat_info.get("min_points", 0)
-            max_pts = cat_info.get("max_points", 0)
+        if cat and cat.variable_points:
+            min_pts = cat.min_points
+            max_pts = cat.max_points
             placeholder = f"Enter points ({min_pts}-{max_pts})" if max_pts else f"Enter points (min {min_pts})"
             self.points = discord.ui.TextInput(
                 label="Points",
@@ -279,7 +279,7 @@ class ResolveTicketModal(discord.ui.Modal, title="Resolve Ticket"):
             )
         else:
             # Show fixed points that will be charged if left blank
-            fixed_pts = cat_info.get("points", 0)
+            fixed_pts = cat.points if cat else 0
             self.points = discord.ui.TextInput(
                 label="Points Override",
                 placeholder=f"Leave blank for default ({fixed_pts}pt) or enter to override",

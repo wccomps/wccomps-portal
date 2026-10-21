@@ -29,10 +29,10 @@
                                         @change="onCatChange"
                                         aria-label="Change ticket category"
                                         class="py-5 px-10">
-                                    {% for cat_id, cat_info in categories.items %}
-                                        <option value="{{ cat_id }}"
-                                                {% if cat_id == ticket.category_id %}selected{% endif %}>
-                                            {{ cat_info.display_name }} ({{ cat_info.points }}pt)
+                                    {% for cat in categories %}
+                                        <option value="{{ cat.id }}"
+                                                {% if cat.id == ticket.category_id %}selected{% endif %}>
+                                            {{ cat.display_name }} ({{ cat.points }}pt)
                                         </option>
                                     {% endfor %}
                                 </select>

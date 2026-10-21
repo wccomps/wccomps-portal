@@ -100,7 +100,7 @@ async def test_ticket_reply_fits_a_long_description_and_still_opens_the_thread(m
     description = "w" * 3000
     member = SimpleNamespace(team=SimpleNamespace(team_name="Team 05"))
     ticket = SimpleNamespace(ticket_number="T005-001")
-    read = TicketInput(MagicMock(), {"display_name": "Other", "points": 0}, description, "", "", "")
+    read = TicketInput(SimpleNamespace(display_name="Other", points=0), description, "", "", "")
     cog = TicketingCog.__new__(TicketingCog)
     cog.bot = MagicMock()
     with (

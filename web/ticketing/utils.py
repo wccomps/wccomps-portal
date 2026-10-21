@@ -14,7 +14,6 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
-from core.tickets_config import get_category_config
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 
@@ -135,7 +134,7 @@ def change_ticket_category_atomic(
     with transaction.atomic():
         ticket = (
             Ticket.objects.select_for_update(of=("self",))
-            .select_related("team", "assigned_to")
+            .select_related("team", "assigned_to", "category")
             .filter(id=ticket_id)
             .first()
         )
@@ -146,16 +145,16 @@ def change_ticket_category_atomic(
         if error := assignee_refusal(ticket, user, "recategorize"):
             return None, error
 
-        new_cat_info = get_category_config(new_category_id)
-        if new_cat_info is None:
+        new_category = TicketCategory.objects.filter(pk=new_category_id).first()
+        if new_category is None:
             return None, "Invalid category."
 
         old_category_id = ticket.category_id
         if old_category_id == new_category_id:
             return None, f"Ticket {ticket.ticket_number} is already in that category."
-        old_cat_info = get_category_config(old_category_id) or {}
+        old_category = ticket.category
 
-        ticket.category_id = new_category_id
+        ticket.category = new_category
         ticket.save(update_fields=["category", "updated_at"])
 
         TicketHistory.objects.create(
@@ -165,11 +164,11 @@ def change_ticket_category_atomic(
             details={
                 "changed_by": actor_username,
                 "old_category": old_category_id,
-                "old_category_name": old_cat_info.get("display_name", "Unknown"),
+                "old_category_name": old_category.display_name if old_category else "Unknown",
                 "new_category": new_category_id,
-                "new_category_name": new_cat_info.get("display_name", "Unknown"),
-                "old_points": old_cat_info.get("points", 0),
-                "new_points": new_cat_info.get("points", 0),
+                "new_category_name": new_category.display_name,
+                "old_points": old_category.points if old_category else 0,
+                "new_points": new_category.points,
             },
         )
 

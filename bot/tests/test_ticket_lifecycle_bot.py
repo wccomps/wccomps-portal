@@ -114,7 +114,7 @@ async def test_resolve_modal_queues_one_update(
     ticket = await _ticket(team, box_reset_category, "claimed")
     mock_interaction.user.id = mock_admin_user._discord_id
     mock_interaction.client, _ = _bot_client()
-    modal = ResolveTicketModal(ticket, {"points": 5})
+    modal = ResolveTicketModal(ticket)
     modal.points._value = ""
 
     await modal.on_submit(mock_interaction)
