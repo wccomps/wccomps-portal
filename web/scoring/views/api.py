@@ -22,6 +22,7 @@ def api_scores(request: HttpRequest) -> JsonResponse:
             "red": float(score.red_deductions),
             "incidents": float(score.incident_recovery_points),
             "sla": float(score.sla_penalties),
+            "adjustments": float(score.point_adjustments),
         }
         for score in scores
     ]

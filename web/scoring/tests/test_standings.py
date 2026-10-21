@@ -35,6 +35,26 @@ def test_leaderboard_reflects_an_approval_without_recalculating(unit_modifiers, 
 
     assert [s["total"] for s in before] == [100.0]
     assert [s["total"] for s in after] == [125.0]
+    assert after[0]["adjustments"] == 0.0
+
+
+@pytest.mark.django_db
+def test_zero_weights_do_not_crash_modifiers():
+    team = Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
+    ServiceScore.objects.create(team=team, service_points=Decimal("100"))
+    ScoringTemplate.objects.create(
+        service_weight=Decimal("0"),
+        inject_weight=Decimal("0"),
+        orange_weight=Decimal("0"),
+        service_max=Decimal("0"),
+        inject_max=Decimal("0"),
+        orange_max=Decimal("0"),
+    )
+
+    standings = compute_standings()
+
+    assert len(standings) == 1
+    assert standings[0].total_score == Decimal("0.00")
 
 
 @pytest.mark.django_db

@@ -1,13 +1,12 @@
-import weasyprint
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
-from django.template.loader import render_to_string
 
 from core.admin_views.places import SetupSection, setup_url
 from core.auth_utils import has_permission, require_permission
 
 from ..calculator import compute_standings, get_leaderboard, get_standing
 from ..scorecard import build_scorecard_context
+from .export import render_scorecard_pdf
 
 
 @require_permission(
@@ -73,8 +72,7 @@ def scorecard(request: HttpRequest, team_number: int) -> HttpResponse:
 )
 def scorecard_pdf(request: HttpRequest, team_number: int) -> HttpResponse:
     context = _scorecard_context(team_number)
-    html_string = render_to_string("scoring/scorecard_print.html", context, request=request)
-    pdf_bytes = weasyprint.HTML(string=html_string).write_pdf()
+    pdf_bytes = render_scorecard_pdf(context, request=request)
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
     response["Content-Disposition"] = f'attachment; filename="team-{team_number:02d}-scorecard.pdf"'
     return response

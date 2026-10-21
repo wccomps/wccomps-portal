@@ -1,11 +1,11 @@
 from decimal import Decimal
 
 import pytest
+from scoring.calculator import calculate_team_score_detailed, compute_standings
 from scoring.models import ServiceScore
 
 from team.models import Team
 from ticketing.models import Ticket
-from ticketing.scoring_sync import recompute_all_ticket_adjustments, recompute_team_ticket_adjustment
 
 pytestmark = pytest.mark.django_db
 
@@ -24,30 +24,33 @@ def _ticket(team: Team, points: int, approved: bool) -> Ticket:
     )
 
 
-def test_recompute_sums_approved_charges_negative() -> None:
+def test_calculator_sums_approved_ticket_charges_negative() -> None:
     team = Team.objects.create(team_number=1, team_name="T1")
     _ticket(team, 30, True)
     _ticket(team, 20, True)
-    _ticket(team, 99, False)  # unapproved — ignored
-    recompute_team_ticket_adjustment(team)
-    assert ServiceScore.objects.get(team=team).point_adjustments == Decimal("-50")
+    _ticket(team, 99, False)  # unapproved - ignored
+    breakdown = calculate_team_score_detailed(team)
+    assert breakdown["point_adjustments"] == Decimal("-50")
+    assert breakdown["total_score"] == Decimal("-50.00")
 
 
-def test_recompute_creates_servicescore_if_absent() -> None:
-    team = Team.objects.create(team_number=2, team_name="T2")
+def test_calculator_counts_ticket_adjustments_without_servicescore() -> None:
+    team = Team.objects.create(team_number=2, team_name="T2", is_active=True)
     _ticket(team, 10, True)
-    recompute_team_ticket_adjustment(team)
-    assert ServiceScore.objects.filter(team=team).exists()
+    assert not ServiceScore.objects.filter(team=team).exists()
+    standings = compute_standings()
+    assert len(standings) == 1
+    assert standings[0].point_adjustments == Decimal("-10")
+    assert standings[0].rank == 1
 
 
-def test_recompute_preserves_service_points() -> None:
+def test_calculator_combines_service_points_and_ticket_adjustments() -> None:
     team = Team.objects.create(team_number=3, team_name="T3")
     ServiceScore.objects.create(team=team, service_points=Decimal("500"))
     _ticket(team, 40, True)
-    recompute_team_ticket_adjustment(team)
-    ss = ServiceScore.objects.get(team=team)
-    assert ss.service_points == Decimal("500")
-    assert ss.point_adjustments == Decimal("-40")
+    breakdown = calculate_team_score_detailed(team)
+    assert breakdown["service_raw"] == Decimal("500")
+    assert breakdown["point_adjustments"] == Decimal("-40")
 
 
 def test_reopen_leaves_approved_adjustment_intact(admin_user) -> None:
@@ -56,24 +59,12 @@ def test_reopen_leaves_approved_adjustment_intact(admin_user) -> None:
 
     team = Team.objects.create(team_number=11, team_name="T11")
     t = _ticket(team, 25, approved=True)
-    recompute_team_ticket_adjustment(team)
-    assert ServiceScore.objects.get(team=team).point_adjustments == Decimal("-25")
+    assert calculate_team_score_detailed(team)["point_adjustments"] == Decimal("-25")
     client = Client()
     client.force_login(admin_user)
     client.post(reverse("ticket_reopen", args=[t.ticket_number]), {})
     # An approved ticket cannot be reopened, so its charge stays deducted.
     t.refresh_from_db()
     assert t.is_approved
-    assert ServiceScore.objects.get(team=team).point_adjustments == Decimal("-25")
+    assert calculate_team_score_detailed(team)["point_adjustments"] == Decimal("-25")
 
-
-def test_recompute_all_covers_every_team_with_tickets() -> None:
-    t1 = Team.objects.create(team_number=4, team_name="T4")
-    t2 = Team.objects.create(team_number=5, team_name="T5")
-    Team.objects.create(team_number=6, team_name="T6")  # no tickets
-    _ticket(t1, 15, True)
-    _ticket(t2, 25, True)
-    count = recompute_all_ticket_adjustments()
-    assert count == 2
-    assert ServiceScore.objects.get(team=t1).point_adjustments == Decimal("-15")
-    assert ServiceScore.objects.get(team=t2).point_adjustments == Decimal("-25")

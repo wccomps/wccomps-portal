@@ -315,6 +315,51 @@ class TestSendScorecardEmail:
 
         assert result is False
 
+    @patch("django.core.mail.EmailMultiAlternatives")
+    def test_renders_signed_deductions_and_point_adjustments(self, mock_email_cls, teams, red_user, final_scores):
+        from scoring.calculator import compute_standings
+        from scoring.models import AttackType, RedTeamScore
+        from scoring.views.export import _build_email_context, _deny_external_urls, _send_scorecard_email
+        from ticketing.models import Ticket
+
+        ServiceScore.objects.filter(team=teams[0]).update(sla_violations=Decimal("-10.00"))
+        finding = RedTeamScore.objects.create(
+            attack_type=AttackType.objects.get_or_create(name="Default Credentials")[0],
+            attack_vector="ssh",
+            source_ip="10.0.0.5",
+            points_per_team=Decimal("50.00"),
+            submitted_by=red_user,
+            is_approved=True,
+        )
+        finding.affected_teams.add(teams[0])
+        Ticket.objects.create(
+            ticket_number="T001-001",
+            team=teams[0],
+            title="Reset",
+            status="resolved",
+            points_charged=25,
+            is_approved=True,
+        )
+        standings = compute_standings()
+        score = next(s for s in standings if s.team == teams[0])
+        ctx = _build_email_context(score, len(standings))
+
+        mock_email = MagicMock()
+        mock_email_cls.return_value = mock_email
+        assert _send_scorecard_email(["a@test.com"], ctx, 1, b"pdf-bytes") is True
+
+        body = mock_email_cls.call_args[1]["body"]
+        html_content = mock_email.attach_alternative.call_args[0][0]
+        assert "- Point Adjustments: -25" in body
+        assert "--50" not in html_content
+        assert "--10" not in html_content
+        assert '<td class="negative">-50.00</td>' in html_content
+        assert '<td class="negative">-10.00</td>' in html_content
+        assert '<td class="negative">-25</td>' in html_content
+
+        with pytest.raises(ValueError, match="External URL fetching is disabled"):
+            _deny_external_urls("file:///etc/passwd")
+
 
 class TestSingleEmailScorecardGET:
     """Test the single team email confirmation page."""

@@ -13,7 +13,6 @@ from core.tickets_config import get_all_categories, get_category_config
 from core.utils import by_approval, by_team, chosen_team, list_filters, optional_int, team_numbers
 from team.models import Team
 from ticketing.models import Ticket, TicketHistory
-from ticketing.scoring_sync import recompute_team_ticket_adjustment
 
 logger = logging.getLogger(__name__)
 
@@ -93,14 +92,12 @@ def ops_batch_verify_tickets(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)
     authentik_username = user.username
     now = timezone.now()
-    approved_team_ids: set[int] = set()
 
     def approve(ticket: Ticket) -> None:
         ticket.is_approved = True
         ticket.approved_by = user
         ticket.approved_at = now
         ticket.save()
-        approved_team_ids.add(ticket.team_id)
         TicketHistory.objects.create(
             ticket=ticket,
             action="points_verified",
@@ -121,7 +118,5 @@ def ops_batch_verify_tickets(request: HttpRequest) -> HttpResponse:
         item_label="ticket",
         on_item=approve,
     )
-    for team in Team.objects.filter(pk__in=approved_team_ids):
-        recompute_team_ticket_adjustment(team)
     logger.info(f"Batch verified tickets by {authentik_username}")
     return result

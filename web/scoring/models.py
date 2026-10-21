@@ -721,12 +721,6 @@ class ServiceScore(models.Model):
         default=Decimal("0"),
         help_text="SLA penalty points (stored as negative)",
     )
-    point_adjustments = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=Decimal("0"),
-        help_text="Manual point adjustments (stored as negative)",
-    )
 
     synced_at = models.DateTimeField(auto_now=True)
     synced_by = models.ForeignKey(

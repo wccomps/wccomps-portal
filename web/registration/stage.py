@@ -10,6 +10,7 @@ from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeam
 from core.competition_utils import live_competition_data_exists
 from core.models import AuditLog, CompetitionConfig
 from team.models import Team
+from ticketing.models import Ticket
 
 from .models import Event
 
@@ -107,6 +108,7 @@ def scored_teams() -> QuerySet[Team]:
         | Exists(OrangeTeamScore.objects.filter(team=team))
         | Exists(IncidentReport.objects.filter(team=team))
         | Exists(RedTeamScore.objects.filter(affected_teams=team))
+        | Exists(Ticket.objects.filter(team=team, is_approved=True).exclude(points_charged=0))
     )
 
 
