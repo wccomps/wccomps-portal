@@ -552,7 +552,10 @@ class Drawn:
 
 def _optional(strategy: st.SearchStrategy[Any]) -> st.SearchStrategy[Any]:
     """A field missing, posted once, or posted twice."""
-    return st.one_of(st.just(None), strategy, strategy, st.lists(strategy, min_size=2, max_size=2))
+    twice = st.lists(strategy, min_size=2, max_size=2).map(
+        lambda pair: [v for item in pair for v in (item if isinstance(item, list) else [item])]
+    )
+    return st.one_of(st.just(None), strategy, strategy, twice)
 
 
 METHODS = ("GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS")

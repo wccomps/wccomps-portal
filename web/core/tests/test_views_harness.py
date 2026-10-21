@@ -95,6 +95,37 @@ def test_a_nul_counts_only_where_the_refusals_look() -> None:
                  fields={"search": "\x00"}).carries_nul()  # fmt: skip
 
 
+def test_posting_a_list_field_twice_keeps_a_flat_list() -> None:
+    """_optional wraps uploads() too: a nested list would make encode_multipart stringify the inner list."""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from hypothesis import given
+    from hypothesis import strategies as st
+
+    from core.tests.views_harness import _optional, encoded
+
+    case = ViewCase("scoring:submit_red_score", frozenset({"red_team"}))
+    upload = SimpleUploadedFile("a.csv", b"", content_type="\x00")
+
+    @given(value=_optional(st.lists(st.just(upload), max_size=2)))
+    def check(value: list[SimpleUploadedFile] | None) -> None:
+        if value is not None:
+            assert all(isinstance(item, SimpleUploadedFile) for item in value)
+            drawn = build(
+                case,
+                role="blue_team",
+                method="POST",
+                name="scoring:submit_red_score",
+                kwargs={},
+                query={},
+                fields={"screenshots": value},
+            )
+            assert not drawn.carries_nul()
+            body, _ = encoded(drawn)
+            assert b"SimpleUploadedFile" not in body
+
+    check()
+
+
 def test_the_blue_team_role_user_is_a_team_member(db: object) -> None:
     """role_user("blue_team") makes Team 1 when it doesn't exist: without it, the user holds a group and no team."""
     from core.auth_utils import get_user_team
