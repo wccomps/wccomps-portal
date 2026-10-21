@@ -90,7 +90,9 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
                     "phone": self.cleaned_data.get("coach_phone", ""),
                 },
             )
-            for event in self.cleaned_data["events"]:
+            selected = list(self.cleaned_data["events"])
+            RegistrationEventEnrollment.objects.filter(registration=registration).exclude(event__in=selected).delete()
+            for event in selected:
                 RegistrationEventEnrollment.objects.get_or_create(
                     registration=registration,
                     event=event,

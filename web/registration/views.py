@@ -9,9 +9,10 @@ from packets.models import packets_sent
 
 from core.auth_utils import require_permission
 from core.utils import client_ip, list_filters
-from team.models import SchoolInfo, Team
+from team.models import SchoolInfo
 
 from .forms import EventForm, RegistrationForm, RejectRegistrationForm, SeasonForm, ShownSchoolForm
+from .locks import school_list_lock
 from .models import (
     Event,
     EventTeamAssignment,
@@ -31,6 +32,7 @@ from .services import (
     delete_event,
     delete_season,
     event_delete_problem,
+    free_teams,
     remove_team_school,
     season_delete_problem,
     set_team_school,
@@ -340,40 +342,9 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
     if request.method != "POST":
         return redirect("registration_event_detail", event_id=event_id)
 
-    event = get_object_or_404(Event, id=event_id)
-    if event != Event.objects.open():
-        messages.error(request, "Teams can only be assigned for the open event: import its school list first.")
-        return redirect("registration_event_detail", event_id=event_id)
-
-    enrolled_registrations = (
-        RegistrationEventEnrollment.objects.filter(
-            event=event,
-            registration__status="paid",
-        )
-        .exclude(registration__team_assignments__event=event)
-        .select_related("registration")
-        .prefetch_related("registration__contacts")
-        .order_by("enrolled_at", "pk")
-    )
-
-    # A school holds one team, whether it was imported or assigned here
-    taken = set(SchoolInfo.objects.values_list("school__name_key", flat=True))
-    taken |= set(EventTeamAssignment.objects.filter(event=event).values_list("school__name_key", flat=True))
-    registrations_to_assign: list[tuple[TeamRegistration, str]] = []
-    skipped = []
-    no_contact = []
+    skipped: list[str] = []
+    no_contact: list[str] = []
     team_taken: list[str] = []
-    for enrollment in enrolled_registrations:
-        registration = enrollment.registration
-        key = normalize_school_name(registration.school_name)
-        contact_email = _primary_contact_email(registration)
-        if key in taken:
-            skipped.append(registration.school_name)
-        elif not contact_email:
-            no_contact.append(registration.school_name)
-        else:
-            taken.add(key)
-            registrations_to_assign.append((registration, contact_email))
 
     def warn_skipped() -> None:
         if skipped:
@@ -386,30 +357,60 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
                 f"Skipped {', '.join(team_taken)}: the team picked for it got a school meanwhile. Assign again.",
             )
 
-    if not registrations_to_assign:
-        warn_skipped()
-        messages.warning(request, "No eligible registrations to assign.")
-        return redirect("registration_event_detail", event_id=event_id)
-
-    assigned_team_ids = EventTeamAssignment.objects.filter(event=event).values_list("team_id", flat=True)
-    available_teams = list(
-        Team.objects.exclude(id__in=assigned_team_ids).filter(school_info__isnull=True).order_by("team_number")
-    )
-
-    if len(registrations_to_assign) > len(available_teams):
-        warn_skipped()
-        messages.error(
-            request,
-            f"Not enough teams available. Need {len(registrations_to_assign)}, have {len(available_teams)}.",
-        )
-        return redirect("registration_event_detail", event_id=event_id)
-
-    random.shuffle(available_teams)
-
-    assigned = 0
     with transaction.atomic():
+        school_list_lock()
+        event = get_object_or_404(Event, id=event_id)
+        if event != Event.objects.open():
+            messages.error(request, "Teams can only be assigned for the open event: import its school list first.")
+            return redirect("registration_event_detail", event_id=event_id)
+
+        enrolled_registrations = (
+            RegistrationEventEnrollment.objects.filter(
+                event=event,
+                registration__status="paid",
+            )
+            .exclude(registration__team_assignments__event=event)
+            .select_related("registration")
+            .prefetch_related("registration__contacts")
+            .order_by("enrolled_at", "pk")
+        )
+
+        # A school holds one team, whether it was imported or assigned here
+        taken = set(SchoolInfo.objects.values_list("school__name_key", flat=True))
+        taken |= set(EventTeamAssignment.objects.filter(event=event).values_list("school__name_key", flat=True))
+        registrations_to_assign: list[tuple[TeamRegistration, str]] = []
+        for enrollment in enrolled_registrations:
+            registration = enrollment.registration
+            key = normalize_school_name(registration.school_name)
+            contact_email = _primary_contact_email(registration)
+            if key in taken:
+                skipped.append(registration.school_name)
+            elif not contact_email:
+                no_contact.append(registration.school_name)
+            else:
+                taken.add(key)
+                registrations_to_assign.append((registration, contact_email))
+
+        if not registrations_to_assign:
+            warn_skipped()
+            messages.warning(request, "No eligible registrations to assign.")
+            return redirect("registration_event_detail", event_id=event_id)
+
+        available_teams = list(free_teams(event).order_by("team_number"))
+
+        if len(registrations_to_assign) > len(available_teams):
+            warn_skipped()
+            messages.error(
+                request,
+                f"Not enough teams available. Need {len(registrations_to_assign)}, have {len(available_teams)}.",
+            )
+            return redirect("registration_event_detail", event_id=event_id)
+
+        random.shuffle(available_teams)
+
+        assigned = 0
         for team, (registration, contact_email) in zip(available_teams, registrations_to_assign, strict=False):
-            # Each in its own savepoint: a school claimed meanwhile (another tab, an edit) skips just this one
+            # Each in its own savepoint: a school claimed meanwhile skips just this one
             try:
                 with transaction.atomic():
                     set_team_school(
