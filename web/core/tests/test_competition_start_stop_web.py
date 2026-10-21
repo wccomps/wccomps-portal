@@ -44,6 +44,32 @@ def test_start_streams_progress_and_posts_to_ops(admin_client):
     assert "Competition Started" in DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
 
 
+def test_stop_streams_progress_syncs_scores_and_posts_to_ops(admin_client, admin_user):
+    CompetitionConfig.objects.update_or_create(
+        pk=1, defaults={"controlled_applications": ["scoring"], "applications_enabled": True}
+    )
+    manager = MagicMock()
+    manager.disable_application.return_value = (True, None)
+    manager.toggle_user.return_value = (True, "")
+
+    with (
+        patch("core.authentik_manager.AuthentikManager", return_value=manager),
+        patch("core.services.user_groups.refresh_user_groups") as refresh,
+        patch("scoring.quotient_sync.sync_service_scores") as sync_scores,
+    ):
+        response = _post(admin_client, "stop_competition")
+        lines = [json.loads(line) for line in b"".join(response.streaming_content).decode().splitlines()]
+
+    assert lines[-2]["step"] == "Quotient service scores synced"
+    assert lines[-1]["done"] and lines[-1]["success"]
+    refresh.assert_called_once()
+    sync_scores.assert_called_once_with(admin_user)
+    assert not CompetitionConfig.get_config().applications_enabled
+    log = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    assert "Competition Stopped" in log
+    assert "Quotient service scores: synced" in log
+
+
 def test_setting_a_start_time_mid_competition_keeps_it_running(admin_client):
     CompetitionConfig.objects.update_or_create(
         pk=1, defaults={"controlled_applications": ["scoring"], "applications_enabled": True}

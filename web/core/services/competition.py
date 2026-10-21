@@ -67,7 +67,8 @@ class CompetitionRunResult:
             accounts += f" ({self.accounts_failed} failed)"
         lines.append(accounts)
         if self.quotient_synced is not None:
-            lines.append(f"Quotient metadata: {'synced' if self.quotient_synced else 'sync failed'}")
+            what = "Quotient metadata" if self.enable else "Quotient service scores"
+            lines.append(f"{what}: {'synced' if self.quotient_synced else 'sync failed'}")
         if self.start_message_queued:
             lines.append("Start message queued for every active team")
         return "\n".join(lines)
@@ -78,11 +79,12 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
 
     Toggles each controlled application's BlueTeam binding and the team accounts (start enables the
     active teams' accounts; stop disables every team account), refreshes stored groups so permissions
-    follow at once, syncs Quotient metadata on start, then records the new state and an audit entry.
-    A start that turns the competition on also queues the start message to every active team.
-    Blocking (Authentik HTTP): async callers run it in a thread.
+    follow at once, syncs Quotient metadata on start or final service scores on stop, then records the
+    new state and an audit entry. A start that turns the competition on also queues the start message
+    to every active team. Blocking (Authentik and Quotient HTTP): async callers run it in a thread.
     """
-    from scoring.quotient_sync import sync_quotient_metadata
+    from django.contrib.auth.models import User
+    from scoring.quotient_sync import sync_quotient_metadata, sync_service_scores
 
     from core.authentik_manager import AuthentikManager
     from core.services.user_groups import refresh_user_groups
@@ -98,7 +100,7 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
     # disables every team account, closing any that was left enabled.
     numbers = active_team_numbers() if enable else list(range(1, MAX_TEAMS + 1))
     result.accounts_total = len(numbers)
-    total = len(result.controlled_apps) + len(numbers) + 1 + (1 if enable else 0)
+    total = len(result.controlled_apps) + len(numbers) + 2
     step = 0
     manager = AuthentikManager()
 
@@ -131,16 +133,26 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
         logger.warning(f"Group refresh after competition {'start' if enable else 'stop'} failed: {e}")
         yield CompetitionStep(f"Permission refresh failed (retried within 5 minutes): {e}", step, total, ok=False)
 
+    step += 1
+    actor_user = User.objects.filter(username=actor).first()
     if enable:
-        step += 1
         try:
-            sync_quotient_metadata()
+            sync_quotient_metadata(actor_user)
             result.quotient_synced = True
             yield CompetitionStep("Quotient metadata synced", step, total)
         except Exception as e:
             logger.warning(f"Failed to sync Quotient metadata: {e}")
             result.quotient_synced = False
             yield CompetitionStep(f"Quotient sync failed: {e}", step, total, ok=False)
+    else:
+        try:
+            sync_service_scores(actor_user)
+            result.quotient_synced = True
+            yield CompetitionStep("Quotient service scores synced", step, total)
+        except Exception as e:
+            logger.warning(f"Failed to sync Quotient service scores: {e}")
+            result.quotient_synced = False
+            yield CompetitionStep(f"Quotient score sync failed: {e}", step, total, ok=False)
 
     # Only the fields this run owns: a schedule or app-list edit made meanwhile must survive.
     changes: dict[str, object] = {"applications_enabled": enable}

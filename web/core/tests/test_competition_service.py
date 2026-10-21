@@ -24,9 +24,12 @@ def authentik() -> Iterator[MagicMock]:
     with (
         patch("core.authentik_manager.AuthentikManager", return_value=manager),
         patch("core.services.user_groups.refresh_user_groups") as refresh,
-        patch("scoring.quotient_sync.sync_quotient_metadata"),
+        patch("scoring.quotient_sync.sync_quotient_metadata") as sync_metadata,
+        patch("scoring.quotient_sync.sync_service_scores") as sync_scores,
     ):
         manager.refresh = refresh
+        manager.sync_metadata = sync_metadata
+        manager.sync_scores = sync_scores
         yield manager
 
 
@@ -62,6 +65,8 @@ def test_start_enables_apps_and_accounts_refreshes_groups_and_audits(authentik, 
     assert result.apps_ok == ["scoring", "netbird"]
     assert result.accounts_ok == result.accounts_total == len(ACTIVE_TEAMS)
     authentik.refresh.assert_called_once()
+    authentik.sync_metadata.assert_called_once_with(None)
+    authentik.sync_scores.assert_not_called()
     config.refresh_from_db()
     assert config.applications_enabled
     assert config.competition_start_time is None
@@ -86,6 +91,46 @@ def test_stop_disables_every_team_account(authentik, config):
 
     assert authentik.toggle_user.call_count == result.accounts_total == MAX_TEAMS
     assert "Accounts disabled: 50/50" in result.summary()
+
+
+def test_stop_syncs_service_scores_and_records_actor_user(authentik, config, django_user_model):
+    user = django_user_model.objects.create_user(username="gold_admin")
+    CompetitionConfig.objects.filter(pk=1).update(applications_enabled=True)
+
+    steps = list(run_competition(False, "gold_admin"))
+    result = run_competition_to_completion(False, "gold_admin")
+
+    assert steps[-1].message == "Quotient service scores synced"
+    assert steps[-1].ok is True
+    authentik.sync_scores.assert_called_with(user)
+    authentik.sync_metadata.assert_not_called()
+    assert result.quotient_synced is True
+    assert "Quotient service scores: synced" in result.summary()
+    audit = AuditLog.objects.filter(action="competition_stopped").order_by("-pk").first()
+    assert audit is not None and audit.details["quotient_synced"] is True
+
+
+def test_stop_records_failed_score_sync_without_aborting(authentik, config):
+    CompetitionConfig.objects.filter(pk=1).update(applications_enabled=True)
+    authentik.sync_scores.side_effect = ValueError("Failed to retrieve service scores from Quotient")
+
+    steps = []
+    gen = run_competition(False, "timer")
+    while True:
+        try:
+            steps.append(next(gen))
+        except StopIteration as done:
+            result = done.value
+            break
+
+    assert steps[-1].message == "Quotient score sync failed: Failed to retrieve service scores from Quotient"
+    assert steps[-1].ok is False
+    assert result.success and not result.has_failures
+    assert result.quotient_synced is False
+    assert "Quotient service scores: sync failed" in result.summary()
+    config.refresh_from_db()
+    assert not config.applications_enabled
+    assert AuditLog.objects.get(action="competition_stopped").details["quotient_synced"] is False
 
 
 def test_stop_clears_only_the_end_time(authentik, config):
@@ -115,9 +160,10 @@ def test_schedule_edited_during_a_run_survives(authentik, config):
     assert (config.competition_end_time, config.max_team_members) == (new_end, 7)
 
 
-def test_progress_counts_every_step(authentik, config):
-    steps = list(run_competition(True, "web:admin"))
-    total = 2 + len(ACTIVE_TEAMS) + 2  # apps, accounts, group refresh, Quotient sync
+@pytest.mark.parametrize(("enable", "expected_accounts"), [(True, len(ACTIVE_TEAMS)), (False, MAX_TEAMS)])
+def test_progress_counts_every_step(authentik, config, enable, expected_accounts):
+    steps = list(run_competition(enable, "web:admin"))
+    total = 2 + expected_accounts + 2  # apps, accounts, group refresh, Quotient sync
     assert [s.current for s in steps] == list(range(1, total + 1))
     assert {s.total for s in steps} == {total}
 
