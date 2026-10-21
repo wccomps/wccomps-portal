@@ -3,7 +3,7 @@ from datetime import datetime
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 # The most a check, or one of its criteria, is worth
@@ -32,6 +32,22 @@ class OrangeCheckIn(models.Model):
     def __str__(self) -> str:
         status = "IN" if self.is_active else "OUT"
         return f"{self.user.username} [{status}]"
+
+    @classmethod
+    def toggle(cls, user: User) -> None:
+        """Check the user out if currently checked in, or check them in."""
+        with transaction.atomic():
+            active = cls.objects.select_for_update().filter(user=user, is_active=True).first()
+            if active:
+                active.is_active = False
+                active.checked_out_at = timezone.now()
+                active.save(update_fields=["is_active", "checked_out_at"])
+                return
+            try:
+                with transaction.atomic():
+                    cls.objects.create(user=user)
+            except IntegrityError:
+                pass
 
 
 class OrangeCheck(models.Model):

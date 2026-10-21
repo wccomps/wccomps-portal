@@ -164,9 +164,17 @@ class TestCheckDetail:
 
 class TestCheckDuplicate:
     def test_duplicate_creates_copy(self) -> None:
+        from datetime import timedelta
+
         user = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
-        check = OrangeCheck.objects.create(title="Original", description="Desc", created_by=user)
+        check = OrangeCheck.objects.create(
+            title="Original",
+            description="Desc",
+            max_points=25,
+            time_limit=timedelta(minutes=30),
+            created_by=user,
+        )
         OrangeCheckCriterion.objects.create(orange_check=check, label="C1", points=5)
         client = Client()
         client.force_login(User.objects.get(username="gold1"))
@@ -174,6 +182,27 @@ class TestCheckDuplicate:
         assert response.status_code == 302
         copy = OrangeCheck.objects.get(title="Original (copy)")
         assert copy.criteria.count() == 1
+        assert copy.max_points == 25
+        assert copy.time_limit == timedelta(minutes=30)
+
+    def test_duplicate_truncates_long_title_and_checks_total_points(self) -> None:
+        user = User.objects.create_user(username="gold1", password="test")
+        UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
+        long_title = "A" * 200
+        check = OrangeCheck.objects.create(title=long_title, description="Desc", max_points=6000, created_by=user)
+        client = Client()
+        client.force_login(User.objects.get(username="gold1"))
+        ok = client.post(f"/orange-team/checks/{check.pk}/duplicate/")
+        assert ok.status_code == 302
+        copy = OrangeCheck.objects.exclude(pk=check.pk).get()
+        assert len(copy.title) == 200
+        assert copy.title.endswith(" (copy)")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("orange_team.views.scores_total_problem", lambda *_: "Over capacity")
+            refused = client.post(f"/orange-team/checks/{check.pk}/duplicate/")
+        assert refused.status_code == 302
+        assert OrangeCheck.objects.count() == 2
 
     def test_get_redirects(self) -> None:
         user = User.objects.create_user(username="gold1", password="test")

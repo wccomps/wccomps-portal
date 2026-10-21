@@ -98,14 +98,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 def toggle_checkin(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:dashboard")
-    user = cast(User, request.user)
-    active = OrangeCheckIn.objects.filter(user=user, is_active=True).first()
-    if active:
-        active.is_active = False
-        active.checked_out_at = timezone.now()
-        active.save()
-    else:
-        OrangeCheckIn.objects.create(user=user)
+    OrangeCheckIn.toggle(cast(User, request.user))
     return redirect("orange_team:dashboard")
 
 
@@ -115,13 +108,7 @@ def admin_toggle_checkin(request: HttpRequest, user_id: int) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:check_list")
     target_user = get_object_or_404(User, pk=user_id)
-    active = OrangeCheckIn.objects.filter(user=target_user, is_active=True).first()
-    if active:
-        active.is_active = False
-        active.checked_out_at = timezone.now()
-        active.save()
-    else:
-        OrangeCheckIn.objects.create(user=target_user)
+    OrangeCheckIn.toggle(target_user)
     return redirect("orange_team:check_list")
 
 
@@ -335,14 +322,23 @@ def check_duplicate(request: HttpRequest, check_id: int) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:check_detail", check_id=check_id)
     original = get_object_or_404(OrangeCheck.objects.prefetch_related("criteria"), pk=check_id)
+    criteria = list(original.criteria.all())
+    worth = sum(c.points for c in criteria) if criteria else original.max_points
+    if problem := scores_total_problem(None, worth):
+        messages.error(request, problem)
+        return redirect("orange_team:check_detail", check_id=check_id)
     user = cast(User, request.user)
+    suffix = " (copy)"
+    title = f"{original.title[: 200 - len(suffix)]}{suffix}"
     with transaction.atomic():
         new_check = OrangeCheck.objects.create(
-            title=f"{original.title} (copy)",
+            title=title,
             description=original.description,
+            max_points=original.max_points,
+            time_limit=original.time_limit,
             created_by=user,
         )
-        for criterion in original.criteria.all():
+        for criterion in criteria:
             OrangeCheckCriterion.objects.create(
                 orange_check=new_check,
                 label=criterion.label,

@@ -56,6 +56,50 @@ def test_edit_keeps_results_adds_new_and_drops_removed(gold_team_user, graded_ch
     assert results == {"Polite and calm": True, "Escalates": False}
 
 
+def test_edit_recomputes_submitted_and_approved_scores(gold_team_user, graded_check):
+    from scoring.models import OrangeTeamScore
+
+    from orange_team.services import create_orange_score_from_assignment
+
+    check, keep, drop = graded_check
+    assignment = OrangeAssignment.objects.get(orange_check=check)
+    assignment.status = "approved"
+    assignment.score = assignment.calculate_score()
+    assignment.save()
+    score = create_orange_score_from_assignment(assignment, gold_team_user)
+    assert (assignment.score, int(score.points_awarded)) == (8, 8)
+
+    team2 = Team.objects.create(team_number=5, team_name="Team 05")
+    sub = OrangeAssignment.objects.create(orange_check=check, user=gold_team_user, team=team2, status="submitted")
+    OrangeAssignmentResult.objects.create(assignment=sub, criterion=keep, met=True)
+    OrangeAssignmentResult.objects.create(assignment=sub, criterion=drop, met=False)
+    sub.score = sub.calculate_score()
+    sub.save()
+    assert sub.score == 5
+
+    client = Client()
+    client.force_login(gold_team_user)
+    response = client.post(
+        f"/orange-team/checks/{check.pk}/edit/",
+        {
+            "title": "Phones (updated)",
+            "criterion_id_0": keep.pk,
+            "criterion_label_0": "Polite",
+            "criterion_points_0": "10",
+        },
+    )
+    assert response.status_code == 302
+
+    assignment.refresh_from_db()
+    sub.refresh_from_db()
+    score.refresh_from_db()
+    assert assignment.score == 10
+    assert sub.score == 10
+    assert int(score.points_awarded) == 10
+    assert score.description == "Check: Phones (updated)"
+    assert OrangeTeamScore.objects.filter(orange_check=check, team=assignment.team).count() == 1
+
+
 def test_extract_criteria_reads_rows_past_gaps():
     post = QueryDict(mutable=True)
     post.update(
