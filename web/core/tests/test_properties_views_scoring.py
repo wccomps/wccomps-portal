@@ -60,10 +60,9 @@ def _ids(w: World, kind: str) -> st.SearchStrategy[Any]:
 
 
 def _red_score(w: World) -> Fields:
-    form = RedTeamScoreForm(team_count=3, user=w.users["red_team"])
+    form = RedTeamScoreForm(user=w.users["red_team"])
     return form_fields(form) | {
         "screenshots": uploads(3),
-        "attack_vector": hostile_text(),
         "target_teams": hostile_text(),
     }
 

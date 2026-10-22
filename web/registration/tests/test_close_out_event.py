@@ -174,7 +174,7 @@ def test_a_refusal_writes_nothing(event, setup, message):
 def test_a_red_finding_against_a_team_with_no_school_is_refused(event):
     unlisted = Team.objects.create(team_number=3, team_name="Team 03", is_active=True)
     finding = RedTeamScore.objects.create(
-        attack_vector="ssh", points_per_team=Decimal(10), submitted_by=User.objects.create_user("red")
+        points_per_team=Decimal(10), submitted_by=User.objects.create_user("red")
     )
     finding.affected_teams.add(unlisted)
 

@@ -26,9 +26,6 @@
                             Score
                         </c-table_header>
                         <c-table_header sortable="false">
-                            Raw Comments
-                        </c-table_header>
-                        <c-table_header sortable="false">
                             Feedback
                         </c-table_header>
                         <c-table_header sortable="false">
@@ -55,9 +52,6 @@
                         <td>{{ score.inject_name }}</td>
                         <td>Team {{ score.team.team_number }}</td>
                         <td class="text-right">{{ score.points_awarded|floatformat:0 }}/{{ score.max_points|floatformat:0 }}</td>
-                        <td>
-                            <small class="text-muted">{{ score.notes }}</small>
-                        </td>
                         <td x-data="editableCell">
                             <div x-show="notEditing"
                                  @click="startEditing"

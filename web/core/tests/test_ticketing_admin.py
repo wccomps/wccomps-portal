@@ -160,7 +160,7 @@ class TestTicketAdminExportCSV:
 
         # Header row
         assert rows[0][0] == "Ticket Number"
-        assert len(rows[0]) == 16
+        assert len(rows[0]) == 15
 
         # Data row
         assert rows[1][0] == "T005-001"

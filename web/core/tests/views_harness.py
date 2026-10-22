@@ -165,8 +165,6 @@ def build_world() -> World:
 
     QuotientMetadataCache.objects.create(
         boxes=[{"name": "web", "ip": "10.0.0.5", "services": [{"name": "web-http", "display_name": "HTTP"}]}],
-        services=[{"name": "web-http", "display_name": "HTTP"}],
-        team_count=3,
     )
     ScoringTemplate.objects.first() or ScoringTemplate.objects.create()
 

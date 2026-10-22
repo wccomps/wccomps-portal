@@ -293,7 +293,7 @@ def _check_quotient_api() -> CheckResult:
 
     if not infra:
         return ("fail", "Could not reach Quotient API", _setup_link(SetupSection.SCORING_ENGINE, "Scoring Engine"))
-    return ("pass", f"Connected: {len(infra.boxes)} boxes, {infra.team_count} teams", None)
+    return ("pass", f"Connected: {len(infra.boxes)} boxes", None)
 
 
 def _check_school_info() -> CheckResult:

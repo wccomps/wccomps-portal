@@ -288,7 +288,7 @@
             </c-slot>
             {% for finding in red_scores %}
                 <tr>
-                    <td>{{ finding.attack_type.name|default:finding.attack_vector|default:"Unknown" }}</td>
+                    <td>{{ finding.attack_type.name|default:"Unknown" }}</td>
                     <td>
                         {% if finding.affected_boxes_display %}{{ finding.affected_boxes_display }}{% endif %}
                         {% if finding.affected_service %}({{ finding.affected_service }}){% endif %}

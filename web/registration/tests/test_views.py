@@ -291,30 +291,6 @@ class TokenEditViewTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "registration/edit_locked.html")
 
-    def test_edit_locked_after_token_expired(self):
-        """Test edit page shows locked message after token expired."""
-        from datetime import timedelta
-
-        from django.utils import timezone
-
-        self.registration.edit_token_expires = timezone.now() - timedelta(hours=1)
-        self.registration.save()
-        response = self.client.get(reverse("registration_edit", args=[self.registration.edit_token]))
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "registration/edit_locked.html")
-
-    def test_edit_allowed_when_token_not_expired(self):
-        """Test edit page loads when token has not expired."""
-        from datetime import timedelta
-
-        from django.utils import timezone
-
-        self.registration.edit_token_expires = timezone.now() + timedelta(hours=1)
-        self.registration.save()
-        response = self.client.get(reverse("registration_edit", args=[self.registration.edit_token]))
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "registration/edit.html")
-
     def test_edit_updates_registration(self):
         """Test edit form updates registration."""
         form_data = {

@@ -56,11 +56,8 @@ class TestTeamRegistration:
         registration = TeamRegistration.objects.create(school_name="Test School")
         assert registration.status == "pending"
         assert registration.approved_at is None
-        assert registration.paid_at is None
-        assert registration.credentials_sent_at is None
         assert registration.rejection_reason == ""
         assert registration.approved_by is None
-        assert registration.edit_token_expires is None
 
     def test_edit_token_is_unique(self):
         """Test each registration gets a unique edit token."""
@@ -70,7 +67,7 @@ class TestTeamRegistration:
 
     def test_status_choices(self):
         """Test valid status choices."""
-        valid_statuses = ["pending", "approved", "paid", "credentials_sent", "rejected"]
+        valid_statuses = ["pending", "approved", "rejected"]
         for status in valid_statuses:
             registration = TeamRegistration.objects.create(
                 school_name=f"School {status}",
@@ -308,7 +305,6 @@ class TestEventTeamAssignment:
         assert assignment.registration == registration
         assert assignment.team == team
         assert assignment.assigned_at is not None
-        assert assignment.credentials_sent_at is None
 
     def test_unique_school_per_event(self, school, event, team):
         from team.models import Team

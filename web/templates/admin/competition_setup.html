@@ -215,14 +215,6 @@
                     <c-detail_row label="Last synced">
                         {{ quotient_metadata.last_synced|date:"Y-m-d H:i:s" }}
                     </c-detail_row>
-                    {% if quotient_metadata.event_name %}
-                        <c-detail_row label="Event">
-                            {{ quotient_metadata.event_name }}
-                        </c-detail_row>
-                    {% endif %}
-                    <c-detail_row label="Teams">
-                        {{ quotient_metadata.team_count }}
-                    </c-detail_row>
                     <c-detail_row label="Boxes">
                         {{ quotient_metadata.boxes|length }}
                     </c-detail_row>

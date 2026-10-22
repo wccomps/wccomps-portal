@@ -142,7 +142,6 @@ def three_of_each(admin_user: User) -> None:
             assigned_to=assignee,
         )
         finding = RedTeamScore.objects.create(
-            attack_vector=name,
             attack_type=AttackType.objects.create(name=f"{name} attack"),
             points_per_team=Decimal(number),
             submitted_by=admin_user,

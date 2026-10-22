@@ -76,12 +76,9 @@ class TeamRegistration(models.Model):
 
     # Token for self-service editing
     edit_token = models.CharField(max_length=64, unique=True, default=generate_edit_token)
-    edit_token_expires = models.DateTimeField(null=True, blank=True)
 
     submitted_at = models.DateTimeField(auto_now_add=True)
     approved_at = models.DateTimeField(null=True, blank=True)
-    paid_at = models.DateTimeField(null=True, blank=True)
-    credentials_sent_at = models.DateTimeField(null=True, blank=True)
 
     rejection_reason = models.TextField(blank=True)
     approved_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
@@ -269,7 +266,6 @@ class EventTeamAssignment(models.Model):
     )
     team = models.ForeignKey("team.Team", on_delete=models.CASCADE, related_name="event_assignments")
     assigned_at = models.DateTimeField(auto_now_add=True)
-    credentials_sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [

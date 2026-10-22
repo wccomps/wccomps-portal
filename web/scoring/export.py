@@ -24,7 +24,7 @@ def _serialize_red_scores_csv() -> str:
     writer.writerow(
         [
             "ID",
-            "Attack Vector",
+            "Attack Type",
             "Source IP",
             "Destination IP Template",
             "Affected Boxes",
@@ -40,8 +40,10 @@ def _serialize_red_scores_csv() -> str:
             "Created At",
         ]
     )
-    findings = RedTeamScore.objects.prefetch_related("affected_teams", "approved_by", "submitted_by").order_by(
-        "-created_at"
+    findings = (
+        RedTeamScore.objects.select_related("attack_type", "approved_by", "submitted_by")
+        .prefetch_related("affected_teams")
+        .order_by("-created_at")
     )
     for finding in findings:
         affected_teams = ", ".join(team.team_name for team in finding.affected_teams.all())
@@ -49,7 +51,7 @@ def _serialize_red_scores_csv() -> str:
         writer.writerow(
             [
                 finding.id,
-                finding.attack_vector,
+                finding.attack_type.name if finding.attack_type else "",
                 finding.source_ip,
                 finding.destination_ip_template,
                 affected_boxes,
@@ -69,8 +71,10 @@ def _serialize_red_scores_csv() -> str:
 
 
 def _serialize_red_scores_json() -> str:
-    findings = RedTeamScore.objects.prefetch_related("affected_teams", "approved_by", "submitted_by").order_by(
-        "-created_at"
+    findings = (
+        RedTeamScore.objects.select_related("attack_type", "approved_by", "submitted_by")
+        .prefetch_related("affected_teams")
+        .order_by("-created_at")
     )
     data = []
     for finding in findings:
@@ -78,7 +82,7 @@ def _serialize_red_scores_json() -> str:
         data.append(
             {
                 "id": finding.id,
-                "attack_vector": finding.attack_vector,
+                "attack_type": finding.attack_type.name if finding.attack_type else None,
                 "source_ip": finding.source_ip,
                 "destination_ip_template": finding.destination_ip_template,
                 "affected_boxes": finding.affected_boxes,

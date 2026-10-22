@@ -325,7 +325,6 @@ class TestSendScorecardEmail:
         ServiceScore.objects.filter(team=teams[0]).update(sla_violations=Decimal("-10.00"))
         finding = RedTeamScore.objects.create(
             attack_type=AttackType.objects.get_or_create(name="Default Credentials")[0],
-            attack_vector="ssh",
             source_ip="10.0.0.5",
             points_per_team=Decimal("50.00"),
             submitted_by=red_user,

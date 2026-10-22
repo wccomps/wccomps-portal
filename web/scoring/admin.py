@@ -54,7 +54,7 @@ class AttackTypeAdmin(PortalModelAdmin[AttackType]):
 class RedTeamScreenshotInline(admin.TabularInline[RedTeamScreenshot, RedTeamScore]):
     model = RedTeamScreenshot
     extra = 1
-    fields = ["filename", "description"]
+    fields = ["filename"]
 
 
 @admin.register(RedTeamScore)
@@ -88,7 +88,6 @@ class RedTeamScoreAdmin(PortalModelAdmin[RedTeamScore]):
             {
                 "fields": [
                     "attack_type",
-                    "attack_vector",
                     "source_ip",
                     "source_ip_pool",
                     "destination_ip_template",
@@ -117,7 +116,7 @@ class RedTeamScoreAdmin(PortalModelAdmin[RedTeamScore]):
 class IncidentScreenshotInline(admin.TabularInline[IncidentScreenshot, IncidentReport]):
     model = IncidentScreenshot
     extra = 1
-    fields = ["filename", "description"]
+    fields = ["filename"]
 
 
 @admin.register(IncidentReport)
@@ -161,7 +160,6 @@ class IncidentReportAdmin(PortalModelAdmin[IncidentReport]):
             "Timeline",
             {"fields": ["attack_detected_at", "attack_mitigated"]},
         ),
-        ("Evidence", {"fields": ["evidence_notes"]}),
         (
             "Gold Team Review",
             {
@@ -211,7 +209,7 @@ class InjectScoreAdmin(PortalModelAdmin[InjectScore]):
     fieldsets = [
         ("Team", {"fields": ["team"]}),
         ("Inject", {"fields": ["inject_id", "inject_name", "max_points"]}),
-        ("Grading", {"fields": ["points_awarded", "notes"]}),
+        ("Grading", {"fields": ["points_awarded"]}),
         ("Audit", {"fields": ["graded_by", "graded_at", "updated_at"]}),
     ]
 
@@ -310,9 +308,8 @@ class ScoringTemplateAdmin(PortalModelAdmin[ScoringTemplate]):
 
 @admin.register(QuotientMetadataCache)
 class QuotientMetadataCacheAdmin(PortalModelAdmin[QuotientMetadataCache]):
-    list_display = ["event_name", "team_count", "last_synced", "synced_by"]
+    list_display = ["last_synced", "synced_by"]
     readonly_fields = ["last_synced"]
-    search_fields = ["event_name"]
 
 
 @admin.register(RedTeamIPPool)

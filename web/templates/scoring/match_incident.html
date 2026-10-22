@@ -33,20 +33,13 @@
                 {% if incident.screenshots.exists %}
                     <c-image_grid>
                         {% for screenshot in incident.screenshots.all %}
-                            {% if screenshot.has_data %}
-                                <a href="{% url 'scoring:incident_screenshot' screenshot.id %}"
-                                   target="_blank">
-                                    <img src="{% url 'scoring:incident_screenshot' screenshot.id %}"
-                                         alt="{{ screenshot.filename }}"
-                                         width="200"
-                                         height="150">
-                                </a>
-                            {% else %}
-                                <div>
-                                    <span class="text-muted">{{ screenshot.filename|cut:"scoring/incidents/" }}</span>
-                                    <small class="text-danger d-block">(file lost)</small>
-                                </div>
-                            {% endif %}
+                            <a href="{% url 'scoring:incident_screenshot' screenshot.id %}"
+                               target="_blank">
+                                <img src="{% url 'scoring:incident_screenshot' screenshot.id %}"
+                                     alt="{{ screenshot.filename }}"
+                                     width="200"
+                                     height="150">
+                            </a>
                         {% endfor %}
                     </c-image_grid>
                 {% else %}
@@ -69,7 +62,7 @@
                                     <strong>Finding #{{ finding.id }}</strong>
                                     {% if finding.source_ip == incident.source_ip %}<c-badge variant="success" class="ml-5">IP Match</c-badge>{% endif %}
                                     <br>
-                                    <small>{{ finding.attack_vector|shorten:60 }}</small>
+                                    <small>{{ finding.attack_type.name|default:"Unknown" }}</small>
                                     <br>
                                     <small class="text-muted">
                                         {% if finding.affected_boxes_display %}{{ finding.affected_boxes_display }} /{% endif %}

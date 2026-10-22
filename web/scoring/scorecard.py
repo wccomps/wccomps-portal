@@ -105,11 +105,7 @@ def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _Sco
     ranked_team_ids = {s.team.pk for s in ranked}
 
     inject_stats: list[_InjectStat] = []
-    team_injects = (
-        InjectScore.objects.filter(team=team, is_approved=True)
-        .exclude(inject_id="qualifier-total")
-        .order_by("inject_name", "pk")
-    )
+    team_injects = InjectScore.objects.filter(team=team, is_approved=True).order_by("inject_name", "pk")
 
     for inj in team_injects:
         all_inj = InjectScore.objects.filter(inject_id=inj.inject_id, is_approved=True, team_id__in=ranked_team_ids)

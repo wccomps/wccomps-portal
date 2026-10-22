@@ -71,7 +71,7 @@
                 <th>
                     <c-link href="{% url 'scoring:view_red_score' finding.id %}">#{{ finding.id }}</c-link>
                 </th>
-                <td>{{ finding.attack_type.name|default:finding.attack_vector|default:"Unknown" }}</td>
+                <td>{{ finding.attack_type.name|default:"Unknown" }}</td>
                 <td>{{ finding.affected_boxes_display }}</td>
                 <td>{{ finding.affected_service }}</td>
                 <td>

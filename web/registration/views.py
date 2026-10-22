@@ -4,7 +4,6 @@ from django.contrib import messages
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils import timezone
 from packets.models import packets_sent
 
 from core.auth_utils import require_permission
@@ -63,10 +62,6 @@ def register(request: HttpRequest) -> HttpResponse:
 def registration_edit(request: HttpRequest, token: str) -> HttpResponse:
     """Token-based self-service editing of registration."""
     registration = get_object_or_404(TeamRegistration, edit_token=token)
-
-    if registration.edit_token_expires and timezone.now() > registration.edit_token_expires:
-        messages.error(request, "This edit link has expired.")
-        return render(request, "registration/edit_locked.html", {"registration": registration})
 
     # Lock after approval so school name, region (event restrictions) and contacts can't be changed or hijacked.
     if registration.status not in ("pending", "rejected"):

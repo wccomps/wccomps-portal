@@ -225,19 +225,11 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
 
     page_obj = Paginator(all_grades_for_outlier_calc, 50).get_page(request.GET.get("page"))
 
-    # Stats (unfiltered counts)
-    total_grades = InjectScore.objects.count()
-    approved_count = InjectScore.objects.filter(is_approved=True).count()
-    unapproved_count = total_grades - approved_count
-
     available_injects = InjectScore.objects.values("inject_id", "inject_name").distinct().order_by("inject_name")
 
     context = {
         "page_obj": page_obj,
-        "unapproved_count": unapproved_count,
-        "approved_count": approved_count,
-        "total_grades": total_grades,
-        "has_unapproved": unapproved_count > 0,
+        "has_unapproved": InjectScore.objects.filter(is_approved=False).exists(),
         "available_injects": available_injects,
         "team_numbers": team_numbers(Team.objects.filter(inject_grades__isnull=False), team),
         "chosen_team": team,
@@ -277,7 +269,6 @@ def review_inject_feedback(request: HttpRequest) -> HttpResponse:
 
     scores = (
         InjectScore.objects.filter(is_approved=True)
-        .exclude(inject_id="qualifier-total")
         .exclude(feedback="")
         .select_related("team", "feedback_approved_by")
         .order_by("inject_name", "team__team_number")
@@ -289,7 +280,6 @@ def review_inject_feedback(request: HttpRequest) -> HttpResponse:
 
     inject_choices = (
         InjectScore.objects.filter(is_approved=True)
-        .exclude(inject_id="qualifier-total")
         .exclude(feedback="")
         .values_list("inject_id", "inject_name")
         .distinct()

@@ -101,11 +101,11 @@ def test_the_page_shows_what_is_set_now(admin_client):
 
 
 def test_the_current_settings_show_in_detail_grids_and_the_small_forms_like_the_teams_page(admin_client):
-    QuotientMetadataCache.objects.create(boxes=[{"name": "web"}], team_count=3)
+    QuotientMetadataCache.objects.create(boxes=[{"name": "web"}])
 
     page = _flat(_setup_page(admin_client))
 
-    for label, value in (("Starts", "Not set"), ("Stops", "Not set"), ("Teams", "3"), ("Boxes", "1")):
+    for label, value in (("Starts", "Not set"), ("Stops", "Not set"), ("Boxes", "1")):
         assert re.search(rf'<dl\s+class="detail-list">.*?<dt>{label}</dt><dd>{value}</dd>', page, re.S), label
     assert re.search(r"<dt>Last synced</dt><dd>\d{4}-\d{2}-\d{2} ", page)
     # Labelled inputs beside their button, as the Teams page's bulk actions

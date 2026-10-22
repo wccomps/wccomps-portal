@@ -115,7 +115,7 @@ def make_test_data():
     )
 
     finding = RedTeamScore.objects.create(
-        attack_vector="SSH brute force", source_ip="10.0.0.1", points_per_team=Decimal("10")
+        source_ip="10.0.0.1", points_per_team=Decimal("10")
     )
     finding.affected_teams.add(team)
     incident = IncidentReport.objects.create(

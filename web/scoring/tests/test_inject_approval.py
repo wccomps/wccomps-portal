@@ -665,6 +665,4 @@ class TestInjectScoresReviewStats:
         response = client.get(reverse("scoring:inject_grades_review"))
 
         assert response.status_code == 200
-        assert response.context["unapproved_count"] == 2
-        assert response.context["total_grades"] == 3
-        assert response.context["approved_count"] == 1
+        assert response.context["has_unapproved"] is True

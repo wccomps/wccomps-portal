@@ -77,14 +77,9 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
 )
 def red_team_findings(request: HttpRequest) -> HttpResponse:
     """Gold team review page for red team findings."""
-    total_findings = RedTeamScore.objects.count()
-    pending_count = RedTeamScore.objects.filter(is_approved=False).count()
     context = {
         **findings_list(request, default_status="pending", page_size=50),
-        "pending_findings": pending_count > 0,
-        "total_findings": total_findings,
-        "pending_count": pending_count,
-        "approved_count": total_findings - pending_count,
+        "pending_findings": RedTeamScore.objects.filter(is_approved=False).exists(),
         "is_gold_team": has_permission(cast(User, request.user), "gold_team"),
     }
     if request.headers.get("HX-Request"):

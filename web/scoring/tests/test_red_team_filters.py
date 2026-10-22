@@ -26,7 +26,6 @@ class TestRedTeamFindingsFiltering:
 
         # Create findings targeting different teams
         finding1 = RedTeamScore.objects.create(
-            attack_vector="SQL Injection on Team 1",
             source_ip="10.0.0.5",
             points_per_team=Decimal("50.00"),
             submitted_by=red_user,
@@ -34,7 +33,6 @@ class TestRedTeamFindingsFiltering:
         finding1.affected_teams.add(team1)
 
         finding2 = RedTeamScore.objects.create(
-            attack_vector="XSS on Team 2",
             source_ip="10.0.0.6",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user,
@@ -42,7 +40,6 @@ class TestRedTeamFindingsFiltering:
         finding2.affected_teams.add(team2)
 
         finding3 = RedTeamScore.objects.create(
-            attack_vector="RCE on both teams",
             source_ip="10.0.0.7",
             points_per_team=Decimal("100.00"),
             submitted_by=red_user,
@@ -62,12 +59,11 @@ class TestRedTeamFindingsFiltering:
         assert finding3.id in finding_ids
 
     def test_filter_by_attack_type(self, create_user_with_groups: Callable[..., User]) -> None:
-        """Red Team can filter findings by attack type (attack_vector)."""
+        """Red Team can filter findings by attack type."""
         red_user = create_user_with_groups("red_user", ["WCComps_RedTeam"])
         team = Team.objects.create(team_number=1, team_name="Team 1")
 
         finding1 = RedTeamScore.objects.create(
-            attack_vector="SQL Injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("50.00"),
             submitted_by=red_user,
@@ -75,7 +71,6 @@ class TestRedTeamFindingsFiltering:
         finding1.affected_teams.add(team)
 
         finding2 = RedTeamScore.objects.create(
-            attack_vector="XSS Attack",
             source_ip="10.0.0.6",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user,
@@ -103,7 +98,6 @@ class TestRedTeamFindingsFiltering:
         team = Team.objects.create(team_number=1, team_name="Team 1")
 
         finding1 = RedTeamScore.objects.create(
-            attack_vector="SQL Injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("50.00"),
             submitted_by=red_user1,
@@ -111,7 +105,6 @@ class TestRedTeamFindingsFiltering:
         finding1.affected_teams.add(team)
 
         finding2 = RedTeamScore.objects.create(
-            attack_vector="XSS Attack",
             source_ip="10.0.0.6",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user2,
@@ -137,7 +130,6 @@ class TestRedTeamFindingsFiltering:
         team2 = Team.objects.create(team_number=2, team_name="Team 2")
 
         finding1 = RedTeamScore.objects.create(
-            attack_vector="SQL Injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("50.00"),
             submitted_by=red_user1,
@@ -145,7 +137,6 @@ class TestRedTeamFindingsFiltering:
         finding1.affected_teams.add(team1)
 
         finding2 = RedTeamScore.objects.create(
-            attack_vector="SQL Injection",
             source_ip="10.0.0.6",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user2,
@@ -153,7 +144,6 @@ class TestRedTeamFindingsFiltering:
         finding2.affected_teams.add(team1)
 
         finding3 = RedTeamScore.objects.create(
-            attack_vector="SQL Injection",
             source_ip="10.0.0.7",
             points_per_team=Decimal("40.00"),
             submitted_by=red_user1,
@@ -180,7 +170,6 @@ class TestRedTeamFindingsFiltering:
         team = Team.objects.create(team_number=1, team_name="Team 1")
 
         finding1 = RedTeamScore.objects.create(
-            attack_vector="SQL Injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("50.00"),
             submitted_by=red_user,
@@ -188,7 +177,6 @@ class TestRedTeamFindingsFiltering:
         finding1.affected_teams.add(team)
 
         finding2 = RedTeamScore.objects.create(
-            attack_vector="XSS Attack",
             source_ip="10.0.0.6",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user,
@@ -210,7 +198,6 @@ class TestRedTeamFindingsFiltering:
         team2 = Team.objects.create(team_number=2, team_name="Team 2")
 
         finding = RedTeamScore.objects.create(
-            attack_vector="SQL Injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("50.00"),
             submitted_by=red_user,
@@ -232,7 +219,6 @@ class TestRedTeamFindingsFiltering:
         team = Team.objects.create(team_number=1, team_name="Team 1")
 
         finding = RedTeamScore.objects.create(
-            attack_vector="SQL Injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("50.00"),
             submitted_by=red_user,
@@ -260,7 +246,6 @@ class TestRedTeamFindingsFiltering:
         team = Team.objects.create(team_number=1, team_name="Team 1")
 
         finding = RedTeamScore.objects.create(
-            attack_vector="SQL Injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("50.00"),
             submitted_by=gold_user,
@@ -288,9 +273,8 @@ class TestRedTeamSortCycle:
         team = Team.objects.create(team_number=1, team_name="Team 1")
         base_time = timezone.now()
         findings = []
-        for i, vector in enumerate(["Alpha Attack", "Beta Attack", "Gamma Attack"]):
+        for i in range(3):
             f = RedTeamScore.objects.create(
-                attack_vector=vector,
                 source_ip=f"10.0.0.{i}",
                 points_per_team=Decimal("10.00"),
                 submitted_by=user,

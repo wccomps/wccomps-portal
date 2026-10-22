@@ -9,7 +9,7 @@ from django.views.decorators.http import require_http_methods
 from core.auth_utils import require_permission
 
 from ..forms import ScoringTemplateForm
-from ..models import QuotientMetadataCache, ScoringTemplate
+from ..models import ScoringTemplate
 from ..quotient_sync import sync_service_scores
 
 
@@ -21,11 +21,6 @@ def scoring_config(request: HttpRequest) -> HttpResponse:
     template = ScoringTemplate.objects.first()
     if not template:
         template = ScoringTemplate.objects.create()
-
-    try:
-        metadata = QuotientMetadataCache.objects.first()
-    except QuotientMetadataCache.DoesNotExist:
-        metadata = None
 
     if request.method == "POST":
         form = ScoringTemplateForm(request.POST, instance=template)
@@ -41,7 +36,6 @@ def scoring_config(request: HttpRequest) -> HttpResponse:
     context = {
         "form": form,
         "template": template,
-        "metadata": metadata,
     }
     return render(request, "scoring/scoring_config.html", context)
 

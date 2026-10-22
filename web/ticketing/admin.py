@@ -107,7 +107,6 @@ class TicketAdmin(PortalModelAdmin[Ticket]):
                     "hostname",
                     "ip_address",
                     "service_name",
-                    "custom_fields",
                 )
             },
         ),
@@ -127,7 +126,6 @@ class TicketAdmin(PortalModelAdmin[Ticket]):
                     "resolved_by",
                     "resolved_at",
                     "resolution_notes",
-                    "duration_notes",
                     "points_charged",
                 )
             },
@@ -137,7 +135,6 @@ class TicketAdmin(PortalModelAdmin[Ticket]):
             {
                 "fields": (
                     "discord_thread_id",
-                    "discord_channel_id",
                     "thread_archive_scheduled_at",
                 )
             },
@@ -188,7 +185,6 @@ class TicketAdmin(PortalModelAdmin[Ticket]):
                 "Created At",
                 "Resolved At",
                 "Resolution Notes",
-                "Duration Notes",
             ]
         )
 
@@ -211,7 +207,6 @@ class TicketAdmin(PortalModelAdmin[Ticket]):
                     ticket.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                     ticket.resolved_at.strftime("%Y-%m-%d %H:%M:%S") if ticket.resolved_at else "",
                     ticket.resolution_notes or "",
-                    ticket.duration_notes or "",
                 ]
             )
 

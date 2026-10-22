@@ -22,7 +22,6 @@ def _approved_grade(team: Team, feedback: str) -> InjectScore:
         points_awarded=Decimal("90"),
         graded_by=reviewer,
         feedback=feedback,
-        notes="",  # the grading flow never populates notes
     )
     grade.approve(reviewer)  # score approved (is_approved=True)
     grade.feedback_approved = True

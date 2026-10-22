@@ -87,7 +87,7 @@ def rows(admin_user: User) -> tuple[dict, dict]:
     assignment = OrangeAssignment.objects.create(orange_check=check, user=admin_user, team=team, status="in_progress")
     OrangeFollowUp.objects.create(user=admin_user, assignment=assignment, remind_at=timezone.now())
     finding = RedTeamScore.objects.create(
-        attack_vector="", source_ip="10.0.0.9", points_per_team=Decimal(5), submitted_by=admin_user
+        source_ip="10.0.0.9", points_per_team=Decimal(5), submitted_by=admin_user
     )
     finding.affected_teams.add(team)
     incident = IncidentReport.objects.create(
@@ -111,7 +111,7 @@ def rows(admin_user: User) -> tuple[dict, dict]:
             team=team, submitted_by=admin_user, description=long_text, points_awarded=Decimal(1)
         ),
         RedTeamScore.objects.create(
-            attack_vector=long_text, source_ip="10.0.0.9", points_per_team=Decimal(5), submitted_by=admin_user
+            notes=long_text, source_ip="10.0.0.9", points_per_team=Decimal(5), submitted_by=admin_user
         ),
         Ticket.objects.create(
             ticket_number="T007-001", team=team, category=TicketCategory.objects.first(), title=long_text
