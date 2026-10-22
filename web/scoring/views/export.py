@@ -1,5 +1,4 @@
 import io
-import json
 import logging
 import zipfile
 from collections.abc import Iterator
@@ -17,7 +16,7 @@ from registration.close_out_checks import record_scorecards_emailed, scorecards_
 from registration.models import Event
 
 from core.auth_utils import require_permission
-from core.utils import ndjson_progress, run_detached
+from core.utils import ndjson_done, ndjson_progress, run_detached
 
 from .. import export
 from ..calculator import Standing, compute_standings, get_leaderboard, get_standing
@@ -138,7 +137,7 @@ def _stream_email_scorecards(request: HttpRequest, custom_message: str = "") -> 
 
     total = len(sendable)
     if total == 0:
-        yield json.dumps({"done": True, "success": True, "message": "No teams with email addresses"}) + "\n"
+        yield ndjson_done("No teams with email addresses", success=True)
         return
 
     sent = 0
@@ -159,7 +158,7 @@ def _stream_email_scorecards(request: HttpRequest, custom_message: str = "") -> 
     if sent:
         record_scorecards_emailed(event, fingerprint, sent, failed, request.user.get_username())
     message = f"Sent {sent}, failed {failed}" if failed else f"Emailed scorecards to {sent} teams"
-    yield json.dumps({"done": True, "success": failed == 0, "message": message}) + "\n"
+    yield ndjson_done(message, success=failed == 0)
 
 
 @require_permission("gold_team", error_message="Only Gold Team members can email scorecards")
@@ -192,7 +191,6 @@ def email_scorecards(request: HttpRequest) -> HttpResponse:
             "team_rows": team_rows,
             "teams_with_email": teams_with_email,
             "teams_without_email": teams_without_email,
-            "total_teams": len(scores),
         },
     )
 
@@ -242,7 +240,6 @@ def email_scorecard(request: HttpRequest, team_number: int) -> HttpResponse:
         "scoring/email_scorecard_confirm.html",
         {
             "team": team,
-            "score": score,
             "school_name": school_name,
             "emails": emails,
         },

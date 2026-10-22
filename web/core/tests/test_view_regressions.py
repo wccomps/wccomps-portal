@@ -216,10 +216,10 @@ def test_the_rubric_autosave_answers_a_missing_assignment_with_a_json_404(
 
 
 @pytest.mark.parametrize("action", ["registration_approve", "registration_reject"])
-@given(status=st.sampled_from(["approved", "paid", "credentials_sent", "rejected"]))
-@example(status="paid")
+@given(status=st.sampled_from(["approved", "rejected"]))
+@example(status="approved")
 def test_only_a_pending_registration_is_approved_or_rejected(admin_client: Client, action: str, status: str) -> None:
-    """Approving a paid registration (a second click, a stale page) put it back to approved."""
+    """Approving or rejecting an already-reviewed registration leaves it unchanged."""
     with rolled_back():
         registration = TeamRegistration.objects.create(school_name="School", status=status)
         before = TeamRegistration.objects.filter(pk=registration.pk).values().get()

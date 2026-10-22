@@ -21,7 +21,6 @@ from .models import (
     ScoringExclusion,
     ScoringTemplate,
     ServiceScore,
-    format_boxes_display,
 )
 
 
@@ -72,11 +71,6 @@ class RedTeamScoreAdmin(PortalModelAdmin[RedTeamScore]):
     list_filter = ["attack_type", "universally_attempted", "is_approved", "created_at"]
     search_fields = ["attack_type__name", "affected_service", "notes"]
     autocomplete_fields = ["attack_type"]
-
-    @admin.display(description="Boxes")
-    def affected_boxes_display(self, obj: RedTeamScore) -> str:
-        return format_boxes_display(obj.affected_boxes)
-
     filter_horizontal = ["affected_teams"]
     inlines = [RedTeamScreenshotInline]
     readonly_fields = ["created_at", "updated_at"]
@@ -179,10 +173,6 @@ class IncidentReportAdmin(PortalModelAdmin[IncidentReport]):
     @admin.display(description="Description")
     def attack_description_short(self, obj: IncidentReport) -> str:
         return shorten(obj.attack_description, 50)
-
-    @admin.display(description="Affected Boxes")
-    def affected_boxes_display(self, obj: IncidentReport) -> str:
-        return format_boxes_display(obj.affected_boxes)
 
     @admin.display(description="Status")
     def reviewed_status(self, obj: IncidentReport) -> str:

@@ -50,7 +50,7 @@ def _assignment(apps, event, number, school_name):
     TeamRegistration = apps.get_model("registration", "TeamRegistration")
     EventTeamAssignment = apps.get_model("registration", "EventTeamAssignment")
     team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}")
-    registration = TeamRegistration.objects.create(school_name=school_name, status="paid")
+    registration = TeamRegistration.objects.create(school_name=school_name, status="approved")
     return EventTeamAssignment.objects.create(event=event, team=team, registration=registration)
 
 

@@ -164,7 +164,6 @@ def permissions(request: HttpRequest) -> dict[str, bool | str]:
         ctx.update(
             {
                 "is_blue_team": False,
-                "is_red_team": False,
                 "authentik_username": "",
                 "nav_active": "",
                 "subnav_active": "",
@@ -178,7 +177,6 @@ def permissions(request: HttpRequest) -> dict[str, bool | str]:
     return {
         **perms,
         "is_blue_team": has_permission(user, "blue_team"),
-        "is_red_team": has_permission(user, "red_team"),
         "authentik_username": user.username,
         "nav_active": nav_context["nav"],
         "subnav_active": nav_context["subnav"],

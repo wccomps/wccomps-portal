@@ -114,9 +114,7 @@ def make_test_data():
         status="open",
     )
 
-    finding = RedTeamScore.objects.create(
-        source_ip="10.0.0.1", points_per_team=Decimal("10")
-    )
+    finding = RedTeamScore.objects.create(source_ip="10.0.0.1", points_per_team=Decimal("10"))
     finding.affected_teams.add(team)
     incident = IncidentReport.objects.create(
         team=team,

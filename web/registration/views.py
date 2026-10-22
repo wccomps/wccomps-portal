@@ -196,7 +196,7 @@ def season_edit(request: HttpRequest, season_id: int) -> HttpResponse:
     return render(
         request,
         "registration/seasons/form.html",
-        {"form": form, "title": "Edit Season", "season": season},
+        {"form": form, "title": "Edit Season"},
     )
 
 
@@ -223,8 +223,10 @@ def season_delete(request: HttpRequest, season_id: int) -> HttpResponse:
 
 @require_permission("gold_team")
 def event_list(request: HttpRequest, season_id: int) -> HttpResponse:
+    from django.db.models import Count
+
     season = get_object_or_404(Season, id=season_id)
-    events = season.events.annotate_enrollment_count()
+    events = season.events.annotate(enrollment_count=Count("enrollments"))
 
     return render(request, "registration/events/list.html", {"season": season, "events": events})
 
@@ -266,7 +268,7 @@ def event_edit(request: HttpRequest, event_id: int) -> HttpResponse:
     return render(
         request,
         "registration/events/form.html",
-        {"form": form, "season": event.season, "event": event, "title": "Edit Event"},
+        {"form": form, "season": event.season, "title": "Edit Event"},
     )
 
 
@@ -317,7 +319,7 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
                 "enrollment": enrollment,
                 "registration": enrollment.registration,
                 "assignment": assignment,
-                "can_assign": enrollment.registration.status == "paid" and not assignment,
+                "can_assign": enrollment.registration.status == "approved" and not assignment,
             }
         )
 
@@ -367,7 +369,7 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         enrolled_registrations = (
             RegistrationEventEnrollment.objects.filter(
                 event=event,
-                registration__status="paid",
+                registration__status="approved",
             )
             .exclude(registration__team_assignments__event=event)
             .select_related("registration")

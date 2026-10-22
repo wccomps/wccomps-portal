@@ -32,8 +32,6 @@ def admin_teams(request: HttpRequest) -> HttpResponse:
 
     context = {
         "teams": teams_with_info,
-        "show_ops_nav": True,
-        "nav_active": "ops_admin",
     }
 
     return render(request, "admin/teams.html", context)
@@ -48,8 +46,6 @@ def admin_team_detail(request: HttpRequest, team_number: int) -> HttpResponse:
     context = {
         "team": team,
         "members": members,
-        "show_ops_nav": True,
-        "nav_active": "ops_admin",
     }
 
     return render(request, "admin/team_detail.html", context)

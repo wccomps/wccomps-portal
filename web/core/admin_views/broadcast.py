@@ -19,13 +19,7 @@ from team.models import Team
 def admin_broadcast(request: HttpRequest) -> HttpResponse:
     teams = Team.objects.filter(is_active=True).order_by("team_number")
 
-    context = {
-        "teams": teams,
-        "show_ops_nav": True,
-        "nav_active": "ops_admin",
-    }
-
-    return render(request, "admin/broadcast.html", context)
+    return render(request, "admin/broadcast.html", {"teams": teams})
 
 
 @json_endpoint
@@ -60,12 +54,7 @@ def admin_broadcast_action(request: HttpRequest) -> HttpResponse:
 
 @require_permission("admin", "gold_team")
 def admin_sync_roles(request: HttpRequest) -> HttpResponse:
-    context = {
-        "show_ops_nav": True,
-        "nav_active": "ops_admin",
-    }
-
-    return render(request, "admin/sync_roles.html", context)
+    return render(request, "admin/sync_roles.html")
 
 
 @json_endpoint

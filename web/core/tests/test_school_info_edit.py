@@ -46,7 +46,7 @@ def test_new_school_info_assigns_the_team_to_the_active_event(client, event):
 
 def test_renaming_an_assigned_teams_school_moves_its_assignment(client, event):
     team = Team.objects.create(team_number=4, team_name="Team 04")
-    registration = TeamRegistration.objects.create(school_name="Example University", status="paid")
+    registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
     EventTeamAssignment.objects.create(
         event=event, team=team, school=School.for_name("Example University"), registration=registration
     )
@@ -60,7 +60,7 @@ def test_renaming_an_assigned_teams_school_moves_its_assignment(client, event):
 def test_changing_an_assigned_teams_school_unlinks_the_old_schools_registration(client, event):
     team = Team.objects.create(team_number=4, team_name="Team 04")
     school = School.for_name("Example University")
-    registration = TeamRegistration.objects.create(school_name="Example University", status="paid", school=school)
+    registration = TeamRegistration.objects.create(school_name="Example University", status="approved", school=school)
     EventTeamAssignment.objects.create(event=event, team=team, school=school, registration=registration)
 
     _edit(client, 4, "Other College")
@@ -97,7 +97,7 @@ def test_renaming_to_a_school_another_team_holds_is_refused(client, event):
 
 def test_school_with_a_team_in_the_event_is_refused(client, event):
     other = Team.objects.create(team_number=2, team_name="Team 02")
-    registration = TeamRegistration.objects.create(school_name="Example University", status="paid")
+    registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
     EventTeamAssignment.objects.create(
         event=event, team=other, school=School.for_name("Example University"), registration=registration
     )

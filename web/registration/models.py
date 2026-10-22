@@ -53,8 +53,6 @@ class TeamRegistration(models.Model):
     STATUS_CHOICES = [
         ("pending", "Pending Review"),
         ("approved", "Approved"),
-        ("paid", "Paid"),
-        ("credentials_sent", "Credentials Sent"),
         ("rejected", "Rejected"),
     ]
 
@@ -139,18 +137,7 @@ class Season(models.Model):
         self.is_active = True
 
 
-class EventQuerySet(models.QuerySet["Event"]):
-    def annotate_enrollment_count(self) -> EventQuerySet:
-        return self.annotate(enrollment_count=models.Count("enrollments"))
-
-
 class EventManager(models.Manager["Event"]):
-    def get_queryset(self) -> EventQuerySet:
-        return EventQuerySet(self.model, using=self._db)
-
-    def annotate_enrollment_count(self) -> EventQuerySet:
-        return self.get_queryset().annotate_enrollment_count()
-
     def open(self) -> Event | None:
         """The active event (the database allows one), with its season."""
         return self.filter(is_active=True).select_related("season").first()

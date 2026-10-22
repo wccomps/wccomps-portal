@@ -15,6 +15,7 @@ from core.admin_views.places import SetupSection, setup_url
 from core.authentik_manager import AuthentikManager
 from core.forms import ReadinessFixForm
 from core.models import CompetitionConfig
+from core.utils import ndjson_done
 from team.models import Team, team_username
 
 logger = logging.getLogger(__name__)
@@ -378,7 +379,7 @@ def stream_readiness_checks() -> Iterator[str]:
         msg = "All checks passed"
         success = True
 
-    yield json.dumps({"done": True, "success": success, "message": msg}) + "\n"
+    yield ndjson_done(msg, success=success)
 
 
 def _fix_group_membership(request: HttpRequest) -> JsonResponse:

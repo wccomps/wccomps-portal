@@ -163,10 +163,11 @@ class AuthentikRequiredMiddleware:
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
 
-        self.whitelist_prefixes = [
+        self.whitelist_prefixes = (
             "/static/",
-        ]
-        self.whitelist_exact = [
+            "/register/edit/",  # Token-based registration editing
+        )
+        self.whitelist_exact = {
             "/health/",  # Health check endpoint for monitoring
             "/livez/",  # Liveness probe (no database)
             "/register/",  # Public registration form
@@ -175,20 +176,11 @@ class AuthentikRequiredMiddleware:
             "/auth/logout/",
             "/auth/link",  # Discord account linking (token-based)
             "/admin/login/",  # sends a visitor to /auth/login/ with its own next (core.admin)
-        ]
-        self.whitelist_startswith = [
-            "/register/edit/",  # Token-based registration editing
-        ]
+        }
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        for prefix in self.whitelist_prefixes:
-            if request.path.startswith(prefix):
-                return self.get_response(request)
-        if request.path in self.whitelist_exact:
+        if request.path.startswith(self.whitelist_prefixes) or request.path in self.whitelist_exact:
             return self.get_response(request)
-        for prefix in self.whitelist_startswith:
-            if request.path.startswith(prefix):
-                return self.get_response(request)
 
         if not request.user.is_authenticated:
             return sign_in_answer(request)

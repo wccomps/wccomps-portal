@@ -40,7 +40,7 @@ def test_the_event_page_cannot_open_an_event(admin_client):
 def test_the_registration_page_cannot_change_the_school(admin_client):
     school = School.for_name("Example University")
     other = School.for_name("Other College")
-    registration = TeamRegistration.objects.create(school_name="Example University", status="paid", school=school)
+    registration = TeamRegistration.objects.create(school_name="Example University", status="approved", school=school)
     url = reverse("admin:registration_teamregistration_change", args=[registration.pk])
 
     page = admin_client.get(url).content.decode()

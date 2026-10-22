@@ -46,7 +46,6 @@ from team.models import LinkToken, SchoolInfo, Team
 from .auth_utils import (
     get_authentik_groups,
     get_authentik_id,
-    get_permissions_context,
     get_role_based_landing_url,
     require_permission,
     team_for_groups,
@@ -225,7 +224,6 @@ def school_info(request: HttpRequest) -> HttpResponse:
         "school_info.html",
         {
             "teams": teams_with_info,
-            "show_ops_nav": True,
         },
     )
 
@@ -256,7 +254,7 @@ def school_info_clear(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "school_info_clear.html",
-        {"count": count, "error": error, "show_ops_nav": True},
+        {"count": count, "error": error},
     )
 
 
@@ -278,7 +276,7 @@ def school_info_remove(request: HttpRequest, team_number: int) -> HttpResponse:
     return render(
         request,
         "school_info_remove.html",
-        {"school_info": school_info, "error": error, "show_ops_nav": True},
+        {"school_info": school_info, "error": error},
     )
 
 
@@ -337,7 +335,6 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
         {
             "team": team,
             "school_info": school_info,
-            "show_ops_nav": True,
         },
     )
 
@@ -439,7 +436,6 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)
     authentik_username = user.username
 
-    permissions = get_permissions_context(user)
     form = CSVUploadForm()
     preview_data: dict[str, object] | None = None
     import_results: dict[str, object] | None = None
@@ -493,7 +489,6 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
         request,
         "school_info_import.html",
         {
-            "authentik_username": authentik_username,
             "form": form,
             "active_season": season,
             "open_events": season.events.filter(is_finalized=False) if season else [],
@@ -501,8 +496,6 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
             "preview_data": preview_data,
             "import_results": import_results,
             "page_error": error,
-            "show_ops_nav": True,
-            **permissions,
         },
     )
 

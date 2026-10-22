@@ -79,8 +79,8 @@ def _shown():
 
 
 def _enrolled(event, school_name, *contacts):
-    """A paid registration enrolled in the event, with (role, email) contacts; a captain by default."""
-    registration = TeamRegistration.objects.create(school_name=school_name, status="paid")
+    """An approved registration enrolled in the event, with (role, email) contacts; a captain by default."""
+    registration = TeamRegistration.objects.create(school_name=school_name, status="approved")
     RegistrationEventEnrollment.objects.create(registration=registration, event=event)
     for role, email in contacts or [("captain", "captain@example.edu")]:
         RegistrationContact.objects.create(registration=registration, role=role, name=role, email=email)
@@ -166,7 +166,7 @@ def test_assign_teams_uses_the_first_contact_without_a_captain(gold_team_user, e
 
 def test_assign_teams_skips_a_registration_with_no_contact_email(gold_team_user, event):
     Team.objects.create(team_number=4, team_name="Team 04")
-    registration = TeamRegistration.objects.create(school_name="Example University", status="paid")
+    registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
     RegistrationEventEnrollment.objects.create(registration=registration, event=event)
     client = Client()
     client.force_login(gold_team_user)

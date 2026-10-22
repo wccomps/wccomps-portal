@@ -78,7 +78,7 @@ class TicketAdmin(PortalModelAdmin[Ticket]):
         "team",
         "category",
         "status",
-        "get_assigned_to_display",
+        "assigned_to",
         "points_charged",
         "created_at",
     ]
@@ -155,10 +155,6 @@ class TicketAdmin(PortalModelAdmin[Ticket]):
             team.refresh_from_db()
             obj.ticket_number = f"T{team.team_number:03d}-{team.ticket_counter:03d}"
         super().save_model(request, obj, form, change)
-
-    @admin.display(description="Assigned To")
-    def get_assigned_to_display(self, obj: Ticket) -> str:
-        return str(obj.assigned_to) if obj.assigned_to else ""
 
     @admin.action(description="Export selected tickets as CSV")
     def export_as_csv(self, request: HttpRequest, queryset: QuerySet[Ticket]) -> HttpResponse:

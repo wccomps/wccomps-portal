@@ -309,7 +309,7 @@ def build_world() -> World:
     )
 
     registrations = []
-    for status in ("pending", "paid", "approved"):
+    for status in ("pending", "approved", "rejected"):
         registration = TeamRegistration.objects.create(school_name=f"Registered {status}", status=status)
         RegistrationContact.objects.create(
             registration=registration, role="captain", name="Cap", email=f"{status}@example.edu"

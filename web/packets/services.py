@@ -173,7 +173,6 @@ class PacketDistributionService:
         team: Team,
         recipients: list[str],
         subject: str,
-        distribution: PacketDistribution | None = None,
     ) -> EmailMultiAlternatives:
         password = self._team_password(team)
         username = team_username(team.team_number)
@@ -188,8 +187,6 @@ class PacketDistributionService:
             "team_extras": team_extras,
             "portal_url": team_packet_url(),
         }
-        if distribution is not None:
-            context["distribution"] = distribution
 
         text_content = render_to_string("packets/emails/packet_notification.txt", context)
         html_content = render_to_string("packets/emails/packet_notification.html", context)
@@ -219,7 +216,6 @@ class PacketDistributionService:
             team,
             recipients,
             f"WCComps: {packet.title}",
-            distribution=distribution,
         )
         email.send(fail_silently=False)
 

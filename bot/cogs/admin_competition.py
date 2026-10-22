@@ -193,11 +193,7 @@ class AdminCompetitionCog(commands.Cog):
             return
 
         config = await sync_to_async(CompetitionConfig.get_config)()
-        error = (
-            config.schedule_error(start=scheduled_time)
-            if is_start
-            else config.schedule_error(end=scheduled_time)
-        )
+        error = config.schedule_error(start=scheduled_time) if is_start else config.schedule_error(end=scheduled_time)
         if error:
             await interaction.response.send_message(error, ephemeral=True)
             return
@@ -259,9 +255,7 @@ class AdminCompetitionCog(commands.Cog):
         timezone_name: str = "America/Los_Angeles",
     ) -> None:
         """Set competition start time for automatic application enabling."""
-        await self._set_competition_time(
-            interaction, datetime_str, timezone_name, is_start=True
-        )
+        await self._set_competition_time(interaction, datetime_str, timezone_name, is_start=True)
 
     @competition_group.command(
         name="set-end-time",
@@ -288,9 +282,7 @@ class AdminCompetitionCog(commands.Cog):
         timezone_name: str = "America/Los_Angeles",
     ) -> None:
         """Set competition end time for automatic application disabling."""
-        await self._set_competition_time(
-            interaction, datetime_str, timezone_name, is_start=False
-        )
+        await self._set_competition_time(interaction, datetime_str, timezone_name, is_start=False)
 
     @competition_group.command(
         name="start-competition",

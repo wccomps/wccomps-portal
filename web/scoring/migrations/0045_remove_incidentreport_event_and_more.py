@@ -6,8 +6,8 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('scoring', '0043_remove_redteamscore_contributors'),
-        ('team', '0017_discordlink_unique_active_non_team_user_link'),
+        ("scoring", "0044_remove_redteamscore_contributors"),
+        ("team", "0015_discordlink_forget_student_helper"),
     ]
 
     operations = [

@@ -3,7 +3,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("scoring", "0042_remove_servicescore_point_adjustments"),
+        ("scoring", "0043_alter_orangeteamscore_orange_check"),
     ]
 
     operations = [

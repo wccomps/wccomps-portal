@@ -265,7 +265,7 @@ def test_assign_teams_takes_the_lock_and_skips_non_free_teams(team):
     # Team 1 has a leftover ticket counter, so free_teams(event) excludes it; Team 2 is free.
     Team.objects.filter(pk=team.pk).update(ticket_counter=3)
     team2 = Team.objects.create(team_number=2, team_name="Team 02")
-    reg = TeamRegistration.objects.create(school_name="Cal Poly", status="paid")
+    reg = TeamRegistration.objects.create(school_name="Cal Poly", status="approved")
     RegistrationContact.objects.create(
         registration=reg, role="captain", name="Cap", email="cap@calpoly.edu", phone="555"
     )
