@@ -41,10 +41,13 @@ def test_schedule_ending_before_it_starts_is_refused(admin_client):
 
 
 @pytest.mark.parametrize(
-    ("action", "time"),
-    [("set_start_time", "2026-10-04T01:00"), ("set_end_time", "2026-10-03T15:00")],
+    "fields",
+    [
+        {"start_datetime": "2026-10-04T01:00", "start_timezone": "UTC"},
+        {"end_datetime": "2026-10-03T15:00", "end_timezone": "UTC"},
+    ],
 )
-def test_one_time_is_checked_against_the_stored_other(admin_client, action, time):
+def test_one_time_is_checked_against_the_stored_other(admin_client, fields):
     CompetitionConfig.objects.update_or_create(
         pk=1,
         defaults={
@@ -53,7 +56,7 @@ def test_one_time_is_checked_against_the_stored_other(admin_client, action, time
         },
     )
 
-    response = _post(admin_client, action, datetime=time, timezone="UTC")
+    response = _post(admin_client, "set_schedule", **fields)
 
     assert response.status_code == 400
     config = CompetitionConfig.get_config()

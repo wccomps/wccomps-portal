@@ -168,6 +168,72 @@ class AdminCompetitionCog(commands.Cog):
             ephemeral=True,
         )
 
+    async def _set_competition_time(
+        self,
+        interaction: discord.Interaction,
+        datetime_str: str,
+        timezone_name: str,
+        *,
+        is_start: bool,
+    ) -> None:
+        label = "Start" if is_start else "End"
+        label_lower = label.lower()
+        action_verb = "enabled" if is_start else "disabled"
+        example_hour = "09:00" if is_start else "17:00"
+        try:
+            scheduled_time = parse_datetime_to_utc(datetime_str, timezone_name)
+        except UnknownTimezoneError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+        except ValueError:
+            await interaction.response.send_message(
+                f"Invalid datetime format. Use: YYYY-MM-DDTHH:MM (e.g., 2025-01-15T{example_hour})",
+                ephemeral=True,
+            )
+            return
+
+        config = await sync_to_async(CompetitionConfig.get_config)()
+        error = (
+            config.schedule_error(start=scheduled_time)
+            if is_start
+            else config.schedule_error(end=scheduled_time)
+        )
+        if error:
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+
+        field_name = "competition_start_time" if is_start else "competition_end_time"
+        setattr(config, field_name, scheduled_time)
+        await config.asave(update_fields=[field_name])
+
+        audit_action = "competition_start_time_set" if is_start else "competition_end_time_set"
+        audit_key = "start_time" if is_start else "end_time"
+        await AuditLog.objects.acreate(
+            action=audit_action,
+            admin_user=str(interaction.user),
+            target_entity="competition_config",
+            target_id=config.pk,
+            details={
+                audit_key: scheduled_time.isoformat(),
+                "controlled_apps": config.controlled_applications,
+            },
+        )
+
+        await log_to_ops_channel(
+            self.bot,
+            f"Competition {label} Time Set by {interaction.user.mention}\n"
+            f"• {label} Time: {discord.utils.format_dt(scheduled_time, style='F')}\n"
+            f"• Controlled Apps: {', '.join(config.controlled_applications)}\n"
+            f"• Applications will be {action_verb} automatically at {label_lower} time",
+        )
+
+        await interaction.response.send_message(
+            f"Competition {label_lower} time set to: {discord.utils.format_dt(scheduled_time, style='F')}\n"
+            f"Controlled applications: {', '.join(config.controlled_applications)}\n\n"
+            f"Applications will be automatically {action_verb} at {label_lower} time.",
+            ephemeral=True,
+        )
+
     @competition_group.command(
         name="set-start-time",
         description="[ADMIN] Set competition start time (applications will be enabled automatically)",
@@ -193,50 +259,8 @@ class AdminCompetitionCog(commands.Cog):
         timezone_name: str = "America/Los_Angeles",
     ) -> None:
         """Set competition start time for automatic application enabling."""
-        try:
-            start_time = parse_datetime_to_utc(datetime_str, timezone_name)
-        except UnknownTimezoneError as e:
-            await interaction.response.send_message(str(e), ephemeral=True)
-            return
-        except ValueError:
-            await interaction.response.send_message(
-                "Invalid datetime format. Use: YYYY-MM-DDTHH:MM (e.g., 2025-01-15T09:00)",
-                ephemeral=True,
-            )
-            return
-
-        config = await sync_to_async(CompetitionConfig.get_config)()
-        if error := config.schedule_error(start=start_time):
-            await interaction.response.send_message(error, ephemeral=True)
-            return
-
-        config.competition_start_time = start_time
-        await config.asave(update_fields=["competition_start_time"])
-
-        await AuditLog.objects.acreate(
-            action="competition_start_time_set",
-            admin_user=str(interaction.user),
-            target_entity="competition_config",
-            target_id=config.pk,
-            details={
-                "start_time": start_time.isoformat(),
-                "controlled_apps": config.controlled_applications,
-            },
-        )
-
-        await log_to_ops_channel(
-            self.bot,
-            f"Competition Start Time Set by {interaction.user.mention}\n"
-            f"• Start Time: {discord.utils.format_dt(start_time, style='F')}\n"
-            f"• Controlled Apps: {', '.join(config.controlled_applications)}\n"
-            f"• Applications will be enabled automatically at start time",
-        )
-
-        await interaction.response.send_message(
-            f"Competition start time set to: {discord.utils.format_dt(start_time, style='F')}\n"
-            f"Controlled applications: {', '.join(config.controlled_applications)}\n\n"
-            f"Applications will be automatically enabled at start time.",
-            ephemeral=True,
+        await self._set_competition_time(
+            interaction, datetime_str, timezone_name, is_start=True
         )
 
     @competition_group.command(
@@ -264,50 +288,8 @@ class AdminCompetitionCog(commands.Cog):
         timezone_name: str = "America/Los_Angeles",
     ) -> None:
         """Set competition end time for automatic application disabling."""
-        try:
-            end_time = parse_datetime_to_utc(datetime_str, timezone_name)
-        except UnknownTimezoneError as e:
-            await interaction.response.send_message(str(e), ephemeral=True)
-            return
-        except ValueError:
-            await interaction.response.send_message(
-                "Invalid datetime format. Use: YYYY-MM-DDTHH:MM (e.g., 2025-01-15T17:00)",
-                ephemeral=True,
-            )
-            return
-
-        config = await sync_to_async(CompetitionConfig.get_config)()
-        if error := config.schedule_error(end=end_time):
-            await interaction.response.send_message(error, ephemeral=True)
-            return
-
-        config.competition_end_time = end_time
-        await config.asave(update_fields=["competition_end_time"])
-
-        await AuditLog.objects.acreate(
-            action="competition_end_time_set",
-            admin_user=str(interaction.user),
-            target_entity="competition_config",
-            target_id=config.pk,
-            details={
-                "end_time": end_time.isoformat(),
-                "controlled_apps": config.controlled_applications,
-            },
-        )
-
-        await log_to_ops_channel(
-            self.bot,
-            f"Competition End Time Set by {interaction.user.mention}\n"
-            f"• End Time: {discord.utils.format_dt(end_time, style='F')}\n"
-            f"• Controlled Apps: {', '.join(config.controlled_applications)}\n"
-            f"• Applications will be disabled automatically at end time",
-        )
-
-        await interaction.response.send_message(
-            f"Competition end time set to: {discord.utils.format_dt(end_time, style='F')}\n"
-            f"Controlled applications: {', '.join(config.controlled_applications)}\n\n"
-            f"Applications will be automatically disabled at end time.",
-            ephemeral=True,
+        await self._set_competition_time(
+            interaction, datetime_str, timezone_name, is_start=False
         )
 
     @competition_group.command(

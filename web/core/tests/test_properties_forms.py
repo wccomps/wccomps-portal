@@ -86,7 +86,6 @@ from core.forms import (
     SchoolInfoEditForm,
     SetMaxMembersForm,
     SetScheduleForm,
-    SetTimeForm,
     StartMessageForm,
     SyncRolesForm,
     TeamActionForm,
@@ -471,11 +470,6 @@ CASES = [
     ),
     # Adding an app asks Authentik about it; removing one is the same form and stores the same list
     FormCase(AppSlugForm, use=competition_action("remove_app")),
-    FormCase(
-        SetTimeForm,
-        hints=lambda w: {"datetime": _datetime_local(), "timezone": _tz_hint()},
-        use=competition_action("set_start_time"),
-    ),
     FormCase(
         SetScheduleForm,
         hints=lambda w: {

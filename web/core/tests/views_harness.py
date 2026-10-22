@@ -228,7 +228,6 @@ def build_world() -> World:
             notes="Seen <b>",
         )
         finding.affected_teams.set(teams[:2])
-        finding.contributors.add(users["red_team"])
         findings.append(finding)
     red_shot = RedTeamScreenshot.objects.create(
         finding=findings[0], file_data=b"\x89PNG\r\n\x1a\n", filename="s.png", mime_type="image/png"

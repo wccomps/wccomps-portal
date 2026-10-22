@@ -65,7 +65,6 @@ class RedTeamScoreAdmin(PortalModelAdmin[RedTeamScore]):
         "affected_boxes_display",
         "affected_service",
         "team_count",
-        "contributors_count",
         "points_per_team",
         "submitted_by",
         "created_at",
@@ -78,12 +77,12 @@ class RedTeamScoreAdmin(PortalModelAdmin[RedTeamScore]):
     def affected_boxes_display(self, obj: RedTeamScore) -> str:
         return format_boxes_display(obj.affected_boxes)
 
-    filter_horizontal = ["affected_teams", "contributors"]
+    filter_horizontal = ["affected_teams"]
     inlines = [RedTeamScreenshotInline]
     readonly_fields = ["created_at", "updated_at"]
 
     fieldsets = [
-        ("Submitted By", {"fields": ["submitted_by", "contributors"]}),
+        ("Submitted By", {"fields": ["submitted_by"]}),
         (
             "Attack Details",
             {
@@ -113,10 +112,6 @@ class RedTeamScoreAdmin(PortalModelAdmin[RedTeamScore]):
     @admin.display(description="Teams")
     def team_count(self, obj: RedTeamScore) -> int:
         return obj.affected_teams.count()
-
-    @admin.display(description="Contributors")
-    def contributors_count(self, obj: RedTeamScore) -> int:
-        return obj.contributors.count()
 
 
 class IncidentScreenshotInline(admin.TabularInline[IncidentScreenshot, IncidentReport]):

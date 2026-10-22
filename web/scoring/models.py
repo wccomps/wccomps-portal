@@ -235,12 +235,6 @@ class RedTeamScore(Approvable):
         null=True,
         related_name="red_scores_submitted",
     )
-    contributors = models.ManyToManyField(
-        User,
-        related_name="contributed_findings",
-        blank=True,
-        help_text="All red teamers who submitted matching findings",
-    )
 
     attack_type = models.ForeignKey(
         AttackType,
@@ -370,6 +364,16 @@ class RedTeamScore(Approvable):
     def affected_boxes_display(self) -> str:
         return format_boxes_display(self.affected_boxes)
 
+    OUTCOME_SPECS: tuple[tuple[str, int, str], ...] = (
+        ("privilege_escalation", 100, "Privilege Escalation"),
+        ("credentials_recovered", 50, "Credentials"),
+        ("sensitive_files_recovered", 25, "Sensitive Files"),
+        ("credit_cards_recovered", 50, "Credit Cards"),
+        ("pii_recovered", 200, "PII"),
+        ("encrypted_db_recovered", 25, "Encrypted DB"),
+        ("db_decrypted", 25, "DB Decrypted"),
+    )
+
     def calculate_points(self) -> Decimal:
         """Points each affected team loses, per CCDC guidelines, from the outcome checkboxes.
 
@@ -386,31 +390,13 @@ class RedTeamScore(Approvable):
         - DB decrypted: -25 (additional)
         """
         total = Decimal("0")
-
-        # Access level (only highest scored)
         if self.root_access:
             total += Decimal("100")
         elif self.user_access:
             total += Decimal("25")
-
-        # Privilege escalation is additional
-        if self.privilege_escalation:
-            total += Decimal("100")
-
-        # Data recovery outcomes (cumulative)
-        if self.credentials_recovered:
-            total += Decimal("50")
-        if self.sensitive_files_recovered:
-            total += Decimal("25")
-        if self.credit_cards_recovered:
-            total += Decimal("50")
-        if self.pii_recovered:
-            total += Decimal("200")
-        if self.encrypted_db_recovered:
-            total += Decimal("25")
-        if self.db_decrypted:
-            total += Decimal("25")
-
+        for field_name, pts, _label in self.OUTCOME_SPECS:
+            if getattr(self, field_name):
+                total += Decimal(pts)
         return total
 
     @property
@@ -420,20 +406,9 @@ class RedTeamScore(Approvable):
             outcomes.append("Root Access (-100)")
         elif self.user_access:
             outcomes.append("User Access (-25)")
-        if self.privilege_escalation:
-            outcomes.append("Privilege Escalation (-100)")
-        if self.credentials_recovered:
-            outcomes.append("Credentials (-50)")
-        if self.sensitive_files_recovered:
-            outcomes.append("Sensitive Files (-25)")
-        if self.credit_cards_recovered:
-            outcomes.append("Credit Cards (-50)")
-        if self.pii_recovered:
-            outcomes.append("PII (-200)")
-        if self.encrypted_db_recovered:
-            outcomes.append("Encrypted DB (-25)")
-        if self.db_decrypted:
-            outcomes.append("DB Decrypted (-25)")
+        for field_name, pts, label in self.OUTCOME_SPECS:
+            if getattr(self, field_name):
+                outcomes.append(f"{label} (-{pts})")
         return outcomes
 
 

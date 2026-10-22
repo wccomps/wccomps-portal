@@ -140,26 +140,10 @@ class DiscordLink(models.Model):
         return f"{self.discord_username} as {self.user.username}"
 
     @classmethod
-    def deactivate_previous_links(cls, discord_id: int, exclude_pk: int | None = None) -> int:
+    def deactivate_previous_links(cls, discord_id: int) -> int:
         """Deactivate this Discord user's active links (returns the count); call before creating a new link."""
-        qs = cls.objects.filter(discord_id=discord_id, is_active=True)
-        if exclude_pk:
-            qs = qs.exclude(pk=exclude_pk)
-        return qs.update(is_active=False, unlinked_at=timezone.now())
-
-    def save(
-        self,
-        *,
-        force_insert: bool | tuple[ModelBase, ...] = False,
-        force_update: bool = False,
-        using: str | None = None,
-        update_fields: Iterable[str] | None = None,
-    ) -> None:
-        super().save(
-            force_insert=force_insert,
-            force_update=force_update,
-            using=using,
-            update_fields=update_fields,
+        return cls.objects.filter(discord_id=discord_id, is_active=True).update(
+            is_active=False, unlinked_at=timezone.now()
         )
 
 
@@ -220,17 +204,6 @@ class LinkRateLimit(models.Model):
 
     def __str__(self) -> str:
         return f"Link attempt by {self.discord_id} at {self.attempted_at}"
-
-    @classmethod
-    def check_rate_limit(cls, discord_id: int) -> tuple[bool, int]:
-        """Check the 5-attempts-per-hour limit, returning (is_allowed, attempts_in_last_hour)."""
-        from datetime import timedelta
-
-        one_hour_ago = timezone.now() - timedelta(hours=1)
-
-        recent_attempts = cls.objects.filter(discord_id=discord_id, attempted_at__gte=one_hour_ago).count()
-
-        return recent_attempts < 5, recent_attempts
 
 
 class SchoolInfo(models.Model):
