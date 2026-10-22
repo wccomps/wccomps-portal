@@ -4,6 +4,8 @@ from datetime import timedelta
 from django.db import models
 from django.utils import timezone
 
+from core.models import Approvable
+
 
 def parse_playbook_steps(text: str) -> list[str]:
     """Parse multiline playbook text into individual steps.
@@ -52,7 +54,7 @@ class TicketCategory(models.Model):
         return self.display_name
 
 
-class Ticket(models.Model):
+class Ticket(Approvable):
     """Support ticket from team."""
 
     STATUS_OPEN = "open"
@@ -108,16 +110,6 @@ class Ticket(models.Model):
     resolved_at = models.DateTimeField(null=True, blank=True)
     resolution_notes = models.TextField(blank=True)
     points_charged = models.IntegerField(default=0)
-
-    is_approved = models.BooleanField(default=False)
-    approved_by = models.ForeignKey(
-        "auth.User",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="approved_tickets",
-    )
-    approved_at = models.DateTimeField(null=True, blank=True)
 
     discord_thread_id = models.BigIntegerField(unique=True, null=True, blank=True)
     thread_archive_scheduled_at = models.DateTimeField(null=True, blank=True)
@@ -228,7 +220,10 @@ class TicketHistory(models.Model):
 
 
 class CommentRateLimit(models.Model):
-    """Rate limiting for ticket comments (5/min per ticket, 10/min per user)."""
+    """Rate limiting for ticket comments (5/min per ticket, 10/min per user).
+
+    discord_id stores the caller's Discord user ID on bot comments and Django User.id on web comments.
+    """
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, null=True, blank=True)
     discord_id = models.BigIntegerField()
@@ -247,6 +242,7 @@ class CommentRateLimit(models.Model):
     def check_rate_limit(cls, ticket_id: int, discord_id: int) -> tuple[bool, str]:
         """Return (is_allowed, reason_if_blocked)."""
         one_minute_ago = timezone.now() - timedelta(minutes=1)
+        cls.objects.filter(posted_at__lt=one_minute_ago).delete()
 
         ticket_comments = cls.objects.filter(ticket_id=ticket_id, posted_at__gte=one_minute_ago).count()
 

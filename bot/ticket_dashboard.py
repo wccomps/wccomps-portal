@@ -79,12 +79,19 @@ class TicketActionView(discord.ui.View):
         self.ticket_id = ticket_id
 
     async def _get_ticket_id_from_interaction(self, interaction: discord.Interaction) -> int | None:
-        """Extract ticket ID from interaction message or instance variable."""
+        """Extract ticket ID from instance variable, thread channel, or interaction message."""
         import re
 
         # If instance has ticket_id, use it (for newly created views)
         if hasattr(self, "ticket_id") and self.ticket_id:
             return self.ticket_id
+
+        channel = getattr(interaction, "channel", None)
+        channel_id = getattr(channel, "id", None)
+        if isinstance(channel_id, int):
+            ticket = await Ticket.objects.filter(discord_thread_id=channel_id).afirst()
+            if ticket:
+                return ticket.id
 
         # Extract from message embed (for persistent views after bot restart)
         if interaction.message and interaction.message.embeds:

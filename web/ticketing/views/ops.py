@@ -5,7 +5,6 @@ from django.contrib.auth.models import User
 from django.db.models import Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
-from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import require_permission
@@ -87,13 +86,9 @@ def ops_batch_verify_tickets(request: HttpRequest) -> HttpResponse:
     """Bulk approve selected ticket points."""
     user = cast(User, request.user)
     authentik_username = user.username
-    now = timezone.now()
 
     def approve(ticket: Ticket) -> None:
-        ticket.is_approved = True
-        ticket.approved_by = user
-        ticket.approved_at = now
-        ticket.save(update_fields=["is_approved", "approved_by", "approved_at", "updated_at"])
+        ticket.approve(user)
         TicketHistory.objects.create(
             ticket=ticket,
             action="points_verified",

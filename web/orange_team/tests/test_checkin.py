@@ -36,7 +36,7 @@ class TestToggleCheckIn:
         client = Client()
         client.force_login(User.objects.get(username="orange1"))
         response = client.get("/orange-team/check-in/")
-        assert response.status_code == 302
+        assert response.status_code == 405
 
 
 class TestAdminToggleCheckIn:

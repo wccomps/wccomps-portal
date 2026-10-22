@@ -4,8 +4,8 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.utils import timezone
 
+from core.models import Approvable
 from core.utils import shorten
 
 
@@ -25,23 +25,6 @@ def validate_file_size(file: UploadedFile[bytes]) -> UploadedFile[bytes]:
 
         raise ValidationError(f"File size cannot exceed {max_size_mb}MB")
     return file
-
-
-class Approvable(models.Model):
-    """A submission that counts toward scores only once a reviewer approves it."""
-
-    is_approved = models.BooleanField(default=False)
-    approved_at = models.DateTimeField(null=True, blank=True)
-    approved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
-
-    class Meta:
-        abstract = True
-
-    def approve(self, user: User) -> None:
-        self.is_approved = True
-        self.approved_by = user
-        self.approved_at = timezone.now()
-        self.save(update_fields=["is_approved", "approved_by", "approved_at"])
 
 
 class ScoringTemplate(models.Model):

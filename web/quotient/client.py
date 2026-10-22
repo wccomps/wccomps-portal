@@ -14,8 +14,15 @@ from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
 _SERVICE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_INJECT_POINTS_RE = re.compile(r"\(\s*([\d,]+)\s*(?:pts?|points?)\s*\)", re.IGNORECASE)
 MAX_CHECK_OUTPUT_CHARS = 16_384
 _UNSAFE_OUTPUT_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+
+
+def inject_points(title: str) -> int | None:
+    """The point value embedded in a Quotient inject title, or None if it has none."""
+    match = _INJECT_POINTS_RE.search(title or "")
+    return int(match.group(1).replace(",", "")) if match else None
 
 
 def _is_unavailable(exc: BaseException | None) -> bool:
@@ -185,6 +192,11 @@ class Inject:
     inject_id: int
     title: str
     description: str
+    max_points: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.max_points is None:
+            self.max_points = inject_points(self.title)
 
 
 @dataclass

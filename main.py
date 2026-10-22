@@ -47,13 +47,21 @@ class PortalBot(commands.Bot):
         self.unified_dashboard: UnifiedDashboard | None = None
 
     def _get_command_hash(self) -> str:
-        """Hash cog source files to detect command changes."""
+        """Hash cog and command-parameter source files to detect command changes."""
         from pathlib import Path
 
-        cogs_dir = Path(__file__).parent / "bot" / "cogs"
+        root = Path(__file__).parent
+        cogs_dir = root / "bot" / "cogs"
+        tracked_files = [
+            *sorted(cogs_dir.glob("*.py")),
+            root / "bot" / "utils.py",
+            root / "web" / "ticketing" / "models.py",
+            root / "web" / "scoring" / "models.py",
+        ]
         hasher = hashlib.sha256()
-        for cog_file in sorted(cogs_dir.glob("*.py")):
-            hasher.update(cog_file.read_bytes())
+        for path in tracked_files:
+            if path.exists():
+                hasher.update(path.read_bytes())
         return hasher.hexdigest()[:16]
 
     async def _should_sync_commands(self) -> bool:

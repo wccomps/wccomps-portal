@@ -18,18 +18,16 @@ and went stale between events; these helpers recompute them from the live inputs
 """
 
 import logging
-import re
+from collections.abc import Sequence
 from decimal import Decimal
 from typing import Literal
 
 from orange_team.models import OrangeCheck
+from quotient.client import Inject, inject_points
 
 from scoring.models import ScoringTemplate, ServiceDetail
 
 logger = logging.getLogger(__name__)
-
-# The point value as organizers write it in a Quotient inject title: "(100 pts)", "(1,000 points)".
-_INJECT_POINTS_RE = re.compile(r"\(\s*([\d,]+)\s*(?:pts?|points?)\s*\)", re.IGNORECASE)
 
 # Below this uptime a single sample extrapolates too far via points/uptime to trust.
 _MIN_RELIABLE_UPTIME = Decimal("0.1")
@@ -37,19 +35,15 @@ _MIN_RELIABLE_UPTIME = Decimal("0.1")
 TemplateMaxField = Literal["service_max", "inject_max", "orange_max"]
 
 
-def inject_points(title: str) -> int | None:
-    """The point value embedded in an inject title, or None if it has none."""
-    match = _INJECT_POINTS_RE.search(title or "")
-    return int(match.group(1).replace(",", "")) if match else None
-
-
-def inject_max_from_titles(titles: list[str]) -> Decimal | None:
+def inject_max_from_titles(items: Sequence[Inject | str]) -> Decimal | None:
     """Sum of the per-inject point values, or None if any title lacks one.
 
     All-or-nothing on purpose: an inject with no parseable max still contributes its
     graded points to the total, so a partial sum would silently under-count.
     """
-    values = [(title, inject_points(title)) for title in titles]
+    values = [
+        (item.title, item.max_points) if isinstance(item, Inject) else (item, inject_points(item)) for item in items
+    ]
     missing = [title for title, points in values if points is None]
     if missing:
         logger.warning("inject_max not derived: %d inject title(s) have no point value: %s", len(missing), missing)

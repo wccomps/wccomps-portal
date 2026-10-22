@@ -78,7 +78,7 @@ def download_packet(request: HttpRequest, packet_id: int) -> HttpResponse:
 @require_permission("gold_team")
 def packets_list(request: HttpRequest) -> HttpResponse:
     """List all packets for GoldTeam administrators."""
-    packets = list(Packet.objects.all().order_by("-created_at"))
+    packets = list(Packet.objects.with_distribution_stats().order_by("-created_at"))
 
     # Active = draft or distributing (there's typically only one)
     active_packet: Packet | None = None
@@ -150,7 +150,7 @@ def upload_packet(request: HttpRequest) -> HttpResponse:
 @require_GET
 @require_permission("gold_team")
 def packet_detail(request: HttpRequest, packet_id: int) -> HttpResponse:
-    packet = get_object_or_404(Packet, id=packet_id)
+    packet = get_object_or_404(Packet.objects.with_distribution_stats(), id=packet_id)
 
     distributions = packet.distributions.select_related("team", "team__school_info").order_by("team__team_number")
     teams = Team.objects.filter(is_active=True).order_by("team_number")

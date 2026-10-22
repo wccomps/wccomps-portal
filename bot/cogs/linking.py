@@ -31,6 +31,7 @@ class LinkCheckResult:
 async def check_rate_limit(discord_id: int) -> tuple[bool, int]:
     """Check rate limit for link attempts. Returns (is_allowed, attempt_count)."""
     one_hour_ago = timezone.now() - timedelta(hours=RATE_LIMIT_WINDOW_HOURS)
+    await LinkRateLimit.objects.filter(attempted_at__lt=one_hour_ago).adelete()
     recent_attempts = await LinkRateLimit.objects.filter(discord_id=discord_id, attempted_at__gte=one_hour_ago).acount()
     return recent_attempts < RATE_LIMIT_MAX, recent_attempts
 

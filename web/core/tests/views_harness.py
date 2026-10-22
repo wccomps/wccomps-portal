@@ -286,9 +286,12 @@ def build_world() -> World:
         for criterion in criteria:
             OrangeAssignmentResult.objects.create(assignment=assignment, criterion=criterion)
     OrangeCheckIn.objects.create(user=users["orange_team"])
-    followup = OrangeFollowUp.objects.create(
-        user=users["orange_team"], assignment=assignments[0], remind_at=timezone.now(), note="Call back"
-    )
+    followups = [
+        OrangeFollowUp.objects.create(
+            user=assignment.user, assignment=assignment, remind_at=timezone.now(), note="Call back"
+        )
+        for assignment in (assignments[0], assignments[3], assignments[4], assignments[5])
+    ]
     orange_score = OrangeTeamScore.objects.create(
         team=teams[0], submitted_by=users["orange_team"], description="Answered", points_awarded=5
     )
@@ -342,7 +345,7 @@ def build_world() -> World:
         "check_id": [check.pk, plain.pk],
         "criterion_id": [c.pk for c in criteria],
         "assignment_id": [a.pk for a in assignments],
-        "followup_id": [followup.pk],
+        "followup_id": [f.pk for f in followups],
         "orange_score_id": [orange_score.pk],
         "packet_id": [packet.pk, draft.pk],
         "registration_id": [r.pk for r in registrations],

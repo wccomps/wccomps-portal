@@ -19,12 +19,10 @@ from bot.thread_creator import publish_new_ticket
 from bot.ticket_dashboard import trigger_dashboard
 from bot.utils import (
     add_field,
-    announcement,
     recycle_db_connection,
     send_announcement,
     send_parts,
     split_message,
-    team_chat_channel,
 )
 from core.discord_tasks import (
     PAYLOAD_TYPES,
@@ -442,8 +440,8 @@ class DiscordQueueProcessor:
 
     async def _handle_broadcast_message(self, payload: BroadcastMessage) -> dict[str, object]:
         """Broadcast a message to announcement channel or team channels."""
+        from bot.competition_actions import deliver_team_broadcast
         from bot.utils import log_to_ops_channel
-        from core.authentik_utils import parse_team_range
 
         target = payload.target
         message = payload.message
@@ -467,37 +465,11 @@ class DiscordQueueProcessor:
             await send_announcement(guild, channel, message)
             sent_count = 1
             logger.info(f"Broadcast to announcements by {sender}")
-
-        elif target_lower == "all-teams":
-            teams = [t async for t in Team.objects.filter(is_active=True).order_by("team_number")]
-            for team in teams:
-                result = await self._send_to_team_channel(guild, team, message, sender)
-                if result == "sent":
-                    sent_count += 1
-                elif result == "queued":
-                    queued_count += 1
-                else:
-                    failed_channels.append(f"Team {team.team_number:02d}")
-
         else:
             try:
-                team_numbers = parse_team_range(target)
+                sent_count, queued_count, failed_channels = await deliver_team_broadcast(guild, target, message, sender)
             except ValueError as e:
                 raise ValueError(f"Invalid team range: {e}") from e
-
-            for team_number in team_numbers:
-                found_team = await Team.objects.filter(team_number=team_number).afirst()
-                if not found_team:
-                    failed_channels.append(f"Team {team_number:02d} (not found)")
-                    continue
-
-                result = await self._send_to_team_channel(guild, found_team, message, sender)
-                if result == "sent":
-                    sent_count += 1
-                elif result == "queued":
-                    queued_count += 1
-                else:
-                    failed_channels.append(f"Team {team_number:02d}")
 
         await log_to_ops_channel(
             self.bot,
@@ -506,23 +478,3 @@ class DiscordQueueProcessor:
 
         logger.info(f"Broadcast complete: sent={sent_count}, queued={queued_count}, failed={len(failed_channels)}")
         return {"sent_count": sent_count, "queued_count": queued_count, "failed_count": len(failed_channels)}
-
-    async def _send_to_team_channel(self, guild: discord.Guild, team: Team, message: str, sender: str) -> str:
-        """Send message to a team's chat channel. Returns 'sent', 'queued', or 'failed'."""
-        from core.models import QueuedAnnouncement
-
-        try:
-            chat_channel = team_chat_channel(guild, team)
-            if chat_channel:
-                await send_parts(chat_channel, announcement(sender, message))
-                return "sent"
-            else:
-                await QueuedAnnouncement.objects.acreate(
-                    team=team,
-                    message=message,
-                    sender_name=sender,
-                )
-                return "queued"
-        except Exception as e:
-            logger.exception(f"Failed to send to team {team.team_number}: {e}")
-            return "failed"
