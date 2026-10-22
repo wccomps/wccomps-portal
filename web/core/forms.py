@@ -102,11 +102,6 @@ class AppSlugForm(forms.Form):
         return str(self.cleaned_data["app_slug"]).lower()
 
 
-class SetTimeForm(forms.Form):
-    datetime = forms.CharField()
-    timezone = forms.CharField(initial="America/Los_Angeles")
-
-
 class SetScheduleForm(forms.Form):
     start_datetime = forms.CharField(required=False)
     start_timezone = forms.CharField(required=False, initial="America/Los_Angeles")

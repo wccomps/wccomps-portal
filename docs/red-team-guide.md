@@ -83,12 +83,4 @@ You can also create a new pool on the fly from the submission form using the "Cr
 
 ## API / Scripted Submissions
 
-There is no dedicated REST API for submitting findings — submission is form-based and requires browser authentication with CSRF tokens.
-
-If you have existing scripts using legacy field names, the following mappings are supported:
-
-| Legacy field | Current field |
-|---|---|
-| `attack_vector` | `attack_type` |
-| `affected_box` | `affected_boxes` |
-| `target_teams` | `affected_teams` |
+There is no dedicated REST API for submitting findings. Submission is form-based and requires browser authentication with CSRF tokens.

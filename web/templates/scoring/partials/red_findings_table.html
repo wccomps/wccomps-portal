@@ -131,15 +131,6 @@
                                 Delete
                             </c-button>
                         </c-form>
-                    {% elif user in finding.contributors.all and finding.submitted_by != user and not finding.is_approved %}
-                        <c-form action="{% url 'scoring:leave_red_score' finding.id %}"
-                                class="d-inline"
-                                data-confirm="Remove yourself from this finding?">
-                            {% csrf_token %}
-                            <c-button type="submit" variant="danger">
-                                Leave
-                            </c-button>
-                        </c-form>
                     {% endif %}
                 </td>
             </tr>

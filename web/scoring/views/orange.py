@@ -75,11 +75,6 @@ def review_orange(request: HttpRequest) -> HttpResponse:
     return render(request, "scoring/review_orange.html", context)
 
 
-def submit_orange_check(request: HttpRequest) -> HttpResponse:
-    """Redirect to the orange team dashboard."""
-    return redirect("orange_team:dashboard")
-
-
 @require_permission("orange_team", error_message="Only Orange Team or Gold Team members can approve checks")
 @transaction.atomic
 @require_http_methods(["POST"])

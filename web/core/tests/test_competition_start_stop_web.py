@@ -75,7 +75,7 @@ def test_setting_a_start_time_mid_competition_keeps_it_running(admin_client):
         pk=1, defaults={"controlled_applications": ["scoring"], "applications_enabled": True}
     )
 
-    _post(admin_client, "set_start_time", datetime="2030-01-01T09:00", timezone="UTC")
+    _post(admin_client, "set_schedule", start_datetime="2030-01-01T09:00", start_timezone="UTC")
 
     config = CompetitionConfig.get_config()
     assert config.applications_enabled

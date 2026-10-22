@@ -51,7 +51,6 @@ from core.forms import (
     CloseOutForm,
     ResetPasswordsForm,
     SetMaxMembersForm,
-    SetTimeForm,
     StartMessageForm,
     TypedConfirmForm,
 )
@@ -158,68 +157,6 @@ def _action_add_app(request: HttpRequest, config: CompetitionConfig, authentik_u
 
 def _action_remove_app(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
     return _edit_controlled_app(request, config, authentik_username, add=False)
-
-
-def _action_set_start_time(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
-    form = SetTimeForm(request.POST)
-    if not form.is_valid():
-        raise BadRequest("Please provide a datetime")
-
-    datetime_str = form.cleaned_data["datetime"]
-    tz_name = form.cleaned_data["timezone"]
-
-    try:
-        start_time = parse_datetime_to_utc(datetime_str, tz_name)
-        if error := config.schedule_error(start=start_time):
-            raise BadRequest(error)
-
-        config.competition_start_time = start_time
-        config.save()
-
-        AuditLog.objects.create(
-            action="competition_start_time_set",
-            admin_user=authentik_username,
-            target_entity="competition_config",
-            target_id=config.pk,
-            details={"start_time": start_time.isoformat(), "controlled_apps": config.controlled_applications},
-        )
-
-        return JsonResponse({"success": True, "message": f"Start time set to {start_time.isoformat()}"})
-    except UnknownTimezoneError as e:
-        raise BadRequest(str(e)) from e
-    except ValueError:
-        raise BadRequest("Invalid datetime format") from None
-
-
-def _action_set_end_time(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
-    form = SetTimeForm(request.POST)
-    if not form.is_valid():
-        raise BadRequest("Please provide a datetime")
-
-    datetime_str = form.cleaned_data["datetime"]
-    tz_name = form.cleaned_data["timezone"]
-
-    try:
-        end_time = parse_datetime_to_utc(datetime_str, tz_name)
-        if error := config.schedule_error(end=end_time):
-            raise BadRequest(error)
-
-        config.competition_end_time = end_time
-        config.save()
-
-        AuditLog.objects.create(
-            action="competition_end_time_set",
-            admin_user=authentik_username,
-            target_entity="competition_config",
-            target_id=config.pk,
-            details={"end_time": end_time.isoformat(), "controlled_apps": config.controlled_applications},
-        )
-
-        return JsonResponse({"success": True, "message": f"End time set to {end_time.isoformat()}"})
-    except UnknownTimezoneError as e:
-        raise BadRequest(str(e)) from e
-    except ValueError:
-        raise BadRequest("Invalid datetime format") from None
 
 
 def _action_set_schedule(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
@@ -481,8 +418,6 @@ _COMPETITION_ACTION_HANDLERS = {
     "set_start_message": _action_set_start_message,
     "add_app": _action_add_app,
     "remove_app": _action_remove_app,
-    "set_start_time": _action_set_start_time,
-    "set_end_time": _action_set_end_time,
     "set_schedule": _action_set_schedule,
     "start_competition": _action_start_competition,
     "stop_competition": _action_stop_competition,

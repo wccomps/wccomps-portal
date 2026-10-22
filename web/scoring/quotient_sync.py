@@ -202,24 +202,9 @@ def get_box_choices() -> list[tuple[str, str]]:
     return []
 
 
-def get_service_choices(box_name: str | None = None) -> list[tuple[str, str]]:
-    """Service dropdown choices from cached metadata, limited to box_name's services when given."""
+def get_service_choices() -> list[tuple[str, str]]:
+    """Service dropdown choices from cached metadata."""
     metadata = QuotientMetadataCache.objects.first()
     if not metadata:
         return []
-
-    if box_name:
-        for box in metadata.boxes:
-            if box["name"] == box_name:
-                return [(s["name"], s["display_name"] or s["name"]) for s in box["services"]]
-        return []
-    else:
-        return [(s["name"], s["display_name"] or s["name"]) for s in metadata.services]
-
-
-def get_cached_team_count() -> int:
-    """Team count from the last Quotient sync, or 50 if never synced."""
-    metadata = QuotientMetadataCache.objects.first()
-    if metadata and metadata.team_count > 0:
-        return metadata.team_count
-    return 50
+    return [(s["name"], s["display_name"] or s["name"]) for s in metadata.services]

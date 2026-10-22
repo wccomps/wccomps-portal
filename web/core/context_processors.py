@@ -41,7 +41,6 @@ NAV_MAPPING: dict[str, tuple[str, str]] = {
     "red_team_scores": ("red_findings", "findings"),
     "view_red_score": ("red_findings", "findings"),
     "delete_red_score": ("red_findings", "findings"),
-    "leave_red_score": ("red_findings", "findings"),
     "ip_pool_list": ("red_findings", "pools"),
     "ip_pool_create": ("red_findings", "pools"),
     "ip_pool_edit": ("red_findings", "pools"),
