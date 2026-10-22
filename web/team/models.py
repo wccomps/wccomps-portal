@@ -127,6 +127,11 @@ class DiscordLink(models.Model):
                 condition=models.Q(is_active=True),
                 name="team_unique_active_discord_link",
             ),
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(is_active=True, team__isnull=True),
+                name="team_unique_active_non_team_user_link",
+            ),
         ]
 
     def __str__(self) -> str:

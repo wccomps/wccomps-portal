@@ -10,6 +10,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from bot.heartbeat import record as record_heartbeat
+from bot.permissions import has_permission
 from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, add_field, fit_lines, recycle_db_connection
 from core.models import BotState
 from core.utils import shorten
@@ -320,6 +321,28 @@ class DashboardControlView(discord.ui.View):
         super().__init__(timeout=None)
         self.dashboard = dashboard
 
+    async def _apply(
+        self,
+        interaction: discord.Interaction,
+        message: str,
+        *,
+        sort_by: str | None = None,
+        filter_status: str | None = None,
+    ) -> None:
+        if not await has_permission(interaction.user.id, "ticketing_support"):
+            await interaction.response.send_message(
+                "You do not have permission to change the ticket queue view.",
+                ephemeral=True,
+            )
+            return
+        if sort_by is not None:
+            self.dashboard.sort_by = sort_by
+        if filter_status is not None:
+            self.dashboard.filter_status = filter_status
+        await interaction.response.defer(ephemeral=True)
+        await self.dashboard._update_dashboard()
+        await interaction.followup.send(message, ephemeral=True)
+
     @discord.ui.button(
         label="Sort: Created",
         style=discord.ButtonStyle.secondary,
@@ -329,9 +352,7 @@ class DashboardControlView(discord.ui.View):
     async def sort_created(
         self, interaction: discord.Interaction, button: discord.ui.Button[DashboardControlView]
     ) -> None:
-        self.dashboard.sort_by = "created"
-        await self.dashboard._update_dashboard()
-        await interaction.response.send_message("Sorted by creation time", ephemeral=True)
+        await self._apply(interaction, "Sorted by creation time", sort_by="created")
 
     @discord.ui.button(
         label="Sort: Stale",
@@ -343,9 +364,7 @@ class DashboardControlView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button[DashboardControlView]
     ) -> None:
         """Sort by stale (oldest assigned first)."""
-        self.dashboard.sort_by = "stale"
-        await self.dashboard._update_dashboard()
-        await interaction.response.send_message("Sorted by stale (oldest assigned first)", ephemeral=True)
+        await self._apply(interaction, "Sorted by stale (oldest assigned first)", sort_by="stale")
 
     @discord.ui.button(
         label="Sort: Team",
@@ -356,9 +375,7 @@ class DashboardControlView(discord.ui.View):
     async def sort_team(
         self, interaction: discord.Interaction, button: discord.ui.Button[DashboardControlView]
     ) -> None:
-        self.dashboard.sort_by = "team"
-        await self.dashboard._update_dashboard()
-        await interaction.response.send_message("Sorted by team name", ephemeral=True)
+        await self._apply(interaction, "Sorted by team name", sort_by="team")
 
     @discord.ui.button(
         label="Filter: All",
@@ -369,9 +386,7 @@ class DashboardControlView(discord.ui.View):
     async def filter_all(
         self, interaction: discord.Interaction, button: discord.ui.Button[DashboardControlView]
     ) -> None:
-        self.dashboard.filter_status = "all"
-        await self.dashboard._update_dashboard()
-        await interaction.response.send_message("Showing all active tickets", ephemeral=True)
+        await self._apply(interaction, "Showing all active tickets", filter_status="all")
 
     @discord.ui.button(
         label="Filter: Open",
@@ -382,9 +397,7 @@ class DashboardControlView(discord.ui.View):
     async def filter_open(
         self, interaction: discord.Interaction, button: discord.ui.Button[DashboardControlView]
     ) -> None:
-        self.dashboard.filter_status = "open"
-        await self.dashboard._update_dashboard()
-        await interaction.response.send_message("Showing only open tickets", ephemeral=True)
+        await self._apply(interaction, "Showing only open tickets", filter_status="open")
 
     @discord.ui.button(
         label="Filter: Claimed",
@@ -395,6 +408,4 @@ class DashboardControlView(discord.ui.View):
     async def filter_claimed(
         self, interaction: discord.Interaction, button: discord.ui.Button[DashboardControlView]
     ) -> None:
-        self.dashboard.filter_status = "claimed"
-        await self.dashboard._update_dashboard()
-        await interaction.response.send_message("Showing only claimed tickets", ephemeral=True)
+        await self._apply(interaction, "Showing only claimed tickets", filter_status="claimed")

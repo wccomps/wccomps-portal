@@ -40,6 +40,7 @@ class SetupTeamInfrastructure:
     task_type: ClassVar = "setup_team_infrastructure"
     label: ClassVar = "Setup Team Infrastructure"
     team_number: int
+    recreate: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)

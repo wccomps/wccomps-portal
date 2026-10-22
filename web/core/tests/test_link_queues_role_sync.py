@@ -30,7 +30,7 @@ def test_active_team_is_set_up_before_the_member_is_synced():
     team = Team.objects.create(team_number=9, team_name="Team 09")
 
     assert _link(team) == [
-        ("setup_team_infrastructure", {"team_number": 9}),
+        ("setup_team_infrastructure", {"team_number": 9, "recreate": False}),
         ("sync_member_roles", {"discord_id": 4242}),
     ]
 

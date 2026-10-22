@@ -52,12 +52,10 @@ def test_a_question_answered_yes_posts(team_page):
 
     page.on("dialog", accept)
     with (
-        patch("core.admin_views.teams.reset_team_password", return_value=("Team-Pass-7!", "")),
-        patch("core.admin_views.teams.AuthentikManager") as manager,
+        patch("core.admin_views.teams.reset_team_credentials", return_value=("Team-Pass-7!", "", True)),
+        page.expect_response(lambda r: r.url.endswith("/action/")),
     ):
-        manager.return_value.revoke_user_sessions.return_value = (True, None, 1)
-        with page.expect_response(lambda r: r.url.endswith("/action/")):
-            page.get_by_role("button", name="Reset Team").click()
+        page.get_by_role("button", name="Reset Team").click()
     assert questions == [
         "Reset this team? This unlinks all members, generates a new Authentik password and revokes all active "
         "sessions. It cannot be undone."

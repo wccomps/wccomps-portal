@@ -1,7 +1,6 @@
 """Shared competition actions for commands and timer."""
 
 import logging
-import re
 from collections.abc import Callable
 
 import discord
@@ -10,6 +9,7 @@ from django.db import connection
 from django.utils import timezone
 from scoring.models import QuotientMetadataCache
 
+from bot.discord_manager import delete_team_infrastructure
 from bot.utils import log_to_ops_channel
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.services.competition import CompetitionRunResult, run_competition_to_completion
@@ -78,7 +78,7 @@ def _build_status_embed(config: CompetitionConfig) -> discord.Embed:
     if config.applications_enabled:
         status = "RUNNING"
         color = discord.Color.green()
-    elif config.competition_start_time:
+    elif config.schedule_will_start():
         status = "SCHEDULED"
         color = discord.Color.blue()
     else:
@@ -190,26 +190,20 @@ async def run_competition_cleanup(
             deactivated = await _deactivate_team_links(actor)
             await log_to_ops_channel(bot, f"Deactivated {deactivated} team member links")
 
-        deleted_count = 0
-        for category in guild.categories:
-            match = re.match(r"^team\s*(\d+)$", category.name, re.IGNORECASE)
-            if match:
-                try:
-                    for channel in category.channels:
-                        await channel.delete(reason="Competition cleanup")
-                    await category.delete(reason="Competition cleanup")
-                    deleted_count += 1
-                    logger.info(f"Deleted {category.name}")
-                except Exception as e:
-                    logger.exception(f"Failed to delete {category.name}: {e}")
-
-        await log_to_ops_channel(bot, f"Deleted {deleted_count} team categories")
-
         from bot.role_sync import sync_roles
 
         # Before the role IDs are cleared: afterwards the sync no longer counts team roles as its own
         stats = await sync_roles(guild)
         await log_to_ops_channel(bot, f"Removed {stats['roles_removed']} roles from members who are no longer linked")
+
+        deleted_count = 0
+        async for team in Team.objects.all().order_by("team_number"):
+            if team.discord_category_id or team.discord_role_id:
+                removed = await delete_team_infrastructure(guild, team, reason="Competition cleanup")
+                if any(item.startswith("category") for item in removed):
+                    deleted_count += 1
+
+        await log_to_ops_channel(bot, f"Deleted {deleted_count} team categories")
 
         await Team.objects.all().aupdate(discord_category_id=None, discord_role_id=None)
 

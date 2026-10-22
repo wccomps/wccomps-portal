@@ -51,11 +51,7 @@ def test_reset_team_keeps_the_password_up_and_hides_the_unlinked_members(live_se
     page.on("dialog", lambda dialog: dialog.accept())
 
     try:
-        with (
-            patch("core.admin_views.teams.reset_team_password", return_value=("Team-Pass-7!", "")),
-            patch("core.admin_views.teams.AuthentikManager") as manager,
-        ):
-            manager.return_value.revoke_user_sessions.return_value = (True, None, 1)
+        with patch("core.admin_views.teams.reset_team_credentials", return_value=("Team-Pass-7!", "", True)):
             page.goto(live_server.url + reverse("admin_team_detail", args=[8]))
             assert page.get_by_text("memberdiscord").is_visible()
             with page.expect_response(lambda r: r.url.endswith("/action/")):

@@ -207,7 +207,7 @@ CASES: list[BotCase] = [
     Item("button", TicketActionView.resolve_button, ticket_view, STAFF, message=ticket_message),
     Item("button", TicketActionView.cancel_button, ticket_view, STAFF | TEAM_MEMBERS, message=ticket_message),
     *(
-        Item("button", getattr(DashboardControlView, name), dashboard_view, EVERYONE)
+        Item("button", getattr(DashboardControlView, name), dashboard_view, STAFF)
         for name in ("sort_created", "sort_stale", "sort_team", "filter_all", "filter_open", "filter_claimed")
     ),
     Item("button", ConfirmButton, confirm_view, ADMIN | TICKETING_ADMIN, reached_by=ADMIN | TICKETING_ADMIN),

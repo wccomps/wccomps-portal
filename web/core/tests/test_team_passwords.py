@@ -65,11 +65,7 @@ def test_web_unlink_queues_a_role_sync_for_the_member(admin_user, action):
     client = Client()
     client.force_login(admin_user)
 
-    with (
-        patch("core.admin_views.teams.reset_team_password", return_value=("pw", "")),
-        patch("core.admin_views.teams.AuthentikManager") as manager,
-    ):
-        manager.return_value.revoke_user_sessions.return_value = (True, "", 0)
+    with patch("core.admin_views.teams.reset_team_credentials", return_value=("pw", "", True)):
         client.post(reverse("admin_team_action", args=[8]), {"action": action, "discord_id": 4242})
 
     task = DiscordTask.objects.get(task_type="sync_member_roles")

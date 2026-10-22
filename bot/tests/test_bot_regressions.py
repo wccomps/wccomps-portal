@@ -276,7 +276,7 @@ def test_a_thread_attachment_is_stored_as_a_web_upload_is(
     assert "ticketing_ticketattachment" in run.written
 
 
-DASHBOARD = Item("button", DashboardControlView.sort_created, dashboard_view, EVERYONE)
+DASHBOARD = Item("button", DashboardControlView.sort_created, dashboard_view, may("ticketing_support"))
 TICKET_LIST = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_list.callback, may("ticketing_support"))
 TEAM_LIST = Command(AdminTeamsCog, AdminTeamsCog.admin_teams.callback, may("admin"))
 TEAM_INFO = Command(AdminTeamsCog, AdminTeamsCog.admin_team_info.callback, may("admin"))

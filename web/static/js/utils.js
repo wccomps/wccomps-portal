@@ -71,18 +71,33 @@ async function wcStream(url, data, onProgress, onDone) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let sawDone = false;
+    const handleLine = (line) => {
+        if (!line.trim()) return;
+        const msg = JSON.parse(line);
+        if (msg.done) {
+            sawDone = true;
+            onDone(msg);
+        } else {
+            onProgress(msg);
+        }
+    };
     while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+            buffer += decoder.decode();
+            handleLine(buffer);
+            break;
+        }
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop();
         for (const line of lines) {
-            if (!line.trim()) continue;
-            const msg = JSON.parse(line);
-            if (msg.done) onDone(msg);
-            else onProgress(msg);
+            handleLine(line);
         }
+    }
+    if (!sawDone) {
+        throw new Error('Stream ended unexpectedly');
     }
 }
 

@@ -20,15 +20,22 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 def _guild(*category_names: str) -> MagicMock:
     guild = MagicMock(spec=discord.Guild)
     categories = []
-    for name in category_names:
+    for idx, name in enumerate(category_names):
         category = MagicMock(spec=discord.CategoryChannel)
+        category.id = 22 if idx == 0 else 100 + idx
         category.name = name
         category.channels = [AsyncMock(spec=discord.TextChannel)]
         category.delete = AsyncMock()
         categories.append(category)
     guild.categories = categories
-    guild.roles = []
-    guild.get_role.return_value = None
+    by_id = {c.id: c for c in categories}
+    guild.get_channel.side_effect = by_id.get
+    role = MagicMock(spec=discord.Role)
+    role.id = 11
+    role.name = "Team 03"
+    role.delete = AsyncMock()
+    guild.roles = [role]
+    guild.get_role.side_effect = lambda role_id: role if role_id == 11 else None
     return guild
 
 
