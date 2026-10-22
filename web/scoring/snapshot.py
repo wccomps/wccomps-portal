@@ -49,7 +49,6 @@ def serialize_scorecard(context: dict[str, object]) -> dict[str, object]:
         "red_scores": [
             {
                 "attack_type": {"name": finding.attack_type.name} if finding.attack_type else None,
-                "attack_vector": finding.attack_vector,
                 "affected_boxes_display": finding.affected_boxes_display,
                 "affected_service": finding.affected_service,
                 "outcomes_display": finding.outcomes_display,

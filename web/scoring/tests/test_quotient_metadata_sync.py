@@ -28,7 +28,7 @@ def test_metadata_sync_derives_inject_max():
     ScoringTemplate.objects.create(
         service_weight=Decimal("40"), inject_weight=Decimal("40"), orange_weight=Decimal("20"), inject_max=Decimal("1")
     )
-    infra = MagicMock(boxes=[], event_name="Event", team_count=5)
+    infra = MagicMock(boxes=[])
     injects = [MagicMock(title="Inject 00 (100 pts)"), MagicMock(title="Inject 01 (155 pts)")]
 
     with patch("scoring.quotient_sync.QuotientClient") as client:
@@ -47,7 +47,7 @@ def test_a_sync_from_the_portal_records_who_ran_it(admin_user, data):
     client = Client()
     client.force_login(admin_user)
     with patch("scoring.quotient_sync.QuotientClient") as quotient:
-        quotient.return_value.get_infrastructure.return_value = MagicMock(boxes=[], event_name="Event", team_count=5)
+        quotient.return_value.get_infrastructure.return_value = MagicMock(boxes=[])
         quotient.return_value.get_injects.return_value = []
         response = client.post(reverse("admin_competition_action"), data)
 

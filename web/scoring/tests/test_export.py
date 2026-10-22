@@ -55,7 +55,6 @@ def red_team_findings(test_teams, admin_user):
 
     # Finding 1: Approved, affecting teams 1 and 2
     finding1 = RedTeamScore.objects.create(
-        attack_vector="SQL Injection in login form",
         source_ip="10.0.0.1",
         destination_ip_template="10.100.1X.22",
         affected_boxes=["WebServer"],
@@ -74,7 +73,6 @@ def red_team_findings(test_teams, admin_user):
 
     # Finding 2: Not approved, affecting team 3
     finding2 = RedTeamScore.objects.create(
-        attack_vector="XSS in comments",
         source_ip="10.0.0.2",
         destination_ip_template="10.100.1X.80",
         affected_boxes=["AppServer"],
@@ -113,7 +111,6 @@ def incident_reports(test_teams, admin_user, red_team_findings):
         submitted_by=admin_user,
         approved_by=admin_user,
         approved_at=timezone.now(),
-        evidence_notes="Found in access logs",
     )
     incidents.append(incident1)
 
@@ -181,7 +178,6 @@ def inject_grades(test_teams, admin_user):
         approved_at=timezone.now(),
         approved_by=admin_user,
         graded_by=admin_user,
-        notes="Well documented plan",
     )
     grades.append(grade1)
 
@@ -194,7 +190,6 @@ def inject_grades(test_teams, admin_user):
         points_awarded=Decimal("70.00"),
         is_approved=False,
         graded_by=admin_user,
-        notes="Missing key components",
     )
     grades.append(grade2)
 
@@ -302,7 +297,6 @@ class TestRedFindingsExport:
 
         required_headers = [
             "ID",
-            "Attack Vector",
             "Source IP",
             "Destination IP Template",
             "Affected Boxes",
@@ -334,7 +328,7 @@ class TestRedFindingsExport:
         assert len(rows) == 2, "Should have 2 findings"
 
         # Find SQL injection finding
-        sql_finding = next((r for r in rows if "SQL Injection" in r["Attack Vector"]), None)
+        sql_finding = next((r for r in rows if r["Source IP"] == "10.0.0.1"), None)
         assert sql_finding is not None, "SQL Injection finding not found"
         assert sql_finding["Source IP"] == "10.0.0.1"
         assert sql_finding["Affected Boxes"] == "WebServer"
@@ -395,7 +389,6 @@ class TestRedFindingsExport:
 
         required_fields = [
             "id",
-            "attack_vector",
             "source_ip",
             "destination_ip_template",
             "affected_boxes",
@@ -424,7 +417,7 @@ class TestRedFindingsExport:
         findings = data["red_findings"]
 
         # Find SQL injection finding
-        sql_finding = next((f for f in findings if "SQL Injection" in f["attack_vector"]), None)
+        sql_finding = next((f for f in findings if f["source_ip"] == "10.0.0.1"), None)
         assert sql_finding is not None, "SQL Injection finding not found"
         assert sql_finding["source_ip"] == "10.0.0.1"
         assert sql_finding["affected_boxes"] == ["WebServer"]

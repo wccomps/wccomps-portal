@@ -97,7 +97,7 @@ def _rows_for(team: Team, marker: str, submitter: User) -> None:
         team=team, inject_id=marker, inject_name=marker, max_points=Decimal(10), points_awarded=Decimal(5)
     )
     finding = RedTeamScore.objects.create(
-        attack_vector=marker, notes=marker, source_ip="10.0.0.1", points_per_team=Decimal(1), submitted_by=submitter
+        affected_service=marker, notes=marker, source_ip="10.0.0.1", points_per_team=Decimal(1), submitted_by=submitter
     )
     finding.affected_teams.add(team)
 

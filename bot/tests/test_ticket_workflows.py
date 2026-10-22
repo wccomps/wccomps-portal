@@ -94,7 +94,6 @@ class TestTicketCreationWorkflow:
         # Verify ticket updated with Discord IDs
         await ticket.arefresh_from_db()
         assert ticket.discord_thread_id == 9001
-        assert ticket.discord_channel_id == 3001
 
         # The real embed renders on the event loop (no sync ORM call escapes sync_to_async).
         sent = thread.send.await_args

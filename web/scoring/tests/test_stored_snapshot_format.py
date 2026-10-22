@@ -21,7 +21,7 @@ FIXTURE = Path(__file__).with_name("fixtures") / "scorecard_snapshot_v1.json"
 # Keys the templates keep for logic only (colouring, fallbacks) or don't show; matched against the key path
 NOT_SHOWN = re.compile(
     r"\.below_avg$|^stats\.category_ranks\.\w+\.(avg|min|value)$|^stats\.(service|inject)_stats\.\d+\.avg$"
-    r"|^stats\.inject_stats\.\d+\.max$|^red_scores\.\d+\.attack_vector$"
+    r"|^stats\.inject_stats\.\d+\.max$"
 )
 NOT_SHOWN_BY = {
     "scoring/_scorecard_body.html": re.compile(r"^team\.team_number$"),  # the page around the body shows it

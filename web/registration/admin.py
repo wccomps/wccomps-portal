@@ -38,7 +38,7 @@ class TeamRegistrationAdmin(PortalModelAdmin[TeamRegistration]):
     list_filter = ["status", "submitted_at", "approved_at"]
     search_fields = ["school_name", "contacts__email", "contacts__name"]
     # The school is set with the team's school through registration.services
-    readonly_fields = ["school", "submitted_at", "approved_at", "paid_at", "credentials_sent_at", "edit_token"]
+    readonly_fields = ["school", "submitted_at", "approved_at", "edit_token"]
     ordering = ["-submitted_at"]
     inlines = [RegistrationContactInline, RegistrationEventEnrollmentInline]
 

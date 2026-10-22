@@ -280,9 +280,11 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
 
 def _repeated_schools(rows: list[CSVRowData]) -> list[str]:
     """Schools named by more than one row; schools are matched by normalized name, and hold one team per event."""
-    by_key: dict[str, list[str]] = {}
+    from collections import defaultdict
+
+    by_key: dict[str, list[str]] = defaultdict(list)
     for row in rows:
-        by_key.setdefault(normalize_school_name(row["school_name"]), []).append(row["school_name"])
+        by_key[normalize_school_name(row["school_name"])].append(row["school_name"])
     repeated = [" / ".join(names) for names in by_key.values() if len(names) > 1]
     return [f"Each school can appear only once; repeated: {', '.join(repeated)}"] if repeated else []
 

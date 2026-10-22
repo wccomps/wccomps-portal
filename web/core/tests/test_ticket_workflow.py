@@ -156,7 +156,6 @@ class TestTicketWorkflow:
         ticket.resolved_by = support_user
         ticket.resolved_at = timezone.now()
         ticket.resolution_notes = "Reset database server successfully"
-        ticket.duration_notes = "15 minutes"
         ticket.points_charged = 60
         ticket.save()
 
@@ -207,7 +206,6 @@ class TestTicketWorkflow:
         ticket.is_approved = True
         ticket.approved_by = users["admin"]
         ticket.approved_at = timezone.now()
-        ticket.approval_notes = "Appropriate point charge for consultation"
         ticket.save()
 
         # Create history entry
@@ -222,7 +220,6 @@ class TestTicketWorkflow:
         assert ticket.is_approved is True
         assert ticket.approved_by == users["admin"]
         assert ticket.approved_at is not None
-        assert ticket.approval_notes == "Appropriate point charge for consultation"
 
         # Verify history entry was created
         history = TicketHistory.objects.filter(ticket=ticket, action="points_verified").first()
@@ -274,7 +271,6 @@ class TestTicketWorkflow:
         ticket.resolved_by = support2_user
         ticket.resolved_at = timezone.now()
         ticket.resolution_notes = "Verified service is working correctly"
-        ticket.duration_notes = "10 minutes"
         ticket.points_charged = 10
         ticket.save()
 
@@ -294,7 +290,6 @@ class TestTicketWorkflow:
         ticket.is_approved = True
         ticket.approved_by = users["admin"]
         ticket.approved_at = timezone.now()
-        ticket.approval_notes = "Points verified"
         ticket.save()
 
         TicketHistory.objects.create(

@@ -162,8 +162,6 @@ def world(db: Any, create_user_with_groups: Callable[..., User]) -> World:
     teams = [Team.objects.create(team_number=n, team_name=f"Team {n:02d}") for n in (1, 2, 3)]
     QuotientMetadataCache.objects.create(
         boxes=[{"name": "web", "ip": "10.0.0.5", "services": [{"name": "web-http", "display_name": "HTTP"}]}],
-        services=[{"name": "web-http", "display_name": "HTTP"}],
-        team_count=3,
     )
     pool = RedTeamIPPool.objects.create(name="Pool A", ip_addresses="10.0.0.1", created_by=user)
     finding = RedTeamScore.objects.create(
@@ -335,8 +333,7 @@ def _team_numbers_check(w: World, form: Any) -> None:
 
 
 def _red_score_make(w: World, draw: st.DataObject) -> Factory:
-    team_count = draw.draw(st.sampled_from([None, 3]), label="team_count") if draw else None
-    return lambda data, files: RedTeamScoreForm(data, files, team_count=team_count, user=w.user)
+    return lambda data, files: RedTeamScoreForm(data, files, user=w.user)
 
 
 def _incident_make(w: World, draw: st.DataObject) -> Factory:

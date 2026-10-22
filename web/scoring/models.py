@@ -140,8 +140,6 @@ class QuotientMetadataCache(models.Model):
         default=list,
         help_text="List of services from Quotient metadata",
     )
-    event_name = models.CharField(max_length=200, blank=True)
-    team_count = models.IntegerField(default=0)
 
     last_synced = models.DateTimeField(auto_now=True)
     synced_by = models.ForeignKey(
@@ -222,13 +220,6 @@ class AttackType(models.Model):
 class RedTeamScore(Approvable):
     """Red team vulnerability score affecting one or more teams."""
 
-    event = models.ForeignKey(
-        "registration.Event",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="red_team_scores",
-    )
     submitted_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -242,10 +233,6 @@ class RedTeamScore(Approvable):
         related_name="findings",
         null=True,
         blank=True,
-    )
-    attack_vector = models.TextField(
-        blank=True,
-        help_text="Additional details about the attack (legacy field, use notes instead)",
     )
     source_ip = models.GenericIPAddressField(
         null=True,
@@ -347,9 +334,7 @@ class RedTeamScore(Approvable):
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        if self.attack_type:
-            return f"RF-{self.pk}: {self.attack_type.name}"
-        return f"RF-{self.pk}: {shorten(self.attack_vector, 50) if self.attack_vector else 'Unknown'}"
+        return f"RF-{self.pk}: {self.attack_type.name if self.attack_type else 'Unknown'}"
 
     @property
     def source_ip_display(self) -> str:
@@ -424,16 +409,10 @@ class RedTeamScreenshot(models.Model):
     filename = models.CharField(max_length=255)
     mime_type = models.CharField(max_length=100, default="image/png")
     uploaded_at = models.DateTimeField(auto_now_add=True)
-    description = models.CharField(max_length=200, blank=True)
 
     class Meta:
         db_table = "red_team_screenshot"
         ordering = ["uploaded_at"]
-
-    @property
-    def has_data(self) -> bool:
-        """Check if file data exists (for legacy records without data)."""
-        return bool(self.file_data)
 
     def __str__(self) -> str:
         return f"{self.filename} ({self.finding})"
@@ -442,13 +421,6 @@ class RedTeamScreenshot(models.Model):
 class IncidentReport(Approvable):
     """Blue team incident report submission."""
 
-    event = models.ForeignKey(
-        "registration.Event",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="incident_reports",
-    )
     team = models.ForeignKey(
         "team.Team",
         on_delete=models.CASCADE,
@@ -478,8 +450,6 @@ class IncidentReport(Approvable):
         default=False,
         help_text="Attack was successfully mitigated",
     )
-
-    evidence_notes = models.TextField(blank=True)
 
     matched_to_red_score = models.ForeignKey(
         RedTeamScore,
@@ -530,16 +500,10 @@ class IncidentScreenshot(models.Model):
     filename = models.CharField(max_length=255)
     mime_type = models.CharField(max_length=100, default="image/png")
     uploaded_at = models.DateTimeField(auto_now_add=True)
-    description = models.CharField(max_length=200, blank=True)
 
     class Meta:
         db_table = "incident_screenshot"
         ordering = ["uploaded_at"]
-
-    @property
-    def has_data(self) -> bool:
-        """Check if file data exists (for legacy records without data)."""
-        return bool(self.file_data)
 
     def __str__(self) -> str:
         return f"{self.filename} ({self.incident})"
@@ -548,13 +512,6 @@ class IncidentScreenshot(models.Model):
 class InjectScore(Approvable):
     """White/Gold team scoring of inject submissions."""
 
-    event = models.ForeignKey(
-        "registration.Event",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="inject_grades",
-    )
     team = models.ForeignKey(
         "team.Team",
         on_delete=models.CASCADE,
@@ -571,7 +528,6 @@ class InjectScore(Approvable):
         decimal_places=2,
         validators=[MinValueValidator(Decimal("0"))],
     )
-    notes = models.TextField(blank=True, help_text="Grader notes")
 
     # Team-facing feedback (synthesized from raw judge comments)
     feedback = models.TextField(
@@ -620,13 +576,6 @@ class InjectScore(Approvable):
 class OrangeTeamScore(Approvable):
     """Orange team checks for customer service evaluation (positive or negative)."""
 
-    event = models.ForeignKey(
-        "registration.Event",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="orange_team_scores",
-    )
     team = models.ForeignKey(
         "team.Team",
         on_delete=models.CASCADE,
@@ -672,13 +621,6 @@ class OrangeTeamScore(Approvable):
 class ServiceScore(models.Model):
     """Service uptime scores from Quotient."""
 
-    event = models.ForeignKey(
-        "registration.Event",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="service_scores",
-    )
     team = models.ForeignKey(
         "team.Team",
         on_delete=models.CASCADE,
@@ -719,13 +661,6 @@ class ServiceScore(models.Model):
 class ServiceDetail(models.Model):
     """Per-service uptime scores (e.g., balrog-ntp, brassknuckles-imap)."""
 
-    event = models.ForeignKey(
-        "registration.Event",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="service_details",
-    )
     team = models.ForeignKey(
         "team.Team",
         on_delete=models.CASCADE,
@@ -748,7 +683,7 @@ class ServiceDetail(models.Model):
         db_table = "service_detail"
         verbose_name = "Service Detail"
         verbose_name_plural = "Service Details"
-        unique_together = [["team", "event", "service_name"]]
+        unique_together = [["team", "service_name"]]
         ordering = ["service_name", "team__team_number"]
 
     def __str__(self) -> str:

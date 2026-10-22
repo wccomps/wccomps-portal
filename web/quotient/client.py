@@ -139,7 +139,6 @@ class QuotientService:
 
     name: str
     display_name: str
-    type: str  # custom, dns, smtp, imap, ssh, web, pop3
 
 
 @dataclass
@@ -152,8 +151,6 @@ class QuotientBox:
 @dataclass
 class QuotientInfrastructure:
     boxes: list[QuotientBox]
-    event_name: str
-    team_count: int
 
 
 @dataclass
@@ -292,7 +289,6 @@ class QuotientClient:
                     QuotientService(
                         name=_text(svc_name, "a service"),
                         display_name=_text(svc_name, "a service"),
-                        type="custom",  # Type not provided by metadata endpoint
                     )
                     for svc_name in svc_names
                 ]
@@ -305,11 +301,7 @@ class QuotientClient:
                     )
                 )
 
-            infrastructure = QuotientInfrastructure(
-                boxes=boxes,
-                event_name="",  # Not provided by metadata endpoint
-                team_count=0,  # Not provided by metadata endpoint
-            )
+            infrastructure = QuotientInfrastructure(boxes=boxes)
 
             cache.set(cache_key, infrastructure, self.cache_ttl)
             logger.info(f"Fetched {len(boxes)} boxes from Quotient API")
@@ -464,7 +456,6 @@ class QuotientClient:
                 "box_ip": box.ip,
                 "box_name": box.name,
                 "service_name": service.name,
-                "service_type": service.type,
             }
             for box in infrastructure.boxes
             for service in box.services

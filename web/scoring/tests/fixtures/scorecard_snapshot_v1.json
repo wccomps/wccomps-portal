@@ -215,7 +215,6 @@
       "attack_type": {
         "name": "Default Credentials"
       },
-      "attack_vector": "ssh",
       "affected_boxes_display": "web01, db01",
       "affected_service": "smtp-relay",
       "outcomes_display": [

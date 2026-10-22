@@ -100,16 +100,13 @@ class Ticket(models.Model):
     hostname = models.CharField(max_length=255, blank=True)
     ip_address = models.CharField(max_length=45, blank=True, null=True)
     service_name = models.CharField(max_length=100, blank=True)
-    custom_fields = models.JSONField(default=dict, blank=True)
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_OPEN)
-    tags = models.JSONField(default=list, blank=True)  # e.g., ['operations-issue', 'escalated']
 
     assigned_at = models.DateTimeField(null=True, blank=True)
 
     resolved_at = models.DateTimeField(null=True, blank=True)
     resolution_notes = models.TextField(blank=True)
-    duration_notes = models.TextField(blank=True)
     points_charged = models.IntegerField(default=0)
 
     is_approved = models.BooleanField(default=False)
@@ -121,10 +118,8 @@ class Ticket(models.Model):
         related_name="approved_tickets",
     )
     approved_at = models.DateTimeField(null=True, blank=True)
-    approval_notes = models.TextField(blank=True)
 
     discord_thread_id = models.BigIntegerField(unique=True, null=True, blank=True)
-    discord_channel_id = models.BigIntegerField(null=True, blank=True)
     thread_archive_scheduled_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

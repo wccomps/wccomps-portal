@@ -287,7 +287,6 @@ a.button:active {
 .h-120 { height: 120px; }
 
 /* Backgrounds */
-.bg-light { background-color: var(--darkened-bg, #f8f8f8); }
 .bg-warning-light { background-color: var(--warning-alert-bg); }
 
 /* Borders */

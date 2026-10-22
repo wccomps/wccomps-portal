@@ -37,7 +37,7 @@ class TestBulkApproveRedFindingsView:
         """Red Team submits findings; only Gold Team approves them."""
         red_user = create_user_with_groups("red_user", ["WCComps_RedTeam"])
         finding = RedTeamScore.objects.create(
-            attack_vector="SQLi", source_ip="10.0.0.5", points_per_team=Decimal("-10"), submitted_by=red_user
+            source_ip="10.0.0.5", points_per_team=Decimal("-10"), submitted_by=red_user
         )
         client = Client()
         client.force_login(red_user)
@@ -90,7 +90,6 @@ class TestBulkApproveRedFindingsView:
         red_user = create_user_with_groups("red_user", ["WCComps_RedTeam"])
 
         finding = RedTeamScore.objects.create(
-            attack_vector="SQL injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user,
@@ -121,19 +120,16 @@ class TestBulkApproveRedFindingsView:
         red_user = create_user_with_groups("red_user", ["WCComps_RedTeam"])
 
         finding1 = RedTeamScore.objects.create(
-            attack_vector="SQL injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user,
         )
         finding2 = RedTeamScore.objects.create(
-            attack_vector="RCE",
             source_ip="10.0.0.6",
             points_per_team=Decimal("50.00"),
             submitted_by=red_user,
         )
         finding3 = RedTeamScore.objects.create(
-            attack_vector="XSS",
             source_ip="10.0.0.7",
             points_per_team=Decimal("20.00"),
             submitted_by=red_user,
@@ -170,7 +166,6 @@ class TestBulkApproveRedFindingsView:
         original_approval_time = datetime(2025, 11, 27, 10, 0, 0, tzinfo=UTC)
 
         finding = RedTeamScore.objects.create(
-            attack_vector="SQL injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user,
@@ -224,13 +219,11 @@ class TestBulkApproveRedFindingsView:
         red_user = create_user_with_groups("red_user", ["WCComps_RedTeam"])
 
         finding1 = RedTeamScore.objects.create(
-            attack_vector="SQL injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user,
         )
         finding2 = RedTeamScore.objects.create(
-            attack_vector="RCE",
             source_ip="10.0.0.6",
             points_per_team=Decimal("50.00"),
             submitted_by=red_user,
@@ -256,7 +249,6 @@ class TestBulkApproveRedFindingsView:
         red_user = create_user_with_groups("red_user", ["WCComps_RedTeam"])
 
         finding = RedTeamScore.objects.create(
-            attack_vector="SQL injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user,
@@ -282,13 +274,11 @@ class TestBulkApproveRedFindingsView:
         red_user = create_user_with_groups("red_user", ["WCComps_RedTeam"])
 
         finding1 = RedTeamScore.objects.create(
-            attack_vector="SQL injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user,
         )
         finding2 = RedTeamScore.objects.create(
-            attack_vector="RCE",
             source_ip="10.0.0.6",
             points_per_team=Decimal("50.00"),
             submitted_by=red_user,
@@ -319,7 +309,6 @@ class TestBulkApproveUIElements:
         red_user = create_user_with_groups("red_user", ["WCComps_RedTeam"])
 
         RedTeamScore.objects.create(
-            attack_vector="SQL injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user,

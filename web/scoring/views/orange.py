@@ -49,18 +49,11 @@ def review_orange(request: HttpRequest) -> HttpResponse:
     page_obj = result["page_obj"]
     sort_by = result["current_sort"]
 
-    total_checks = OrangeTeamScore.objects.count()
-    pending_count = OrangeTeamScore.objects.filter(is_approved=False).count()
-    approved_count = total_checks - pending_count
-
     available_checks = OrangeCheck.objects.filter(orange_scores__isnull=False).distinct().order_by("title")
 
     context = {
         "page_obj": page_obj,
-        "total_checks": total_checks,
-        "pending_count": pending_count,
-        "approved_count": approved_count,
-        "has_pending": pending_count > 0,
+        "has_pending": OrangeTeamScore.objects.filter(is_approved=False).exists(),
         "team_numbers": team_numbers(Team.objects.filter(orange_team_scores__isnull=False), team),
         "chosen_team": team,
         "available_checks": available_checks,

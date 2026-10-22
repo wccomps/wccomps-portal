@@ -74,19 +74,9 @@ def trigger_dashboard(bot: discord.Client) -> None:
 class TicketActionView(discord.ui.View):
     """Action buttons for ticket dashboard."""
 
-    def __init__(self, ticket_id: int, thread_url: str | None = None) -> None:
+    def __init__(self, ticket_id: int) -> None:
         super().__init__(timeout=None)
         self.ticket_id = ticket_id
-
-        if thread_url:
-            self.add_item(
-                discord.ui.Button(
-                    label="Go to Thread",
-                    style=discord.ButtonStyle.link,
-                    url=thread_url,
-                    row=0,
-                )
-            )
 
     async def _get_ticket_id_from_interaction(self, interaction: discord.Interaction) -> int | None:
         """Extract ticket ID from interaction message or instance variable."""

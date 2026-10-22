@@ -73,7 +73,7 @@ def test_each_kind_of_unfinished_work_is_counted_with_the_page_that_finishes_it(
         IncidentReport.objects.create(
             team=_team(), attack_description="scan", source_ip="10.0.0.1", attack_detected_at="2026-10-03T10:00Z"
         )
-    RedTeamScore.objects.create(attack_vector="ssh", points_per_team=Decimal(10), submitted_by=user)
+    RedTeamScore.objects.create(points_per_team=Decimal(10), submitted_by=user)
     OrangeTeamScore.objects.create(team=_team(), description="Call", points_awarded=Decimal(5))
     check = OrangeCheck.objects.create(title="Phone call", created_by=user)
     second = OrangeCheck.objects.create(title="Email", created_by=user)

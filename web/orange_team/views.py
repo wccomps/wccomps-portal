@@ -1,4 +1,5 @@
 import json
+from collections import defaultdict
 from datetime import timedelta
 from typing import cast
 
@@ -139,13 +140,13 @@ def check_list(request: HttpRequest) -> HttpResponse:
         .order_by("scheduled_at", "-created_at")
     )
     checkins = list(OrangeCheckIn.objects.filter(is_active=True).select_related("user").order_by("checked_in_at"))
-    by_user: dict[int, list[OrangeAssignment]] = {}
+    by_user: dict[int, list[OrangeAssignment]] = defaultdict(list)
     for assignment in (
         OrangeAssignment.objects.filter(user_id__in=[ci.user_id for ci in checkins])
         .unfinished()
         .select_related("orange_check", "team")
     ):
-        by_user.setdefault(assignment.user_id, []).append(assignment)
+        by_user[assignment.user_id].append(assignment)
     volunteers = []
     for checkin in checkins:
         mine = by_user.get(checkin.user_id, [])

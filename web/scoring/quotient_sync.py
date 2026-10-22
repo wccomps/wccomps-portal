@@ -17,7 +17,6 @@ class ServiceData(TypedDict):
 
     name: str
     display_name: str
-    type: str
 
 
 class BoxData(TypedDict):
@@ -51,7 +50,6 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
             service_dict: ServiceData = {
                 "name": service.name,
                 "display_name": service.display_name,
-                "type": service.type,
             }
             box_services.append(service_dict)
 
@@ -70,16 +68,12 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
     if metadata:
         metadata.boxes = boxes_data
         metadata.services = services_data
-        metadata.event_name = infrastructure.event_name
-        metadata.team_count = infrastructure.team_count
         metadata.synced_by = user
         metadata.save()
     else:
         metadata = QuotientMetadataCache.objects.create(
             boxes=boxes_data,
             services=services_data,
-            event_name=infrastructure.event_name,
-            team_count=infrastructure.team_count,
             synced_by=user,
         )
 

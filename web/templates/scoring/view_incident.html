@@ -70,31 +70,17 @@
                     {{ incident.attack_description|linebreaks }}
                 </c-info_box>
             </c-fieldset>
-            {% if incident.evidence_notes %}
-                <c-fieldset heading="Evidence Notes">
-                    <c-info_box>
-                        {{ incident.evidence_notes|linebreaks }}
-                    </c-info_box>
-                </c-fieldset>
-            {% endif %}
             <c-fieldset heading="Evidence Screenshots">
                 {% if incident.screenshots.exists %}
                     <c-image_grid>
                         {% for screenshot in incident.screenshots.all %}
-                            {% if screenshot.has_data %}
-                                <a href="{% url 'scoring:incident_screenshot' screenshot.id %}"
-                                   target="_blank">
-                                    <img src="{% url 'scoring:incident_screenshot' screenshot.id %}"
-                                         alt="{{ screenshot.filename }}"
-                                         width="200"
-                                         height="150">
-                                </a>
-                            {% else %}
-                                <div>
-                                    <span class="text-muted">{{ screenshot.filename|cut:"scoring/incidents/" }}</span>
-                                    <small class="text-danger d-block">(file lost)</small>
-                                </div>
-                            {% endif %}
+                            <a href="{% url 'scoring:incident_screenshot' screenshot.id %}"
+                               target="_blank">
+                                <img src="{% url 'scoring:incident_screenshot' screenshot.id %}"
+                                     alt="{{ screenshot.filename }}"
+                                     width="200"
+                                     height="150">
+                            </a>
                         {% endfor %}
                     </c-image_grid>
                 {% else %}

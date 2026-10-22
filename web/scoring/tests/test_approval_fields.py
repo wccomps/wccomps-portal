@@ -38,7 +38,6 @@ def team():
 def unapproved_finding(red_user):
     """Create an unapproved finding."""
     return RedTeamScore.objects.create(
-        attack_vector="SQL injection",
         source_ip="10.0.0.5",
         points_per_team=Decimal("0"),
         submitted_by=red_user,
@@ -77,7 +76,6 @@ class TestFindingApprovalWorkflow:
         approver = User.objects.create_user(username="approver", password="test123")
 
         finding = RedTeamScore.objects.create(
-            attack_vector="SQL injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user,
@@ -100,7 +98,6 @@ class TestFindingQueries:
     def test_can_filter_by_approval_status(self, red_user, gold_user):
         """Should be able to filter findings by approval status."""
         RedTeamScore.objects.create(
-            attack_vector="Approved attack",
             source_ip="10.0.0.5",
             points_per_team=Decimal("30.00"),
             submitted_by=red_user,
@@ -109,7 +106,6 @@ class TestFindingQueries:
             approved_at=datetime.now(UTC),
         )
         RedTeamScore.objects.create(
-            attack_vector="Unapproved attack",
             source_ip="10.0.0.6",
             points_per_team=Decimal("0"),
             submitted_by=red_user,
@@ -121,7 +117,6 @@ class TestFindingQueries:
     def test_approval_works_with_all_model_fields(self, red_user, gold_user, team):
         """Approval fields should work with all other model fields."""
         finding = RedTeamScore.objects.create(
-            attack_vector="Complex attack vector",
             source_ip="10.0.0.5",
             destination_ip_template="10.100.1X.22",
             affected_boxes=["web-server"],

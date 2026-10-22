@@ -7,7 +7,6 @@ import pytest
 from django.db import IntegrityError
 from django.test import Client
 from django.urls import reverse
-from django.utils import timezone
 
 from registration.models import (
     Event,
@@ -321,7 +320,6 @@ def test_unassign_goes_ahead_when_only_an_earlier_events_packet_went_out(gold_te
     set_team_school(
         Team.objects.create(team_number=4, team_name="Team 04"), "Example University", contact_email="c@example.edu"
     )
-    EventTeamAssignment.objects.filter(event=event).update(credentials_sent_at=timezone.now())
 
     _client(gold_team_user).post(
         reverse("registration_unassign_team", args=[EventTeamAssignment.objects.get().pk]), _shown()

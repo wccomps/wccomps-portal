@@ -99,14 +99,6 @@ class TestComputeScorecardStats:
                 points_awarded=Decimal(str(pts)),
                 is_approved=True,
             )
-        # qualifier-total should be excluded from inject_stats
-        InjectScore.objects.create(
-            team=teams[0],
-            inject_id="qualifier-total",
-            inject_name="Qualifier Total",
-            points_awarded=Decimal("170"),
-            is_approved=True,
-        )
 
         stats = _compute_scorecard_stats(scores[0], scores)
 
@@ -353,7 +345,6 @@ class TestScorecardRedTeamDetail:
         attack_type, _ = AttackType.objects.get_or_create(name="Default Credentials")
         finding = RedTeamScore.objects.create(
             attack_type=attack_type,
-            attack_vector=".240 Default Creds",
             points_per_team=Decimal("100"),
             is_approved=True,
         )
@@ -366,7 +357,6 @@ class TestScorecardRedTeamDetail:
         assert response.status_code == 200
         content = response.content.decode()
         assert "Default Credentials" in content  # attack_type.name shown
-        assert ".240 Default Creds" not in content  # raw attack_vector NOT shown
 
     def test_scorecard_shows_affected_boxes(self, gold_team_user, teams, scores):
         from scoring.models import AttackType, RedTeamScore

@@ -88,7 +88,6 @@ class Packet(models.Model):
             "total": distributions.count(),
             "pending": distributions.filter(email_status="pending").count(),
             "sent": distributions.filter(email_status="sent").count(),
-            "delivered": distributions.filter(email_status="delivered").count(),
             "failed": distributions.filter(email_status="failed").count(),
             "downloaded": distributions.filter(downloaded_at__isnull=False).count(),
         }
@@ -138,11 +137,9 @@ class PacketDistribution(models.Model):
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("sent", "Sent"),
-        ("delivered", "Delivered"),
         ("failed", "Failed"),
-        ("bounced", "Bounced"),
     ]
-    DONE_STATUSES = ("sent", "delivered")
+    DONE_STATUSES = ("sent",)
 
     packet = models.ForeignKey(Packet, on_delete=models.CASCADE, related_name="distributions")
     team = models.ForeignKey("team.Team", on_delete=models.CASCADE)
