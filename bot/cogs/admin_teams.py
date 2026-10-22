@@ -389,7 +389,7 @@ class AdminTeamsCog(commands.Cog):
                 continue
 
             team.is_active = True
-            await team.asave()
+            await team.asave(update_fields=["is_active"])
             if interaction.guild:
                 async for link in DiscordLink.objects.filter(team=team, is_active=True):
                     member = interaction.guild.get_member(link.discord_id)
@@ -455,7 +455,7 @@ class AdminTeamsCog(commands.Cog):
                 continue
 
             team.is_active = False
-            await team.asave()
+            await team.asave(update_fields=["is_active"])
             if interaction.guild:
                 async for link in DiscordLink.objects.filter(team=team, is_active=True):
                     member = interaction.guild.get_member(link.discord_id)

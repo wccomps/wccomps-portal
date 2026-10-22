@@ -52,9 +52,7 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
         logger.warning("Quotient API unavailable, ticket form will have limited functionality")
 
     # Staff file tickets in any category; teams only in user-creatable ones.
-    categories = list(
-        TicketCategory.objects.all() if is_admin else TicketCategory.objects.filter(user_creatable=True)
-    )
+    categories = list(TicketCategory.objects.all() if is_admin else TicketCategory.objects.filter(user_creatable=True))
     categories_json = {
         cat.pk: {"required_fields": cat.required_fields, "optional_fields": cat.optional_fields} for cat in categories
     }

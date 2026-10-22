@@ -22,33 +22,39 @@ async def delete_team_infrastructure(guild: discord.Guild, team: Team, reason: s
     """
     deleted_items: list[str] = []
 
-    if team.discord_category_id:
-        category = guild.get_channel(team.discord_category_id)
-        if category and isinstance(category, discord.CategoryChannel):
-            for channel in category.channels:
-                try:
-                    await channel.delete(reason=reason)
-                except Exception as e:
-                    logger.exception(f"Failed to delete channel {channel.name}: {e}")
-
+    category = guild.get_channel(team.discord_category_id) if team.discord_category_id else None
+    if not category:
+        category = discord.utils.get(guild.categories, name=f"team {team.team_number:02d}") or discord.utils.get(
+            guild.categories, name=f"team {team.team_number}"
+        )
+    if category and isinstance(category, discord.CategoryChannel):
+        for channel in category.channels:
             try:
-                await category.delete(reason=reason)
-                deleted_items.append("category")
+                await channel.delete(reason=reason)
             except Exception as e:
-                logger.exception(f"Failed to delete category: {e}")
+                logger.exception(f"Failed to delete channel {channel.name}: {e}")
 
-    if team.discord_role_id:
-        role = guild.get_role(team.discord_role_id)
-        if role:
-            try:
-                await role.delete(reason=reason)
-                deleted_items.append("role")
-            except Exception as e:
-                logger.exception(f"Failed to delete role: {e}")
+        try:
+            await category.delete(reason=reason)
+            deleted_items.append("category")
+        except Exception as e:
+            logger.exception(f"Failed to delete category: {e}")
+
+    role = guild.get_role(team.discord_role_id) if team.discord_role_id else None
+    if not role:
+        role = discord.utils.get(guild.roles, name=f"Team {team.team_number:02d}") or discord.utils.get(
+            guild.roles, name=f"Team {team.team_number}"
+        )
+    if role:
+        try:
+            await role.delete(reason=reason)
+            deleted_items.append("role")
+        except Exception as e:
+            logger.exception(f"Failed to delete role: {e}")
 
     team.discord_role_id = None
     team.discord_category_id = None
-    await team.asave()
+    await team.asave(update_fields=["discord_role_id", "discord_category_id"])
 
     return deleted_items
 
@@ -130,16 +136,24 @@ class DiscordManager:
         if category:
             team.discord_role_id = role.id
             team.discord_category_id = category.id
-            await team.asave()
+            await team.asave(update_fields=["discord_role_id", "discord_category_id"])
             logger.info(f"Set up infrastructure for {team.team_name}")
         elif role:
             team.discord_role_id = role.id
-            await team.asave()
+            await team.asave(update_fields=["discord_role_id"])
             logger.warning(f"Only role created for {team.team_name}, category failed")
         elif category:
             team.discord_category_id = category.id
-            await team.asave()
+            await team.asave(update_fields=["discord_category_id"])
             logger.warning(f"Only category created for {team.team_name}, role failed")
+
+        if team.is_active:
+            from bot.role_sync import sync_member_roles
+
+            async for link in team.members.filter(is_active=True):
+                member = self.guild.get_member(link.discord_id)
+                if member:
+                    await sync_member_roles(self.guild, member)
 
         return role, category
 

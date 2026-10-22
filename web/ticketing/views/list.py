@@ -171,11 +171,7 @@ def ticket_notifications(request: HttpRequest) -> JsonResponse:
     since_id = optional_int(request.GET.get("since_id", "")) or 0
 
     open_count = Ticket.objects.filter(status="open").count()
-    raw_tickets = (
-        Ticket.objects.filter(status="open", id__gt=since_id)
-        .select_related("category")
-        .order_by("id")[:10]
-    )
+    raw_tickets = Ticket.objects.filter(status="open", id__gt=since_id).select_related("category").order_by("id")[:10]
 
     new_tickets = [
         {

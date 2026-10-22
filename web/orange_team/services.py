@@ -112,21 +112,24 @@ def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) ->
                 OrangeAssignmentResult(assignment=a, criterion=criterion) for a in assignments
             )
 
-        if check.criteria.exists():
-            for assignment in assignments:
-                if assignment.status in ("submitted", "approved"):
+        has_criteria = check.criteria.exists()
+        for assignment in assignments:
+            if assignment.status in ("submitted", "approved"):
+                if has_criteria:
                     assignment.score = assignment.calculate_score()
                     assignment.save(update_fields=["score"])
-                    if assignment.status == "approved":
-                        OrangeTeamScore.objects.filter(
-                            orange_check=check,
-                            team=assignment.team,
-                        ).update(
-                            description=f"Check: {check.title}",
-                            points_awarded=assignment.score,
-                        )
-        else:
-            OrangeTeamScore.objects.filter(orange_check=check).update(description=f"Check: {check.title}")
+                elif assignment.score is not None and assignment.score > check.max_score:
+                    assignment.score = check.max_score
+                    assignment.save(update_fields=["score"])
+                if assignment.status == "approved":
+                    OrangeTeamScore.objects.filter(
+                        orange_check=check,
+                        team=assignment.team,
+                    ).update(
+                        description=f"Check: {check.title}",
+                        points_awarded=assignment.score or 0,
+                    )
+        OrangeTeamScore.objects.filter(orange_check=check).update(description=f"Check: {check.title}")
 
 
 def create_orange_score_from_assignment(

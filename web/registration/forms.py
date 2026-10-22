@@ -70,8 +70,16 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
         """Save registration, contacts, and event enrollments."""
         from .models import RegistrationEventEnrollment
 
-        registration = super().save(commit=commit)
+        editing = self.instance.pk is not None
+        registration = super().save(commit=commit and not editing)
         if commit:
+            if editing:
+                if registration.status == "rejected":
+                    registration.status = "pending"
+                    registration.rejection_reason = ""
+                    registration.save(update_fields=["school_name", "region", "status", "rejection_reason"])
+                else:
+                    registration.save(update_fields=["school_name", "region"])
             RegistrationContact.objects.update_or_create(
                 registration=registration,
                 role="captain",

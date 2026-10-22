@@ -22,7 +22,6 @@ OUTLIER_Z_SCORE_THRESHOLD = 1.5
 
 
 @require_permission("white_team", "gold_team", error_message="Only White/Gold Team members can access inject grading")
-@transaction.atomic
 def inject_grading(request: HttpRequest) -> HttpResponse:
     """Inject grading interface - select inject, grade all teams."""
     from quotient.client import QuotientClient
@@ -53,76 +52,78 @@ def inject_grading(request: HttpRequest) -> HttpResponse:
             selected_inject = inject_lookup.get(selected_inject_id) if selected_inject_id else None
 
             if selected_inject:
-                grades_saved = 0
-                user = cast(User, request.user)
-                current = {
-                    g.team_id: g for g in InjectScore.objects.select_for_update().filter(inject_id=selected_inject_id)
-                }
+                with transaction.atomic():
+                    grades_saved = 0
+                    user = cast(User, request.user)
+                    current = {
+                        g.team_id: g
+                        for g in InjectScore.objects.select_for_update().filter(inject_id=selected_inject_id)
+                    }
 
-                # Feedback is approved as it is saved only when the white team lead enters it.
-                is_lead = has_permission(user, "white_team_lead")
-                inject_max_points = inject_points(selected_inject.title)  # same for every team this inject
-                for team in teams:
-                    num = team.team_number
-                    points_value = grading_form.cleaned_data.get(f"points_team_{num}")
-                    feedback_value = grading_form.cleaned_data.get(f"feedback_team_{num}") or ""
-                    feedback_value = feedback_value.replace("\r\n", "\n").strip()
-                    grade = current.get(team.id)
+                    # Feedback is approved as it is saved only when the white team lead enters it.
+                    is_lead = has_permission(user, "white_team_lead")
+                    inject_max_points = inject_points(selected_inject.title)  # same for every team this inject
+                    for team in teams:
+                        num = team.team_number
+                        points_value = grading_form.cleaned_data.get(f"points_team_{num}")
+                        feedback_value = grading_form.cleaned_data.get(f"feedback_team_{num}") or ""
+                        feedback_value = feedback_value.replace("\r\n", "\n").strip()
+                        grade = current.get(team.id)
 
-                    # The form posts every team's points as the page loaded them; only write a value this grader
-                    # changed (vs the loaded one) and that differs from what is stored, so a stale page can't revert
-                    # a grade saved since.
-                    points_edited = (
-                        points_value is not None
-                        and not (
-                            f"loaded_team_{num}" in request.POST
-                            and points_value == grading_form.cleaned_data.get(f"loaded_team_{num}")
+                        # The form posts every team's points as the page loaded them; only write a value this grader
+                        # changed (vs the loaded one) and that differs from what is stored, so a stale page can't revert
+                        # a grade saved since.
+                        points_edited = (
+                            points_value is not None
+                            and not (
+                                f"loaded_team_{num}" in request.POST
+                                and points_value == grading_form.cleaned_data.get(f"loaded_team_{num}")
+                            )
+                            and (grade is None or grade.points_awarded != points_value)
                         )
-                        and (grade is None or grade.points_awarded != points_value)
-                    )
-                    stored_feedback = (grade.feedback if grade else "").replace("\r\n", "\n").strip()
-                    feedback_edited = feedback_value != stored_feedback
+                        stored_feedback = (grade.feedback if grade else "").replace("\r\n", "\n").strip()
+                        feedback_edited = feedback_value != stored_feedback
 
-                    if not points_edited and not feedback_edited:
-                        continue
-                    if grade is None:
-                        if points_value is None:
-                            # No grade and no points: nothing to attach feedback to
+                        if not points_edited and not feedback_edited:
                             continue
-                        # get_or_create: another grader may be saving this team's first grade right now
-                        grade, _ = InjectScore.objects.select_for_update().get_or_create(
-                            team=team,
-                            inject_id=selected_inject_id,
-                            defaults={
-                                "inject_name": selected_inject.title,
-                                "points_awarded": points_value,
-                                "graded_by": user,
-                            },
-                        )
+                        if grade is None:
+                            if points_value is None:
+                                # No grade and no points: nothing to attach feedback to
+                                continue
+                            # get_or_create: another grader may be saving this team's first grade right now
+                            grade, _ = InjectScore.objects.select_for_update().get_or_create(
+                                team=team,
+                                inject_id=selected_inject_id,
+                                defaults={
+                                    "inject_name": selected_inject.title,
+                                    "points_awarded": points_value,
+                                    "graded_by": user,
+                                },
+                            )
 
-                    grade.inject_name = selected_inject.title
-                    grade.max_points = inject_max_points
-                    if points_edited and points_value is not None:  # the None check is for the type checker
-                        grade.points_awarded = points_value
-                        grade.graded_by = user
-                        grade.graded_at = timezone.now()
-                        # An approval was of the old points; the new ones go back for review
-                        grade.is_approved = False
-                        grade.approved_by = None
-                        grade.approved_at = None
-                    if feedback_edited:
-                        grade.feedback = feedback_value
-                        grade.feedback_approved = is_lead
-                        grade.feedback_approved_by = user if is_lead else None
-                    grade.save()
-                    grades_saved += 1
+                        grade.inject_name = selected_inject.title
+                        grade.max_points = inject_max_points
+                        if points_edited and points_value is not None:  # the None check is for the type checker
+                            grade.points_awarded = points_value
+                            grade.graded_by = user
+                            grade.graded_at = timezone.now()
+                            # An approval was of the old points; the new ones go back for review
+                            grade.is_approved = False
+                            grade.approved_by = None
+                            grade.approved_at = None
+                        if feedback_edited:
+                            grade.feedback = feedback_value
+                            grade.feedback_approved = is_lead
+                            grade.feedback_approved_by = user if is_lead else None
+                        grade.save()
+                        grades_saved += 1
 
-                if grades_saved:
-                    messages.success(request, f"Saved {grades_saved} grades for {selected_inject.title}")
-                    # Keep the reactive inject scaling current from the inject point values. After
-                    # commit, so a failure deriving the max can never roll back the saved grades.
-                    titles = [i.title for i in injects]
-                    transaction.on_commit(lambda: set_template_max("inject_max", inject_max_from_titles(titles)))
+                    if grades_saved:
+                        messages.success(request, f"Saved {grades_saved} grades for {selected_inject.title}")
+                        # Keep the reactive inject scaling current from the inject point values. After
+                        # commit, so a failure deriving the max can never roll back the saved grades.
+                        titles = [i.title for i in injects]
+                        transaction.on_commit(lambda: set_template_max("inject_max", inject_max_from_titles(titles)))
             return redirect(f"{reverse('scoring:inject_grading')}?inject={selected_inject_id}")
         errors = "; ".join(f"{field.removeprefix('points_team_')}: {e[0]}" for field, e in grading_form.errors.items())
         messages.error(request, f"Nothing saved. Fix these teams' points: {errors}")
@@ -324,8 +325,13 @@ def save_inject_feedback(request: HttpRequest) -> HttpResponse:
     feedback_text = form.cleaned_data.get("feedback", "")
 
     score = get_object_or_404(InjectScore, pk=score_id)
-    score.feedback = feedback_text
-    score.save(update_fields=["feedback"])
+    if score.feedback != feedback_text:
+        user = cast(User, request.user)
+        is_lead = has_permission(user, "white_team_lead")
+        score.feedback = feedback_text
+        score.feedback_approved = is_lead
+        score.feedback_approved_by = user if is_lead else None
+        score.save(update_fields=["feedback", "feedback_approved", "feedback_approved_by"])
 
     messages.success(request, f"Saved feedback for {score.inject_name}, Team {score.team.team_number}")
     return redirect("scoring:review_inject_feedback")

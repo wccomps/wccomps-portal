@@ -67,4 +67,3 @@ def test_reopen_leaves_approved_adjustment_intact(admin_user) -> None:
     t.refresh_from_db()
     assert t.is_approved
     assert calculate_team_score_detailed(team)["point_adjustments"] == Decimal("-25")
-

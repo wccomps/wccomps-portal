@@ -74,11 +74,16 @@ def registration_edit(request: HttpRequest, token: str) -> HttpResponse:
         return render(request, "registration/edit_locked.html", {"registration": registration})
 
     if request.method == "POST":
-        form = RegistrationForm(request.POST, instance=registration)
-        if form.is_valid():
-            form.save()
-            messages.success(request, "Registration updated successfully!")
-            return redirect("registration_edit", token=token)
+        with transaction.atomic():
+            registration = get_object_or_404(TeamRegistration.objects.select_for_update(), edit_token=token)
+            if registration.status not in ("pending", "rejected"):
+                messages.error(request, "This registration can no longer be edited after approval.")
+                return render(request, "registration/edit_locked.html", {"registration": registration})
+            form = RegistrationForm(request.POST, instance=registration)
+            if form.is_valid():
+                form.save()
+                messages.success(request, "Registration updated successfully!")
+                return redirect("registration_edit", token=token)
     else:
         captain = registration.contacts.filter(role="captain").first()
         coach = registration.contacts.filter(role="coach").first()

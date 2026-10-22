@@ -459,7 +459,7 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
 
     if assignment.status == "pending":
         assignment.status = "in_progress"
-        assignment.save()
+        assignment.save(update_fields=["status"])
 
     score = assignment.calculate_score()
     max_score = assignment.orange_check.max_score
@@ -482,16 +482,21 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
         assignment.score = assignment.calculate_score()
     else:
         score_form = SubmitScoreForm(request.POST)
-        if score_form.is_valid() and score_form.cleaned_data.get("score") is not None:
-            posted = score_form.cleaned_data["score"]
+        if not score_form.is_valid():
+            messages.error(request, f"Score must be between 0 and {assignment.orange_check.max_score}.")
+            return redirect("orange_team:dashboard")
+        posted = score_form.cleaned_data.get("score")
+        if posted is not None:
             if posted > assignment.orange_check.max_score:
                 messages.error(request, f"Score must be between 0 and {assignment.orange_check.max_score}.")
                 return redirect("orange_team:dashboard")
             assignment.score = posted
-        # else: keep any score already saved on the assignment
+        elif assignment.score is None:
+            messages.error(request, "Please enter a score before submitting.")
+            return redirect("orange_team:dashboard")
     assignment.status = "submitted"
     assignment.submitted_at = timezone.now()
-    assignment.save()
+    assignment.save(update_fields=["score", "status", "submitted_at"])
 
     messages.success(
         request,

@@ -127,9 +127,7 @@ class CreateTicketForm(forms.Form):
             else {
                 cat.pk: cat
                 for cat in (
-                    TicketCategory.objects.all()
-                    if self.staff
-                    else TicketCategory.objects.filter(user_creatable=True)
+                    TicketCategory.objects.all() if self.staff else TicketCategory.objects.filter(user_creatable=True)
                 )
             }
         )

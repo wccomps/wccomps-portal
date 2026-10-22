@@ -52,6 +52,8 @@ class TicketingCog(commands.Cog):
             ]
 
             for ticket in tickets_to_archive:
+                if not await Ticket.objects.filter(pk=ticket.pk, status__in=["resolved", "cancelled"]).aexists():
+                    continue
                 try:
                     thread = self.bot.get_channel(ticket.discord_thread_id) if ticket.discord_thread_id else None
                     if isinstance(thread, discord.Thread):

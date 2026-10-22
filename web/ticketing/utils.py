@@ -127,52 +127,10 @@ def change_ticket_category_atomic(
     user: User | None = None,
     discord_id: int | None = None,
 ) -> tuple[Ticket | None, str | None]:
-    """Move a ticket to another category atomically, recording both categories' names and points. Only its assignee
-    or a ticketing admin (`user` or `discord_id`) does (ticketing.lifecycle.assignee_refusal)."""
-    from ticketing.lifecycle import assignee_refusal
+    """Move a ticket to another category atomically (delegates to ticketing.lifecycle)."""
+    from ticketing.lifecycle import change_ticket_category_atomic as _change
 
-    with transaction.atomic():
-        ticket = (
-            Ticket.objects.select_for_update(of=("self",))
-            .select_related("team", "assigned_to", "category")
-            .filter(id=ticket_id)
-            .first()
-        )
-
-        if not ticket:
-            return None, "Ticket not found."
-        user = get_user_for_ticket(discord_id=discord_id, user=user)
-        if error := assignee_refusal(ticket, user, "recategorize"):
-            return None, error
-
-        new_category = TicketCategory.objects.filter(pk=new_category_id).first()
-        if new_category is None:
-            return None, "Invalid category."
-
-        old_category_id = ticket.category_id
-        if old_category_id == new_category_id:
-            return None, f"Ticket {ticket.ticket_number} is already in that category."
-        old_category = ticket.category
-
-        ticket.category = new_category
-        ticket.save(update_fields=["category", "updated_at"])
-
-        TicketHistory.objects.create(
-            ticket=ticket,
-            action="category_changed",
-            actor=user,
-            details={
-                "changed_by": actor_username,
-                "old_category": old_category_id,
-                "old_category_name": old_category.display_name if old_category else "Unknown",
-                "new_category": new_category_id,
-                "new_category_name": new_category.display_name,
-                "old_points": old_category.points if old_category else 0,
-                "new_points": new_category.points,
-            },
-        )
-
-        return ticket, None
+    return _change(ticket_id, new_category_id, actor_username, user=user, discord_id=discord_id)
 
 
 achange_ticket_category_atomic = _make_async(change_ticket_category_atomic)

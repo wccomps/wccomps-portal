@@ -94,7 +94,7 @@ def ops_batch_verify_tickets(request: HttpRequest) -> HttpResponse:
         ticket.is_approved = True
         ticket.approved_by = user
         ticket.approved_at = now
-        ticket.save()
+        ticket.save(update_fields=["is_approved", "approved_by", "approved_at", "updated_at"])
         TicketHistory.objects.create(
             ticket=ticket,
             action="points_verified",
