@@ -51,6 +51,7 @@ class PortalBot(commands.Bot):
         tracked_files = [
             *sorted(cogs_dir.glob("*.py")),
             root / "bot" / "utils.py",
+            root / "web" / "team" / "models.py",
             root / "web" / "ticketing" / "models.py",
             root / "web" / "scoring" / "models.py",
         ]

@@ -1,5 +1,3 @@
-"""Admin commands for competition and account management."""
-
 import io
 import logging
 
@@ -15,7 +13,6 @@ from bot.utils import ConfirmView, log_to_ops_channel, send_announcement
 from core.authentik_utils import (
     credentials_csv,
     parse_team_range,
-    reset_team_credentials,
     reset_teams_credentials,
 )
 from core.forms import AppSlugForm
@@ -27,8 +24,6 @@ logger = logging.getLogger(__name__)
 
 
 class AdminCompetitionCog(commands.Cog):
-    """Admin commands for competition and account management."""
-
     competition_group = app_commands.Group(
         name="competition",
         description="Competition management commands",
@@ -88,7 +83,7 @@ class AdminCompetitionCog(commands.Cog):
             teams = active
 
         # Only successful resets go in the CSV: a failed one leaves the old password in place.
-        result = await sync_to_async(reset_teams_credentials)(teams, reset_fn=reset_team_credentials)
+        result = await sync_to_async(reset_teams_credentials)(teams)
         password_list = result.password_list
         failed_resets = result.failed_resets
         sessions_failed = result.sessions_failed

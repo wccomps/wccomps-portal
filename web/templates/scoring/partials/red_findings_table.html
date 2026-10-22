@@ -1,9 +1,8 @@
-{# Red team findings table - swappable content for htmx #}
 {% load cotton %}
 <div id="red-findings-content"
      {% if is_gold_team %}x-data="redFindingsBulkSelect"{% endif %}>
     {% if is_gold_team %}
-        {# The row checkboxes join this form with form=, so a row's own Delete or Leave form isn't nested in it #}
+        {# The row checkboxes join this form with form=, so a row's own Delete form isn't nested in it #}
         <c-form id="bulk-approve-form" action="{% url 'scoring:bulk_approve_red_scores' %}" ::data-confirm="approveQuestion">
             {% csrf_token %}
         </c-form>

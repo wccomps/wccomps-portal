@@ -41,14 +41,12 @@ class AdminTeamsCog(commands.Cog):
     @app_commands.check(permission_check("admin"))
     async def admin_teams(self, interaction: discord.Interaction) -> None:
         """List all teams with member counts."""
-        teams = [team async for team in Team.objects.all().order_by("team_number")]
+        teams = [team async for team in Team.objects.with_active_member_count()]
         max_members = (await sync_to_async(CompetitionConfig.get_config)()).max_team_members
-        team_statuses = []
-
-        for team in teams:
-            member_count = await team.members.filter(is_active=True).acount()
-            status = f"#{team.team_number:02d} {team.team_name}: {member_count}/{max_members} members"
-            team_statuses.append(status)
+        team_statuses = [
+            f"#{team.team_number:02d} {team.team_name}: {team.get_member_count()}/{max_members} members"
+            for team in teams
+        ]
 
         embed = discord.Embed(
             title=f"Team Status ({len(team_statuses)} teams)",
@@ -354,14 +352,7 @@ class AdminTeamsCog(commands.Cog):
             response += "\n\nMake sure to securely share this password with the team."
         await interaction.followup.send(response, ephemeral=True)
 
-    @teams_group.command(
-        name="activate",
-        description="[ADMIN] Activate multiple teams in database",
-    )
-    @app_commands.describe(teams="Team numbers (e.g., '1,3,5-10,15')")
-    @app_commands.check(permission_check("admin"))
-    async def admin_activate_teams(self, interaction: discord.Interaction, teams: str) -> None:
-        """Activate multiple teams in database (sets is_active=True)."""
+    async def _set_teams_active(self, interaction: discord.Interaction, teams: str, *, active: bool) -> None:
         await interaction.response.defer(ephemeral=True)
 
         try:
@@ -374,6 +365,11 @@ class AdminTeamsCog(commands.Cog):
             await interaction.followup.send("No teams specified", ephemeral=True)
             return
 
+        already_state = "active" if active else "inactive"
+        verb = "activated" if active else "deactivated"
+        title_verb = "Activated" if active else "Deactivated"
+        noun = "Activation" if active else "Deactivation"
+
         results = []
         success_count = 0
         for team_number in team_numbers:
@@ -382,22 +378,22 @@ class AdminTeamsCog(commands.Cog):
                 results.append(f"Team {team_number:02d}: not found")
                 continue
 
-            if team.is_active:
-                results.append(f"Team {team_number:02d}: already active")
+            if team.is_active is active:
+                results.append(f"Team {team_number:02d}: already {already_state}")
                 continue
 
-            team.is_active = True
+            team.is_active = active
             await team.asave(update_fields=["is_active"])
             if interaction.guild:
                 async for link in DiscordLink.objects.filter(team=team, is_active=True):
                     member = interaction.guild.get_member(link.discord_id)
                     if member:
                         await sync_member_roles(interaction.guild, member)
-            results.append(f"Team {team_number:02d}: activated")
+            results.append(f"Team {team_number:02d}: {verb}")
             success_count += 1
 
         await AuditLog.objects.acreate(
-            action="teams_activated",
+            action=f"teams_{verb}",
             admin_user=str(interaction.user),
             target_entity="teams",
             target_id=0,
@@ -410,15 +406,26 @@ class AdminTeamsCog(commands.Cog):
 
         await log_to_ops_channel(
             self.bot,
-            f"Team Activation by {interaction.user.mention}\n"
+            f"Team {noun} by {interaction.user.mention}\n"
             f"• Teams: {teams}\n"
-            f"• Activated: {success_count}/{len(team_numbers)}",
+            f"• {title_verb}: {success_count}/{len(team_numbers)}",
         )
 
-        summary = "**Team Activation Results**\n\n"
-        summary += f"Activated: {success_count}/{len(team_numbers)}\n\n"
+        summary = f"**Team {noun} Results**\n\n{title_verb}: {success_count}/{len(team_numbers)}\n"
+        if not active:
+            summary += "Their members lose their team roles within a few minutes; reactivating restores them.\n"
 
         await send_lines(interaction, summary.rstrip(), results, title="Details", filename="results.txt")
+
+    @teams_group.command(
+        name="activate",
+        description="[ADMIN] Activate multiple teams in database",
+    )
+    @app_commands.describe(teams="Team numbers (e.g., '1,3,5-10,15')")
+    @app_commands.check(permission_check("admin"))
+    async def admin_activate_teams(self, interaction: discord.Interaction, teams: str) -> None:
+        """Activate multiple teams in database (sets is_active=True)."""
+        await self._set_teams_active(interaction, teams, active=True)
 
     @teams_group.command(
         name="deactivate",
@@ -428,64 +435,7 @@ class AdminTeamsCog(commands.Cog):
     @app_commands.check(permission_check("admin"))
     async def admin_deactivate_teams(self, interaction: discord.Interaction, teams: str) -> None:
         """Deactivate multiple teams in database (sets is_active=False)."""
-        await interaction.response.defer(ephemeral=True)
-
-        try:
-            team_numbers = parse_team_range(teams)
-        except ValueError as e:
-            await interaction.followup.send(f"Error: {e}", ephemeral=True)
-            return
-
-        if not team_numbers:
-            await interaction.followup.send("No teams specified", ephemeral=True)
-            return
-
-        results = []
-        success_count = 0
-        for team_number in team_numbers:
-            team = await Team.objects.filter(team_number=team_number).afirst()
-            if not team:
-                results.append(f"Team {team_number:02d}: not found")
-                continue
-
-            if not team.is_active:
-                results.append(f"Team {team_number:02d}: already inactive")
-                continue
-
-            team.is_active = False
-            await team.asave(update_fields=["is_active"])
-            if interaction.guild:
-                async for link in DiscordLink.objects.filter(team=team, is_active=True):
-                    member = interaction.guild.get_member(link.discord_id)
-                    if member:
-                        await sync_member_roles(interaction.guild, member)
-            results.append(f"Team {team_number:02d}: deactivated")
-            success_count += 1
-
-        await AuditLog.objects.acreate(
-            action="teams_deactivated",
-            admin_user=str(interaction.user),
-            target_entity="teams",
-            target_id=0,
-            details={
-                "team_numbers": team_numbers,
-                "success_count": success_count,
-                "total_count": len(team_numbers),
-            },
-        )
-
-        await log_to_ops_channel(
-            self.bot,
-            f"Team Deactivation by {interaction.user.mention}\n"
-            f"• Teams: {teams}\n"
-            f"• Deactivated: {success_count}/{len(team_numbers)}",
-        )
-
-        summary = "**Team Deactivation Results**\n\n"
-        summary += f"Deactivated: {success_count}/{len(team_numbers)}\n"
-        summary += "Their members lose their team roles within a few minutes; reactivating restores them.\n\n"
-
-        await send_lines(interaction, summary.rstrip(), results, title="Details", filename="results.txt")
+        await self._set_teams_active(interaction, teams, active=False)
 
     @teams_group.command(
         name="recreate",

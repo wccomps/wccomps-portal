@@ -38,7 +38,6 @@ def get_authentik_id(user: User) -> str | None:
 
 
 def get_permissions_context(user: User) -> dict[str, bool]:
-    """Get permissions dict for template context."""
     return {f"is_{perm}": has_permission(user, perm) for perm in PERMISSION_MAP}
 
 

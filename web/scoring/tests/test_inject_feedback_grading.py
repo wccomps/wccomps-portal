@@ -1,19 +1,20 @@
 """Feedback entered on the grading page saves to the grade; only the white team lead's is auto-approved."""
 
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
+from quotient.client import Inject
 
 from scoring.models import InjectScore
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
 
-INJECT = MagicMock(inject_id=1, title="Firewall policy", description="")
+INJECT = Inject(inject_id=1, title="Firewall policy", description="")
 
 
 @pytest.fixture

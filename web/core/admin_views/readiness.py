@@ -325,14 +325,12 @@ ALL_CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
     ("Team accounts exist", _check_team_accounts_exist),
     ("Group membership correct", _check_team_group_membership),
     ("App bindings configured", _check_blueteam_bindings),
-    # Phase 2: Teams & infrastructure
     ("Multiple teams registered", _check_multiple_teams),
     ("School info configured", _check_school_info),
     ("Quotient API reachable", _check_quotient_api),
     ("Quotient metadata synced", _check_quotient_synced),
     ("Packets distributed", _check_packets_distributed),
     ("Start message set", _check_start_message),
-    # Phase 3: Clean slate
     *((check.step_name, check) for check in CLEAN_SLATE_CHECKS),
 ]
 

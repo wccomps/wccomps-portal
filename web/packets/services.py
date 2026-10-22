@@ -357,8 +357,8 @@ class PacketDistributionService:
     def stream_send_to_new_teams(self, packet: Packet) -> Iterator[str]:
         """Send a sent packet to the teams added to the school list since, which have no distribution of it.
 
-        Its event must still be the open one. The emails go out after the school list lock is released; the
-        packet's status stays as it is."""
+        Its event must still be the open one. The emails go out after the school list lock is released;
+        completes a distributing packet if every distribution is then done."""
         try:
             distributions = self._distributions_for_new_teams(packet)
         except ValueError as refused:

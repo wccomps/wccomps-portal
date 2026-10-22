@@ -1,5 +1,3 @@
-"""Admin cog for general administrative commands."""
-
 import logging
 
 import discord
@@ -15,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 class AdminCog(commands.Cog):
-    """General admin commands."""
-
     admin_group = app_commands.Group(name="admin", description="General administrative commands")
 
     def __init__(self, bot: commands.Bot) -> None:

@@ -549,7 +549,9 @@ class Discord:
         interaction.user = self.member_for(role)
         interaction.guild = self.guild
         interaction.guild_id = GUILD_ID
-        interaction.channel = self.channel(TEAM_CHAT_ID)
+        interaction.channel = (
+            message.channel if message is not None and message.channel is not None else self.channel(TEAM_CHAT_ID)
+        )
         interaction.client = self.bot
         interaction.message = message
         interaction.data = data or {}

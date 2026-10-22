@@ -1,15 +1,18 @@
 import json
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from io import BytesIO, StringIO
+from typing import Protocol
 
 from django.http import HttpResponse
 from django.utils import timezone
 
 from core.csv_export import csv_writer
+from ticketing.models import Ticket
 
-from .calculator import compute_standings
+from .calculator import Standing, compute_standings
 from .models import (
     IncidentReport,
     InjectScore,
@@ -18,459 +21,232 @@ from .models import (
 )
 
 
-def _serialize_red_scores_csv() -> str:
-    output = StringIO()
-    writer = csv_writer(output)
-    writer.writerow(
-        [
-            "ID",
-            "Attack Type",
-            "Source IP",
-            "Destination IP Template",
-            "Affected Boxes",
-            "Affected Service",
-            "Affected Teams",
-            "Points Per Team",
-            "Universally Attempted",
-            "Persistence Established",
-            "Approved",
-            "Approved By",
-            "Approved At",
-            "Submitted By",
-            "Created At",
-        ]
-    )
-    findings = (
-        RedTeamScore.objects.select_related("attack_type", "approved_by", "submitted_by")
-        .prefetch_related("affected_teams")
-        .order_by("-created_at")
-    )
-    for finding in findings:
-        affected_teams = ", ".join(team.team_name for team in finding.affected_teams.all())
-        affected_boxes = ", ".join(finding.affected_boxes) if finding.affected_boxes else ""
-        writer.writerow(
-            [
-                finding.id,
-                finding.attack_type.name if finding.attack_type else "",
-                finding.source_ip,
-                finding.destination_ip_template,
-                affected_boxes,
-                finding.affected_service,
-                affected_teams,
-                finding.points_per_team,
-                finding.universally_attempted,
-                finding.persistence_established,
-                finding.is_approved,
-                finding.approved_by.username if finding.approved_by else "",
-                finding.approved_at.isoformat() if finding.approved_at else "",
-                finding.submitted_by.username if finding.submitted_by else "",
-                finding.created_at.isoformat(),
-            ]
-        )
-    return output.getvalue()
+def _csv_cell(value: object) -> object:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    return value
 
 
-def _serialize_red_scores_json() -> str:
-    findings = (
-        RedTeamScore.objects.select_related("attack_type", "approved_by", "submitted_by")
-        .prefetch_related("affected_teams")
-        .order_by("-created_at")
-    )
-    data = []
-    for finding in findings:
-        affected_teams = [team.team_name for team in finding.affected_teams.all()]
-        data.append(
-            {
-                "id": finding.id,
-                "attack_type": finding.attack_type.name if finding.attack_type else None,
-                "source_ip": finding.source_ip,
-                "destination_ip_template": finding.destination_ip_template,
-                "affected_boxes": finding.affected_boxes,
-                "affected_service": finding.affected_service,
-                "affected_teams": affected_teams,
-                "points_per_team": str(finding.points_per_team),
-                "universally_attempted": finding.universally_attempted,
-                "persistence_established": finding.persistence_established,
-                "is_approved": finding.is_approved,
-                "approved_by": finding.approved_by.username if finding.approved_by else None,
-                "approved_at": finding.approved_at.isoformat() if finding.approved_at else None,
-                "submitted_by": finding.submitted_by.username if finding.submitted_by else None,
-                "created_at": finding.created_at.isoformat(),
-            }
-        )
-    return json.dumps({"red_findings": data}, indent=2)
-
-
-def _serialize_incidents_csv() -> str:
-    output = StringIO()
-    writer = csv_writer(output)
-    writer.writerow(
-        [
-            "ID",
-            "Team",
-            "Attack Description",
-            "Source IP",
-            "Destination IP",
-            "Affected Boxes",
-            "Affected Service",
-            "Attack Detected At",
-            "Attack Mitigated",
-            "Points Returned",
-            "Reviewed",
-            "Matched Finding ID",
-            "Reviewed By",
-            "Reviewed At",
-            "Submitted By",
-            "Created At",
-        ]
-    )
-    incidents = IncidentReport.objects.select_related(
-        "team", "submitted_by", "approved_by", "matched_to_red_score"
-    ).order_by("-created_at")
-    for incident in incidents:
-        writer.writerow(
-            [
-                incident.id,
-                incident.team.team_name,
-                incident.attack_description,
-                incident.source_ip,
-                incident.destination_ip or "",
-                ", ".join(incident.affected_boxes) if incident.affected_boxes else "",
-                incident.affected_service,
-                incident.attack_detected_at.isoformat(),
-                incident.attack_mitigated,
-                incident.points_returned,
-                incident.is_approved,
-                incident.matched_to_red_score.id if incident.matched_to_red_score else "",
-                incident.approved_by.username if incident.approved_by else "",
-                incident.approved_at.isoformat() if incident.approved_at else "",
-                incident.submitted_by.username if incident.submitted_by else "",
-                incident.created_at.isoformat(),
-            ]
-        )
-    return output.getvalue()
-
-
-def _serialize_incidents_json() -> str:
-    incidents = IncidentReport.objects.select_related(
-        "team", "submitted_by", "approved_by", "matched_to_red_score"
-    ).order_by("-created_at")
-    data = [
-        {
-            "id": incident.id,
-            "team": incident.team.team_name,
-            "team_number": incident.team.team_number,
-            "attack_description": incident.attack_description,
-            "source_ip": incident.source_ip,
-            "destination_ip": incident.destination_ip,
-            "affected_boxes": incident.affected_boxes,
-            "affected_service": incident.affected_service,
-            "attack_detected_at": incident.attack_detected_at.isoformat(),
-            "attack_mitigated": incident.attack_mitigated,
-            "points_returned": str(incident.points_returned),
-            "is_approved": incident.is_approved,
-            "matched_to_red_score_id": (incident.matched_to_red_score.id if incident.matched_to_red_score else None),
-            "approved_by": incident.approved_by.username if incident.approved_by else None,
-            "approved_at": incident.approved_at.isoformat() if incident.approved_at else None,
-            "submitted_by": incident.submitted_by.username if incident.submitted_by else None,
-            "created_at": incident.created_at.isoformat(),
-        }
-        for incident in incidents
-    ]
-    return json.dumps({"incidents": data}, indent=2)
-
-
-def _serialize_orange_adjustments_csv() -> str:
-    output = StringIO()
-    writer = csv_writer(output)
-    writer.writerow(
-        [
-            "ID",
-            "Team",
-            "Description",
-            "Points",
-            "Approved",
-            "Approved By",
-            "Approved At",
-            "Submitted By",
-            "Created At",
-        ]
-    )
-    bonuses = OrangeTeamScore.objects.select_related("team", "submitted_by", "approved_by").order_by("-created_at")
-    for bonus in bonuses:
-        writer.writerow(
-            [
-                bonus.id,
-                bonus.team.team_name,
-                bonus.description,
-                bonus.points_awarded,
-                bonus.is_approved,
-                bonus.approved_by.username if bonus.approved_by else "",
-                bonus.approved_at.isoformat() if bonus.approved_at else "",
-                bonus.submitted_by.username if bonus.submitted_by else "",
-                bonus.created_at.isoformat(),
-            ]
-        )
-    return output.getvalue()
-
-
-def _serialize_orange_adjustments_json() -> str:
-    bonuses = OrangeTeamScore.objects.select_related("team", "submitted_by", "approved_by").order_by("-created_at")
-    data = [
-        {
-            "id": bonus.id,
-            "team": bonus.team.team_name,
-            "team_number": bonus.team.team_number,
-            "description": bonus.description,
-            "points_awarded": str(bonus.points_awarded),
-            "is_approved": bonus.is_approved,
-            "approved_by": bonus.approved_by.username if bonus.approved_by else None,
-            "approved_at": bonus.approved_at.isoformat() if bonus.approved_at else None,
-            "submitted_by": bonus.submitted_by.username if bonus.submitted_by else None,
-            "created_at": bonus.created_at.isoformat(),
-        }
-        for bonus in bonuses
-    ]
-    return json.dumps({"orange_checks": data}, indent=2)
-
-
-def _serialize_inject_grades_csv() -> str:
-    output = StringIO()
-    writer = csv_writer(output)
-    writer.writerow(
-        [
-            "Team",
-            "Team Number",
-            "Inject ID",
-            "Inject Name",
-            "Max Points",
-            "Points Awarded",
-            "Approved",
-            "Approved By",
-            "Approved At",
-            "Graded By",
-            "Graded At",
-        ]
-    )
-    grades = InjectScore.objects.select_related("team", "graded_by", "approved_by").order_by(
-        "inject_name", "team__team_number"
-    )
-    for grade in grades:
-        writer.writerow(
-            [
-                grade.team.team_name,
-                grade.team.team_number,
-                grade.inject_id,
-                grade.inject_name,
-                grade.max_points,
-                grade.points_awarded,
-                grade.is_approved,
-                grade.approved_by.username if grade.approved_by else "",
-                grade.approved_at.isoformat() if grade.approved_at else "",
-                grade.graded_by.username if grade.graded_by else "",
-                grade.graded_at.isoformat(),
-            ]
-        )
-    return output.getvalue()
-
-
-def _serialize_inject_grades_json() -> str:
-    grades = InjectScore.objects.select_related("team", "graded_by", "approved_by").order_by(
-        "inject_name", "team__team_number"
-    )
-    data = [
-        {
-            "team": grade.team.team_name,
-            "team_number": grade.team.team_number,
-            "inject_id": grade.inject_id,
-            "inject_name": grade.inject_name,
-            "max_points": str(grade.max_points),
-            "points_awarded": str(grade.points_awarded),
-            "is_approved": grade.is_approved,
-            "approved_by": grade.approved_by.username if grade.approved_by else None,
-            "approved_at": grade.approved_at.isoformat() if grade.approved_at else None,
-            "graded_by": grade.graded_by.username if grade.graded_by else None,
-            "graded_at": grade.graded_at.isoformat(),
-        }
-        for grade in grades
-    ]
-    return json.dumps({"inject_grades": data}, indent=2)
-
-
-def _serialize_final_scores_csv() -> str:
-    output = StringIO()
-    writer = csv_writer(output)
-    writer.writerow(
-        [
-            "Rank",
-            "Team",
-            "Team Number",
-            "Total Score",
-            "Service Points",
-            "Inject Points",
-            "Orange Points",
-            "Red Deductions",
-            "Incident Recovery Points",
-            "SLA Penalties",
-            "Point Adjustments",
-            "Calculated At",
-        ]
-    )
-    scores = compute_standings()
-    calculated_at = timezone.now().isoformat()
-    for score in scores:
-        writer.writerow(
-            [
-                score.rank or "",
-                score.team.team_name,
-                score.team.team_number,
-                score.total_score,
-                score.service_points,
-                score.inject_points,
-                score.orange_points,
-                score.red_deductions,
-                score.incident_recovery_points,
-                score.sla_penalties,
-                score.point_adjustments,
-                calculated_at,
-            ]
-        )
-    return output.getvalue()
-
-
-def _serialize_final_scores_json() -> str:
-    scores = compute_standings()
-    calculated_at = timezone.now().isoformat()
-    data = [
-        {
-            "rank": score.rank,
-            "team": score.team.team_name,
-            "team_number": score.team.team_number,
-            "total_score": str(score.total_score),
-            "service_points": str(score.service_points),
-            "inject_points": str(score.inject_points),
-            "orange_points": str(score.orange_points),
-            "red_deductions": str(score.red_deductions),
-            "incident_recovery_points": str(score.incident_recovery_points),
-            "sla_penalties": str(score.sla_penalties),
-            "point_adjustments": str(score.point_adjustments),
-            "calculated_at": calculated_at,
-        }
-        for score in scores
-    ]
-    return json.dumps({"final_scores": data}, indent=2)
-
-
-def _serialize_tickets_csv() -> str:
-    from ticketing.models import Ticket
-
-    output = StringIO()
-    writer = csv_writer(output)
-    writer.writerow(
-        [
-            "Ticket Number",
-            "Team",
-            "Team Number",
-            "Category",
-            "Title",
-            "Description",
-            "Status",
-            "Points Charged",
-            "Hostname",
-            "IP Address",
-            "Service Name",
-            "Assigned To",
-            "Assigned At",
-            "Resolved By",
-            "Resolved At",
-            "Resolution Notes",
-            "Approved",
-            "Approved By",
-            "Approved At",
-            "Created At",
-        ]
-    )
-    tickets = Ticket.objects.select_related("team", "category", "assigned_to", "resolved_by", "approved_by").order_by(
-        "-created_at"
-    )
-    for ticket in tickets:
-        writer.writerow(
-            [
-                ticket.ticket_number,
-                ticket.team.team_name,
-                ticket.team.team_number,
-                ticket.category.display_name if ticket.category else "",
-                ticket.title,
-                ticket.description,
-                ticket.status,
-                ticket.points_charged,
-                ticket.hostname,
-                ticket.ip_address or "",
-                ticket.service_name,
-                ticket.assigned_to.username if ticket.assigned_to else "",
-                ticket.assigned_at.isoformat() if ticket.assigned_at else "",
-                ticket.resolved_by.username if ticket.resolved_by else "",
-                ticket.resolved_at.isoformat() if ticket.resolved_at else "",
-                ticket.resolution_notes,
-                ticket.is_approved,
-                ticket.approved_by.username if ticket.approved_by else "",
-                ticket.approved_at.isoformat() if ticket.approved_at else "",
-                ticket.created_at.isoformat(),
-            ]
-        )
-    return output.getvalue()
-
-
-def _serialize_tickets_json() -> str:
-    from ticketing.models import Ticket
-
-    tickets = Ticket.objects.select_related("team", "category", "assigned_to", "resolved_by", "approved_by").order_by(
-        "-created_at"
-    )
-    data = [
-        {
-            "ticket_number": ticket.ticket_number,
-            "team": ticket.team.team_name,
-            "team_number": ticket.team.team_number,
-            "category": ticket.category.display_name if ticket.category else None,
-            "title": ticket.title,
-            "description": ticket.description,
-            "status": ticket.status,
-            "points_charged": ticket.points_charged,
-            "hostname": ticket.hostname,
-            "ip_address": ticket.ip_address,
-            "service_name": ticket.service_name,
-            "assigned_to": ticket.assigned_to.username if ticket.assigned_to else None,
-            "assigned_at": ticket.assigned_at.isoformat() if ticket.assigned_at else None,
-            "resolved_by": ticket.resolved_by.username if ticket.resolved_by else None,
-            "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
-            "resolution_notes": ticket.resolution_notes,
-            "is_approved": ticket.is_approved,
-            "approved_by": ticket.approved_by.username if ticket.approved_by else None,
-            "approved_at": ticket.approved_at.isoformat() if ticket.approved_at else None,
-            "created_at": ticket.created_at.isoformat(),
-        }
-        for ticket in tickets
-    ]
-    return json.dumps({"tickets": data}, indent=2)
+def _json_value(value: object) -> object:
+    if isinstance(value, Decimal):
+        return str(value)
+    return value
 
 
 @dataclass(frozen=True)
-class Dataset:
+class Column[T]:
+    csv_header: str | None
+    json_key: str
+    extract: Callable[[T], object]
+
+
+class ExportableDataset(Protocol):
+    @property
+    def filename(self) -> str: ...
+    def render_pair(self) -> tuple[str, str]: ...
+    def to_csv(self) -> str: ...
+    def to_json(self) -> str: ...
+
+
+@dataclass(frozen=True)
+class Dataset[T]:
     filename: str
-    to_csv: Callable[[], str]
-    to_json: Callable[[], str]
+    columns: Sequence[Column[T]]
+    fetch: Callable[[], Sequence[T]]
+
+    def render_csv(self, rows: Sequence[T]) -> str:
+        output = StringIO()
+        writer = csv_writer(output)
+        csv_cols = [col for col in self.columns if col.csv_header is not None]
+        writer.writerow([col.csv_header for col in csv_cols])
+        for row in rows:
+            writer.writerow([_csv_cell(col.extract(row)) for col in csv_cols])
+        return output.getvalue()
+
+    def render_json(self, rows: Sequence[T]) -> str:
+        data = [{col.json_key: _json_value(col.extract(row)) for col in self.columns} for row in rows]
+        return json.dumps({self.filename: data}, indent=2)
+
+    def render_pair(self) -> tuple[str, str]:
+        rows = self.fetch()
+        return self.render_csv(rows), self.render_json(rows)
+
+    def to_csv(self) -> str:
+        return self.render_csv(self.fetch())
+
+    def to_json(self) -> str:
+        return self.render_json(self.fetch())
 
 
-DATASETS = {
-    "red_scores": Dataset("red_findings", _serialize_red_scores_csv, _serialize_red_scores_json),
-    "incidents": Dataset("incidents", _serialize_incidents_csv, _serialize_incidents_json),
-    "orange_adjustments": Dataset(
-        "orange_checks", _serialize_orange_adjustments_csv, _serialize_orange_adjustments_json
+def _fetch_red_scores() -> list[RedTeamScore]:
+    return list(
+        RedTeamScore.objects.select_related("attack_type", "approved_by", "submitted_by")
+        .prefetch_related("affected_teams")
+        .order_by("-created_at")
+    )
+
+
+def _fetch_incidents() -> list[IncidentReport]:
+    return list(
+        IncidentReport.objects.select_related("team", "submitted_by", "approved_by", "matched_to_red_score").order_by(
+            "-created_at"
+        )
+    )
+
+
+def _fetch_orange_adjustments() -> list[OrangeTeamScore]:
+    return list(OrangeTeamScore.objects.select_related("team", "submitted_by", "approved_by").order_by("-created_at"))
+
+
+def _fetch_inject_grades() -> list[InjectScore]:
+    return list(
+        InjectScore.objects.select_related("team", "graded_by", "approved_by").order_by(
+            "inject_name", "team__team_number"
+        )
+    )
+
+
+def _fetch_final_scores() -> list[tuple[Standing, str]]:
+    calculated_at = timezone.now().isoformat()
+    return [(score, calculated_at) for score in compute_standings()]
+
+
+def _fetch_tickets() -> list[Ticket]:
+    return list(
+        Ticket.objects.select_related("team", "category", "assigned_to", "resolved_by", "approved_by").order_by(
+            "-created_at"
+        )
+    )
+
+
+DATASETS: dict[str, ExportableDataset] = {
+    "red_scores": Dataset[RedTeamScore](
+        "red_findings",
+        [
+            Column("ID", "id", lambda f: f.id),
+            Column("Attack Type", "attack_type", lambda f: f.attack_type.name if f.attack_type else None),
+            Column("Source IP", "source_ip", lambda f: f.source_ip),
+            Column("Destination IP Template", "destination_ip_template", lambda f: f.destination_ip_template),
+            Column("Affected Boxes", "affected_boxes", lambda f: f.affected_boxes),
+            Column("Affected Service", "affected_service", lambda f: f.affected_service),
+            Column("Affected Teams", "affected_teams", lambda f: [t.team_name for t in f.affected_teams.all()]),
+            Column("Points Per Team", "points_per_team", lambda f: f.points_per_team),
+            Column("Universally Attempted", "universally_attempted", lambda f: f.universally_attempted),
+            Column("Persistence Established", "persistence_established", lambda f: f.persistence_established),
+            Column("Approved", "is_approved", lambda f: f.is_approved),
+            Column("Approved By", "approved_by", lambda f: f.approved_by.username if f.approved_by else None),
+            Column("Approved At", "approved_at", lambda f: f.approved_at.isoformat() if f.approved_at else None),
+            Column("Submitted By", "submitted_by", lambda f: f.submitted_by.username if f.submitted_by else None),
+            Column("Created At", "created_at", lambda f: f.created_at.isoformat()),
+        ],
+        _fetch_red_scores,
     ),
-    "inject_grades": Dataset("inject_grades", _serialize_inject_grades_csv, _serialize_inject_grades_json),
-    "final_scores": Dataset("final_scores", _serialize_final_scores_csv, _serialize_final_scores_json),
-    "tickets": Dataset("tickets", _serialize_tickets_csv, _serialize_tickets_json),
+    "incidents": Dataset[IncidentReport](
+        "incidents",
+        [
+            Column("ID", "id", lambda i: i.id),
+            Column("Team", "team", lambda i: i.team.team_name),
+            Column(None, "team_number", lambda i: i.team.team_number),
+            Column("Attack Description", "attack_description", lambda i: i.attack_description),
+            Column("Source IP", "source_ip", lambda i: i.source_ip),
+            Column("Destination IP", "destination_ip", lambda i: i.destination_ip),
+            Column("Affected Boxes", "affected_boxes", lambda i: i.affected_boxes),
+            Column("Affected Service", "affected_service", lambda i: i.affected_service),
+            Column("Attack Detected At", "attack_detected_at", lambda i: i.attack_detected_at.isoformat()),
+            Column("Attack Mitigated", "attack_mitigated", lambda i: i.attack_mitigated),
+            Column("Points Returned", "points_returned", lambda i: i.points_returned),
+            Column("Reviewed", "is_approved", lambda i: i.is_approved),
+            Column(
+                "Matched Finding ID",
+                "matched_to_red_score_id",
+                lambda i: i.matched_to_red_score.id if i.matched_to_red_score else None,
+            ),
+            Column("Reviewed By", "approved_by", lambda i: i.approved_by.username if i.approved_by else None),
+            Column("Reviewed At", "approved_at", lambda i: i.approved_at.isoformat() if i.approved_at else None),
+            Column("Submitted By", "submitted_by", lambda i: i.submitted_by.username if i.submitted_by else None),
+            Column("Created At", "created_at", lambda i: i.created_at.isoformat()),
+        ],
+        _fetch_incidents,
+    ),
+    "orange_adjustments": Dataset[OrangeTeamScore](
+        "orange_checks",
+        [
+            Column("ID", "id", lambda b: b.id),
+            Column("Team", "team", lambda b: b.team.team_name),
+            Column(None, "team_number", lambda b: b.team.team_number),
+            Column("Description", "description", lambda b: b.description),
+            Column("Points", "points_awarded", lambda b: b.points_awarded),
+            Column("Approved", "is_approved", lambda b: b.is_approved),
+            Column("Approved By", "approved_by", lambda b: b.approved_by.username if b.approved_by else None),
+            Column("Approved At", "approved_at", lambda b: b.approved_at.isoformat() if b.approved_at else None),
+            Column("Submitted By", "submitted_by", lambda b: b.submitted_by.username if b.submitted_by else None),
+            Column("Created At", "created_at", lambda b: b.created_at.isoformat()),
+        ],
+        _fetch_orange_adjustments,
+    ),
+    "inject_grades": Dataset[InjectScore](
+        "inject_grades",
+        [
+            Column("Team", "team", lambda g: g.team.team_name),
+            Column("Team Number", "team_number", lambda g: g.team.team_number),
+            Column("Inject ID", "inject_id", lambda g: g.inject_id),
+            Column("Inject Name", "inject_name", lambda g: g.inject_name),
+            Column("Max Points", "max_points", lambda g: g.max_points),
+            Column("Points Awarded", "points_awarded", lambda g: g.points_awarded),
+            Column("Approved", "is_approved", lambda g: g.is_approved),
+            Column("Approved By", "approved_by", lambda g: g.approved_by.username if g.approved_by else None),
+            Column("Approved At", "approved_at", lambda g: g.approved_at.isoformat() if g.approved_at else None),
+            Column("Graded By", "graded_by", lambda g: g.graded_by.username if g.graded_by else None),
+            Column("Graded At", "graded_at", lambda g: g.graded_at.isoformat()),
+        ],
+        _fetch_inject_grades,
+    ),
+    "final_scores": Dataset[tuple[Standing, str]](
+        "final_scores",
+        [
+            Column("Rank", "rank", lambda sc: sc[0].rank),
+            Column("Team", "team", lambda sc: sc[0].team.team_name),
+            Column("Team Number", "team_number", lambda sc: sc[0].team.team_number),
+            Column("Total Score", "total_score", lambda sc: sc[0].total_score),
+            Column("Service Points", "service_points", lambda sc: sc[0].service_points),
+            Column("Inject Points", "inject_points", lambda sc: sc[0].inject_points),
+            Column("Orange Points", "orange_points", lambda sc: sc[0].orange_points),
+            Column("Red Deductions", "red_deductions", lambda sc: sc[0].red_deductions),
+            Column("Incident Recovery Points", "incident_recovery_points", lambda sc: sc[0].incident_recovery_points),
+            Column("SLA Penalties", "sla_penalties", lambda sc: sc[0].sla_penalties),
+            Column("Point Adjustments", "point_adjustments", lambda sc: sc[0].point_adjustments),
+            Column("Calculated At", "calculated_at", lambda sc: sc[1]),
+        ],
+        _fetch_final_scores,
+    ),
+    "tickets": Dataset[Ticket](
+        "tickets",
+        [
+            Column("Ticket Number", "ticket_number", lambda t: t.ticket_number),
+            Column("Team", "team", lambda t: t.team.team_name),
+            Column("Team Number", "team_number", lambda t: t.team.team_number),
+            Column("Category", "category", lambda t: t.category.display_name if t.category else None),
+            Column("Title", "title", lambda t: t.title),
+            Column("Description", "description", lambda t: t.description),
+            Column("Status", "status", lambda t: t.status),
+            Column("Points Charged", "points_charged", lambda t: t.points_charged),
+            Column("Hostname", "hostname", lambda t: t.hostname),
+            Column("IP Address", "ip_address", lambda t: t.ip_address),
+            Column("Service Name", "service_name", lambda t: t.service_name),
+            Column("Assigned To", "assigned_to", lambda t: t.assigned_to.username if t.assigned_to else None),
+            Column("Assigned At", "assigned_at", lambda t: t.assigned_at.isoformat() if t.assigned_at else None),
+            Column("Resolved By", "resolved_by", lambda t: t.resolved_by.username if t.resolved_by else None),
+            Column("Resolved At", "resolved_at", lambda t: t.resolved_at.isoformat() if t.resolved_at else None),
+            Column("Resolution Notes", "resolution_notes", lambda t: t.resolution_notes),
+            Column("Approved", "is_approved", lambda t: t.is_approved),
+            Column("Approved By", "approved_by", lambda t: t.approved_by.username if t.approved_by else None),
+            Column("Approved At", "approved_at", lambda t: t.approved_at.isoformat() if t.approved_at else None),
+            Column("Created At", "created_at", lambda t: t.created_at.isoformat()),
+        ],
+        _fetch_tickets,
+    ),
 }
 
 
@@ -492,13 +268,13 @@ def export_all_zip_bytes() -> bytes:
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for dataset in DATASETS.values():
-            zip_file.writestr(f"{dataset.filename}.csv", dataset.to_csv())
-            zip_file.writestr(f"{dataset.filename}.json", dataset.to_json())
+            csv_str, json_str = dataset.render_pair()
+            zip_file.writestr(f"{dataset.filename}.csv", csv_str)
+            zip_file.writestr(f"{dataset.filename}.json", json_str)
     return zip_buffer.getvalue()
 
 
 def export_all_zip() -> HttpResponse:
-    """Export all scoring data as a zip file containing CSV and JSON files."""
     timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
     response = HttpResponse(export_all_zip_bytes(), content_type="application/zip")
     response["Content-Disposition"] = f'attachment; filename="wccomps_export_{timestamp}.zip"'

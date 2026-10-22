@@ -85,9 +85,13 @@ class TestAdminCommands:
         """Test /admin reset-blueteam-passwords - verifies password reset flow."""
         mock_interaction.user.id = mock_admin_user._discord_id
 
-        reset = MagicMock(side_effect=lambda n: (f"pw-{n}", "", n != 2))
         callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
-        with patch_globals(callback, {"reset_team_credentials": reset, "settings": MagicMock(AUTHENTIK_TOKEN="t")}):
+        with (
+            patch(
+                "core.authentik_utils.reset_team_credentials", side_effect=lambda n: (f"pw-{n}", "", n != 2)
+            ) as reset,
+            patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
+        ):
             cog = AdminCompetitionCog(mock_bot)
             await cog.admin_reset_blueteam_passwords.callback(cog, mock_interaction, team_numbers="1-3")
 
@@ -109,12 +113,9 @@ class TestAdminCommands:
 
         results = {1: ("pw-1", "", True), 2: (None, "HTTP 500", False), 3: ("pw-3", "", True)}
         callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
-        with patch_globals(
-            callback,
-            {
-                "reset_team_credentials": MagicMock(side_effect=lambda n: results[n]),
-                "settings": MagicMock(AUTHENTIK_TOKEN="t"),
-            },
+        with (
+            patch("core.authentik_utils.reset_team_credentials", side_effect=lambda n: results[n]),
+            patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
         ):
             cog = AdminCompetitionCog(mock_bot)
             await cog.admin_reset_blueteam_passwords.callback(cog, mock_interaction, team_numbers="1-3")

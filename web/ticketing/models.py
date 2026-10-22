@@ -46,6 +46,14 @@ class TicketCategory(models.Model):
     def steps(self) -> list[str]:
         return parse_playbook_steps(self.playbook)
 
+    @property
+    def points_label(self) -> str:
+        return "Variable" if self.variable_points else f"{self.points}pt"
+
+    @property
+    def points_display(self) -> str:
+        return "Variable" if self.variable_points else f"{self.points} points"
+
     class Meta:
         ordering = ["sort_order", "display_name"]
         verbose_name_plural = "ticket categories"

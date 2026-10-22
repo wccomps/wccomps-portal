@@ -42,6 +42,9 @@ class TeamAdmin(PortalModelAdmin[Team]):
         # Teams are fixed slots from init_teams; deleting one would take its season history with it
         return False
 
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Team]:
+        return super().get_queryset(request).with_active_member_count()  # type: ignore[attr-defined, no-any-return]
+
     @admin.display(description="Password")
     def password_reset(self, obj: Team) -> str:
         return _password_reset_button(obj)
@@ -117,9 +120,7 @@ class SchoolInfoAdmin(PortalModelAdmin[SchoolInfo]):
     list_select_related = ["school", "team"]
     search_fields = ["school__name", "contact_email", "team__team_name"]
     # password mirrors the team account's Authentik password for packet emails; editing it here would change
-    # only this copy, so it's set solely by reset_team_password. The school, and whether a team has one, is set
-    # through registration.services (set_team_school, remove_team_school, clear_school_list, import_school_list,
-    # add_to_school_list).
+    # only this copy, so it's set solely by reset_team_password. The school is set through registration.services.
     exclude = ["password"]
     readonly_fields = ["team", "school", "created_at", "updated_at", "updated_by", "password_with_reset"]
     ordering = ["team__team_number"]

@@ -14,11 +14,10 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def mock_quotient_injects():
     """Mock Quotient client with sample injects."""
+    from quotient.client import Inject
+
     with patch("quotient.client.QuotientClient") as mock_client:
-        mock_inject = MagicMock()
-        mock_inject.inject_id = 1
-        mock_inject.title = "Test Inject"
-        mock_inject.description = "Test description"
+        mock_inject = Inject(inject_id=1, title="Test Inject", description="Test description")
 
         instance = MagicMock()
         instance.get_injects.return_value = [mock_inject]

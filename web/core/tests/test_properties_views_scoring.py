@@ -2,7 +2,6 @@
 
 import json
 from contextlib import ExitStack
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -82,8 +81,10 @@ def _grading(w: World) -> Fields:
 
 def _injects(w: World) -> ExitStack:
     """Quotient lists one inject, so the grading page has one to grade."""
+    from quotient.client import Inject
+
     stack = ExitStack()
-    inject = SimpleNamespace(inject_id=1, title="Inject 01 - Web (100 pts)")
+    inject = Inject(inject_id=1, title="Inject 01 - Web (100 pts)", description="")
     stack.enter_context(patch("quotient.client.QuotientClient.get_injects", return_value=[inject]))
     return stack
 

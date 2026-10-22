@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import TypedDict
 
@@ -58,16 +58,26 @@ SCORE_COMPONENT_FIELDS = (
     "incident_recovery_points",
 )
 
+SCALING_FIELDS = (
+    "service_raw",
+    "inject_raw",
+    "orange_raw",
+    "service_modifier",
+    "inject_modifier",
+    "orange_modifier",
+    "service_weight",
+    "inject_weight",
+    "orange_weight",
+)
+
 RECOVERY_POINT_RATIO = Decimal("0.80")
 
 
 def _get_modifiers(template: ScoringTemplate) -> tuple[Decimal, Decimal, Decimal]:
     """Derive each category's scaling modifier from its weight and raw maximum.
 
-        total_pool = max(raw_max / (weight/100))
-        modifier = (weight/100) × total_pool / raw_max
-
-    The maxes are the single source of truth: editing one re-derives the scale.
+    total_pool = max(raw_max / (weight/100))
+    modifier = (weight/100) × total_pool / raw_max
     """
     hundred = Decimal("100")
     pairs = [
@@ -204,6 +214,7 @@ class Standing:
     total_score: Decimal
     is_excluded: bool
     rank: int | None = None
+    scaling: dict[str, Decimal] = field(default_factory=dict)
 
     @property
     def has_scoring_activity(self) -> bool:
@@ -239,6 +250,7 @@ def compute_standings() -> list[Standing]:
                 team=team,
                 is_excluded=team.pk in excluded_team_ids,
                 total_score=breakdown["total_score"],
+                scaling={key: breakdown[key] for key in SCALING_FIELDS},  # type: ignore[literal-required]
                 **{field: breakdown[field] for field in SCORE_COMPONENT_FIELDS},  # type: ignore[literal-required]
             )
         )

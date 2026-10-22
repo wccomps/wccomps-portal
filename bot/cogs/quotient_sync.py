@@ -1,5 +1,3 @@
-"""Background task to sync Quotient metadata and clear stale data."""
-
 import logging
 
 from asgiref.sync import sync_to_async

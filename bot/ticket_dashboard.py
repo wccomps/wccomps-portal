@@ -1,4 +1,4 @@
-"""Ticket dashboard management for #ticket-queue channel."""
+"""Per-ticket embed and action buttons posted in ticket threads."""
 
 import logging
 
@@ -72,17 +72,14 @@ def trigger_dashboard(bot: discord.Client) -> None:
 
 
 class TicketActionView(discord.ui.View):
-    """Action buttons for ticket dashboard."""
+    """Claim, unclaim, resolve, and cancel buttons on a ticket's thread message."""
 
     def __init__(self, ticket_id: int) -> None:
         super().__init__(timeout=None)
         self.ticket_id = ticket_id
 
     async def _get_ticket_id_from_interaction(self, interaction: discord.Interaction) -> int | None:
-        """Extract ticket ID from instance variable, thread channel, or interaction message."""
-        import re
-
-        # If instance has ticket_id, use it (for newly created views)
+        """Extract ticket ID from instance variable or thread channel."""
         if hasattr(self, "ticket_id") and self.ticket_id:
             return self.ticket_id
 
@@ -92,18 +89,6 @@ class TicketActionView(discord.ui.View):
             ticket = await Ticket.objects.filter(discord_thread_id=channel_id).afirst()
             if ticket:
                 return ticket.id
-
-        # Extract from message embed (for persistent views after bot restart)
-        if interaction.message and interaction.message.embeds:
-            embed = interaction.message.embeds[0]
-            if embed.title:
-                # Title format: "Ticket T050-008: Title"
-                match = re.match(r"Ticket ([^:]+):", embed.title)
-                if match:
-                    ticket_number = match.group(1).strip()
-                    ticket = await Ticket.objects.filter(ticket_number=ticket_number).afirst()
-                    if ticket:
-                        return ticket.id
 
         return None
 

@@ -30,6 +30,7 @@ from core.services.linking import (
     enforce_account_link_policy,
     execute_link,
     finalize_link,
+    lookup_valid_link_token,
     store_discord_id_in_authentik,
     validate_link_token,
 )
@@ -41,7 +42,7 @@ from team.forms import (
     ImportMode,
     parse_csv_file,
 )
-from team.models import LinkToken, SchoolInfo, Team
+from team.models import SchoolInfo, Team
 
 from .auth_utils import (
     get_authentik_groups,
@@ -75,29 +76,14 @@ def link_initiate(request: HttpRequest) -> HttpResponse:
     if not token:
         raise BadRequest("Missing token parameter")
 
-    try:
-        link_token = LinkToken.objects.get(token=token, used=False)
-    except LinkToken.DoesNotExist:
+    token_result = lookup_valid_link_token(token)
+    if isinstance(token_result, LinkResult):
         return render(
             request,
-            "link_error.html",
-            {
-                "error": "Invalid or expired token",
-                "message": "This link has expired or is invalid. Please use /link in Discord to generate a new one.",
-            },
+            token_result.error_template or "link_error.html",
+            token_result.error_context or {},
         )
-
-    if link_token.is_expired():
-        return render(
-            request,
-            "link_error.html",
-            {
-                "error": "Token expired",
-                "message": (
-                    "This link has expired (15 minute limit). Please use /link in Discord to generate a new one."
-                ),
-            },
-        )
+    link_token = token_result
 
     # The callback only completes in a browser that came through here (core.services.linking)
     request.session["pending_link_token"] = link_token.token

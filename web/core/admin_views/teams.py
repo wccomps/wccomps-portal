@@ -18,23 +18,15 @@ from team.models import DiscordLink, Team
 
 @require_permission("admin", "gold_team")
 def admin_teams(request: HttpRequest) -> HttpResponse:
-    teams = Team.objects.all().order_by("team_number")
+    teams_with_info = [
+        {
+            "team": team,
+            "member_count": team.get_member_count(),
+        }
+        for team in Team.objects.with_active_member_count()
+    ]
 
-    teams_with_info = []
-    for team in teams:
-        member_count = DiscordLink.objects.filter(team=team, is_active=True).count()
-        teams_with_info.append(
-            {
-                "team": team,
-                "member_count": member_count,
-            }
-        )
-
-    context = {
-        "teams": teams_with_info,
-    }
-
-    return render(request, "admin/teams.html", context)
+    return render(request, "admin/teams.html", {"teams": teams_with_info})
 
 
 @require_permission("admin", "gold_team")
@@ -65,47 +57,27 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
 
     action = form.cleaned_data["action"]
 
-    if action == "activate":
-        team.is_active = True
+    if action in ("activate", "deactivate"):
+        target_active = action == "activate"
+        team.is_active = target_active
         team.save(update_fields=["is_active"])
         for member_discord_id in DiscordLink.objects.filter(team=team, is_active=True).values_list(
             "discord_id", flat=True
         ):
             DiscordTask.enqueue(SyncMemberRoles(discord_id=member_discord_id))
         AuditLog.objects.create(
-            action="team_activated",
+            action="team_activated" if target_active else "team_deactivated",
             admin_user=authentik_username,
             target_entity="team",
             target_id=team_number,
             details={"team_name": team.team_name},
         )
-        return JsonResponse(
-            {
-                "success": True,
-                "message": f"Team {team_number} activated; its members get their team roles within a few minutes",
-            }
+        msg = (
+            f"Team {team_number} activated; its members get their team roles within a few minutes"
+            if target_active
+            else f"Team {team_number} deactivated; its members lose their team roles within a few minutes"
         )
-
-    elif action == "deactivate":
-        team.is_active = False
-        team.save(update_fields=["is_active"])
-        for member_discord_id in DiscordLink.objects.filter(team=team, is_active=True).values_list(
-            "discord_id", flat=True
-        ):
-            DiscordTask.enqueue(SyncMemberRoles(discord_id=member_discord_id))
-        AuditLog.objects.create(
-            action="team_deactivated",
-            admin_user=authentik_username,
-            target_entity="team",
-            target_id=team_number,
-            details={"team_name": team.team_name},
-        )
-        return JsonResponse(
-            {
-                "success": True,
-                "message": f"Team {team_number} deactivated; its members lose their team roles within a few minutes",
-            }
-        )
+        return JsonResponse({"success": True, "message": msg})
 
     elif action == "unlink_user":
         discord_id = form.cleaned_data.get("discord_id")
@@ -244,45 +216,26 @@ def admin_teams_bulk_action(request: HttpRequest) -> HttpResponse:
     action = form.cleaned_data["action"]
     team_numbers = form.cleaned_data["team_numbers"]
 
-    if action == "activate":
-        updated = Team.objects.filter(team_number__in=team_numbers).update(is_active=True)
+    if action in ("activate", "deactivate"):
+        target_active = action == "activate"
+        updated = Team.objects.filter(team_number__in=team_numbers).update(is_active=target_active)
         for discord_id in DiscordLink.objects.filter(team__team_number__in=team_numbers, is_active=True).values_list(
             "discord_id", flat=True
         ):
             DiscordTask.enqueue(SyncMemberRoles(discord_id=discord_id))
         AuditLog.objects.create(
-            action="teams_activated",
+            action="teams_activated" if target_active else "teams_deactivated",
             admin_user=authentik_username,
             target_entity="teams",
             target_id=0,
             details={"team_numbers": team_numbers, "updated_count": updated},
         )
-        return JsonResponse(
-            {
-                "success": True,
-                "message": f"Activated {updated} teams; their members get their team roles within a few minutes",
-            }
+        msg = (
+            f"Activated {updated} teams; their members get their team roles within a few minutes"
+            if target_active
+            else f"Deactivated {updated} teams; their members lose their team roles within a few minutes"
         )
-
-    elif action == "deactivate":
-        updated = Team.objects.filter(team_number__in=team_numbers).update(is_active=False)
-        for discord_id in DiscordLink.objects.filter(team__team_number__in=team_numbers, is_active=True).values_list(
-            "discord_id", flat=True
-        ):
-            DiscordTask.enqueue(SyncMemberRoles(discord_id=discord_id))
-        AuditLog.objects.create(
-            action="teams_deactivated",
-            admin_user=authentik_username,
-            target_entity="teams",
-            target_id=0,
-            details={"team_numbers": team_numbers, "updated_count": updated},
-        )
-        return JsonResponse(
-            {
-                "success": True,
-                "message": f"Deactivated {updated} teams; their members lose their team roles within a few minutes",
-            }
-        )
+        return JsonResponse({"success": True, "message": msg})
 
     elif action == "recreate":
         for team_number in team_numbers:

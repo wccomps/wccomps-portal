@@ -28,8 +28,17 @@ def default_team_name(team_number: int) -> str:
     return f"BlueTeam{team_number:02d}"
 
 
+class TeamQuerySet(models.QuerySet["Team"]):
+    def with_active_member_count(self) -> TeamQuerySet:
+        return self.annotate(
+            active_member_count=models.Count("members", filter=models.Q(members__is_active=True)),
+        )
+
+
 class Team(models.Model):
     """Competition team (1-50)."""
+
+    objects = TeamQuerySet.as_manager()
 
     team_number = models.IntegerField(unique=True)
     team_name = models.CharField(max_length=100)
@@ -81,6 +90,9 @@ class Team(models.Model):
 
     def get_member_count(self) -> int:
         """Get count of active members."""
+        annotated = getattr(self, "active_member_count", None)
+        if isinstance(annotated, int):
+            return annotated
         return self.members.filter(is_active=True).count()
 
     @cached_property
@@ -210,8 +222,7 @@ class SchoolInfo(models.Model):
     """School information for teams (GoldTeam only)."""
 
     team = models.OneToOneField(Team, on_delete=models.CASCADE, related_name="school_info")
-    # The team's school in the live school list; set through registration.services (set_team_school,
-    # remove_team_school, clear_school_list, import_school_list, add_to_school_list)
+    # The team's school in the live school list; set through registration.services.
     school = models.ForeignKey("registration.School", on_delete=models.PROTECT, related_name="school_infos")
     contact_email = models.EmailField()
     secondary_email = models.EmailField(blank=True)

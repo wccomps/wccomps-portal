@@ -49,7 +49,6 @@ from bot.tests.bot_harness import (
     on_message,
     on_message_delete,
     on_message_edit,
-    stored_text,
     team_ranges,
     ticket_numbers,
 )
@@ -88,11 +87,11 @@ def broadcast_targets(_: World) -> st.SearchStrategy[str]:
 
 
 def ticket_message(run: Run, data: Draws) -> Any:
-    """The message a persistent ticket view is on after a restart: the ticket number read back from its embed."""
-    # The bot wrote the message: its title holds no NUL (a ticket number or a title from the database)
-    number = data.draw(st.one_of(ticket_numbers(run.world), stored_text(30)), label="embed ticket")
-    message = run.discord.message_object()
-    message.embeds = [discord.Embed(title=f"Ticket {number}: Title")]
+    """The message a persistent ticket view is on after a restart: in a ticket's thread channel or an unknown one."""
+    thread_id = data.draw(st.sampled_from([None, *run.world.thread_ids]), label="ticket thread")
+    channel = run.discord.channel(thread_id) if thread_id else None
+    message = run.discord.message_object(channel=channel)
+    message.embeds = [discord.Embed(title="Ticket T001-001: Title")]
     return message
 
 
