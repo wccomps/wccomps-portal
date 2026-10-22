@@ -116,8 +116,7 @@ class DiscordManager:
     async def setup_team_infrastructure(
         self, team_number: int
     ) -> tuple[discord.Role | None, discord.CategoryChannel | None]:
-        """
-        Set up a team's Discord role and category, creating whichever is missing, and record their IDs.
+        """Set up a team's Discord role and category, and record their IDs on Team.
 
         Safe to run again: an existing role or category is reused as-is (its channels and
         permissions aren't repaired).
@@ -138,14 +137,10 @@ class DiscordManager:
             team.discord_category_id = category.id
             await team.asave(update_fields=["discord_role_id", "discord_category_id"])
             logger.info(f"Set up infrastructure for {team.team_name}")
-        elif role:
+        else:
             team.discord_role_id = role.id
             await team.asave(update_fields=["discord_role_id"])
             logger.warning(f"Only role created for {team.team_name}, category failed")
-        elif category:
-            team.discord_category_id = category.id
-            await team.asave(update_fields=["discord_category_id"])
-            logger.warning(f"Only category created for {team.team_name}, role failed")
 
         if team.is_active:
             from bot.role_sync import sync_member_roles

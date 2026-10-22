@@ -118,7 +118,8 @@ class SchoolInfoAdmin(PortalModelAdmin[SchoolInfo]):
     search_fields = ["school__name", "contact_email", "team__team_name"]
     # password mirrors the team account's Authentik password for packet emails; editing it here would change
     # only this copy, so it's set solely by reset_team_password. The school, and whether a team has one, is set
-    # through registration.services (set_team_school, remove_team_school, clear_school_list, import_school_list).
+    # through registration.services (set_team_school, remove_team_school, clear_school_list, import_school_list,
+    # add_to_school_list).
     exclude = ["password"]
     readonly_fields = ["team", "school", "created_at", "updated_at", "updated_by", "password_with_reset"]
     ordering = ["team__team_number"]

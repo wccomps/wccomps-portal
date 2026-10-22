@@ -82,7 +82,6 @@
                               error="{{ form.affected_service.errors|join:', ' }}">
                     {{ form.affected_service }}
                 </c-form_field>
-                <!-- Hidden field to store destination IPs for form submission -->
                 <input type="hidden"
                        name="destination_ip_template"
                        id="id_destination_ip_template"
@@ -195,10 +194,8 @@
                     </div>
                 </div>
                 {% if form.affected_teams.help_text %}<div class="help-text mb-5">{{ form.affected_teams.help_text }}</div>{% endif %}
-                <!-- Hidden checkboxes for form submission -->
                 <div class="d-none"
                      id="teamCheckboxes">{% for checkbox in form.affected_teams %}{{ checkbox.tag }}{% endfor %}</div>
-                <!-- Visual team selector buttons -->
                 <div class="border rounded">
                     <div class="p-15">
                         <div id="teamButtons" class="d-flex flex-wrap gap-10" x-data="teamPicker">

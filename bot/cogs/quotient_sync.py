@@ -14,8 +14,6 @@ BACKOFF_MINUTES = 15
 
 
 class QuotientSyncCog(commands.Cog):
-    """Background sync for Quotient integration."""
-
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.quotient_unavailable = False

@@ -290,7 +290,7 @@ def _check_quotient_api() -> CheckResult:
 
 
 def _check_school_info() -> CheckResult:
-    """Check that all active teams have school info with contact emails."""
+    """Check that all active teams have a SchoolInfo record."""
     from team.models import SchoolInfo
 
     active_teams = Team.objects.filter(is_active=True)
@@ -321,7 +321,6 @@ def _check_multiple_teams() -> CheckResult:
 
 
 ALL_CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
-    # Phase 1: Authentik
     ("Discord IDs configured", _check_discord_settings),
     ("Team accounts exist", _check_team_accounts_exist),
     ("Group membership correct", _check_team_group_membership),

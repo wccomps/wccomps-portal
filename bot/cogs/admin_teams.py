@@ -323,8 +323,6 @@ class AdminTeamsCog(commands.Cog):
                 results.append(f"Recreated the role and category with {len(category.channels)} channels")
             elif role:
                 results.append("Recreated the role (creating the category failed)")
-            elif category:
-                results.append("Recreated the category (creating the role failed)")
             else:
                 results.append("Failed to recreate the role and category")
         else:

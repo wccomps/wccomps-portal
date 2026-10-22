@@ -48,8 +48,6 @@ logger = logging.getLogger(__name__)
 
 
 class DiscordQueueProcessor:
-    """Process Discord tasks from database queue using async tasks."""
-
     QUEUE_POLL_INTERVAL_SECONDS = 2
     QUEUE_BATCH_SIZE = 10
     MAX_BACKOFF_SECONDS = 300
@@ -289,7 +287,6 @@ class DiscordQueueProcessor:
         await log_to_ops_channel(self.bot, payload.message)
 
     async def _handle_ticket_created_web(self, payload: TicketCreatedWeb) -> None:
-        """Handle ticket creation from web UI - create thread and post to dashboard."""
         ticket = await Ticket.objects.select_related("team").aget(id=payload.ticket_id)
 
         # A retry after a partial failure must not create a second thread.
@@ -311,7 +308,6 @@ class DiscordQueueProcessor:
         return thread
 
     async def _handle_post_comment(self, payload: PostComment) -> None:
-        """Handle posting a comment from web to Discord thread."""
         ticket_id = payload.ticket_id
         comment_id = payload.comment_id
 
@@ -348,7 +344,6 @@ class DiscordQueueProcessor:
         logger.info(f"Posted comment {comment_id} to thread {thread.id} (message {message.id})")
 
     async def _handle_post_ticket_update(self, payload: PostTicketUpdate) -> None:
-        """Post a ticket status update (resolve/claim/unclaim/reopen) to the Discord thread."""
         action = payload.action
         actor = payload.actor
 
@@ -439,7 +434,6 @@ class DiscordQueueProcessor:
         return stats
 
     async def _handle_broadcast_message(self, payload: BroadcastMessage) -> dict[str, object]:
-        """Broadcast a message to announcement channel or team channels."""
         from bot.competition_actions import deliver_team_broadcast
         from bot.utils import log_to_ops_channel
 

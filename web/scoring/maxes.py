@@ -23,7 +23,8 @@ from decimal import Decimal
 from typing import Literal
 
 from orange_team.models import OrangeCheck
-from quotient.client import Inject, inject_points
+from quotient.client import Inject
+from quotient.client import inject_points as inject_points
 
 from scoring.models import ScoringTemplate, ServiceDetail
 
@@ -35,15 +36,21 @@ _MIN_RELIABLE_UPTIME = Decimal("0.1")
 TemplateMaxField = Literal["service_max", "inject_max", "orange_max"]
 
 
-def inject_max_from_titles(items: Sequence[Inject | str]) -> Decimal | None:
+def inject_max_from_titles(items: Sequence[Inject | str | object]) -> Decimal | None:
     """Sum of the per-inject point values, or None if any title lacks one.
 
     All-or-nothing on purpose: an inject with no parseable max still contributes its
     graded points to the total, so a partial sum would silently under-count.
     """
-    values = [
-        (item.title, item.max_points) if isinstance(item, Inject) else (item, inject_points(item)) for item in items
-    ]
+    values: list[tuple[str, int | None]] = []
+    for item in items:
+        if isinstance(item, Inject):
+            values.append((item.title, item.max_points))
+        elif isinstance(item, str):
+            values.append((item, inject_points(item)))
+        else:
+            title = str(getattr(item, "title", ""))
+            values.append((title, inject_points(title)))
     missing = [title for title, points in values if points is None]
     if missing:
         logger.warning("inject_max not derived: %d inject title(s) have no point value: %s", len(missing), missing)

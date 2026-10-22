@@ -1,13 +1,9 @@
-"""WCComps Discord Bot - Main entry point."""
-
 import hashlib
 import logging
 import os
 import sys
 
 import discord
-
-# Initialize Django before any imports that use Django models
 import django
 from discord.ext import commands
 
@@ -103,7 +99,6 @@ class PortalBot(commands.Bot):
 
         logger.info("Cogs loaded")
 
-        # Register persistent views for ticket buttons
         from bot.ticket_dashboard import TicketActionView
 
         self.add_view(TicketActionView(ticket_id=0))
@@ -122,13 +117,11 @@ class PortalBot(commands.Bot):
         # Volunteer guild gets only the /link command so staff can link their accounts there
         volunteer_guild_id = settings.VOLUNTEER_GUILD_ID
 
-        # Only sync if commands have changed (checked against database)
         if not await self._should_sync_commands():
             return
 
         synced = True
 
-        # Sync to competition guild (instant availability)
         if competition_guild_id:
             guild = discord.Object(id=competition_guild_id)
             self.tree.copy_global_to(guild=guild)

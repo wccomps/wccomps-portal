@@ -456,7 +456,7 @@ class QuotientClient:
             return None
 
     def get_service_choices(self) -> list[dict[str, str]]:
-        """Service choices for the ticket dropdown, as dicts with 'value', 'label', 'box_ip' and 'box_name' keys."""
+        """Service choices for the ticket dropdown (keys: value, label, box_ip, box_name, service_name)."""
         infrastructure = self.get_infrastructure()
         if not infrastructure:
             return []

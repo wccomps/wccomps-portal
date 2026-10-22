@@ -177,7 +177,6 @@ class PacketDistributionService:
         password = self._team_password(team)
         username = team_username(team.team_number)
         raw_extras = packet.team_extras.get(str(team.team_number), {}) if packet.team_extras else {}
-        # Format keys for display: "api_key" -> "API Key", "max_spend_usd" -> "Max Spend USD"
         team_extras = {k.replace("_", " ").title(): v for k, v in raw_extras.items()}
         context: dict[str, object] = {
             "packet": packet,

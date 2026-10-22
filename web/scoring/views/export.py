@@ -38,7 +38,6 @@ def export_dataset(request: HttpRequest, dataset: str) -> HttpResponse:
 
 @require_permission("gold_team", error_message="Only Gold Team members can access this")
 def export_all(request: HttpRequest) -> HttpResponse:
-    """Export all scoring data as a zip file (admin only)."""
     return export.export_all_zip()
 
 

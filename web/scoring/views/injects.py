@@ -161,7 +161,7 @@ def inject_grading(request: HttpRequest) -> HttpResponse:
 
 @require_permission("white_team", error_message="Only White Team or Gold Team members can review inject grades")
 def inject_grades_review(request: HttpRequest) -> HttpResponse:
-    """Review and approve inject grades (Gold Team)."""
+    """Review and approve inject grades."""
     import statistics
     from collections import defaultdict
 
@@ -247,7 +247,7 @@ def inject_grades_review(request: HttpRequest) -> HttpResponse:
 @transaction.atomic
 @require_http_methods(["POST"])
 def inject_grades_bulk_approve(request: HttpRequest) -> HttpResponse:
-    """Bulk approve inject grades (Gold Team)."""
+    """Bulk approve inject grades."""
     from core.utils import bulk_approve
 
     user = cast(User, request.user)

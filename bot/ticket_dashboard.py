@@ -159,7 +159,6 @@ class TicketActionView(discord.ui.View):
     async def resolve_button(
         self, interaction: discord.Interaction, button: discord.ui.Button[TicketActionView]
     ) -> None:
-        """Show resolve modal with category dropdown and notes."""
         from bot.permissions import has_permission
 
         ticket_id = await self._get_ticket_id_from_interaction(interaction)
