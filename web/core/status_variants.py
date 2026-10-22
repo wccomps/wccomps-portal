@@ -30,8 +30,6 @@ BADGE_STATUSES: dict[str, tuple[str, str, dict[str, str]]] = {
         {
             "pending": "warning",
             "approved": "info",
-            "paid": "success",
-            "credentials_sent": "neutral",
             "rejected": "danger",
         },
     ),

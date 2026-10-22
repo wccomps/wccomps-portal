@@ -33,9 +33,7 @@ def test_with_a_filter_set_the_clear_link_stays_on_the_page(client: Client, name
     assert re.search(rf'<a href="{re.escape(reverse(name))}"[^>]*>\s*clearing all filters\s*</a>', html)
 
 
-def test_a_finding_without_an_attack_type_shows_unknown(
-    client: Client, red_team_user: User
-) -> None:
+def test_a_finding_without_an_attack_type_shows_unknown(client: Client, red_team_user: User) -> None:
     from decimal import Decimal
 
     from scoring.models import RedTeamScore
@@ -45,9 +43,7 @@ def test_a_finding_without_an_attack_type_shows_unknown(
     assert "<td>Unknown</td>" in html
 
 
-def test_a_finding_page_without_an_attack_type_says_unknown(
-    client: Client, red_team_user: User
-) -> None:
+def test_a_finding_page_without_an_attack_type_says_unknown(client: Client, red_team_user: User) -> None:
     from decimal import Decimal
 
     from scoring.models import RedTeamScore

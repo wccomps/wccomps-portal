@@ -153,7 +153,7 @@ def ticket_detail_dynamic(request: HttpRequest, ticket_number: str) -> HttpRespo
     return render(
         request,
         "ops_ticket_detail_dynamic.html",
-        {"ticket": ticket, "comments": comments, "history": history, **versions},
+        {"comments": comments, "history": history, **versions},
     )
 
 

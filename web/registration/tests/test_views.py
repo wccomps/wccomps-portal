@@ -283,9 +283,9 @@ class TokenEditViewTestCase(TestCase):
         response = self.client.get(reverse("registration_edit", args=["invalid-token"]))
         self.assertEqual(response.status_code, 404)
 
-    def test_edit_locked_after_credentials_sent(self):
-        """Test edit page shows locked message after credentials sent."""
-        self.registration.status = "credentials_sent"
+    def test_edit_locked_after_approval(self):
+        """Test edit page shows locked message after approval."""
+        self.registration.status = "approved"
         self.registration.save()
         response = self.client.get(reverse("registration_edit", args=[self.registration.edit_token]))
         self.assertEqual(response.status_code, 200)

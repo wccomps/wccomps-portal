@@ -168,9 +168,7 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
             "notes": "Full description of the attack and steps taken.",
         }
 
-    def __init__(
-        self, *args: object, user: User | None = None, **kwargs: object
-    ) -> None:
+    def __init__(self, *args: object, user: User | None = None, **kwargs: object) -> None:
         self.user = user
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
 

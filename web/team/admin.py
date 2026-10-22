@@ -55,7 +55,7 @@ class TeamAdmin(PortalModelAdmin[Team]):
 class DiscordLinkAdmin(PortalModelAdmin[DiscordLink]):
     list_display = [
         "discord_username",
-        "get_username",
+        "user",
         "team",
         "is_active",
         "linked_at",
@@ -64,10 +64,6 @@ class DiscordLinkAdmin(PortalModelAdmin[DiscordLink]):
     search_fields = ["discord_username", "user__username"]
     readonly_fields = ["linked_at", "unlinked_at"]
     ordering = ["-linked_at"]
-
-    @admin.display(description="Authentik Username")
-    def get_username(self, obj: DiscordLink) -> str:
-        return obj.user.username if obj.user else ""
 
 
 @admin.register(LinkToken)

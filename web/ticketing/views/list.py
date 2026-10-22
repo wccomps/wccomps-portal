@@ -64,26 +64,12 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     if page_size not in VALID_PAGE_SIZES:
         page_size = 50
 
-    if is_ops:
-        query = (
-            Ticket.objects.select_related("team", "assigned_to", "category")
-            .exclude(ticket_number="")
-            .annotate(
-                comment_count=Count("comments", distinct=True),
-                attachment_count=Count("attachments", distinct=True),
-                last_activity=Max("history__timestamp"),
-            )
-        )
-    else:
-        query = (
-            Ticket.objects.select_related("team", "assigned_to", "category")
-            .filter(team=team)
-            .annotate(
-                comment_count=Count("comments", distinct=True),
-                attachment_count=Count("attachments", distinct=True),
-                last_activity=Max("history__timestamp"),
-            )
-        )
+    query = Ticket.objects.select_related("team", "assigned_to", "category").annotate(
+        comment_count=Count("comments", distinct=True),
+        attachment_count=Count("attachments", distinct=True),
+        last_activity=Max("history__timestamp"),
+    )
+    query = query.exclude(ticket_number="") if is_ops else query.filter(team=team)
 
     if selected_statuses:
         query = query.filter(status__in=selected_statuses)

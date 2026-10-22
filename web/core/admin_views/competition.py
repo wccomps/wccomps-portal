@@ -1,7 +1,7 @@
-import json
 import logging
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from functools import partial
 from typing import cast
 
 from django.contrib.auth.models import User
@@ -151,14 +151,6 @@ def _edit_controlled_app(
     return JsonResponse({"success": True, "message": f"{verb} {slug}", "apps": apps})
 
 
-def _action_add_app(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
-    return _edit_controlled_app(request, config, authentik_username, add=True)
-
-
-def _action_remove_app(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
-    return _edit_controlled_app(request, config, authentik_username, add=False)
-
-
 def _action_set_schedule(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
     """Handle set_schedule action — set start and/or end time in one request."""
     from core.forms import SetScheduleForm
@@ -232,22 +224,14 @@ def _stream_competition_run(enable: bool, authentik_username: str) -> Iterator[s
     if result.success and result.has_failures:
         message = f"Incomplete: run {'Start' if enable else 'Stop'} again.\n{message}"
     complete = result.success and not result.has_failures
-    yield json.dumps({"done": True, "success": complete, "message": message}) + "\n"
+    yield ndjson_done(message, success=complete)
 
 
-def _action_start_competition(
-    request: HttpRequest, config: CompetitionConfig, authentik_username: str
+def _toggle_competition(
+    request: HttpRequest, config: CompetitionConfig, authentik_username: str, *, enable: bool
 ) -> StreamingHttpResponse:
     return StreamingHttpResponse(
-        run_detached(_stream_competition_run(True, authentik_username)), content_type="application/x-ndjson"
-    )
-
-
-def _action_stop_competition(
-    request: HttpRequest, config: CompetitionConfig, authentik_username: str
-) -> StreamingHttpResponse:
-    return StreamingHttpResponse(
-        run_detached(_stream_competition_run(False, authentik_username)), content_type="application/x-ndjson"
+        run_detached(_stream_competition_run(enable, authentik_username)), content_type="application/x-ndjson"
     )
 
 
@@ -283,7 +267,7 @@ def _action_cancel_event(request: HttpRequest, config: CompetitionConfig, authen
 def _require_typed_confirmation(request: HttpRequest) -> None:
     form = TypedConfirmForm(request.POST)
     if not form.is_valid():
-        raise BadRequest(form.errors["confirm"][0])
+        raise BadRequest(form.first_error())
 
 
 def _wiped_summary(wiped: WipedData) -> str:
@@ -411,16 +395,16 @@ def _action_close_out_event(
     )
 
 
-_COMPETITION_ACTION_HANDLERS = {
+_COMPETITION_ACTION_HANDLERS: dict[str, Callable[[HttpRequest, CompetitionConfig, str], HttpResponseBase]] = {
     "close_out_event": _action_close_out_event,
     "close_out_check": _action_close_out_check,
     "set_max_members": _action_set_max_members,
     "set_start_message": _action_set_start_message,
-    "add_app": _action_add_app,
-    "remove_app": _action_remove_app,
+    "add_app": partial(_edit_controlled_app, add=True),
+    "remove_app": partial(_edit_controlled_app, add=False),
     "set_schedule": _action_set_schedule,
-    "start_competition": _action_start_competition,
-    "stop_competition": _action_stop_competition,
+    "start_competition": partial(_toggle_competition, enable=True),
+    "stop_competition": partial(_toggle_competition, enable=False),
     "clear_leftover_data": _action_clear_leftover_data,
     "cancel_event": _action_cancel_event,
     "reset_passwords": _action_reset_passwords,

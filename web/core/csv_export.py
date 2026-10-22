@@ -39,10 +39,6 @@ class CsvWriter:
     def writerow(self, row: Iterable[object]) -> None:
         self._writer.writerow([safe_cell(value) for value in row])
 
-    def writerows(self, rows: Iterable[Iterable[object]]) -> None:
-        for row in rows:
-            self.writerow(row)
-
 
 def csv_writer(out: SupportsWrite[str]) -> CsvWriter:
     return CsvWriter(out)

@@ -301,6 +301,17 @@ class DiscordQueueProcessor:
 
         await publish_new_ticket(self.bot, competition_guild(self.bot), ticket)
 
+    async def _get_ticket_thread(self, thread_id: int) -> discord.TextChannel | discord.Thread:
+        thread = self.bot.get_channel(thread_id)
+        if not thread:
+            try:
+                thread = await self.bot.fetch_channel(thread_id)
+            except Exception as e:
+                raise ValueError(f"Could not find thread {thread_id}: {e}") from e
+        if not isinstance(thread, (discord.TextChannel, discord.Thread)):
+            raise TypeError(f"Channel {thread_id} is not a text channel or thread")
+        return thread
+
     async def _handle_post_comment(self, payload: PostComment) -> None:
         """Handle posting a comment from web to Discord thread."""
         ticket_id = payload.ticket_id
@@ -318,15 +329,7 @@ class DiscordQueueProcessor:
             logger.info(f"Ticket {ticket.ticket_number} has no Discord thread; comment {comment_id} not mirrored")
             return
 
-        thread = self.bot.get_channel(ticket.discord_thread_id)
-        if not thread:
-            try:
-                thread = await self.bot.fetch_channel(ticket.discord_thread_id)
-            except Exception as e:
-                raise ValueError(f"Could not find thread {ticket.discord_thread_id}: {e}") from e
-
-        if not isinstance(thread, (discord.TextChannel, discord.Thread)):
-            raise TypeError(f"Channel {ticket.discord_thread_id} is not a text channel or thread")
+        thread = await self._get_ticket_thread(ticket.discord_thread_id)
 
         author_display = "Unknown"
         if comment.author:
@@ -358,15 +361,7 @@ class DiscordQueueProcessor:
             logger.info(f"Ticket {ticket.ticket_number} has no Discord thread; update '{action}' not mirrored")
             return
 
-        thread = self.bot.get_channel(ticket.discord_thread_id)
-        if not thread:
-            try:
-                thread = await self.bot.fetch_channel(ticket.discord_thread_id)
-            except Exception as e:
-                raise ValueError(f"Could not find thread {ticket.discord_thread_id}: {e}") from e
-
-        if not isinstance(thread, (discord.TextChannel, discord.Thread)):
-            raise TypeError(f"Channel {ticket.discord_thread_id} is not a text channel or thread")
+        thread = await self._get_ticket_thread(ticket.discord_thread_id)
 
         if action == "resolved":
             notes = payload.resolution_notes

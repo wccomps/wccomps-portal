@@ -175,8 +175,6 @@ async def report_missing_discord_settings(bot: discord.Client) -> None:
 
 async def get_team_or_respond(interaction: discord.Interaction, team_number: int) -> Team | None:
     """Get a team by number, or send the user an error and return None."""
-    from team.models import Team
-
     if team_number < 1 or team_number > MAX_TEAMS:
         await interaction.response.send_message(f"Team number must be between 1 and {MAX_TEAMS}", ephemeral=True)
         return None

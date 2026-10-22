@@ -71,7 +71,6 @@ def ops_review_tickets(request: HttpRequest) -> HttpResponse:
         "team_numbers": team_numbers(Team.objects.filter(tickets__status="resolved"), team),
         "chosen_team": team,
         "has_pending": Ticket.objects.filter(status="resolved", is_approved=False).exists(),
-        "show_ops_nav": True,
     }
 
     if request.headers.get("HX-Request"):

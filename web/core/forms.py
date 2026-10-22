@@ -39,6 +39,9 @@ class TypedConfirmForm(forms.Form):
             raise forms.ValidationError('Type "yolo" to confirm.')
         return typed
 
+    def first_error(self) -> str:
+        return str(next(iter(self.errors.values()))[0])
+
 
 class CancelEventForm(TypedConfirmForm):
     """The open event the page showed, and the typed confirmation."""
@@ -50,9 +53,6 @@ class CancelEventForm(TypedConfirmForm):
             "invalid_choice": "That event no longer exists. Reload the page.",
         },
     )
-
-    def first_error(self) -> str:
-        return str(next(iter(self.errors.values()))[0])
 
 
 class CloseOutForm(TypedConfirmForm, NewEventFields):
@@ -75,9 +75,6 @@ class CloseOutForm(TypedConfirmForm, NewEventFields):
         """The page's open event, or the new event to create. Call once is_valid() is True."""
         event: Event | None = self.cleaned_data.get("open_event")
         return event if event is not None else self.new_event_to_create
-
-    def first_error(self) -> str:
-        return str(next(iter(self.errors.values()))[0])
 
 
 class StartMessageForm(forms.Form):
