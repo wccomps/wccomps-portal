@@ -173,24 +173,6 @@ body.dashboard #content {
     font-size: 13px;
 }
 
-.button.warning,
-a.button.warning {
-    background: #b45309;
-    color: #fff;
-}
-
-.button.danger,
-a.button.danger {
-    background: var(--delete-button-bg, #ba2121);
-    color: #fff;
-}
-
-.button.danger:hover,
-a.button.danger:hover {
-    background: var(--delete-button-hover-bg, #a41515);
-    color: #fff;
-}
-
 /* Action links styled as buttons */
 a.button,
 a.button:link,
@@ -212,6 +194,42 @@ a.button:focus,
 a.button:active {
     text-decoration: none !important;
     color: var(--button-fg);
+}
+
+.button.warning,
+a.button.warning,
+a.button.warning:link,
+a.button.warning:visited {
+    background: #b45309;
+    color: #fff;
+}
+
+.button.warning:hover,
+.button.warning:focus,
+.button.warning:active,
+a.button.warning:hover,
+a.button.warning:focus,
+a.button.warning:active {
+    background: #92400e;
+    color: #fff;
+}
+
+.button.danger,
+a.button.danger,
+a.button.danger:link,
+a.button.danger:visited {
+    background: var(--delete-button-bg, #ba2121);
+    color: #fff;
+}
+
+.button.danger:hover,
+.button.danger:focus,
+.button.danger:active,
+a.button.danger:hover,
+a.button.danger:focus,
+a.button.danger:active {
+    background: var(--delete-button-hover-bg, #a41515);
+    color: #fff;
 }
 
 
@@ -378,6 +396,7 @@ a.btn-secondary:visited {
     min-width: 80px;
     padding: 7px 15px;
     font-size: 13px;
+    font-family: var(--font-family-primary);
     line-height: normal;
     text-align: center;
     vertical-align: middle;

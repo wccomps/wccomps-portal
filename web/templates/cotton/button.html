@@ -1,5 +1,5 @@
 {# Usage: <c-button variant="primary" type="submit">Save</c-button> #}
-{# Props: variant (default|primary|danger|warning|cancel), type (button|submit), class (additional classes), id, name, value, form #}
+{# Props: variant (default|primary|secondary|danger|warning|cancel), type (button|submit), class (additional classes), id, name, value, form #}
 <c-vars variant="default"
         type="button"
         class
@@ -13,6 +13,6 @@
         {% if value %}value="{{ value }}"{% endif %}
         {% if form %}form="{{ form }}"{% endif %}
         {{ attrs }}
-        class="button {{ class }} {% if variant == 'primary' %}default {% elif variant == 'danger' %}danger {% elif variant == 'warning' %}warning {% elif variant == 'cancel' %}cancel-link {% endif %}">
+        class="{% if variant == 'secondary' or variant == 'cancel' %}btn-secondary {{ class }}{% else %}button {{ class }} {% if variant == 'primary' %}default {% elif variant == 'danger' %}danger {% elif variant == 'warning' %}warning {% endif %}{% endif %}">
     {{ slot }}
 </button>
