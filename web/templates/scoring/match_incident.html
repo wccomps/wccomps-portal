@@ -5,7 +5,7 @@
                    parent_url="{% url 'scoring:review_incidents' %}"
                    parent_label="Incidents" />
     <div class="grid-2 gap-20">
-        <c-module>
+        <c-module class="p-15">
             <h2 class="module-header">Incident Report #{{ incident.id }}</h2>
             <c-detail_grid class="mb-15">
                 <c-detail_row label="Team">
@@ -48,7 +48,7 @@
                 {% endif %}
             </c-fieldset>
         </c-module>
-        <c-module>
+        <c-module class="p-15">
             <h2 class="module-header module-header-success">Review & Match</h2>
             {% if suggested_findings %}
                 <p class="mb-5">

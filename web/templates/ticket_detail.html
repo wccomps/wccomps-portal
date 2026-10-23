@@ -185,7 +185,7 @@
             </c-fieldset>
             {% if is_ops and is_box_reset %}
                 <c-fieldset heading="Box Reset" collapsible="true" collapsed="false">
-                    <div x-data="boxReset">
+                    <div x-data="boxReset" class="p-10">
                         <div id="box-reset-panel"
                              hx-get="{% url 'ticket_box_reset_panel' ticket.ticket_number %}"
                              hx-trigger="load"
@@ -229,7 +229,7 @@
                                   required
                                   class="vTextField"></textarea>
                     </c-form_field>
-                    <c-button_row class="px-10">
+                    <c-button_row class="justify-end">
                         <c-button type="submit" variant="primary">
                             Post Comment
                         </c-button>
