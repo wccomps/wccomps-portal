@@ -202,6 +202,8 @@
                             {% for checkbox in form.affected_teams %}
                                 <button type="button"
                                         class="team-btn"
+                                        aria-pressed="false"
+                                        aria-label="{{ checkbox.choice_label }}"
                                         data-team-id="{{ checkbox.data.value }}"
                                         data-team-label="{{ checkbox.choice_label }}"
                                         data-checkbox-id="{{ checkbox.id_for_label }}"
@@ -471,8 +473,10 @@
         function updateTeamButton(button, isSelected) {
             if (isSelected) {
                 button.classList.add('team-btn--selected');
+                button.setAttribute('aria-pressed', 'true');
             } else {
                 button.classList.remove('team-btn--selected');
+                button.setAttribute('aria-pressed', 'false');
             }
         }
 

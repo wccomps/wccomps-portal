@@ -13,6 +13,6 @@
         {% if value %}value="{{ value }}"{% endif %}
         {% if form %}form="{{ form }}"{% endif %}
         {{ attrs }}
-        class="button {{ class }} {% if variant == 'primary' %}default {% elif variant == 'danger' %}warning{% elif variant == 'warning' %}warning {% elif variant == 'cancel' %}cancel-link {% endif %}">
+        class="button {{ class }} {% if variant == 'primary' %}default {% elif variant == 'danger' %}danger {% elif variant == 'warning' %}warning {% elif variant == 'cancel' %}cancel-link {% endif %}">
     {{ slot }}
 </button>

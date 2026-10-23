@@ -5,6 +5,6 @@
    {% if id %}id="{{ id }}"{% endif %}
    {% if role %}role="{{ role }}"{% elif variant == 'primary' or variant == 'secondary' or variant == 'danger' or variant == 'cancel' or 'button' in class %}role="button"{% endif %}
    {{ attrs }}
-   class="{% if variant == 'primary' %}button default {% elif variant == 'add' %}addlink {% elif variant == 'change' %}changelink {% elif variant == 'danger' %}button warning{% elif variant == 'secondary' or variant == 'cancel' %}btn-secondary {% endif %}{{ class }}">
+   class="{% if variant == 'primary' %}button default {% elif variant == 'add' %}addlink {% elif variant == 'change' %}changelink {% elif variant == 'danger' %}button danger {% elif variant == 'secondary' or variant == 'cancel' %}btn-secondary {% endif %}{{ class }}">
     {{ slot }}
 </a>

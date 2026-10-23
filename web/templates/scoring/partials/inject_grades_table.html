@@ -15,7 +15,8 @@
                                :checked="allSelected"
                                :indeterminate="someSelected"
                                @click="toggleAll"
-                               title="Select all">
+                               title="Select all"
+                               aria-label="Select all grades">
                     </th>
                     <c-table_header sort_field="inject_name"
                                     current_sort="{{ sort_by }}">
@@ -53,6 +54,7 @@
                                    name="grade_ids"
                                    value="{{ grade.id }}"
                                    data-grade-id="{{ grade.id }}"
+                                   aria-label="Select grade for Team {{ grade.team.team_number }} on {{ grade.inject_name }}"
                                    :checked="selectedMap.{{ grade.id|jskey }}"
                                    @change="toggleItem">
                         {% endif %}

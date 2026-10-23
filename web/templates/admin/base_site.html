@@ -118,8 +118,11 @@
              x-cloak
              role="status"
              aria-live="polite"
+             tabindex="0"
              :aria-label="toastAriaLabel"
-             @click="go">
+             @click="go"
+             @keydown.enter="go"
+             @keydown.space.prevent="go">
             <div class="toast-line1">
                 <strong x-text="toastNumber"></strong>
                 <span x-text="toastTitle"></span>
@@ -227,6 +230,7 @@
                 },
 
                 async poll() {
+                    if (document.hidden) return;
                     try {
                         const resp = await fetch('{% url "ticket_notifications" %}?since_id=' + this._lastSeenId);
                         if (!resp.ok) return;
@@ -277,6 +281,7 @@
                         osc.type = 'sine';
                         gain.gain.value = 0.15;
                         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+                        osc.onended = () => ctx.close();
                         osc.start();
                         osc.stop(ctx.currentTime + 0.2);
                     } catch { /* audio not available, skip */ }
