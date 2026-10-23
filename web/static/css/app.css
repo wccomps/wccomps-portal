@@ -322,9 +322,11 @@ a.button:active {
 .whitespace-pre-wrap { white-space: pre-wrap; }
 /* A table row flagged as a problem */
 .row-danger td { background: var(--danger-bg); }
-/* A cell's action forms sit side by side */
+/* A cell's action forms and buttons sit side by side */
 .field-actions form {
     display: inline-block;
+}
+.field-actions > :not(:last-child) {
     margin-right: 6px;
 }
 .max-h-300 { max-height: 300px; }
@@ -368,11 +370,13 @@ a.button:active {
 .toast-position { position: fixed; bottom: 16px; right: 16px; z-index: 50; }
 
 /* Secondary button (c-link variant secondary or cancel): sized like .button, so it matches the button beside it */
-.btn-secondary {
+.btn-secondary,
+a.btn-secondary:link,
+a.btn-secondary:visited {
     display: inline-block;
     box-sizing: border-box;
     min-width: 80px;
-    padding: 8px 16px;
+    padding: 7px 15px;
     font-size: 13px;
     line-height: normal;
     text-align: center;
@@ -385,7 +389,11 @@ a.button:active {
     text-decoration: none;
 }
 .btn-secondary:hover,
-.btn-secondary:focus-visible {
+.btn-secondary:focus,
+.btn-secondary:focus-visible,
+a.btn-secondary:hover,
+a.btn-secondary:focus,
+a.btn-secondary:focus-visible {
     background: var(--darkened-bg, #f8f8f8);
     color: var(--body-fg, #333);
     text-decoration: none;

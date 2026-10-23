@@ -32,7 +32,9 @@
                 </c-slot>
                 {% for season in seasons %}
                     <tr>
-                        <td>{{ season.name }}</td>
+                        <td>
+                            <a href="{% url 'registration_event_list' season_id=season.id %}">{{ season.name }}</a>
+                        </td>
                         <td>{{ season.year }}</td>
                         <td>
                             {% if season.is_active %}
@@ -47,9 +49,10 @@
                         </td>
                         <td>{{ season.events.count }}</td>
                         <td class="field-actions">
-                            <c-link href="{% url 'registration_event_list' season_id=season.id %}">Events</c-link>
+                            <c-link href="{% url 'registration_event_list' season_id=season.id %}"
+                                    variant="secondary">Events</c-link>
                             <c-link href="{% url 'registration_season_edit' season_id=season.id %}"
-                                    variant="change">Edit</c-link>
+                                    variant="secondary">Edit</c-link>
                             <c-link href="{% url 'registration_season_delete' season_id=season.id %}"
                                     variant="danger">Delete</c-link>
                         </td>
