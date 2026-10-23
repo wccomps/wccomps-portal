@@ -21,11 +21,10 @@ from bot.utils import (
     log_to_ops_channel,
     send_lines,
 )
-from core.authentik_manager import AuthentikManager
-from core.authentik_utils import parse_team_range, reset_team_password
+from core.authentik_utils import parse_team_range, reset_team_credentials
 from core.models import AuditLog, CompetitionConfig
 from core.utils import shorten
-from team.models import MAX_TEAMS, DiscordLink, Team, team_username
+from team.models import MAX_TEAMS, DiscordLink, Team
 
 logger = logging.getLogger(__name__)
 
@@ -297,23 +296,15 @@ class AdminTeamsCog(commands.Cog):
 
         results.append(f"Unlinked {unlinked_count} Discord user(s)")
 
-        from asgiref.sync import sync_to_async
-
-        auth_manager = AuthentikManager()
-        new_password, error = await sync_to_async(reset_team_password)(team_number)
+        new_password, error, sessions_revoked = await sync_to_async(reset_team_credentials)(team_number)
         if new_password:
             results.append("Reset the Authentik password")
+            if sessions_revoked:
+                results.append("Revoked active session(s)")
+            else:
+                results.append("Failed to revoke sessions")
         else:
             results.append(f"Failed to reset the password: {error}")
-
-        username = team_username(team_number)
-        session_success, session_error, sessions_revoked = await sync_to_async(auth_manager.revoke_user_sessions)(
-            username
-        )
-        if session_success:
-            results.append(f"Revoked {sessions_revoked} active session(s)")
-        else:
-            results.append(f"Failed to revoke sessions: {session_error}")
 
         if recreate_channels:
             deleted_items = await delete_team_infrastructure(
@@ -347,7 +338,8 @@ class AdminTeamsCog(commands.Cog):
             details={
                 "team_name": team.team_name,
                 "unlinked_members": unlinked_count,
-                "sessions_revoked": sessions_revoked if session_success else 0,
+                "password_reset": new_password is not None,
+                "sessions_revoked": sessions_revoked,
                 "recreated_channels": recreate_channels,
             },
         )
@@ -397,7 +389,12 @@ class AdminTeamsCog(commands.Cog):
                 continue
 
             team.is_active = True
-            await team.asave()
+            await team.asave(update_fields=["is_active"])
+            if interaction.guild:
+                async for link in DiscordLink.objects.filter(team=team, is_active=True):
+                    member = interaction.guild.get_member(link.discord_id)
+                    if member:
+                        await sync_member_roles(interaction.guild, member)
             results.append(f"Team {team_number:02d}: activated")
             success_count += 1
 
@@ -458,7 +455,12 @@ class AdminTeamsCog(commands.Cog):
                 continue
 
             team.is_active = False
-            await team.asave()
+            await team.asave(update_fields=["is_active"])
+            if interaction.guild:
+                async for link in DiscordLink.objects.filter(team=team, is_active=True):
+                    member = interaction.guild.get_member(link.discord_id)
+                    if member:
+                        await sync_member_roles(interaction.guild, member)
             results.append(f"Team {team_number:02d}: deactivated")
             success_count += 1
 

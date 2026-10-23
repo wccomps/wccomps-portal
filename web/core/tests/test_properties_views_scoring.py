@@ -184,13 +184,13 @@ CASES = [
     ),
     ViewCase(
         "scoring:approve_inject_feedback",
-        GOLD_WHITE,
+        may("gold_team", "white_team_lead"),
         post=_feedback(ApproveInjectFeedbackForm()),
         idempotent=(InjectScore,),
     ),
     ViewCase(
         "scoring:bulk_approve_inject_feedback",
-        GOLD_WHITE,
+        may("gold_team", "white_team_lead"),
         post=lambda w: {"score_ids": _ids(w, "grade_id")},
         idempotent=(InjectScore,),
     ),

@@ -40,7 +40,7 @@ from core.admin_views.places import (
 )
 from core.admin_views.readiness import action_readiness_check, action_readiness_fix
 from core.authentik_manager import AuthentikManager
-from core.authentik_utils import credentials_csv, reset_team_credentials
+from core.authentik_utils import credentials_csv, reset_team_credentials, reset_teams_credentials
 from core.competition_utils import WipedData, competition_data_counts
 from core.discord_tasks import LogToChannel
 from core.errors import json_endpoint
@@ -59,7 +59,7 @@ from core.models import AuditLog, CompetitionConfig, DiscordTask
 from core.services.competition import CompetitionRunResult, last_start_accounts, run_competition
 from core.utils import ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
-from team.models import active_team_numbers, team_username
+from team.models import active_team_numbers
 
 from ..auth_utils import require_permission
 from ..utils import UnknownTimezoneError, parse_datetime_to_utc
@@ -363,20 +363,10 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
         raise BadRequest(error_msg)
 
     team_numbers = form.cleaned_data["team_numbers"] or active_team_numbers()
-
-    password_list = []
-    failed_resets = []
-    sessions_failed = []
-
-    for team_num in team_numbers:
-        username = team_username(team_num)
-        password, error, sessions_revoked = reset_team_credentials(team_num)
-        if password:
-            password_list.append((team_num, username, password))
-            if not sessions_revoked:
-                sessions_failed.append(username)
-        else:
-            failed_resets.append((username, error))
+    result = reset_teams_credentials(team_numbers, reset_fn=reset_team_credentials)
+    password_list = result.password_list
+    failed_resets = result.failed_resets
+    sessions_failed = result.sessions_failed
 
     csv_content = credentials_csv((username, password) for _num, username, password in password_list)
 

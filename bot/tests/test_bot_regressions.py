@@ -50,10 +50,7 @@ THREAD_EDIT = Listener(TicketingCog, TicketingCog.on_message_edit, on_message_ed
 
 
 def resolve_modal(run: Run, name: str) -> ResolveTicketModal:
-    from core.tickets_config import get_category_config
-
-    ticket = run.world.tickets[name]
-    return ResolveTicketModal(ticket, get_category_config(ticket.category_id) or {})
+    return ResolveTicketModal(run.world.tickets[name])
 
 
 def in_a_ticket_thread(world: World, content: str, **more: object) -> Chosen:
@@ -141,14 +138,13 @@ def test_ticket_commands_require_the_categorys_required_fields(bot_world: World,
     IP satisfy a required IP; a hostname Quotient knows satisfies a required IP in commands and modals alike."""
     from unittest.mock import patch
 
-    from bot.cogs.help_panels import BoxResetModal
+    from bot.cogs.help_panels import TicketModal
+    from ticketing.models import TicketCategory
 
-    def build_box_modal(run: Run, data: object) -> BoxResetModal:
-        modal = BoxResetModal()
-        modal.category_id = "2"
-        return modal
+    def build_box_modal(run: Run, data: object) -> TicketModal:
+        return TicketModal(TicketCategory.objects.get(pk=2))
 
-    box_modal = Modal(BoxResetModal, build_box_modal, frozenset({"blue_team"}))
+    box_modal = Modal(TicketModal, build_box_modal, frozenset({"blue_team"}))
     infra = (["web01"], {"web01": "10.0.1.5"}, [])
     with patch.object(TicketingCog, "_load_infrastructure_data", return_value=infra):
         admin = drive(
@@ -280,7 +276,7 @@ def test_a_thread_attachment_is_stored_as_a_web_upload_is(
     assert "ticketing_ticketattachment" in run.written
 
 
-DASHBOARD = Item("button", DashboardControlView.sort_created, dashboard_view, EVERYONE)
+DASHBOARD = Item("button", DashboardControlView.sort_created, dashboard_view, may("ticketing_support"))
 TICKET_LIST = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_list.callback, may("ticketing_support"))
 TEAM_LIST = Command(AdminTeamsCog, AdminTeamsCog.admin_teams.callback, may("admin"))
 TEAM_INFO = Command(AdminTeamsCog, AdminTeamsCog.admin_team_info.callback, may("admin"))

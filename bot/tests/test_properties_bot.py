@@ -18,17 +18,13 @@ from bot.cogs.admin_competition import AdminCompetitionCog
 from bot.cogs.admin_teams import AdminTeamsCog
 from bot.cogs.admin_tickets import AdminTicketsCog
 from bot.cogs.help_panels import (
-    BoxResetModal,
     CategorySelect,
-    ConsultationModal,
     HelpPanelsCog,
     LinkButton,
-    OtherModal,
-    ScoringServiceCheckModal,
-    ServiceScoringModal,
     TeamHelpView,
     TicketButton,
     TicketCategoryView,
+    TicketModal,
 )
 from bot.cogs.linking import LinkingCog
 from bot.cogs.scoring import ScoringCog
@@ -62,8 +58,8 @@ from bot.unified_dashboard import DashboardControlView
 from bot.utils import CancelButton, ConfirmButton, ConfirmView
 from core.tests.strategies import datetime_text
 from core.tests.views_harness import views_profile
-from core.tickets_config import get_all_categories, get_category_config
 from ticketing.access import TICKET_STAFF
+from ticketing.models import TicketCategory
 
 ADMIN = may("admin")
 TICKETING_ADMIN = may("ticketing_admin")
@@ -112,7 +108,7 @@ def help_view(run: Run, data: Draws) -> TeamHelpView:
 
 
 def category_view(run: Run, data: Draws) -> TicketCategoryView:
-    return TicketCategoryView(get_all_categories(user_creatable_only=True))
+    return TicketCategoryView(list(TicketCategory.objects.filter(user_creatable=True).order_by("sort_order", "id")))
 
 
 def confirm_view(run: Run, data: Draws) -> ConfirmView:
@@ -121,19 +117,12 @@ def confirm_view(run: Run, data: Draws) -> ConfirmView:
 
 def resolve_modal(run: Run, data: Draws) -> ResolveTicketModal:
     ticket = run.world.tickets[data.draw(st.sampled_from(sorted(run.world.tickets)), label="ticket")]
-    return ResolveTicketModal(ticket, get_category_config(ticket.category_id) or {})
+    return ResolveTicketModal(ticket)
 
 
-def help_modal(cls: type[discord.ui.Modal]) -> Any:
-    def build(run: Run, data: Draws) -> discord.ui.Modal:
-        category_id = str(data.draw(st.sampled_from(run.world.user_creatable), label="category"))
-        if cls is ConsultationModal:
-            return ConsultationModal(category_id, get_category_config(int(category_id)) or {})
-        modal = cls()
-        modal.category_id = category_id  # type: ignore[attr-defined]
-        return modal
-
-    return build
+def help_modal(run: Run, data: Draws) -> TicketModal:
+    category_id = data.draw(st.sampled_from(run.world.user_creatable), label="category")
+    return TicketModal(TicketCategory.objects.get(pk=category_id))
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -218,17 +207,14 @@ CASES: list[BotCase] = [
     Item("button", TicketActionView.resolve_button, ticket_view, STAFF, message=ticket_message),
     Item("button", TicketActionView.cancel_button, ticket_view, STAFF | TEAM_MEMBERS, message=ticket_message),
     *(
-        Item("button", getattr(DashboardControlView, name), dashboard_view, EVERYONE)
+        Item("button", getattr(DashboardControlView, name), dashboard_view, STAFF)
         for name in ("sort_created", "sort_stale", "sort_team", "filter_all", "filter_open", "filter_claimed")
     ),
     Item("button", ConfirmButton, confirm_view, ADMIN | TICKETING_ADMIN, reached_by=ADMIN | TICKETING_ADMIN),
     Item("button", CancelButton, confirm_view, ADMIN | TICKETING_ADMIN, reached_by=ADMIN | TICKETING_ADMIN),
     Item("select", CategorySelect, category_view, EVERYONE),
     # Modals
-    *(
-        Modal(cls, help_modal(cls), TEAM_MEMBERS)
-        for cls in (BoxResetModal, ConsultationModal, OtherModal, ScoringServiceCheckModal, ServiceScoringModal)
-    ),
+    Modal(TicketModal, help_modal, TEAM_MEMBERS),
     Modal(ResolveTicketModal, resolve_modal, STAFF, reached_by=STAFF),
     # Message listeners
     Listener(HelpPanelsCog, HelpPanelsCog.on_message, on_message),

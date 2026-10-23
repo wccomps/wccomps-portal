@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.contrib import messages
 from django.core.paginator import Page, Paginator
-from django.db import connection
+from django.db import connection, transaction
 from django.db.models import Model, QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
@@ -238,11 +238,12 @@ def bulk_approve(  # type: ignore[explicit-any]
         messages.warning(request, f"No valid {item_label} IDs provided")
         return redirect(redirect_url)
 
-    items = queryset.filter(id__in=valid_ids)
-    count = 0
-    for item in items:
-        on_item(item)
-        count += 1
+    with transaction.atomic():
+        items = queryset.select_for_update(of=("self",)).filter(id__in=valid_ids)
+        count = 0
+        for item in items:
+            on_item(item)
+            count += 1
 
     if count > 0:
         messages.success(request, f"Successfully approved {count} {item_label}(s)")

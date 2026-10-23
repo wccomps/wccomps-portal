@@ -91,6 +91,37 @@ class PacketDistributionServiceTestCase(TestCase):
         self.assertIn("TestPass1!", mock_email_class.call_args.kwargs["body"])
 
     @patch("packets.services.EmailMultiAlternatives")
+    def test_send_packet_email_includes_secondary_email(self, mock_email_class):
+        """Both primary and secondary emails on SchoolInfo receive the packet email."""
+        team = Team.objects.get(team_number=1)
+        SchoolInfo.objects.filter(team=team).update(secondary_email="coach1@example.com")
+        distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
+        mock_email_class.return_value = MagicMock()
+
+        self.service.send_packet_email(distribution)
+
+        self.assertEqual(mock_email_class.call_args.kwargs["to"], ["team1@example.com", "coach1@example.com"])
+        distribution.refresh_from_db()
+        self.assertEqual(distribution.email_sent_to, "team1@example.com, coach1@example.com")
+
+    @patch("packets.services.EmailMultiAlternatives")
+    def test_stream_distribute_packet_skips_emails_when_send_via_email_false(self, mock_email_class):
+        """stream_distribute_packet creates web distributions and completes without sending email when disabled."""
+        import json
+
+        self.packet.send_via_email = False
+        self.packet.save(update_fields=["send_via_email"])
+
+        lines = list(self.service.stream_distribute_packet(self.packet))
+        done = json.loads(lines[-1])
+        self.assertTrue(done["success"])
+        self.assertEqual(done["message"], "Distributed to 3 teams")
+        mock_email_class.assert_not_called()
+        self.packet.refresh_from_db()
+        self.assertEqual(self.packet.status, "completed")
+        self.assertEqual(PacketDistribution.objects.filter(packet=self.packet, email_status="pending").count(), 3)
+
+    @patch("packets.services.EmailMultiAlternatives")
     def test_send_packet_email_with_team_extras(self, mock_email_class):
         """Test that per-team extras are passed to email context."""
         self.packet.team_extras = {

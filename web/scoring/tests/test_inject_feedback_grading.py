@@ -75,3 +75,22 @@ def test_grading_page_shows_existing_feedback(teams, gold_team_user):
 
     assert b"feedback_team_2" in response.content
     assert b"Prior feedback here" in response.content
+
+
+def test_non_lead_cannot_approve_inject_feedback(teams, white_team_user):
+    g = InjectScore.objects.get(team__team_number=2)
+    g.feedback = "Pending review"
+    g.feedback_approved = False
+    g.save(update_fields=["feedback", "feedback_approved"])
+    client = Client()
+    client.force_login(white_team_user)
+
+    response = client.post(reverse("scoring:approve_inject_feedback"), {"score_id": str(g.id)})
+    assert response.status_code == 403
+    g.refresh_from_db()
+    assert g.feedback_approved is False
+
+    bulk_response = client.post(reverse("scoring:bulk_approve_inject_feedback"), {"score_ids": [str(g.id)]})
+    assert bulk_response.status_code == 403
+    g.refresh_from_db()
+    assert g.feedback_approved is False

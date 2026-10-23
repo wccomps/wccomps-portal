@@ -60,6 +60,23 @@ def test_only_teams_without_the_packet_get_it(current_event):
     assert packet.status == "completed"
 
 
+def test_non_emailed_distributing_packet_completes_when_sent_to_new_teams(current_event):
+    had_it = _team_with_school(1)
+    _team_with_school(2)
+    packet = _packet(current_event, status="distributing")
+    packet.send_via_email = False
+    packet.save(update_fields=["send_via_email"])
+    PacketDistribution.objects.create(packet=packet, team=had_it, email_status="pending")
+
+    result = _done(list(PacketDistributionService().stream_send_to_new_teams(packet)))
+
+    assert result["success"] is True
+    assert not mail.outbox
+    assert PacketDistribution.objects.filter(packet=packet).count() == 2
+    packet.refresh_from_db()
+    assert packet.status == "completed"
+
+
 def test_a_failed_team_is_left_to_resend_failed(current_event):
     failed = _team_with_school(1)
     packet = _packet(current_event)

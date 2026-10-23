@@ -721,6 +721,7 @@ class TestFinalScoresExport:
             "Red Deductions",
             "Incident Recovery Points",
             "SLA Penalties",
+            "Point Adjustments",
             "Calculated At",
         ]
 
@@ -742,6 +743,7 @@ class TestFinalScoresExport:
         assert rows[0]["Total Score"] == "490.00"
         assert rows[0]["Service Points"] == "500.00"
         assert rows[0]["SLA Penalties"] == "-10.00"
+        assert rows[0]["Point Adjustments"] == "0"
         assert rows[0]["Inject Points"] == "0.00"
 
     def test_json_export_contains_all_required_fields(self, admin_user, final_scores):
@@ -766,6 +768,7 @@ class TestFinalScoresExport:
             "red_deductions",
             "incident_recovery_points",
             "sla_penalties",
+            "point_adjustments",
             "calculated_at",
         ]
 

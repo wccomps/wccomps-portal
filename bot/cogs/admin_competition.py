@@ -12,11 +12,16 @@ from django.conf import settings
 from bot.competition_actions import run_competition_cleanup
 from bot.permissions import permission_check
 from bot.utils import ConfirmView, announcement, log_to_ops_channel, send_announcement, send_parts, team_chat_channel
-from core.authentik_utils import credentials_csv, parse_team_range, reset_team_credentials
+from core.authentik_utils import (
+    credentials_csv,
+    parse_team_range,
+    reset_team_credentials,
+    reset_teams_credentials,
+)
 from core.forms import AppSlugForm
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.utils import UnknownTimezoneError, parse_datetime_to_utc, shorten
-from team.models import Team, active_team_numbers, team_username
+from team.models import Team, active_team_numbers
 
 logger = logging.getLogger(__name__)
 
@@ -83,18 +88,10 @@ class AdminCompetitionCog(commands.Cog):
             teams = active
 
         # Only successful resets go in the CSV: a failed one leaves the old password in place.
-        password_list = []
-        failed_resets = []
-        sessions_failed = []
-        for team_num in teams:
-            username = team_username(team_num)
-            password, error, sessions_revoked = await sync_to_async(reset_team_credentials)(team_num)
-            if password:
-                password_list.append((team_num, username, password))
-                if not sessions_revoked:
-                    sessions_failed.append(username)
-            else:
-                failed_resets.append((username, error))
+        result = await sync_to_async(reset_teams_credentials)(teams, reset_fn=reset_team_credentials)
+        password_list = result.password_list
+        failed_resets = result.failed_resets
+        sessions_failed = result.sessions_failed
 
         total = len(teams)
         await AuditLog.objects.acreate(

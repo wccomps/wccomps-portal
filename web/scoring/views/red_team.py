@@ -59,7 +59,9 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
         request, {"status": default_status, "team": "", "attack_type": "", "submitter": "", "search": ""}
     )
 
-    findings = RedTeamScore.objects.prefetch_related("affected_teams", "screenshots").select_related("submitted_by")
+    findings = RedTeamScore.objects.prefetch_related("affected_teams", "screenshots").select_related(
+        "attack_type", "submitted_by"
+    )
     team = chosen_team(filters["team"])
     findings = by_team(by_approval(findings, filters["status"]), team, "affected_teams")
     if (attack_type_id := optional_int(filters["attack_type"])) is not None:

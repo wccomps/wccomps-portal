@@ -41,7 +41,7 @@ class Approvable(models.Model):
         self.is_approved = True
         self.approved_by = user
         self.approved_at = timezone.now()
-        self.save()
+        self.save(update_fields=["is_approved", "approved_by", "approved_at"])
 
 
 class ScoringTemplate(models.Model):
@@ -673,7 +673,7 @@ class OrangeTeamScore(Approvable):
 
     orange_check = models.ForeignKey(
         "orange_team.OrangeCheck",
-        on_delete=models.SET_NULL,
+        on_delete=models.CASCADE,
         null=True,
         blank=True,
         related_name="orange_scores",
@@ -720,12 +720,6 @@ class ServiceScore(models.Model):
         decimal_places=2,
         default=Decimal("0"),
         help_text="SLA penalty points (stored as negative)",
-    )
-    point_adjustments = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=Decimal("0"),
-        help_text="Manual point adjustments (stored as negative)",
     )
 
     synced_at = models.DateTimeField(auto_now=True)

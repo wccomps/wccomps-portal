@@ -267,6 +267,14 @@ class DiscordQueueProcessor:
 
     async def _handle_setup_team_infrastructure(self, payload: SetupTeamInfrastructure) -> None:
         team_number = payload.team_number
+        if payload.recreate:
+            from bot.discord_manager import delete_team_infrastructure
+
+            team = await Team.objects.filter(team_number=team_number).afirst()
+            if team:
+                await delete_team_infrastructure(
+                    self._guild(), team, reason=f"Team {team_number} infrastructure recreate"
+                )
 
         role, category = await self._manager().setup_team_infrastructure(team_number)
         if not role or not category:

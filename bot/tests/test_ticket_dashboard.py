@@ -38,8 +38,6 @@ class TicketDashboardTest(TestCase):
         """Test formatting ticket embeds with various states and categories."""
         from django.utils import timezone as tz
 
-        from core.tickets_config import get_all_categories
-
         # Test basic open ticket
         box_reset, _ = TicketCategory.objects.get_or_create(
             pk=2,
@@ -110,14 +108,12 @@ class TicketDashboardTest(TestCase):
         self.assertIn("Resolved At", resolved_field_names)
 
         # Test that all ticket categories can be formatted
-        all_categories = get_all_categories()
-        for idx, (cat_pk, cat_info) in enumerate(all_categories.items(), start=10):
-            cat_obj = TicketCategory.objects.get(pk=cat_pk)
+        for idx, cat_obj in enumerate(TicketCategory.objects.order_by("sort_order", "id"), start=10):
             ticket = Ticket.objects.create(
                 ticket_number=f"T001-{idx:03d}",
                 team=self.team,
                 category=cat_obj,
-                title=f"Test {cat_info['display_name']}",
+                title=f"Test {cat_obj.display_name}",
                 description="Test",
                 status="open",
             )

@@ -17,9 +17,8 @@ from django.utils import timezone
 from core.auth_utils import has_permission
 from core.discord_tasks import AddUserToThread, PostTicketUpdate
 from core.models import DiscordTask
-from core.tickets_config import get_category_config
 from team.models import DiscordLink
-from ticketing.models import Ticket, TicketHistory
+from ticketing.models import Ticket, TicketCategory, TicketHistory
 from ticketing.utils import _make_async, get_user_for_ticket
 
 # How long a resolved or cancelled ticket's Discord thread stays open before the bot archives it.
@@ -33,6 +32,10 @@ TRANSITIONS: dict[str, tuple[frozenset[str], str]] = {
     "reassign": (
         frozenset({Ticket.STATUS_CLAIMED, Ticket.STATUS_RESOLVED, Ticket.STATUS_CANCELLED}),
         "Cannot reassign ticket with status: {status}.",
+    ),
+    "recategorize": (
+        frozenset({Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED}),
+        "Cannot change category of ticket with status: {status}.",
     ),
     "resolve": (frozenset({Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED}), "Cannot resolve ticket with status: {status}."),
     "cancel": (frozenset({Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED}), "Cannot cancel ticket with status: {status}."),
@@ -74,7 +77,7 @@ def assignee_refusal(ticket: Ticket, actor: User | None, action: str) -> str | N
 def _lock(ticket_id: int) -> Ticket | None:
     return (
         Ticket.objects.select_for_update(of=("self",))
-        .select_related("team", "assigned_to")
+        .select_related("team", "assigned_to", "category")
         .filter(id=ticket_id)
         .first()
     )
@@ -260,20 +263,19 @@ def resolve_ticket(
         if error := assignee_refusal(ticket, resolver, "resolve"):
             return None, error
 
-        cat_info = get_category_config(ticket.category_id) or {}
+        category = ticket.category
+        variable_points = bool(category and category.variable_points)
         if points_override is not None:
-            if cat_info.get("variable_points", False):
-                min_pts = int(cat_info.get("min_points", 0))
-                max_pts = int(cat_info.get("max_points", 0))
-                if points_override < min_pts:
-                    return None, f"Point value must be at least {min_pts}."
-                if max_pts and points_override > max_pts:
-                    return None, f"Point value must be at most {max_pts}."
+            if variable_points and category:
+                if points_override < category.min_points:
+                    return None, f"Point value must be at least {category.min_points}."
+                if category.max_points and points_override > category.max_points:
+                    return None, f"Point value must be at most {category.max_points}."
             point_penalty = points_override
-        elif cat_info.get("variable_points", False):
+        elif variable_points:
             return None, "This category requires an explicit point value."
         else:
-            point_penalty = cat_info.get("points", 0)
+            point_penalty = category.points if category else 0
 
         ticket.status = Ticket.STATUS_RESOLVED
         ticket.resolved_at = timezone.now()
@@ -365,8 +367,22 @@ def reopen_ticket(
         ticket.status = Ticket.STATUS_OPEN
         ticket.assigned_to = None
         ticket.resolved_at = None
+        ticket.resolved_by = None
+        ticket.resolution_notes = ""
         ticket.points_charged = 0
-        ticket.save()
+        ticket.thread_archive_scheduled_at = None
+        ticket.save(
+            update_fields=[
+                "status",
+                "assigned_to",
+                "resolved_at",
+                "resolved_by",
+                "resolution_notes",
+                "points_charged",
+                "thread_archive_scheduled_at",
+                "updated_at",
+            ]
+        )
 
         details: dict[str, object] = {"reopened_by": actor_username, "refunded_points": refunded_points}
         if old_assignee:
@@ -379,3 +395,51 @@ def reopen_ticket(
 
 
 areopen_ticket = _make_async(reopen_ticket)
+
+
+def change_ticket_category_atomic(
+    ticket_id: int,
+    new_category_id: int,
+    actor_username: str,
+    user: User | None = None,
+    discord_id: int | None = None,
+) -> tuple[Ticket | None, str | None]:
+    """Move a ticket to another category atomically, recording both categories' names and points. Only its assignee
+    or a ticketing admin (`user` or `discord_id`) does (ticketing.lifecycle.assignee_refusal)."""
+    with transaction.atomic():
+        ticket = _lock(ticket_id)
+        if not ticket:
+            return None, "Ticket not found."
+        if error := refusal(ticket, "recategorize"):
+            return None, error
+        user = get_user_for_ticket(discord_id=discord_id, user=user)
+        if error := assignee_refusal(ticket, user, "recategorize"):
+            return None, error
+
+        new_category = TicketCategory.objects.filter(pk=new_category_id).first()
+        if new_category is None:
+            return None, "Invalid category."
+
+        old_category_id = ticket.category_id
+        if old_category_id == new_category_id:
+            return None, f"Ticket {ticket.ticket_number} is already in that category."
+        old_category = ticket.category
+
+        ticket.category = new_category
+        ticket.points_charged = new_category.points
+        ticket.save(update_fields=["category", "points_charged", "updated_at"])
+
+        details: dict[str, object] = {
+            "changed_by": actor_username,
+            "old_category": old_category_id,
+            "old_category_name": old_category.display_name if old_category else "Unknown",
+            "new_category": new_category_id,
+            "new_category_name": new_category.display_name,
+            "old_points": old_category.points if old_category else 0,
+            "new_points": new_category.points,
+        }
+        _record(ticket, "category_changed", user, actor_username, details)
+        return ticket, None
+
+
+achange_ticket_category_atomic = _make_async(change_ticket_category_atomic)

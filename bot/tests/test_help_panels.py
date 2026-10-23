@@ -5,18 +5,16 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import discord
 import pytest
-from asgiref.sync import sync_to_async
 from django.contrib.auth.models import User
 
 from bot.cogs.help_panels import (
     CategorySelect,
-    ConsultationModal,
     HelpPanelsCog,
     TeamHelpView,
+    TicketModal,
     create_ticket,
 )
 from core.models import DiscordTask, UserGroups
-from core.tickets_config import get_all_categories
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory
 
@@ -57,10 +55,19 @@ async def test_create_ticket_button_lists_user_creatable_categories(
     assert [o.value for o in select.options] == [str(consult.pk)]
 
 
+async def test_create_ticket_button_handles_no_categories(mock_interaction: Any, mock_bot: Any) -> None:
+    await TicketCategory.objects.all().adelete()
+    await TeamHelpView(mock_bot).create_ticket(mock_interaction)
+
+    mock_interaction.response.send_message.assert_awaited_once_with(
+        "No ticket categories are currently available.",
+        ephemeral=True,
+    )
+
+
 async def test_category_select_opens_modal_without_db(categories: tuple[TicketCategory, TicketCategory]) -> None:
     consult, _ = categories
-    configs = await sync_to_async(get_all_categories)(user_creatable_only=True)
-    select = CategorySelect(configs)
+    select = CategorySelect([consult])
     interaction = AsyncMock(spec=discord.Interaction)
     interaction.response = AsyncMock()
 
@@ -68,7 +75,7 @@ async def test_category_select_opens_modal_without_db(categories: tuple[TicketCa
         await select.callback(interaction)
 
     modal = interaction.response.send_modal.await_args.args[0]
-    assert isinstance(modal, ConsultationModal)
+    assert isinstance(modal, TicketModal)
     assert modal.title == "Consultation"
 
 

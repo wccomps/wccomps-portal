@@ -3,13 +3,14 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import TypedDict
 
 from django.core.exceptions import ObjectDoesNotExist
+from django.db import models
 from django.db.models import Q, QuerySet, Sum
 from django.http import Http404
 
 from team.models import Team
+from ticketing.models import Ticket
 
 from .models import (
-    Approvable,
     IncidentReport,
     InjectScore,
     OrangeTeamScore,
@@ -75,7 +76,10 @@ def _get_modifiers(template: ScoringTemplate) -> tuple[Decimal, Decimal, Decimal
         (template.orange_weight, template.orange_max),
     ]
     # Largest raw_max / fractional_weight sets the common scale
-    total_pool = max(raw_max / (weight / hundred) for weight, raw_max in pairs if weight > 0 and raw_max > 0)
+    total_pool = max(
+        (raw_max / (weight / hundred) for weight, raw_max in pairs if weight > 0 and raw_max > 0),
+        default=Decimal("0"),
+    )
     modifiers: list[Decimal] = []
     for weight, raw_max in pairs:
         if weight > 0 and raw_max > 0:
@@ -114,15 +118,14 @@ def _raw_scores(teams: list[Team]) -> dict[int, _RawScores]:
     for service in ServiceScore.objects.filter(team_id__in=team_ids):
         raw[service.team_id]["service"] = service.service_points
         raw[service.team_id]["sla"] = service.sla_violations
-        raw[service.team_id]["adjustments"] = service.point_adjustments
 
-    def approved_totals(model: type[Approvable], team_field: str, points_field: str) -> dict[int, Decimal]:
+    def approved_totals(model: type[models.Model], team_field: str, points_field: str) -> dict[int, Decimal]:
         rows = (
             model._default_manager.filter(is_approved=True, **{f"{team_field}__in": team_ids})
             .values(team_field)
             .annotate(total=Sum(points_field))
         )
-        return {row[team_field]: row["total"] for row in rows}
+        return {row[team_field]: Decimal(row["total"]) for row in rows}
 
     for team_id, total in approved_totals(InjectScore, "team", "points_awarded").items():
         raw[team_id]["inject"] = total.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
@@ -132,6 +135,8 @@ def _raw_scores(teams: list[Team]) -> dict[int, _RawScores]:
         raw[team_id]["red"] = zero - total
     for team_id, total in approved_totals(IncidentReport, "team", "points_returned").items():
         raw[team_id]["recovery"] = total
+    for team_id, total in approved_totals(Ticket, "team", "points_charged").items():
+        raw[team_id]["adjustments"] = zero - total
     return raw
 
 

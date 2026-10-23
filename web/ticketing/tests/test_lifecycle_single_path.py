@@ -132,6 +132,18 @@ def test_cancel_view(blue_team_user, team):
     assert _effects(ticket) == (["cancelled"], ["cancelled"], [])
 
 
+def test_resolve_preserves_zero_point_override(ticketing_support_user, team):
+    """Entering 0 for points_override overrides a non-zero category default with 0 instead of falling back."""
+    ticket = _ticket(team, "claimed", assigned_to=ticketing_support_user)
+    _post(ticketing_support_user, "ticket_resolve", ticket, {"resolution_notes": "waived", "points_override": "0"})
+
+    ticket.refresh_from_db()
+    assert ticket.status == "resolved"
+    assert ticket.points_charged == 0
+    history = TicketHistory.objects.filter(ticket=ticket, action="resolved").get()
+    assert history.details["point_penalty"] == 0
+
+
 def test_bulk_claim_matches_single_claim(ticketing_support_user, team):
     tickets = [_ticket(team, "open", number=f"T001-00{n}") for n in (1, 2)]
     client = Client()

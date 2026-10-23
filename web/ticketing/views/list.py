@@ -14,11 +14,10 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 from core.auth_utils import get_user_team, has_permission, require_permission
 from core.errors import json_endpoint
-from core.tickets_config import get_all_categories, get_category_config
 from core.utils import by_team, chosen_team, list_filters, optional_int, team_numbers
 from team.models import Team
 from ticketing.access import TICKET_STAFF, ticket_actions
-from ticketing.models import Ticket
+from ticketing.models import Ticket, TicketCategory
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +66,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
 
     if is_ops:
         query = (
-            Ticket.objects.select_related("team", "assigned_to")
+            Ticket.objects.select_related("team", "assigned_to", "category")
             .exclude(ticket_number="")
             .annotate(
                 comment_count=Count("comments", distinct=True),
@@ -77,7 +76,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         )
     else:
         query = (
-            Ticket.objects.select_related("team", "assigned_to")
+            Ticket.objects.select_related("team", "assigned_to", "category")
             .filter(team=team)
             .annotate(
                 comment_count=Count("comments", distinct=True),
@@ -123,7 +122,6 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     thirty_minutes_ago = timezone.now() - timedelta(minutes=STALE_TICKET_MINUTES)
     enriched = []
     for ticket in page_obj.object_list:
-        cat_info = get_category_config(ticket.category_id) or {}
         is_stale = (
             is_ops
             and ticket.status == "claimed"
@@ -133,7 +131,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         enriched.append(
             {
                 "ticket": ticket,
-                "category_name": cat_info.get("display_name", "Unknown"),
+                "category_name": ticket.category.display_name if ticket.category else "Unknown",
                 "is_stale": is_stale,
                 "status_display": ticket.status.upper().replace("_", " "),
                 "actions": ticket_actions(user, ticket),
@@ -157,7 +155,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         "assignees": assignees,
         "team_numbers": teams,
         "chosen_team": team_chosen,
-        "categories": get_all_categories(),
+        "categories": TicketCategory.objects.all(),
     }
 
     if request.headers.get("HX-Request"):
@@ -173,22 +171,16 @@ def ticket_notifications(request: HttpRequest) -> JsonResponse:
     since_id = optional_int(request.GET.get("since_id", "")) or 0
 
     open_count = Ticket.objects.filter(status="open").count()
-    raw_tickets = (
-        Ticket.objects.filter(status="open", id__gt=since_id)
-        .order_by("id")
-        .values("id", "ticket_number", "title", "category_id")[:10]
-    )
+    raw_tickets = Ticket.objects.filter(status="open", id__gt=since_id).select_related("category").order_by("id")[:10]
 
-    new_tickets = []
-    for t in raw_tickets:
-        cat_config = get_category_config(t["category_id"])
-        new_tickets.append(
-            {
-                "id": t["id"],
-                "number": t["ticket_number"],
-                "title": t["title"],
-                "category_display": cat_config["display_name"] if cat_config else "Unknown",
-            }
-        )
+    new_tickets = [
+        {
+            "id": t.id,
+            "number": t.ticket_number,
+            "title": t.title,
+            "category_display": t.category.display_name if t.category else "Unknown",
+        }
+        for t in raw_tickets
+    ]
 
     return JsonResponse({"open_count": open_count, "new_tickets": new_tickets})

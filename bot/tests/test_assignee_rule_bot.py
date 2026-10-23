@@ -55,7 +55,7 @@ async def test_resolve_modal_refuses_a_non_assignee_under_the_lock(held: Ticket,
     """The button's check can go stale; the modal's submit goes through the lifecycle, which checks again."""
     _, discord_id = await _support("other45")
     mock_interaction.user.id = discord_id
-    modal = ResolveTicketModal(held, {"points": 5})
+    modal = ResolveTicketModal(held)
     modal.points._value = ""
 
     await modal.on_submit(mock_interaction)
@@ -83,7 +83,7 @@ async def test_a_ticketing_admin_resolves_someone_elses_ticket(
     await TicketActionView(held.id).resolve_button.callback(mock_interaction)
     mock_interaction.response.send_modal.assert_awaited_once()
 
-    modal = ResolveTicketModal(held, {"points": 5})
+    modal = ResolveTicketModal(held)
     modal.points._value = ""
     await modal.on_submit(mock_interaction)
     await held.arefresh_from_db()

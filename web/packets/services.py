@@ -167,36 +167,30 @@ class PacketDistributionService:
         logger.info(f"Generated credentials for team {team.team_number}")
         return password
 
-    def send_packet_email(self, distribution: PacketDistribution, override_emails: list[str] | None = None) -> None:
-        """Send packet email to a team, or to override_emails instead of the SchoolInfo addresses."""
-        packet = distribution.packet
-        team = distribution.team
-
-        if override_emails:
-            recipients = override_emails
-        else:
-            email_address = self._get_team_email(team)
-            if not email_address:
-                raise ValueError(f"No email address for team {team.team_number}")
-            recipients = [email_address]
-
+    def _build_packet_email(
+        self,
+        packet: Packet,
+        team: Team,
+        recipients: list[str],
+        subject: str,
+        distribution: PacketDistribution | None = None,
+    ) -> EmailMultiAlternatives:
         password = self._team_password(team)
-
         username = team_username(team.team_number)
         raw_extras = packet.team_extras.get(str(team.team_number), {}) if packet.team_extras else {}
         # Format keys for display: "api_key" -> "API Key", "max_spend_usd" -> "Max Spend USD"
         team_extras = {k.replace("_", " ").title(): v for k, v in raw_extras.items()}
-        context = {
+        context: dict[str, object] = {
             "packet": packet,
             "team": team,
-            "distribution": distribution,
             "username": username,
             "password": password,
             "team_extras": team_extras,
             "portal_url": team_packet_url(),
         }
+        if distribution is not None:
+            context["distribution"] = distribution
 
-        subject = f"WCComps: {packet.title}"
         text_content = render_to_string("packets/emails/packet_notification.txt", context)
         html_content = render_to_string("packets/emails/packet_notification.html", context)
 
@@ -209,7 +203,24 @@ class PacketDistributionService:
         )
         email.attach_alternative(html_content, "text/html")
         email.attach(packet.filename, bytes(packet.file_data), packet.mime_type)
+        return email
 
+    def send_packet_email(self, distribution: PacketDistribution, override_emails: list[str] | None = None) -> None:
+        """Send packet email to a team, or to override_emails instead of the SchoolInfo addresses."""
+        packet = distribution.packet
+        team = distribution.team
+
+        recipients = override_emails or team.school_emails
+        if not recipients:
+            raise ValueError(f"No email address for team {team.team_number}")
+
+        email = self._build_packet_email(
+            packet,
+            team,
+            recipients,
+            f"WCComps: {packet.title}",
+            distribution=distribution,
+        )
         email.send(fail_silently=False)
 
         sent_to = ", ".join(recipients)
@@ -246,44 +257,10 @@ class PacketDistributionService:
 
     def send_test_packet_email(self, packet: Packet, team: Team, email: str) -> None:
         """Send a test packet email to a specific address without creating distribution records."""
-        password = self._team_password(team)
-
-        username = team_username(team.team_number)
-        raw_extras = packet.team_extras.get(str(team.team_number), {}) if packet.team_extras else {}
-        team_extras = {k.replace("_", " ").title(): v for k, v in raw_extras.items()}
-        context = {
-            "packet": packet,
-            "team": team,
-            "username": username,
-            "password": password,
-            "team_extras": team_extras,
-            "portal_url": team_packet_url(),
-        }
-
-        subject = f"[TEST] WCComps: {packet.title}"
-        text_content = render_to_string("packets/emails/packet_notification.txt", context)
-        html_content = render_to_string("packets/emails/packet_notification.html", context)
-
-        msg = EmailMultiAlternatives(
-            subject=subject,
-            body=text_content,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            to=[email],
-            reply_to=[settings.DEFAULT_REPLY_TO_EMAIL],
-        )
-        msg.attach_alternative(html_content, "text/html")
-        msg.attach(packet.filename, bytes(packet.file_data), packet.mime_type)
+        msg = self._build_packet_email(packet, team, [email], f"[TEST] WCComps: {packet.title}")
         msg.send(fail_silently=False)
 
         logger.info(f"Sent test email for packet {packet.id} (team {team.team_number}) to {email}")
-
-    def _get_team_email(self, team: Team) -> str | None:
-        try:
-            school_info = SchoolInfo.objects.get(team=team)
-            return school_info.contact_email
-        except SchoolInfo.DoesNotExist:
-            logger.warning(f"No SchoolInfo found for team {team.team_number}")
-            return None
 
     def _send_one(self, dist: PacketDistribution) -> tuple[PacketDistribution, bool, str]:
         """Send a single packet email (thread-safe). Returns (dist, success, error)."""
@@ -325,6 +302,11 @@ class PacketDistributionService:
         if not distributions:
             packet.mark_as_completed()
             yield ndjson_done("No teams to distribute to")
+            return
+
+        if not packet.send_via_email:
+            packet.mark_as_completed()
+            yield ndjson_done(f"Distributed to {len(distributions)} teams")
             return
 
         sent, failed = yield from self._stream_parallel_send(distributions)
@@ -390,7 +372,11 @@ class PacketDistributionService:
         if not distributions:
             yield ndjson_done(EVERY_TEAM_HAS_IT)
             return
-        sent, failed = yield from self._stream_parallel_send(distributions)
+        if not packet.send_via_email:
+            packet.complete_if_done()
+            sent, failed = len(distributions), 0
+        else:
+            sent, failed = yield from self._stream_parallel_send(distributions)
         message = f"Sent {sent}, failed {failed}" if failed else f"Sent to {sent} new team(s)"
         # Extras uploaded before these teams had their numbers have none for them
         numbers = sorted(dist.team.team_number for dist in distributions)

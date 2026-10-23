@@ -8,6 +8,7 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest, PermissionDenied
 from django.core.files.uploadedfile import UploadedFile
+from django.db import transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from registration.forms import ShownSchoolForm
@@ -144,19 +145,15 @@ def link_callback(request: HttpRequest) -> HttpResponse:
     else:
         url_token = request.GET.get("token")
     session_token = request.session.get("pending_link_token")
-    token_result = validate_link_token(url_token, session_token, authentik_username)
-    if isinstance(token_result, LinkResult):
-        return _render_error(token_result)
-    link_token = token_result
-
-    discord_id = link_token.discord_id
-    discord_username = link_token.discord_username
-
     team = team_for_groups(groups)
 
     # Nothing is linked until the user confirms which Discord account they are linking (POST + CSRF).
     # Opening someone else's /link URL would otherwise silently hand them this account's roles.
     if request.method != "POST":
+        token_result = validate_link_token(url_token, session_token, authentik_username)
+        if isinstance(token_result, LinkResult):
+            return _render_error(token_result)
+        link_token = token_result
         return render(
             request,
             "link_confirm.html",
@@ -169,19 +166,30 @@ def link_callback(request: HttpRequest) -> HttpResponse:
             },
         )
 
-    # Enforce one-to-one link policy for non-team accounts
-    policy_error = enforce_account_link_policy(user, discord_id, discord_username, authentik_username, team)
-    if policy_error:
-        return _render_error(policy_error)
+    with transaction.atomic():
+        token_result = validate_link_token(url_token, session_token, authentik_username, for_update=True)
+        if isinstance(token_result, LinkResult):
+            return _render_error(token_result)
+        link_token = token_result
+        discord_id = link_token.discord_id
+        discord_username = link_token.discord_username
+
+        if not team:
+            User.objects.select_for_update().get(pk=user.pk)
+
+        # Enforce one-to-one link policy for non-team accounts
+        policy_error = enforce_account_link_policy(user, discord_id, discord_username, authentik_username, team)
+        if policy_error:
+            return _render_error(policy_error)
+
+        link_error = execute_link(discord_id, discord_username, user, team)
+        if link_error:
+            return _render_error(link_error)
+
+        finalize_link(link_token, discord_id, discord_username, authentik_username, team)
 
     if not team:
         store_discord_id_in_authentik(authentik_username, discord_id, authentik_user_id)
-
-    link_error = execute_link(discord_id, discord_username, user, team)
-    if link_error:
-        return _render_error(link_error)
-
-    finalize_link(link_token, discord_id, discord_username, authentik_username, team)
 
     request.session.pop("pending_link_token", None)
     request.session.pop("pending_link_discord_id", None)

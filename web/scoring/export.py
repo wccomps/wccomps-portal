@@ -308,6 +308,7 @@ def _serialize_final_scores_csv() -> str:
             "Red Deductions",
             "Incident Recovery Points",
             "SLA Penalties",
+            "Point Adjustments",
             "Calculated At",
         ]
     )
@@ -326,6 +327,7 @@ def _serialize_final_scores_csv() -> str:
                 score.red_deductions,
                 score.incident_recovery_points,
                 score.sla_penalties,
+                score.point_adjustments,
                 calculated_at,
             ]
         )
@@ -347,6 +349,7 @@ def _serialize_final_scores_json() -> str:
             "red_deductions": str(score.red_deductions),
             "incident_recovery_points": str(score.incident_recovery_points),
             "sla_penalties": str(score.sla_penalties),
+            "point_adjustments": str(score.point_adjustments),
             "calculated_at": calculated_at,
         }
         for score in scores

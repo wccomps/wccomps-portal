@@ -39,15 +39,15 @@
                                 :value="selectedCategory"
                                 @change="onCategoryChange">
                             <option value="">Select a category...</option>
-                            {% for cat_key, cat_info in categories.items %}
-                                <option value="{{ cat_key }}"
-                                        data-points="{{ cat_info.points }}"
-                                        {% if form_data.category == cat_key|stringformat:"i" %}selected{% endif %}>
-                                    {{ cat_info.display_name }} (
-                                    {% if cat_info.variable_points %}
+                            {% for cat in categories %}
+                                <option value="{{ cat.id }}"
+                                        data-points="{{ cat.points }}"
+                                        {% if form_data.category == cat.id|stringformat:"i" %}selected{% endif %}>
+                                    {{ cat.display_name }} (
+                                    {% if cat.variable_points %}
                                         Variable
-                                    {% elif cat_info.points %}
-                                        {{ cat_info.points }}pt
+                                    {% elif cat.points %}
+                                        {{ cat.points }}pt
                                     {% else %}
                                         Free
                                     {% endif %}
@@ -159,7 +159,7 @@
             </c-module>
         </c-form>
     </div>
-    {{ categories|json_script:"categories-data" }}
+    {{ categories_json|json_script:"categories-data" }}
     {{ box_ip_map|json_script:"box-ip-map-data" }}
     {{ service_choices|json_script:"service-choices-data" }}
     <script>

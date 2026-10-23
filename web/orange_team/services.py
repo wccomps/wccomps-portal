@@ -96,7 +96,7 @@ def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) ->
         posted_ids = {c["id"] for c in criteria if c["id"] in existing}
         check.criteria.exclude(pk__in=posted_ids).delete()
 
-        assignments = list(check.assignments.all())
+        assignments = list(check.assignments.select_for_update())
         for c in criteria:
             criterion = existing.get(c["id"]) if c["id"] is not None else None
             if criterion is not None:
@@ -112,19 +112,40 @@ def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) ->
                 OrangeAssignmentResult(assignment=a, criterion=criterion) for a in assignments
             )
 
+        has_criteria = check.criteria.exists()
+        for assignment in assignments:
+            if assignment.status in ("submitted", "approved"):
+                if has_criteria:
+                    assignment.score = assignment.calculate_score()
+                    assignment.save(update_fields=["score"])
+                elif assignment.score is not None and assignment.score > check.max_score:
+                    assignment.score = check.max_score
+                    assignment.save(update_fields=["score"])
+                if assignment.status == "approved":
+                    OrangeTeamScore.objects.filter(
+                        orange_check=check,
+                        team=assignment.team,
+                    ).update(
+                        points_awarded=assignment.score or 0,
+                    )
+        OrangeTeamScore.objects.filter(orange_check=check).update(description=f"Check: {check.title}")
+
 
 def create_orange_score_from_assignment(
     assignment: OrangeAssignment,
     approver: User,
 ) -> OrangeTeamScore:
-    """Create an OrangeTeamScore record from an approved orange team check."""
-    return OrangeTeamScore.objects.create(
-        team=assignment.team,
-        submitted_by=assignment.user,
-        description=f"Check: {assignment.orange_check.title}",
-        points_awarded=assignment.score or 0,
-        is_approved=True,
-        approved_by=approver,
-        approved_at=timezone.now(),
+    """Create or update an OrangeTeamScore record from an approved orange team check."""
+    score, _ = OrangeTeamScore.objects.update_or_create(
         orange_check=assignment.orange_check,
+        team=assignment.team,
+        defaults={
+            "submitted_by": assignment.user,
+            "description": f"Check: {assignment.orange_check.title}",
+            "points_awarded": assignment.score or 0,
+            "is_approved": True,
+            "approved_by": approver,
+            "approved_at": timezone.now(),
+        },
     )
+    return score

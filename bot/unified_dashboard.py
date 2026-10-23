@@ -10,9 +10,9 @@ from django.conf import settings
 from django.utils import timezone
 
 from bot.heartbeat import record as record_heartbeat
+from bot.permissions import has_permission
 from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, add_field, fit_lines, recycle_db_connection
 from core.models import BotState
-from core.tickets_config import get_category_config
 from core.utils import shorten
 from ticketing.models import Ticket
 
@@ -234,7 +234,7 @@ class UnifiedDashboard:
                     query = Ticket.objects.filter(status__in=["open", "claimed"])
                 else:
                     query = Ticket.objects.filter(status=self.filter_status)
-                return list(query.select_related("team", "assigned_to").order_by("created_at"))
+                return list(query.select_related("team", "assigned_to", "category").order_by("created_at"))
 
             @sync_to_async
             def get_stats() -> tuple[int, int]:
@@ -287,11 +287,10 @@ class UnifiedDashboard:
                 categorized = list(self._categorize_tickets(tickets).items())
                 guild_id = channel.guild.id
                 for n, (category_id, cat_tickets) in enumerate(categorized):
-                    cat_info = await sync_to_async(get_category_config)(category_id) or {
-                        "display_name": f"Category {category_id}"
-                    }
+                    cat = cat_tickets[0].category
+                    cat_name = cat.display_name if cat else f"Category {category_id}"
                     field_name, field_value = self._build_category_field(
-                        cat_info["display_name"], cat_tickets, guild_id, cat_info.get("playbook_steps") or []
+                        cat_name, cat_tickets, guild_id, cat.steps if cat else []
                     )
                     # The embed holds 25 fields and 6000 characters: the categories past that are counted instead
                     if not add_field(embed, field_name, field_value, room=DASHBOARD_FOOTER_ROOM):
@@ -322,6 +321,28 @@ class DashboardControlView(discord.ui.View):
         super().__init__(timeout=None)
         self.dashboard = dashboard
 
+    async def _apply(
+        self,
+        interaction: discord.Interaction,
+        message: str,
+        *,
+        sort_by: str | None = None,
+        filter_status: str | None = None,
+    ) -> None:
+        if not await has_permission(interaction.user.id, "ticketing_support"):
+            await interaction.response.send_message(
+                "You do not have permission to change the ticket queue view.",
+                ephemeral=True,
+            )
+            return
+        if sort_by is not None:
+            self.dashboard.sort_by = sort_by
+        if filter_status is not None:
+            self.dashboard.filter_status = filter_status
+        await interaction.response.defer(ephemeral=True)
+        await self.dashboard._update_dashboard()
+        await interaction.followup.send(message, ephemeral=True)
+
     @discord.ui.button(
         label="Sort: Created",
         style=discord.ButtonStyle.secondary,
@@ -331,9 +352,7 @@ class DashboardControlView(discord.ui.View):
     async def sort_created(
         self, interaction: discord.Interaction, button: discord.ui.Button[DashboardControlView]
     ) -> None:
-        self.dashboard.sort_by = "created"
-        await self.dashboard._update_dashboard()
-        await interaction.response.send_message("Sorted by creation time", ephemeral=True)
+        await self._apply(interaction, "Sorted by creation time", sort_by="created")
 
     @discord.ui.button(
         label="Sort: Stale",
@@ -345,9 +364,7 @@ class DashboardControlView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button[DashboardControlView]
     ) -> None:
         """Sort by stale (oldest assigned first)."""
-        self.dashboard.sort_by = "stale"
-        await self.dashboard._update_dashboard()
-        await interaction.response.send_message("Sorted by stale (oldest assigned first)", ephemeral=True)
+        await self._apply(interaction, "Sorted by stale (oldest assigned first)", sort_by="stale")
 
     @discord.ui.button(
         label="Sort: Team",
@@ -358,9 +375,7 @@ class DashboardControlView(discord.ui.View):
     async def sort_team(
         self, interaction: discord.Interaction, button: discord.ui.Button[DashboardControlView]
     ) -> None:
-        self.dashboard.sort_by = "team"
-        await self.dashboard._update_dashboard()
-        await interaction.response.send_message("Sorted by team name", ephemeral=True)
+        await self._apply(interaction, "Sorted by team name", sort_by="team")
 
     @discord.ui.button(
         label="Filter: All",
@@ -371,9 +386,7 @@ class DashboardControlView(discord.ui.View):
     async def filter_all(
         self, interaction: discord.Interaction, button: discord.ui.Button[DashboardControlView]
     ) -> None:
-        self.dashboard.filter_status = "all"
-        await self.dashboard._update_dashboard()
-        await interaction.response.send_message("Showing all active tickets", ephemeral=True)
+        await self._apply(interaction, "Showing all active tickets", filter_status="all")
 
     @discord.ui.button(
         label="Filter: Open",
@@ -384,9 +397,7 @@ class DashboardControlView(discord.ui.View):
     async def filter_open(
         self, interaction: discord.Interaction, button: discord.ui.Button[DashboardControlView]
     ) -> None:
-        self.dashboard.filter_status = "open"
-        await self.dashboard._update_dashboard()
-        await interaction.response.send_message("Showing only open tickets", ephemeral=True)
+        await self._apply(interaction, "Showing only open tickets", filter_status="open")
 
     @discord.ui.button(
         label="Filter: Claimed",
@@ -397,6 +408,4 @@ class DashboardControlView(discord.ui.View):
     async def filter_claimed(
         self, interaction: discord.Interaction, button: discord.ui.Button[DashboardControlView]
     ) -> None:
-        self.dashboard.filter_status = "claimed"
-        await self.dashboard._update_dashboard()
-        await interaction.response.send_message("Showing only claimed tickets", ephemeral=True)
+        await self._apply(interaction, "Showing only claimed tickets", filter_status="claimed")

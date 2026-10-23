@@ -844,7 +844,6 @@ class ScalingContextTests(TestCase):
             team=self.team,
             service_points=Decimal("8000"),
             sla_violations=Decimal("0"),
-            point_adjustments=Decimal("0"),
         )
         InjectScore.objects.create(
             team=self.team,

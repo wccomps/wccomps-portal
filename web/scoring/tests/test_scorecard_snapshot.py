@@ -20,6 +20,7 @@ from scoring.models import (
 from scoring.snapshot import context_from_snapshot, serialize_scorecard
 from scoring.views.leaderboard import _scorecard_context
 from team.models import Team
+from ticketing.models import Ticket
 
 pytestmark = pytest.mark.django_db
 
@@ -29,8 +30,14 @@ def scored_teams():
     red_user = User.objects.create_user("red")
     teams = [Team.objects.create(team_number=n, team_name=f"Team {n:02d}", is_active=True) for n in (1, 2, 3)]
     for team, points in zip(teams, (300, 200, 100), strict=True):
-        ServiceScore.objects.create(
-            team=team, service_points=Decimal(points), sla_violations=Decimal(-5), point_adjustments=Decimal(-20)
+        ServiceScore.objects.create(team=team, service_points=Decimal(points), sla_violations=Decimal(-5))
+        Ticket.objects.create(
+            ticket_number=f"T{team.team_number:03d}-001",
+            team=team,
+            title="Support ticket",
+            status="resolved",
+            points_charged=20,
+            is_approved=True,
         )
         ServiceDetail.objects.create(team=team, service_name="web-http", points=Decimal(points), sla_violations=2)
         InjectScore.objects.create(

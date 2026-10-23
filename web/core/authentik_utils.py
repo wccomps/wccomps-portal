@@ -2,7 +2,8 @@ import csv
 import io
 import logging
 import secrets
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 
 from team.models import MAX_TEAMS, team_username
 
@@ -61,6 +62,39 @@ def reset_team_credentials(team_number: int) -> tuple[str | None, str, bool]:
         return None, error, False
     revoked, _, _ = AuthentikManager().revoke_user_sessions(team_username(team_number))
     return password, "", revoked
+
+
+@dataclass(frozen=True)
+class BulkPasswordResetResult:
+    password_list: list[tuple[int, str, str]]
+    failed_resets: list[tuple[str, str]]
+    sessions_failed: list[str]
+
+
+def reset_teams_credentials(
+    team_numbers: Iterable[int],
+    reset_fn: Callable[[int], tuple[str | None, str, bool]] = reset_team_credentials,
+) -> BulkPasswordResetResult:
+    """Reset passwords and revoke sessions for multiple teams."""
+    password_list: list[tuple[int, str, str]] = []
+    failed_resets: list[tuple[str, str]] = []
+    sessions_failed: list[str] = []
+
+    for team_num in team_numbers:
+        username = team_username(team_num)
+        password, error, sessions_revoked = reset_fn(team_num)
+        if password:
+            password_list.append((team_num, username, password))
+            if not sessions_revoked:
+                sessions_failed.append(username)
+        else:
+            failed_resets.append((username, error))
+
+    return BulkPasswordResetResult(
+        password_list=password_list,
+        failed_resets=failed_resets,
+        sessions_failed=sessions_failed,
+    )
 
 
 def generate_blueteam_password() -> str:

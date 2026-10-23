@@ -15,7 +15,7 @@ from bot.ticket_input import read_ticket
 from bot.utils import add_field, choices, pinging
 from core.stored_files import clean_name
 from core.utils import shorten
-from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketComment, TicketHistory
+from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
 from ticketing.utils import TicketRateLimitError, acreate_ticket_atomic, get_user_for_ticket
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,8 @@ class TicketingCog(commands.Cog):
             ]
 
             for ticket in tickets_to_archive:
+                if not await Ticket.objects.filter(pk=ticket.pk, status__in=["resolved", "cancelled"]).aexists():
+                    continue
                 try:
                     thread = self.bot.get_channel(ticket.discord_thread_id) if ticket.discord_thread_id else None
                     if isinstance(thread, discord.Thread):
@@ -112,13 +114,10 @@ class TicketingCog(commands.Cog):
     async def category_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        from core.tickets_config import get_all_categories
-
-        categories = await sync_to_async(get_all_categories)(user_creatable_only=True)
-        named = [
-            (f"{cat_info['display_name']} ({cat_info.get('points', 0)}pt)", str(cat_id))
-            for cat_id, cat_info in categories.items()
+        categories = [
+            cat async for cat in TicketCategory.objects.filter(user_creatable=True).order_by("sort_order", "id")
         ]
+        named = [(f"{cat.display_name} ({cat.points}pt)", str(cat.id)) for cat in categories]
         return choices([(name, value) for name, value in named if not current or current.lower() in name.lower()])
 
     @app_commands.command(name="ticket", description="[BLUE TEAM] Create a support ticket for your team")
@@ -163,13 +162,13 @@ class TicketingCog(commands.Cog):
         if isinstance(ticket_input, str):
             await interaction.response.send_message(ticket_input, ephemeral=True)
             return
-        cat_info = ticket_input.config
+        cat = ticket_input.category
 
         try:
             ticket = await acreate_ticket_atomic(
                 team=team,
-                category=ticket_input.category,
-                title=cat_info["display_name"],
+                category=cat,
+                title=cat.display_name,
                 description=ticket_input.description,
                 hostname=ticket_input.hostname,
                 ip_address=ticket_input.ip_address,
@@ -183,13 +182,13 @@ class TicketingCog(commands.Cog):
 
         embed = discord.Embed(
             title="Ticket Created",
-            description=f"Your {cat_info['display_name']} ticket has been created.",
+            description=f"Your {cat.display_name} ticket has been created.",
             color=discord.Color.green(),
         )
         embed.add_field(name="Ticket Number", value=ticket.ticket_number, inline=True)
         embed.add_field(name="Status", value="Open", inline=True)
         add_field(embed, "Team", team.team_name, inline=True)
-        embed.add_field(name="Point Cost", value=f"{cat_info.get('points', 0)} points", inline=True)
+        embed.add_field(name="Point Cost", value=f"{cat.points} points", inline=True)
         add_field(embed, "Description", ticket_input.description)
 
         embed.add_field(
@@ -238,7 +237,7 @@ class TicketingCog(commands.Cog):
         await CommentRateLimit.objects.acreate(ticket=ticket, discord_id=message.author.id)
 
         # Save message as comment in database (for web interface visibility)
-        if message.content:
+        if content := storable(message.content):
             existing = await TicketComment.objects.filter(discord_message_id=message.id).afirst()
 
             if not existing:
@@ -246,7 +245,7 @@ class TicketingCog(commands.Cog):
                 await TicketComment.objects.acreate(
                     ticket=ticket,
                     author=author,
-                    comment_text=storable(message.content),
+                    comment_text=content,
                     discord_message_id=message.id,
                 )
                 logger.info(f"Saved Discord message as comment for ticket #{ticket.id}")

@@ -3,7 +3,6 @@ from collections.abc import Iterable, Mapping
 from django import forms
 
 from core.proxmox import is_valid_snapshot_name
-from core.tickets_config import TicketCategoryConfig, get_all_categories
 from ticketing.models import Ticket, TicketCategory
 
 TICKET_FIELD_CHOICES = [
@@ -100,14 +99,13 @@ class CreateTicketForm(forms.Form):
     category = forms.IntegerField()
     team_id = forms.IntegerField(required=False)
 
-    category_config: TicketCategoryConfig | None = None
     category_obj: TicketCategory | None = None
 
     def __init__(
         self,
         *args: object,
         staff: bool = False,
-        categories: Mapping[int, TicketCategoryConfig] | None = None,
+        categories: Iterable[TicketCategory] | None = None,
         box_ip_map: Mapping[str, str] | None = None,
         service_choices: Iterable[Mapping[str, str]] = (),
         **kwargs: object,
@@ -123,16 +121,22 @@ class CreateTicketForm(forms.Form):
         category_id = cleaned.get("category")
         if category_id is None:
             return cleaned
-        categories = (
-            self._categories if self._categories is not None else get_all_categories(user_creatable_only=not self.staff)
+        allowed = (
+            {cat.pk: cat for cat in self._categories}
+            if self._categories is not None
+            else {
+                cat.pk: cat
+                for cat in (
+                    TicketCategory.objects.all() if self.staff else TicketCategory.objects.filter(user_creatable=True)
+                )
+            }
         )
-        if category_id not in categories:
+        if category_id not in allowed:
             self.add_error("category", "Invalid ticket category selected.")
             return cleaned
 
-        cat_info = categories[category_id]
-        self.category_config = cat_info
-        self.category_obj = TicketCategory.objects.get(pk=category_id)
+        category = allowed[category_id]
+        self.category_obj = category
 
         hostname = str(cleaned.get("hostname", ""))
         ip_address = str(cleaned.get("ip_address", ""))
@@ -149,7 +153,7 @@ class CreateTicketForm(forms.Form):
         cleaned["hostname"] = hostname
         cleaned["ip_address"] = ip_address
 
-        for field in cat_info.get("required_fields", []):
+        for field in category.required_fields:
             if field in REQUIRED_FIELD_ERRORS and field not in self.errors and not cleaned.get(field):
                 self.add_error(field, REQUIRED_FIELD_ERRORS[field])
         return cleaned

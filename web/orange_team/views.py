@@ -98,14 +98,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 def toggle_checkin(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:dashboard")
-    user = cast(User, request.user)
-    active = OrangeCheckIn.objects.filter(user=user, is_active=True).first()
-    if active:
-        active.is_active = False
-        active.checked_out_at = timezone.now()
-        active.save()
-    else:
-        OrangeCheckIn.objects.create(user=user)
+    OrangeCheckIn.toggle(cast(User, request.user))
     return redirect("orange_team:dashboard")
 
 
@@ -115,13 +108,7 @@ def admin_toggle_checkin(request: HttpRequest, user_id: int) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:check_list")
     target_user = get_object_or_404(User, pk=user_id)
-    active = OrangeCheckIn.objects.filter(user=target_user, is_active=True).first()
-    if active:
-        active.is_active = False
-        active.checked_out_at = timezone.now()
-        active.save()
-    else:
-        OrangeCheckIn.objects.create(user=target_user)
+    OrangeCheckIn.toggle(target_user)
     return redirect("orange_team:check_list")
 
 
@@ -335,14 +322,23 @@ def check_duplicate(request: HttpRequest, check_id: int) -> HttpResponse:
     if request.method != "POST":
         return redirect("orange_team:check_detail", check_id=check_id)
     original = get_object_or_404(OrangeCheck.objects.prefetch_related("criteria"), pk=check_id)
+    criteria = list(original.criteria.all())
+    worth = sum(c.points for c in criteria) if criteria else original.max_points
+    if problem := scores_total_problem(None, worth):
+        messages.error(request, problem)
+        return redirect("orange_team:check_detail", check_id=check_id)
     user = cast(User, request.user)
+    suffix = " (copy)"
+    title = f"{original.title[: 200 - len(suffix)]}{suffix}"
     with transaction.atomic():
         new_check = OrangeCheck.objects.create(
-            title=f"{original.title} (copy)",
+            title=title,
             description=original.description,
+            max_points=original.max_points,
+            time_limit=original.time_limit,
             created_by=user,
         )
-        for criterion in original.criteria.all():
+        for criterion in criteria:
             OrangeCheckCriterion.objects.create(
                 orange_check=new_check,
                 label=criterion.label,
@@ -463,7 +459,7 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
 
     if assignment.status == "pending":
         assignment.status = "in_progress"
-        assignment.save()
+        assignment.save(update_fields=["status"])
 
     score = assignment.calculate_score()
     max_score = assignment.orange_check.max_score
@@ -486,16 +482,21 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
         assignment.score = assignment.calculate_score()
     else:
         score_form = SubmitScoreForm(request.POST)
-        if score_form.is_valid() and score_form.cleaned_data.get("score") is not None:
-            posted = score_form.cleaned_data["score"]
+        if not score_form.is_valid():
+            messages.error(request, f"Score must be between 0 and {assignment.orange_check.max_score}.")
+            return redirect("orange_team:dashboard")
+        posted = score_form.cleaned_data.get("score")
+        if posted is not None:
             if posted > assignment.orange_check.max_score:
                 messages.error(request, f"Score must be between 0 and {assignment.orange_check.max_score}.")
                 return redirect("orange_team:dashboard")
             assignment.score = posted
-        # else: keep any score already saved on the assignment
+        elif assignment.score is None:
+            messages.error(request, "Please enter a score before submitting.")
+            return redirect("orange_team:dashboard")
     assignment.status = "submitted"
     assignment.submitted_at = timezone.now()
-    assignment.save()
+    assignment.save(update_fields=["score", "status", "submitted_at"])
 
     messages.success(
         request,

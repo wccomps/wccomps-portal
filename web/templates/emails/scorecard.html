@@ -145,7 +145,7 @@
                     </tr>
                     <tr>
                         <td>Red Team Deductions</td>
-                        <td class="negative">-{{ red_deductions }}</td>
+                        <td class="negative">{{ red_deductions }}</td>
                     </tr>
                     <tr>
                         <td>Incident Recovery</td>
@@ -153,7 +153,11 @@
                     </tr>
                     <tr>
                         <td>SLA Penalties</td>
-                        <td class="negative">-{{ sla_penalties }}</td>
+                        <td class="negative">{{ sla_penalties }}</td>
+                    </tr>
+                    <tr>
+                        <td>Point Adjustments</td>
+                        <td class="negative">{{ point_adjustments }}</td>
                     </tr>
                     <tr class="total">
                         <td>Total Score</td>

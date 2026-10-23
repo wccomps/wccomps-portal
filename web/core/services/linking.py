@@ -20,7 +20,13 @@ class LinkResult:
     error_context: dict[str, str] | None = None
 
 
-def validate_link_token(url_token: str | None, session_token: str | None, username: str) -> LinkResult | LinkToken:
+def validate_link_token(
+    url_token: str | None,
+    session_token: str | None,
+    username: str,
+    *,
+    for_update: bool = False,
+) -> LinkResult | LinkToken:
     """Validate the link token from URL and session, returning the LinkToken or an error LinkResult."""
     if not url_token:
         return LinkResult(
@@ -55,8 +61,9 @@ def validate_link_token(url_token: str | None, session_token: str | None, userna
             },
         )
 
+    tokens = LinkToken.objects.select_for_update() if for_update else LinkToken.objects
     try:
-        link_token = LinkToken.objects.get(token=url_token, used=False)
+        link_token = tokens.get(token=url_token, used=False)
     except LinkToken.DoesNotExist:
         return LinkResult(
             success=False,

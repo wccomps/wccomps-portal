@@ -49,3 +49,16 @@ def test_submit_without_posted_score_keeps_existing(setup: tuple[Client, OrangeA
     a.refresh_from_db()
     assert a.status == "submitted"
     assert a.score == 14
+
+
+def test_submit_rejects_missing_or_invalid_score_when_unscored(setup: tuple[Client, OrangeAssignment]) -> None:
+    c, a = setup
+    c.post(f"/orange-team/assignments/{a.id}/submit/")
+    a.refresh_from_db()
+    assert a.status != "submitted"
+    assert a.score is None
+
+    c.post(f"/orange-team/assignments/{a.id}/submit/", {"score": "-5"})
+    a.refresh_from_db()
+    assert a.status != "submitted"
+    assert a.score is None

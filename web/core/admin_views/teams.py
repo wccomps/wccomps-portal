@@ -8,13 +8,12 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from core.auth_utils import require_permission
-from core.authentik_manager import AuthentikManager
-from core.authentik_utils import reset_team_credentials, reset_team_password
+from core.authentik_utils import reset_team_credentials
 from core.discord_tasks import SetupTeamInfrastructure, SyncMemberRoles
 from core.errors import json_endpoint
 from core.forms import TeamActionForm, TeamsBulkActionForm
 from core.models import AuditLog, DiscordTask
-from team.models import DiscordLink, Team, team_username
+from team.models import DiscordLink, Team
 
 
 @require_permission("admin", "gold_team")
@@ -73,6 +72,10 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
     if action == "activate":
         team.is_active = True
         team.save(update_fields=["is_active"])
+        for member_discord_id in DiscordLink.objects.filter(team=team, is_active=True).values_list(
+            "discord_id", flat=True
+        ):
+            DiscordTask.enqueue(SyncMemberRoles(discord_id=member_discord_id))
         AuditLog.objects.create(
             action="team_activated",
             admin_user=authentik_username,
@@ -90,6 +93,10 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
     elif action == "deactivate":
         team.is_active = False
         team.save(update_fields=["is_active"])
+        for member_discord_id in DiscordLink.objects.filter(team=team, is_active=True).values_list(
+            "discord_id", flat=True
+        ):
+            DiscordTask.enqueue(SyncMemberRoles(discord_id=member_discord_id))
         AuditLog.objects.create(
             action="team_deactivated",
             admin_user=authentik_username,
@@ -133,21 +140,32 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
             raise BadRequest("User not found or not linked to this team") from None
 
     elif action == "reset":
-        links = DiscordLink.objects.filter(team=team, is_active=True)
+        links = DiscordLink.objects.filter(team=team, is_active=True).select_related("user")
         unlinked = 0
         for link in links:
             link.is_active = False
             link.unlinked_at = timezone.now()
             link.save()
             DiscordTask.enqueue(SyncMemberRoles(discord_id=link.discord_id))
+            AuditLog.objects.create(
+                action="user_unlinked",
+                admin_user=authentik_username,
+                target_entity="discord_link",
+                target_id=link.discord_id,
+                details={
+                    "discord_id": link.discord_id,
+                    "discord_username": link.discord_username,
+                    "team_name": team.team_name,
+                    "authentik_username": link.user.username,
+                    "reason": "team_reset",
+                },
+            )
             unlinked += 1
 
-        password, error = reset_team_password(team_number)
-        success = password is not None
-        auth_manager = AuthentikManager()
+        DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
 
-        username = team_username(team_number)
-        session_success, session_error, sessions_revoked = auth_manager.revoke_user_sessions(username)
+        password, error, sessions_revoked = reset_team_credentials(team_number)
+        success = password is not None
 
         AuditLog.objects.create(
             action="team_reset",
@@ -159,6 +177,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
                 "unlinked_members": unlinked,
                 "password_reset": success,
                 "sessions_revoked": sessions_revoked,
+                "recreated_channels": True,
             },
         )
 
@@ -199,7 +218,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
         return JsonResponse({"success": True, "message": message, "password": password})
 
     elif action == "recreate_channels":
-        DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team_number))
+        DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
 
         AuditLog.objects.create(
             action="team_channels_recreate_requested",
@@ -231,6 +250,10 @@ def admin_teams_bulk_action(request: HttpRequest) -> HttpResponse:
 
     if action == "activate":
         updated = Team.objects.filter(team_number__in=team_numbers).update(is_active=True)
+        for discord_id in DiscordLink.objects.filter(team__team_number__in=team_numbers, is_active=True).values_list(
+            "discord_id", flat=True
+        ):
+            DiscordTask.enqueue(SyncMemberRoles(discord_id=discord_id))
         AuditLog.objects.create(
             action="teams_activated",
             admin_user=authentik_username,
@@ -247,6 +270,10 @@ def admin_teams_bulk_action(request: HttpRequest) -> HttpResponse:
 
     elif action == "deactivate":
         updated = Team.objects.filter(team_number__in=team_numbers).update(is_active=False)
+        for discord_id in DiscordLink.objects.filter(team__team_number__in=team_numbers, is_active=True).values_list(
+            "discord_id", flat=True
+        ):
+            DiscordTask.enqueue(SyncMemberRoles(discord_id=discord_id))
         AuditLog.objects.create(
             action="teams_deactivated",
             admin_user=authentik_username,
@@ -263,7 +290,7 @@ def admin_teams_bulk_action(request: HttpRequest) -> HttpResponse:
 
     elif action == "recreate":
         for team_number in team_numbers:
-            DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team_number))
+            DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
 
         AuditLog.objects.create(
             action="teams_recreate_requested",

@@ -115,7 +115,10 @@ class Packet(models.Model):
 
         Each send calls this, so the last one completes the packet whether or not anyone is watching.
         """
-        if self.distributions.exclude(email_status__in=PacketDistribution.DONE_STATUSES).exists():
+        if (
+            self.send_via_email
+            and self.distributions.exclude(email_status__in=PacketDistribution.DONE_STATUSES).exists()
+        ):
             return
         Packet.objects.filter(pk=self.pk, status="distributing").update(status="completed", updated_at=timezone.now())
 

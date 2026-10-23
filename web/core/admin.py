@@ -202,7 +202,7 @@ class CompetitionConfigAdmin(PortalModelAdmin[CompetitionConfig]):
 
         if obj.applications_enabled:
             return "Active"
-        if obj.competition_start_time and timezone.now() < obj.competition_start_time:
+        if obj.schedule_will_start():
             return "Scheduled"
         if obj.competition_end_time and timezone.now() > obj.competition_end_time:
             return "Ended"

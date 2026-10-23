@@ -53,8 +53,8 @@ def uses_django_admin(user: User | AnonymousUser) -> bool:
 
 
 def team_for_groups(groups: list[str]) -> Team | None:
-    """The team whose Authentik group (Team.authentik_group) is among these groups, or None."""
-    return Team.objects.filter(authentik_group__in=groups).first()
+    """The active team whose Authentik group (Team.authentik_group) is among these groups, or None."""
+    return Team.objects.filter(authentik_group__in=groups, is_active=True).first()
 
 
 def get_user_team(user: User | AnonymousUser) -> Team | None:

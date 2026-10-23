@@ -20,15 +20,22 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 def _guild(*category_names: str) -> MagicMock:
     guild = MagicMock(spec=discord.Guild)
     categories = []
-    for name in category_names:
+    for idx, name in enumerate(category_names):
         category = MagicMock(spec=discord.CategoryChannel)
+        category.id = 22 if idx == 0 else 100 + idx
         category.name = name
         category.channels = [AsyncMock(spec=discord.TextChannel)]
         category.delete = AsyncMock()
         categories.append(category)
     guild.categories = categories
-    guild.roles = []
-    guild.get_role.return_value = None
+    by_id = {c.id: c for c in categories}
+    guild.get_channel.side_effect = by_id.get
+    role = MagicMock(spec=discord.Role)
+    role.id = 11
+    role.name = "Team 03"
+    role.delete = AsyncMock()
+    guild.roles = [role]
+    guild.get_role.side_effect = lambda role_id: role if role_id == 11 else None
     return guild
 
 
@@ -81,6 +88,21 @@ async def test_tears_down_discord_and_database(competition: Team) -> None:
     assert (config.competition_start_time, config.start_message) == (None, "")
     assert not await QuotientMetadataCache.objects.aexists()
     assert (await AuditLog.objects.aget(action="competition_cleanup")).admin_user == "web:admin"
+
+
+async def test_tears_down_discord_by_name_when_db_ids_are_null(competition: Team) -> None:
+    await Team.objects.filter(pk=competition.pk).aupdate(discord_role_id=None, discord_category_id=None)
+    guild = _guild("team 03", "Staff")
+
+    with (
+        patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock),
+        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
+        patch("bot.role_sync.sync_roles", _sync_removing(0)),
+    ):
+        await run_competition_cleanup(MagicMock(), guild, "web:admin")
+
+    guild.categories[0].delete.assert_awaited_once()
+    guild.roles[0].delete.assert_awaited_once()
 
 
 async def test_refuses_while_the_competition_runs(competition: Team) -> None:

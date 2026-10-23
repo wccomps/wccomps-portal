@@ -99,6 +99,7 @@ def _build_email_context(score: Standing, total_teams: int, custom_message: str 
         "red_deductions": score.red_deductions,
         "incident_recovery_points": score.incident_recovery_points,
         "sla_penalties": score.sla_penalties,
+        "point_adjustments": score.point_adjustments,
         "total_score": score.total_score,
         "rank": score.rank,
         "total_teams": total_teams,
@@ -107,11 +108,20 @@ def _build_email_context(score: Standing, total_teams: int, custom_message: str 
     }
 
 
-def _generate_team_pdf(score: Standing, standings: list[Standing], request: HttpRequest) -> bytes:
-    context = build_scorecard_context(score, standings)
+def _deny_external_urls(url: str, *_args: object, **_kwargs: object) -> dict[str, object]:
+    """Block all external and local-file URL fetches during WeasyPrint PDF rendering."""
+    raise ValueError(f"External URL fetching is disabled in scorecard PDFs: {url}")
+
+
+def render_scorecard_pdf(context: dict[str, object], request: HttpRequest | None = None) -> bytes:
+    """Render a scorecard context to PDF bytes with external URL fetching disabled."""
     html_string = render_to_string("scoring/scorecard_print.html", context, request=request)
-    pdf_bytes: bytes = weasyprint.HTML(string=html_string).write_pdf()
+    pdf_bytes: bytes = weasyprint.HTML(string=html_string, url_fetcher=_deny_external_urls).write_pdf()
     return pdf_bytes
+
+
+def _generate_team_pdf(score: Standing, standings: list[Standing], request: HttpRequest) -> bytes:
+    return render_scorecard_pdf(build_scorecard_context(score, standings), request=request)
 
 
 def _stream_email_scorecards(request: HttpRequest, custom_message: str = "") -> Iterator[str]:

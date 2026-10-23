@@ -14,7 +14,6 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
-from core.tickets_config import get_category_config
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 
@@ -128,52 +127,10 @@ def change_ticket_category_atomic(
     user: User | None = None,
     discord_id: int | None = None,
 ) -> tuple[Ticket | None, str | None]:
-    """Move a ticket to another category atomically, recording both categories' names and points. Only its assignee
-    or a ticketing admin (`user` or `discord_id`) does (ticketing.lifecycle.assignee_refusal)."""
-    from ticketing.lifecycle import assignee_refusal
+    """Move a ticket to another category atomically (delegates to ticketing.lifecycle)."""
+    from ticketing.lifecycle import change_ticket_category_atomic as _change
 
-    with transaction.atomic():
-        ticket = (
-            Ticket.objects.select_for_update(of=("self",))
-            .select_related("team", "assigned_to")
-            .filter(id=ticket_id)
-            .first()
-        )
-
-        if not ticket:
-            return None, "Ticket not found."
-        user = get_user_for_ticket(discord_id=discord_id, user=user)
-        if error := assignee_refusal(ticket, user, "recategorize"):
-            return None, error
-
-        new_cat_info = get_category_config(new_category_id)
-        if new_cat_info is None:
-            return None, "Invalid category."
-
-        old_category_id = ticket.category_id
-        if old_category_id == new_category_id:
-            return None, f"Ticket {ticket.ticket_number} is already in that category."
-        old_cat_info = get_category_config(old_category_id) or {}
-
-        ticket.category_id = new_category_id
-        ticket.save(update_fields=["category", "updated_at"])
-
-        TicketHistory.objects.create(
-            ticket=ticket,
-            action="category_changed",
-            actor=user,
-            details={
-                "changed_by": actor_username,
-                "old_category": old_category_id,
-                "old_category_name": old_cat_info.get("display_name", "Unknown"),
-                "new_category": new_category_id,
-                "new_category_name": new_cat_info.get("display_name", "Unknown"),
-                "old_points": old_cat_info.get("points", 0),
-                "new_points": new_cat_info.get("points", 0),
-            },
-        )
-
-        return ticket, None
+    return _change(ticket_id, new_category_id, actor_username, user=user, discord_id=discord_id)
 
 
 achange_ticket_category_atomic = _make_async(change_ticket_category_atomic)

@@ -256,3 +256,29 @@ def test_sending_to_new_teams_creates_their_distributions_under_the_lock(_send, 
     status = next(i for i, q in enumerate(sql) if q.startswith(status_read))
     create = next(i for i, q in enumerate(sql) if q.startswith('INSERT INTO "packets_packetdistribution"'))
     assert lock < status < create
+
+
+def test_assign_teams_takes_the_lock_and_skips_non_free_teams(team):
+    from registration.models import RegistrationContact, RegistrationEventEnrollment, TeamRegistration
+
+    event = _event()
+    # Team 1 has a leftover ticket counter, so free_teams(event) excludes it; Team 2 is free.
+    Team.objects.filter(pk=team.pk).update(ticket_counter=3)
+    team2 = Team.objects.create(team_number=2, team_name="Team 02")
+    reg = TeamRegistration.objects.create(school_name="Cal Poly", status="paid")
+    RegistrationContact.objects.create(
+        registration=reg, role="captain", name="Cap", email="cap@calpoly.edu", phone="555"
+    )
+    RegistrationEventEnrollment.objects.create(registration=reg, event=event)
+
+    gold = User.objects.create(username="gold")
+    UserGroups.objects.update_or_create(user=gold, defaults={"groups": ["WCComps_GoldTeam"], "authentik_id": "g"})
+    client = Client()
+    client.force_login(gold)
+
+    with CaptureQueriesContext(connection) as queries:
+        response = client.post(reverse("registration_assign_teams", args=[event.id]))
+
+    assert response.status_code == 302
+    _assert_locks_before_reading_the_open_event(queries)
+    assert event.team_assignments.get().team == team2

@@ -51,10 +51,25 @@ def test_resolved_or_cancelled_ticket_cannot_be_cancelled(team):
         assert error == f"Cannot cancel ticket with status: {status}."
 
 
-def test_reopen_refunds_points(team):
-    ticket = _ticket(team, "resolved", points_charged=60)
+def test_reopen_refunds_points(team, ticketing_admin_user):
+    from django.utils import timezone
+
+    ticket = _ticket(
+        team,
+        "resolved",
+        points_charged=60,
+        resolved_by=ticketing_admin_user,
+        resolution_notes="old notes",
+        thread_archive_scheduled_at=timezone.now(),
+    )
     reopened, _ = reopen_ticket(ticket.id, "admin", reopen_reason="not fixed")
-    assert (reopened.status, reopened.points_charged) == ("open", 0)
+    assert (
+        reopened.status,
+        reopened.points_charged,
+        reopened.resolved_by,
+        reopened.resolution_notes,
+        reopened.thread_archive_scheduled_at,
+    ) == ("open", 0, None, "", None)
     assert TicketHistory.objects.get(ticket=ticket, action="reopened").details["refunded_points"] == 60
 
 
@@ -62,6 +77,7 @@ def test_change_category_records_both_categories(team, ticketing_admin_user):
     ticket = _ticket(team, "open")
     changed, error = change_ticket_category_atomic(ticket.id, 3, "admin", user=ticketing_admin_user)
     assert error is None and changed.category_id == 3
+    assert changed.points_charged == TicketCategory.objects.get(pk=3).points
     details = TicketHistory.objects.get(ticket=ticket, action="category_changed").details
     assert (details["old_category"], details["new_category"], details["changed_by"]) == (2, 3, "admin")
 
@@ -70,6 +86,11 @@ def test_change_category_records_both_categories(team, ticketing_admin_user):
         == f"Ticket {ticket.ticket_number} is already in that category."
     )
     assert change_ticket_category_atomic(ticket.id, 999, "admin", user=ticketing_admin_user)[1] == "Invalid category."
+    resolved = _ticket(team, "resolved")
+    assert (
+        change_ticket_category_atomic(resolved.id, 3, "admin", user=ticketing_admin_user)[1]
+        == "Cannot change category of ticket with status: resolved."
+    )
 
 
 def test_web_cancel_tells_discord(blue_team_user, team):

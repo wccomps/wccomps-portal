@@ -70,6 +70,11 @@
                                             tooltip="Penalties for service level agreement violations">
                                 SLA
                             </c-table_header>
+                            <c-table_header sortable="false"
+                                            class="text-right"
+                                            tooltip="Ticket and manual point adjustments">
+                                Adjustments
+                            </c-table_header>
                             <c-table_header sortable="false" class="text-right">
                                 Total
                             </c-table_header>
@@ -108,6 +113,9 @@
                             </td>
                             <td class="text-right">
                                 <c-score_value :value="score.sla_penalties" />
+                            </td>
+                            <td class="text-right">
+                                <c-score_value :value="score.point_adjustments" />
                             </td>
                             <td class="text-right">
                                 <strong>{{ score.total_score|floatformat:0 }}</strong>

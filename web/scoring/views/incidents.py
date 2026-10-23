@@ -79,7 +79,7 @@ def submit_incident_report(request: HttpRequest) -> HttpResponse:
 
 
 def incident_list(request: HttpRequest) -> HttpResponse:
-    """List all incidents for the user's team (blue team view)."""
+    """List incident reports (all reports for incident staff, or the user's team reports)."""
     user = cast(User, request.user)
 
     if has_permission(user, INCIDENT_STAFF):
@@ -175,22 +175,14 @@ def review_incidents(request: HttpRequest) -> HttpResponse:
     page_obj = result["page_obj"]
     sort_by = result["current_sort"]
 
-    # Stats (unfiltered counts)
-    total_incidents = IncidentReport.objects.count()
-    approved_count = IncidentReport.objects.filter(is_approved=True).count()
-    pending_count = total_incidents - approved_count
-
     context = {
         "page_obj": page_obj,
-        "total_incidents": total_incidents,
-        "approved_count": approved_count,
-        "pending_count": pending_count,
         "team_numbers": team_numbers(Team.objects.filter(incident_reports__isnull=False), team),
         "chosen_team": team,
         "filters": filters,
         "filtered": filtered,
         "sort_by": sort_by,
-        "has_pending": pending_count > 0,
+        "has_pending": IncidentReport.objects.filter(is_approved=False).exists(),
     }
 
     if request.headers.get("HX-Request"):
@@ -219,16 +211,20 @@ def bulk_approve_incidents(request: HttpRequest) -> HttpResponse:
 @require_permission(INCIDENT_STAFF, error_message="Only Gold Team or White Team members can match incident reports")
 @transaction.atomic
 def match_incident(request: HttpRequest, incident_id: int) -> HttpResponse:
-    """Match incident to red team finding (gold team)."""
-    incident = get_object_or_404(IncidentReport, id=incident_id)
+    """Match an incident report to a red team finding."""
+    incident = get_object_or_404(IncidentReport.objects.select_for_update(), id=incident_id)
 
     suggested_findings = suggest_red_score_matches(incident)
 
     if request.method == "POST":
+        if incident.is_approved:
+            messages.error(request, f"Incident #{incident.id} has already been reviewed")
+            return redirect("scoring:review_incidents")
+
         form = IncidentMatchForm(suggested_findings, request.POST, instance=incident)
 
         if form.is_valid():
-            incident = form.save(commit=False)
+            incident = form.save()
             incident.approve(cast(User, request.user))
 
             messages.success(request, f"Incident #{incident.id} reviewed and {incident.points_returned} points awarded")
