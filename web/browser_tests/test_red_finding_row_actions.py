@@ -17,7 +17,7 @@ def test_delete_in_a_row_deletes_that_finding(live_server, pw_browser):
     from scoring.models import RedTeamScore
 
     user = role_user("red_team")
-    finding = RedTeamScore.objects.create(attack_vector="ssh", points_per_team=Decimal(10), submitted_by=user)
+    finding = RedTeamScore.objects.create(points_per_team=Decimal(10), submitted_by=user)
 
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
@@ -35,10 +35,7 @@ def test_approve_selected_approves_the_checked_findings(live_server, pw_browser)
     from scoring.models import RedTeamScore
 
     user = role_user("gold_team")
-    checked, unchecked = (
-        RedTeamScore.objects.create(attack_vector=vector, points_per_team=Decimal(10), submitted_by=user)
-        for vector in ("ssh", "rdp")
-    )
+    checked, unchecked = (RedTeamScore.objects.create(points_per_team=Decimal(10), submitted_by=user) for _ in range(2))
 
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()

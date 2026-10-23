@@ -195,8 +195,7 @@ def check_infrastructure(result: object) -> None:
                 and is_str(box.name)
                 and is_str(box.ip)
                 and all(
-                    isinstance(s, QuotientService) and is_str(s.name) and is_str(s.display_name) and is_str(s.type)
-                    for s in box.services
+                    isinstance(s, QuotientService) and is_str(s.name) and is_str(s.display_name) for s in box.services
                 )
                 for box in r.boxes
             )
