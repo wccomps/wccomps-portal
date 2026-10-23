@@ -56,7 +56,7 @@
         </div>
         <c-fieldset heading="Affected Teams">
             {% if finding.affected_teams.exists %}
-                <div class="d-flex gap-10 flex-wrap">
+                <div class="d-flex gap-10 flex-wrap p-10">
                     {% for team in finding.affected_teams.all %}<c-badge>Team {{ team.team_number }}</c-badge>{% endfor %}
                 </div>
             {% else %}
@@ -64,7 +64,7 @@
             {% endif %}
         </c-fieldset>
         <c-fieldset heading="Flags">
-            <div class="d-flex gap-20">
+            <div class="d-flex gap-20 p-10">
                 <div>
                     <strong>Universally Attempted:</strong>
                     {% if finding.universally_attempted %}
@@ -85,7 +85,7 @@
         </c-fieldset>
         <c-fieldset heading="Scoring Outcomes">
             {% if finding.outcomes_display %}
-                <div class="d-flex gap-10 flex-wrap">
+                <div class="d-flex gap-10 flex-wrap p-10">
                     {% for outcome in finding.outcomes_display %}<c-badge variant="warning">{{ outcome }}</c-badge>{% endfor %}
                 </div>
                 <p class="mt-10">
