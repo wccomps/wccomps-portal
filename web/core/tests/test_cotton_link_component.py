@@ -26,6 +26,17 @@ class TestCottonLinkComponent:
         assert 'class="button danger "' in html
         assert 'role="button"' in html
 
+    def test_warning_variant_renders_button_role(self) -> None:
+        """variant='warning' renders class='button warning' and role='button'."""
+        html = self._render('<c-link href="/test" variant="warning">Stop</c-link>')
+        assert 'class="button warning "' in html
+        assert 'role="button"' in html
+
+    def test_button_cancel_variant_renders_btn_secondary(self) -> None:
+        """c-button variant='cancel' renders class='btn-secondary' matching c-link variant='cancel'."""
+        html = self._render('<c-button variant="cancel">Cancel</c-button>')
+        assert 'class="btn-secondary "' in html
+
     def test_button_class_renders_button_role(self) -> None:
         """Explicit class='button' renders role='button'."""
         html = self._render('<c-link href="/test" class="button">Custom</c-link>')

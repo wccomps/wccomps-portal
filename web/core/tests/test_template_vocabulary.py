@@ -547,7 +547,7 @@ def test_button_rows_end_a_section() -> None:
     fail_with("Button rows inside a detail grid", found, {})
 
 
-BUTTON_ROW_LINK_VARIANTS = {"primary", "secondary", "danger", "cancel"}
+BUTTON_ROW_LINK_VARIANTS = {"primary", "secondary", "danger", "warning", "cancel"}
 BOXED_BUTTON_ROW_EXCEPTIONS = {
     "admin/team_detail.html": "The multi-action team actions bar (a row that is the whole section)",
 }

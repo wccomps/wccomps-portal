@@ -66,7 +66,7 @@
                         data-confirm="{% if active_checkin %}Check out? You will stop receiving assignments.{% endif %}">
                     {% csrf_token %}
                     {% if active_checkin %}
-                        <c-button type="submit" variant="danger">
+                        <c-button type="submit" variant="warning">
                             Check Out
                         </c-button>
                     {% else %}
