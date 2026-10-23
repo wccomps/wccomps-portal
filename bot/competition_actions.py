@@ -198,10 +198,9 @@ async def run_competition_cleanup(
 
         deleted_count = 0
         async for team in Team.objects.all().order_by("team_number"):
-            if team.discord_category_id or team.discord_role_id:
-                removed = await delete_team_infrastructure(guild, team, reason="Competition cleanup")
-                if any(item.startswith("category") for item in removed):
-                    deleted_count += 1
+            removed = await delete_team_infrastructure(guild, team, reason="Competition cleanup")
+            if any(item.startswith("category") for item in removed):
+                deleted_count += 1
 
         await log_to_ops_channel(bot, f"Deleted {deleted_count} team categories")
 

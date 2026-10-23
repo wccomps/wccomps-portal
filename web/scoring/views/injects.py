@@ -324,7 +324,7 @@ def save_inject_feedback(request: HttpRequest) -> HttpResponse:
     score_id = form.cleaned_data["score_id"]
     feedback_text = form.cleaned_data.get("feedback", "")
 
-    score = get_object_or_404(InjectScore, pk=score_id)
+    score = get_object_or_404(InjectScore.objects.select_for_update().select_related("team"), pk=score_id)
     if score.feedback != feedback_text:
         user = cast(User, request.user)
         is_lead = has_permission(user, "white_team_lead")
@@ -337,7 +337,9 @@ def save_inject_feedback(request: HttpRequest) -> HttpResponse:
     return redirect("scoring:review_inject_feedback")
 
 
-@require_permission("gold_team", "white_team", error_message="Only Gold/White Team members can approve inject feedback")
+@require_permission(
+    "gold_team", "white_team_lead", error_message="Only Gold Team or White Team Leads can approve inject feedback"
+)
 @transaction.atomic
 @require_http_methods(["POST"])
 def approve_inject_feedback(request: HttpRequest) -> HttpResponse:
@@ -349,7 +351,7 @@ def approve_inject_feedback(request: HttpRequest) -> HttpResponse:
         return redirect("scoring:review_inject_feedback")
 
     score_id = form.cleaned_data["score_id"]
-    score = get_object_or_404(InjectScore, pk=score_id)
+    score = get_object_or_404(InjectScore.objects.select_for_update().select_related("team"), pk=score_id)
     score.feedback_approved = True
     score.feedback_approved_by = user
     score.save(update_fields=["feedback_approved", "feedback_approved_by"])
@@ -358,7 +360,9 @@ def approve_inject_feedback(request: HttpRequest) -> HttpResponse:
     return redirect("scoring:review_inject_feedback")
 
 
-@require_permission("gold_team", "white_team", error_message="Only Gold/White Team members can approve inject feedback")
+@require_permission(
+    "gold_team", "white_team_lead", error_message="Only Gold Team or White Team Leads can approve inject feedback"
+)
 @transaction.atomic
 @require_http_methods(["POST"])
 def bulk_approve_inject_feedback(request: HttpRequest) -> HttpResponse:

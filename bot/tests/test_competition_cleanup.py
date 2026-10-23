@@ -90,6 +90,21 @@ async def test_tears_down_discord_and_database(competition: Team) -> None:
     assert (await AuditLog.objects.aget(action="competition_cleanup")).admin_user == "web:admin"
 
 
+async def test_tears_down_discord_by_name_when_db_ids_are_null(competition: Team) -> None:
+    await Team.objects.filter(pk=competition.pk).aupdate(discord_role_id=None, discord_category_id=None)
+    guild = _guild("team 03", "Staff")
+
+    with (
+        patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock),
+        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
+        patch("bot.role_sync.sync_roles", _sync_removing(0)),
+    ):
+        await run_competition_cleanup(MagicMock(), guild, "web:admin")
+
+    guild.categories[0].delete.assert_awaited_once()
+    guild.roles[0].delete.assert_awaited_once()
+
+
 async def test_refuses_while_the_competition_runs(competition: Team) -> None:
     await CompetitionConfig.objects.filter(pk=1).aupdate(applications_enabled=True)
     with patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops:

@@ -212,11 +212,15 @@ def bulk_approve_incidents(request: HttpRequest) -> HttpResponse:
 @transaction.atomic
 def match_incident(request: HttpRequest, incident_id: int) -> HttpResponse:
     """Match an incident report to a red team finding."""
-    incident = get_object_or_404(IncidentReport, id=incident_id)
+    incident = get_object_or_404(IncidentReport.objects.select_for_update(), id=incident_id)
 
     suggested_findings = suggest_red_score_matches(incident)
 
     if request.method == "POST":
+        if incident.is_approved:
+            messages.error(request, f"Incident #{incident.id} has already been reviewed")
+            return redirect("scoring:review_incidents")
+
         form = IncidentMatchForm(suggested_findings, request.POST, instance=incident)
 
         if form.is_valid():

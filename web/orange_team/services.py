@@ -126,7 +126,6 @@ def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) ->
                         orange_check=check,
                         team=assignment.team,
                     ).update(
-                        description=f"Check: {check.title}",
                         points_awarded=assignment.score or 0,
                     )
         OrangeTeamScore.objects.filter(orange_check=check).update(description=f"Check: {check.title}")
