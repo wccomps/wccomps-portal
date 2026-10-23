@@ -1,6 +1,6 @@
-"""Ticketing utilities: atomic ticket creation, category changes and clearing.
+"""Ticketing utilities: atomic ticket creation and clearing.
 
-Status and assignee changes live in ticketing.lifecycle. Each *_atomic function has an async
+Status, assignee, and category changes live in ticketing.lifecycle. Each *_atomic function has an async
 variant with an 'a' prefix (e.g. acreate_ticket_atomic) created via _make_async().
 """
 
@@ -118,22 +118,6 @@ def create_ticket_atomic(
 
 
 acreate_ticket_atomic = _make_async(create_ticket_atomic)
-
-
-def change_ticket_category_atomic(
-    ticket_id: int,
-    new_category_id: int,
-    actor_username: str,
-    user: User | None = None,
-    discord_id: int | None = None,
-) -> tuple[Ticket | None, str | None]:
-    """Move a ticket to another category atomically (delegates to ticketing.lifecycle)."""
-    from ticketing.lifecycle import change_ticket_category_atomic as _change
-
-    return _change(ticket_id, new_category_id, actor_username, user=user, discord_id=discord_id)
-
-
-achange_ticket_category_atomic = _make_async(change_ticket_category_atomic)
 
 
 def clear_all_tickets(actor: str) -> dict[str, int]:

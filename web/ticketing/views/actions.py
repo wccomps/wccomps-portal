@@ -23,6 +23,7 @@ from ticketing.lifecycle import (
     assign_ticket,
     assignee_refusal,
     cancel_ticket,
+    change_ticket_category_atomic,
     claim_ticket,
     refusal,
     reopen_ticket,
@@ -217,8 +218,6 @@ def ticket_change_category(request: HttpRequest, ticket_number: str) -> HttpResp
         messages.error(request, "Invalid category")
         return redirect("ticket_detail", ticket_number=ticket_number)
     new_category_id = form.cleaned_data["new_category"]
-
-    from ticketing.utils import change_ticket_category_atomic
 
     changed, error = change_ticket_category_atomic(
         ticket_id=ticket.id, new_category_id=new_category_id, actor_username=authentik_username, user=user

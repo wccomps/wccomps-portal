@@ -293,7 +293,7 @@ class AdminTicketsCog(commands.Cog):
     ) -> None:
         """Change the category of a ticket."""
         from ticketing.forms import TicketChangeCategoryForm
-        from ticketing.utils import achange_ticket_category_atomic
+        from ticketing.lifecycle import achange_ticket_category_atomic
 
         ticket = await Ticket.objects.select_related("category").filter(ticket_number=ticket_number).afirst()
         if not ticket:
