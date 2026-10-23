@@ -1,12 +1,13 @@
 """Saving inject grades: only changed points are written, a regrade loses its approval, bad input saves nothing."""
 
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
+from quotient.client import Inject
 
 from scoring.models import InjectScore
 from team.models import Team
@@ -16,7 +17,7 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def grading(gold_team_user):
-    inject = MagicMock(inject_id=1, title="Firewall policy", description="")
+    inject = Inject(inject_id=1, title="Firewall policy", description="")
     teams = [Team.objects.create(team_number=n, team_name=f"Team {n}", is_active=True) for n in (1, 2)]
     reviewer = User.objects.create(username="reviewer")
     first_grader = User.objects.create(username="first-grader")

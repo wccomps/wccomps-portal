@@ -1,13 +1,9 @@
-"""WCComps Discord Bot - Main entry point."""
-
 import hashlib
 import logging
 import os
 import sys
 
 import discord
-
-# Initialize Django before any imports that use Django models
 import django
 from discord.ext import commands
 
@@ -47,13 +43,22 @@ class PortalBot(commands.Bot):
         self.unified_dashboard: UnifiedDashboard | None = None
 
     def _get_command_hash(self) -> str:
-        """Hash cog source files to detect command changes."""
+        """Hash cog and command-parameter source files to detect command changes."""
         from pathlib import Path
 
-        cogs_dir = Path(__file__).parent / "bot" / "cogs"
+        root = Path(__file__).parent
+        cogs_dir = root / "bot" / "cogs"
+        tracked_files = [
+            *sorted(cogs_dir.glob("*.py")),
+            root / "bot" / "utils.py",
+            root / "web" / "team" / "models.py",
+            root / "web" / "ticketing" / "models.py",
+            root / "web" / "scoring" / "models.py",
+        ]
         hasher = hashlib.sha256()
-        for cog_file in sorted(cogs_dir.glob("*.py")):
-            hasher.update(cog_file.read_bytes())
+        for path in tracked_files:
+            if path.exists():
+                hasher.update(path.read_bytes())
         return hasher.hexdigest()[:16]
 
     async def _should_sync_commands(self) -> bool:
@@ -95,7 +100,6 @@ class PortalBot(commands.Bot):
 
         logger.info("Cogs loaded")
 
-        # Register persistent views for ticket buttons
         from bot.ticket_dashboard import TicketActionView
 
         self.add_view(TicketActionView(ticket_id=0))
@@ -114,13 +118,11 @@ class PortalBot(commands.Bot):
         # Volunteer guild gets only the /link command so staff can link their accounts there
         volunteer_guild_id = settings.VOLUNTEER_GUILD_ID
 
-        # Only sync if commands have changed (checked against database)
         if not await self._should_sync_commands():
             return
 
         synced = True
 
-        # Sync to competition guild (instant availability)
         if competition_guild_id:
             guild = discord.Object(id=competition_guild_id)
             self.tree.copy_global_to(guild=guild)

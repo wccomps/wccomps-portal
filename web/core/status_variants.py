@@ -30,15 +30,13 @@ BADGE_STATUSES: dict[str, tuple[str, str, dict[str, str]]] = {
         {
             "pending": "warning",
             "approved": "info",
-            "paid": "success",
-            "credentials_sent": "neutral",
             "rejected": "danger",
         },
     ),
     "packet_email": (
         "packets.PacketDistribution",
         "email_status",
-        {"pending": "neutral", "sent": "success", "delivered": "success", "failed": "danger", "bounced": "danger"},
+        {"pending": "neutral", "sent": "success", "failed": "danger"},
     ),
 }
 

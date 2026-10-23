@@ -14,7 +14,7 @@ pytestmark = pytest.mark.django_db
 
 
 def _red(team: Team) -> RedTeamScore:
-    finding = RedTeamScore.objects.create(attack_vector="SQLi", points_per_team=Decimal("10"))
+    finding = RedTeamScore.objects.create(points_per_team=Decimal("10"))
     finding.affected_teams.set([team])
     return finding
 

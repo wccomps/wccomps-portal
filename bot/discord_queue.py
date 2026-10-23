@@ -8,7 +8,6 @@ from typing import assert_never
 
 import discord
 from asgiref.sync import sync_to_async
-from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
@@ -19,12 +18,9 @@ from bot.thread_creator import publish_new_ticket
 from bot.ticket_dashboard import trigger_dashboard
 from bot.utils import (
     add_field,
-    announcement,
     recycle_db_connection,
-    send_announcement,
     send_parts,
     split_message,
-    team_chat_channel,
 )
 from core.discord_tasks import (
     PAYLOAD_TYPES,
@@ -50,8 +46,6 @@ logger = logging.getLogger(__name__)
 
 
 class DiscordQueueProcessor:
-    """Process Discord tasks from database queue using async tasks."""
-
     QUEUE_POLL_INTERVAL_SECONDS = 2
     QUEUE_BATCH_SIZE = 10
     MAX_BACKOFF_SECONDS = 300
@@ -291,7 +285,6 @@ class DiscordQueueProcessor:
         await log_to_ops_channel(self.bot, payload.message)
 
     async def _handle_ticket_created_web(self, payload: TicketCreatedWeb) -> None:
-        """Handle ticket creation from web UI - create thread and post to dashboard."""
         ticket = await Ticket.objects.select_related("team").aget(id=payload.ticket_id)
 
         # A retry after a partial failure must not create a second thread.
@@ -301,8 +294,18 @@ class DiscordQueueProcessor:
 
         await publish_new_ticket(self.bot, competition_guild(self.bot), ticket)
 
+    async def _get_ticket_thread(self, thread_id: int) -> discord.TextChannel | discord.Thread:
+        thread = self.bot.get_channel(thread_id)
+        if not thread:
+            try:
+                thread = await self.bot.fetch_channel(thread_id)
+            except Exception as e:
+                raise ValueError(f"Could not find thread {thread_id}: {e}") from e
+        if not isinstance(thread, (discord.TextChannel, discord.Thread)):
+            raise TypeError(f"Channel {thread_id} is not a text channel or thread")
+        return thread
+
     async def _handle_post_comment(self, payload: PostComment) -> None:
-        """Handle posting a comment from web to Discord thread."""
         ticket_id = payload.ticket_id
         comment_id = payload.comment_id
 
@@ -318,15 +321,7 @@ class DiscordQueueProcessor:
             logger.info(f"Ticket {ticket.ticket_number} has no Discord thread; comment {comment_id} not mirrored")
             return
 
-        thread = self.bot.get_channel(ticket.discord_thread_id)
-        if not thread:
-            try:
-                thread = await self.bot.fetch_channel(ticket.discord_thread_id)
-            except Exception as e:
-                raise ValueError(f"Could not find thread {ticket.discord_thread_id}: {e}") from e
-
-        if not isinstance(thread, (discord.TextChannel, discord.Thread)):
-            raise TypeError(f"Channel {ticket.discord_thread_id} is not a text channel or thread")
+        thread = await self._get_ticket_thread(ticket.discord_thread_id)
 
         author_display = "Unknown"
         if comment.author:
@@ -347,7 +342,6 @@ class DiscordQueueProcessor:
         logger.info(f"Posted comment {comment_id} to thread {thread.id} (message {message.id})")
 
     async def _handle_post_ticket_update(self, payload: PostTicketUpdate) -> None:
-        """Post a ticket status update (resolve/claim/unclaim/reopen) to the Discord thread."""
         action = payload.action
         actor = payload.actor
 
@@ -358,15 +352,7 @@ class DiscordQueueProcessor:
             logger.info(f"Ticket {ticket.ticket_number} has no Discord thread; update '{action}' not mirrored")
             return
 
-        thread = self.bot.get_channel(ticket.discord_thread_id)
-        if not thread:
-            try:
-                thread = await self.bot.fetch_channel(ticket.discord_thread_id)
-            except Exception as e:
-                raise ValueError(f"Could not find thread {ticket.discord_thread_id}: {e}") from e
-
-        if not isinstance(thread, (discord.TextChannel, discord.Thread)):
-            raise TypeError(f"Channel {ticket.discord_thread_id} is not a text channel or thread")
+        thread = await self._get_ticket_thread(ticket.discord_thread_id)
 
         if action == "resolved":
             notes = payload.resolution_notes
@@ -446,9 +432,8 @@ class DiscordQueueProcessor:
         return stats
 
     async def _handle_broadcast_message(self, payload: BroadcastMessage) -> dict[str, object]:
-        """Broadcast a message to announcement channel or team channels."""
+        from bot.competition_actions import deliver_team_broadcast
         from bot.utils import log_to_ops_channel
-        from core.authentik_utils import parse_team_range
 
         target = payload.target
         message = payload.message
@@ -459,50 +444,13 @@ class DiscordQueueProcessor:
 
         guild = self._guild()
 
-        target_lower = target.lower().strip()
-        sent_count = 0
-        queued_count = 0
-        failed_channels: list[str] = []
+        try:
+            sent_count, queued_count, failed_channels = await deliver_team_broadcast(guild, target, message, sender)
+        except ValueError as e:
+            raise ValueError(f"Invalid team range: {e}") from e
 
-        if target_lower == "announcements":
-            channel = guild.get_channel(settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID)
-            if not channel or not isinstance(channel, discord.TextChannel):
-                raise RuntimeError("Announcements channel not found")
-
-            await send_announcement(guild, channel, message)
-            sent_count = 1
-            logger.info(f"Broadcast to announcements by {sender}")
-
-        elif target_lower == "all-teams":
-            teams = [t async for t in Team.objects.filter(is_active=True).order_by("team_number")]
-            for team in teams:
-                result = await self._send_to_team_channel(guild, team, message, sender)
-                if result == "sent":
-                    sent_count += 1
-                elif result == "queued":
-                    queued_count += 1
-                else:
-                    failed_channels.append(f"Team {team.team_number:02d}")
-
-        else:
-            try:
-                team_numbers = parse_team_range(target)
-            except ValueError as e:
-                raise ValueError(f"Invalid team range: {e}") from e
-
-            for team_number in team_numbers:
-                found_team = await Team.objects.filter(team_number=team_number).afirst()
-                if not found_team:
-                    failed_channels.append(f"Team {team_number:02d} (not found)")
-                    continue
-
-                result = await self._send_to_team_channel(guild, found_team, message, sender)
-                if result == "sent":
-                    sent_count += 1
-                elif result == "queued":
-                    queued_count += 1
-                else:
-                    failed_channels.append(f"Team {team_number:02d}")
+        if target.lower().strip() == "announcements" and failed_channels:
+            raise RuntimeError(failed_channels[0])
 
         await log_to_ops_channel(
             self.bot,
@@ -511,23 +459,3 @@ class DiscordQueueProcessor:
 
         logger.info(f"Broadcast complete: sent={sent_count}, queued={queued_count}, failed={len(failed_channels)}")
         return {"sent_count": sent_count, "queued_count": queued_count, "failed_count": len(failed_channels)}
-
-    async def _send_to_team_channel(self, guild: discord.Guild, team: Team, message: str, sender: str) -> str:
-        """Send message to a team's chat channel. Returns 'sent', 'queued', or 'failed'."""
-        from core.models import QueuedAnnouncement
-
-        try:
-            chat_channel = team_chat_channel(guild, team)
-            if chat_channel:
-                await send_parts(chat_channel, announcement(sender, message))
-                return "sent"
-            else:
-                await QueuedAnnouncement.objects.acreate(
-                    team=team,
-                    message=message,
-                    sender_name=sender,
-                )
-                return "queued"
-        except Exception as e:
-            logger.exception(f"Failed to send to team {team.team_number}: {e}")
-            return "failed"

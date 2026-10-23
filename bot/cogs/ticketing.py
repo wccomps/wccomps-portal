@@ -117,7 +117,7 @@ class TicketingCog(commands.Cog):
         categories = [
             cat async for cat in TicketCategory.objects.filter(user_creatable=True).order_by("sort_order", "id")
         ]
-        named = [(f"{cat.display_name} ({cat.points}pt)", str(cat.id)) for cat in categories]
+        named = [(f"{cat.display_name} ({cat.points_label})", str(cat.id)) for cat in categories]
         return choices([(name, value) for name, value in named if not current or current.lower() in name.lower()])
 
     @app_commands.command(name="ticket", description="[BLUE TEAM] Create a support ticket for your team")
@@ -188,7 +188,7 @@ class TicketingCog(commands.Cog):
         embed.add_field(name="Ticket Number", value=ticket.ticket_number, inline=True)
         embed.add_field(name="Status", value="Open", inline=True)
         add_field(embed, "Team", team.team_name, inline=True)
-        embed.add_field(name="Point Cost", value=f"{cat.points} points", inline=True)
+        embed.add_field(name="Point Cost", value=cat.points_display, inline=True)
         add_field(embed, "Description", ticket_input.description)
 
         embed.add_field(
@@ -207,7 +207,7 @@ class TicketingCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
-        """Handle messages in ticket threads (attachments and rate limiting)."""
+        """Sync ticket thread messages and attachments to the ticket, with rate limiting."""
         if message.author.bot:
             return
 
@@ -236,7 +236,6 @@ class TicketingCog(commands.Cog):
 
         await CommentRateLimit.objects.acreate(ticket=ticket, discord_id=message.author.id)
 
-        # Save message as comment in database (for web interface visibility)
         if content := storable(message.content):
             existing = await TicketComment.objects.filter(discord_message_id=message.id).afirst()
 

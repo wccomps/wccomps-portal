@@ -46,7 +46,6 @@ class TestIncidentReportFlow:
             destination_ip="10.100.11.22",
             attack_detected_at=timezone.now(),
             attack_mitigated=True,
-            evidence_notes="Blocked via WAF",
         )
 
         # Gold team views review page

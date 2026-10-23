@@ -102,7 +102,7 @@ def test_web_bulk_reset_defaults_to_the_active_teams(admin_user):
     client.force_login(admin_user)
 
     with patch(
-        "core.admin_views.competition.reset_team_credentials",
+        "core.authentik_utils.reset_team_credentials",
         side_effect=lambda n: (f"pw-{n}", "", n != 2),
     ) as reset:
         response = client.post(reverse("admin_competition_action"), {"action": "reset_passwords", "team_numbers": ""})

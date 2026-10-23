@@ -1,5 +1,3 @@
-"""Utility functions for the bot."""
-
 import io
 import logging
 from typing import Final, Literal
@@ -16,7 +14,7 @@ from team.models import MAX_TEAMS, Team
 logger = logging.getLogger(__name__)
 
 
-THREAD_AUTO_ARCHIVE_MINUTES: Final[Literal[10080]] = 10080  # 7 days
+THREAD_AUTO_ARCHIVE_MINUTES: Final[Literal[10080]] = 10080
 DISCORD_EMBED_FIELD_CHAR_LIMIT = 1024
 DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT = 4096
 DISCORD_EMBED_TITLE_CHAR_LIMIT = 256
@@ -123,7 +121,7 @@ async def send_announcement(guild: discord.Guild, channel: discord.abc.Messageab
     )
 
 
-async def log_to_ops_channel(bot: discord.Client, message: str, embed: discord.Embed | None = None) -> None:
+async def log_to_ops_channel(bot: discord.Client, message: str) -> None:
     try:
         channel_id = settings.DISCORD_LOG_CHANNEL_ID
         if not channel_id:
@@ -136,12 +134,8 @@ async def log_to_ops_channel(bot: discord.Client, message: str, embed: discord.E
             return
 
         message = fit(message, DISCORD_MESSAGE_CHAR_LIMIT)
-        # Type guard: only TextChannel and Thread have send()
         if isinstance(channel, (discord.TextChannel, discord.Thread)):
-            if embed:
-                await channel.send(message, embed=embed)
-            else:
-                await channel.send(message)
+            await channel.send(message)
             logger.info(f"Logged to ops channel: {message}")
         else:
             logger.error(f"Channel {channel_id} is not a text channel or thread")
@@ -176,13 +170,9 @@ async def report_missing_discord_settings(bot: discord.Client) -> None:
     await log_to_ops_channel(bot, message)
 
 
-async def get_team_or_respond(
-    interaction: discord.Interaction, team_number: int, validate_range: bool = True
-) -> Team | None:
+async def get_team_or_respond(interaction: discord.Interaction, team_number: int) -> Team | None:
     """Get a team by number, or send the user an error and return None."""
-    from team.models import Team
-
-    if validate_range and (team_number < 1 or team_number > MAX_TEAMS):
+    if team_number < 1 or team_number > MAX_TEAMS:
         await interaction.response.send_message(f"Team number must be between 1 and {MAX_TEAMS}", ephemeral=True)
         return None
 
@@ -207,8 +197,6 @@ def get_team_member_discord_ids(team: Team) -> list[int]:
 
 
 class ConfirmView(discord.ui.View):
-    """Reusable confirmation dialog with confirm/cancel buttons."""
-
     def __init__(
         self,
         confirm_label: str = "Confirm",

@@ -1,5 +1,3 @@
-"""Admin commands for competition and account management."""
-
 import io
 import logging
 
@@ -9,26 +7,23 @@ from discord import app_commands
 from discord.ext import commands
 from django.conf import settings
 
-from bot.competition_actions import run_competition_cleanup
+from bot.competition_actions import deliver_team_broadcast, run_competition_cleanup
 from bot.permissions import permission_check
-from bot.utils import ConfirmView, announcement, log_to_ops_channel, send_announcement, send_parts, team_chat_channel
+from bot.utils import ConfirmView, log_to_ops_channel
 from core.authentik_utils import (
     credentials_csv,
     parse_team_range,
-    reset_team_credentials,
     reset_teams_credentials,
 )
 from core.forms import AppSlugForm
-from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
+from core.models import AuditLog, CompetitionConfig
 from core.utils import UnknownTimezoneError, parse_datetime_to_utc, shorten
-from team.models import Team, active_team_numbers
+from team.models import active_team_numbers
 
 logger = logging.getLogger(__name__)
 
 
 class AdminCompetitionCog(commands.Cog):
-    """Admin commands for competition and account management."""
-
     competition_group = app_commands.Group(
         name="competition",
         description="Competition management commands",
@@ -88,7 +83,7 @@ class AdminCompetitionCog(commands.Cog):
             teams = active
 
         # Only successful resets go in the CSV: a failed one leaves the old password in place.
-        result = await sync_to_async(reset_teams_credentials)(teams, reset_fn=reset_team_credentials)
+        result = await sync_to_async(reset_teams_credentials)(teams)
         password_list = result.password_list
         failed_resets = result.failed_resets
         sessions_failed = result.sessions_failed
@@ -168,6 +163,68 @@ class AdminCompetitionCog(commands.Cog):
             ephemeral=True,
         )
 
+    async def _set_competition_time(
+        self,
+        interaction: discord.Interaction,
+        datetime_str: str,
+        timezone_name: str,
+        *,
+        is_start: bool,
+    ) -> None:
+        label = "Start" if is_start else "End"
+        label_lower = label.lower()
+        action_verb = "enabled" if is_start else "disabled"
+        example_hour = "09:00" if is_start else "17:00"
+        try:
+            scheduled_time = parse_datetime_to_utc(datetime_str, timezone_name)
+        except UnknownTimezoneError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+        except ValueError:
+            await interaction.response.send_message(
+                f"Invalid datetime format. Use: YYYY-MM-DDTHH:MM (e.g., 2025-01-15T{example_hour})",
+                ephemeral=True,
+            )
+            return
+
+        config = await sync_to_async(CompetitionConfig.get_config)()
+        error = config.schedule_error(start=scheduled_time) if is_start else config.schedule_error(end=scheduled_time)
+        if error:
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+
+        field_name = "competition_start_time" if is_start else "competition_end_time"
+        setattr(config, field_name, scheduled_time)
+        await config.asave(update_fields=[field_name])
+
+        audit_action = "competition_start_time_set" if is_start else "competition_end_time_set"
+        audit_key = "start_time" if is_start else "end_time"
+        await AuditLog.objects.acreate(
+            action=audit_action,
+            admin_user=str(interaction.user),
+            target_entity="competition_config",
+            target_id=config.pk,
+            details={
+                audit_key: scheduled_time.isoformat(),
+                "controlled_apps": config.controlled_applications,
+            },
+        )
+
+        await log_to_ops_channel(
+            self.bot,
+            f"Competition {label} Time Set by {interaction.user.mention}\n"
+            f"• {label} Time: {discord.utils.format_dt(scheduled_time, style='F')}\n"
+            f"• Controlled Apps: {', '.join(config.controlled_applications)}\n"
+            f"• Applications will be {action_verb} automatically at {label_lower} time",
+        )
+
+        await interaction.response.send_message(
+            f"Competition {label_lower} time set to: {discord.utils.format_dt(scheduled_time, style='F')}\n"
+            f"Controlled applications: {', '.join(config.controlled_applications)}\n\n"
+            f"Applications will be automatically {action_verb} at {label_lower} time.",
+            ephemeral=True,
+        )
+
     @competition_group.command(
         name="set-start-time",
         description="[ADMIN] Set competition start time (applications will be enabled automatically)",
@@ -193,51 +250,7 @@ class AdminCompetitionCog(commands.Cog):
         timezone_name: str = "America/Los_Angeles",
     ) -> None:
         """Set competition start time for automatic application enabling."""
-        try:
-            start_time = parse_datetime_to_utc(datetime_str, timezone_name)
-        except UnknownTimezoneError as e:
-            await interaction.response.send_message(str(e), ephemeral=True)
-            return
-        except ValueError:
-            await interaction.response.send_message(
-                "Invalid datetime format. Use: YYYY-MM-DDTHH:MM (e.g., 2025-01-15T09:00)",
-                ephemeral=True,
-            )
-            return
-
-        config = await sync_to_async(CompetitionConfig.get_config)()
-        if error := config.schedule_error(start=start_time):
-            await interaction.response.send_message(error, ephemeral=True)
-            return
-
-        config.competition_start_time = start_time
-        await config.asave(update_fields=["competition_start_time"])
-
-        await AuditLog.objects.acreate(
-            action="competition_start_time_set",
-            admin_user=str(interaction.user),
-            target_entity="competition_config",
-            target_id=config.pk,
-            details={
-                "start_time": start_time.isoformat(),
-                "controlled_apps": config.controlled_applications,
-            },
-        )
-
-        await log_to_ops_channel(
-            self.bot,
-            f"Competition Start Time Set by {interaction.user.mention}\n"
-            f"• Start Time: {discord.utils.format_dt(start_time, style='F')}\n"
-            f"• Controlled Apps: {', '.join(config.controlled_applications)}\n"
-            f"• Applications will be enabled automatically at start time",
-        )
-
-        await interaction.response.send_message(
-            f"Competition start time set to: {discord.utils.format_dt(start_time, style='F')}\n"
-            f"Controlled applications: {', '.join(config.controlled_applications)}\n\n"
-            f"Applications will be automatically enabled at start time.",
-            ephemeral=True,
-        )
+        await self._set_competition_time(interaction, datetime_str, timezone_name, is_start=True)
 
     @competition_group.command(
         name="set-end-time",
@@ -264,51 +277,7 @@ class AdminCompetitionCog(commands.Cog):
         timezone_name: str = "America/Los_Angeles",
     ) -> None:
         """Set competition end time for automatic application disabling."""
-        try:
-            end_time = parse_datetime_to_utc(datetime_str, timezone_name)
-        except UnknownTimezoneError as e:
-            await interaction.response.send_message(str(e), ephemeral=True)
-            return
-        except ValueError:
-            await interaction.response.send_message(
-                "Invalid datetime format. Use: YYYY-MM-DDTHH:MM (e.g., 2025-01-15T17:00)",
-                ephemeral=True,
-            )
-            return
-
-        config = await sync_to_async(CompetitionConfig.get_config)()
-        if error := config.schedule_error(end=end_time):
-            await interaction.response.send_message(error, ephemeral=True)
-            return
-
-        config.competition_end_time = end_time
-        await config.asave(update_fields=["competition_end_time"])
-
-        await AuditLog.objects.acreate(
-            action="competition_end_time_set",
-            admin_user=str(interaction.user),
-            target_entity="competition_config",
-            target_id=config.pk,
-            details={
-                "end_time": end_time.isoformat(),
-                "controlled_apps": config.controlled_applications,
-            },
-        )
-
-        await log_to_ops_channel(
-            self.bot,
-            f"Competition End Time Set by {interaction.user.mention}\n"
-            f"• End Time: {discord.utils.format_dt(end_time, style='F')}\n"
-            f"• Controlled Apps: {', '.join(config.controlled_applications)}\n"
-            f"• Applications will be disabled automatically at end time",
-        )
-
-        await interaction.response.send_message(
-            f"Competition end time set to: {discord.utils.format_dt(end_time, style='F')}\n"
-            f"Controlled applications: {', '.join(config.controlled_applications)}\n\n"
-            f"Applications will be automatically disabled at end time.",
-            ephemeral=True,
-        )
+        await self._set_competition_time(interaction, datetime_str, timezone_name, is_start=False)
 
     @competition_group.command(
         name="start-competition",
@@ -461,82 +430,22 @@ class AdminCompetitionCog(commands.Cog):
             await interaction.followup.send("This command must be used in a guild", ephemeral=True)
             return
 
-        target_lower = target.lower().strip()
-        sent_count = 0
-        failed_channels = []
-
-        if target_lower == "announcements":
-            announcement_channel_id = settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID
-            channel = guild.get_channel(announcement_channel_id)
-
-            if not channel or not isinstance(channel, discord.TextChannel):
-                await interaction.followup.send(
-                    f"Announcements channel not found (ID: {announcement_channel_id})",
-                    ephemeral=True,
-                )
-                return
-
-            try:
-                await send_announcement(guild, channel, message)
-                sent_count = 1
-
-                await log_to_ops_channel(
-                    self.bot,
-                    f"Broadcast to Announcements by {interaction.user.mention}\nMessage: {shorten(message, 100)}",
-                )
-
-                await interaction.followup.send("Broadcast sent to announcements channel", ephemeral=True)
-            except Exception as e:
-                logger.exception(f"Failed to broadcast to announcements: {e}")
-                await interaction.followup.send(f"Failed to send broadcast: {e}", ephemeral=True)
+        try:
+            sent_count, queued_count, failed_channels = await deliver_team_broadcast(
+                guild, target, message, interaction.user.name
+            )
+        except ValueError as e:
+            await interaction.followup.send(
+                f"Invalid team range format: {e}\n\n"
+                f"Examples:\n"
+                f"• Single teams: `1,3,5`\n"
+                f"• Range: `1-10`\n"
+                f"• Mixed: `1,3,5-10,15`\n"
+                f"• All teams: `all-teams`\n"
+                f"• Announcements: `announcements`",
+                ephemeral=True,
+            )
             return
-
-        if target_lower == "all-teams":
-            teams = [t async for t in Team.objects.filter(is_active=True).order_by("team_number")]
-            team_numbers = [t.team_number for t in teams]
-
-        else:
-            try:
-                team_numbers = parse_team_range(target)
-            except ValueError as e:
-                await interaction.followup.send(
-                    f"Invalid team range format: {e}\n\n"
-                    f"Examples:\n"
-                    f"• Single teams: `1,3,5`\n"
-                    f"• Range: `1-10`\n"
-                    f"• Mixed: `1,3,5-10,15`\n"
-                    f"• All teams: `all-teams`\n"
-                    f"• Announcements: `announcements`",
-                    ephemeral=True,
-                )
-                return
-
-        queued_count = 0
-
-        for team_number in team_numbers:
-            try:
-                team = await Team.objects.filter(team_number=team_number).afirst()
-                if not team:
-                    failed_channels.append(f"Team {team_number:02d} (not found)")
-                    continue
-
-                chat_channel = team_chat_channel(guild, team)
-                if chat_channel:
-                    await send_parts(chat_channel, announcement(interaction.user.name, message))
-                    sent_count += 1
-                else:
-                    # Queue announcement for later delivery when channel is created
-                    await QueuedAnnouncement.objects.acreate(
-                        team=team,
-                        message=message,
-                        sender_name=interaction.user.name,
-                    )
-                    queued_count += 1
-
-            except Exception as e:
-                logger.exception(f"Failed to broadcast to team {team_number}: {e}")
-                failed_channels.append(f"Team {team_number:02d} ({shorten(str(e), 50)})")
-                continue
 
         await AuditLog.objects.acreate(
             action="broadcast_message",

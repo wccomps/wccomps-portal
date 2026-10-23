@@ -55,7 +55,6 @@ def scored_teams():
         )
     finding = RedTeamScore.objects.create(
         attack_type=AttackType.objects.get_or_create(name="Default Credentials")[0],
-        attack_vector="ssh",
         source_ip="10.0.0.5",
         affected_boxes=["web01", "db01"],
         affected_service="ssh",

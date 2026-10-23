@@ -3,7 +3,7 @@ from typing import cast
 from django.contrib import messages
 from django.contrib.auth.models import User
 from django.db import transaction
-from django.http import HttpRequest, HttpResponse, JsonResponse, QueryDict
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
@@ -19,34 +19,8 @@ from ..models import (
     RedTeamScore,
     RedTeamScreenshot,
 )
-from ..quotient_sync import get_box_metadata, get_cached_team_count
+from ..quotient_sync import get_box_metadata
 from ..screenshots import ScreenshotError, read_screenshots
-
-
-def _normalize_red_score_post(post_data: QueryDict) -> QueryDict:
-    """Normalize legacy field names in red team finding POST data.
-
-    Supports backwards compatibility for scripted submissions using old field names:
-    - attack_vector -> attack_type
-    - affected_box -> affected_boxes
-    - target_teams -> affected_teams
-    """
-    field_mappings = {
-        "attack_vector": "attack_type",
-        "affected_box": "affected_boxes",
-        "target_teams": "affected_teams",
-    }
-
-    needs_normalization = any(old in post_data for old in field_mappings)
-    if not needs_normalization:
-        return post_data
-
-    normalized = QueryDict(mutable=True)
-    for key in post_data:
-        new_key = field_mappings.get(key, key)
-        for value in post_data.getlist(key):
-            normalized.appendlist(new_key, value)
-    return normalized
 
 
 def findings_list(request: HttpRequest, *, default_status: str, page_size: int) -> dict[str, object]:
@@ -102,15 +76,10 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
     error_message="Only Red Team or Gold Team members can review findings",
 )
 def red_team_findings(request: HttpRequest) -> HttpResponse:
-    """Gold team review page for red team findings."""
-    total_findings = RedTeamScore.objects.count()
-    pending_count = RedTeamScore.objects.filter(is_approved=False).count()
+    """Review page for red team findings."""
     context = {
         **findings_list(request, default_status="pending", page_size=50),
-        "pending_findings": pending_count > 0,
-        "total_findings": total_findings,
-        "pending_count": pending_count,
-        "approved_count": total_findings - pending_count,
+        "pending_findings": RedTeamScore.objects.filter(is_approved=False).exists(),
         "is_gold_team": has_permission(cast(User, request.user), "gold_team"),
     }
     if request.headers.get("HX-Request"):
@@ -123,7 +92,7 @@ def red_team_findings(request: HttpRequest) -> HttpResponse:
     error_message="Only Red Team members can view findings",
 )
 def red_team_scores(request: HttpRequest) -> HttpResponse:
-    """Red team view of all findings (read-only, can delete/leave own)."""
+    """Red team view of all findings (read-only, can delete own)."""
     context = {**findings_list(request, default_status="all", page_size=25), "is_gold_team": False}
     if request.headers.get("HX-Request"):
         return render(request, "scoring/partials/red_findings_table.html", context)
@@ -154,13 +123,10 @@ def submit_red_score(request: HttpRequest) -> HttpResponse:
     from ..models import RedTeamIPPool
 
     user = cast(User, request.user)
-    team_count = get_cached_team_count()
-
     user_pools = RedTeamIPPool.objects.filter(created_by=user)
 
     if request.method == "POST":
-        post_data = _normalize_red_score_post(request.POST)
-        form = RedTeamScoreForm(post_data, request.FILES, team_count=team_count, user=user)
+        form = RedTeamScoreForm(request.POST, request.FILES, user=user)
 
         if form.is_valid():
             try:
@@ -170,7 +136,7 @@ def submit_red_score(request: HttpRequest) -> HttpResponse:
             else:
                 return _create_red_score(request, form, user, screenshots)
     else:
-        form = RedTeamScoreForm(team_count=team_count, user=user)
+        form = RedTeamScoreForm(user=user)
 
     context = {
         "form": form,
@@ -183,33 +149,10 @@ def submit_red_score(request: HttpRequest) -> HttpResponse:
 def _create_red_score(
     request: HttpRequest, form: RedTeamScoreForm, user: User, screenshots: list[tuple[bytes, str, str]]
 ) -> HttpResponse:
-    cd = form.cleaned_data
-    finding = RedTeamScore.objects.create(
-        attack_type=cd["attack_type"],
-        affected_boxes=cd.get("affected_boxes", []),
-        source_ip=cd.get("source_ip") if not cd.get("source_ip_pool") else None,
-        source_ip_pool=cd.get("source_ip_pool"),
-        submitted_by=user,
-        notes=cd.get("notes", ""),
-        affected_service=cd.get("affected_service", ""),
-        destination_ip_template=cd.get("destination_ip_template", ""),
-        universally_attempted=cd.get("universally_attempted", False),
-        persistence_established=cd.get("persistence_established", False),
-        root_access=cd.get("root_access", False),
-        user_access=cd.get("user_access", False),
-        privilege_escalation=cd.get("privilege_escalation", False),
-        credentials_recovered=cd.get("credentials_recovered", False),
-        sensitive_files_recovered=cd.get("sensitive_files_recovered", False),
-        credit_cards_recovered=cd.get("credit_cards_recovered", False),
-        pii_recovered=cd.get("pii_recovered", False),
-        encrypted_db_recovered=cd.get("encrypted_db_recovered", False),
-        db_decrypted=cd.get("db_decrypted", False),
-        points_per_team=0,
-    )
-    finding.points_per_team = finding.calculate_points()
-    finding.save(update_fields=["points_per_team"])
-    finding.affected_teams.set(cd["affected_teams"])
-    finding.contributors.add(user)
+    finding = form.save(commit=False)
+    finding.submitted_by = user
+    finding.save()
+    form.save_m2m()
 
     for file_data, filename, mime_type in screenshots:
         RedTeamScreenshot.objects.create(finding=finding, file_data=file_data, filename=filename, mime_type=mime_type)
@@ -224,7 +167,7 @@ def view_red_score(request: HttpRequest, finding_id: int) -> HttpResponse:
     finding = get_object_or_404(
         RedTeamScore.objects.select_related(
             "attack_type", "submitted_by", "approved_by", "source_ip_pool"
-        ).prefetch_related("affected_teams", "contributors", "screenshots"),
+        ).prefetch_related("affected_teams", "screenshots"),
         id=finding_id,
     )
     user = cast(User, request.user)
@@ -258,38 +201,6 @@ def delete_red_score(request: HttpRequest, finding_id: int) -> HttpResponse:
     finding_num = finding.id
     finding.delete()
     messages.success(request, f"Red team finding #{finding_num} deleted")
-    return redirect("scoring:red_team_scores")
-
-
-@require_permission("red_team", error_message="Only Red Team members can leave findings")
-@transaction.atomic
-@require_http_methods(["POST"])
-def leave_red_score(request: HttpRequest, finding_id: int) -> HttpResponse:
-    """Remove yourself as a contributor from a merged finding."""
-    finding = get_object_or_404(RedTeamScore, id=finding_id)
-    user = cast(User, request.user)
-
-    if finding.is_approved:
-        messages.error(request, "Cannot leave a finding that has already been approved")
-        return redirect("scoring:red_team_scores")
-
-    if finding.submitted_by == user:
-        messages.error(request, "You are the original submitter. Use delete instead.")
-        return redirect("scoring:red_team_scores")
-
-    if user not in finding.contributors.all():
-        messages.error(request, "You are not a contributor to this finding")
-        return redirect("scoring:red_team_scores")
-
-    finding.contributors.remove(user)
-
-    if finding.notes:
-        finding.notes += f"\n\n[System]: {user.username} removed themselves from this finding."
-    else:
-        finding.notes = f"[System]: {user.username} removed themselves from this finding."
-    finding.save()
-
-    messages.success(request, f"You have been removed from finding #{finding.id}")
     return redirect("scoring:red_team_scores")
 
 

@@ -2,10 +2,10 @@ from decimal import Decimal
 
 import pytest
 from orange_team.models import OrangeCheck
+from quotient.client import Inject, inject_points
 
 from scoring.maxes import (
     inject_max_from_titles,
-    inject_points,
     orange_max_from_checks,
     service_max_from_details,
     set_template_max,
@@ -14,6 +14,10 @@ from scoring.models import ScoringTemplate, ServiceDetail
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
+
+
+def _injects(*titles: str) -> list[Inject]:
+    return [Inject(inject_id=i, title=title, description="") for i, title in enumerate(titles, 1)]
 
 
 def test_inject_points_parses_title() -> None:
@@ -33,16 +37,16 @@ def test_inject_points_tolerant_formats() -> None:
 
 
 def test_inject_max_sums_titles() -> None:
-    assert inject_max_from_titles(["A (100 pts)", "B (155 pts)"]) == Decimal("255")
+    assert inject_max_from_titles(_injects("A (100 pts)", "B (155 pts)")) == Decimal("255")
 
 
 def test_inject_max_none_if_any_title_unparsed() -> None:
     # An unparsed inject still contributes graded points, so a partial sum would under-count.
-    assert inject_max_from_titles(["A (100 pts)", "C (no value)"]) is None
+    assert inject_max_from_titles(_injects("A (100 pts)", "C (no value)")) is None
 
 
 def test_inject_max_none_without_any_values() -> None:
-    assert inject_max_from_titles(["A", "B"]) is None
+    assert inject_max_from_titles(_injects("A", "B")) is None
 
 
 def _detail(team: Team, name: str, points: str, uptime: str) -> None:

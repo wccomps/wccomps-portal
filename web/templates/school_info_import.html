@@ -11,7 +11,6 @@
         <c-module>
             {% if page_error %}<c-alert variant="error">{{ page_error }}</c-alert>{% endif %}
             {% if import_results %}
-                {# Step 3: Show success message #}
                 <c-alert variant="success">
                     {% for line in import_results.lines %}
                         {% if forloop.first %}
@@ -31,7 +30,6 @@
                     <c-link href="{% url 'school_info' %}" variant="primary">View School Information</c-link>
                 </c-button_row>
             {% elif preview_data %}
-                {# Step 2: Show preview and confirmation #}
                 {% if preview_data.errors %}
                     <c-alert variant="error">
                         <strong>Validation Errors:</strong>
@@ -110,7 +108,6 @@
                     </c-button_row>
                 {% endif %}
             {% else %}
-                {# Step 1: Upload form #}
                 <div class="max-w-800">
                     <p>
                         Upload a CSV file with one row per school. Replace the school list replaces all existing school information,

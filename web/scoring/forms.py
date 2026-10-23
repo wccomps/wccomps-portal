@@ -168,9 +168,7 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
             "notes": "Full description of the attack and steps taken.",
         }
 
-    def __init__(
-        self, *args: object, team_count: int | None = None, user: User | None = None, **kwargs: object
-    ) -> None:
+    def __init__(self, *args: object, user: User | None = None, **kwargs: object) -> None:
         self.user = user
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
 
@@ -208,8 +206,6 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
 
         # Replace default field with TeamNumberChoiceField to hide team names
         queryset = Team.objects.filter(is_active=True).order_by("team_number")
-        if team_count is not None:
-            queryset = queryset.filter(team_number__lte=team_count)
         self.fields["affected_teams"] = TeamNumberChoiceField(
             queryset=queryset,
             widget=forms.CheckboxSelectMultiple(),

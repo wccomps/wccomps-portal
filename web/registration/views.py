@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils import timezone
+from django.views.decorators.http import require_POST
 from packets.models import packets_sent
 
 from core.auth_utils import require_permission
@@ -63,10 +63,6 @@ def register(request: HttpRequest) -> HttpResponse:
 def registration_edit(request: HttpRequest, token: str) -> HttpResponse:
     """Token-based self-service editing of registration."""
     registration = get_object_or_404(TeamRegistration, edit_token=token)
-
-    if registration.edit_token_expires and timezone.now() > registration.edit_token_expires:
-        messages.error(request, "This edit link has expired.")
-        return render(request, "registration/edit_locked.html", {"registration": registration})
 
     # Lock after approval so school name, region (event restrictions) and contacts can't be changed or hijacked.
     if registration.status not in ("pending", "rejected"):
@@ -132,10 +128,8 @@ def review_list(request: HttpRequest) -> HttpResponse:
 
 
 @require_permission("gold_team")
+@require_POST
 def approve_registration(request: HttpRequest, registration_id: int) -> HttpResponse:
-    if request.method != "POST":
-        return redirect("registration_review_list")
-
     registration = get_object_or_404(TeamRegistration, id=registration_id)
     if request.user.is_authenticated and registration.approve(request.user):
         messages.success(request, f"Registration for {registration.school_name} has been approved.")
@@ -201,7 +195,7 @@ def season_edit(request: HttpRequest, season_id: int) -> HttpResponse:
     return render(
         request,
         "registration/seasons/form.html",
-        {"form": form, "title": "Edit Season", "season": season},
+        {"form": form, "title": "Edit Season"},
     )
 
 
@@ -228,8 +222,10 @@ def season_delete(request: HttpRequest, season_id: int) -> HttpResponse:
 
 @require_permission("gold_team")
 def event_list(request: HttpRequest, season_id: int) -> HttpResponse:
+    from django.db.models import Count
+
     season = get_object_or_404(Season, id=season_id)
-    events = season.events.annotate_enrollment_count()
+    events = season.events.annotate(enrollment_count=Count("enrollments"))
 
     return render(request, "registration/events/list.html", {"season": season, "events": events})
 
@@ -271,7 +267,7 @@ def event_edit(request: HttpRequest, event_id: int) -> HttpResponse:
     return render(
         request,
         "registration/events/form.html",
-        {"form": form, "season": event.season, "event": event, "title": "Edit Event"},
+        {"form": form, "season": event.season, "title": "Edit Event"},
     )
 
 
@@ -322,7 +318,7 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
                 "enrollment": enrollment,
                 "registration": enrollment.registration,
                 "assignment": assignment,
-                "can_assign": enrollment.registration.status == "paid" and not assignment,
+                "can_assign": enrollment.registration.status == "approved" and not assignment,
             }
         )
 
@@ -342,11 +338,9 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
 
 
 @require_permission("gold_team")
+@require_POST
 def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
     """Randomly assign team numbers to all eligible registrations for an event (Gold Team only)."""
-    if request.method != "POST":
-        return redirect("registration_event_detail", event_id=event_id)
-
     skipped: list[str] = []
     no_contact: list[str] = []
     team_taken: list[str] = []
@@ -372,7 +366,7 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         enrolled_registrations = (
             RegistrationEventEnrollment.objects.filter(
                 event=event,
-                registration__status="paid",
+                registration__status="approved",
             )
             .exclude(registration__team_assignments__event=event)
             .select_related("registration")
@@ -447,10 +441,8 @@ def _primary_contact_email(registration: TeamRegistration) -> str:
 
 
 @require_permission("gold_team")
+@require_POST
 def unassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
-    if request.method != "POST":
-        return redirect("registration_season_list")
-
     assignment = get_object_or_404(EventTeamAssignment, id=assignment_id)
     event_id = assignment.event_id
 

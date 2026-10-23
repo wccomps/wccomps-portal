@@ -41,7 +41,6 @@ NAV_MAPPING: dict[str, tuple[str, str]] = {
     "red_team_scores": ("red_findings", "findings"),
     "view_red_score": ("red_findings", "findings"),
     "delete_red_score": ("red_findings", "findings"),
-    "leave_red_score": ("red_findings", "findings"),
     "ip_pool_list": ("red_findings", "pools"),
     "ip_pool_create": ("red_findings", "pools"),
     "ip_pool_edit": ("red_findings", "pools"),
@@ -165,7 +164,6 @@ def permissions(request: HttpRequest) -> dict[str, bool | str]:
         ctx.update(
             {
                 "is_blue_team": False,
-                "is_red_team": False,
                 "authentik_username": "",
                 "nav_active": "",
                 "subnav_active": "",
@@ -179,7 +177,6 @@ def permissions(request: HttpRequest) -> dict[str, bool | str]:
     return {
         **perms,
         "is_blue_team": has_permission(user, "blue_team"),
-        "is_red_team": has_permission(user, "red_team"),
         "authentik_username": user.username,
         "nav_active": nav_context["nav"],
         "subnav_active": nav_context["subnav"],

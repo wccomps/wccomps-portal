@@ -91,7 +91,6 @@ class ScoringFormulaTests(TestCase):
 
         # Red: -100 (subtracted directly)
         red_finding = RedTeamScore.objects.create(
-            attack_vector="Test attack",
             source_ip="10.0.0.5",
             points_per_team=Decimal("100.00"),
             submitted_by=self.user,
@@ -129,7 +128,6 @@ class ScoringFormulaTests(TestCase):
     def test_only_red_deductions(self) -> None:
         """Team with only red findings gets negative total."""
         red = RedTeamScore.objects.create(
-            attack_vector="RCE",
             source_ip="10.0.0.1",
             points_per_team=Decimal("200.00"),
             submitted_by=self.user,
@@ -161,7 +159,6 @@ class ScoringFormulaTests(TestCase):
             is_approved=False,
         )
         red = RedTeamScore.objects.create(
-            attack_vector="Unapproved finding",
             source_ip="10.0.0.2",
             points_per_team=Decimal("50.00"),
             submitted_by=self.user,
@@ -609,7 +606,6 @@ class TestIncidentFindingMatching:
         team = Team.objects.create(team_number=1, team_name="Test Team")
 
         red_finding = RedTeamScore.objects.create(
-            attack_vector="SQL Injection",
             source_ip="10.0.0.5",
             points_per_team=Decimal("50.00"),
             submitted_by=user,
@@ -723,7 +719,6 @@ class TestIncidentFindingMatching:
         team = Team.objects.create(team_number=1, team_name="Test Team")
 
         matching_finding = RedTeamScore.objects.create(
-            attack_vector="RCE",
             source_ip="10.0.0.5",
             points_per_team=Decimal("50.00"),
             submitted_by=user,
@@ -731,7 +726,6 @@ class TestIncidentFindingMatching:
         matching_finding.affected_teams.add(team)
 
         non_matching_finding = RedTeamScore.objects.create(
-            attack_vector="SQLi",
             source_ip="10.0.0.99",
             points_per_team=Decimal("30.00"),
             submitted_by=user,
@@ -758,7 +752,6 @@ class TestIncidentFindingMatching:
         team = Team.objects.create(team_number=1, team_name="Test Team")
 
         matching_finding = RedTeamScore.objects.create(
-            attack_vector="Web Exploit",
             source_ip="10.0.0.5",
             affected_boxes=["web-server"],
             affected_service="HTTP",
@@ -788,7 +781,6 @@ class TestIncidentFindingMatching:
         team = Team.objects.create(team_number=1, team_name="Test Team")
 
         red_finding = RedTeamScore.objects.create(
-            attack_vector="RCE",
             source_ip="10.0.0.5",
             points_per_team=Decimal("50.00"),
             submitted_by=user,
@@ -997,7 +989,6 @@ class TestIncidentListView:
         team = Team.objects.create(team_number=1, team_name="Team 01")
 
         red_finding = RedTeamScore.objects.create(
-            attack_vector="Test attack",
             source_ip="10.0.0.5",
             points_per_team=Decimal("30.00"),
             submitted_by=gold_user,

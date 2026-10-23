@@ -77,7 +77,7 @@ async def create_ticket(
     await interaction.followup.send(
         f"Ticket **{ticket.ticket_number}** created.\n"
         f"Category: **{category.display_name}**\n"
-        f"Points: **{category.points}**\n\n"
+        f"Points: **{category.points_label}**\n\n"
         f"A volunteer will respond shortly.",
         ephemeral=True,
     )
@@ -141,7 +141,7 @@ class CategorySelect(discord.ui.Select["TicketCategoryView"]):
             discord.SelectOption(
                 label=cat.display_name,
                 value=str(cat.pk),
-                description=f"{cat.points} points",
+                description=cat.points_display,
             )
             for cat in self.categories.values()
         ]
@@ -202,7 +202,6 @@ class TeamHelpView(discord.ui.View):
             self.add_item(TicketButton())
 
     async def link_account(self, interaction: discord.Interaction) -> None:
-        # Import here to avoid circular dependency
         from bot.cogs.linking import LinkingCog
 
         cog = self.bot.get_cog("LinkingCog")
@@ -217,7 +216,6 @@ class TeamHelpView(discord.ui.View):
         await callback(cog, interaction)
 
     async def create_ticket(self, interaction: discord.Interaction) -> None:
-        """Handle create ticket button click - show category selection."""
         categories = [cat async for cat in TicketCategory.objects.filter(user_creatable=True)]
         if not categories:
             await interaction.response.send_message(
@@ -248,7 +246,6 @@ class HelpPanelsCog(commands.Cog):
         self.bot = bot
 
     async def cog_load(self) -> None:
-        # Register persistent views
         self.bot.add_view(TeamHelpView(self.bot, show_link=True, show_ticket=False))
         self.bot.add_view(TeamHelpView(self.bot, show_link=False, show_ticket=True))
         self.bot.add_view(TeamHelpView(self.bot, show_link=True, show_ticket=True))
@@ -259,12 +256,10 @@ class HelpPanelsCog(commands.Cog):
     async def on_ready(self) -> None:
         """Post (or refresh) the help panels whenever the bot connects; on_ready also fires on reconnect."""
         try:
-            # Post link panel to link channel (hidden after linking)
             link_channel_id = getattr(settings, "DISCORD_LINK_CHANNEL_ID", None)
             if link_channel_id:
                 await self._post_link_panel(link_channel_id)
 
-            # Post ticket panel to welcome-rules (always visible)
             welcome_channel_id = getattr(settings, "DISCORD_WELCOME_CHANNEL_ID", None)
             if welcome_channel_id:
                 await self._post_ticket_panel(welcome_channel_id)
@@ -336,7 +331,7 @@ class HelpPanelsCog(commands.Cog):
             return
 
         categories_text = [
-            f"• **{cat.display_name}**: {cat.points}pt"
+            f"• **{cat.display_name}**: {cat.points_label}"
             async for cat in TicketCategory.objects.filter(user_creatable=True)
         ]
 

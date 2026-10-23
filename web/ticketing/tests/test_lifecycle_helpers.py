@@ -5,9 +5,8 @@ from django.test import Client
 from django.urls import reverse
 
 from core.models import DiscordTask
-from ticketing.lifecycle import cancel_ticket, reopen_ticket
+from ticketing.lifecycle import cancel_ticket, change_ticket_category_atomic, reopen_ticket
 from ticketing.models import Ticket, TicketCategory, TicketHistory
-from ticketing.utils import change_ticket_category_atomic
 
 pytestmark = pytest.mark.django_db
 

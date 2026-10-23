@@ -73,7 +73,7 @@ def test_each_kind_of_unfinished_work_is_counted_with_the_page_that_finishes_it(
         IncidentReport.objects.create(
             team=_team(), attack_description="scan", source_ip="10.0.0.1", attack_detected_at="2026-10-03T10:00Z"
         )
-    RedTeamScore.objects.create(attack_vector="ssh", points_per_team=Decimal(10), submitted_by=user)
+    RedTeamScore.objects.create(points_per_team=Decimal(10), submitted_by=user)
     OrangeTeamScore.objects.create(team=_team(), description="Call", points_awarded=Decimal(5))
     check = OrangeCheck.objects.create(title="Phone call", created_by=user)
     second = OrangeCheck.objects.create(title="Email", created_by=user)
@@ -138,8 +138,8 @@ def test_failed_scorecard_emails_are_counted(event):
 def test_the_fingerprint_is_stable_with_averaged_decimals_and_int_keys(event):
     """JSON turns int keys into strings and Decimals into tagged values; the same scorecards hash the same."""
 
-    def with_int_keys(score, standings):
-        context = build_scorecard_context(score, standings)
+    def with_int_keys(score, standings, peer_context=None):
+        context = build_scorecard_context(score, standings, peer_context=peer_context)
         by_team = {score.team.team_number: Decimal("0.3333333333"), "all": Decimal("0.5")}
         context["stats"] = {**context["stats"], "by_team": by_team}
         return context

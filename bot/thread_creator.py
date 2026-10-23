@@ -6,7 +6,6 @@ import discord
 from asgiref.sync import sync_to_async
 
 from bot.utils import DISCORD_THREAD_NAME_CHAR_LIMIT, THREAD_AUTO_ARCHIVE_MINUTES, fit, team_chat_channel
-from team.models import Team
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -15,8 +14,6 @@ logger = logging.getLogger(__name__)
 async def create_ticket_thread(
     guild: discord.Guild,
     ticket: Ticket,
-    team: Team,
-    pin_message: bool = False,
 ) -> discord.Thread | None:
     """Create a Discord thread for a ticket in the team's chat channel.
 
@@ -28,6 +25,7 @@ async def create_ticket_thread(
     from bot.ticket_dashboard import TicketActionView, format_ticket_embed
     from bot.utils import get_team_member_discord_ids
 
+    team = ticket.team
     chat_channel = team_chat_channel(guild, team)
     if not chat_channel:
         logger.warning(f"No chat channel found for {team.team_name} (category {team.discord_category_id})")
@@ -42,10 +40,7 @@ async def create_ticket_thread(
 
     # Targeted update: a full save of this instance would revert concurrent web changes.
     ticket.discord_thread_id = thread.id
-    ticket.discord_channel_id = team.discord_category_id
-    await Ticket.objects.filter(pk=ticket.pk).aupdate(
-        discord_thread_id=thread.id, discord_channel_id=team.discord_category_id
-    )
+    await Ticket.objects.filter(pk=ticket.pk).aupdate(discord_thread_id=thread.id)
 
     team_member_ids = await get_team_member_discord_ids(team)
     for member_id in team_member_ids:
@@ -64,11 +59,10 @@ async def create_ticket_thread(
         view=view,
     )
 
-    if pin_message:
-        try:
-            await message.pin()
-        except Exception as pin_error:
-            logger.warning(f"Failed to pin ticket message in thread {thread.id}: {pin_error}")
+    try:
+        await message.pin()
+    except Exception as pin_error:
+        logger.warning(f"Failed to pin ticket message in thread {thread.id}: {pin_error}")
 
     logger.info(f"Created thread {thread.id} for ticket #{ticket.ticket_number}")
     return thread
@@ -86,7 +80,7 @@ async def publish_new_ticket(bot: discord.Client, guild: discord.Guild | None, t
         logger.warning(f"No guild available; ticket {ticket.ticket_number} will have no thread")
     else:
         try:
-            await create_ticket_thread(guild=guild, ticket=ticket, team=ticket.team, pin_message=True)
+            await create_ticket_thread(guild=guild, ticket=ticket)
         except Exception:
             logger.exception(f"Failed to create thread for ticket {ticket.ticket_number}")
     trigger_dashboard(bot)

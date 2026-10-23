@@ -13,7 +13,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -86,7 +85,6 @@ from core.forms import (
     SchoolInfoEditForm,
     SetMaxMembersForm,
     SetScheduleForm,
-    SetTimeForm,
     StartMessageForm,
     SyncRolesForm,
     TeamActionForm,
@@ -163,8 +161,6 @@ def world(db: Any, create_user_with_groups: Callable[..., User]) -> World:
     teams = [Team.objects.create(team_number=n, team_name=f"Team {n:02d}") for n in (1, 2, 3)]
     QuotientMetadataCache.objects.create(
         boxes=[{"name": "web", "ip": "10.0.0.5", "services": [{"name": "web-http", "display_name": "HTTP"}]}],
-        services=[{"name": "web-http", "display_name": "HTTP"}],
-        team_count=3,
     )
     pool = RedTeamIPPool.objects.create(name="Pool A", ip_addresses="10.0.0.1", created_by=user)
     finding = RedTeamScore.objects.create(
@@ -228,7 +224,9 @@ def competition_action(action: str) -> Use:
 
 def _inject_grading_through_the_view(w: World, form: Any) -> None:
     """The grading page lists Quotient's injects; one inject is enough to grade."""
-    inject = SimpleNamespace(inject_id=1, title="Inject 01 - Web (100 pts)")
+    from quotient.client import Inject
+
+    inject = Inject(inject_id=1, title="Inject 01 - Web (100 pts)", description="")
     with patch("quotient.client.QuotientClient.get_injects", return_value=[inject]):
         posts_to(lambda w: reverse("scoring:inject_grading") + "?inject=1")(w, form)
 
@@ -336,8 +334,7 @@ def _team_numbers_check(w: World, form: Any) -> None:
 
 
 def _red_score_make(w: World, draw: st.DataObject) -> Factory:
-    team_count = draw.draw(st.sampled_from([None, 3]), label="team_count") if draw else None
-    return lambda data, files: RedTeamScoreForm(data, files, team_count=team_count, user=w.user)
+    return lambda data, files: RedTeamScoreForm(data, files, user=w.user)
 
 
 def _incident_make(w: World, draw: st.DataObject) -> Factory:
@@ -471,11 +468,6 @@ CASES = [
     ),
     # Adding an app asks Authentik about it; removing one is the same form and stores the same list
     FormCase(AppSlugForm, use=competition_action("remove_app")),
-    FormCase(
-        SetTimeForm,
-        hints=lambda w: {"datetime": _datetime_local(), "timezone": _tz_hint()},
-        use=competition_action("set_start_time"),
-    ),
     FormCase(
         SetScheduleForm,
         hints=lambda w: {

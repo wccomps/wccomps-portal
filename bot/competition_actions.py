@@ -5,14 +5,17 @@ from collections.abc import Callable
 
 import discord
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from django.db import connection
 from django.utils import timezone
 from scoring.models import QuotientMetadataCache
 
 from bot.discord_manager import delete_team_infrastructure
-from bot.utils import log_to_ops_channel
+from bot.utils import announcement, log_to_ops_channel, send_announcement, send_parts, team_chat_channel
+from core.authentik_utils import parse_team_range
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.services.competition import CompetitionRunResult, run_competition_to_completion
+from core.utils import shorten
 from team.models import MAX_TEAMS, DiscordLink, Team
 
 logger = logging.getLogger(__name__)
@@ -258,3 +261,59 @@ async def run_competition_cleanup(
     except Exception as e:
         logger.exception(f"Cleanup error: {e}")
         await log_to_ops_channel(bot, f"Cleanup Error: {e}")
+
+
+async def deliver_team_broadcast(
+    guild: discord.Guild,
+    target: str,
+    message: str,
+    sender: str,
+) -> tuple[int, int, list[str]]:
+    """Send a broadcast to 'announcements', 'all-teams', or a team range, queuing if a channel is missing."""
+    target_lower = target.lower().strip()
+    if target_lower == "announcements":
+        announcement_channel_id = settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID
+        channel = guild.get_channel(announcement_channel_id)
+        if not channel or not isinstance(channel, discord.TextChannel):
+            return 0, 0, [f"Announcements channel not found (ID: {announcement_channel_id})"]
+        try:
+            await send_announcement(guild, channel, message)
+            return 1, 0, []
+        except Exception as e:
+            logger.exception(f"Failed to broadcast to announcements: {e}")
+            return 0, 0, [f"Announcements ({shorten(str(e), 50)})"]
+
+    if target_lower == "all-teams":
+        teams = [t async for t in Team.objects.filter(is_active=True).order_by("team_number")]
+        team_numbers = [t.team_number for t in teams]
+        teams_by_number = {t.team_number: t for t in teams}
+    else:
+        team_numbers = parse_team_range(target)
+        teams_by_number = {t.team_number: t async for t in Team.objects.filter(team_number__in=team_numbers)}
+
+    sent_count = 0
+    queued_count = 0
+    failed_channels: list[str] = []
+
+    for team_number in team_numbers:
+        team = teams_by_number.get(team_number)
+        if not team:
+            failed_channels.append(f"Team {team_number:02d} (not found)")
+            continue
+        try:
+            chat_channel = team_chat_channel(guild, team)
+            if chat_channel:
+                await send_parts(chat_channel, announcement(sender, message))
+                sent_count += 1
+            else:
+                await QueuedAnnouncement.objects.acreate(
+                    team=team,
+                    message=message,
+                    sender_name=sender,
+                )
+                queued_count += 1
+        except Exception as e:
+            logger.exception(f"Failed to broadcast to team {team_number}: {e}")
+            failed_channels.append(f"Team {team_number:02d} ({shorten(str(e), 50)})")
+
+    return sent_count, queued_count, failed_channels

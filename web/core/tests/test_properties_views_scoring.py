@@ -2,7 +2,6 @@
 
 import json
 from contextlib import ExitStack
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -60,10 +59,9 @@ def _ids(w: World, kind: str) -> st.SearchStrategy[Any]:
 
 
 def _red_score(w: World) -> Fields:
-    form = RedTeamScoreForm(team_count=3, user=w.users["red_team"])
+    form = RedTeamScoreForm(user=w.users["red_team"])
     return form_fields(form) | {
         "screenshots": uploads(3),
-        "attack_vector": hostile_text(),
         "target_teams": hostile_text(),
     }
 
@@ -83,8 +81,10 @@ def _grading(w: World) -> Fields:
 
 def _injects(w: World) -> ExitStack:
     """Quotient lists one inject, so the grading page has one to grade."""
+    from quotient.client import Inject
+
     stack = ExitStack()
-    inject = SimpleNamespace(inject_id=1, title="Inject 01 - Web (100 pts)")
+    inject = Inject(inject_id=1, title="Inject 01 - Web (100 pts)", description="")
     stack.enter_context(patch("quotient.client.QuotientClient.get_injects", return_value=[inject]))
     return stack
 
@@ -122,7 +122,6 @@ CASES = [
     ViewCase("scoring:view_red_score", may("red_team", "gold_team")),
     ViewCase("scoring:red_team_findings", may("red_team", "gold_team"), query=_filters),
     ViewCase("scoring:delete_red_score", RED),
-    ViewCase("scoring:leave_red_score", RED),
     ViewCase(
         "scoring:bulk_approve_red_scores",
         GOLD,

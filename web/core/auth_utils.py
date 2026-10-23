@@ -38,7 +38,6 @@ def get_authentik_id(user: User) -> str | None:
 
 
 def get_permissions_context(user: User) -> dict[str, bool]:
-    """Get permissions dict for template context."""
     return {f"is_{perm}": has_permission(user, perm) for perm in PERMISSION_MAP}
 
 
@@ -65,13 +64,9 @@ def get_role_based_landing_url(groups: list[str]) -> str:
     """Determine the landing page URL based on a user's Authentik groups, checking roles in priority order."""
     from django.urls import reverse
 
-    if (
-        check_groups_for_permission(groups, "admin")
-        or check_groups_for_permission(groups, "ticketing_admin")
-        or check_groups_for_permission(groups, "ticketing_support")
-    ):
+    if check_groups_for_permission(groups, "ticketing_support"):
         return reverse("ticket_list")
-    if check_groups_for_permission(groups, "gold_team") or check_groups_for_permission(groups, "white_team"):
+    if check_groups_for_permission(groups, "white_team"):
         return reverse("leaderboard_page")
     if check_groups_for_permission(groups, "red_team"):
         return reverse("scoring:submit_red_score")

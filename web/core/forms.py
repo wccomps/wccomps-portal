@@ -39,6 +39,9 @@ class TypedConfirmForm(forms.Form):
             raise forms.ValidationError('Type "yolo" to confirm.')
         return typed
 
+    def first_error(self) -> str:
+        return str(next(iter(self.errors.values()))[0])
+
 
 class CancelEventForm(TypedConfirmForm):
     """The open event the page showed, and the typed confirmation."""
@@ -50,9 +53,6 @@ class CancelEventForm(TypedConfirmForm):
             "invalid_choice": "That event no longer exists. Reload the page.",
         },
     )
-
-    def first_error(self) -> str:
-        return str(next(iter(self.errors.values()))[0])
 
 
 class CloseOutForm(TypedConfirmForm, NewEventFields):
@@ -76,9 +76,6 @@ class CloseOutForm(TypedConfirmForm, NewEventFields):
         event: Event | None = self.cleaned_data.get("open_event")
         return event if event is not None else self.new_event_to_create
 
-    def first_error(self) -> str:
-        return str(next(iter(self.errors.values()))[0])
-
 
 class StartMessageForm(forms.Form):
     # Discord caps a message at 2000 characters; the broadcast adds an "Announcement from" header.
@@ -100,11 +97,6 @@ class AppSlugForm(forms.Form):
 
     def clean_app_slug(self) -> str:
         return str(self.cleaned_data["app_slug"]).lower()
-
-
-class SetTimeForm(forms.Form):
-    datetime = forms.CharField()
-    timezone = forms.CharField(initial="America/Los_Angeles")
 
 
 class SetScheduleForm(forms.Form):

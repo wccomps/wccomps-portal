@@ -21,7 +21,7 @@ def test_match_to_suggested_finding_saves(gold_team_user: User) -> None:
         team=team, submitted_by=blue, attack_description="x", source_ip="10.0.0.5", attack_detected_at=timezone.now()
     )
     finding = RedTeamScore.objects.create(
-        attack_vector="SQLi", source_ip="10.0.0.5", points_per_team=Decimal("-50"), submitted_by=gold_team_user
+        source_ip="10.0.0.5", points_per_team=Decimal("-50"), submitted_by=gold_team_user
     )
     finding.affected_teams.add(team)
 

@@ -156,8 +156,6 @@ def test_setting_the_schedule_leaves_an_emptied_app_list_empty(admin_client, con
     _post(admin_client, "remove_app", app_slug="netbird")
 
     with patch("core.authentik_manager.AuthentikManager") as manager:
-        for action in ("set_start_time", "set_end_time"):
-            _post(admin_client, action, datetime="2026-10-03T09:00", timezone="America/Los_Angeles")
         _post(admin_client, "set_schedule", start_datetime="2026-10-03T09:00", end_datetime="2026-10-03T17:00")
 
     manager.assert_not_called()

@@ -49,7 +49,6 @@ def seed_table_data(viewer: User) -> dict:
             max_points=Decimal("100"),
             points_awarded=Decimal("80"),
             feedback="Good work",
-            notes="Raw grader comments",
             graded_by=member,
             is_approved=approved,
         )

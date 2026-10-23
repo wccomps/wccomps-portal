@@ -1,9 +1,8 @@
-{# Red team findings table - swappable content for htmx #}
 {% load cotton %}
 <div id="red-findings-content"
      {% if is_gold_team %}x-data="redFindingsBulkSelect"{% endif %}>
     {% if is_gold_team %}
-        {# The row checkboxes join this form with form=, so a row's own Delete or Leave form isn't nested in it #}
+        {# The row checkboxes join this form with form=, so a row's own Delete form isn't nested in it #}
         <c-form id="bulk-approve-form" action="{% url 'scoring:bulk_approve_red_scores' %}" ::data-confirm="approveQuestion">
             {% csrf_token %}
         </c-form>
@@ -71,7 +70,7 @@
                 <th>
                     <c-link href="{% url 'scoring:view_red_score' finding.id %}">#{{ finding.id }}</c-link>
                 </th>
-                <td>{{ finding.attack_type.name|default:finding.attack_vector|default:"Unknown" }}</td>
+                <td>{{ finding.attack_type.name|default:"Unknown" }}</td>
                 <td>{{ finding.affected_boxes_display }}</td>
                 <td>{{ finding.affected_service }}</td>
                 <td>
@@ -129,15 +128,6 @@
                             {% csrf_token %}
                             <c-button type="submit" variant="danger">
                                 Delete
-                            </c-button>
-                        </c-form>
-                    {% elif user in finding.contributors.all and finding.submitted_by != user and not finding.is_approved %}
-                        <c-form action="{% url 'scoring:leave_red_score' finding.id %}"
-                                class="d-inline"
-                                data-confirm="Remove yourself from this finding?">
-                            {% csrf_token %}
-                            <c-button type="submit" variant="danger">
-                                Leave
                             </c-button>
                         </c-form>
                     {% endif %}

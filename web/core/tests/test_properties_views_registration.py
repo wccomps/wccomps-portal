@@ -32,7 +32,7 @@ CASES = [
     ViewCase(
         "registration_review_list",
         GOLD,
-        query=lambda w: {"status": st.one_of(st.sampled_from(["pending", "paid", "approved"]), hostile_text())},
+        query=lambda w: {"status": st.one_of(st.sampled_from(["pending", "approved", "rejected"]), hostile_text())},
     ),
     ViewCase("registration_approve", GOLD, idempotent=(TeamRegistration,)),
     ViewCase("registration_reject", GOLD, post=lambda w: form_fields(RejectRegistrationForm())),

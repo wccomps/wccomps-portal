@@ -1,4 +1,5 @@
 import json
+from collections import defaultdict
 from datetime import timedelta
 from typing import cast
 
@@ -95,18 +96,16 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
 
 @require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
+@require_POST
 def toggle_checkin(request: HttpRequest) -> HttpResponse:
-    if request.method != "POST":
-        return redirect("orange_team:dashboard")
     OrangeCheckIn.toggle(cast(User, request.user))
     return redirect("orange_team:dashboard")
 
 
 @require_permission("orange_team_lead", error_message="Only leads can manage check-ins")
+@require_POST
 def admin_toggle_checkin(request: HttpRequest, user_id: int) -> HttpResponse:
     """Toggle check-in/out for another user (lead only)."""
-    if request.method != "POST":
-        return redirect("orange_team:check_list")
     target_user = get_object_or_404(User, pk=user_id)
     OrangeCheckIn.toggle(target_user)
     return redirect("orange_team:check_list")
@@ -139,13 +138,13 @@ def check_list(request: HttpRequest) -> HttpResponse:
         .order_by("scheduled_at", "-created_at")
     )
     checkins = list(OrangeCheckIn.objects.filter(is_active=True).select_related("user").order_by("checked_in_at"))
-    by_user: dict[int, list[OrangeAssignment]] = {}
+    by_user: dict[int, list[OrangeAssignment]] = defaultdict(list)
     for assignment in (
         OrangeAssignment.objects.filter(user_id__in=[ci.user_id for ci in checkins])
         .unfinished()
         .select_related("orange_check", "team")
     ):
-        by_user.setdefault(assignment.user_id, []).append(assignment)
+        by_user[assignment.user_id].append(assignment)
     volunteers = []
     for checkin in checkins:
         mine = by_user.get(checkin.user_id, [])
@@ -171,9 +170,8 @@ def check_list(request: HttpRequest) -> HttpResponse:
 
 
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
+@require_POST
 def auto_assign_all(request: HttpRequest) -> HttpResponse:
-    if request.method != "POST":
-        return redirect("orange_team:check_list")
     now = timezone.now()
     # Every scheduled check that isn't closed yet — skips drafts (no schedule) and past windows.
     checks = [
@@ -317,10 +315,9 @@ def _check_page(
 
 
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
+@require_POST
 def check_duplicate(request: HttpRequest, check_id: int) -> HttpResponse:
     """Duplicate a check and its criteria into a new draft."""
-    if request.method != "POST":
-        return redirect("orange_team:check_detail", check_id=check_id)
     original = get_object_or_404(OrangeCheck.objects.prefetch_related("criteria"), pk=check_id)
     criteria = list(original.criteria.all())
     worth = sum(c.points for c in criteria) if criteria else original.max_points
@@ -375,10 +372,9 @@ def check_assign(request: HttpRequest, check_id: int) -> HttpResponse:
 
 
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
+@require_POST
 def check_auto_assign(request: HttpRequest, check_id: int) -> HttpResponse:
     """Rotate on-shift volunteers across this check's teams (pending/missing cells only)."""
-    if request.method != "POST":
-        return redirect("orange_team:check_assign", check_id=check_id)
     orange_check = get_object_or_404(OrangeCheck, pk=check_id)
     users = list(User.objects.filter(orange_checkins__is_active=True).distinct())
     teams = list(Team.objects.filter(is_active=True).order_by("team_number"))
@@ -388,10 +384,9 @@ def check_auto_assign(request: HttpRequest, check_id: int) -> HttpResponse:
 
 
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
+@require_POST
 def check_rebalance(request: HttpRequest, check_id: int) -> HttpResponse:
     """Spread only the pending teams across whoever is still on shift."""
-    if request.method != "POST":
-        return redirect("orange_team:check_assign", check_id=check_id)
     orange_check = get_object_or_404(OrangeCheck, pk=check_id)
     users = list(User.objects.filter(orange_checkins__is_active=True).distinct())
     count = rebalance_unstarted(orange_check, users)
@@ -400,10 +395,9 @@ def check_rebalance(request: HttpRequest, check_id: int) -> HttpResponse:
 
 
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
+@require_POST
 def reassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
     """Reassign one team's volunteer; scored teams are locked."""
-    if request.method != "POST":
-        return redirect("orange_team:dashboard")
     assignment = get_object_or_404(OrangeAssignment.objects.select_related("orange_check", "team"), pk=assignment_id)
     check_id = assignment.orange_check_id
     if assignment.status in ("submitted", "approved"):
@@ -467,10 +461,8 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
 
 
 @require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
+@require_POST
 def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
-    if request.method != "POST":
-        return redirect("orange_team:dashboard")
-
     user = cast(User, request.user)
     assignment = get_object_or_404(OrangeAssignment, pk=assignment_id, user=user)
 
@@ -508,10 +500,8 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
 
 
 @require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
+@require_POST
 def followup_create(request: HttpRequest) -> HttpResponse:
-    if request.method != "POST":
-        return redirect("orange_team:dashboard")
-
     user = cast(User, request.user)
     form = FollowUpForm(request.POST)
     if not form.is_valid():
@@ -532,10 +522,8 @@ def followup_create(request: HttpRequest) -> HttpResponse:
 
 
 @require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
+@require_POST
 def followup_dismiss(request: HttpRequest, followup_id: int) -> HttpResponse:
-    if request.method != "POST":
-        return redirect("orange_team:dashboard")
-
     user = cast(User, request.user)
     followup = get_object_or_404(OrangeFollowUp, pk=followup_id, user=user)
     followup.dismissed = True
@@ -544,11 +532,9 @@ def followup_dismiss(request: HttpRequest, followup_id: int) -> HttpResponse:
 
 
 @require_permission("orange_team_lead", error_message="Only leads can approve assignments")
+@require_POST
 def assignment_approve(request: HttpRequest, assignment_id: int) -> HttpResponse:
     """Approve a submitted orange team check, creating an OrangeTeamScore record."""
-    if request.method != "POST":
-        return redirect("orange_team:review_queue")
-
     user = cast(User, request.user)
     # Locked so a double submit or a racing reject can't act on the same submission twice.
     with transaction.atomic():
@@ -576,11 +562,9 @@ def assignment_approve(request: HttpRequest, assignment_id: int) -> HttpResponse
 
 
 @require_permission("orange_team_lead", error_message="Only leads can reject assignments")
+@require_POST
 def assignment_reject(request: HttpRequest, assignment_id: int) -> HttpResponse:
     """Reject a submitted assignment, sending it back to the teamer."""
-    if request.method != "POST":
-        return redirect("orange_team:review_queue")
-
     user = cast(User, request.user)
     form = AssignmentRejectForm(request.POST)
     form.is_valid()  # Always valid (optional field)

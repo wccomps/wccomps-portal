@@ -30,6 +30,7 @@ from core.services.linking import (
     enforce_account_link_policy,
     execute_link,
     finalize_link,
+    lookup_valid_link_token,
     store_discord_id_in_authentik,
     validate_link_token,
 )
@@ -41,12 +42,11 @@ from team.forms import (
     ImportMode,
     parse_csv_file,
 )
-from team.models import LinkToken, SchoolInfo, Team
+from team.models import SchoolInfo, Team
 
 from .auth_utils import (
     get_authentik_groups,
     get_authentik_id,
-    get_permissions_context,
     get_role_based_landing_url,
     require_permission,
     team_for_groups,
@@ -76,29 +76,14 @@ def link_initiate(request: HttpRequest) -> HttpResponse:
     if not token:
         raise BadRequest("Missing token parameter")
 
-    try:
-        link_token = LinkToken.objects.get(token=token, used=False)
-    except LinkToken.DoesNotExist:
+    token_result = lookup_valid_link_token(token)
+    if isinstance(token_result, LinkResult):
         return render(
             request,
-            "link_error.html",
-            {
-                "error": "Invalid or expired token",
-                "message": "This link has expired or is invalid. Please use /link in Discord to generate a new one.",
-            },
+            token_result.error_template or "link_error.html",
+            token_result.error_context or {},
         )
-
-    if link_token.is_expired():
-        return render(
-            request,
-            "link_error.html",
-            {
-                "error": "Token expired",
-                "message": (
-                    "This link has expired (15 minute limit). Please use /link in Discord to generate a new one."
-                ),
-            },
-        )
+    link_token = token_result
 
     # The callback only completes in a browser that came through here (core.services.linking)
     request.session["pending_link_token"] = link_token.token
@@ -225,7 +210,6 @@ def school_info(request: HttpRequest) -> HttpResponse:
         "school_info.html",
         {
             "teams": teams_with_info,
-            "show_ops_nav": True,
         },
     )
 
@@ -256,7 +240,7 @@ def school_info_clear(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "school_info_clear.html",
-        {"count": count, "error": error, "show_ops_nav": True},
+        {"count": count, "error": error},
     )
 
 
@@ -278,7 +262,7 @@ def school_info_remove(request: HttpRequest, team_number: int) -> HttpResponse:
     return render(
         request,
         "school_info_remove.html",
-        {"school_info": school_info, "error": error, "show_ops_nav": True},
+        {"school_info": school_info, "error": error},
     )
 
 
@@ -337,7 +321,6 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
         {
             "team": team,
             "school_info": school_info,
-            "show_ops_nav": True,
         },
     )
 
@@ -439,7 +422,6 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)
     authentik_username = user.username
 
-    permissions = get_permissions_context(user)
     form = CSVUploadForm()
     preview_data: dict[str, object] | None = None
     import_results: dict[str, object] | None = None
@@ -493,7 +475,6 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
         request,
         "school_info_import.html",
         {
-            "authentik_username": authentik_username,
             "form": form,
             "active_season": season,
             "open_events": season.events.filter(is_finalized=False) if season else [],
@@ -501,8 +482,6 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
             "preview_data": preview_data,
             "import_results": import_results,
             "page_error": error,
-            "show_ops_nav": True,
-            **permissions,
         },
     )
 

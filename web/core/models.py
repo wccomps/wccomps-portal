@@ -8,6 +8,23 @@ from django.utils import timezone
 from core import discord_tasks
 
 
+class Approvable(models.Model):
+    """A submission or ticket that counts toward scores only once a reviewer approves it."""
+
+    is_approved = models.BooleanField(default=False)
+    approved_at = models.DateTimeField(null=True, blank=True)
+    approved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+
+    class Meta:
+        abstract = True
+
+    def approve(self, user: User) -> None:
+        self.is_approved = True
+        self.approved_by = user
+        self.approved_at = timezone.now()
+        self.save(update_fields=["is_approved", "approved_by", "approved_at"])
+
+
 class UserGroups(models.Model):
     """
     Stores Authentik groups for a user. Refreshed on every login and by the bot every 5 minutes.

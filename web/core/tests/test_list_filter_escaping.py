@@ -142,7 +142,6 @@ def three_of_each(admin_user: User) -> None:
             assigned_to=assignee,
         )
         finding = RedTeamScore.objects.create(
-            attack_vector=name,
             attack_type=AttackType.objects.create(name=f"{name} attack"),
             points_per_team=Decimal(number),
             submitted_by=admin_user,
@@ -201,7 +200,10 @@ def test_every_sort_header_a_list_shows_sorts_its_rows(admin_client: Client, thr
 FILTERED_PAGES = ["ticket_list", "ops_review_tickets", "scoring:review_incidents", "scoring:review_orange"]
 FILTERED_PAGES += ["scoring:inject_grades_review", "scoring:red_team_findings", "scoring:red_team_scores"]
 FILTERED_PAGES += ["scoring:review_inject_feedback", "registration_review_list"]
-FILTER_SET = {"scoring:review_inject_feedback": {"inject": "nothing"}, "registration_review_list": {"status": "paid"}}
+FILTER_SET = {
+    "scoring:review_inject_feedback": {"inject": "nothing"},
+    "registration_review_list": {"status": "approved"},
+}
 
 
 @pytest.mark.parametrize("name", FILTERED_PAGES)

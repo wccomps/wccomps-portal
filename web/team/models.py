@@ -28,8 +28,17 @@ def default_team_name(team_number: int) -> str:
     return f"BlueTeam{team_number:02d}"
 
 
+class TeamQuerySet(models.QuerySet["Team"]):
+    def with_active_member_count(self) -> TeamQuerySet:
+        return self.annotate(
+            active_member_count=models.Count("members", filter=models.Q(members__is_active=True)),
+        )
+
+
 class Team(models.Model):
     """Competition team (1-50)."""
+
+    objects = TeamQuerySet.as_manager()
 
     team_number = models.IntegerField(unique=True)
     team_name = models.CharField(max_length=100)
@@ -81,6 +90,9 @@ class Team(models.Model):
 
     def get_member_count(self) -> int:
         """Get count of active members."""
+        annotated = getattr(self, "active_member_count", None)
+        if isinstance(annotated, int):
+            return annotated
         return self.members.filter(is_active=True).count()
 
     @cached_property
@@ -140,26 +152,10 @@ class DiscordLink(models.Model):
         return f"{self.discord_username} as {self.user.username}"
 
     @classmethod
-    def deactivate_previous_links(cls, discord_id: int, exclude_pk: int | None = None) -> int:
+    def deactivate_previous_links(cls, discord_id: int) -> int:
         """Deactivate this Discord user's active links (returns the count); call before creating a new link."""
-        qs = cls.objects.filter(discord_id=discord_id, is_active=True)
-        if exclude_pk:
-            qs = qs.exclude(pk=exclude_pk)
-        return qs.update(is_active=False, unlinked_at=timezone.now())
-
-    def save(
-        self,
-        *,
-        force_insert: bool | tuple[ModelBase, ...] = False,
-        force_update: bool = False,
-        using: str | None = None,
-        update_fields: Iterable[str] | None = None,
-    ) -> None:
-        super().save(
-            force_insert=force_insert,
-            force_update=force_update,
-            using=using,
-            update_fields=update_fields,
+        return cls.objects.filter(discord_id=discord_id, is_active=True).update(
+            is_active=False, unlinked_at=timezone.now()
         )
 
 
@@ -221,24 +217,12 @@ class LinkRateLimit(models.Model):
     def __str__(self) -> str:
         return f"Link attempt by {self.discord_id} at {self.attempted_at}"
 
-    @classmethod
-    def check_rate_limit(cls, discord_id: int) -> tuple[bool, int]:
-        """Check the 5-attempts-per-hour limit, returning (is_allowed, attempts_in_last_hour)."""
-        from datetime import timedelta
-
-        one_hour_ago = timezone.now() - timedelta(hours=1)
-
-        recent_attempts = cls.objects.filter(discord_id=discord_id, attempted_at__gte=one_hour_ago).count()
-
-        return recent_attempts < 5, recent_attempts
-
 
 class SchoolInfo(models.Model):
     """School information for teams (GoldTeam only)."""
 
     team = models.OneToOneField(Team, on_delete=models.CASCADE, related_name="school_info")
-    # The team's school in the live school list; set through registration.services (set_team_school,
-    # remove_team_school, clear_school_list, import_school_list)
+    # The team's school in the live school list; set through registration.services.
     school = models.ForeignKey("registration.School", on_delete=models.PROTECT, related_name="school_infos")
     contact_email = models.EmailField()
     secondary_email = models.EmailField(blank=True)

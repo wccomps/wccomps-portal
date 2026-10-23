@@ -78,7 +78,7 @@ def download_packet(request: HttpRequest, packet_id: int) -> HttpResponse:
 @require_permission("gold_team")
 def packets_list(request: HttpRequest) -> HttpResponse:
     """List all packets for GoldTeam administrators."""
-    packets = list(Packet.objects.all().order_by("-created_at"))
+    packets = list(Packet.objects.with_distribution_stats().order_by("-created_at"))
 
     # Active = draft or distributing (there's typically only one)
     active_packet: Packet | None = None
@@ -96,14 +96,8 @@ def packets_list(request: HttpRequest) -> HttpResponse:
     context: dict[str, object] = {
         "active_packet": active_packet,
         "active_stats": active_stats,
-        "active_distributions": (
-            active_packet.distributions.select_related("team", "team__school_info").order_by("team__team_number")
-            if active_packet
-            else []
-        ),
         "history": history,
         "teams": Team.objects.filter(is_active=True).order_by("team_number"),
-        "nav_active": "ops_admin",
     }
 
     return render(request, "packets/ops_packets_list.html", context)
@@ -112,14 +106,12 @@ def packets_list(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET", "POST"])
 @require_permission("gold_team")
 def upload_packet(request: HttpRequest) -> HttpResponse:
-    form_context = {"nav_active": "packets"}
-
     if request.method == "POST":
         form = PacketUploadForm(request.POST, request.FILES)
         if not form.is_valid():
             error_msg = " ".join(str(e) for errors in form.errors.values() for e in errors)
             messages.error(request, error_msg)
-            return render(request, "packets/ops_upload_packet.html", form_context)
+            return render(request, "packets/ops_upload_packet.html")
 
         title = form.cleaned_data["title"]
         notes = form.cleaned_data["notes"]
@@ -152,13 +144,13 @@ def upload_packet(request: HttpRequest) -> HttpResponse:
         )
         return redirect("packets_list")
 
-    return render(request, "packets/ops_upload_packet.html", form_context)
+    return render(request, "packets/ops_upload_packet.html")
 
 
 @require_GET
 @require_permission("gold_team")
 def packet_detail(request: HttpRequest, packet_id: int) -> HttpResponse:
-    packet = get_object_or_404(Packet, id=packet_id)
+    packet = get_object_or_404(Packet.objects.with_distribution_stats(), id=packet_id)
 
     distributions = packet.distributions.select_related("team", "team__school_info").order_by("team__team_number")
     teams = Team.objects.filter(is_active=True).order_by("team_number")
@@ -168,7 +160,6 @@ def packet_detail(request: HttpRequest, packet_id: int) -> HttpResponse:
         "distributions": distributions,
         "stats": packet.get_distribution_stats(),
         "teams": teams,
-        "nav_active": "ops_admin",
     }
 
     return render(request, "packets/ops_packet_detail.html", context)

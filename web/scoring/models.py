@@ -4,8 +4,8 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.utils import timezone
 
+from core.models import Approvable
 from core.utils import shorten
 
 
@@ -27,36 +27,9 @@ def validate_file_size(file: UploadedFile[bytes]) -> UploadedFile[bytes]:
     return file
 
 
-class Approvable(models.Model):
-    """A submission that counts toward scores only once a reviewer approves it."""
-
-    is_approved = models.BooleanField(default=False)
-    approved_at = models.DateTimeField(null=True, blank=True)
-    approved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
-
-    class Meta:
-        abstract = True
-
-    def approve(self, user: User) -> None:
-        self.is_approved = True
-        self.approved_by = user
-        self.approved_at = timezone.now()
-        self.save(update_fields=["is_approved", "approved_by", "approved_at"])
-
-
 class ScoringTemplate(models.Model):
-    """Scoring configuration using category weights and raw maximums.
+    """Scoring configuration using category weights and raw maximums (scaled via calculator._get_modifiers)."""
 
-    The calculator derives a scaling modifier for each category at runtime:
-        total_pool = max(raw_max / (weight/100) for each category)
-        modifier = (weight/100) × total_pool / raw_max
-        scaled = raw × modifier
-
-    This produces the same result as manually entering modifiers, but the
-    config page shows meaningful percentages instead of opaque multipliers.
-    """
-
-    # Category weights (percentage of total score; must sum to 100)
     service_weight = models.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -140,8 +113,6 @@ class QuotientMetadataCache(models.Model):
         default=list,
         help_text="List of services from Quotient metadata",
     )
-    event_name = models.CharField(max_length=200, blank=True)
-    team_count = models.IntegerField(default=0)
 
     last_synced = models.DateTimeField(auto_now=True)
     synced_by = models.ForeignKey(
@@ -222,24 +193,11 @@ class AttackType(models.Model):
 class RedTeamScore(Approvable):
     """Red team vulnerability score affecting one or more teams."""
 
-    event = models.ForeignKey(
-        "registration.Event",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="red_team_scores",
-    )
     submitted_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
         null=True,
         related_name="red_scores_submitted",
-    )
-    contributors = models.ManyToManyField(
-        User,
-        related_name="contributed_findings",
-        blank=True,
-        help_text="All red teamers who submitted matching findings",
     )
 
     attack_type = models.ForeignKey(
@@ -248,10 +206,6 @@ class RedTeamScore(Approvable):
         related_name="findings",
         null=True,
         blank=True,
-    )
-    attack_vector = models.TextField(
-        blank=True,
-        help_text="Additional details about the attack (legacy field, use notes instead)",
     )
     source_ip = models.GenericIPAddressField(
         null=True,
@@ -353,9 +307,7 @@ class RedTeamScore(Approvable):
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        if self.attack_type:
-            return f"RF-{self.pk}: {self.attack_type.name}"
-        return f"RF-{self.pk}: {shorten(self.attack_vector, 50) if self.attack_vector else 'Unknown'}"
+        return f"RF-{self.pk}: {self.attack_type.name if self.attack_type else 'Unknown'}"
 
     @property
     def source_ip_display(self) -> str:
@@ -370,47 +322,26 @@ class RedTeamScore(Approvable):
     def affected_boxes_display(self) -> str:
         return format_boxes_display(self.affected_boxes)
 
+    OUTCOME_SPECS: tuple[tuple[str, int, str], ...] = (
+        ("privilege_escalation", 100, "Privilege Escalation"),
+        ("credentials_recovered", 50, "Credentials"),
+        ("sensitive_files_recovered", 25, "Sensitive Files"),
+        ("credit_cards_recovered", 50, "Credit Cards"),
+        ("pii_recovered", 200, "PII"),
+        ("encrypted_db_recovered", 25, "Encrypted DB"),
+        ("db_decrypted", 25, "DB Decrypted"),
+    )
+
     def calculate_points(self) -> Decimal:
-        """Points each affected team loses, per CCDC guidelines, from the outcome checkboxes.
-
-        Stored positive in points_per_team; the calculator subtracts it.
-        Effect on the team, from the National Scoring Guidelines:
-        - Root/Admin access: -100
-        - User access: -25 (only if no root access)
-        - Privilege escalation: -100 (additional)
-        - Credentials recovered: -50
-        - Sensitive files recovered: -25
-        - Credit cards recovered: -50
-        - PII recovered: -200
-        - Encrypted DB recovered: -25
-        - DB decrypted: -25 (additional)
-        """
+        """Points each affected team loses from the outcome checkboxes (stored positive; calculator subtracts it)."""
         total = Decimal("0")
-
-        # Access level (only highest scored)
         if self.root_access:
             total += Decimal("100")
         elif self.user_access:
             total += Decimal("25")
-
-        # Privilege escalation is additional
-        if self.privilege_escalation:
-            total += Decimal("100")
-
-        # Data recovery outcomes (cumulative)
-        if self.credentials_recovered:
-            total += Decimal("50")
-        if self.sensitive_files_recovered:
-            total += Decimal("25")
-        if self.credit_cards_recovered:
-            total += Decimal("50")
-        if self.pii_recovered:
-            total += Decimal("200")
-        if self.encrypted_db_recovered:
-            total += Decimal("25")
-        if self.db_decrypted:
-            total += Decimal("25")
-
+        for field_name, pts, _label in self.OUTCOME_SPECS:
+            if getattr(self, field_name):
+                total += Decimal(pts)
         return total
 
     @property
@@ -420,20 +351,9 @@ class RedTeamScore(Approvable):
             outcomes.append("Root Access (-100)")
         elif self.user_access:
             outcomes.append("User Access (-25)")
-        if self.privilege_escalation:
-            outcomes.append("Privilege Escalation (-100)")
-        if self.credentials_recovered:
-            outcomes.append("Credentials (-50)")
-        if self.sensitive_files_recovered:
-            outcomes.append("Sensitive Files (-25)")
-        if self.credit_cards_recovered:
-            outcomes.append("Credit Cards (-50)")
-        if self.pii_recovered:
-            outcomes.append("PII (-200)")
-        if self.encrypted_db_recovered:
-            outcomes.append("Encrypted DB (-25)")
-        if self.db_decrypted:
-            outcomes.append("DB Decrypted (-25)")
+        for field_name, pts, label in self.OUTCOME_SPECS:
+            if getattr(self, field_name):
+                outcomes.append(f"{label} (-{pts})")
         return outcomes
 
 
@@ -449,16 +369,10 @@ class RedTeamScreenshot(models.Model):
     filename = models.CharField(max_length=255)
     mime_type = models.CharField(max_length=100, default="image/png")
     uploaded_at = models.DateTimeField(auto_now_add=True)
-    description = models.CharField(max_length=200, blank=True)
 
     class Meta:
         db_table = "red_team_screenshot"
         ordering = ["uploaded_at"]
-
-    @property
-    def has_data(self) -> bool:
-        """Check if file data exists (for legacy records without data)."""
-        return bool(self.file_data)
 
     def __str__(self) -> str:
         return f"{self.filename} ({self.finding})"
@@ -467,13 +381,6 @@ class RedTeamScreenshot(models.Model):
 class IncidentReport(Approvable):
     """Blue team incident report submission."""
 
-    event = models.ForeignKey(
-        "registration.Event",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="incident_reports",
-    )
     team = models.ForeignKey(
         "team.Team",
         on_delete=models.CASCADE,
@@ -503,8 +410,6 @@ class IncidentReport(Approvable):
         default=False,
         help_text="Attack was successfully mitigated",
     )
-
-    evidence_notes = models.TextField(blank=True)
 
     matched_to_red_score = models.ForeignKey(
         RedTeamScore,
@@ -555,16 +460,10 @@ class IncidentScreenshot(models.Model):
     filename = models.CharField(max_length=255)
     mime_type = models.CharField(max_length=100, default="image/png")
     uploaded_at = models.DateTimeField(auto_now_add=True)
-    description = models.CharField(max_length=200, blank=True)
 
     class Meta:
         db_table = "incident_screenshot"
         ordering = ["uploaded_at"]
-
-    @property
-    def has_data(self) -> bool:
-        """Check if file data exists (for legacy records without data)."""
-        return bool(self.file_data)
 
     def __str__(self) -> str:
         return f"{self.filename} ({self.incident})"
@@ -573,13 +472,6 @@ class IncidentScreenshot(models.Model):
 class InjectScore(Approvable):
     """White/Gold team scoring of inject submissions."""
 
-    event = models.ForeignKey(
-        "registration.Event",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="inject_grades",
-    )
     team = models.ForeignKey(
         "team.Team",
         on_delete=models.CASCADE,
@@ -596,9 +488,7 @@ class InjectScore(Approvable):
         decimal_places=2,
         validators=[MinValueValidator(Decimal("0"))],
     )
-    notes = models.TextField(blank=True, help_text="Grader notes")
 
-    # Team-facing feedback (synthesized from raw judge comments)
     feedback = models.TextField(
         blank=True,
         help_text="Professional feedback shown to teams on scorecard",
@@ -643,15 +533,8 @@ class InjectScore(Approvable):
 
 
 class OrangeTeamScore(Approvable):
-    """Orange team checks for customer service evaluation (positive or negative)."""
+    """Orange team check scores from customer service evaluations."""
 
-    event = models.ForeignKey(
-        "registration.Event",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="orange_team_scores",
-    )
     team = models.ForeignKey(
         "team.Team",
         on_delete=models.CASCADE,
@@ -668,7 +551,7 @@ class OrangeTeamScore(Approvable):
     points_awarded = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        help_text="Points to add (positive) or deduct (negative)",
+        help_text="Points awarded for the check",
     )
 
     orange_check = models.ForeignKey(
@@ -677,7 +560,7 @@ class OrangeTeamScore(Approvable):
         null=True,
         blank=True,
         related_name="orange_scores",
-        help_text="Orange check this score was created from (null for manual adjustments)",
+        help_text="Orange check this score was created from",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -697,13 +580,6 @@ class OrangeTeamScore(Approvable):
 class ServiceScore(models.Model):
     """Service uptime scores from Quotient."""
 
-    event = models.ForeignKey(
-        "registration.Event",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="service_scores",
-    )
     team = models.ForeignKey(
         "team.Team",
         on_delete=models.CASCADE,
@@ -744,13 +620,6 @@ class ServiceScore(models.Model):
 class ServiceDetail(models.Model):
     """Per-service uptime scores (e.g., balrog-ntp, brassknuckles-imap)."""
 
-    event = models.ForeignKey(
-        "registration.Event",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="service_details",
-    )
     team = models.ForeignKey(
         "team.Team",
         on_delete=models.CASCADE,
@@ -773,7 +642,7 @@ class ServiceDetail(models.Model):
         db_table = "service_detail"
         verbose_name = "Service Detail"
         verbose_name_plural = "Service Details"
-        unique_together = [["team", "event", "service_name"]]
+        unique_together = [["team", "service_name"]]
         ordering = ["service_name", "team__team_number"]
 
     def __str__(self) -> str:

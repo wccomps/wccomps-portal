@@ -21,7 +21,6 @@ from .models import (
     ScoringExclusion,
     ScoringTemplate,
     ServiceScore,
-    format_boxes_display,
 )
 
 
@@ -54,7 +53,7 @@ class AttackTypeAdmin(PortalModelAdmin[AttackType]):
 class RedTeamScreenshotInline(admin.TabularInline[RedTeamScreenshot, RedTeamScore]):
     model = RedTeamScreenshot
     extra = 1
-    fields = ["filename", "description"]
+    fields = ["filename"]
 
 
 @admin.register(RedTeamScore)
@@ -65,7 +64,6 @@ class RedTeamScoreAdmin(PortalModelAdmin[RedTeamScore]):
         "affected_boxes_display",
         "affected_service",
         "team_count",
-        "contributors_count",
         "points_per_team",
         "submitted_by",
         "created_at",
@@ -73,23 +71,17 @@ class RedTeamScoreAdmin(PortalModelAdmin[RedTeamScore]):
     list_filter = ["attack_type", "universally_attempted", "is_approved", "created_at"]
     search_fields = ["attack_type__name", "affected_service", "notes"]
     autocomplete_fields = ["attack_type"]
-
-    @admin.display(description="Boxes")
-    def affected_boxes_display(self, obj: RedTeamScore) -> str:
-        return format_boxes_display(obj.affected_boxes)
-
-    filter_horizontal = ["affected_teams", "contributors"]
+    filter_horizontal = ["affected_teams"]
     inlines = [RedTeamScreenshotInline]
     readonly_fields = ["created_at", "updated_at"]
 
     fieldsets = [
-        ("Submitted By", {"fields": ["submitted_by", "contributors"]}),
+        ("Submitted By", {"fields": ["submitted_by"]}),
         (
             "Attack Details",
             {
                 "fields": [
                     "attack_type",
-                    "attack_vector",
                     "source_ip",
                     "source_ip_pool",
                     "destination_ip_template",
@@ -114,15 +106,11 @@ class RedTeamScoreAdmin(PortalModelAdmin[RedTeamScore]):
     def team_count(self, obj: RedTeamScore) -> int:
         return obj.affected_teams.count()
 
-    @admin.display(description="Contributors")
-    def contributors_count(self, obj: RedTeamScore) -> int:
-        return obj.contributors.count()
-
 
 class IncidentScreenshotInline(admin.TabularInline[IncidentScreenshot, IncidentReport]):
     model = IncidentScreenshot
     extra = 1
-    fields = ["filename", "description"]
+    fields = ["filename"]
 
 
 @admin.register(IncidentReport)
@@ -166,7 +154,6 @@ class IncidentReportAdmin(PortalModelAdmin[IncidentReport]):
             "Timeline",
             {"fields": ["attack_detected_at", "attack_mitigated"]},
         ),
-        ("Evidence", {"fields": ["evidence_notes"]}),
         (
             "Gold Team Review",
             {
@@ -186,10 +173,6 @@ class IncidentReportAdmin(PortalModelAdmin[IncidentReport]):
     @admin.display(description="Description")
     def attack_description_short(self, obj: IncidentReport) -> str:
         return shorten(obj.attack_description, 50)
-
-    @admin.display(description="Affected Boxes")
-    def affected_boxes_display(self, obj: IncidentReport) -> str:
-        return format_boxes_display(obj.affected_boxes)
 
     @admin.display(description="Status")
     def reviewed_status(self, obj: IncidentReport) -> str:
@@ -216,7 +199,7 @@ class InjectScoreAdmin(PortalModelAdmin[InjectScore]):
     fieldsets = [
         ("Team", {"fields": ["team"]}),
         ("Inject", {"fields": ["inject_id", "inject_name", "max_points"]}),
-        ("Grading", {"fields": ["points_awarded", "notes"]}),
+        ("Grading", {"fields": ["points_awarded"]}),
         ("Audit", {"fields": ["graded_by", "graded_at", "updated_at"]}),
     ]
 
@@ -315,9 +298,8 @@ class ScoringTemplateAdmin(PortalModelAdmin[ScoringTemplate]):
 
 @admin.register(QuotientMetadataCache)
 class QuotientMetadataCacheAdmin(PortalModelAdmin[QuotientMetadataCache]):
-    list_display = ["event_name", "team_count", "last_synced", "synced_by"]
+    list_display = ["last_synced", "synced_by"]
     readonly_fields = ["last_synced"]
-    search_fields = ["event_name"]
 
 
 @admin.register(RedTeamIPPool)

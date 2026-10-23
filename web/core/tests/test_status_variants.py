@@ -10,7 +10,7 @@ from core.status_variants import badge_variant
 
 def test_a_stored_status_maps_to_its_variant() -> None:
     rendered = Template("{% load status_variants %}{{ s|badge_variant:'packet_email' }}").render(
-        Context({"s": "bounced"})
+        Context({"s": "failed"})
     )
     assert rendered == "danger"
 

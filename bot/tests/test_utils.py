@@ -56,16 +56,6 @@ class TestTeamHelpers:
         call_args = mock_interaction.response.send_message.call_args
         assert "between 1 and 50" in call_args.args[0]
 
-    async def test_get_team_or_respond_skip_validation(self, mock_interaction: Any) -> None:
-        """Test skipping range validation."""
-        result = await get_team_or_respond(mock_interaction, 99, validate_range=False)
-
-        assert result is None
-        mock_interaction.response.send_message.assert_called_once()
-        call_args = mock_interaction.response.send_message.call_args
-        assert "not found" in call_args.args[0].lower()
-        assert "between" not in call_args.args[0].lower()
-
     async def test_get_team_member_discord_ids(self) -> None:
         """Test getting Discord IDs for team members."""
         team_num = 26
@@ -130,22 +120,6 @@ class TestLogging:
             await log_to_ops_channel(bot, "Test message")
 
         channel.send.assert_called_once_with("Test message")
-
-    async def test_log_to_ops_channel_with_embed(self) -> None:
-        """Test logging to ops channel with embed."""
-        channel = AsyncMock(spec=discord.TextChannel)
-        channel.send = AsyncMock()
-
-        bot = MagicMock(spec=discord.Client)
-        bot.get_channel = MagicMock(return_value=channel)
-
-        embed = discord.Embed(title="Test")
-
-        with patch("bot.utils.settings") as mock_settings:
-            mock_settings.DISCORD_LOG_CHANNEL_ID = 123456789
-            await log_to_ops_channel(bot, "Test message", embed=embed)
-
-        channel.send.assert_called_once_with("Test message", embed=embed)
 
     async def test_log_to_ops_channel_no_config(self) -> None:
         """Test logging when channel ID not configured."""

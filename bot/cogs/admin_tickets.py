@@ -1,5 +1,3 @@
-"""Admin commands for ticket management."""
-
 import logging
 
 import discord
@@ -45,8 +43,6 @@ class UserOrIdTransformer(app_commands.Transformer):
 
 
 class AdminTicketsCog(commands.Cog):
-    """Admin commands for ticket management."""
-
     tickets_group = app_commands.Group(name="tickets", description="Ticket management commands")
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -108,7 +104,6 @@ class AdminTicketsCog(commands.Cog):
             return
         cat = ticket_input.category
 
-        # Create ticket atomically to prevent race conditions
         from ticketing.utils import acreate_ticket_atomic
 
         ticket = await acreate_ticket_atomic(
@@ -126,7 +121,7 @@ class AdminTicketsCog(commands.Cog):
         await interaction.response.send_message(
             f"Created ticket **{ticket.ticket_number}** for **{team.team_name}**\n"
             f"Category: {cat.display_name}\n"
-            f"Point cost: {cat.points} points",
+            f"Point cost: {cat.points_display}",
             ephemeral=True,
         )
 
@@ -293,7 +288,7 @@ class AdminTicketsCog(commands.Cog):
     ) -> None:
         """Change the category of a ticket."""
         from ticketing.forms import TicketChangeCategoryForm
-        from ticketing.utils import achange_ticket_category_atomic
+        from ticketing.lifecycle import achange_ticket_category_atomic
 
         ticket = await Ticket.objects.select_related("category").filter(ticket_number=ticket_number).afirst()
         if not ticket:
@@ -323,14 +318,14 @@ class AdminTicketsCog(commands.Cog):
 
         old_cat_name = old_cat.display_name if old_cat else str(old_category_id)
         new_cat_name = new_cat.display_name if new_cat else str(new_category_id)
-        old_pts = old_cat.points if old_cat else 0
-        new_pts = new_cat.points if new_cat else 0
+        old_pts = old_cat.points_label if old_cat else "0pt"
+        new_pts = new_cat.points_label if new_cat else "0pt"
 
         await log_to_ops_channel(
             self.bot,
             f"Ticket Category Changed: {ticket.ticket_number} for **{ticket.team.team_name}**\n"
             f"Changed by {interaction.user.mention}: from {old_cat_name} to {new_cat_name}\n"
-            f"Point impact: from {old_pts}pt to {new_pts}pt",
+            f"Point impact: from {old_pts} to {new_pts}",
         )
 
         await interaction.response.send_message(

@@ -14,8 +14,15 @@ from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
 _SERVICE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_INJECT_POINTS_RE = re.compile(r"\(\s*([\d,]+)\s*(?:pts?|points?)\s*\)", re.IGNORECASE)
 MAX_CHECK_OUTPUT_CHARS = 16_384
 _UNSAFE_OUTPUT_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+
+
+def inject_points(title: str) -> int | None:
+    """The point value embedded in a Quotient inject title, or None if it has none."""
+    match = _INJECT_POINTS_RE.search(title or "")
+    return int(match.group(1).replace(",", "")) if match else None
 
 
 def _is_unavailable(exc: BaseException | None) -> bool:
@@ -139,7 +146,6 @@ class QuotientService:
 
     name: str
     display_name: str
-    type: str  # custom, dns, smtp, imap, ssh, web, pop3
 
 
 @dataclass
@@ -152,8 +158,6 @@ class QuotientBox:
 @dataclass
 class QuotientInfrastructure:
     boxes: list[QuotientBox]
-    event_name: str
-    team_count: int
 
 
 @dataclass
@@ -188,6 +192,11 @@ class Inject:
     inject_id: int
     title: str
     description: str
+    max_points: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.max_points is None:
+            self.max_points = inject_points(self.title)
 
 
 @dataclass
@@ -292,7 +301,6 @@ class QuotientClient:
                     QuotientService(
                         name=_text(svc_name, "a service"),
                         display_name=_text(svc_name, "a service"),
-                        type="custom",  # Type not provided by metadata endpoint
                     )
                     for svc_name in svc_names
                 ]
@@ -305,11 +313,7 @@ class QuotientClient:
                     )
                 )
 
-            infrastructure = QuotientInfrastructure(
-                boxes=boxes,
-                event_name="",  # Not provided by metadata endpoint
-                team_count=0,  # Not provided by metadata endpoint
-            )
+            infrastructure = QuotientInfrastructure(boxes=boxes)
 
             cache.set(cache_key, infrastructure, self.cache_ttl)
             logger.info(f"Fetched {len(boxes)} boxes from Quotient API")
@@ -452,7 +456,7 @@ class QuotientClient:
             return None
 
     def get_service_choices(self) -> list[dict[str, str]]:
-        """Service choices for the ticket dropdown, as dicts with 'value', 'label', 'box_ip' and 'box_name' keys."""
+        """Service choices for the ticket dropdown (keys: value, label, box_ip, box_name, service_name)."""
         infrastructure = self.get_infrastructure()
         if not infrastructure:
             return []
@@ -464,7 +468,6 @@ class QuotientClient:
                 "box_ip": box.ip,
                 "box_name": box.name,
                 "service_name": service.name,
-                "service_type": service.type,
             }
             for box in infrastructure.boxes
             for service in box.services
