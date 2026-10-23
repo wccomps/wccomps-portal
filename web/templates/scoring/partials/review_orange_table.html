@@ -12,7 +12,8 @@
                                :checked="allSelected"
                                :indeterminate="someSelected"
                                @click="toggleAll"
-                               title="Select all">
+                               title="Select all"
+                               aria-label="Select all checks">
                     </th>
                     <c-table_header sortable="false">
                         ID
@@ -48,6 +49,7 @@
                                    name="adjustment_ids"
                                    value="{{ check.id }}"
                                    data-check-id="{{ check.id }}"
+                                   aria-label="Select check #{{ check.id }}"
                                    :checked="selectedMap.{{ check.id|jskey }}"
                                    @change="toggleItem">
                         {% endif %}

@@ -22,7 +22,7 @@
             </c-slot>
             <div class="grid-2 gap-20">
                 <div>
-                    <h3>Report Details</h3>
+                    <h2>Report Details</h2>
                     <c-detail_grid>
                         <c-detail_row label="Team">
                             Team {{ incident.team.team_number }}
@@ -39,7 +39,7 @@
                     </c-detail_grid>
                 </div>
                 <div>
-                    <h3>Attack Information</h3>
+                    <h2>Attack Information</h2>
                     <c-detail_grid>
                         <c-detail_row label="Affected Boxes">
                             {{ incident.affected_boxes_display }}
@@ -78,6 +78,7 @@
                                target="_blank">
                                 <img src="{% url 'scoring:incident_screenshot' screenshot.id %}"
                                      alt="{{ screenshot.filename }}"
+                                     loading="lazy"
                                      width="200"
                                      height="150">
                             </a>

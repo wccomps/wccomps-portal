@@ -19,7 +19,8 @@
                                :checked="allSelected"
                                :indeterminate="someSelected"
                                @click="toggleAll"
-                               title="Select all">
+                               title="Select all"
+                               aria-label="Select all findings">
                     </th>
                 {% endif %}
                 <c-table_header sortable="false">
@@ -62,6 +63,7 @@
                                    name="finding_ids"
                                    value="{{ finding.id }}"
                                    data-finding-id="{{ finding.id }}"
+                                   aria-label="Select finding #{{ finding.id }}"
                                    :checked="selectedMap.{{ finding.id|jskey }}"
                                    @change="toggleItem">
                         {% endif %}

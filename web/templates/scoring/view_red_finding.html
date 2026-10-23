@@ -21,7 +21,7 @@
         </c-slot>
         <div class="grid-2 gap-20">
             <div>
-                <h3>Attack Details</h3>
+                <h2>Attack Details</h2>
                 <c-detail_grid>
                     <c-detail_row label="Attack Type">
                         {{ finding.attack_type.name|default:"Unknown" }}
@@ -43,7 +43,7 @@
                 </c-detail_grid>
             </div>
             <div>
-                <h3>Submission</h3>
+                <h2>Submission</h2>
                 <c-detail_grid>
                     <c-detail_row label="Submitted By">
                         {{ finding.submitted_by.username }}
@@ -110,6 +110,7 @@
                            target="_blank">
                             <img src="{% url 'scoring:red_screenshot' screenshot.id %}"
                                  alt="{{ screenshot.filename }}"
+                                 loading="lazy"
                                  width="200"
                                  height="150">
                         </a>

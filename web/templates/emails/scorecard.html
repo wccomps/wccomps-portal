@@ -5,9 +5,20 @@
         <title>Scorecard - WCComps</title>
         <style>
             body {
-                font-family: Arial, sans-serif;
+                font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                font-size: 14px;
                 line-height: 1.6;
                 color: #333;
+            }
+
+            h1 {
+                font-size: 24px;
+                margin: 0;
+            }
+
+            h2 {
+                font-size: 18px;
+                margin: 12px 0 8px 0;
             }
 
             .container {
@@ -30,7 +41,7 @@
 
             .rank-badge {
                 background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
-                color: #78350f;
+                color: #451a03;
                 padding: 20px;
                 border-radius: 10px;
                 text-align: center;
@@ -71,7 +82,7 @@
             }
 
             .score-table .positive {
-                color: #059669;
+                color: #047857;
             }
 
             .score-table .negative {
@@ -86,12 +97,12 @@
 
             .advisory {
                 background: #fffbeb;
-                border-left: 4px solid #f59e0b;
+                border: 1px solid #f59e0b;
                 padding: 15px;
                 border-radius: 4px;
                 margin: 20px 0;
                 font-size: 14px;
-                color: #78350f;
+                color: #451a03;
                 line-height: 1.5;
             }
 
@@ -114,7 +125,7 @@
                     <div class="label">out of {{ total_teams }} teams</div>
                 </div>
                 <div class="event-details">
-                    <h3>Event Details</h3>
+                    <h2>Event Details</h2>
                     <p>
                         <strong>Date:</strong> {{ event_date|date:"F d, Y" }}
                     </p>
@@ -125,7 +136,7 @@
                         <strong>Team Number:</strong> {{ team_number }}
                     </p>
                 </div>
-                <h3>Score Breakdown</h3>
+                <h2>Score Breakdown</h2>
                 <table class="score-table">
                     <tr>
                         <th>Category</th>

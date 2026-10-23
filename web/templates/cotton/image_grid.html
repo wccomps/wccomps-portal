@@ -1,10 +1,3 @@
 {# Image grid component - responsive grid for displaying images/screenshots #}
-{# Usage: <c-image_grid cols="3">image elements or links</c-image_grid> #}
-{# Props: cols (optional: number of columns, default "3"), gap (optional: spacing, default "15px") #}
-<c-vars cols="3" gap="15px" />
-<div {{ attrs }}
-     class="image-grid"
-     style="display: grid;
-            grid-template-columns: repeat({{ cols }}, 1fr);
-            gap: {{ gap }}">{{ slot }}</div>
-{# djlint:on #}
+{# Usage: <c-image_grid>image elements or links</c-image_grid> #}
+<div {{ attrs }} class="image-grid">{{ slot }}</div>

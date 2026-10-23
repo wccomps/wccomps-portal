@@ -139,7 +139,7 @@
 University of Example,coach@example.edu,assistant@example.edu,Main campus team
 Community College,contact@college.edu,,Remote team
 Tech Institute,admin@techinst.edu,,</pre>
-                    <c-form enctype="multipart/form-data" class="mt-20">
+                    <c-form enctype="multipart/form-data" class="mt-20" x-data="schoolImportForm">
                         {% csrf_token %}
                         <input type="hidden" name="upload" value="true">
                         <c-fieldset aligned="true">
@@ -156,7 +156,7 @@ Tech Institute,admin@techinst.edu,,</pre>
                                           required="true"
                                           id="id_event"
                                           help_text="The event this school list is for. Importing opens it; packets sent from then on belong to it.">
-                                <select name="event" id="id_event" class="vTextField">
+                                <select name="event" id="id_event" class="vTextField" @change="onEventChange">
                                     <option value="">Choose an event</option>
                                     {% for ev in open_events %}<option value="{{ ev.pk }}">{{ ev.name }} ({{ ev.date }})</option>{% endfor %}
                                     <option value="new">New event</option>
@@ -173,50 +173,52 @@ Tech Institute,admin@techinst.edu,,</pre>
                                     </div>
                                 {% endfor %}
                             </c-form_field>
-                            <c-form_field label="New event name" id="id_new_name" help_text="Only for a new event.">
-                                <input type="text" name="new_name" id="id_new_name" class="vTextField">
-                            </c-form_field>
-                            <c-form_field label="New event date" id="id_new_date">
-                                <input type="date" name="new_date" id="id_new_date" class="vTextField">
-                            </c-form_field>
-                            <c-form_field label="New event type" id="id_new_type">
-                                <select name="new_type" id="id_new_type" class="vTextField">
-                                    <option value="invitational">Invitational</option>
-                                    <option value="qualifier">Qualifier</option>
-                                    <option value="regional">Regional</option>
-                                    <option value="state">State</option>
-                                </select>
-                            </c-form_field>
-                            {% if active_season %}
-                                <input type="hidden" name="current_season" value="{{ active_season.pk }}">
-                                <p>
-                                    Unless you start a new season below, this event will be in season
-                                    <strong>{{ active_season.name }}</strong>.
-                                </p>
-                                <p>
-                                    <strong>Start a new season</strong> instead at the start of a school year: choose New
-                                    event and give the new season a name and a year below.
-                                </p>
-                            {% else %}
-                                <p>No season is active, so the new event starts a new season: give it a name and a year.</p>
-                            {% endif %}
-                            <c-form_field label="New season name"
-                                          id="id_new_season_name"
-                                          help_text="Only for a new event in a new season. The import creates the season and makes it the active one.">
-                                <input type="text"
-                                       name="new_season_name"
-                                       id="id_new_season_name"
-                                       maxlength="100"
-                                       class="vTextField">
-                            </c-form_field>
-                            <c-form_field label="New season year" id="id_new_season_year">
-                                <input type="number"
-                                       name="new_season_year"
-                                       id="id_new_season_year"
-                                       min="2000"
-                                       max="2100"
-                                       class="vTextField">
-                            </c-form_field>
+                            <div x-show="isNewEvent">
+                                <c-form_field label="New event name" id="id_new_name" help_text="Only for a new event.">
+                                    <input type="text" name="new_name" id="id_new_name" class="vTextField">
+                                </c-form_field>
+                                <c-form_field label="New event date" id="id_new_date">
+                                    <input type="date" name="new_date" id="id_new_date" class="vTextField">
+                                </c-form_field>
+                                <c-form_field label="New event type" id="id_new_type">
+                                    <select name="new_type" id="id_new_type" class="vTextField">
+                                        <option value="invitational">Invitational</option>
+                                        <option value="qualifier">Qualifier</option>
+                                        <option value="regional">Regional</option>
+                                        <option value="state">State</option>
+                                    </select>
+                                </c-form_field>
+                                {% if active_season %}
+                                    <input type="hidden" name="current_season" value="{{ active_season.pk }}">
+                                    <p>
+                                        Unless you start a new season below, this event will be in season
+                                        <strong>{{ active_season.name }}</strong>.
+                                    </p>
+                                    <p>
+                                        <strong>Start a new season</strong> instead at the start of a school year: choose New
+                                        event and give the new season a name and a year below.
+                                    </p>
+                                {% else %}
+                                    <p>No season is active, so the new event starts a new season: give it a name and a year.</p>
+                                {% endif %}
+                                <c-form_field label="New season name"
+                                              id="id_new_season_name"
+                                              help_text="Only for a new event in a new season. The import creates the season and makes it the active one.">
+                                    <input type="text"
+                                           name="new_season_name"
+                                           id="id_new_season_name"
+                                           maxlength="100"
+                                           class="vTextField">
+                                </c-form_field>
+                                <c-form_field label="New season year" id="id_new_season_year">
+                                    <input type="number"
+                                           name="new_season_year"
+                                           id="id_new_season_year"
+                                           min="2000"
+                                           max="2100"
+                                           class="vTextField">
+                                </c-form_field>
+                            </div>
                         </c-fieldset>
                         <c-button_row class="justify-end">
                             <c-link href="{% url 'school_info' %}" variant="cancel">Cancel</c-link>
@@ -225,6 +227,19 @@ Tech Institute,admin@techinst.edu,,</pre>
                             </c-button>
                         </c-button_row>
                     </c-form>
+                    <script>
+                        document.addEventListener('alpine:init', () => {
+                            Alpine.data('schoolImportForm', () => ({
+                                selectedEvent: '',
+                                get isNewEvent() {
+                                    return this.selectedEvent === 'new';
+                                },
+                                onEventChange(e) {
+                                    this.selectedEvent = e.target.value;
+                                }
+                            }));
+                        });
+                    </script>
                 </div>
             {% endif %}
         </c-module>

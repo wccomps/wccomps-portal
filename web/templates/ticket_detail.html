@@ -250,6 +250,7 @@
                                class="attachment-preview">
                                 <img src="{% url 'ticket_attachment_download' ticket.ticket_number attachment.id %}?inline=1"
                                      alt="{{ attachment.filename }}"
+                                     loading="lazy"
                                      width="100"
                                      height="100"
                                      class="attachment-thumbnail">

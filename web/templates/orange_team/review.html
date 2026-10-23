@@ -63,7 +63,10 @@
                                     <c-form action="{% url 'orange_team:assignment_reject' assignment.pk %}"
                                             data-confirm="Reject this assignment?">
                                         {% csrf_token %}
-                                        <input type="text" name="notes" placeholder="Reason (optional)">
+                                        <input type="text"
+                                               name="notes"
+                                               aria-label="Rejection reason for Team {{ assignment.team.team_number }}"
+                                               placeholder="Reason (optional)">
                                         <c-button type="submit" variant="danger">
                                             Reject
                                         </c-button>
