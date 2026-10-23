@@ -533,7 +533,7 @@ class InjectScore(Approvable):
 
 
 class OrangeTeamScore(Approvable):
-    """Orange team checks for customer service evaluation (positive or negative)."""
+    """Orange team check scores from customer service evaluations."""
 
     team = models.ForeignKey(
         "team.Team",
@@ -551,7 +551,7 @@ class OrangeTeamScore(Approvable):
     points_awarded = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        help_text="Points to add (positive) or deduct (negative)",
+        help_text="Points awarded for the check",
     )
 
     orange_check = models.ForeignKey(
@@ -560,7 +560,7 @@ class OrangeTeamScore(Approvable):
         null=True,
         blank=True,
         related_name="orange_scores",
-        help_text="Orange check this score was created from (null for manual adjustments)",
+        help_text="Orange check this score was created from",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

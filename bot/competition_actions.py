@@ -5,12 +5,13 @@ from collections.abc import Callable
 
 import discord
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from django.db import connection
 from django.utils import timezone
 from scoring.models import QuotientMetadataCache
 
 from bot.discord_manager import delete_team_infrastructure
-from bot.utils import announcement, log_to_ops_channel, send_parts, team_chat_channel
+from bot.utils import announcement, log_to_ops_channel, send_announcement, send_parts, team_chat_channel
 from core.authentik_utils import parse_team_range
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.services.competition import CompetitionRunResult, run_competition_to_completion
@@ -268,8 +269,20 @@ async def deliver_team_broadcast(
     message: str,
     sender: str,
 ) -> tuple[int, int, list[str]]:
-    """Send a broadcast message to 'all-teams' or a parsed team range, queuing if a channel is missing."""
+    """Send a broadcast to 'announcements', 'all-teams', or a team range, queuing if a channel is missing."""
     target_lower = target.lower().strip()
+    if target_lower == "announcements":
+        announcement_channel_id = settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID
+        channel = guild.get_channel(announcement_channel_id)
+        if not channel or not isinstance(channel, discord.TextChannel):
+            return 0, 0, [f"Announcements channel not found (ID: {announcement_channel_id})"]
+        try:
+            await send_announcement(guild, channel, message)
+            return 1, 0, []
+        except Exception as e:
+            logger.exception(f"Failed to broadcast to announcements: {e}")
+            return 0, 0, [f"Announcements ({shorten(str(e), 50)})"]
+
     if target_lower == "all-teams":
         teams = [t async for t in Team.objects.filter(is_active=True).order_by("team_number")]
         team_numbers = [t.team_number for t in teams]

@@ -8,7 +8,7 @@ from packets.models import Packet, packets_sent
 from scoring.calculator import Standing, compute_standings
 from scoring.export import export_all_zip_bytes
 from scoring.models import QuotientMetadataCache
-from scoring.scorecard import build_scorecard_context
+from scoring.scorecard import build_peer_context, build_scorecard_context
 from scoring.snapshot import SNAPSHOT_VERSION, serialize_scorecard
 
 from core.competition_utils import WipedData, wipe_competition_data
@@ -556,9 +556,10 @@ def current_snapshots(event: Event | None, standings: list[Standing] | None = No
     school_by_team = _school_by_team(event)
     if standings is None:
         standings = compute_standings()
+    peer_context = build_peer_context(standings)
     return {
         school_by_team[standing.team.pk]: SchoolSnapshot(
-            standing, serialize_scorecard(build_scorecard_context(standing, standings))
+            standing, serialize_scorecard(build_scorecard_context(standing, standings, peer_context=peer_context))
         )
         for standing in standings
         if standing.team.pk in school_by_team

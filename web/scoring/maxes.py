@@ -19,7 +19,7 @@ TemplateMaxField = Literal["service_max", "inject_max", "orange_max"]
 
 
 def inject_max_from_titles(injects: Sequence[Inject]) -> Decimal | None:
-    """Sum of the per-inject point values, or None if any title lacks one.
+    """Sum of per-inject point values from a sequence of Inject objects, or None if any title lacks one.
 
     All-or-nothing on purpose: an inject with no parseable max still contributes its
     graded points to the total, so a partial sum would silently under-count.

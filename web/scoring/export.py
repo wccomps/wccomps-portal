@@ -97,7 +97,11 @@ def _fetch_incidents() -> list[IncidentReport]:
 
 
 def _fetch_orange_adjustments() -> list[OrangeTeamScore]:
-    return list(OrangeTeamScore.objects.select_related("team", "submitted_by", "approved_by").order_by("-created_at"))
+    return list(
+        OrangeTeamScore.objects.select_related("team", "submitted_by", "approved_by", "orange_check").order_by(
+            "-created_at"
+        )
+    )
 
 
 def _fetch_inject_grades() -> list[InjectScore]:

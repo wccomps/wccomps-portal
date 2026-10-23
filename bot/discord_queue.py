@@ -8,7 +8,6 @@ from typing import assert_never
 
 import discord
 from asgiref.sync import sync_to_async
-from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
@@ -20,7 +19,6 @@ from bot.ticket_dashboard import trigger_dashboard
 from bot.utils import (
     add_field,
     recycle_db_connection,
-    send_announcement,
     send_parts,
     split_message,
 )
@@ -446,24 +444,13 @@ class DiscordQueueProcessor:
 
         guild = self._guild()
 
-        target_lower = target.lower().strip()
-        sent_count = 0
-        queued_count = 0
-        failed_channels: list[str] = []
+        try:
+            sent_count, queued_count, failed_channels = await deliver_team_broadcast(guild, target, message, sender)
+        except ValueError as e:
+            raise ValueError(f"Invalid team range: {e}") from e
 
-        if target_lower == "announcements":
-            channel = guild.get_channel(settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID)
-            if not channel or not isinstance(channel, discord.TextChannel):
-                raise RuntimeError("Announcements channel not found")
-
-            await send_announcement(guild, channel, message)
-            sent_count = 1
-            logger.info(f"Broadcast to announcements by {sender}")
-        else:
-            try:
-                sent_count, queued_count, failed_channels = await deliver_team_broadcast(guild, target, message, sender)
-            except ValueError as e:
-                raise ValueError(f"Invalid team range: {e}") from e
+        if target.lower().strip() == "announcements" and failed_channels:
+            raise RuntimeError(failed_channels[0])
 
         await log_to_ops_channel(
             self.bot,

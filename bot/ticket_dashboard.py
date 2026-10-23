@@ -72,7 +72,7 @@ def trigger_dashboard(bot: discord.Client) -> None:
 
 
 class TicketActionView(discord.ui.View):
-    """Claim, unclaim, resolve, and cancel buttons on a ticket's thread message."""
+    """Claim, resolve, and cancel buttons on a ticket's thread message."""
 
     def __init__(self, ticket_id: int) -> None:
         super().__init__(timeout=None)

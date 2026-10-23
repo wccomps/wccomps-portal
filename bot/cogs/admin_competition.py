@@ -9,7 +9,7 @@ from django.conf import settings
 
 from bot.competition_actions import deliver_team_broadcast, run_competition_cleanup
 from bot.permissions import permission_check
-from bot.utils import ConfirmView, log_to_ops_channel, send_announcement
+from bot.utils import ConfirmView, log_to_ops_channel
 from core.authentik_utils import (
     credentials_csv,
     parse_team_range,
@@ -428,33 +428,6 @@ class AdminCompetitionCog(commands.Cog):
         guild = interaction.guild
         if not guild:
             await interaction.followup.send("This command must be used in a guild", ephemeral=True)
-            return
-
-        target_lower = target.lower().strip()
-
-        if target_lower == "announcements":
-            announcement_channel_id = settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID
-            channel = guild.get_channel(announcement_channel_id)
-
-            if not channel or not isinstance(channel, discord.TextChannel):
-                await interaction.followup.send(
-                    f"Announcements channel not found (ID: {announcement_channel_id})",
-                    ephemeral=True,
-                )
-                return
-
-            try:
-                await send_announcement(guild, channel, message)
-
-                await log_to_ops_channel(
-                    self.bot,
-                    f"Broadcast to Announcements by {interaction.user.mention}\nMessage: {shorten(message, 100)}",
-                )
-
-                await interaction.followup.send("Broadcast sent to announcements channel", ephemeral=True)
-            except Exception as e:
-                logger.exception(f"Failed to broadcast to announcements: {e}")
-                await interaction.followup.send(f"Failed to send broadcast: {e}", ephemeral=True)
             return
 
         try:

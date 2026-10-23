@@ -56,3 +56,24 @@ def test_service_scorecard_list_breaks_ties_by_pk():
 
     listing = next(q["sql"] for q in queries if q["sql"].startswith('SELECT "service_detail"."id"'))
     assert listing.endswith('ORDER BY "service_detail"."service_name" ASC, "service_detail"."id" ASC')
+
+
+def test_batch_peer_context_queries_injects_and_services_once():
+    from scoring.scorecard import build_peer_context
+
+    t1, t2 = _team_with_school(1), _team_with_school(2)
+    InjectScore.objects.create(team=t1, inject_id="a", inject_name="Inj A", points_awarded=Decimal(5), is_approved=True)
+    InjectScore.objects.create(team=t2, inject_id="a", inject_name="Inj A", points_awarded=Decimal(9), is_approved=True)
+    ServiceDetail.objects.create(team=t1, service_name="svc-1", points=Decimal(10))
+    ServiceDetail.objects.create(team=t2, service_name="svc-1", points=Decimal(20))
+    standings = compute_standings()
+
+    with CaptureQueriesContext(connection) as queries:
+        peer_context = build_peer_context(standings)
+        for s in standings:
+            build_scorecard_context(s, standings, peer_context=peer_context)
+
+    inject_queries = [q["sql"] for q in queries if 'FROM "inject_grade"' in q["sql"]]
+    service_queries = [q["sql"] for q in queries if 'FROM "service_detail"' in q["sql"]]
+    assert len(inject_queries) == 1
+    assert len(service_queries) == 1

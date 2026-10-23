@@ -413,7 +413,7 @@ class AdminTeamsCog(commands.Cog):
 
         summary = f"**Team {noun} Results**\n\n{title_verb}: {success_count}/{len(team_numbers)}\n"
         if not active:
-            summary += "Their members lose their team roles within a few minutes; reactivating restores them.\n"
+            summary += "Their members lose their team roles; reactivating restores them.\n"
 
         await send_lines(interaction, summary.rstrip(), results, title="Details", filename="results.txt")
 
