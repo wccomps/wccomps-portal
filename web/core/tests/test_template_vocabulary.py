@@ -565,17 +565,22 @@ VAR_PLACEHOLDER_RE = re.compile(r"{{.*?}}")
 
 
 def test_button_row_links_have_a_button_variant() -> None:
-    """c-link's default variant renders a plain text link; inside a c-button_row every link is an action button."""
+    """c-link's default variant renders a plain text link; inside a c-button_row or .field-actions cell every link is
+    an action button."""
     found = {
         f"{template_name(path)}:{tag.line}": f"variant={tag.attrs.get('variant', 'default')!r}"
         for path in page_templates()
         for tag, open_tags in with_open_elements(path)
         if tag.name == "c-link"
-        and any(t.name == "c-button_row" for t in open_tags)
+        and any(
+            t.name == "c-button_row" or "field-actions" in attribute_classes(t.attrs.get("class", ""))
+            for t in open_tags
+        )
         and tag.attrs.get("variant") not in BUTTON_ROW_LINK_VARIANTS
     }
     fail_with(
-        f"c-link in a c-button_row without a button variant ({', '.join(sorted(BUTTON_ROW_LINK_VARIANTS))})",
+        "c-link in a c-button_row or .field-actions without a button variant "
+        f"({', '.join(sorted(BUTTON_ROW_LINK_VARIANTS))})",
         found,
         {},
     )

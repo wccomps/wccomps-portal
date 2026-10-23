@@ -23,12 +23,14 @@ def test_seasons_and_events_pages(live_server, pw_browser):
         page, status, errors = visit_and_capture_errors(context, f"{live_server.url}/register/seasons/")
         assert status == 200
         assert page.get_by_role("link", name="Create Season").first.is_visible()
-        page.get_by_role("link", name="Events", exact=True).click()
+        assert page.get_by_role("button", name="Edit", exact=True).is_visible()
+        page.get_by_role("button", name="Events", exact=True).click()
         page.wait_for_load_state("networkidle")
         assert page.get_by_role("cell", name="Invitational").first.is_visible()
         assert page.get_by_role("link", name="Create Event").first.is_visible()
+        assert page.get_by_role("button", name="Edit", exact=True).is_visible()
 
-        page.get_by_role("link", name="View", exact=True).click()
+        page.get_by_role("button", name="View", exact=True).click()
         page.wait_for_load_state("networkidle")
         assert page.get_by_role("heading", name="Team Enrollments (0)").is_visible()
         assert page.get_by_text("No teams enrolled for this event").is_visible()

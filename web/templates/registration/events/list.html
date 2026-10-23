@@ -68,9 +68,10 @@
                             {% endif %}
                         </td>
                         <td class="field-actions">
-                            <c-link href="{% url 'registration_event_detail' event_id=event.id %}">View</c-link>
+                            <c-link href="{% url 'registration_event_detail' event_id=event.id %}"
+                                    variant="secondary">View</c-link>
                             <c-link href="{% url 'registration_event_edit' event_id=event.id %}"
-                                    variant="change">Edit</c-link>
+                                    variant="secondary">Edit</c-link>
                             <c-link href="{% url 'registration_event_delete' event_id=event.id %}"
                                     variant="danger">Delete</c-link>
                         </td>

@@ -35,7 +35,7 @@
                     </c-badge>
                 </td>
                 <td>{{ registration.submitted_at|date:"Y-m-d H:i" }}</td>
-                <td>
+                <td class="field-actions">
                     {% if registration.status == "pending" %}
                         <c-form action="{% url 'registration_approve' registration.id %}"
                                 class="d-inline">
@@ -45,7 +45,7 @@
                             </c-button>
                         </c-form>
                         <c-link href="{% url 'registration_reject' registration.id %}"
-                                class="deletelink">Reject</c-link>
+                                variant="danger">Reject</c-link>
                     {% endif %}
                 </td>
             </tr>
