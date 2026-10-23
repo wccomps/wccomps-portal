@@ -15,9 +15,6 @@ from ..quotient_sync import sync_service_scores
 
 @require_permission("gold_team", error_message="Only Gold Team members can access this")
 def scoring_config(request: HttpRequest) -> HttpResponse:
-    """Scoring configuration (admin)."""
-
-    # Get or create scoring template (singleton)
     template = ScoringTemplate.objects.first()
     if not template:
         template = ScoringTemplate.objects.create()

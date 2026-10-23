@@ -1,7 +1,6 @@
 """Inject grading's Clear Form empties every team's points, so a save after it posts none."""
 
 from decimal import Decimal
-from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs
 
@@ -16,6 +15,7 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 
 def test_clear_form_empties_the_points_and_a_save_posts_none(live_server, pw_browser):
+    from quotient.client import Inject
     from scoring.models import InjectScore
 
     from team.models import Team
@@ -26,7 +26,7 @@ def test_clear_form_empties_the_points_and_a_save_posts_none(live_server, pw_bro
         InjectScore.objects.create(
             team=team, inject_id="1", inject_name="Inject 01", points_awarded=Decimal(50), graded_by=user
         )
-    inject = SimpleNamespace(inject_id=1, title="Inject 01 - Web (100 pts)", description="")
+    inject = Inject(inject_id=1, title="Inject 01 - Web (100 pts)", description="")
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     try:

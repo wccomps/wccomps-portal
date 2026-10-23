@@ -3,13 +3,17 @@
 import json
 import logging
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import cast
 
 from django.core.exceptions import BadRequest
+from django.db import models
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.urls import reverse
 from django.utils import timezone
+from orange_team.models import OrangeAssignment
+from scoring.models import IncidentReport, InjectScore, RedTeamScore
 
 from core.admin_views.places import SetupSection, setup_url
 from core.authentik_manager import AuthentikManager
@@ -17,6 +21,7 @@ from core.forms import ReadinessFixForm
 from core.models import CompetitionConfig
 from core.utils import ndjson_done
 from team.models import Team, team_username
+from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
 
@@ -150,20 +155,6 @@ def _check_blueteam_bindings() -> CheckResult:
     return ("pass", f"Bindings exist for all {len(apps)} apps", None)
 
 
-def _check_no_tickets() -> CheckResult:
-    """Check that no tickets exist yet (clean slate for competition)."""
-    from ticketing.models import Ticket
-
-    count = Ticket.objects.count()
-    if count > 0:
-        return (
-            "warn",
-            f"{count} ticket{'s' if count != 1 else ''} already exist",
-            {"type": "link", "url": reverse("ticket_list"), "label": "View Tickets"},
-        )
-    return ("pass", "No existing tickets", None)
-
-
 def _check_packets_distributed() -> CheckResult:
     """Check that packets went out for the open event and that every team on the school list has a delivered copy
     of each. Earlier events' packets went to their own teams."""
@@ -226,60 +217,61 @@ def _check_quotient_synced() -> CheckResult:
     return ("pass", f"Synced {cache.last_synced.strftime('%b %d %H:%M')}", None)
 
 
-def _check_no_red_scores() -> CheckResult:
-    """Check that no red team findings exist yet (clean slate for competition)."""
-    from scoring.models import RedTeamScore
+@dataclass(frozen=True)
+class CleanSlateCheck:
+    step_name: str
+    model: type[models.Model]
+    singular: str
+    pass_label: str
+    url_name: str
+    link_label: str
 
-    count = RedTeamScore.objects.count()
-    if count > 0:
-        return (
-            "warn",
-            f"{count} finding{'s' if count != 1 else ''} already exist",
-            {"type": "link", "url": reverse("scoring:red_team_findings"), "label": "View Findings"},
-        )
-    return ("pass", "No existing findings", None)
-
-
-def _check_no_incidents() -> CheckResult:
-    """Check that no incident reports exist yet (clean slate for competition)."""
-    from scoring.models import IncidentReport
-
-    count = IncidentReport.objects.count()
-    if count > 0:
-        return (
-            "warn",
-            f"{count} report{'s' if count != 1 else ''} already exist",
-            {"type": "link", "url": reverse("scoring:review_incidents"), "label": "View Reports"},
-        )
-    return ("pass", "No existing incident reports", None)
+    def __call__(self) -> CheckResult:
+        count = self.model._default_manager.count()
+        if count > 0:
+            return (
+                "warn",
+                f"{count} {self.singular}{'s' if count != 1 else ''} already exist",
+                {"type": "link", "url": reverse(self.url_name), "label": self.link_label},
+            )
+        return ("pass", f"No existing {self.pass_label}", None)
 
 
-def _check_no_inject_grades() -> CheckResult:
-    """Check that no inject grades exist yet (clean slate for competition)."""
-    from scoring.models import InjectScore
-
-    count = InjectScore.objects.count()
-    if count > 0:
-        return (
-            "warn",
-            f"{count} grade{'s' if count != 1 else ''} already exist",
-            {"type": "link", "url": reverse("scoring:inject_grades_review"), "label": "View Grades"},
-        )
-    return ("pass", "No existing inject grades", None)
-
-
-def _check_no_orange_assignments() -> CheckResult:
-    """Check that no orange team assignments exist yet (clean slate for competition)."""
-    from orange_team.models import OrangeAssignment
-
-    count = OrangeAssignment.objects.count()
-    if count > 0:
-        return (
-            "warn",
-            f"{count} assignment{'s' if count != 1 else ''} already exist",
-            {"type": "link", "url": reverse("review_queue"), "label": "View Assignments"},
-        )
-    return ("pass", "No existing orange assignments", None)
+CLEAN_SLATE_CHECKS: tuple[CleanSlateCheck, ...] = (
+    CleanSlateCheck("No existing tickets", Ticket, "ticket", "tickets", "ticket_list", "View Tickets"),
+    CleanSlateCheck(
+        "No existing red team findings",
+        RedTeamScore,
+        "finding",
+        "findings",
+        "scoring:red_team_findings",
+        "View Findings",
+    ),
+    CleanSlateCheck(
+        "No existing incident reports",
+        IncidentReport,
+        "report",
+        "incident reports",
+        "scoring:review_incidents",
+        "View Reports",
+    ),
+    CleanSlateCheck(
+        "No existing inject grades",
+        InjectScore,
+        "grade",
+        "inject grades",
+        "scoring:inject_grades_review",
+        "View Grades",
+    ),
+    CleanSlateCheck(
+        "No existing orange assignments",
+        OrangeAssignment,
+        "assignment",
+        "orange assignments",
+        "review_queue",
+        "View Assignments",
+    ),
+)
 
 
 def _check_quotient_api() -> CheckResult:
@@ -298,7 +290,7 @@ def _check_quotient_api() -> CheckResult:
 
 
 def _check_school_info() -> CheckResult:
-    """Check that all active teams have school info with contact emails."""
+    """Check that all active teams have a SchoolInfo record."""
     from team.models import SchoolInfo
 
     active_teams = Team.objects.filter(is_active=True)
@@ -329,24 +321,17 @@ def _check_multiple_teams() -> CheckResult:
 
 
 ALL_CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
-    # Phase 1: Authentik
     ("Discord IDs configured", _check_discord_settings),
     ("Team accounts exist", _check_team_accounts_exist),
     ("Group membership correct", _check_team_group_membership),
     ("App bindings configured", _check_blueteam_bindings),
-    # Phase 2: Teams & infrastructure
     ("Multiple teams registered", _check_multiple_teams),
     ("School info configured", _check_school_info),
     ("Quotient API reachable", _check_quotient_api),
     ("Quotient metadata synced", _check_quotient_synced),
     ("Packets distributed", _check_packets_distributed),
     ("Start message set", _check_start_message),
-    # Phase 3: Clean slate
-    ("No existing tickets", _check_no_tickets),
-    ("No existing red team findings", _check_no_red_scores),
-    ("No existing incident reports", _check_no_incidents),
-    ("No existing inject grades", _check_no_inject_grades),
-    ("No existing orange assignments", _check_no_orange_assignments),
+    *((check.step_name, check) for check in CLEAN_SLATE_CHECKS),
 ]
 
 

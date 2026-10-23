@@ -76,7 +76,7 @@ def findings_list(request: HttpRequest, *, default_status: str, page_size: int) 
     error_message="Only Red Team or Gold Team members can review findings",
 )
 def red_team_findings(request: HttpRequest) -> HttpResponse:
-    """Gold team review page for red team findings."""
+    """Review page for red team findings."""
     context = {
         **findings_list(request, default_status="pending", page_size=50),
         "pending_findings": RedTeamScore.objects.filter(is_approved=False).exists(),
@@ -92,7 +92,7 @@ def red_team_findings(request: HttpRequest) -> HttpResponse:
     error_message="Only Red Team members can view findings",
 )
 def red_team_scores(request: HttpRequest) -> HttpResponse:
-    """Red team view of all findings (read-only, can delete/leave own)."""
+    """Red team view of all findings (read-only, can delete own)."""
     context = {**findings_list(request, default_status="all", page_size=25), "is_gold_team": False}
     if request.headers.get("HX-Request"):
         return render(request, "scoring/partials/red_findings_table.html", context)

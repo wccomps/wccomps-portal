@@ -80,7 +80,7 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
     # Keep the reactive inject scaling current: inject point values live in the titles.
     injects = client.get_injects(force_refresh=True)
     if injects:
-        set_template_max("inject_max", inject_max_from_titles([inject.title for inject in injects]))
+        set_template_max("inject_max", inject_max_from_titles(injects))
 
     return metadata
 

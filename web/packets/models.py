@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
 from django.db import models
-from django.db.models import F, Value
+from django.db.models import Count, F, Q, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from registration.models import Event
@@ -22,6 +22,16 @@ class PacketQuerySet(models.QuerySet["Packet"]):
     def downloadable(self) -> PacketQuerySet:
         """Sent packets that teams may download from the portal."""
         return self.sent().filter(web_access_enabled=True)
+
+    def with_distribution_stats(self) -> PacketQuerySet:
+        """Annotate packets with distribution counts in a single query."""
+        return self.annotate(
+            total_distributions=Count("distributions"),
+            pending_count=Count("distributions", filter=Q(distributions__email_status="pending")),
+            sent_count=Count("distributions", filter=Q(distributions__email_status="sent")),
+            failed_count=Count("distributions", filter=Q(distributions__email_status="failed")),
+            downloaded_count=Count("distributions", filter=Q(distributions__downloaded_at__isnull=False)),
+        )
 
 
 def packets_sent(event: Event | None) -> bool:
@@ -83,14 +93,21 @@ class Packet(models.Model):
         return f"{self.title} ({self.status})"
 
     def get_distribution_stats(self) -> dict[str, int]:
-        distributions = self.distributions.all()
-        return {
-            "total": distributions.count(),
-            "pending": distributions.filter(email_status="pending").count(),
-            "sent": distributions.filter(email_status="sent").count(),
-            "failed": distributions.filter(email_status="failed").count(),
-            "downloaded": distributions.filter(downloaded_at__isnull=False).count(),
-        }
+        if "total_distributions" in self.__dict__:
+            return {
+                "total": int(self.__dict__["total_distributions"]),
+                "pending": int(self.__dict__["pending_count"]),
+                "sent": int(self.__dict__["sent_count"]),
+                "failed": int(self.__dict__["failed_count"]),
+                "downloaded": int(self.__dict__["downloaded_count"]),
+            }
+        return self.distributions.aggregate(
+            total=Count("pk"),
+            pending=Count("pk", filter=Q(email_status="pending")),
+            sent=Count("pk", filter=Q(email_status="sent")),
+            failed=Count("pk", filter=Q(email_status="failed")),
+            downloaded=Count("pk", filter=Q(downloaded_at__isnull=False)),
+        )
 
     def is_ready_for_distribution(self) -> bool:
         return self.status == "draft"

@@ -1,24 +1,13 @@
-from typing import Protocol
+from typing import cast
 
 from django.contrib import admin, messages
-from django.db.models import Count, Q, QuerySet
+from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.utils.html import format_html
 
 from core.admin import PortalModelAdmin
 
-from .models import Packet, PacketDistribution
-
-
-class AnnotatedPacket(Protocol):
-    """Protocol for Packet with annotated distribution stats."""
-
-    total_distributions: int
-    sent_count: int
-    failed_count: int
-    downloaded_count: int
-
-    def get_distribution_stats(self) -> dict[str, int]: ...
+from .models import Packet, PacketDistribution, PacketQuerySet
 
 
 class PacketDistributionInline(admin.TabularInline[PacketDistribution, Packet]):
@@ -114,17 +103,7 @@ class PacketAdmin(PortalModelAdmin[Packet]):
         return super().has_delete_permission(request, obj) and (obj is None or obj.status == "draft")
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Packet]:
-        qs = super().get_queryset(request)
-        qs = qs.annotate(
-            total_distributions=Count("distributions"),
-            sent_count=Count("distributions", filter=Q(distributions__email_status="sent")),
-            failed_count=Count("distributions", filter=Q(distributions__email_status="failed")),
-            downloaded_count=Count(
-                "distributions",
-                filter=Q(distributions__downloaded_at__isnull=False),
-            ),
-        )
-        return qs
+        return cast(PacketQuerySet, super().get_queryset(request)).with_distribution_stats()
 
     @admin.display(description="File")
     def file_info(self, obj: Packet) -> str:
@@ -138,17 +117,8 @@ class PacketAdmin(PortalModelAdmin[Packet]):
         )
 
     @admin.display(description="Distribution Stats")
-    def distribution_stats_display(self, obj: AnnotatedPacket) -> str:
-        if hasattr(obj, "total_distributions"):
-            # From annotated queryset
-            stats = {
-                "total": obj.total_distributions,
-                "sent": obj.sent_count,
-                "failed": obj.failed_count,
-                "downloaded": obj.downloaded_count,
-            }
-        else:
-            stats = obj.get_distribution_stats()
+    def distribution_stats_display(self, obj: Packet) -> str:
+        stats = obj.get_distribution_stats()
 
         return format_html(
             '<table style="width: 100%;"><tr>'

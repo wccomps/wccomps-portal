@@ -14,7 +14,7 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", secrets.token_urlsafe(50))
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "False") == "True"
 
-# A component attribute that cotton would drop (core.cotton) fails the render when True, else logs a warning
+# A component attribute that cotton would drop (core.cotton) fails the render when True, else logs an error
 STRICT_COMPONENT_ATTRS = DEBUG
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
@@ -188,7 +188,7 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 DISCORD_LOG_CHANNEL_ID = int(os.environ.get("DISCORD_LOG_CHANNEL_ID", "0"))
 DISCORD_TICKET_QUEUE_CHANNEL_ID = int(os.environ.get("DISCORD_TICKET_QUEUE_CHANNEL_ID", "0"))
 DISCORD_ANNOUNCEMENT_CHANNEL_ID = int(os.environ.get("DISCORD_ANNOUNCEMENT_CHANNEL_ID", "0"))
-# Channel where combined link+ticket panel is posted (#welcome-rules)
+# Channel where ticket panel is posted (#welcome-rules)
 DISCORD_WELCOME_CHANNEL_ID = int(os.environ.get("DISCORD_WELCOME_CHANNEL_ID", "0"))
 # Channel where link-only panel is posted (#link - hidden after linking)
 DISCORD_LINK_CHANNEL_ID = int(os.environ.get("DISCORD_LINK_CHANNEL_ID", "0"))

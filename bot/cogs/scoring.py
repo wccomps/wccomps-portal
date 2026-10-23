@@ -43,7 +43,6 @@ class ScoringCog(commands.Cog):
         attack_vector: app_commands.Range[str, 1, 200],
         description: str,
     ) -> None:
-        """Submit an incident report for red team activity."""
         member = await linked_team_member(interaction.user.id)
         if not member:
             return

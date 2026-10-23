@@ -20,6 +20,38 @@ class LinkResult:
     error_context: dict[str, str] | None = None
 
 
+def lookup_valid_link_token(token: str, *, for_update: bool = False) -> LinkResult | LinkToken:
+    """Look up an unused LinkToken and verify it has not expired."""
+    tokens = LinkToken.objects.select_for_update() if for_update else LinkToken.objects
+    try:
+        link_token = tokens.get(token=token, used=False)
+    except LinkToken.DoesNotExist:
+        return LinkResult(
+            success=False,
+            error_template="link_error.html",
+            error_context={
+                "error": "Invalid or expired token",
+                "message": (
+                    "This link has expired or been used already. Please use /link in Discord to generate a new one."
+                ),
+            },
+        )
+
+    if link_token.is_expired():
+        return LinkResult(
+            success=False,
+            error_template="link_error.html",
+            error_context={
+                "error": "Token expired",
+                "message": (
+                    "This link has expired (15 minute limit). Please use /link in Discord to generate a new one."
+                ),
+            },
+        )
+
+    return link_token
+
+
 def validate_link_token(
     url_token: str | None,
     session_token: str | None,
@@ -61,34 +93,7 @@ def validate_link_token(
             },
         )
 
-    tokens = LinkToken.objects.select_for_update() if for_update else LinkToken.objects
-    try:
-        link_token = tokens.get(token=url_token, used=False)
-    except LinkToken.DoesNotExist:
-        return LinkResult(
-            success=False,
-            error_template="link_error.html",
-            error_context={
-                "error": "Invalid or expired token",
-                "message": (
-                    "This link has expired or been used already. Please use /link in Discord to generate a new one."
-                ),
-            },
-        )
-
-    if link_token.is_expired():
-        return LinkResult(
-            success=False,
-            error_template="link_error.html",
-            error_context={
-                "error": "Token expired",
-                "message": (
-                    "This link has expired (15 minute limit). Please use /link in Discord to generate a new one."
-                ),
-            },
-        )
-
-    return link_token
+    return lookup_valid_link_token(url_token, for_update=for_update)
 
 
 def enforce_account_link_policy(

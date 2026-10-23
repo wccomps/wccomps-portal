@@ -13,7 +13,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -225,7 +224,9 @@ def competition_action(action: str) -> Use:
 
 def _inject_grading_through_the_view(w: World, form: Any) -> None:
     """The grading page lists Quotient's injects; one inject is enough to grade."""
-    inject = SimpleNamespace(inject_id=1, title="Inject 01 - Web (100 pts)")
+    from quotient.client import Inject
+
+    inject = Inject(inject_id=1, title="Inject 01 - Web (100 pts)", description="")
     with patch("quotient.client.QuotientClient.get_injects", return_value=[inject]):
         posts_to(lambda w: reverse("scoring:inject_grading") + "?inject=1")(w, form)
 

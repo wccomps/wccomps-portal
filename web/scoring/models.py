@@ -4,8 +4,8 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.utils import timezone
 
+from core.models import Approvable
 from core.utils import shorten
 
 
@@ -27,36 +27,9 @@ def validate_file_size(file: UploadedFile[bytes]) -> UploadedFile[bytes]:
     return file
 
 
-class Approvable(models.Model):
-    """A submission that counts toward scores only once a reviewer approves it."""
-
-    is_approved = models.BooleanField(default=False)
-    approved_at = models.DateTimeField(null=True, blank=True)
-    approved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
-
-    class Meta:
-        abstract = True
-
-    def approve(self, user: User) -> None:
-        self.is_approved = True
-        self.approved_by = user
-        self.approved_at = timezone.now()
-        self.save(update_fields=["is_approved", "approved_by", "approved_at"])
-
-
 class ScoringTemplate(models.Model):
-    """Scoring configuration using category weights and raw maximums.
+    """Scoring configuration using category weights and raw maximums (scaled via calculator._get_modifiers)."""
 
-    The calculator derives a scaling modifier for each category at runtime:
-        total_pool = max(raw_max / (weight/100) for each category)
-        modifier = (weight/100) × total_pool / raw_max
-        scaled = raw × modifier
-
-    This produces the same result as manually entering modifiers, but the
-    config page shows meaningful percentages instead of opaque multipliers.
-    """
-
-    # Category weights (percentage of total score; must sum to 100)
     service_weight = models.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -360,20 +333,7 @@ class RedTeamScore(Approvable):
     )
 
     def calculate_points(self) -> Decimal:
-        """Points each affected team loses, per CCDC guidelines, from the outcome checkboxes.
-
-        Stored positive in points_per_team; the calculator subtracts it.
-        Effect on the team, from the National Scoring Guidelines:
-        - Root/Admin access: -100
-        - User access: -25 (only if no root access)
-        - Privilege escalation: -100 (additional)
-        - Credentials recovered: -50
-        - Sensitive files recovered: -25
-        - Credit cards recovered: -50
-        - PII recovered: -200
-        - Encrypted DB recovered: -25
-        - DB decrypted: -25 (additional)
-        """
+        """Points each affected team loses from the outcome checkboxes (stored positive; calculator subtracts it)."""
         total = Decimal("0")
         if self.root_access:
             total += Decimal("100")
@@ -529,7 +489,6 @@ class InjectScore(Approvable):
         validators=[MinValueValidator(Decimal("0"))],
     )
 
-    # Team-facing feedback (synthesized from raw judge comments)
     feedback = models.TextField(
         blank=True,
         help_text="Professional feedback shown to teams on scorecard",
@@ -574,7 +533,7 @@ class InjectScore(Approvable):
 
 
 class OrangeTeamScore(Approvable):
-    """Orange team checks for customer service evaluation (positive or negative)."""
+    """Orange team check scores from customer service evaluations."""
 
     team = models.ForeignKey(
         "team.Team",
@@ -592,7 +551,7 @@ class OrangeTeamScore(Approvable):
     points_awarded = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        help_text="Points to add (positive) or deduct (negative)",
+        help_text="Points awarded for the check",
     )
 
     orange_check = models.ForeignKey(
@@ -601,7 +560,7 @@ class OrangeTeamScore(Approvable):
         null=True,
         blank=True,
         related_name="orange_scores",
-        help_text="Orange check this score was created from (null for manual adjustments)",
+        help_text="Orange check this score was created from",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

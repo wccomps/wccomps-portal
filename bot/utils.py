@@ -1,5 +1,3 @@
-"""Utility functions for the bot."""
-
 import io
 import logging
 from typing import Final, Literal
@@ -16,7 +14,7 @@ from team.models import MAX_TEAMS, Team
 logger = logging.getLogger(__name__)
 
 
-THREAD_AUTO_ARCHIVE_MINUTES: Final[Literal[10080]] = 10080  # 7 days
+THREAD_AUTO_ARCHIVE_MINUTES: Final[Literal[10080]] = 10080
 DISCORD_EMBED_FIELD_CHAR_LIMIT = 1024
 DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT = 4096
 DISCORD_EMBED_TITLE_CHAR_LIMIT = 256
@@ -136,7 +134,6 @@ async def log_to_ops_channel(bot: discord.Client, message: str) -> None:
             return
 
         message = fit(message, DISCORD_MESSAGE_CHAR_LIMIT)
-        # Type guard: only TextChannel and Thread have send()
         if isinstance(channel, (discord.TextChannel, discord.Thread)):
             await channel.send(message)
             logger.info(f"Logged to ops channel: {message}")
@@ -200,8 +197,6 @@ def get_team_member_discord_ids(team: Team) -> list[int]:
 
 
 class ConfirmView(discord.ui.View):
-    """Reusable confirmation dialog with confirm/cancel buttons."""
-
     def __init__(
         self,
         confirm_label: str = "Confirm",

@@ -40,7 +40,7 @@ from core.admin_views.places import (
 )
 from core.admin_views.readiness import action_readiness_check, action_readiness_fix
 from core.authentik_manager import AuthentikManager
-from core.authentik_utils import credentials_csv, reset_team_credentials, reset_teams_credentials
+from core.authentik_utils import credentials_csv, reset_teams_credentials
 from core.competition_utils import WipedData, competition_data_counts
 from core.discord_tasks import LogToChannel
 from core.errors import json_endpoint
@@ -284,7 +284,7 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
         raise BadRequest(error_msg)
 
     team_numbers = form.cleaned_data["team_numbers"] or active_team_numbers()
-    result = reset_teams_credentials(team_numbers, reset_fn=reset_team_credentials)
+    result = reset_teams_credentials(team_numbers)
     password_list = result.password_list
     failed_resets = result.failed_resets
     sessions_failed = result.sessions_failed

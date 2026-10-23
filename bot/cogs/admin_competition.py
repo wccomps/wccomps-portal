@@ -1,5 +1,3 @@
-"""Admin commands for competition and account management."""
-
 import io
 import logging
 
@@ -9,26 +7,23 @@ from discord import app_commands
 from discord.ext import commands
 from django.conf import settings
 
-from bot.competition_actions import run_competition_cleanup
+from bot.competition_actions import deliver_team_broadcast, run_competition_cleanup
 from bot.permissions import permission_check
-from bot.utils import ConfirmView, announcement, log_to_ops_channel, send_announcement, send_parts, team_chat_channel
+from bot.utils import ConfirmView, log_to_ops_channel
 from core.authentik_utils import (
     credentials_csv,
     parse_team_range,
-    reset_team_credentials,
     reset_teams_credentials,
 )
 from core.forms import AppSlugForm
-from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
+from core.models import AuditLog, CompetitionConfig
 from core.utils import UnknownTimezoneError, parse_datetime_to_utc, shorten
-from team.models import Team, active_team_numbers
+from team.models import active_team_numbers
 
 logger = logging.getLogger(__name__)
 
 
 class AdminCompetitionCog(commands.Cog):
-    """Admin commands for competition and account management."""
-
     competition_group = app_commands.Group(
         name="competition",
         description="Competition management commands",
@@ -88,7 +83,7 @@ class AdminCompetitionCog(commands.Cog):
             teams = active
 
         # Only successful resets go in the CSV: a failed one leaves the old password in place.
-        result = await sync_to_async(reset_teams_credentials)(teams, reset_fn=reset_team_credentials)
+        result = await sync_to_async(reset_teams_credentials)(teams)
         password_list = result.password_list
         failed_resets = result.failed_resets
         sessions_failed = result.sessions_failed
@@ -435,82 +430,22 @@ class AdminCompetitionCog(commands.Cog):
             await interaction.followup.send("This command must be used in a guild", ephemeral=True)
             return
 
-        target_lower = target.lower().strip()
-        sent_count = 0
-        failed_channels = []
-
-        if target_lower == "announcements":
-            announcement_channel_id = settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID
-            channel = guild.get_channel(announcement_channel_id)
-
-            if not channel or not isinstance(channel, discord.TextChannel):
-                await interaction.followup.send(
-                    f"Announcements channel not found (ID: {announcement_channel_id})",
-                    ephemeral=True,
-                )
-                return
-
-            try:
-                await send_announcement(guild, channel, message)
-                sent_count = 1
-
-                await log_to_ops_channel(
-                    self.bot,
-                    f"Broadcast to Announcements by {interaction.user.mention}\nMessage: {shorten(message, 100)}",
-                )
-
-                await interaction.followup.send("Broadcast sent to announcements channel", ephemeral=True)
-            except Exception as e:
-                logger.exception(f"Failed to broadcast to announcements: {e}")
-                await interaction.followup.send(f"Failed to send broadcast: {e}", ephemeral=True)
+        try:
+            sent_count, queued_count, failed_channels = await deliver_team_broadcast(
+                guild, target, message, interaction.user.name
+            )
+        except ValueError as e:
+            await interaction.followup.send(
+                f"Invalid team range format: {e}\n\n"
+                f"Examples:\n"
+                f"• Single teams: `1,3,5`\n"
+                f"• Range: `1-10`\n"
+                f"• Mixed: `1,3,5-10,15`\n"
+                f"• All teams: `all-teams`\n"
+                f"• Announcements: `announcements`",
+                ephemeral=True,
+            )
             return
-
-        if target_lower == "all-teams":
-            teams = [t async for t in Team.objects.filter(is_active=True).order_by("team_number")]
-            team_numbers = [t.team_number for t in teams]
-
-        else:
-            try:
-                team_numbers = parse_team_range(target)
-            except ValueError as e:
-                await interaction.followup.send(
-                    f"Invalid team range format: {e}\n\n"
-                    f"Examples:\n"
-                    f"• Single teams: `1,3,5`\n"
-                    f"• Range: `1-10`\n"
-                    f"• Mixed: `1,3,5-10,15`\n"
-                    f"• All teams: `all-teams`\n"
-                    f"• Announcements: `announcements`",
-                    ephemeral=True,
-                )
-                return
-
-        queued_count = 0
-
-        for team_number in team_numbers:
-            try:
-                team = await Team.objects.filter(team_number=team_number).afirst()
-                if not team:
-                    failed_channels.append(f"Team {team_number:02d} (not found)")
-                    continue
-
-                chat_channel = team_chat_channel(guild, team)
-                if chat_channel:
-                    await send_parts(chat_channel, announcement(interaction.user.name, message))
-                    sent_count += 1
-                else:
-                    # Queue announcement for later delivery when channel is created
-                    await QueuedAnnouncement.objects.acreate(
-                        team=team,
-                        message=message,
-                        sender_name=interaction.user.name,
-                    )
-                    queued_count += 1
-
-            except Exception as e:
-                logger.exception(f"Failed to broadcast to team {team_number}: {e}")
-                failed_channels.append(f"Team {team_number:02d} ({shorten(str(e), 50)})")
-                continue
 
         await AuditLog.objects.acreate(
             action="broadcast_message",

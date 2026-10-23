@@ -13,8 +13,20 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.AlterField(
-            model_name='orangeteamscore',
-            name='orange_check',
-            field=models.ForeignKey(blank=True, help_text='Orange check this score was created from (null for manual adjustments)', null=True, on_delete=django.db.models.deletion.CASCADE, related_name='orange_scores', to='orange_team.orangecheck'),
+            model_name="orangeteamscore",
+            name="points_awarded",
+            field=models.DecimalField(decimal_places=2, help_text="Points awarded for the check", max_digits=10),
+        ),
+        migrations.AlterField(
+            model_name="orangeteamscore",
+            name="orange_check",
+            field=models.ForeignKey(
+                blank=True,
+                help_text="Orange check this score was created from",
+                null=True,
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="orange_scores",
+                to="orange_team.orangecheck",
+            ),
         ),
     ]

@@ -21,7 +21,7 @@ from core.utils import ndjson_done, ndjson_progress, run_detached
 from .. import export
 from ..calculator import Standing, compute_standings, get_leaderboard, get_standing
 from ..forms import ScorecardEmailForm
-from ..scorecard import build_scorecard_context
+from ..scorecard import ScorecardPeerContext, build_peer_context, build_scorecard_context
 
 logger = logging.getLogger(__name__)
 
@@ -38,19 +38,19 @@ def export_dataset(request: HttpRequest, dataset: str) -> HttpResponse:
 
 @require_permission("gold_team", error_message="Only Gold Team members can access this")
 def export_all(request: HttpRequest) -> HttpResponse:
-    """Export all scoring data as a zip file (admin only)."""
     return export.export_all_zip()
 
 
 @require_permission("gold_team", error_message="Only Gold Team members can access this")
 def export_scorecards(request: HttpRequest) -> HttpResponse:
-    """Export all team scorecards as a zip of PDFs."""
     standings = compute_standings()
+    peer_context = build_peer_context(standings)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for score in get_leaderboard(standings):
             zf.writestr(
-                f"team-{score.team.team_number:02d}-scorecard.pdf", _generate_team_pdf(score, standings, request)
+                f"team-{score.team.team_number:02d}-scorecard.pdf",
+                _generate_team_pdf(score, standings, request, peer_context=peer_context),
             )
 
     timestamp = timezone.now().strftime("%Y%m%d-%H%M%S")
@@ -119,13 +119,19 @@ def render_scorecard_pdf(context: dict[str, object], request: HttpRequest | None
     return pdf_bytes
 
 
-def _generate_team_pdf(score: Standing, standings: list[Standing], request: HttpRequest) -> bytes:
-    return render_scorecard_pdf(build_scorecard_context(score, standings), request=request)
+def _generate_team_pdf(
+    score: Standing,
+    standings: list[Standing],
+    request: HttpRequest,
+    peer_context: ScorecardPeerContext | None = None,
+) -> bytes:
+    return render_scorecard_pdf(build_scorecard_context(score, standings, peer_context=peer_context), request=request)
 
 
 def _stream_email_scorecards(request: HttpRequest, custom_message: str = "") -> Iterator[str]:
     """Generator that sends scorecard emails and yields NDJSON progress."""
     standings = compute_standings()
+    peer_context = build_peer_context(standings)
     scores = get_leaderboard(standings)
     total_teams = len(scores)
 
@@ -144,7 +150,7 @@ def _stream_email_scorecards(request: HttpRequest, custom_message: str = "") -> 
     failed = 0
     for i, (team, score, emails) in enumerate(sendable, 1):
         email_ctx = _build_email_context(score, total_teams, custom_message=custom_message)
-        pdf_bytes = _generate_team_pdf(score, standings, request)
+        pdf_bytes = _generate_team_pdf(score, standings, request, peer_context=peer_context)
         success = _send_scorecard_email(emails, email_ctx, team.team_number, pdf_bytes)
 
         if success:

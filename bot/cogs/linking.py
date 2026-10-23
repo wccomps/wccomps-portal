@@ -22,8 +22,6 @@ TOKEN_EXPIRY_MINUTES = 15
 
 @dataclass
 class LinkCheckResult:
-    """Result of checking if a user can link."""
-
     can_link: bool
     error_message: str = ""
 
@@ -31,6 +29,7 @@ class LinkCheckResult:
 async def check_rate_limit(discord_id: int) -> tuple[bool, int]:
     """Check rate limit for link attempts. Returns (is_allowed, attempt_count)."""
     one_hour_ago = timezone.now() - timedelta(hours=RATE_LIMIT_WINDOW_HOURS)
+    await LinkRateLimit.objects.filter(attempted_at__lt=one_hour_ago).adelete()
     recent_attempts = await LinkRateLimit.objects.filter(discord_id=discord_id, attempted_at__gte=one_hour_ago).acount()
     return recent_attempts < RATE_LIMIT_MAX, recent_attempts
 
@@ -85,14 +84,11 @@ def build_link_embed(auth_url: str) -> discord.Embed:
 
 
 class LinkingCog(commands.Cog):
-    """Commands for linking Discord accounts to teams."""
-
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
     @app_commands.command(name="link", description="Link your Discord account to your WCComps team")
     async def link_command(self, interaction: discord.Interaction) -> None:
-        """Generate a link token for user authentication."""
         user_id = interaction.user.id
 
         # Defer at once: the rate-limit, existing-link and token queries can exceed Discord's

@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 from packets.models import packets_sent
 
 from core.auth_utils import require_permission
@@ -127,10 +128,8 @@ def review_list(request: HttpRequest) -> HttpResponse:
 
 
 @require_permission("gold_team")
+@require_POST
 def approve_registration(request: HttpRequest, registration_id: int) -> HttpResponse:
-    if request.method != "POST":
-        return redirect("registration_review_list")
-
     registration = get_object_or_404(TeamRegistration, id=registration_id)
     if request.user.is_authenticated and registration.approve(request.user):
         messages.success(request, f"Registration for {registration.school_name} has been approved.")
@@ -339,11 +338,9 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
 
 
 @require_permission("gold_team")
+@require_POST
 def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
     """Randomly assign team numbers to all eligible registrations for an event (Gold Team only)."""
-    if request.method != "POST":
-        return redirect("registration_event_detail", event_id=event_id)
-
     skipped: list[str] = []
     no_contact: list[str] = []
     team_taken: list[str] = []
@@ -444,10 +441,8 @@ def _primary_contact_email(registration: TeamRegistration) -> str:
 
 
 @require_permission("gold_team")
+@require_POST
 def unassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
-    if request.method != "POST":
-        return redirect("registration_season_list")
-
     assignment = get_object_or_404(EventTeamAssignment, id=assignment_id)
     event_id = assignment.event_id
 

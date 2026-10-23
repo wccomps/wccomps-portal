@@ -211,7 +211,7 @@ class TestCheckDuplicate:
         client = Client()
         client.force_login(User.objects.get(username="gold1"))
         response = client.get(f"/orange-team/checks/{check.pk}/duplicate/")
-        assert response.status_code == 302
+        assert response.status_code == 405
 
 
 class TestCheckAssign:

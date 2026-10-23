@@ -110,7 +110,7 @@ def test_competition_reset_passwords_keeps_the_csv_and_its_download(live_server,
     page.on("dialog", lambda dialog: dialog.accept())
 
     try:
-        with patch("core.admin_views.competition.reset_team_credentials", return_value=("Csv-Pass-3!", "", True)):
+        with patch("core.authentik_utils.reset_team_credentials", return_value=("Csv-Pass-3!", "", True)):
             page.goto(live_server.url + reverse("admin_competition"))
             page.get_by_role("button", name="Advanced: reset team passwords").click()
             page.get_by_label("Team Numbers").fill("3")

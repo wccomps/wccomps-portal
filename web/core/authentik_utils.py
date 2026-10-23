@@ -2,7 +2,7 @@ import csv
 import io
 import logging
 import secrets
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from team.models import MAX_TEAMS, team_username
@@ -71,10 +71,7 @@ class BulkPasswordResetResult:
     sessions_failed: list[str]
 
 
-def reset_teams_credentials(
-    team_numbers: Iterable[int],
-    reset_fn: Callable[[int], tuple[str | None, str, bool]] = reset_team_credentials,
-) -> BulkPasswordResetResult:
+def reset_teams_credentials(team_numbers: Iterable[int]) -> BulkPasswordResetResult:
     """Reset passwords and revoke sessions for multiple teams."""
     password_list: list[tuple[int, str, str]] = []
     failed_resets: list[tuple[str, str]] = []
@@ -82,7 +79,7 @@ def reset_teams_credentials(
 
     for team_num in team_numbers:
         username = team_username(team_num)
-        password, error, sessions_revoked = reset_fn(team_num)
+        password, error, sessions_revoked = reset_team_credentials(team_num)
         if password:
             password_list.append((team_num, username, password))
             if not sessions_revoked:

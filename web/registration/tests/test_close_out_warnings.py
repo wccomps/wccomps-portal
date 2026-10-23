@@ -138,8 +138,8 @@ def test_failed_scorecard_emails_are_counted(event):
 def test_the_fingerprint_is_stable_with_averaged_decimals_and_int_keys(event):
     """JSON turns int keys into strings and Decimals into tagged values; the same scorecards hash the same."""
 
-    def with_int_keys(score, standings):
-        context = build_scorecard_context(score, standings)
+    def with_int_keys(score, standings, peer_context=None):
+        context = build_scorecard_context(score, standings, peer_context=peer_context)
         by_team = {score.team.team_number: Decimal("0.3333333333"), "all": Decimal("0.5")}
         context["stats"] = {**context["stats"], "by_team": by_team}
         return context

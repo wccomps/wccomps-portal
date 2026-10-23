@@ -79,8 +79,7 @@ class SeasonAdmin(PortalModelAdmin[Season]):
 
 
 class EventTeamAssignmentInline(admin.TabularInline[EventTeamAssignment, Event]):
-    """Shown only: assignments are set through registration.services (set_team_school, remove_team_school,
-    clear_school_list, import_school_list, add_to_school_list, and Close Out's _assign_school_list)."""
+    """Shown only: assignments are set through registration.services."""
 
     model = EventTeamAssignment
     extra = 0

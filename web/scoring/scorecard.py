@@ -3,13 +3,57 @@
 Kept apart from the views so Close Out (and anything importing it at startup) doesn't load WeasyPrint.
 """
 
+from collections import defaultdict
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import TypedDict
 
-from django.db.models import Avg, Max
-
-from .calculator import Standing, calculate_team_score_detailed, get_leaderboard
+from .calculator import SCALING_FIELDS, Standing, calculate_team_score_detailed, get_leaderboard
 from .models import InjectScore, OrangeTeamScore, RedTeamScore, ServiceDetail
+
+
+@dataclass(frozen=True)
+class ScorecardPeerContext:
+    """Pre-fetched inject and service rows across all teams in a standings cohort."""
+
+    ranked_team_ids: set[int]
+    peer_inject_points: dict[str, list[Decimal]]
+    peer_service_points: dict[str, list[Decimal]]
+    injects_by_team: dict[int, list[InjectScore]]
+    services_by_team: dict[int, list[ServiceDetail]]
+
+
+def build_peer_context(standings: list[Standing], extra_team_ids: set[int] | None = None) -> ScorecardPeerContext:
+    """Fetch approved injects and service details once for a cohort of standings."""
+    ranked = get_leaderboard(standings)
+    ranked_team_ids = {s.team.pk for s in ranked}
+    query_team_ids = {s.team.pk for s in standings} | (extra_team_ids or set())
+
+    all_injects = list(
+        InjectScore.objects.filter(team_id__in=query_team_ids, is_approved=True).order_by("inject_name", "pk")
+    )
+    peer_inject_points: dict[str, list[Decimal]] = defaultdict(list)
+    injects_by_team: dict[int, list[InjectScore]] = defaultdict(list)
+    for row in all_injects:
+        injects_by_team[row.team_id].append(row)
+        if row.team_id in ranked_team_ids:
+            peer_inject_points[row.inject_id].append(row.points_awarded)
+
+    all_services = list(ServiceDetail.objects.filter(team_id__in=query_team_ids).order_by("service_name", "pk"))
+    peer_service_points: dict[str, list[Decimal]] = defaultdict(list)
+    services_by_team: dict[int, list[ServiceDetail]] = defaultdict(list)
+    for svc_row in all_services:
+        services_by_team[svc_row.team_id].append(svc_row)
+        if svc_row.team_id in ranked_team_ids:
+            peer_service_points[svc_row.service_name].append(svc_row.points)
+
+    return ScorecardPeerContext(
+        ranked_team_ids=ranked_team_ids,
+        peer_inject_points=peer_inject_points,
+        peer_service_points=peer_service_points,
+        injects_by_team=injects_by_team,
+        services_by_team=services_by_team,
+    )
 
 
 class _CategoryRank(TypedDict):
@@ -59,7 +103,11 @@ class _ScorecardStats(TypedDict):
     total_delta: int
 
 
-def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _ScorecardStats:
+def _compute_scorecard_stats(
+    score: Standing,
+    standings: list[Standing],
+    peer_context: ScorecardPeerContext | None = None,
+) -> _ScorecardStats:
     """Compute comparative statistics for a team's scorecard against the ranked teams."""
     team = score.team
     ranked = get_leaderboard(standings)
@@ -101,17 +149,15 @@ def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _Sco
             below_avg=delta < 0,
         )
 
-    # Use the same population as category ranking: only ranked, non-excluded teams
-    ranked_team_ids = {s.team.pk for s in ranked}
+    if peer_context is None:
+        peer_context = build_peer_context(standings, extra_team_ids={team.pk})
 
     inject_stats: list[_InjectStat] = []
-    team_injects = InjectScore.objects.filter(team=team, is_approved=True).order_by("inject_name", "pk")
-
-    for inj in team_injects:
-        all_inj = InjectScore.objects.filter(inject_id=inj.inject_id, is_approved=True, team_id__in=ranked_team_ids)
-        inj_aggs = all_inj.aggregate(avg=Avg("points_awarded"), mx=Max("points_awarded"))
-        inj_rank = all_inj.filter(points_awarded__gt=inj.points_awarded).count() + 1
-        inj_avg = inj_aggs["avg"] or Decimal("0")
+    for inj in peer_context.injects_by_team.get(team.pk, ()):
+        peers = peer_context.peer_inject_points[inj.inject_id]
+        inj_avg = sum(peers, Decimal("0")) / len(peers) if peers else Decimal("0")
+        inj_max = max(peers, default=Decimal("0"))
+        inj_rank = sum(1 for p in peers if p > inj.points_awarded) + 1
         inj_delta = inj.points_awarded - inj_avg
         inject_stats.append(
             _InjectStat(
@@ -119,7 +165,7 @@ def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _Sco
                 points=inj.points_awarded,
                 rank=inj_rank,
                 avg=inj_avg,
-                max=inj_aggs["mx"] or Decimal("0"),
+                max=inj_max,
                 delta=int(round(inj_delta)),
                 below_avg=inj_delta < 0,
                 feedback=inj.feedback if inj.feedback_approved else "",
@@ -127,13 +173,10 @@ def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _Sco
         )
 
     service_stats: list[_ServiceStat] = []
-    team_services = ServiceDetail.objects.filter(team=team).order_by("service_name", "pk")
-
-    for svc in team_services:
-        all_svc = ServiceDetail.objects.filter(service_name=svc.service_name, team_id__in=ranked_team_ids)
-        svc_aggs = all_svc.aggregate(avg=Avg("points"))
-        svc_rank = all_svc.filter(points__gt=svc.points).count() + 1
-        svc_avg = svc_aggs["avg"] or Decimal("0")
+    for svc in peer_context.services_by_team.get(team.pk, ()):
+        peers = peer_context.peer_service_points[svc.service_name]
+        svc_avg = sum(peers, Decimal("0")) / len(peers) if peers else Decimal("0")
+        svc_rank = sum(1 for p in peers if p > svc.points) + 1
         svc_delta = svc.points - svc_avg
         service_stats.append(
             _ServiceStat(
@@ -199,7 +242,11 @@ def _compute_scorecard_stats(score: Standing, standings: list[Standing]) -> _Sco
     )
 
 
-def build_scorecard_context(score: Standing, standings: list[Standing]) -> dict[str, object]:
+def build_scorecard_context(
+    score: Standing,
+    standings: list[Standing],
+    peer_context: ScorecardPeerContext | None = None,
+) -> dict[str, object]:
     """Context shared by the scorecard page, its PDF, and the emailed and bulk-exported PDFs."""
     team = score.team
 
@@ -209,8 +256,12 @@ def build_scorecard_context(score: Standing, standings: list[Standing]) -> dict[
         .order_by("attack_type__name", "pk")
     )
 
-    stats = _compute_scorecard_stats(score, standings)
-    detailed = calculate_team_score_detailed(team)
+    stats = _compute_scorecard_stats(score, standings, peer_context=peer_context)
+    if score.scaling:
+        scaling = dict(score.scaling)
+    else:
+        detailed = calculate_team_score_detailed(team)
+        scaling = {key: detailed[key] for key in SCALING_FIELDS}  # type: ignore[literal-required]
 
     orange_scores = OrangeTeamScore.objects.filter(team=team, is_approved=True).order_by("description", "pk")
 
@@ -225,15 +276,5 @@ def build_scorecard_context(score: Standing, standings: list[Standing]) -> dict[
         "orange_total": sum(o.points_awarded for o in orange_scores),
         "service_total": sum(s["points"] for s in stats["service_stats"]),
         "service_sla_total": sum(s["sla_violations"] for s in stats["service_stats"]),
-        "scaling": {
-            "service_raw": detailed["service_raw"],
-            "inject_raw": detailed["inject_raw"],
-            "orange_raw": detailed["orange_raw"],
-            "service_modifier": detailed["service_modifier"],
-            "inject_modifier": detailed["inject_modifier"],
-            "orange_modifier": detailed["orange_modifier"],
-            "service_weight": detailed["service_weight"],
-            "inject_weight": detailed["inject_weight"],
-            "orange_weight": detailed["orange_weight"],
-        },
+        "scaling": scaling,
     }

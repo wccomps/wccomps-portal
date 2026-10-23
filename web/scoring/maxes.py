@@ -1,35 +1,16 @@
-"""Derive the scoring raw-maximums from the competition's own data.
-
-These maxima feed the reactive scaling in ``calculator.py`` (each component's modifier
-comes from its weight and raw max). They used to be typed in by hand on the config page
-and went stale between events; these helpers recompute them from the live inputs.
-
-- ``service_max``: each service's points at full uptime, taken as ``points / uptime`` from
-  the service's highest-uptime team (the numerically most reliable sample), summed over
-  services. Quotient exposes no per-round point value, so ``points / uptime`` is how the
-  full-uptime total is recovered. If a scored service has no reliable uptime sample the
-  sum would under-count (its points still sit in the team's gross service total), so the
-  whole derivation is skipped rather than written too low.
-- ``inject_max``: the sum of each inject's point value, which Quotient carries only in the
-  inject title (e.g. ``"Inject 00 - Welcome (100 pts)"``). Skipped if any title lacks a
-  value, since those injects' graded points still count toward the inject total.
-- ``orange_max``: the sum of every orange check's maximum score, refreshed by a signal when
-  a check or criterion changes (there is no sync action to hang it on).
-"""
+"""Derive ScoringTemplate.service_max, inject_max, and orange_max from Quotient and OrangeCheck data."""
 
 import logging
-import re
+from collections.abc import Sequence
 from decimal import Decimal
 from typing import Literal
 
 from orange_team.models import OrangeCheck
+from quotient.client import Inject
 
 from scoring.models import ScoringTemplate, ServiceDetail
 
 logger = logging.getLogger(__name__)
-
-# The point value as organizers write it in a Quotient inject title: "(100 pts)", "(1,000 points)".
-_INJECT_POINTS_RE = re.compile(r"\(\s*([\d,]+)\s*(?:pts?|points?)\s*\)", re.IGNORECASE)
 
 # Below this uptime a single sample extrapolates too far via points/uptime to trust.
 _MIN_RELIABLE_UPTIME = Decimal("0.1")
@@ -37,24 +18,17 @@ _MIN_RELIABLE_UPTIME = Decimal("0.1")
 TemplateMaxField = Literal["service_max", "inject_max", "orange_max"]
 
 
-def inject_points(title: str) -> int | None:
-    """The point value embedded in an inject title, or None if it has none."""
-    match = _INJECT_POINTS_RE.search(title or "")
-    return int(match.group(1).replace(",", "")) if match else None
-
-
-def inject_max_from_titles(titles: list[str]) -> Decimal | None:
-    """Sum of the per-inject point values, or None if any title lacks one.
+def inject_max_from_titles(injects: Sequence[Inject]) -> Decimal | None:
+    """Sum of per-inject point values from a sequence of Inject objects, or None if any title lacks one.
 
     All-or-nothing on purpose: an inject with no parseable max still contributes its
     graded points to the total, so a partial sum would silently under-count.
     """
-    values = [(title, inject_points(title)) for title in titles]
-    missing = [title for title, points in values if points is None]
+    missing = [i.title for i in injects if i.max_points is None]
     if missing:
         logger.warning("inject_max not derived: %d inject title(s) have no point value: %s", len(missing), missing)
         return None
-    total = sum(points for _, points in values if points is not None)
+    total = sum(i.max_points for i in injects if i.max_points is not None)
     return Decimal(total) if total > 0 else None
 
 

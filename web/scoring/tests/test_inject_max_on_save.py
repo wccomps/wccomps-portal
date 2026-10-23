@@ -1,11 +1,12 @@
 """Saving inject grades backfills each grade's max_points and derives the inject_max."""
 
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.test import Client
 from django.urls import reverse
+from quotient.client import Inject
 
 from scoring.models import InjectScore, ScoringTemplate
 from team.models import Team
@@ -14,7 +15,7 @@ pytestmark = pytest.mark.django_db
 
 
 def test_saving_grades_sets_max_points_and_inject_max(gold_team_user, django_capture_on_commit_callbacks):
-    inject = MagicMock(inject_id=1, title="Recon report (150 pts)", description="")
+    inject = Inject(inject_id=1, title="Recon report (150 pts)", description="")
     Team.objects.create(team_number=1, team_name="T1", is_active=True)
     ScoringTemplate.objects.create(
         service_weight=Decimal("40"),

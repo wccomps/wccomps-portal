@@ -138,7 +138,6 @@ class PacketDistributionServiceTestCase(TestCase):
 
         self.service.send_packet_email(distribution)
 
-        # Verify email was created with correct context (check rendered templates)
         mock_email.send.assert_called_once_with(fail_silently=False)
         distribution.refresh_from_db()
         self.assertEqual(distribution.email_status, "sent")
