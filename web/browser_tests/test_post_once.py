@@ -69,7 +69,7 @@ def test_a_submit_button_outside_its_form_is_disabled_while_it_posts(live_server
     from scoring.models import RedTeamScore
 
     user = role_user("admin")
-    RedTeamScore.objects.create(attack_vector="ssh", points_per_team=Decimal(10), submitted_by=user)
+    RedTeamScore.objects.create(points_per_team=Decimal(10), submitted_by=user)
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())

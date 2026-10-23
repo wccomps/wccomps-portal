@@ -17,6 +17,7 @@
                         <input type="text"
                                name="school_name"
                                id="school_name"
+                               class="vTextField"
                                value="{% if school_info %}{{ school_info.school_name }}{% endif %}"
                                required
                                placeholder="e.g., University of Example">
@@ -28,6 +29,7 @@
                         <input type="email"
                                name="contact_email"
                                id="contact_email"
+                               class="vTextField"
                                value="{% if school_info %}{{ school_info.contact_email }}{% endif %}"
                                required
                                placeholder="e.g., coach@example.edu">
@@ -38,12 +40,14 @@
                         <input type="email"
                                name="secondary_email"
                                id="secondary_email"
+                               class="vTextField"
                                value="{% if school_info %}{{ school_info.secondary_email }}{% endif %}"
                                placeholder="e.g., alternate@example.edu">
                     </c-form_field>
                     <c-form_field label="Notes" id="notes" help_text="Optional internal notes">
                         <textarea name="notes"
                                   id="notes"
+                                  class="vLargeTextField"
                                   rows="4"
                                   placeholder="Additional notes about this team...">{% if school_info %}{{ school_info.notes }}{% endif %}</textarea>
                     </c-form_field>
