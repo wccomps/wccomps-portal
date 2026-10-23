@@ -21,9 +21,9 @@ class TestCottonLinkComponent:
         assert 'role="button"' in html
 
     def test_danger_variant_renders_button_role(self) -> None:
-        """variant='danger' renders class='button warning' and role='button'."""
+        """variant='danger' renders class='button danger' and role='button'."""
         html = self._render('<c-link href="/test" variant="danger">Delete</c-link>')
-        assert 'class="button warning"' in html
+        assert 'class="button danger "' in html
         assert 'role="button"' in html
 
     def test_button_class_renders_button_role(self) -> None:
