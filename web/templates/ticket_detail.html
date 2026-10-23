@@ -85,7 +85,7 @@
             {% if is_ops and ticket.status == "claimed" %}
                 {% if actions.resolve %}
                     <c-fieldset heading="Resolve Ticket">
-                        <c-form action="{% url 'ticket_resolve' ticket.ticket_number %}">
+                        <c-form action="{% url 'ticket_resolve' ticket.ticket_number %}" class="p-10">
                             {% csrf_token %}
                             <div class="mb-15">
                                 <div class="mb-15">
@@ -129,7 +129,7 @@
             {% if actions.reassign %}
                 <c-fieldset heading="Assignment">
                     <c-form action="{% url 'ticket_reassign' ticket.ticket_number %}"
-                            class="d-flex gap-10 items-center m-0">
+                            class="d-flex gap-10 items-center m-0 px-10">
                         {% csrf_token %}
                         <input type="text"
                                name="new_assignee_username"
@@ -229,7 +229,7 @@
                                   required
                                   class="vTextField"></textarea>
                     </c-form_field>
-                    <c-button_row>
+                    <c-button_row class="px-10">
                         <c-button type="submit" variant="primary">
                             Post Comment
                         </c-button>
@@ -241,7 +241,7 @@
         <c-fieldset heading="Attachments" collapsible="true" collapsed="{% if not attachments %}true{% else %}false{% endif %}">
         {# djlint:on #}
         {% if attachments %}
-            <div class="attachment-grid">
+            <div class="attachment-grid p-10">
                 {% for attachment in attachments %}
                     <div class="attachment-item">
                         {% if attachment.mime_type|slice:":6" == "image/" %}
@@ -283,7 +283,7 @@
         {% if ticket.status != "resolved" and ticket.status != "cancelled" %}
             <c-form action="{% url 'ticket_attachment_upload' ticket.ticket_number %}"
                     enctype="multipart/form-data"
-                    class="mt-20 d-flex gap-10 items-center">
+                    class="mt-20 d-flex gap-10 items-center px-10">
                 {% csrf_token %}
                 <input type="file"
                        name="attachment"

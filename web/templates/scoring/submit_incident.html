@@ -75,7 +75,7 @@
                                   error="{{ form.attack_description.errors|join:', ' }}">
                         {{ form.attack_description }}
                     </c-form_field>
-                    <div class="mb-5">
+                    <div class="p-10">
                         {{ form.attack_mitigated }}
                         <label for="{{ form.attack_mitigated.id_for_label }}">{{ form.attack_mitigated.label }}</label>
                         {% if form.attack_mitigated.help_text %}<div class="help-text">{{ form.attack_mitigated.help_text }}</div>{% endif %}
@@ -97,7 +97,7 @@
                 <c-fieldset heading="Incident Report Guidelines"
                             collapsible="true"
                             collapsed="true">
-                    <div class="text-muted">
+                    <div class="p-10 text-muted">
                         <p>
                             Teams are strongly encouraged to provide incident reports for each Red Team incident they detect. Incident reports can be completed as needed throughout the competition and presented to the White Team for collection.
                         </p>

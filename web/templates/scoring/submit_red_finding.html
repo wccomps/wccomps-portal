@@ -17,9 +17,8 @@
                               error="{{ form.attack_type.errors|join:', ' }}">
                     {{ form.attack_type }}
                 </c-form_field>
-                <fieldset>
-                    <legend class="font-semibold text-sm d-block mb-5">Source IP</legend>
-                    <div class="d-flex gap-20 mb-10">
+                <c-form_field label="Source IP">
+                    <div class="d-flex gap-20">
                         {% for radio in form.source_ip_type %}
                             <div class="d-inline">
                                 {{ radio.tag }}
@@ -27,38 +26,38 @@
                             </div>
                         {% endfor %}
                     </div>
-                    <div id="singleIpSection">
-                        <c-form_field label="{{ form.source_ip.label }}"
-                                      :id="form.source_ip.id_for_label"
-                                      help_text="{{ form.source_ip.help_text }}"
-                                      error="{{ form.source_ip.errors|join:', ' }}">
-                            {{ form.source_ip }}
-                        </c-form_field>
-                    </div>
-                    <div id="poolSection" class="d-none">
-                        <div class="d-flex gap-10 items-end flex-wrap">
-                            <div class="flex-grow-1">
-                                <c-form_field label="{{ form.source_ip_pool.label }}"
-                                              :id="form.source_ip_pool.id_for_label"
-                                              help_text="{{ form.source_ip_pool.help_text }}"
-                                              error="{{ form.source_ip_pool.errors|join:', ' }}">
-                                    {{ form.source_ip_pool }}
-                                </c-form_field>
-                            </div>
-                            <div class="mb-15">
-                                <c-button type="button" onclick="openCreatePoolModal()">
-                                    Create Pool
-                                </c-button>
-                            </div>
+                </c-form_field>
+                <div id="singleIpSection">
+                    <c-form_field label="{{ form.source_ip.label }}"
+                                  :id="form.source_ip.id_for_label"
+                                  help_text="{{ form.source_ip.help_text }}"
+                                  error="{{ form.source_ip.errors|join:', ' }}">
+                        {{ form.source_ip }}
+                    </c-form_field>
+                </div>
+                <div id="poolSection" class="d-none">
+                    <div class="d-flex gap-10 items-end flex-wrap">
+                        <div class="flex-grow-1">
+                            <c-form_field label="{{ form.source_ip_pool.label }}"
+                                          :id="form.source_ip_pool.id_for_label"
+                                          help_text="{{ form.source_ip_pool.help_text }}"
+                                          error="{{ form.source_ip_pool.errors|join:', ' }}">
+                                {{ form.source_ip_pool }}
+                            </c-form_field>
                         </div>
-                        {% if user_pools %}
-                            <div class="help-text">
-                                <c-link href="{% url 'scoring:ip_pool_list' %}"
-                                        variant="default">Manage your IP pools</c-link>
-                            </div>
-                        {% endif %}
+                        <div class="mb-15">
+                            <c-button type="button" onclick="openCreatePoolModal()">
+                                Create Pool
+                            </c-button>
+                        </div>
                     </div>
-                </fieldset>
+                    {% if user_pools %}
+                        <div class="help-text px-10">
+                            <c-link href="{% url 'scoring:ip_pool_list' %}"
+                                    variant="default">Manage your IP pools</c-link>
+                        </div>
+                    {% endif %}
+                </div>
             </c-fieldset>
             <c-fieldset heading="Target Information">
                 <c-form_field label="{{ form.affected_boxes.label }}"
@@ -88,136 +87,142 @@
                        value="">
             </c-fieldset>
             <c-fieldset heading="Attack Characteristics">
-                <div class="mb-5">
-                    {{ form.universally_attempted }}
-                    <label for="{{ form.universally_attempted.id_for_label }}">{{ form.universally_attempted.label }}</label>
-                    {% if form.universally_attempted.help_text %}
-                        <div class="help-text">{{ form.universally_attempted.help_text }}</div>
-                    {% endif %}
-                </div>
-                <div class="mb-5">
-                    {{ form.persistence_established }}
-                    <label for="{{ form.persistence_established.id_for_label }}">{{ form.persistence_established.label }}</label>
-                    {% if form.persistence_established.help_text %}
-                        <div class="help-text">{{ form.persistence_established.help_text }}</div>
-                    {% endif %}
+                <div class="p-10">
+                    <div class="mb-5">
+                        {{ form.universally_attempted }}
+                        <label for="{{ form.universally_attempted.id_for_label }}">{{ form.universally_attempted.label }}</label>
+                        {% if form.universally_attempted.help_text %}
+                            <div class="help-text">{{ form.universally_attempted.help_text }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="mb-5">
+                        {{ form.persistence_established }}
+                        <label for="{{ form.persistence_established.id_for_label }}">{{ form.persistence_established.label }}</label>
+                        {% if form.persistence_established.help_text %}
+                            <div class="help-text">{{ form.persistence_established.help_text }}</div>
+                        {% endif %}
+                    </div>
                 </div>
             </c-fieldset>
             <c-fieldset heading="Attack Outcomes">
-                <div class="d-flex flex-wrap gap-10 mb-15">
-                    <div>
-                        <label class="font-semibold text-sm d-block mb-5">Access Level</label>
-                        <div class="mb-5">
-                            {{ form.root_access }}
-                            <label for="{{ form.root_access.id_for_label }}"
-                                   title="Root/Administrator level access obtained">
-                                Root access <span class="text-muted">-100</span>
-                            </label>
+                <div class="p-10">
+                    <div class="d-flex flex-wrap gap-10 mb-15">
+                        <div>
+                            <label class="font-semibold text-sm d-block mb-5">Access Level</label>
+                            <div class="mb-5">
+                                {{ form.root_access }}
+                                <label for="{{ form.root_access.id_for_label }}"
+                                       title="Root/Administrator level access obtained">
+                                    Root access <span class="text-muted">-100</span>
+                                </label>
+                            </div>
+                            <div class="mb-5">
+                                {{ form.user_access }}
+                                <label for="{{ form.user_access.id_for_label }}"
+                                       title="User level access obtained (not scored if root access)">
+                                    User access <span class="text-muted">-25</span>
+                                </label>
+                            </div>
+                            <div class="mb-5">
+                                {{ form.privilege_escalation }}
+                                <label for="{{ form.privilege_escalation.id_for_label }}"
+                                       title="User escalated to Root/Admin (additional penalty)">
+                                    Priv esc <span class="text-muted">-100</span>
+                                </label>
+                            </div>
                         </div>
-                        <div class="mb-5">
-                            {{ form.user_access }}
-                            <label for="{{ form.user_access.id_for_label }}"
-                                   title="User level access obtained (not scored if root access)">
-                                User access <span class="text-muted">-25</span>
-                            </label>
-                        </div>
-                        <div class="mb-5">
-                            {{ form.privilege_escalation }}
-                            <label for="{{ form.privilege_escalation.id_for_label }}"
-                                   title="User escalated to Root/Admin (additional penalty)">
-                                Priv esc <span class="text-muted">-100</span>
-                            </label>
+                        <div>
+                            <label class="font-semibold text-sm d-block mb-5">Data Recovery</label>
+                            <div class="mb-5">
+                                {{ form.credentials_recovered }}
+                                <label for="{{ form.credentials_recovered.id_for_label }}"
+                                       title="User IDs and passwords recovered">
+                                    Credentials <span class="text-muted">-50</span>
+                                </label>
+                            </div>
+                            <div class="mb-5">
+                                {{ form.sensitive_files_recovered }}
+                                <label for="{{ form.sensitive_files_recovered.id_for_label }}"
+                                       title="Config files, corporate data recovered">
+                                    Sensitive files <span class="text-muted">-25</span>
+                                </label>
+                            </div>
+                            <div class="mb-5">
+                                {{ form.credit_cards_recovered }}
+                                <label for="{{ form.credit_cards_recovered.id_for_label }}"
+                                       title="Customer credit card numbers recovered">
+                                    Credit cards <span class="text-muted">-50</span>
+                                </label>
+                            </div>
+                            <div class="mb-5">
+                                {{ form.pii_recovered }}
+                                <label for="{{ form.pii_recovered.id_for_label }}"
+                                       title="PII recovered: name, address, credit card number">
+                                    PII <span class="text-muted">-200</span>
+                                </label>
+                            </div>
+                            <div class="mb-5">
+                                {{ form.encrypted_db_recovered }}
+                                <label for="{{ form.encrypted_db_recovered.id_for_label }}"
+                                       title="Encrypted customer data/database recovered">
+                                    Encrypted DB <span class="text-muted">-25</span>
+                                </label>
+                            </div>
+                            <div class="mb-5">
+                                {{ form.db_decrypted }}
+                                <label for="{{ form.db_decrypted.id_for_label }}"
+                                       title="Database was decrypted (additional penalty)">
+                                    DB decrypted <span class="text-muted">-25</span>
+                                </label>
+                            </div>
                         </div>
                     </div>
-                    <div>
-                        <label class="font-semibold text-sm d-block mb-5">Data Recovery</label>
-                        <div class="mb-5">
-                            {{ form.credentials_recovered }}
-                            <label for="{{ form.credentials_recovered.id_for_label }}"
-                                   title="User IDs and passwords recovered">
-                                Credentials <span class="text-muted">-50</span>
-                            </label>
-                        </div>
-                        <div class="mb-5">
-                            {{ form.sensitive_files_recovered }}
-                            <label for="{{ form.sensitive_files_recovered.id_for_label }}"
-                                   title="Config files, corporate data recovered">
-                                Sensitive files <span class="text-muted">-25</span>
-                            </label>
-                        </div>
-                        <div class="mb-5">
-                            {{ form.credit_cards_recovered }}
-                            <label for="{{ form.credit_cards_recovered.id_for_label }}"
-                                   title="Customer credit card numbers recovered">
-                                Credit cards <span class="text-muted">-50</span>
-                            </label>
-                        </div>
-                        <div class="mb-5">
-                            {{ form.pii_recovered }}
-                            <label for="{{ form.pii_recovered.id_for_label }}"
-                                   title="PII recovered: name, address, credit card number">
-                                PII <span class="text-muted">-200</span>
-                            </label>
-                        </div>
-                        <div class="mb-5">
-                            {{ form.encrypted_db_recovered }}
-                            <label for="{{ form.encrypted_db_recovered.id_for_label }}"
-                                   title="Encrypted customer data/database recovered">
-                                Encrypted DB <span class="text-muted">-25</span>
-                            </label>
-                        </div>
-                        <div class="mb-5">
-                            {{ form.db_decrypted }}
-                            <label for="{{ form.db_decrypted.id_for_label }}"
-                                   title="Database was decrypted (additional penalty)">
-                                DB decrypted <span class="text-muted">-25</span>
-                            </label>
-                        </div>
+                    <div id="calculatedPoints"
+                         class="text-lg font-semibold"
+                         aria-live="polite">
+                        Total: <span id="pointsValue">0</span> pts per team
                     </div>
-                </div>
-                <div id="calculatedPoints"
-                     class="text-lg font-semibold"
-                     aria-live="polite">
-                    Total: <span id="pointsValue">0</span> pts per team
                 </div>
             </c-fieldset>
             <c-fieldset heading="Affected Teams">
-                <div class="d-flex justify-between items-center mb-10">
-                    <label class="font-semibold text-sm d-block mb-0">{{ form.affected_teams.label }}</label>
-                    <div class="d-flex gap-10">
-                        <c-button type="button" variant="default" onclick="selectAllTeams()">
-                            Select All
-                        </c-button>
-                        <c-button type="button" onclick="deselectAllTeams()">
-                            Deselect All
-                        </c-button>
-                    </div>
-                </div>
-                {% if form.affected_teams.help_text %}<div class="help-text mb-5">{{ form.affected_teams.help_text }}</div>{% endif %}
-                <div class="d-none"
-                     id="teamCheckboxes">{% for checkbox in form.affected_teams %}{{ checkbox.tag }}{% endfor %}</div>
-                <div class="border rounded">
-                    <div class="p-15">
-                        <div id="teamButtons" class="d-flex flex-wrap gap-10" x-data="teamPicker">
-                            {% for checkbox in form.affected_teams %}
-                                <button type="button"
-                                        class="team-btn"
-                                        aria-pressed="false"
-                                        aria-label="{{ checkbox.choice_label }}"
-                                        data-team-id="{{ checkbox.data.value }}"
-                                        data-team-label="{{ checkbox.choice_label }}"
-                                        data-checkbox-id="{{ checkbox.id_for_label }}"
-                                        @click="toggle">{{ checkbox.choice_label }}</button>
-                            {% endfor %}
+                <div class="p-10">
+                    <div class="d-flex justify-between items-center mb-10">
+                        <label class="font-semibold text-sm d-block mb-0">{{ form.affected_teams.label }}</label>
+                        <div class="d-flex gap-10">
+                            <c-button type="button" variant="default" onclick="selectAllTeams()">
+                                Select All
+                            </c-button>
+                            <c-button type="button" onclick="deselectAllTeams()">
+                                Deselect All
+                            </c-button>
                         </div>
                     </div>
+                    {% if form.affected_teams.help_text %}<div class="help-text mb-5">{{ form.affected_teams.help_text }}</div>{% endif %}
+                    <div class="d-none"
+                         id="teamCheckboxes">{% for checkbox in form.affected_teams %}{{ checkbox.tag }}{% endfor %}</div>
+                    <div class="border rounded">
+                        <div class="p-15">
+                            <div id="teamButtons" class="d-flex flex-wrap gap-10" x-data="teamPicker">
+                                {% for checkbox in form.affected_teams %}
+                                    <button type="button"
+                                            class="team-btn"
+                                            aria-pressed="false"
+                                            aria-label="{{ checkbox.choice_label }}"
+                                            data-team-id="{{ checkbox.data.value }}"
+                                            data-team-label="{{ checkbox.choice_label }}"
+                                            data-checkbox-id="{{ checkbox.id_for_label }}"
+                                            @click="toggle">{{ checkbox.choice_label }}</button>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-10" aria-live="polite">
+                        <small class="text-muted">
+                            <span id="selectedCount">0</span> teams selected. Click teams to toggle selection
+                        </small>
+                    </div>
+                    {% if form.affected_teams.errors %}<div class="text-danger mt-10">{{ form.affected_teams.errors }}</div>{% endif %}
                 </div>
-                <div class="mt-10" aria-live="polite">
-                    <small class="text-muted">
-                        <span id="selectedCount">0</span> teams selected. Click teams to toggle selection
-                    </small>
-                </div>
-                {% if form.affected_teams.errors %}<div class="text-danger mt-10">{{ form.affected_teams.errors }}</div>{% endif %}
             </c-fieldset>
             <c-fieldset heading="Evidence">
                 <c-form_field label="Upload Files"
@@ -241,7 +246,7 @@
                 </c-form_field>
             </c-fieldset>
             <c-fieldset heading="Submission Guidelines" collapsible="true" collapsed="true">
-                <div class="text-muted">
+                <div class="p-10 text-muted">
                     <ul class="mb-0">
                         <li>Provide detailed technical information about the vulnerability or attack</li>
                         <li>Include all relevant IP addresses visible in screenshots</li>
