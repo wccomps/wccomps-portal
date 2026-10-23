@@ -97,6 +97,7 @@ RAW_MARKUP = [
     ("div", "form-row", "<c-form_field>"),
     ("div", "filter-field", "<c-filter_field>"),
     ("dl", "detail-list", "<c-detail_grid>"),
+    ("fieldset", None, "<c-fieldset>"),
     ("form", None, "<c-form>"),
 ]
 
@@ -595,6 +596,69 @@ def test_boxed_button_rows_are_action_toolbars() -> None:
         if tag.name == "c-button_row" and tag.attrs.get("boxed") == "true"
     }
     fail_with("Templates using c-button_row boxed='true'", found, BOXED_BUTTON_ROW_EXCEPTIONS)
+
+
+FIELDSET_PADDED_TAGS = {
+    "c-action_box",
+    "c-alert",
+    "c-button_row",
+    "c-detail_grid",
+    "c-empty_state",
+    "c-form_field",
+    "c-image_grid",
+    "c-info_box",
+    "c-progress_bar",
+    "c-slot",
+    "c-table",
+    "dl",
+    "h2",
+    "h3",
+    "h4",
+    "input",
+    "p",
+    "pre",
+    "script",
+    "template",
+    "ul",
+}
+FIELDSET_PADDED_CLASSES = {
+    "code-block",
+    "form-row",
+    "p-10",
+    "p-15",
+    "p-20",
+    "playbook-steps",
+    "px-10",
+    "status-bar",
+}
+
+
+def test_fieldset_children_are_padded() -> None:
+    """Django admin's base.css sets padding: 0 on fieldset.module and only pads p, ul, h3, h4, dl, pre and .form-row.
+    Any direct child of <c-fieldset> must be one of those, carry a padding class, or wrap padded children."""
+    found: dict[str, str] = {}
+    for path in page_templates():
+        with_parents = list(with_open_elements(path))
+        # Direct children of <c-fieldset> that themselves wrap a padded component (c-form_field, c-table)
+        wrappers_with_padded_child = {
+            open_tags[i + 1].line
+            for tag, open_tags in with_parents
+            for i, ancestor in enumerate(open_tags[:-1])
+            if ancestor.name == "c-fieldset" and tag.name in ("c-form_field", "c-table")
+        }
+        for tag, open_tags in with_parents:
+            if not open_tags or open_tags[-1].name != "c-fieldset":
+                continue
+            classes = attribute_classes(tag.attrs.get("class", ""))
+            if (
+                tag.name in FIELDSET_PADDED_TAGS
+                or classes & FIELDSET_PADDED_CLASSES
+                or tag.line in wrappers_with_padded_child
+                or "hx-get" in tag.attrs
+            ):
+                continue
+            found[f"{template_name(path)}:{tag.line}"] = f"<{tag.name} class={tag.attrs.get('class', '')!r}>"
+    fail_with("Unpadded direct child of <c-fieldset> (add p-10/px-10 or use <c-form_field>)", found, {})
 
 
 def test_page_header_hierarchy() -> None:

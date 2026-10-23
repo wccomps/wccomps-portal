@@ -164,7 +164,7 @@
             {% endif %}
         </c-fieldset>
         <c-fieldset heading="Test Email">
-            <div class="d-flex gap-10 items-end flex-wrap">
+            <div class="d-flex gap-10 items-end flex-wrap p-10">
                 <c-form_field label="Team" id="test-team">
                     <select id="test-team" x-ref="testTeam" class="vTextField">
                         {% for team in teams %}<option value="{{ team.id }}">Team {{ team.team_number }}</option>{% endfor %}

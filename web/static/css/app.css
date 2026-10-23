@@ -429,12 +429,16 @@ a.btn-secondary:focus-visible {
 .form-row {
     overflow: visible;
 }
+.form-row > div > label:first-child {
+    display: block;
+    margin-bottom: 4px;
+}
 /* Admin's submit-row draws a grey box, a second one inside the module a button row sits in; a boxed row
    (c-button_row boxed) keeps it. Two classes, so responsive.css's later padding doesn't put it back. */
 .submit-row:not(.submit-row--boxed) {
     background: none;
     border: none;
-    padding: 0;
+    padding: 10px;
 }
 
 /* Common component patterns */
@@ -669,6 +673,7 @@ p.help {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 15px;
+    padding: 10px;
 }
 @media (max-width: 767px) {
     .image-grid {
@@ -1210,6 +1215,7 @@ html[data-theme="dark"] .dark-mode-toggle .light-icon {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    padding: 10px;
 }
 
 .comment-item {
@@ -1308,6 +1314,7 @@ html[data-theme="dark"] .dark-mode-toggle .light-icon {
     gap: 4px;
     font-size: 0.9em;
     font-variant-numeric: tabular-nums;
+    padding: 10px;
 }
 .neighbor-current {
     font-size: 1.5em;

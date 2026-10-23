@@ -92,8 +92,8 @@
                         </c-form_field>
                     </div>
                 </div>
-                <c-button_row class="mt-10">
-                    <c-button type="submit" variant="default" ::disabled="loading">
+                <c-button_row class="mt-10 justify-end">
+                    <c-button type="submit" variant="primary" ::disabled="loading">
                         Save Schedule
                     </c-button>
                 </c-button_row>
@@ -116,8 +116,8 @@
                               rows="6"
                               maxlength="{{ start_message_max_length }}"></textarea>
                 </c-form_field>
-                <c-button_row class="mt-10">
-                    <c-button type="submit" variant="default" ::disabled="loading">
+                <c-button_row class="mt-10 justify-end">
+                    <c-button type="submit" variant="primary" ::disabled="loading">
                         Save Start Message
                     </c-button>
                 </c-button_row>
@@ -133,7 +133,7 @@
                 called the controlled apps. Add one by its short name in Authentik (its slug).
             </p>
             <form @submit.prevent="setMaxMembers"
-                  class="d-flex gap-10 items-end flex-wrap">
+                  class="d-flex gap-10 items-end flex-wrap p-10">
                 <c-filter_field label="People per team" id="max_members">
                     <input type="number"
                            name="max_members"
@@ -181,7 +181,7 @@
                                description="Add the apps Start opens to the blue teams." />
             </template>
             <form @submit.prevent="addApp"
-                  class="d-flex gap-10 items-end flex-wrap mt-10">
+                  class="d-flex gap-10 items-end flex-wrap mt-10 p-10">
                 <c-filter_field label="Add an app" id="new_app">
                     <input type="text"
                            id="new_app"
