@@ -13,7 +13,8 @@
             <form @submit.prevent="sendBroadcast" :data-confirm="sendQuestion">
                 <c-fieldset heading="Compose" aligned="true">
                     <c-form_field label="Target" id="target">
-                        <select name="target"
+                        <select id="target"
+                                name="target"
                                 :value="target"
                                 @change="setField"
                                 data-field="target"
@@ -28,6 +29,7 @@
                                       id="team_numbers"
                                       help_text="Comma-separated numbers or ranges: 1,3,5-10">
                             <input type="text"
+                                   id="team_numbers"
                                    name="team_numbers"
                                    :value="teamNumbers"
                                    @input="setField"
@@ -37,7 +39,8 @@
                         </c-form_field>
                     </template>
                     <c-form_field label="Message" id="message">
-                        <textarea name="message"
+                        <textarea id="message"
+                                  name="message"
                                   :value="text"
                                   @input="setField"
                                   data-field="text"

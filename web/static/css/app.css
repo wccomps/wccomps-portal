@@ -10,6 +10,8 @@
     /* Warning (orange) - "Claimed" status badges */
     --warning-bg: #fff3e0;
     --warning-fg: #b45309;
+    --warning-button-bg: #b45309;
+    --warning-button-hover-bg: #92400e;
 
     /* Warning Alert (yellow/amber) - caution messages, action boxes */
     --warning-alert-bg: #fff3cd;
@@ -200,7 +202,7 @@ a.button:active {
 a.button.warning,
 a.button.warning:link,
 a.button.warning:visited {
-    background: #b45309;
+    background: var(--warning-button-bg, #b45309);
     color: #fff;
 }
 
@@ -210,7 +212,7 @@ a.button.warning:visited {
 a.button.warning:hover,
 a.button.warning:focus,
 a.button.warning:active {
-    background: #92400e;
+    background: var(--warning-button-hover-bg, #92400e);
     color: #fff;
 }
 
@@ -432,6 +434,11 @@ a.btn-secondary:focus-visible {
 .form-row > div > label:first-child {
     display: block;
     margin-bottom: 4px;
+}
+.vTextField,
+.vLargeTextField {
+    max-width: 100%;
+    box-sizing: border-box;
 }
 /* Admin's submit-row draws a grey box, a second one inside the module a button row sits in; a boxed row
    (c-button_row boxed) keeps it. Two classes, so responsive.css's later padding doesn't put it back. */
@@ -1393,7 +1400,7 @@ html[data-theme="dark"] .dark-mode-toggle .light-icon {
     justify-content: center;
     width: 60px;
     height: 60px;
-    background: #dc3545;
+    background: var(--delete-button-bg, #dc3545);
     color: #fff;
     font-weight: 700;
     font-size: 14px;

@@ -661,6 +661,24 @@ def test_fieldset_children_are_padded() -> None:
     fail_with("Unpadded direct child of <c-fieldset> (add p-10/px-10 or use <c-form_field>)", found, {})
 
 
+def test_form_field_id_matches_child_control() -> None:
+    """When <c-form_field id="X"> or <c-filter_field id="X"> wraps explicit HTML controls rather than a Django
+    {{ form.field }} widget, one of its child controls must have id="X" so <label for="X"> points to an element."""
+    found: dict[str, str] = {}
+    for path in page_templates():
+        with_parents = list(with_open_elements(path))
+        for tag, _ in with_parents:
+            if tag.name not in ("c-form_field", "c-filter_field") or "id" not in tag.attrs:
+                continue
+            fid = tag.attrs["id"]
+            descendants = [
+                t for t, ancestors in with_parents if any(a.line == tag.line and a.name == tag.name for a in ancestors)
+            ]
+            if descendants and not any(d.attrs.get("id") == fid or ":id" in d.attrs for d in descendants):
+                found[f"{template_name(path)}:{tag.line}"] = f"<{tag.name} id={fid!r}> has no child with id={fid!r}"
+    fail_with("Orphaned <label for=...> on <c-form_field> or <c-filter_field>", found, {})
+
+
 def test_page_header_hierarchy() -> None:
     """Nav and sub-nav root pages have no parent_url or page-level Cancel link; child pages have both parent_url and
     parent_label, and every child of the same parent URL uses the same parent_label."""

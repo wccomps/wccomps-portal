@@ -258,6 +258,6 @@ def with_open_elements(path: Path) -> Iterator[tuple[Tag, list[Tag]]]:
             if tag.name in names:
                 del open_tags[len(names) - 1 - names[::-1].index(tag.name) :]
             continue
-        yield tag, open_tags
+        yield tag, list(open_tags)
         if tag.name not in VOID:
             open_tags.append(tag)
