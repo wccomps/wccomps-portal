@@ -8,7 +8,7 @@
 # its tag changes with .python-version.
 
 # uv only installs, so it's mounted for that step instead of shipped
-FROM ghcr.io/astral-sh/uv:0.13.1 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.5 AS uv
 
 FROM python:3.14.8-slim
 
