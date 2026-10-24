@@ -151,6 +151,8 @@ class TagReader(HTMLParser):
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.handle_starttag(tag, attrs)
+        if tag not in VOID:
+            self.found.append(Tag(tag, {}, self.getpos()[0], closing=True))
 
     def handle_endtag(self, tag: str) -> None:
         self.found.append(Tag(tag, {}, self.getpos()[0], closing=True))
