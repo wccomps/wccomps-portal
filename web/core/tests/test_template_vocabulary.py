@@ -610,6 +610,7 @@ FIELDSET_PADDED_TAGS = {
     "c-progress_bar",
     "c-slot",
     "c-table",
+    "c-toast",
     "dl",
     "h2",
     "h3",
@@ -662,21 +663,34 @@ def test_fieldset_children_are_padded() -> None:
 
 
 def test_form_field_id_matches_child_control() -> None:
-    """When <c-form_field id="X"> or <c-filter_field id="X"> wraps explicit HTML controls rather than a Django
-    {{ form.field }} widget, one of its child controls must have id="X" so <label for="X"> points to an element."""
+    """When <c-form_field> or <c-filter_field> wraps explicit HTML controls rather than a Django {{ form.field }}
+    widget, id="X" must match a child control's id="X", and any unwrapped <input>/<select>/<textarea> requires id."""
     found: dict[str, str] = {}
     for path in page_templates():
         with_parents = list(with_open_elements(path))
         for tag, _ in with_parents:
-            if tag.name not in ("c-form_field", "c-filter_field") or "id" not in tag.attrs:
+            if tag.name not in ("c-form_field", "c-filter_field"):
                 continue
-            fid = tag.attrs["id"]
             descendants = [
-                t for t, ancestors in with_parents if any(a.line == tag.line and a.name == tag.name for a in ancestors)
+                (t, ancestors)
+                for t, ancestors in with_parents
+                if any(a.line == tag.line and a.name == tag.name for a in ancestors)
             ]
-            if descendants and not any(d.attrs.get("id") == fid or ":id" in d.attrs for d in descendants):
-                found[f"{template_name(path)}:{tag.line}"] = f"<{tag.name} id={fid!r}> has no child with id={fid!r}"
-    fail_with("Orphaned <label for=...> on <c-form_field> or <c-filter_field>", found, {})
+            if "id" in tag.attrs:
+                fid = tag.attrs["id"]
+                if descendants and not any(d.attrs.get("id") == fid or ":id" in d.attrs for d, _ in descendants):
+                    found[f"{template_name(path)}:{tag.line}"] = f"<{tag.name} id={fid!r}> has no child with id={fid!r}"
+            elif ":id" not in tag.attrs:
+                unlabeled = [
+                    d.name
+                    for d, ancestors in descendants
+                    if d.name in ("input", "select", "textarea")
+                    and not any(a.name == "label" for a in ancestors)
+                    and "aria-label" not in d.attrs
+                ]
+                if unlabeled:
+                    found[f"{template_name(path)}:{tag.line}"] = f"<{tag.name}> missing id for child {unlabeled[0]}"
+    fail_with("Broken or missing <label for=...> on <c-form_field> or <c-filter_field>", found, {})
 
 
 def test_page_header_hierarchy() -> None:
