@@ -9,7 +9,7 @@
 | **Proxmox Console** (VMs) | `https://competitors.wccomps.org` | Shared team login (`teamXX`) |
 | **Jump Box** (Browser Terminal / SSH) | `https://jumpbox.wccomps.org` | Shared team login (`teamXX`) |
 
-> **First 5 minutes:** Run `/link` in Discord and log in with your `teamXX` account so you get your private team channels. Then grab your scenario docs at `portal.wccomps.org/packet/`.
+> **Before Competition Day (Tue–Thu):** Your team packet (with your `teamXX` login) is emailed out **days before the Saturday competition** (usually Tuesday, Wednesday, or Thursday). **Run `/link` in Discord as soon as your packet arrives** so your whole team has access to your private Discord channels and `portal.wccomps.org/packet/` before Saturday morning!
 
 ---
 
