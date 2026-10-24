@@ -4,6 +4,6 @@
 <c-vars label id min_width="140px" />
 <div {{ attrs }} class="filter-field" style="min-width: {{ min_width }};">
     {# djlint:on #}
-    <label for="{{ id }}" class="filter-field-label">{{ label }}</label>
+    <label {% if id %}for="{{ id }}"{% endif %} class="filter-field-label">{{ label }}</label>
     {{ slot }}
 </div>

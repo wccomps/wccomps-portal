@@ -191,6 +191,7 @@
                 <template x-if="csvContent">
                     <c-action_box heading="Password CSV Generated" class="mt-20">
                         <textarea readonly
+                                  aria-label="Generated password CSV"
                                   class="w-full vTextField h-120 font-mono text-sm"
                                   x-text="csvContent"></textarea>
                         <c-button_row class="mt-10">

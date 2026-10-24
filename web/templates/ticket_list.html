@@ -56,7 +56,7 @@
                            aria-label="Search tickets"
                            accesskey="/">
                 </c-filter_field>
-                <c-filter_field label="Status" id="id_status">
+                <c-filter_field label="Status">
                     <div class="d-flex gap-10 flex-wrap items-center"
                          role="group"
                          aria-label="Filter by status (none selected shows all)">
@@ -73,7 +73,8 @@
                 </c-filter_field>
                 <c-filter_field label="Category" id="id_category">
                     <select name="category" id="id_category" aria-label="Filter by category">
-                        <option value="all" {% if filters.category == 'all' %}selected{% endif %}>All Categories</option>
+                        <option value="all"
+                                {% if filters.category == 'all' %}selected{% endif %}>All Categories</option>
                         {% for cat in categories %}
                             <option value="{{ cat.id }}"
                                     {% if filters.category == cat.id|stringformat:"i" %}selected{% endif %}>
