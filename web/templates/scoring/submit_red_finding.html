@@ -227,7 +227,7 @@
             <c-fieldset heading="Evidence">
                 <c-form_field label="Upload Files"
                               id="screenshots"
-                              help_text="Upload screenshots, logs, or other evidence. Maximum 20 files, 50MB per file.">
+                              help_text="Upload screenshots, PDFs, logs, archives, or other evidence. Maximum 20 files, 50MB per file.">
                     <input type="file"
                            class="vTextField"
                            id="screenshots"
@@ -249,7 +249,7 @@
                 <div class="p-10 text-muted">
                     <ul class="mb-0">
                         <li>Provide detailed technical information about the vulnerability or attack</li>
-                        <li>Include all relevant IP addresses visible in screenshots</li>
+                        <li>Include all relevant IP addresses in your evidence (screenshots, logs, PDFs, etc.)</li>
                         <li>Select all teams that were successfully compromised</li>
                         <li>Gold Team will review and assign point values</li>
                     </ul>
@@ -426,23 +426,31 @@
                 const fileCount = input.files.length;
 
                 if (fileCount > 20) {
-                    alert('Maximum 20 screenshots per submission. Choose 20 or fewer: a submission with more is rejected.');
+                    alert('Maximum 20 files per submission. Choose 20 or fewer: a submission with more is rejected.');
                 }
 
                 Array.from(input.files).slice(0, 20).forEach((file, index) => {
-                    const reader = new FileReader();
+                    const div = document.createElement('div');
+                    const nameDiv = document.createElement('div');
+                    nameDiv.className = 'screenshot-preview-name';
+                    nameDiv.textContent = file.name;
 
-                    reader.onload = function(e) {
-                        const div = document.createElement('div');
-                        div.innerHTML = `
-                    <img src="${e.target.result}" alt="Screenshot ${index + 1}" class="screenshot-preview-img">
-                    <div class="screenshot-preview-name">${file.name}</div>
-                `;
-
+                    if (file.type && file.type.startsWith('image/')) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const img = document.createElement('img');
+                            img.src = e.target.result;
+                            img.alt = `Evidence ${index + 1}`;
+                            img.className = 'screenshot-preview-img';
+                            div.appendChild(img);
+                            div.appendChild(nameDiv);
+                            preview.appendChild(div);
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        div.appendChild(nameDiv);
                         preview.appendChild(div);
-                    };
-
-                    reader.readAsDataURL(file);
+                    }
                 });
             }
         }

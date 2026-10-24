@@ -84,7 +84,7 @@
                 <c-fieldset heading="Evidence">
                     <c-form_field label="Upload Files"
                                   id="screenshots"
-                                  help_text="Upload screenshots, logs, or other evidence. Maximum 20 files.">
+                                  help_text="Upload screenshots, PDFs, logs, archives, or other evidence. Maximum 20 files, 50MB per file.">
                         <input type="file"
                                class="vTextField"
                                id="screenshots"
@@ -230,20 +230,31 @@
 
             if (input.files) {
                 if (input.files.length > 20) {
-                    alert('Maximum 20 screenshots per submission. Choose 20 or fewer: a submission with more is rejected.');
+                    alert('Maximum 20 files per submission. Choose 20 or fewer: a submission with more is rejected.');
                 }
 
                 Array.from(input.files).slice(0, 20).forEach((file, index) => {
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        const div = document.createElement('div');
-                        div.innerHTML = `
-                    <img src="${e.target.result}" alt="Screenshot ${index + 1}" class="screenshot-preview-img">
-                    <div class="screenshot-preview-name">${file.name}</div>
-                `;
+                    const div = document.createElement('div');
+                    const nameDiv = document.createElement('div');
+                    nameDiv.className = 'screenshot-preview-name';
+                    nameDiv.textContent = file.name;
+
+                    if (file.type && file.type.startsWith('image/')) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const img = document.createElement('img');
+                            img.src = e.target.result;
+                            img.alt = `Evidence ${index + 1}`;
+                            img.className = 'screenshot-preview-img';
+                            div.appendChild(img);
+                            div.appendChild(nameDiv);
+                            preview.appendChild(div);
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        div.appendChild(nameDiv);
                         preview.appendChild(div);
-                    };
-                    reader.readAsDataURL(file);
+                    }
                 });
             }
         }

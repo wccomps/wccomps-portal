@@ -35,16 +35,20 @@
                         {% for screenshot in incident.screenshots.all %}
                             <a href="{% url 'scoring:incident_screenshot' screenshot.id %}"
                                target="_blank">
-                                <img src="{% url 'scoring:incident_screenshot' screenshot.id %}"
-                                     alt="{{ screenshot.filename }}"
-                                     loading="lazy"
-                                     width="200"
-                                     height="150">
+                                {% if screenshot.mime_type|slice:":6" == "image/" %}
+                                    <img src="{% url 'scoring:incident_screenshot' screenshot.id %}"
+                                         alt="{{ screenshot.filename }}"
+                                         loading="lazy"
+                                         width="200"
+                                         height="150">
+                                {% else %}
+                                    {{ screenshot.filename }}
+                                {% endif %}
                             </a>
                         {% endfor %}
                     </c-image_grid>
                 {% else %}
-                    <c-empty_state title="No screenshots" description="No evidence screenshots attached" />
+                    <c-empty_state title="No evidence" description="No evidence files attached" />
                 {% endif %}
             </c-fieldset>
         </c-module>

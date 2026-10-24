@@ -102,23 +102,27 @@
                 </c-info_box>
             </c-fieldset>
         {% endif %}
-        <c-fieldset heading="Evidence Screenshots">
+        <c-fieldset heading="Evidence">
             {% if finding.screenshots.exists %}
                 <c-image_grid>
                     {% for screenshot in finding.screenshots.all %}
                         <a href="{% url 'scoring:red_screenshot' screenshot.id %}"
                            target="_blank">
-                            <img src="{% url 'scoring:red_screenshot' screenshot.id %}"
-                                 alt="{{ screenshot.filename }}"
-                                 loading="lazy"
-                                 width="200"
-                                 height="150">
+                            {% if screenshot.mime_type|slice:":6" == "image/" %}
+                                <img src="{% url 'scoring:red_screenshot' screenshot.id %}"
+                                     alt="{{ screenshot.filename }}"
+                                     loading="lazy"
+                                     width="200"
+                                     height="150">
+                            {% else %}
+                                {{ screenshot.filename }}
+                            {% endif %}
                         </a>
                     {% endfor %}
                 </c-image_grid>
             {% else %}
-                <c-empty_state title="No screenshots"
-                               description="No screenshots were attached to this finding" />
+                <c-empty_state title="No evidence"
+                               description="No evidence files were attached to this finding" />
             {% endif %}
         </c-fieldset>
         {% if finding.is_approved %}
