@@ -415,9 +415,10 @@ class AuthentikManager:
             logger.exception(f"Failed to update discord_id for user {username}: {e}")
             return False
 
-    def end_user_sessions(self, user: AuthentikUser) -> str | None:
-        """End every Authentik session of a user: None when done, else why not (some may have ended). The reason
-        never names the user or counts sessions, so one reason shared by many teams reads once."""
+    def end_user_sessions(self, user: AuthentikUser) -> tuple[int, str | None]:
+        """End every Authentik session of a user: (sessions of theirs found, None when all ended or else why not).
+        The reason never names the user or counts sessions, so one reason shared by many teams reads once."""
+        found = 0
         try:
             # user__username: Authentik ignores a filter it doesn't know (user=<pk> is one) and answers every session
             # the token may view
@@ -425,14 +426,15 @@ class AuthentikManager:
                 "/api/v3/core/authenticated_sessions/", {"user__username": user["username"]}, {"uuid": str, "user": int}
             )
             if any(session["user"] != user["pk"] for session in sessions):
-                return "Authentik answered sessions of other users, so none were ended"
+                return 0, "Authentik answered sessions of other users, so none were ended"
+            found = len(sessions)
             try:
                 # Canonical: uuid.UUID also accepts {...} and urn:uuid: forms, which the delete path must not carry
                 session_ids = [uuid.UUID(str(session["uuid"])) for session in sessions]
             except ValueError:
-                return "Authentik answered a session without a valid id, so none were ended"
+                return found, "Authentik answered a session without a valid id, so none were ended"
             if not sessions and not self.sees_any_sessions():
-                return SESSIONS_HIDDEN
+                return 0, SESSIONS_HIDDEN
 
             refused: int | None = None
             for session_id in session_ids:
@@ -440,10 +442,10 @@ class AuthentikManager:
                 # 404: the session ended between the list and the delete
                 if not response.is_success and response.status_code != 404 and refused is None:
                     refused = response.status_code
-            return None if refused is None else f"Authentik did not end sessions (HTTP {refused})"
+            return found, None if refused is None else f"Authentik did not end sessions (HTTP {refused})"
         except (AuthentikAPIError, httpx.HTTPError) as e:
             logger.warning(f"Ending the sessions of {user['username']} failed: {e}")
-            return reason_for(e)
+            return found, reason_for(e)
 
     def sees_any_sessions(self) -> bool:
         """Whether the token can see any session at all (when not, see SESSIONS_HIDDEN). Raises AuthentikAPIError on

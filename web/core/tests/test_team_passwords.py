@@ -13,7 +13,6 @@ from core.authentik_manager import AuthentikAPIError, AuthentikManager
 from core.authentik_utils import (
     CredentialReset,
     reset_team_credentials,
-    reset_team_password,
     reset_teams_credentials,
     sessions_failure_summary,
 )
@@ -37,27 +36,8 @@ def manager():
     with patch("core.authentik_utils.AuthentikManager") as cls:
         opened = cls.return_value.__enter__.return_value
         opened.find_user.return_value = {"pk": 5, "username": "team07"}
-        opened.end_user_sessions.return_value = None
+        opened.end_user_sessions.return_value = (0, None)
         yield opened
-
-
-def test_reset_records_the_new_password_on_the_school_info(school_info, manager):
-    password, error = reset_team_password(7)
-
-    assert password and error == ""
-    manager.set_password.assert_called_once_with({"pk": 5, "username": "team07"}, password)
-    manager.end_user_sessions.assert_not_called()
-    school_info.refresh_from_db()
-    assert school_info.password == password
-
-
-def test_failed_reset_records_nothing(school_info, manager):
-    manager.set_password.side_effect = AuthentikAPIError("Set the password of team07: Server error", 500)
-
-    assert reset_team_password(7) == (None, "Set the password of team07: Server error")
-
-    school_info.refresh_from_db()
-    assert school_info.password == "old"
 
 
 def test_authentik_reset_leaves_the_account_disabled():
@@ -71,9 +51,9 @@ def test_authentik_reset_leaves_the_account_disabled():
 
     with patch("core.authentik_utils.AuthentikManager") as cls:
         cls.return_value.__enter__.return_value = real
-        password, _ = reset_team_password(7)
+        reset = reset_team_credentials(7)
 
-    assert password
+    assert reset.password
     real.client.patch.assert_not_called()
 
 
@@ -94,7 +74,7 @@ def test_web_unlink_queues_a_role_sync_for_the_member(admin_user, action):
 
 
 def test_reset_team_credentials_records_the_password_and_the_sessions_outcome(school_info, manager):
-    manager.end_user_sessions.return_value = "Authentik did not end sessions (HTTP 403)"
+    manager.end_user_sessions.return_value = (1, "Authentik did not end sessions (HTTP 403)")
 
     reset = reset_team_credentials(7)
 

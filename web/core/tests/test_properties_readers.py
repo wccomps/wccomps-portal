@@ -463,7 +463,11 @@ READERS = [
         "end_user_sessions",
         lambda: authentik().end_user_sessions({"pk": 7, "username": "team01"}),
         (SESSIONS, SESSIONS, DONE),
-        lambda r: outcome(r, lambda e: e is None or is_str(e), "None or why not"),
+        lambda r: outcome(
+            r,
+            lambda t: isinstance(t, tuple) and is_int(t[0]) and t[0] >= 0 and (t[1] is None or is_str(t[1])),
+            "(sessions found, None or why not)",
+        ),
         (f"{AM}.end_user_sessions", f"{AM}._list_all", *READ),
     ),
     Reader(

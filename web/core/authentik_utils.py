@@ -57,15 +57,6 @@ def _new_team_password(manager: AuthentikManager, team_number: int) -> tuple[Aut
     return user, password
 
 
-def reset_team_password(team_number: int) -> tuple[str | None, str]:
-    """A new random password for the team account, recorded on its school info: (password, "") or (None, why not)."""
-    with AuthentikManager() as manager:
-        outcome = _new_team_password(manager, team_number)
-    if isinstance(outcome, str):
-        return None, outcome
-    return outcome[1], ""
-
-
 @dataclass(frozen=True)
 class CredentialReset:
     """The new password, or None and error; sessions_error is None when its Authentik sessions ended or weren't
@@ -74,6 +65,7 @@ class CredentialReset:
     password: str | None
     error: str = ""
     sessions_error: str | None = None
+    sessions_found: int = 0
 
     @property
     def sessions_outcome(self) -> str:
@@ -94,7 +86,8 @@ def _reset_credentials(manager: AuthentikManager, team_number: int) -> Credentia
     if isinstance(outcome, str):
         return CredentialReset(password=None, error=outcome)
     user, password = outcome
-    return CredentialReset(password=password, sessions_error=manager.end_user_sessions(user))
+    found, sessions_error = manager.end_user_sessions(user)
+    return CredentialReset(password=password, sessions_error=sessions_error, sessions_found=found)
 
 
 def reset_team_credentials(team_number: int) -> CredentialReset:

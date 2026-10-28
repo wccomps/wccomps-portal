@@ -12,7 +12,9 @@ from registration.locks import school_list_lock
 from registration.models import Event
 from registration.stage import ACTIONS, Action
 
-from core.authentik_utils import reset_team_password
+from core.authentik_utils import reset_team_credentials
+from core.discord_tasks import LogToChannel
+from core.models import DiscordTask
 from core.utils import ndjson_done
 from core.utils import ndjson_progress as _progress
 from team.models import SchoolInfo, Team, team_username
@@ -161,11 +163,23 @@ class PacketDistributionService:
         if school_info.password:
             return school_info.password
 
-        password, error = reset_team_password(team.team_number)
-        if password is None:
-            raise ValueError(f"Failed to set Authentik password for team {team.team_number}: {error}")
+        reset = reset_team_credentials(team.team_number)
+        if reset.password is None:
+            raise ValueError(f"Failed to set Authentik password for team {team.team_number}: {reset.error}")
         logger.info(f"Generated credentials for team {team.team_number}")
-        return password
+        # Nobody should be signed in to a team account before its packet goes out: someone else has its credentials
+        alerts = []
+        if reset.sessions_found:
+            alerts.append(
+                f"Team {team.team_number}'s account had {reset.sessions_found} Authentik sessions before its packet "
+                "went out; its credentials may have leaked."
+            )
+        if reset.sessions_error:
+            alerts.append(f"Team {team.team_number}: could not end its Authentik sessions: {reset.sessions_error}")
+        if alerts:
+            logger.warning(" ".join(alerts))
+            DiscordTask.enqueue(LogToChannel(message=" ".join(alerts)))
+        return reset.password
 
     def _build_packet_email(
         self,
