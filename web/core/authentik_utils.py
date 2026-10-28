@@ -50,40 +50,48 @@ def reset_team_password(team_number: int) -> tuple[str | None, str]:
     return password, ""
 
 
-def reset_team_credentials(team_number: int) -> tuple[str | None, str, bool]:
-    """Reset a team account's password, then ask Authentik to end the account's sessions.
+def reset_team_credentials(team_number: int) -> tuple[str | None, str, str | None]:
+    """Reset a team account's password, then end the account's sessions.
 
-    Returns (password, error, sessions_revoked); password is None when the reset failed.
+    Returns (password, error, sessions_error); password is None when the reset failed, sessions_error is None when
+    the sessions were ended.
     """
     from .authentik_manager import AuthentikManager
 
     password, error = reset_team_password(team_number)
     if not password:
-        return None, error, False
-    revoked, _, _ = AuthentikManager().revoke_user_sessions(team_username(team_number))
-    return password, "", revoked
+        return None, error, None
+    return password, "", AuthentikManager().revoke_user_sessions(team_username(team_number))
 
 
 @dataclass(frozen=True)
 class BulkPasswordResetResult:
     password_list: list[tuple[int, str, str]]
     failed_resets: list[tuple[str, str]]
-    sessions_failed: list[str]
+    sessions_failed: list[tuple[str, str]]
+
+
+def sessions_failure_summary(sessions_failed: list[tuple[str, str]]) -> str:
+    """'could not end sessions for team01, team02: <why>', one clause per distinct reason."""
+    by_reason: dict[str, list[str]] = {}
+    for username, reason in sessions_failed:
+        by_reason.setdefault(reason, []).append(username)
+    return "; ".join(f"could not end sessions for {', '.join(names)}: {why}" for why, names in by_reason.items())
 
 
 def reset_teams_credentials(team_numbers: Iterable[int]) -> BulkPasswordResetResult:
     """Reset passwords and revoke sessions for multiple teams."""
     password_list: list[tuple[int, str, str]] = []
     failed_resets: list[tuple[str, str]] = []
-    sessions_failed: list[str] = []
+    sessions_failed: list[tuple[str, str]] = []
 
     for team_num in team_numbers:
         username = team_username(team_num)
-        password, error, sessions_revoked = reset_team_credentials(team_num)
+        password, error, sessions_error = reset_team_credentials(team_num)
         if password:
             password_list.append((team_num, username, password))
-            if not sessions_revoked:
-                sessions_failed.append(username)
+            if sessions_error:
+                sessions_failed.append((username, sessions_error))
         else:
             failed_resets.append((username, error))
 

@@ -122,10 +122,10 @@ def _check_team_group_membership() -> CheckResult:
 def _check_session_access() -> CheckResult:
     """The portal's token must see sessions, or resetting a team's credentials leaves the team signed in."""
     if AuthentikManager().sees_any_sessions():
-        return ("pass", "The portal can end team sessions", None)
+        return ("pass", "The portal's token can see Authentik sessions", None)
     return (
         "fail",
-        f"{SESSIONS_HIDDEN} If nobody is signed in to Authentik right now, sign in and run the checks again.",
+        f"{SESSIONS_HIDDEN} If nobody is, sign in to Authentik and run the checks again.",
         None,
     )
 
@@ -335,7 +335,7 @@ ALL_CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
     ("Discord IDs configured", _check_discord_settings),
     ("Team accounts exist", _check_team_accounts_exist),
     ("Group membership correct", _check_team_group_membership),
-    ("Team sessions can be ended", _check_session_access),
+    ("Authentik sessions visible", _check_session_access),
     ("App bindings configured", _check_blueteam_bindings),
     ("Multiple teams registered", _check_multiple_teams),
     ("School info configured", _check_school_info),

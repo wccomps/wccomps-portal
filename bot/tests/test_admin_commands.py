@@ -88,7 +88,8 @@ class TestAdminCommands:
         callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
         with (
             patch(
-                "core.authentik_utils.reset_team_credentials", side_effect=lambda n: (f"pw-{n}", "", n != 2)
+                "core.authentik_utils.reset_team_credentials",
+                side_effect=lambda n: (f"pw-{n}", "", "HTTP 403" if n == 2 else None),
             ) as reset,
             patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
         ):
@@ -100,7 +101,7 @@ class TestAdminCommands:
         call_args = mock_interaction.followup.send.call_args
         csv_text = call_args.kwargs["file"].fp.getvalue().decode()
         assert csv_text.splitlines()[1:] == ["team01,pw-1", "team02,pw-2", "team03,pw-3"]
-        assert "Could not revoke sessions for team02" in call_args.args[0]
+        assert "Sessions: could not end sessions for team02: HTTP 403" in call_args.args[0]
 
     async def test_reset_blueteam_passwords_api_failure(
         self,
@@ -111,7 +112,7 @@ class TestAdminCommands:
         """Test /admin reset-blueteam-passwords handles API failures."""
         mock_interaction.user.id = mock_admin_user._discord_id
 
-        results = {1: ("pw-1", "", True), 2: (None, "HTTP 500", False), 3: ("pw-3", "", True)}
+        results = {1: ("pw-1", "", None), 2: (None, "HTTP 500", None), 3: ("pw-3", "", None)}
         callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
         with (
             patch("core.authentik_utils.reset_team_credentials", side_effect=lambda n: results[n]),

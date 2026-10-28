@@ -52,7 +52,7 @@ def test_a_question_answered_yes_posts(team_page):
 
     page.on("dialog", accept)
     with (
-        patch("core.admin_views.teams.reset_team_credentials", return_value=("Team-Pass-7!", "", True)),
+        patch("core.admin_views.teams.reset_team_credentials", return_value=("Team-Pass-7!", "", None)),
         page.expect_response(lambda r: r.url.endswith("/action/")),
     ):
         page.get_by_role("button", name="Reset Team").click()

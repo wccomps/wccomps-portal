@@ -366,120 +366,92 @@ class TestAuthentikManager:
 
         assert result is False
 
-    def test_revoke_user_sessions_success(self, manager: AuthentikManager) -> None:
-        """Test successfully revoking user sessions."""
-        mock_user_response = Mock()
-        mock_user_response.json.return_value = {"results": [{"pk": 42}]}
+    @staticmethod
+    def _answer(body: dict, status: int = 200) -> Mock:
+        response = Mock(is_error=status >= 400, status_code=status, text="", url="https://auth.test.local/x")
+        response.json.return_value = body
+        if status >= 400:
+            response.raise_for_status.side_effect = httpx.HTTPStatusError("error", request=Mock(), response=response)
+        return response
 
-        mock_sessions_response = Mock()
-        mock_sessions_response.json.return_value = {
-            "results": [
-                {"uuid": "session-1"},
-                {"uuid": "session-2"},
-            ]
-        }
+    def _sessions(self, *owners: int) -> Mock:
+        return self._answer({"results": [{"uuid": f"s-{i}", "user": pk} for i, pk in enumerate(owners)]})
 
-        mock_delete_response = Mock()
+    def test_revoke_user_sessions_ends_each_of_the_users_sessions(self, manager: AuthentikManager) -> None:
+        manager.client.get.side_effect = [self._answer({"results": [{"pk": 42}]}), self._sessions(42, 42)]
+        manager.client.delete.return_value = self._answer({}, 204)
 
-        manager.client.get.side_effect = [mock_user_response, mock_sessions_response]
-        manager.client.delete.return_value = mock_delete_response
+        assert manager.revoke_user_sessions("team01") is None
 
-        success, error, count = manager.revoke_user_sessions("team01")
-
-        assert success is True
-        assert error is None
-        assert count == 2
         assert manager.client.delete.call_count == 2
 
-    def test_revoke_user_sessions_user_not_found(self, manager: AuthentikManager) -> None:
-        """Test revoking sessions for non-existent user."""
-        mock_response = Mock()
-        mock_response.json.return_value = {"results": []}
-        manager.client.get.return_value = mock_response
+    def test_revoke_user_sessions_filters_by_username(self, manager: AuthentikManager) -> None:
+        """Authentik ignores an unknown filter such as user=<pk> and answers every session it lets the token see."""
+        manager.client.get.side_effect = [self._answer({"results": [{"pk": 42}]}), self._sessions(42)]
+        manager.client.delete.return_value = self._answer({}, 204)
 
-        success, error, count = manager.revoke_user_sessions("nonexistent")
+        manager.revoke_user_sessions("team01")
 
-        assert success is False
-        assert "not found" in error
-        assert count == 0
+        assert manager.client.get.call_args_list[1].kwargs["params"]["user__username"] == "team01"
 
-    def test_revoke_user_sessions_no_sessions(self, manager: AuthentikManager) -> None:
-        """Test revoking sessions when user has none."""
-        mock_user_response = Mock()
-        mock_user_response.json.return_value = {"results": [{"pk": 42}]}
+    def test_revoke_user_sessions_refuses_other_users_sessions(self, manager: AuthentikManager) -> None:
+        manager.client.get.side_effect = [self._answer({"results": [{"pk": 42}]}), self._sessions(42, 99)]
 
-        mock_sessions_response = Mock()
-        mock_sessions_response.json.return_value = {"results": []}
+        error = manager.revoke_user_sessions("team01")
 
-        visible_response = Mock(is_error=False)
-        visible_response.json.return_value = {"results": [{"uuid": "someone-else"}]}
-
-        manager.client.get.side_effect = [mock_user_response, mock_sessions_response, visible_response]
-
-        success, error, count = manager.revoke_user_sessions("team01")
-
-        assert success is True
-        assert error is None
-        assert count == 0
-
-    def test_revoke_user_sessions_fails_when_sessions_are_hidden(self, manager: AuthentikManager) -> None:
-        """No sessions found, and the token sees no one's: it can't see sessions, so nothing was ended."""
-        mock_user_response = Mock()
-        mock_user_response.json.return_value = {"results": [{"pk": 42}]}
-
-        empty_response = Mock(is_error=False)
-        empty_response.json.return_value = {"results": []}
-
-        manager.client.get.side_effect = [mock_user_response, empty_response, empty_response]
-
-        success, error, count = manager.revoke_user_sessions("team01")
-
-        assert success is False
-        assert error == SESSIONS_HIDDEN
-        assert count == 0
+        assert error is not None and "other users" in error
         manager.client.delete.assert_not_called()
 
+    def test_revoke_user_sessions_user_not_found(self, manager: AuthentikManager) -> None:
+        manager.client.get.return_value = self._answer({"results": []})
+
+        error = manager.revoke_user_sessions("nonexistent")
+
+        assert error is not None and "not found" in error
+
+    def test_revoke_user_sessions_no_sessions(self, manager: AuthentikManager) -> None:
+        """No sessions of the user, while the token sees someone's: nothing to end."""
+        manager.client.get.side_effect = [
+            self._answer({"results": [{"pk": 42}]}),
+            self._sessions(),
+            self._sessions(7),
+        ]
+
+        assert manager.revoke_user_sessions("team01") is None
+
+    def test_revoke_user_sessions_fails_when_sessions_are_hidden(self, manager: AuthentikManager) -> None:
+        """No sessions found, and the token sees no one's: it may not see sessions at all, so nothing was ended."""
+        manager.client.get.side_effect = [self._answer({"results": [{"pk": 42}]}), self._sessions(), self._sessions()]
+
+        assert manager.revoke_user_sessions("team01") == SESSIONS_HIDDEN
+        manager.client.delete.assert_not_called()
+
+    def test_revoke_user_sessions_already_ended_session_is_fine(self, manager: AuthentikManager) -> None:
+        """A session that expired between the list and the delete answers 404."""
+        manager.client.get.side_effect = [self._answer({"results": [{"pk": 42}]}), self._sessions(42, 42)]
+        manager.client.delete.side_effect = [self._answer({}, 404), self._answer({}, 204)]
+
+        assert manager.revoke_user_sessions("team01") is None
+
+    def test_revoke_user_sessions_failed_delete_is_reported(self, manager: AuthentikManager) -> None:
+        """A token that may view but not delete sessions must not report them ended."""
+        manager.client.get.side_effect = [self._answer({"results": [{"pk": 42}]}), self._sessions(42, 42)]
+        manager.client.delete.side_effect = [self._answer({}, 204), self._answer({"detail": "denied"}, 403)]
+
+        error = manager.revoke_user_sessions("team01")
+
+        assert error is not None and "1 of 2" in error
+
+    def test_revoke_user_sessions_network_error(self, manager: AuthentikManager) -> None:
+        manager.client.get.side_effect = httpx.ConnectError("Network error")
+
+        error = manager.revoke_user_sessions("team01")
+
+        assert error is not None and "Network error" in error
+
     def test_sees_any_sessions(self, manager: AuthentikManager) -> None:
-        visible = Mock(is_error=False)
-        visible.json.return_value = {"results": [{"uuid": "s-1"}]}
-        hidden = Mock(is_error=False)
-        hidden.json.return_value = {"results": []}
-        manager.client.get.side_effect = [visible, hidden]
+        manager.client.get.side_effect = [self._sessions(7), self._sessions()]
 
         assert manager.sees_any_sessions() is True
         assert manager.sees_any_sessions() is False
         assert manager.client.get.call_args.kwargs["params"] == {"page_size": "1"}
-
-    def test_revoke_user_sessions_network_error(self, manager: AuthentikManager) -> None:
-        """Test handling network error during session revocation."""
-        manager.client.get.side_effect = httpx.ConnectError("Network error")
-
-        success, error, count = manager.revoke_user_sessions("team01")
-
-        assert success is False
-        assert "Network error" in error
-        assert count == 0
-
-    def test_revoke_user_sessions_partial_failure(self, manager: AuthentikManager) -> None:
-        """Test partial failure when revoking some sessions."""
-        mock_user_response = Mock()
-        mock_user_response.json.return_value = {"results": [{"pk": 42}]}
-
-        mock_sessions_response = Mock()
-        mock_sessions_response.json.return_value = {
-            "results": [
-                {"uuid": "session-1"},
-                {"uuid": "session-2"},
-                {"uuid": "session-3"},
-            ]
-        }
-
-        mock_delete_success = Mock()
-        manager.client.get.side_effect = [mock_user_response, mock_sessions_response]
-        manager.client.delete.side_effect = [mock_delete_success, Exception("Delete failed"), mock_delete_success]
-
-        success, error, count = manager.revoke_user_sessions("team01")
-
-        assert success is True
-        assert error is None
-        assert count == 2  # 2 succeeded, 1 failed

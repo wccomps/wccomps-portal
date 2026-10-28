@@ -50,11 +50,10 @@ logger = logging.getLogger(__name__)
 
 MAX_PAGES = 100  # of 100 results each: a list endpoint still saying "next" past this is broken, not long
 
-# Authentik answers a session list with only the sessions the token may view, so a token without that permission
-# finds none and every revoke looks like a success
+# Authentik lists only the sessions the token may view, so an empty list can mean a missing permission
 SESSIONS_HIDDEN = (
-    "The portal's Authentik token can't see sessions, so none were ended. Give its Authentik user the view and "
-    "delete Authenticated Session permissions."
+    "Authentik showed the portal's token no sessions at all, so none were ended. Either its Authentik user lacks "
+    "the view and delete Authenticated Session permissions, or nobody is signed in to Authentik."
 )
 
 
@@ -409,8 +408,8 @@ class AuthentikManager:
             logger.exception(f"Failed to update discord_id for user {username}: {e}")
             return False
 
-    def revoke_user_sessions(self, username: str) -> tuple[bool, str | None, int]:
-        """Revoke all active sessions for a user, returning (success, error_message, sessions_revoked)."""
+    def revoke_user_sessions(self, username: str) -> str | None:
+        """End every Authentik session of a user: None when done, else why not (some may have ended)."""
         try:
             response = self.client.get(
                 f"{self.base_url}/api/v3/core/users/",
@@ -418,58 +417,45 @@ class AuthentikManager:
             )
             response.raise_for_status()
             user = self._first_user(response, f"Find user {username}")
-
             if not user:
-                return False, f"User {username} not found", 0
+                return f"User {username} not found"
 
-            user_pk = user["pk"]
-            logger.info(f"Found user {username} with pk={user_pk}")
-
-            response = self.client.get(
-                f"{self.base_url}/api/v3/core/authenticated_sessions/",
-                params={"user": user_pk},
+            # user__username: Authentik ignores a filter it doesn't know (user=<pk> is one) and answers every session
+            sessions = self._list_all(
+                "/api/v3/core/authenticated_sessions/", {"user__username": username}, {"uuid": str, "user": int}
             )
-            response.raise_for_status()
-            sessions, _ = self._results(response, f"List sessions of {username}")
-
-            logger.info(f"Found {len(sessions)} session(s) for user {username}")
+            if any(session["user"] != user["pk"] for session in sessions):
+                return f"Authentik answered sessions of other users for {username}, so none were ended"
             if not sessions and not self.sees_any_sessions():
-                return False, SESSIONS_HIDDEN, 0
+                return SESSIONS_HIDDEN
 
-            revoked_count = 0
+            failures: list[str] = []
             for session in sessions:
-                session_uuid = session.get("uuid")
-                if not isinstance(session_uuid, str) or not session_uuid:
-                    continue
-
-                try:
-                    response = self.client.delete(
-                        f"{self.base_url}/api/v3/core/authenticated_sessions/{session_uuid}/",
-                    )
-                    response.raise_for_status()
-                    revoked_count += 1
-                    logger.info(f"Revoked session {session_uuid} for user {username}")
-                except Exception as e:
-                    logger.warning(f"Failed to revoke session {session_uuid}: {e}")
-
-            return True, None, revoked_count
+                response = self.client.delete(f"{self.base_url}/api/v3/core/authenticated_sessions/{session['uuid']}/")
+                # 404: the session ended between the list and the delete
+                if response.is_error and response.status_code != 404:
+                    failures.append(str(self._handle_response_error(response, f"End a session of {username}")))
+            if failures:
+                return f"Ended {len(sessions) - len(failures)} of {len(sessions)} sessions of {username}: {failures[0]}"
+            logger.info(f"Ended {len(sessions)} session(s) of {username}")
+            return None
 
         except httpx.HTTPStatusError as e:
             error = self._handle_response_error(e.response, f"Revoke sessions for user {username}")
             logger.exception(str(error))
-            return False, str(error), 0
+            return str(error)
         except httpx.HTTPError as e:
             error_msg = f"Network error revoking sessions: {e}"
             logger.exception(error_msg)
-            return False, error_msg, 0
+            return error_msg
         except Exception as e:
             error_msg = f"Unexpected error revoking sessions: {e}"
             logger.error(error_msg, exc_info=True)
-            return False, error_msg, 0
+            return error_msg
 
     def sees_any_sessions(self) -> bool:
         """Whether the token can see any session at all. False means it lacks the permission, or nobody is signed in
-        to Authentik. Raises AuthentikAPIError on an HTTP error or an answer of another shape."""
+        to Authentik. Raises AuthentikAPIError on an error status or an answer of another shape."""
         response = self.client.get(f"{self.base_url}/api/v3/core/authenticated_sessions/", params={"page_size": "1"})
         if response.is_error:
             raise self._handle_response_error(response, "List sessions")

@@ -65,7 +65,7 @@ def test_web_unlink_queues_a_role_sync_for_the_member(admin_user, action):
     client = Client()
     client.force_login(admin_user)
 
-    with patch("core.admin_views.teams.reset_team_credentials", return_value=("pw", "", True)):
+    with patch("core.admin_views.teams.reset_team_credentials", return_value=("pw", "", None)):
         client.post(reverse("admin_team_action", args=[8]), {"action": action, "discord_id": 4242})
 
     task = DiscordTask.objects.get(task_type="sync_member_roles")
@@ -78,8 +78,8 @@ def test_reset_team_credentials_revokes_the_accounts_sessions():
         patch("core.authentik_utils.reset_team_password", return_value=("pw", "")),
         patch("core.authentik_manager.AuthentikManager") as manager,
     ):
-        manager.return_value.revoke_user_sessions.return_value = (True, None, 2)
-        assert reset_team_credentials(7) == ("pw", "", True)
+        manager.return_value.revoke_user_sessions.return_value = None
+        assert reset_team_credentials(7) == ("pw", "", None)
 
     manager.return_value.revoke_user_sessions.assert_called_once_with("team07")
 
@@ -89,7 +89,7 @@ def test_reset_team_credentials_skips_sessions_when_the_reset_fails():
         patch("core.authentik_utils.reset_team_password", return_value=(None, "HTTP 500")),
         patch("core.authentik_manager.AuthentikManager") as manager,
     ):
-        assert reset_team_credentials(7) == (None, "HTTP 500", False)
+        assert reset_team_credentials(7) == (None, "HTTP 500", None)
 
     manager.return_value.revoke_user_sessions.assert_not_called()
 
@@ -103,14 +103,14 @@ def test_web_bulk_reset_defaults_to_the_active_teams(admin_user):
 
     with patch(
         "core.authentik_utils.reset_team_credentials",
-        side_effect=lambda n: (f"pw-{n}", "", n != 2),
+        side_effect=lambda n: (f"pw-{n}", "", "HTTP 403" if n == 2 else None),
     ) as reset:
         response = client.post(reverse("admin_competition_action"), {"action": "reset_passwords", "team_numbers": ""})
 
     assert [c.args[0] for c in reset.call_args_list] == [1, 2]
     body = response.json()
     assert body["csv"].splitlines()[1:] == ["team01,pw-1", "team02,pw-2"]
-    assert body["message"] == "Reset 2/2 passwords; could not revoke sessions for team02"
+    assert body["message"] == "Reset 2/2 passwords; could not end sessions for team02: HTTP 403"
 
 
 def test_team_page_password_reset_keeps_discord_links(admin_user):
@@ -123,14 +123,14 @@ def test_team_page_password_reset_keeps_discord_links(admin_user):
     client = Client()
     client.force_login(admin_user)
 
-    with patch("core.admin_views.teams.reset_team_credentials", return_value=("New-Pass-9!", "", True)) as reset:
+    with patch("core.admin_views.teams.reset_team_credentials", return_value=("New-Pass-9!", "", None)) as reset:
         response = client.post(reverse("admin_team_action", args=[8]), {"action": "reset_password"})
 
     reset.assert_called_once_with(8)
     body = response.json()
     assert body == {
         "success": True,
-        "message": "New password set in Authentik; asked Authentik to end its sessions",
+        "message": "New password set in Authentik; ended its sessions",
         "password": "New-Pass-9!",
     }
     assert DiscordLink.objects.filter(discord_id=4343, is_active=True).exists()

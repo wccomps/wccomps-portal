@@ -294,13 +294,10 @@ class AdminTeamsCog(commands.Cog):
 
         results.append(f"Unlinked {unlinked_count} Discord user(s)")
 
-        new_password, error, sessions_revoked = await sync_to_async(reset_team_credentials)(team_number)
+        new_password, error, sessions_error = await sync_to_async(reset_team_credentials)(team_number)
         if new_password:
             results.append("Reset the Authentik password")
-            if sessions_revoked:
-                results.append("Revoked active session(s)")
-            else:
-                results.append("Failed to revoke sessions")
+            results.append(f"Could not end its sessions: {sessions_error}" if sessions_error else "Ended its sessions")
         else:
             results.append(f"Failed to reset the password: {error}")
 
@@ -335,7 +332,8 @@ class AdminTeamsCog(commands.Cog):
                 "team_name": team.team_name,
                 "unlinked_members": unlinked_count,
                 "password_reset": new_password is not None,
-                "sessions_revoked": sessions_revoked,
+                "sessions_revoked": new_password is not None and sessions_error is None,
+                "sessions_error": sessions_error,
                 "recreated_channels": recreate_channels,
             },
         )

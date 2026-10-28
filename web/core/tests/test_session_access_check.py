@@ -1,8 +1,4 @@
-"""The portal's Authentik token must be able to see sessions, or ending a team's sessions silently does nothing.
-
-Until 2026-10 the token's role had no session permissions: Authentik answered every session list with nothing, so
-each team reset reported success and left the team signed in.
-"""
+"""The portal's Authentik token must be able to see sessions, or ending a team's sessions does nothing."""
 
 from unittest.mock import patch
 

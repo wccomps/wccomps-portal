@@ -16,6 +16,10 @@ from core.models import AuditLog, DiscordTask
 from team.models import DiscordLink, Team
 
 
+def _sessions_outcome(sessions_error: str | None) -> str:
+    return f"could not end its sessions: {sessions_error}" if sessions_error else "ended its sessions"
+
+
 @require_permission("admin", "gold_team")
 def admin_teams(request: HttpRequest) -> HttpResponse:
     teams_with_info = [
@@ -132,7 +136,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
 
         DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
 
-        password, error, sessions_revoked = reset_team_credentials(team_number)
+        password, error, sessions_error = reset_team_credentials(team_number)
         success = password is not None
 
         AuditLog.objects.create(
@@ -144,7 +148,8 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
                 "team_name": team.team_name,
                 "unlinked_members": unlinked,
                 "password_reset": success,
-                "sessions_revoked": sessions_revoked,
+                "sessions_revoked": success and sessions_error is None,
+                "sessions_error": sessions_error,
                 "recreated_channels": True,
             },
         )
@@ -153,7 +158,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
             return JsonResponse(
                 {
                     "success": True,
-                    "message": f"Team reset: {unlinked} unlinked, {sessions_revoked} sessions revoked",
+                    "message": f"Team reset: {unlinked} unlinked, {_sessions_outcome(sessions_error)}",
                     "password": password,
                 }
             )
@@ -167,7 +172,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
 
     elif action == "reset_password":
         # A new password only: Discord links stay, unlike "reset"
-        password, error, sessions_revoked = reset_team_credentials(team_number)
+        password, error, sessions_error = reset_team_credentials(team_number)
         AuditLog.objects.create(
             action="team_password_reset",
             admin_user=authentik_username,
@@ -176,13 +181,13 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
             details={
                 "team_name": team.team_name,
                 "password_reset": password is not None,
-                "sessions_revoked": sessions_revoked,
+                "sessions_revoked": password is not None and sessions_error is None,
+                "sessions_error": sessions_error,
             },
         )
         if password is None:
             return JsonResponse({"success": False, "message": f"Password reset failed: {error}"})
-        message = "New password set in Authentik"
-        message += "; asked Authentik to end its sessions" if sessions_revoked else "; could not end its sessions"
+        message = f"New password set in Authentik; {_sessions_outcome(sessions_error)}"
         return JsonResponse({"success": True, "message": message, "password": password})
 
     elif action == "recreate_channels":

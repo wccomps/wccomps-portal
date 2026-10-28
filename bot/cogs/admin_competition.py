@@ -14,6 +14,7 @@ from core.authentik_utils import (
     credentials_csv,
     parse_team_range,
     reset_teams_credentials,
+    sessions_failure_summary,
 )
 from core.forms import AppSlugForm
 from core.models import AuditLog, CompetitionConfig
@@ -98,7 +99,7 @@ class AdminCompetitionCog(commands.Cog):
                 "total_users": total,
                 "success_count": len(password_list),
                 "failed_resets": len(failed_resets),
-                "sessions_failed": sessions_failed,
+                "sessions_failed": [f"{username}: {why}" for username, why in sessions_failed],
                 "team_numbers": team_numbers or "all active",
             },
         )
@@ -115,7 +116,7 @@ class AdminCompetitionCog(commands.Cog):
         result_msg = f"Password reset complete\n• Success: {len(password_list)}/{total}\n"
         result_msg += "".join(f"• Failed {username}: {error}\n" for username, error in failed_resets)
         if sessions_failed:
-            result_msg += f"• Could not revoke sessions for {', '.join(sessions_failed)}\n"
+            result_msg += f"• Sessions: {sessions_failure_summary(sessions_failed)}\n"
         if not password_list:
             await interaction.followup.send(result_msg, ephemeral=True)
             return
