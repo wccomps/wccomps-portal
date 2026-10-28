@@ -3,7 +3,7 @@ import io
 import logging
 import secrets
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import httpx
 
@@ -40,15 +40,14 @@ def set_team_account_active(manager: AuthentikManager, team_number: int, is_acti
 
 @dataclass(frozen=True)
 class CredentialReset:
-    """The new password, or None and error; sessions_error is None when its Authentik sessions ended or weren't
-    tried; sessions_found is the count before the password changed, None when it couldn't be taken; sessions_left
-    is how many were still listed after it."""
+    """The new password, or None and error; sessions_error is None when its Authentik sessions ended or weren't tried.
+    sessions_found: the count before the password change, None if unknown; sessions_listed_after: 0 if unlisted."""
 
     password: str | None
     error: str = ""
     sessions_error: str | None = None
     sessions_found: int | None = None
-    sessions_left: int = 0
+    sessions_listed_after: int = 0
 
     @property
     def sessions_outcome(self) -> str:
@@ -104,8 +103,10 @@ def _reset_credentials(manager: AuthentikManager, team_number: int) -> Credentia
         return CredentialReset(password=None, error=reason_for(e), sessions_found=found)
     # The copy packet emails send; a team with no school info has none
     SchoolInfo.objects.filter(team__team_number=team_number).update(password=password)
-    left, sessions_error = _end_sessions(manager, user, hidden)
-    return CredentialReset(password=password, sessions_error=sessions_error, sessions_found=found, sessions_left=left)
+    listed_after, sessions_error = _end_sessions(manager, user, hidden)
+    return CredentialReset(
+        password=password, sessions_error=sessions_error, sessions_found=found, sessions_listed_after=listed_after
+    )
 
 
 def reset_team_credentials(team_number: int, actor: str) -> CredentialReset:
@@ -122,7 +123,7 @@ def reset_team_credentials(team_number: int, actor: str) -> CredentialReset:
             "sessions_revoked": reset.password is not None and reset.sessions_error is None,
             "sessions_error": reset.sessions_error,
             "sessions_found": reset.sessions_found,
-            "sessions_left": reset.sessions_left,
+            "sessions_listed_after": reset.sessions_listed_after,
         },
     )
     if reset.password is None:
@@ -138,7 +139,7 @@ class BulkPasswordResetResult:
     password_list: list[tuple[int, str, str]]
     failed_resets: list[tuple[str, str]]
     sessions_failed: list[tuple[str, str]]
-    sessions_uncounted: list[str] = field(default_factory=list)
+    sessions_uncounted: list[str]
 
     def summary(self) -> str:
         total = len(self.password_list) + len(self.failed_resets)
@@ -166,6 +167,7 @@ def reset_teams_credentials(team_numbers: list[int], actor: str) -> BulkPassword
     failed_resets: list[tuple[str, str]] = []
     sessions_failed: list[tuple[str, str]] = []
     sessions_found = 0
+    sessions_listed_after = 0
     uncounted: list[str] = []
 
     with AuthentikManager() as manager:
@@ -176,6 +178,7 @@ def reset_teams_credentials(team_numbers: list[int], actor: str) -> BulkPassword
             failed_resets.append((username, reset.error))
             continue
         password_list.append((team_num, username, reset.password))
+        sessions_listed_after += reset.sessions_listed_after
         if reset.sessions_found is None:
             uncounted.append(username)
         else:
@@ -203,6 +206,7 @@ def reset_teams_credentials(team_numbers: list[int], actor: str) -> BulkPassword
             "sessions_failed": [f"{username}: {why}" for username, why in sessions_failed],
             "sessions_found": sessions_found,
             "sessions_uncounted": uncounted,
+            "sessions_listed_after": sessions_listed_after,
         },
     )
     DiscordTask.enqueue(LogToChannel(message=f"Credentials reset by {actor}: {result.summary()}"))

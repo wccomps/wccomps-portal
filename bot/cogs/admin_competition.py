@@ -94,6 +94,8 @@ class AdminCompetitionCog(commands.Cog):
         details = "".join(f"• Failed {username}: {error}\n" for username, error in failed_resets)
         if sessions_failed:
             details += f"• Sessions: {sessions_failure_summary(sessions_failed)}\n"
+        if result.sessions_uncounted:
+            details += f"• Could not count the sessions of {', '.join(result.sessions_uncounted)}\n"
         if password_list:
             # The CSV rides on the short first message, so details past Discord's limit can't lose the passwords
             csv_content = credentials_csv((username, password) for _num, username, password in password_list)

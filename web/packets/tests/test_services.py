@@ -194,7 +194,7 @@ class PacketDistributionServiceTestCase(TestCase):
         mock_email_class.return_value.send.assert_called_once()
 
     @patch("packets.services.EmailMultiAlternatives")
-    def test_a_session_opened_after_the_count_alerts_ops_too(self, mock_email_class):
+    def test_a_session_listed_only_after_the_count_alerts_ops(self, mock_email_class):
         team = Team.objects.get(team_number=1)
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
@@ -217,7 +217,7 @@ class PacketDistributionServiceTestCase(TestCase):
         )
 
     @patch("packets.services.EmailMultiAlternatives")
-    def test_sessions_left_after_a_failed_count_alert_ops(self, mock_email_class):
+    def test_sessions_listed_after_after_a_failed_count_alert_ops(self, mock_email_class):
         team = Team.objects.get(team_number=1)
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)

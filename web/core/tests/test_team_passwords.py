@@ -150,21 +150,21 @@ def test_a_counted_empty_list_is_trusted_after_the_password_change(manager):
     assert (reset.sessions_found, reset.sessions_error) == (0, None)
 
 
-def test_sessions_listed_before_a_failed_end_still_count(manager):
+def test_sessions_listed_before_a_failed_end_are_recorded(manager):
     manager.user_sessions.side_effect = [AuthentikAPIError("List sessions: Server error", 500), [uuid.UUID(int=1)]]
     manager.end_sessions.side_effect = httpx.ConnectError("refused")
 
     reset = reset_team_credentials(7, actor="gold-admin")
 
-    assert (reset.sessions_left, reset.sessions_error) == (1, "Network error (ConnectError)")
+    assert (reset.sessions_listed_after, reset.sessions_error) == (1, "Network error (ConnectError)")
 
 
-def test_sessions_left_after_a_failed_count_do_not_pass_for_a_count(manager):
+def test_sessions_listed_after_after_a_failed_count_do_not_pass_for_a_count(manager):
     manager.user_sessions.side_effect = [AuthentikAPIError("List sessions: Server error", 500), [uuid.UUID(int=1)]]
 
     reset = reset_team_credentials(7, actor="gold-admin")
 
-    assert (reset.sessions_found, reset.sessions_left) == (None, 1)
+    assert (reset.sessions_found, reset.sessions_listed_after) == (None, 1)
     note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
     assert note.endswith("but could not count them first")
 
@@ -183,7 +183,7 @@ def test_reset_team_credentials_audits_and_tells_ops(manager):
         "sessions_revoked": True,
         "sessions_error": None,
         "sessions_found": 1,
-        "sessions_left": 0,
+        "sessions_listed_after": 0,
     }
     note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
     assert note == "Credentials reset for team 7 by gold-admin: ended the team's Authentik sessions"
@@ -339,13 +339,14 @@ def test_bulk_reset_writes_its_own_audit_row(manager):
 def test_bulk_audit_names_the_teams_it_could_not_count(manager):
     from core.models import AuditLog
 
-    manager.user_sessions.side_effect = AuthentikAPIError("List sessions: Server error", 500)
+    manager.user_sessions.side_effect = [AuthentikAPIError("List sessions: Server error", 500), [uuid.UUID(int=1)]]
     with patch("core.authentik_utils.AuthentikManager") as cls:
         cls.return_value.__enter__.return_value = manager
         reset_teams_credentials([1], actor="gold-admin")
 
     row = AuditLog.objects.get(action="blueteam_passwords_reset")
     assert (row.details["sessions_found"], row.details["sessions_uncounted"]) == (0, ["team01"])
+    assert row.details["sessions_listed_after"] == 1
     note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
     assert note.endswith("; could not count the sessions of team01")
 

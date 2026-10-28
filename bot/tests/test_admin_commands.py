@@ -92,7 +92,9 @@ class TestAdminCommands:
             patch(
                 "core.authentik_utils._reset_credentials",
                 side_effect=lambda _m, n: CredentialReset(
-                    password=f"pw-{n}", sessions_error="HTTP 403" if n == 2 else None
+                    password=f"pw-{n}",
+                    sessions_error="HTTP 403" if n == 2 else None,
+                    sessions_found=None if n == 3 else 0,
                 ),
             ) as reset,
             patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
@@ -106,6 +108,7 @@ class TestAdminCommands:
         csv_text = first.kwargs["file"].fp.getvalue().decode()
         assert csv_text.splitlines()[1:] == ["team01,pw-1", "team02,pw-2", "team03,pw-3"]
         assert any("Sessions: could not end sessions for team02: HTTP 403" in c.args[0] for c in rest)
+        assert any("Could not count the sessions of team03\n" in c.args[0] for c in rest)
         rows = [r.details["team_numbers"] async for r in AuditLog.objects.filter(action="blueteam_passwords_reset")]
         assert rows == [[1, 2, 3]]
 
