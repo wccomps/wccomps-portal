@@ -5,15 +5,12 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import QuerySet
-from django.http import QueryDict
 
-from .models import Event, RegistrationContact, Season, TeamRegistration
+from .models import Event, RegistrationContact, RegistrationEventEnrollment, Season, TeamRegistration
 from .services import NewEvent, NewSeason, new_event_problem
 
 CONTACT_EMAIL_MAX_LENGTH = RegistrationContact._meta.get_field("email").max_length
 RESTRICTED_EVENT_TYPES = ("qualifier", "regional")
-# The registration edit page always posts this beside the open events it offered (shown_events)
-LISTED = "events_listed"
 
 
 def open_events() -> QuerySet[Event]:
@@ -73,113 +70,46 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
-        events_field = cast(OpenEventsField, self.fields["events"])
-        offered = open_events()
-        events_field.queryset = offered
-        self.unoffered_events: list[Event] = []
-        self.untickable: set[int] = set()
-        if self.instance.pk:
-            offered_pks = set(offered.values_list("pk", flat=True))
-            enrolled = set(self.instance.event_enrollments.values_list("event_id", flat=True))
-            self.untickable = offered_pks
-            if self.is_bound and LISTED in self.data:
-                # The edit page posts the open events it offered: only those can be unticked
-                listed = {int(v) for v in self._posted("shown_events") if v.isascii() and v.isdigit()}
-                self.untickable = offered_pks & listed
-                if unlisted := (enrolled & offered_pks) - listed:
-                    # Opened since the page loaded: a re-render shows them ticked, as the team has them
-                    self._post("events", [*self._posted("events"), *map(str, unlisted)])
-            self.unoffered_events = [
-                enrollment.event
-                for enrollment in self.instance.event_enrollments.select_related("event")
-                .exclude(event__in=offered)
-                .order_by("event__date")
-            ]
-            # An enrollment a save can't untick already registers the team for something
-            events_field.required = bool(offered_pks) and not (enrolled - self.untickable)
-
-    def _posted(self, name: str) -> list[str]:
-        if isinstance(self.data, QueryDict):
-            return self.data.getlist(name)
-        values = self.data.get(name, [])
-        return [str(v) for v in (values if isinstance(values, list | tuple) else [values])]
-
-    def _post(self, name: str, values: list[str]) -> None:
-        if isinstance(self.data, QueryDict):
-            data = self.data.copy()
-            data.setlist(name, values)
-            self.data = data
-        else:
-            self.data = {**self.data, name: values}
+        cast(OpenEventsField, self.fields["events"]).queryset = open_events()
 
     def clean(self) -> dict[str, object]:
-        """No Qualifier or Regional for a non-WRCCDC team, counting the enrollments an edit keeps."""
+        """No Qualifier or Regional for a non-WRCCDC team."""
         cleaned_data = super().clean() or {}
         region = cleaned_data.get("region")
-        events = list(cast(Iterable[Event], cleaned_data.get("events") or []))
-        # An open event the team holds is among the ticked ones (__init__ adds any the page didn't list)
-        kept = self.unoffered_events
+        events = cast(Iterable[Event], cleaned_data.get("events") or [])
 
         if region and region != "wrccdc":
             restricted = [e.name for e in events if e.event_type in RESTRICTED_EVENT_TYPES]
-            closed = [e.name for e in kept if e.event_type in RESTRICTED_EVENT_TYPES]
-            problems = []
             if restricted:
-                problems.append(
+                raise forms.ValidationError(
                     "Only Western Regional (WRCCDC) teams can register for Qualifiers and Regionals. "
                     f"Please remove: {', '.join(restricted)}"
                 )
-            if closed:
-                problems.append(
-                    f"This team is registered for {', '.join(closed)}, which only WRCCDC teams can enter and which "
-                    "can't be changed here: contact the organizers to change the region."
-                )
-            if problems:
-                raise forms.ValidationError(problems)
 
         return cleaned_data
 
     def save(self, commit: bool = True) -> TeamRegistration:
-        """Save registration, contacts, and event enrollments."""
-        from .models import RegistrationEventEnrollment
-
-        editing = self.instance.pk is not None
-        registration = super().save(commit=commit and not editing)
+        """Save a new registration with its contacts and event enrollments."""
+        registration = super().save(commit=commit)
         if commit:
-            if editing:
-                if registration.status == "rejected":
-                    registration.status = "pending"
-                    registration.rejection_reason = ""
-                    registration.save(update_fields=["school_name", "region", "status", "rejection_reason"])
-                else:
-                    registration.save(update_fields=["school_name", "region"])
-            RegistrationContact.objects.update_or_create(
+            RegistrationContact.objects.create(
                 registration=registration,
                 role="captain",
-                defaults={
-                    "name": self.cleaned_data["captain_name"],
-                    "email": self.cleaned_data["captain_email"],
-                    "phone": self.cleaned_data["captain_phone"],
-                },
+                name=self.cleaned_data["captain_name"],
+                email=self.cleaned_data["captain_email"],
+                phone=self.cleaned_data["captain_phone"],
             )
-            RegistrationContact.objects.update_or_create(
+            RegistrationContact.objects.create(
                 registration=registration,
                 role="coach",
-                defaults={
-                    "name": self.cleaned_data["coach_name"],
-                    "email": self.cleaned_data["coach_email"],
-                    "phone": self.cleaned_data.get("coach_phone", ""),
-                },
+                name=self.cleaned_data["coach_name"],
+                email=self.cleaned_data["coach_email"],
+                phone=self.cleaned_data.get("coach_phone", ""),
             )
-            selected = list(self.cleaned_data["events"])
-            RegistrationEventEnrollment.objects.filter(registration=registration, event_id__in=self.untickable).exclude(
-                event__in=selected
-            ).delete()
-            for event in selected:
-                RegistrationEventEnrollment.objects.get_or_create(
-                    registration=registration,
-                    event=event,
-                )
+            RegistrationEventEnrollment.objects.bulk_create(
+                RegistrationEventEnrollment(registration=registration, event=event)
+                for event in self.cleaned_data["events"]
+            )
         return registration
 
 

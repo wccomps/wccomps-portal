@@ -49,7 +49,6 @@ class TestTeamRegistration:
         assert registration.school_name == "Test High School"
         assert registration.status == "pending"
         assert registration.submitted_at is not None
-        assert registration.edit_token is not None
 
     def test_registration_defaults(self):
         """Test registration default values."""
@@ -58,12 +57,6 @@ class TestTeamRegistration:
         assert registration.approved_at is None
         assert registration.rejection_reason == ""
         assert registration.approved_by is None
-
-    def test_edit_token_is_unique(self):
-        """Test each registration gets a unique edit token."""
-        reg1 = TeamRegistration.objects.create(school_name="School 1")
-        reg2 = TeamRegistration.objects.create(school_name="School 2")
-        assert reg1.edit_token != reg2.edit_token
 
     def test_status_choices(self):
         """Test valid status choices."""

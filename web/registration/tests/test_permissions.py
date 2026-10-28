@@ -8,7 +8,7 @@ pytestmark = pytest.mark.django_db
 
 
 class TestPublicViews:
-    """Register and edit-by-token are public (no auth required)."""
+    """Register is public (no auth required)."""
 
     def test_register_accessible_unauthenticated(self, unauthenticated_client):
         response = unauthenticated_client.get(reverse("registration_register"))

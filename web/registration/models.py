@@ -1,4 +1,3 @@
-import secrets
 from datetime import timedelta
 
 from django.contrib.auth.models import User
@@ -6,10 +5,6 @@ from django.db import models, transaction
 from django.utils import timezone
 
 from .locks import school_list_lock
-
-
-def generate_edit_token() -> str:
-    return secrets.token_urlsafe(48)
 
 
 def collapse_whitespace(name: str) -> str:
@@ -71,9 +66,6 @@ class TeamRegistration(models.Model):
     school_name = models.CharField(max_length=SCHOOL_NAME_MAX_LENGTH)
     region = models.CharField(max_length=20, choices=REGION_CHOICES, default="wrccdc")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
-
-    # Token for self-service editing
-    edit_token = models.CharField(max_length=64, unique=True, default=generate_edit_token)
 
     submitted_at = models.DateTimeField(auto_now_add=True)
     approved_at = models.DateTimeField(null=True, blank=True)

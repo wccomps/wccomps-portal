@@ -558,8 +558,6 @@ STANDALONE_HEADER_EXCEPTIONS = {
     "link_confirm.html": "Discord link token flow page outside the section hierarchy",
     "link_error.html": "Discord link token flow page outside the section hierarchy",
     "link_success.html": "Discord link token flow page outside the section hierarchy",
-    "registration/edit.html": "Public token-authenticated school registration edit page",
-    "registration/edit_locked.html": "Public token-authenticated school registration locked page",
 }
 URL_TAG_NAME_RE = re.compile(r"""{%\s*url\s+["']([^"']+)["']""")
 VAR_PLACEHOLDER_RE = re.compile(r"{{.*?}}")

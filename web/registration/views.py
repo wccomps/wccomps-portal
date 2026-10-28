@@ -60,52 +60,6 @@ def register(request: HttpRequest) -> HttpResponse:
     return render(request, "registration/register.html", {"form": form})
 
 
-def registration_edit(request: HttpRequest, token: str) -> HttpResponse:
-    """Token-based self-service editing of registration."""
-    registration = get_object_or_404(TeamRegistration, edit_token=token)
-
-    # Lock after approval so school name, region (event restrictions) and contacts can't be changed or hijacked.
-    if registration.status not in ("pending", "rejected"):
-        messages.error(request, "This registration can no longer be edited after approval.")
-        return render(request, "registration/edit_locked.html", {"registration": registration})
-
-    if request.method == "POST":
-        with transaction.atomic():
-            registration = get_object_or_404(TeamRegistration.objects.select_for_update(), edit_token=token)
-            if registration.status not in ("pending", "rejected"):
-                messages.error(request, "This registration can no longer be edited after approval.")
-                return render(request, "registration/edit_locked.html", {"registration": registration})
-            form = RegistrationForm(request.POST, instance=registration)
-            if form.is_valid():
-                form.save()
-                messages.success(request, "Registration updated successfully!")
-                return redirect("registration_edit", token=token)
-    else:
-        captain = registration.contacts.filter(role="captain").first()
-        coach = registration.contacts.filter(role="coach").first()
-        enrolled_events = list(registration.event_enrollments.values_list("event_id", flat=True))
-        initial = {"events": enrolled_events, "agree_to_rules": True}
-        if captain:
-            initial.update(
-                {
-                    "captain_name": captain.name,
-                    "captain_email": captain.email,
-                    "captain_phone": captain.phone,
-                }
-            )
-        if coach:
-            initial.update(
-                {
-                    "coach_name": coach.name,
-                    "coach_email": coach.email,
-                    "coach_phone": coach.phone,
-                }
-            )
-        form = RegistrationForm(instance=registration, initial=initial)
-
-    return render(request, "registration/edit.html", {"form": form, "registration": registration})
-
-
 @require_permission("gold_team")
 def review_list(request: HttpRequest) -> HttpResponse:
     filters, filtered = list_filters(request, {"status": ""})

@@ -5,7 +5,6 @@ from . import views
 urlpatterns = [
     # Public registration
     path("", views.register, name="registration_register"),
-    path("edit/<str:token>/", views.registration_edit, name="registration_edit"),
     # Admin review
     path("review/", views.review_list, name="registration_review_list"),
     path("approve/<int:registration_id>/", views.approve_registration, name="registration_approve"),

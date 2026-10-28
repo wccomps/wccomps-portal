@@ -144,39 +144,6 @@ class TestRegistrationFormSave:
         assert enrollments.count() == 1
         assert enrollments.first().event == event
 
-    def test_form_edit_removes_unchecked_event_enrollments(self, valid_form_data, active_season_with_event):
-        """Editing an existing registration removes enrollments for unchecked events."""
-        season, event1 = active_season_with_event
-        event2 = Event.objects.create(
-            season=season,
-            name="Invitational 2",
-            event_type="invitational",
-            event_number=2,
-            date="2026-02-15",
-            registration_open=True,
-        )
-        valid_form_data["events"] = [event1.id, event2.id]
-        form = RegistrationForm(data=valid_form_data)
-        assert form.is_valid(), form.errors
-        registration = form.save()
-        assert set(registration.event_enrollments.values_list("event_id", flat=True)) == {event1.id, event2.id}
-
-        valid_form_data["events"] = [event2.id]
-        valid_form_data["shown_events"] = [event1.id, event2.id]
-        valid_form_data["events_listed"] = "1"
-        edit_form = RegistrationForm(data=valid_form_data, instance=registration)
-        assert edit_form.is_valid(), edit_form.errors
-        edit_form.save()
-        assert list(registration.event_enrollments.values_list("event_id", flat=True)) == [event2.id]
-
-    def test_registration_has_edit_token(self, valid_form_data):
-        """Saved registration should have an edit token."""
-        form = RegistrationForm(data=valid_form_data)
-        assert form.is_valid(), form.errors
-        registration = form.save()
-        assert registration.edit_token
-        assert len(registration.edit_token) > 32
-
 
 class TestRegistrationFormRegionValidation:
     """Test RegistrationForm region validation behavior."""

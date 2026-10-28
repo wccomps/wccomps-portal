@@ -29,23 +29,8 @@ def _registration(w: World) -> Fields:
     return form_fields(RegistrationForm(), REGIONS)
 
 
-def _edited_registration(w: World) -> Fields:
-    """The edit page also posts the event ids it offered, beside a marker that it posted them."""
-    events = [str(pk) for pk in Event.objects.values_list("pk", flat=True)] or ["1"]
-    return {
-        **_registration(w),
-        "shown_events": st.lists(
-            st.one_of(st.sampled_from(events), st.sampled_from(["\u00b2", "\u0661", "9" * 30]), hostile_text()),
-            max_size=4,
-        ),
-        # An empty list posts no value: a page from before the marker
-        "events_listed": st.sampled_from(["1", "", []]),
-    }
-
-
 CASES = [
     ViewCase("registration_register", EVERYONE, post=_registration),
-    ViewCase("registration_edit", EVERYONE, params={"token": "edit_token"}, post=_edited_registration),
     ViewCase(
         "registration_review_list",
         GOLD,
