@@ -51,6 +51,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # Django's widget templates, for the project template engine core.form_renderer renders with
+    "django.forms",
     "django_cotton",
     "core.apps.CoreConfig",
     "team",
@@ -107,6 +109,8 @@ TEMPLATES = [
         },
     },
 ]
+
+FORM_RENDERER = "core.form_renderer.PortalFormRenderer"
 
 WSGI_APPLICATION = "portal.wsgi.application"
 

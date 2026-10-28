@@ -431,9 +431,14 @@ a.btn-secondary:focus-visible {
 .form-row {
     overflow: visible;
 }
-.form-row > div > label:first-child {
+.form-row > div > label:first-child,
+.form-row fieldset > legend {
     display: block;
     margin-bottom: 4px;
+}
+/* A choice group's fieldset (forms/field.html) is part of its row, not a section of the form */
+.form-row fieldset {
+    border-top: none;
 }
 .vTextField,
 .vLargeTextField {
@@ -694,8 +699,9 @@ p.help {
     display: block;
 }
 
-/* Required field labels (c-form_field) */
-label.required::after {
+/* Required field labels and legends (form rows) */
+label.required::after,
+legend.required::after {
     content: " *";
     color: var(--error-fg, #ba2121);
 }

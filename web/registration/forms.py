@@ -76,6 +76,8 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
         events_field = cast(OpenEventsField, self.fields["events"])
         offered = open_events()
         events_field.queryset = offered
+        if not offered.exists():
+            events_field.help_text = "No events are currently open for registration."
         self.unoffered_events: list[Event] = []
         self.untickable: set[int] = set()
         if self.instance.pk:

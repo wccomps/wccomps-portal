@@ -31,6 +31,7 @@ from core.tests.guards import (
     TEMPLATES_DIR,
     WEB_DIR,
     Tag,
+    elements,
     fail_with,
     page_templates,
     portal_templates,
@@ -202,6 +203,7 @@ PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
 
 # "template:<c-component>" for markup written by hand where a shared component renders it
 RAW_MARKUP_EXCEPTIONS: dict[str, str] = {
+    "forms/field.html:*": "Django's field group template: Django renders it, outside cotton, as the form row markup",
     "admin/base_site.html:<c-button>": (
         "The chrome's menu, dark mode and sound toggles; c-button would put Django's filled .button on the nav bar"
     ),
@@ -634,6 +636,18 @@ FIELDSET_PADDED_CLASSES = {
 }
 
 
+def wraps_a_field_group(path: Path, start: Tag, lines: list[str]) -> bool:
+    """Whether the element opened by start holds a {{ form.x.as_field_group }}, which renders a padded .form-row."""
+    depth = 0
+    for tag in elements(path):
+        if tag.line < start.line or tag.name != start.name:
+            continue
+        depth += -1 if tag.closing else 1
+        if depth == 0:
+            return any("as_field_group" in line for line in lines[start.line - 1 : tag.line])
+    return False
+
+
 def test_fieldset_children_are_padded() -> None:
     """Django admin's base.css sets padding: 0 on fieldset.module and only pads p, ul, h3, h4, dl, pre and .form-row.
     Any direct child of <c-fieldset> must be one of those, carry a padding class, or wrap padded children."""
@@ -647,6 +661,7 @@ def test_fieldset_children_are_padded() -> None:
             for i, ancestor in enumerate(open_tags[:-1])
             if ancestor.name == "c-fieldset" and tag.name in ("c-form_field", "c-table")
         }
+        lines = text(path).splitlines()
         for tag, open_tags in with_parents:
             if not open_tags or open_tags[-1].name != "c-fieldset":
                 continue
@@ -656,6 +671,7 @@ def test_fieldset_children_are_padded() -> None:
                 or classes & FIELDSET_PADDED_CLASSES
                 or tag.line in wrappers_with_padded_child
                 or "hx-get" in tag.attrs
+                or wraps_a_field_group(path, tag, lines)
             ):
                 continue
             found[f"{template_name(path)}:{tag.line}"] = f"<{tag.name} class={tag.attrs.get('class', '')!r}>"

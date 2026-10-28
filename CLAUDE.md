@@ -82,6 +82,8 @@ the unparenthesized form is used intentionally throughout.
 - `core/cotton.py` escapes every value a component writes with `{{ attrs }}` (see "Attributes and Escaping" in
   `templates/cotton/README.md`); run `core/tests/test_cotton_escaping.py` after a django-cotton upgrade.
   Bind Alpine on a component with `::name`: `:name` reads a page variable
+- A form's field renders itself: `{{ form.x.as_field_group }}` (`templates/forms/field.html`); labels and help text
+  live on the form. `c-form_field` is for an input that is no form's field
 - One page's htmx-refreshed markup (a list's table) is an `{% include %}` beside the page, not a component
 
 ### Streaming Progress Pattern

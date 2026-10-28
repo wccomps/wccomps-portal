@@ -15,9 +15,7 @@
                 <c-form_errors :form="form" />
                 <c-fieldset heading="Target Information">
                     {% if is_admin %}
-                        <c-form_field :field="form.team">
-                            {{ form.team }}
-                        </c-form_field>
+                        {{ form.team.as_field_group }}
                     {% endif %}
                     <c-form_field label="{{ form.affected_boxes.label }}"
                                   error="{{ form.affected_boxes.errors|join:', ' }}">
@@ -33,31 +31,17 @@
                         {% endif %}
                     </c-form_field>
                     <div class="grid-2">
-                        <c-form_field :field="form.affected_service">
-                            {{ form.affected_service }}
-                        </c-form_field>
-                        <c-form_field :field="form.destination_ip">
-                            {{ form.destination_ip }}
-                        </c-form_field>
+                        {{ form.affected_service.as_field_group }}
+                        {{ form.destination_ip.as_field_group }}
                     </div>
                 </c-fieldset>
                 <c-fieldset heading="Attack Details">
                     <div class="grid-2">
-                        <c-form_field :field="form.source_ip">
-                            {{ form.source_ip }}
-                        </c-form_field>
-                        <c-form_field :field="form.attack_detected_at">
-                            {{ form.attack_detected_at }}
-                        </c-form_field>
+                        {{ form.source_ip.as_field_group }}
+                        {{ form.attack_detected_at.as_field_group }}
                     </div>
-                    <c-form_field :field="form.attack_description">
-                        {{ form.attack_description }}
-                    </c-form_field>
-                    <div class="p-10">
-                        {{ form.attack_mitigated }}
-                        <label for="{{ form.attack_mitigated.id_for_label }}">{{ form.attack_mitigated.label }}</label>
-                        {% if form.attack_mitigated.help_text %}<div class="help-text">{{ form.attack_mitigated.help_text }}</div>{% endif %}
-                    </div>
+                    {{ form.attack_description.as_field_group }}
+                    {{ form.attack_mitigated.as_field_group }}
                 </c-fieldset>
                 <c-fieldset heading="Evidence">
                     <c-form_field label="Upload Files"

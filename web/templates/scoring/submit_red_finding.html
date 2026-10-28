@@ -11,9 +11,7 @@
             {% csrf_token %}
             <c-form_errors :form="form" />
             <c-fieldset heading="Attack Details">
-                <c-form_field :field="form.attack_type">
-                    {{ form.attack_type }}
-                </c-form_field>
+                {{ form.attack_type.as_field_group }}
                 <c-form_field label="Source IP">
                     <div class="d-flex gap-20">
                         {% for radio in form.source_ip_type %}
@@ -25,16 +23,12 @@
                     </div>
                 </c-form_field>
                 <div id="singleIpSection">
-                    <c-form_field :field="form.source_ip">
-                        {{ form.source_ip }}
-                    </c-form_field>
+                    {{ form.source_ip.as_field_group }}
                 </div>
                 <div id="poolSection" class="d-none">
                     <div class="d-flex gap-10 items-end flex-wrap">
                         <div class="flex-grow-1">
-                            <c-form_field :field="form.source_ip_pool">
-                                {{ form.source_ip_pool }}
-                            </c-form_field>
+                            {{ form.source_ip_pool.as_field_group }}
                         </div>
                         <div class="mb-15">
                             <c-button type="button" onclick="openCreatePoolModal()">
@@ -67,31 +61,15 @@
                         Target IPs: <span id="ipList"></span>
                     </div>
                 </c-form_field>
-                <c-form_field :field="form.affected_service">
-                    {{ form.affected_service }}
-                </c-form_field>
+                {{ form.affected_service.as_field_group }}
                 <input type="hidden"
                        name="destination_ip_template"
                        id="id_destination_ip_template"
                        value="">
             </c-fieldset>
             <c-fieldset heading="Attack Characteristics">
-                <div class="p-10">
-                    <div class="mb-5">
-                        {{ form.universally_attempted }}
-                        <label for="{{ form.universally_attempted.id_for_label }}">{{ form.universally_attempted.label }}</label>
-                        {% if form.universally_attempted.help_text %}
-                            <div class="help-text">{{ form.universally_attempted.help_text }}</div>
-                        {% endif %}
-                    </div>
-                    <div class="mb-5">
-                        {{ form.persistence_established }}
-                        <label for="{{ form.persistence_established.id_for_label }}">{{ form.persistence_established.label }}</label>
-                        {% if form.persistence_established.help_text %}
-                            <div class="help-text">{{ form.persistence_established.help_text }}</div>
-                        {% endif %}
-                    </div>
-                </div>
+                {{ form.universally_attempted.as_field_group }}
+                {{ form.persistence_established.as_field_group }}
             </c-fieldset>
             <c-fieldset heading="Attack Outcomes">
                 <div class="p-10">
@@ -227,9 +205,7 @@
                 <div id="screenshotPreview" class="grid-4 mb-15 px-10" aria-live="polite"></div>
             </c-fieldset>
             <c-fieldset heading="Additional Information">
-                <c-form_field :field="form.notes">
-                    {{ form.notes }}
-                </c-form_field>
+                {{ form.notes.as_field_group }}
             </c-fieldset>
             <c-fieldset heading="Submission Guidelines" collapsible="true" collapsed="true">
                 <div class="p-10 text-muted">

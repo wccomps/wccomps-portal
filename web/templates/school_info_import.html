@@ -144,9 +144,7 @@ Tech Institute,admin@techinst.edu,,</pre>
                         <c-form_errors :form="form" />
                         <input type="hidden" name="upload" value="true">
                         <c-fieldset aligned="true">
-                            <c-form_field :field="form.csv_file">
-                                {{ form.csv_file }}
-                            </c-form_field>
+                            {{ form.csv_file.as_field_group }}
                             <c-form_field label="Event"
                                           required="true"
                                           id="id_event"

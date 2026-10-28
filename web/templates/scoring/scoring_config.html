@@ -21,15 +21,9 @@
             <c-fieldset heading="Category Weights">
                 <p class="text-muted mb-10">Percentage of total score for each category. Must sum to 100.</p>
                 <div class="max-points-grid">
-                    <c-form_field :field="form.service_weight">
-                        {{ form.service_weight }}
-                    </c-form_field>
-                    <c-form_field :field="form.inject_weight">
-                        {{ form.inject_weight }}
-                    </c-form_field>
-                    <c-form_field :field="form.orange_weight">
-                        {{ form.orange_weight }}
-                    </c-form_field>
+                    {{ form.service_weight.as_field_group }}
+                    {{ form.inject_weight.as_field_group }}
+                    {{ form.orange_weight.as_field_group }}
                 </div>
             </c-fieldset>
             <c-fieldset heading="Raw Maximums">

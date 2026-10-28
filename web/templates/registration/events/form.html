@@ -14,35 +14,17 @@
                 {% csrf_token %}
                 <c-form_errors :form="form" />
                 <c-fieldset heading="Event Details" aligned="true">
-                    <c-form_field :field="form.name">
-                        {{ form.name }}
-                    </c-form_field>
-                    <c-form_field :field="form.event_type">
-                        {{ form.event_type }}
-                    </c-form_field>
-                    <c-form_field :field="form.event_number">
-                        {{ form.event_number }}
-                    </c-form_field>
-                    <c-form_field :field="form.date">
-                        {{ form.date }}
-                    </c-form_field>
-                    <c-form_field :field="form.start_time">
-                        {{ form.start_time }}
-                    </c-form_field>
-                    <c-form_field :field="form.end_time">
-                        {{ form.end_time }}
-                    </c-form_field>
-                    <c-form_field :field="form.max_teams">
-                        {{ form.max_teams }}
-                    </c-form_field>
+                    {{ form.name.as_field_group }}
+                    {{ form.event_type.as_field_group }}
+                    {{ form.event_number.as_field_group }}
+                    {{ form.date.as_field_group }}
+                    {{ form.start_time.as_field_group }}
+                    {{ form.end_time.as_field_group }}
+                    {{ form.max_teams.as_field_group }}
                 </c-fieldset>
                 <c-fieldset heading="Registration Settings" aligned="true">
-                    <c-form_field :field="form.registration_open">
-                        {{ form.registration_open }}
-                    </c-form_field>
-                    <c-form_field :field="form.registration_deadline">
-                        {{ form.registration_deadline }}
-                    </c-form_field>
+                    {{ form.registration_open.as_field_group }}
+                    {{ form.registration_deadline.as_field_group }}
                 </c-fieldset>
                 <c-button_row class="mt-20 justify-end">
                     <c-link href="{% url 'registration_event_list' season_id=season.id %}"

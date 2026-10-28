@@ -229,6 +229,7 @@ CODE_EXCEPTIONS = {
     "*:on_*": "discord.py calls event listeners and modal callbacks by name",
     "*:transform": "discord.py calls an app command Transformer's transform",
     "*:interaction_check": "discord.py calls a command tree's interaction_check before every command",
+    "web/core/form_renderer.py:field_template_name": "Django's form renderer reads it for field.as_field_group",
     # Django
     "@admin.register": "Django admin registers the class through its decorator",
     "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",

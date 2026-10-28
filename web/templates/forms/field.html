@@ -1,0 +1,25 @@
+{# A form field as a portal form row (field.as_field_group); the help and error ids are the ones the widget's aria-describedby names #}
+<div class="form-row">
+    <div>
+        {% if field.use_fieldset %}
+            <fieldset {% if field.aria_describedby %}aria-describedby="{{ field.aria_describedby }}"{% endif %}>
+                <legend {% if field.field.required %}class="required"{% endif %}>{{ field.label }}:</legend>
+                {{ field }}
+            </fieldset>
+        {% elif field.widget_type == "checkbox" %}
+            {{ field }}
+            <label for="{{ field.id_for_label }}"
+                   {% if field.field.required %}class="required"{% endif %}>{{ field.label }}</label>
+        {% else %}
+            <label {% if field.id_for_label %}for="{{ field.id_for_label }}"{% endif %}
+                   {% if field.field.required %}class="required"{% endif %}>{{ field.label }}:</label>
+            {{ field }}
+        {% endif %}
+        {% if field.help_text %}
+            <p class="help-text" {% if field.auto_id %}id="{{ field.auto_id }}_helptext"{% endif %}>{{ field.help_text }}</p>
+        {% endif %}
+        {% if field.errors %}
+            <p class="errornote" {% if field.auto_id %}id="{{ field.auto_id }}_error"{% endif %}>{{ field.errors|join:" " }}</p>
+        {% endif %}
+    </div>
+</div>

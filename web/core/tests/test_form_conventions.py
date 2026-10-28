@@ -43,3 +43,22 @@ def test_forms_rendered_field_by_field_show_their_form_errors() -> None:
         if p not in component_templates() and FIELD_USE.search(text(p)) and "<c-form_errors" not in text(p)
     }
     fail_with("Forms whose own errors never render", found, FORM_ERRORS_ALLOWLIST)
+
+
+# A c-form_field given a form's field by hand: {{ form.x.as_field_group }} renders it with its ids and errors
+HAND_FED_FIELD = re.compile(r"<c-form_field\b[^>]*?(?::field=|\bform\.\w+)")
+
+HAND_FED_EXCEPTIONS = {
+    "scoring/submit_incident.html": "affected_boxes: its widget is a hidden select the box toggle buttons drive",
+    "scoring/submit_red_finding.html": "affected_boxes: its widget is a hidden select the box toggle buttons drive",
+}
+
+
+def test_a_form_field_renders_as_its_field_group() -> None:
+    """A row built by hand from a form's field left out the ids aria-describedby names, and could drop its errors."""
+    found = {
+        template_name(p): f"{len(HAND_FED_FIELD.findall(text(p)))} c-form_field fed a form's field"
+        for p in page_templates()
+        if HAND_FED_FIELD.search(text(p))
+    }
+    fail_with("Form fields rendered through c-form_field", found, HAND_FED_EXCEPTIONS)
