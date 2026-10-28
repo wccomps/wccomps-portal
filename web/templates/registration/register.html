@@ -271,8 +271,23 @@
                 flex-direction: column;
             }
 
-            .field-full {
-                grid-column: 1 / -1;
+            .form-grid.form-grid-single {
+                grid-template-columns: 1fr;
+            }
+
+            fieldset {
+                border: 0;
+                min-width: 0;
+            }
+
+            legend {
+                font-size: 0.75rem;
+                color: var(--text-dim);
+                margin-bottom: 1rem;
+            }
+
+            legend .required {
+                color: var(--error);
             }
 
             label {
@@ -292,20 +307,6 @@
                 color: var(--text-dim);
                 font-weight: 400;
                 text-transform: none;
-            }
-
-            .input-wrapper {
-                position: relative;
-            }
-
-            .input-wrapper svg {
-                position: absolute;
-                left: 0.75rem;
-                top: 50%;
-                transform: translateY(-50%);
-                width: 1.25rem;
-                height: 1.25rem;
-                color: var(--text-dim);
             }
 
             input[type="text"],
@@ -344,12 +345,16 @@
                 box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.2);
             }
 
-            input.has-icon {
+            #id_school_name {
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8' stroke-width='1.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z'/%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: left 0.75rem center;
+                background-size: 1.25rem;
                 padding-left: 2.5rem;
             }
 
-            input.error,
-            select.error {
+            input[aria-invalid="true"],
+            select[aria-invalid="true"] {
                 border-color: var(--error);
             }
 
@@ -392,7 +397,7 @@
                 border-color: var(--border-light);
             }
 
-            .checkbox-item.selected {
+            .checkbox-item:has(input:checked) {
                 border-color: var(--primary);
                 background: rgba(var(--primary-rgb), 0.1);
             }
@@ -407,6 +412,11 @@
 
             .checkbox-content {
                 flex: 1;
+            }
+
+            .checkbox-label,
+            .checkbox-description {
+                display: block;
             }
 
             .checkbox-label {
@@ -530,13 +540,6 @@
                     justify-content: space-between;
                 }
             }
-
-            /* No events message */
-            .no-events {
-                padding: 2rem;
-                text-align: center;
-                color: var(--text-muted);
-            }
         </style>
     </head>
     <body>
@@ -640,53 +643,9 @@
                         <h2 class="card-title">School Information</h2>
                     </div>
                     <div class="card-body">
-                        <div class="form-grid">
-                            <div class="field field-full">
-                                <label for="{{ form.school_name.id_for_label }}">
-                                    School / University Name <span class="required">*</span>
-                                </label>
-                                <div class="input-wrapper">
-                                    <svg fill="none"
-                                         stroke="currentColor"
-                                         stroke-width="1.5"
-                                         viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                                    </svg>
-                                    <input type="text"
-                                           class="has-icon{% if form.school_name.errors %} error{% endif %}"
-                                           name="{{ form.school_name.name }}"
-                                           id="{{ form.school_name.id_for_label }}"
-                                           value="{{ form.school_name.value|default:'' }}"
-                                           placeholder="e.g. Riverdale State University"
-                                           required />
-                                </div>
-                                {% if form.school_name.errors %}
-                                    <p class="error-text">{{ form.school_name.errors.0 }}</p>
-                                {% else %}
-                                    <p class="help-text">Enter the full official name of your institution.</p>
-                                {% endif %}
-                            </div>
-                            <div class="field field-full">
-                                <label for="{{ form.region.id_for_label }}">
-                                    CCDC Region <span class="required">*</span>
-                                </label>
-                                <select name="{{ form.region.name }}"
-                                        id="{{ form.region.id_for_label }}"
-                                        class="{% if form.region.errors %}error{% endif %}"
-                                        required>
-                                    {% for value, label in form.region.field.choices %}
-                                        <option value="{{ value }}"
-                                                {% if form.region.value == value %}selected{% endif %}>
-                                            {{ label }}
-                                        </option>
-                                    {% endfor %}
-                                </select>
-                                {% if form.region.errors %}
-                                    <p class="error-text">{{ form.region.errors.0 }}</p>
-                                {% else %}
-                                    <p class="help-text">{{ form.region.help_text }}</p>
-                                {% endif %}
-                            </div>
+                        <div class="form-grid form-grid-single">
+                            {{ form.school_name.as_field_group }}
+                            {{ form.region.as_field_group }}
                         </div>
                     </div>
                 </div>
@@ -704,45 +663,9 @@
                     </div>
                     <div class="card-body">
                         <div class="form-grid">
-                            <div class="field">
-                                <label for="{{ form.captain_name.id_for_label }}">
-                                    Full Name <span class="required">*</span>
-                                </label>
-                                <input type="text"
-                                       class="{% if form.captain_name.errors %}error{% endif %}"
-                                       name="{{ form.captain_name.name }}"
-                                       id="{{ form.captain_name.id_for_label }}"
-                                       value="{{ form.captain_name.value|default:'' }}"
-                                       placeholder="Jane Doe"
-                                       required />
-                                {% if form.captain_name.errors %}<p class="error-text">{{ form.captain_name.errors.0 }}</p>{% endif %}
-                            </div>
-                            <div class="field">
-                                <label for="{{ form.captain_email.id_for_label }}">
-                                    Email Address <span class="required">*</span>
-                                </label>
-                                <input type="email"
-                                       class="{% if form.captain_email.errors %}error{% endif %}"
-                                       name="{{ form.captain_email.name }}"
-                                       id="{{ form.captain_email.id_for_label }}"
-                                       value="{{ form.captain_email.value|default:'' }}"
-                                       placeholder="jane.doe@university.edu"
-                                       required />
-                                {% if form.captain_email.errors %}<p class="error-text">{{ form.captain_email.errors.0 }}</p>{% endif %}
-                            </div>
-                            <div class="field">
-                                <label for="{{ form.captain_phone.id_for_label }}">
-                                    Phone Number <span class="required">*</span>
-                                </label>
-                                <input type="tel"
-                                       class="{% if form.captain_phone.errors %}error{% endif %}"
-                                       name="{{ form.captain_phone.name }}"
-                                       id="{{ form.captain_phone.id_for_label }}"
-                                       value="{{ form.captain_phone.value|default:'' }}"
-                                       placeholder="(555) 123-4567"
-                                       required />
-                                {% if form.captain_phone.errors %}<p class="error-text">{{ form.captain_phone.errors.0 }}</p>{% endif %}
-                            </div>
+                            {{ form.captain_name.as_field_group }}
+                            {{ form.captain_email.as_field_group }}
+                            {{ form.captain_phone.as_field_group }}
                         </div>
                     </div>
                 </div>
@@ -760,44 +683,9 @@
                     </div>
                     <div class="card-body">
                         <div class="form-grid">
-                            <div class="field">
-                                <label for="{{ form.coach_name.id_for_label }}">
-                                    Full Name <span class="required">*</span>
-                                </label>
-                                <input type="text"
-                                       class="{% if form.coach_name.errors %}error{% endif %}"
-                                       name="{{ form.coach_name.name }}"
-                                       id="{{ form.coach_name.id_for_label }}"
-                                       value="{{ form.coach_name.value|default:'' }}"
-                                       placeholder="Dr. John Smith"
-                                       required />
-                                {% if form.coach_name.errors %}<p class="error-text">{{ form.coach_name.errors.0 }}</p>{% endif %}
-                            </div>
-                            <div class="field">
-                                <label for="{{ form.coach_email.id_for_label }}">
-                                    Email Address <span class="required">*</span>
-                                </label>
-                                <input type="email"
-                                       class="{% if form.coach_email.errors %}error{% endif %}"
-                                       name="{{ form.coach_email.name }}"
-                                       id="{{ form.coach_email.id_for_label }}"
-                                       value="{{ form.coach_email.value|default:'' }}"
-                                       placeholder="jsmith@university.edu"
-                                       required />
-                                {% if form.coach_email.errors %}<p class="error-text">{{ form.coach_email.errors.0 }}</p>{% endif %}
-                            </div>
-                            <div class="field">
-                                <label for="{{ form.coach_phone.id_for_label }}">
-                                    Phone Number <span class="optional">(optional)</span>
-                                </label>
-                                <input type="tel"
-                                       class="{% if form.coach_phone.errors %}error{% endif %}"
-                                       name="{{ form.coach_phone.name }}"
-                                       id="{{ form.coach_phone.id_for_label }}"
-                                       value="{{ form.coach_phone.value|default:'' }}"
-                                       placeholder="(555) 123-4567" />
-                                {% if form.coach_phone.errors %}<p class="error-text">{{ form.coach_phone.errors.0 }}</p>{% endif %}
-                            </div>
+                            {{ form.coach_name.as_field_group }}
+                            {{ form.coach_email.as_field_group }}
+                            {{ form.coach_phone.as_field_group }}
                         </div>
                     </div>
                 </div>
@@ -814,32 +702,7 @@
                         <h2 class="card-title">Event Selection</h2>
                     </div>
                     <div class="card-body">
-                        {% if form.events.field.queryset.exists %}
-                            <p class="help-text mb-16">
-                                Select all events your team plans to participate in. <span class="required">*</span>
-                            </p>
-                            {% if form.events.errors %}<p class="error-text mb-16">{{ form.events.errors.0 }}</p>{% endif %}
-                            <div class="checkbox-group">
-                                {% for event in form.events.field.queryset %}
-                                    <label class="checkbox-item" id="event-label-{{ event.id }}">
-                                        <input type="checkbox"
-                                               name="{{ form.events.name }}"
-                                               value="{{ event.id }}"
-                                               {% if event.id|stringformat:"s" in form.events.value %}checked{% endif %}
-                                               onchange="this.closest('.checkbox-item').classList.toggle('selected', this.checked)" />
-                                        <div class="checkbox-content">
-                                            <div class="checkbox-label">{{ event.name }}</div>
-                                            <div class="checkbox-description">{{ event.date|date:"F j, Y" }} • {{ event.get_event_type_display }}</div>
-                                        </div>
-                                    </label>
-                                {% endfor %}
-                            </div>
-                        {% else %}
-                            <div class="no-events">
-                                <p>No events are currently open for registration.</p>
-                                <p class="mt-8">Please check back later or contact us for more information.</p>
-                            </div>
-                        {% endif %}
+                        {{ form.events.as_field_group }}
                     </div>
                 </div>
                 <div class="card">
@@ -855,18 +718,7 @@
                         <h2 class="card-title">Rules Agreement</h2>
                     </div>
                     <div class="card-body">
-                        {% if form.agree_to_rules.errors %}<p class="error-text mb-16">{{ form.agree_to_rules.errors.0 }}</p>{% endif %}
-                        <div class="rules-checkbox">
-                            <input type="checkbox"
-                                   name="{{ form.agree_to_rules.name }}"
-                                   id="{{ form.agree_to_rules.id_for_label }}"
-                                   {% if form.agree_to_rules.value %}checked{% endif %}
-                                   required />
-                            <label for="{{ form.agree_to_rules.id_for_label }}">
-                                I have read and agree to the <a href="https://wrccdc.org/about/rules/"
-    target="_blank">competition rules and guidelines</a>
-                            </label>
-                        </div>
+                        {{ form.agree_to_rules.as_field_group }}
                     </div>
                 </div>
                 <div class="action-bar">
@@ -892,11 +744,5 @@
                 </div>
             </div>
         </footer>
-        <script>
-            // Initialize selected state for pre-checked checkboxes
-            document.querySelectorAll('.checkbox-item input[type="checkbox"]:checked').forEach(function(cb) {
-                cb.closest('.checkbox-item').classList.add('selected');
-            });
-        </script>
     </body>
 </html>

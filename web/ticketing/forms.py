@@ -1,8 +1,10 @@
 from collections.abc import Iterable, Mapping
+from typing import cast
 
 from django import forms
 
 from core.proxmox import is_valid_snapshot_name
+from team.models import Team
 from ticketing.models import Ticket, TicketCategory
 
 TICKET_FIELD_CHOICES = [
@@ -28,18 +30,34 @@ class TicketCategoryForm(forms.ModelForm[TicketCategory]):
         choices=TICKET_FIELD_CHOICES,
         widget=forms.CheckboxSelectMultiple,
         required=False,
+        label="Required fields",
         help_text="Fields the user must fill in when creating a ticket.",
     )
     optional_fields = forms.MultipleChoiceField(
         choices=TICKET_FIELD_CHOICES,
         widget=forms.CheckboxSelectMultiple,
         required=False,
+        label="Optional fields",
         help_text="Fields shown but not required.",
     )
 
     class Meta:
         model = TicketCategory
         fields = "__all__"
+        labels = {
+            "points": "Default points",
+            "playbook": "Playbook steps",
+            "variable_points": "Points vary per ticket",
+            "user_creatable": "Users can create tickets with this category",
+        }
+        help_texts = {
+            "playbook": "Optional step-by-step instructions for staff responding to tickets in this category "
+            "(one step per line).",
+            "variable_cost_note": "Shown to users when creating tickets for this category.",
+            "min_points": "Only applies when Points vary per ticket is ticked.",
+            "max_points": "Only applies when Points vary per ticket is ticked.",
+        }
+        error_messages = {"display_name": {"required": "Display name is required."}}
         widgets = {
             "variable_cost_note": forms.Textarea(
                 attrs={
@@ -67,7 +85,15 @@ class TicketCategoryForm(forms.ModelForm[TicketCategory]):
         return list(self.cleaned_data.get("required_fields", []))
 
     def clean_optional_fields(self) -> list[str]:
-        return list(self.cleaned_data.get("optional_fields", []))
+        optional = list(self.cleaned_data.get("optional_fields", []))
+        required = self.cleaned_data.get("required_fields", [])
+        both = [label for value, label in TICKET_FIELD_CHOICES if value in optional and value in required]
+        if both:
+            verb = "is" if len(both) == 1 else "are"
+            raise forms.ValidationError(
+                f"{', '.join(both)} {verb} already required; a field is either required or optional."
+            )
+        return optional
 
     def clean_min_points(self) -> int:
         return self.cleaned_data.get("min_points") or 0
@@ -86,18 +112,96 @@ HOSTNAME_MAX: int = Ticket._meta.get_field("hostname").max_length  # type: ignor
 IP_MAX: int = Ticket._meta.get_field("ip_address").max_length  # type: ignore[assignment]
 
 
+class BoxPicker(forms.HiddenInput):
+    """A box's name, picked with a toggle button per box (forms/widgets/box_picker.html)."""
+
+    template_name = "forms/widgets/box_picker.html"
+    use_fieldset = True
+
+    def __init__(self, box_names: Iterable[str], attrs: dict[str, object] | None = None) -> None:
+        super().__init__(attrs)
+        self.box_names = list(box_names)
+
+    @property
+    def is_hidden(self) -> bool:
+        return False
+
+    def get_context(self, name: str, value: object, attrs: dict[str, object] | None) -> dict[str, object]:
+        context = super().get_context(name, value, attrs)
+        cast(dict[str, object], context["widget"])["box_names"] = self.box_names
+        return context
+
+
+def _category_label(category: TicketCategory) -> str:
+    worth = "Variable" if category.variable_points else f"{category.points}pt" if category.points else "Free"
+    return f"{category.display_name} ({worth})"
+
+
 class CreateTicketForm(forms.Form):
     """A new ticket, from the web form or Discord's commands and modals. Validates the category against the ones the
     caller may use, fills in hostname and IP from Quotient's service and box maps when known, and requires the
-    category's required fields."""
+    category's required fields.
 
-    title = forms.CharField(max_length=255)
-    description = forms.CharField(required=False)
-    hostname = forms.CharField(max_length=HOSTNAME_MAX, required=False)
-    ip_address = forms.CharField(max_length=IP_MAX, required=False)
-    service_name = forms.CharField(max_length=100, required=False)
-    category = forms.IntegerField()
-    team_id = forms.IntegerField(required=False)
+    The web page passes teams (staff pick the team) and box_names, which set up the fields' widgets; the Alpine
+    bindings in their attrs are the create_ticket.html script's."""
+
+    title = forms.CharField(
+        max_length=255,
+        help_text="Brief summary of the issue",
+        widget=forms.TextInput(attrs={"placeholder": "Brief summary of the issue"}),
+    )
+    description = forms.CharField(
+        required=False,
+        widget=forms.Textarea(
+            attrs={"rows": 8, ":required": "descriptionRequired", "placeholder": "Detailed description of the issue..."}
+        ),
+    )
+    hostname = forms.CharField(
+        max_length=HOSTNAME_MAX,
+        required=False,
+        widget=forms.TextInput(
+            attrs={
+                ":value": "selectedHostname",
+                "x-on:input": "setField",
+                "data-field": "selectedHostname",
+                ":required": "hostnameRequired",
+                "placeholder": "e.g. web01",
+            }
+        ),
+    )
+    ip_address = forms.CharField(
+        max_length=IP_MAX,
+        required=False,
+        label="IP Address",
+        help_text="Enter the box's IP address",
+        widget=forms.TextInput(
+            attrs={
+                ":value": "ipAddress",
+                "x-on:input": "setField",
+                "data-field": "ipAddress",
+                ":required": "ipRequired",
+                "placeholder": "e.g. 10.0.1.5",
+            }
+        ),
+    )
+    service_name = forms.CharField(
+        max_length=100,
+        required=False,
+        label="Service",
+        widget=forms.TextInput(
+            attrs={
+                ":value": "selectedService",
+                "x-on:input": "setField",
+                "data-field": "selectedService",
+                ":required": "serviceRequired",
+                "placeholder": "e.g. HTTP",
+            }
+        ),
+    )
+    category = forms.IntegerField(
+        widget=forms.Select(attrs={":value": "selectedCategory", "x-on:change": "onCategoryChange"})
+    )
+    team_id = forms.IntegerField(required=False, label="Team", error_messages={"required": "Please select a team."})
 
     category_obj: TicketCategory | None = None
 
@@ -108,6 +212,8 @@ class CreateTicketForm(forms.Form):
         categories: Iterable[TicketCategory] | None = None,
         box_ip_map: Mapping[str, str] | None = None,
         service_choices: Iterable[Mapping[str, str]] = (),
+        teams: Iterable[Team] | None = None,
+        box_names: Iterable[str] = (),
         **kwargs: object,
     ) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
@@ -115,6 +221,41 @@ class CreateTicketForm(forms.Form):
         self._categories = categories
         self.box_ip_map = box_ip_map or {}
         self.service_choices = service_choices
+        self.teams = {team.pk: team for team in teams} if teams is not None else None
+        if self._categories is not None:
+            self.fields["category"].widget.choices = [
+                ("", "Select a category..."),
+                *((cat.pk, _category_label(cat)) for cat in self._categories),
+            ]
+        if self.teams:
+            self.fields["team_id"].required = True
+            self.fields["team_id"].widget = forms.Select(
+                choices=[("", "Select a team..."), *((pk, f"Team {t.team_number}") for pk, t in self.teams.items())]
+            )
+        if box_names := list(box_names):
+            hostname = self.fields["hostname"]
+            hostname.widget = BoxPicker(
+                box_names, attrs={":value": "selectedHostname", ":required": "hostnameRequired"}
+            )
+            ip_address = self.fields["ip_address"]
+            ip_address.help_text = "Auto-filled from hostname selection"
+            ip_address.widget.attrs["placeholder"] = "Select a hostname above"
+        if self.service_choices:
+            self.fields["service_name"].widget = forms.Select(
+                choices=[("", "Select a service...")],
+                attrs={
+                    "x-ref": "serviceSelect",
+                    ":value": "selectedService",
+                    "x-on:change": "onServiceChange",
+                    ":required": "serviceRequired",
+                },
+            )
+
+    def clean_team_id(self) -> int | None:
+        team_id: int | None = self.cleaned_data["team_id"]
+        if self.teams and team_id not in self.teams:
+            raise forms.ValidationError(self.fields["team_id"].error_messages["required"])
+        return team_id
 
     def clean(self) -> dict[str, object]:
         cleaned = super().clean() or {}

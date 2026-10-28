@@ -1,0 +1,8 @@
+{# One open event's card; widget.value.instance is the Event #}
+<label class="checkbox-item" for="{{ widget.attrs.id }}">
+    {% include "django/forms/widgets/input.html" %}
+    <span class="checkbox-content">
+        <span class="checkbox-label">{{ widget.value.instance.name }}</span>
+        <span class="checkbox-description">{{ widget.value.instance.date|date:"F j, Y" }} • {{ widget.value.instance.get_event_type_display }}</span>
+    </span>
+</label>

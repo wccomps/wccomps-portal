@@ -436,6 +436,10 @@ a.btn-secondary:focus-visible {
     display: block;
     margin-bottom: 4px;
 }
+/* admin's .aligned legend floats beside its fieldset: a choice group's legend heads its options */
+.form-row fieldset > legend {
+    float: none;
+}
 /* A choice group's fieldset (forms/field.html) is part of its row, not a section of the form */
 .form-row fieldset {
     border-top: none;
@@ -699,7 +703,6 @@ p.help {
     display: block;
 }
 
-/* Required field labels and legends (form rows) */
 label.required::after,
 legend.required::after {
     content: " *";
@@ -1217,7 +1220,6 @@ button[type="submit"]:hover {
 }
 
 /* Category form: its checkbox lists (admin/category_form.html) */
-.checkbox-group { display: flex; flex-direction: column; gap: 8px; }
 
 /* Broadcast recipients (admin/broadcast.html) */
 .team-list { columns: 2; list-style: disc inside; padding: 0; }
@@ -1290,36 +1292,6 @@ button[type="submit"]:hover {
     padding: 15px;
 }
 .module-header-success { background: var(--success-fg); }
-
-/* Red team finding: the team picker (scoring/submit_red_finding.html) */
-.team-btn {
-    padding: 8px 16px;
-    min-width: 60px;
-    font-weight: 500;
-    border: 1px solid var(--hairline-color, #ddd);
-    background: var(--body-bg, white);
-    color: var(--body-fg, #333);
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-.team-btn:hover {
-    border-color: var(--primary, #417690);
-}
-.team-btn--selected {
-    background: var(--error-fg, #dc3545);
-    border-color: var(--error-fg, #dc3545);
-    color: white;
-}
-.team-btn--selected:hover {
-    background: var(--error-fg, #c82333);
-    border-color: var(--error-fg, #c82333);
-}
-@media (prefers-reduced-motion: reduce) {
-    .team-btn {
-        transition: none;
-    }
-}
 
 /* Scorecard (scoring/_scorecard_body.html, scoring/scorecard.html) */
 .neighbors {

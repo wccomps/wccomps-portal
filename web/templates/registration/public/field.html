@@ -1,0 +1,29 @@
+{# A RegistrationForm field as a row of the public register page (registration.views.public_registration_form); the help and error ids are the ones the widget's aria-describedby names #}
+<div class="field">
+    {% if field.use_fieldset %}
+        <fieldset {% if field.aria_describedby %}aria-describedby="{{ field.aria_describedby }}"{% endif %}>
+            <legend>
+                {{ field.label }}
+                {% if field.field.required %}<span class="required">*</span>{% endif %}
+            </legend>
+            {{ field }}
+        </fieldset>
+    {% elif field.widget_type == "checkbox" %}
+        <div class="rules-checkbox">
+            {{ field }}
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        </div>
+    {% else %}
+        <label for="{{ field.id_for_label }}">
+            {{ field.label }}
+            {% if field.field.required %}
+                <span class="required">*</span>
+            {% else %}
+                <span class="optional">(optional)</span>
+            {% endif %}
+        </label>
+        {{ field }}
+    {% endif %}
+    {% if field.help_text %}<p class="help-text" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</p>{% endif %}
+    {% if field.errors %}<p class="error-text" id="{{ field.auto_id }}_error">{{ field.errors|join:" " }}</p>{% endif %}
+</div>

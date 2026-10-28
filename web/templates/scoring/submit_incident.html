@@ -17,19 +17,7 @@
                     {% if is_admin %}
                         {{ form.team.as_field_group }}
                     {% endif %}
-                    <c-form_field label="{{ form.affected_boxes.label }}"
-                                  error="{{ form.affected_boxes.errors|join:', ' }}">
-                        {{ form.affected_boxes }}
-                        {% if form.box_choices %}
-                            <div class="d-flex flex-wrap gap-10">
-                                {% for value, label in form.box_choices %}
-                                    <c-toggle_button data-box="{{ value }}">
-                                        {{ label }}
-                                    </c-toggle_button>
-                                {% endfor %}
-                            </div>
-                        {% endif %}
-                    </c-form_field>
+                    {{ form.affected_boxes.as_field_group }}
                     <div class="grid-2">
                         {{ form.affected_service.as_field_group }}
                         {{ form.destination_ip.as_field_group }}
@@ -106,25 +94,6 @@
         function getSelectedBoxes() {
             const select = document.getElementById('id_affected_boxes');
             return Array.from(select.selectedOptions).map(opt => opt.value);
-        }
-
-        function toggleBox(boxName) {
-            const select = document.getElementById('id_affected_boxes');
-            for (const opt of select.options) {
-                if (opt.value === boxName) {
-                    opt.selected = !opt.selected;
-                    break;
-                }
-            }
-            updateBoxButtons();
-            onBoxSelectionChange();
-        }
-
-        function updateBoxButtons() {
-            const selected = getSelectedBoxes();
-            document.querySelectorAll('.box-toggle').forEach(btn => {
-                setTogglePressed(btn, selected.includes(btn.dataset.box));
-            });
         }
 
         // The IP the boxes last filled in: a box change replaces it, never an IP the team typed
@@ -228,16 +197,12 @@
         document.addEventListener('DOMContentLoaded', function() {
             const teamSelect = document.getElementById('id_team');
 
-            // Wire up box toggle buttons
-            document.querySelectorAll('.box-toggle').forEach(btn => {
-                btn.addEventListener('click', () => toggleBox(btn.dataset.box));
-            });
+            document.getElementById('id_affected_boxes').addEventListener('change', onBoxSelectionChange);
 
             // A re-rendered form's IP counts as box-filled only when it matches the boxes
             const ipField = document.getElementById('id_destination_ip');
             if (ipField && ipField.value === boxIP()) filledIP = ipField.value;
 
-            updateBoxButtons();
             if (getSelectedBoxes().length > 0) {
                 onBoxSelectionChange();
             }

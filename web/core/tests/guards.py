@@ -71,8 +71,9 @@ def template_name(path: Path) -> str:
 @cache
 def is_standalone_document(path: Path) -> bool:
     """A template with an <html> of its own (emails, the print scorecard, the 500 page, the public registration
-    form): it carries its own styles and never loads the portal's base template or app.css."""
-    return any(tag.name == "html" for tag in elements(path))
+    form), or a part only such a page renders (registration/public/: the public form's field rows): it carries its
+    own styles and never loads the portal's base template or app.css."""
+    return template_name(path).startswith("registration/public/") or any(tag.name == "html" for tag in elements(path))
 
 
 def fail_with(
@@ -103,6 +104,9 @@ def fail_with(
     if problems:
         pytest.fail(f"{title} ({len(problems)}):\n" + "\n".join(f"  {p}" for p in problems), pytrace=False)
 
+
+FIELD_GROUP = "field-group"
+FIELD_GROUP_RE = re.compile(r"{{\s*\w*form\.(\w+)\.as_field_group\s*}}")
 
 # HTML and component tags, with any {{ }} or {% %} in an attribute kept as written
 COMMENT_RE = re.compile(r"{#.*?#}|{%\s*comment\s*%}.*?{%\s*endcomment\s*%}", re.DOTALL)
@@ -169,6 +173,12 @@ class TagReader(HTMLParser):
         # of those, a title's and a textarea's text is shown
         if self.cdata_elem in (None, "title", "textarea") and data.strip():
             self.texts.append((self.getpos()[0], self.restore(data)))
+        if self.cdata_elem is None:
+            # A form row a field renders ({{ form.x.as_field_group }}) reads as a void element of its own
+            for placeholder in PLACEHOLDER_RE.finditer(data):
+                if group := FIELD_GROUP_RE.fullmatch(self.kept[int(placeholder.group(1))]):
+                    line = self.getpos()[0] + data[: placeholder.start()].count("\n")
+                    self.found.append(Tag(FIELD_GROUP, {"field": group.group(1)}, line))
 
 
 @cache
@@ -248,7 +258,10 @@ def tags(path: Path) -> tuple[Tag, ...]:
     return tuple(tag for tag in elements(path) if not tag.closing)
 
 
-VOID = {"input", "br", "img", "hr", "meta", "link", "source", "col", "wbr", "area", "base", "embed", "track"}
+VOID = {
+    *("input", "br", "img", "hr", "meta", "link", "source", "col", "wbr", "area", "base", "embed", "track"),
+    FIELD_GROUP,
+}
 
 
 def with_open_elements(path: Path) -> Iterator[tuple[Tag, list[Tag]]]:

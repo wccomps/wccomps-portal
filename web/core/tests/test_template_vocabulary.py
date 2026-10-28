@@ -27,11 +27,11 @@ from django.contrib.messages import constants as message_constants
 from core import status_variants
 from core.admin_views import event_panel
 from core.tests.guards import (
+    FIELD_GROUP,
     REPO_DIR,
     TEMPLATES_DIR,
     WEB_DIR,
     Tag,
-    elements,
     fail_with,
     page_templates,
     portal_templates,
@@ -143,7 +143,6 @@ PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
     "admin/base_site.html:toast-enter-end": CHROME + "the new-ticket toast's slide in and out",
     "admin/base_site.html:toast-leave": CHROME + "the new-ticket toast's slide out",
     "admin/broadcast.html:team-list": "The recipient list flows into 2 to 4 columns by width; no utility sets columns",
-    "admin/category_form.html:checkbox-group": "Stacks the field checkboxes 8px apart; no utility stacks with that gap",
     "ticketing/comments_list.html:comment-list": COMMENTS,
     "ticketing/comments_list.html:comment-item": COMMENTS,
     "ticketing/comments_list.html:comment-header": COMMENTS,
@@ -188,8 +187,6 @@ PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
     "scoring/submit_incident.html:screenshot-preview-name": "A chosen screenshot's file name",
     "scoring/submit_red_finding.html:screenshot-preview-img": "A chosen screenshot's preview image",
     "scoring/submit_red_finding.html:screenshot-preview-name": "A chosen screenshot's file name",
-    "scoring/submit_red_finding.html:team-btn": "The team picker's buttons, outlined",
-    "scoring/submit_red_finding.html:team-btn--selected": "A picked team's button, red",
     "scoring/submit_red_finding.html:modal": MODAL,
     "scoring/submit_red_finding.html:modal--open": MODAL,
     "scoring/submit_red_finding.html:modal-backdrop": MODAL,
@@ -203,7 +200,6 @@ PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
 
 # "template:<c-component>" for markup written by hand where a shared component renders it
 RAW_MARKUP_EXCEPTIONS: dict[str, str] = {
-    "forms/field.html:*": "Django's field group template: Django renders it, outside cotton, as the form row markup",
     "admin/base_site.html:<c-button>": (
         "The chrome's menu, dark mode and sound toggles; c-button would put Django's filled .button on the nav bar"
     ),
@@ -601,6 +597,7 @@ def test_boxed_button_rows_are_action_toolbars() -> None:
 
 
 FIELDSET_PADDED_TAGS = {
+    FIELD_GROUP,
     "c-action_box",
     "c-alert",
     "c-button_row",
@@ -636,32 +633,19 @@ FIELDSET_PADDED_CLASSES = {
 }
 
 
-def wraps_a_field_group(path: Path, start: Tag, lines: list[str]) -> bool:
-    """Whether the element opened by start holds a {{ form.x.as_field_group }}, which renders a padded .form-row."""
-    depth = 0
-    for tag in elements(path):
-        if tag.line < start.line or tag.name != start.name:
-            continue
-        depth += -1 if tag.closing else 1
-        if depth == 0:
-            return any("as_field_group" in line for line in lines[start.line - 1 : tag.line])
-    return False
-
-
 def test_fieldset_children_are_padded() -> None:
     """Django admin's base.css sets padding: 0 on fieldset.module and only pads p, ul, h3, h4, dl, pre and .form-row.
     Any direct child of <c-fieldset> must be one of those, carry a padding class, or wrap padded children."""
     found: dict[str, str] = {}
     for path in page_templates():
         with_parents = list(with_open_elements(path))
-        # Direct children of <c-fieldset> that themselves wrap a padded component (c-form_field, c-table)
+        # Direct children of <c-fieldset> that themselves wrap a padded row (c-form_field, a field group, c-table)
         wrappers_with_padded_child = {
             open_tags[i + 1].line
             for tag, open_tags in with_parents
             for i, ancestor in enumerate(open_tags[:-1])
-            if ancestor.name == "c-fieldset" and tag.name in ("c-form_field", "c-table")
+            if ancestor.name == "c-fieldset" and tag.name in ("c-form_field", FIELD_GROUP, "c-table")
         }
-        lines = text(path).splitlines()
         for tag, open_tags in with_parents:
             if not open_tags or open_tags[-1].name != "c-fieldset":
                 continue
@@ -671,7 +655,6 @@ def test_fieldset_children_are_padded() -> None:
                 or classes & FIELDSET_PADDED_CLASSES
                 or tag.line in wrappers_with_padded_child
                 or "hx-get" in tag.attrs
-                or wraps_a_field_group(path, tag, lines)
             ):
                 continue
             found[f"{template_name(path)}:{tag.line}"] = f"<{tag.name} class={tag.attrs.get('class', '')!r}>"

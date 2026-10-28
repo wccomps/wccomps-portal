@@ -57,38 +57,39 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
         cat.pk: {"required_fields": cat.required_fields, "optional_fields": cat.optional_fields} for cat in categories
     }
 
-    def form_page(error: str | None = None, status: int = 200) -> HttpResponse:
+    form = CreateTicketForm(
+        request.POST if request.method == "POST" else None,
+        staff=is_admin,
+        categories=categories,
+        box_ip_map=box_ip_map,
+        service_choices=service_choices,
+        teams=teams,
+        box_names=box_names,
+        auto_id="%s",
+    )
+
+    def form_page(status: int = 200) -> HttpResponse:
         context: dict[str, object] = {
             "team": team,
-            "teams": teams,
-            "categories": categories,
+            "form": form,
             "categories_json": categories_json,
             "service_choices": service_choices,
             "box_names": box_names,
             "box_ip_map": box_ip_map,
         }
-        if error:
-            context["error"] = error
-            context["form_data"] = request.POST
         return render(request, "create_ticket.html", context, status=status)
 
     if request.method == "POST":
-        form = CreateTicketForm(
-            request.POST,
-            staff=is_admin,
-            categories=categories,
-            box_ip_map=box_ip_map,
-            service_choices=service_choices,
-        )
         valid = form.is_valid()
         if is_admin and form.cleaned_data.get("team_id"):
             with contextlib.suppress(Team.DoesNotExist):
                 team = Team.objects.get(id=form.cleaned_data["team_id"], is_active=True)
         if not valid:
-            return form_page(" ".join(str(err) for errors in form.errors.values() for err in errors))
+            return form_page()
 
         if is_admin and not team:
-            return form_page("Please select a team.")
+            form.add_error(None, "Please select a team.")
+            return form_page()
 
         if not team or not form.category_obj:
             raise BadRequest("Team is required to create a ticket.")
@@ -118,10 +119,13 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
 
         except TicketRateLimitError as e:
             logger.warning(f"Ticket rate limit hit by {authentik_username} for {team.team_name}")
-            return form_page(str(e), status=429)
+            form.add_error(None, str(e))
+            return form_page(status=429)
         except Exception:
             logger.exception("Failed to create ticket")
-
-            return form_page("Failed to create ticket. Please try again or contact support if the problem persists.")
+            form.add_error(
+                None, "Failed to create ticket. Please try again or contact support if the problem persists."
+            )
+            return form_page()
 
     return form_page()

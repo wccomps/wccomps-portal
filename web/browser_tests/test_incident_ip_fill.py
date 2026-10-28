@@ -22,7 +22,7 @@ def page(live_server, pw_browser, blue_team_user, blue_team, mock_quotient_clien
 
 
 def box(page, name):
-    return page.locator(f'.box-toggle[data-box="{name}"]')
+    return page.locator(f'.box-toggle[data-value="{name}"]')
 
 
 def test_a_box_fills_the_ip_and_a_typed_ip_stays(page):

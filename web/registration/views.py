@@ -1,13 +1,16 @@
 import random
+from typing import cast
 
 from django.contrib import messages
 from django.db import IntegrityError, transaction
-from django.http import HttpRequest, HttpResponse
+from django.forms import CheckboxSelectMultiple
+from django.http import HttpRequest, HttpResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from packets.models import packets_sent
 
 from core.auth_utils import require_permission
+from core.form_renderer import PortalFormRenderer
 from core.utils import client_ip, list_filters
 from team.models import SchoolInfo
 
@@ -39,6 +42,21 @@ from .services import (
 )
 
 
+class PublicPageRenderer(PortalFormRenderer):
+    """Renders a field as a row of the standalone register page, in its own look (the edit page keeps the portal's)."""
+
+    field_template_name = "registration/public/field.html"
+
+
+def public_registration_form(data: QueryDict | None = None) -> RegistrationForm:
+    """RegistrationForm with the register page's field rows and its open events as cards."""
+    form = RegistrationForm(data, renderer=PublicPageRenderer())
+    events = cast(CheckboxSelectMultiple, form.fields["events"].widget)
+    events.template_name = "registration/public/event_cards.html"
+    events.option_template_name = "registration/public/event_card.html"
+    return form
+
+
 def register(request: HttpRequest) -> HttpResponse:
     """Public registration form (no authentication required)."""
     if request.method == "POST":
@@ -46,16 +64,16 @@ def register(request: HttpRequest) -> HttpResponse:
         ip = client_ip(request)
         if RegistrationRateLimit.over_limit(ip):
             messages.error(request, "Too many registration submissions. Please try again later.")
-            return render(request, "registration/register.html", {"form": RegistrationForm()}, status=429)
+            return render(request, "registration/register.html", {"form": public_registration_form()}, status=429)
 
-        form = RegistrationForm(request.POST)
+        form = public_registration_form(request.POST)
         if form.is_valid():
             RegistrationRateLimit.record(ip)  # Only count successful submissions
             form.save()
             messages.success(request, "Registration submitted successfully!")
             return redirect("registration_register")
     else:
-        form = RegistrationForm()
+        form = public_registration_form()
 
     return render(request, "registration/register.html", {"form": form})
 

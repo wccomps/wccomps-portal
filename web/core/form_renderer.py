@@ -1,5 +1,3 @@
-"""The form renderer: field.as_field_group renders a field as a portal form row (templates/forms/field.html)."""
-
 from django.forms.renderers import TemplatesSetting
 
 

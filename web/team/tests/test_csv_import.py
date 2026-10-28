@@ -444,8 +444,16 @@ def test_a_new_event_from_the_import_form_is_created_only_by_the_import():
     assert not Event.objects.exists()
 
 
-@pytest.mark.parametrize("choice", ["²", "abc", "-1", ""])
-def test_an_event_choice_that_is_not_a_number_is_a_form_error(choice):
+@pytest.mark.parametrize(
+    ("choice", "error"),
+    [
+        ("²", "That event was closed out or removed: pick another."),
+        ("abc", "That event was closed out or removed: pick another."),
+        ("-1", "That event was closed out or removed: pick another."),
+        ("", "Pick the event this school list is for."),
+    ],
+)
+def test_an_event_choice_that_is_not_an_event_is_an_error_on_the_event(choice, error):
     from registration.models import Season
 
     from team.forms import ImportEventForm
@@ -454,4 +462,4 @@ def test_an_event_choice_that_is_not_a_number_is_a_form_error(choice):
     form = ImportEventForm({"event": choice}, season=season)
 
     assert not form.is_valid()
-    assert form.non_field_errors() == ["Pick the event this school list is for."]
+    assert form.errors["event"] == [error]

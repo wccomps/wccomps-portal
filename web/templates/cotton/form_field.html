@@ -1,13 +1,32 @@
-{# Form field component - a form row for an input that is no form's field; a form's field renders itself: {{ form.email.as_field_group }} #}
-{# Usage: <c-form_field label="Upload Files" id="screenshots"><input type="file" id="screenshots"></c-form_field> #}
-{# Props: label, required (bool), help_text, error, id #}
-<c-vars label="" required="false" help_text="" error="" id="" />
+{# Form field component - one form row: its label (a legend for a group), the input, help text and errors #}
+{# Usage: <c-form_field label="Upload Files" id="screenshots"><input type="file" id="screenshots"></c-form_field>; a form's field renders through it: {{ form.x.as_field_group }} #}
+{# Props: label, required (bool), help_text, error, id (the label's target), describe_id (help and error ids: <describe_id>_helptext, <describe_id>_error), layout (checkbox: input first; group: a fieldset with a legend), describedby (the group's aria-describedby) #}
+<c-vars label="" required="false" help_text="" error="" id="" describe_id="" layout="" describedby="" />
 <div {{ attrs }} class="form-row">
     <div>
-        <label {% if id %}for="{{ id }}"{% endif %}
-               {% if required == "true" %}class="required"{% endif %}>{{ label }}:</label>
-        {{ slot }}
-        {% if help_text %}<p class="help-text">{{ help_text }}</p>{% endif %}
-        {% if error %}<p class="errornote">{{ error }}</p>{% endif %}
+        {% if layout == "group" %}
+            <fieldset {% if describedby %}aria-describedby="{{ describedby }}"{% endif %}>
+                {% if label %}
+                    <legend {% if required == "true" %}class="required"{% endif %}>{{ label }}:</legend>
+                {% endif %}
+                {{ slot }}
+            </fieldset>
+        {% elif layout == "checkbox" %}
+            {{ slot }}
+            <label {% if id %}for="{{ id }}"{% endif %}
+                   {% if required == "true" %}class="required"{% endif %}>{{ label }}</label>
+        {% else %}
+            {% if label %}
+                <label {% if id %}for="{{ id }}"{% endif %}
+                       {% if required == "true" %}class="required"{% endif %}>{{ label }}:</label>
+            {% endif %}
+            {{ slot }}
+        {% endif %}
+        {% if help_text %}
+            <p class="help-text" {% if describe_id %}id="{{ describe_id }}_helptext"{% endif %}>{{ help_text }}</p>
+        {% endif %}
+        {% if error %}
+            <p class="errornote" {% if describe_id %}id="{{ describe_id }}_error"{% endif %}>{{ error }}</p>
+        {% endif %}
     </div>
 </div>

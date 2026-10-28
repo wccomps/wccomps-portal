@@ -22,55 +22,13 @@
         <c-form x-data="criteriaForm"
                 action="{% if mode == 'edit' %}{% url 'orange_team:check_edit' orange_check.pk %}{% endif %}">
             {% csrf_token %}
+            <c-form_errors :form="form" />
             <c-fieldset heading="Check Details">
-                <c-form_field label="Title" required="true" id="id_title">
-                    <input type="text"
-                           class="vTextField"
-                           id="id_title"
-                           name="title"
-                           maxlength="200"
-                           value="{{ values.title }}"
-                           required>
-                </c-form_field>
-                <c-form_field label="Description"
-                              id="id_description"
-                              help_text="Steps/instructions for the orange teamer">
-                    <textarea class="vLargeTextField"
-                              id="id_description"
-                              name="description"
-                              rows="4">{{ values.description }}</textarea>
-                </c-form_field>
-                <c-form_field label="Scheduled At"
-                              id="id_scheduled_at"
-                              help_text="When the window opens (optional)">
-                    <input type="datetime-local"
-                           class="vTextField"
-                           id="id_scheduled_at"
-                           name="scheduled_at"
-                           value="{{ values.scheduled_at }}">
-                </c-form_field>
-                <c-form_field label="Time limit (minutes)"
-                              id="id_time_limit_minutes"
-                              help_text="How long the window stays open from the scheduled time (optional)">
-                    <input type="number"
-                           class="vTextField"
-                           id="id_time_limit_minutes"
-                           name="time_limit_minutes"
-                           min="1"
-                           max="{{ max_minutes }}"
-                           value="{{ values.time_limit_minutes }}">
-                </c-form_field>
-                <c-form_field label="Max points"
-                              id="id_max_points"
-                              help_text="Used when the check has no criteria">
-                    <input type="number"
-                           class="vTextField"
-                           id="id_max_points"
-                           name="max_points"
-                           min="0"
-                           max="{{ max_points }}"
-                           value="{{ values.max_points }}">
-                </c-form_field>
+                {{ form.title.as_field_group }}
+                {{ form.description.as_field_group }}
+                {{ form.scheduled_at.as_field_group }}
+                {{ form.time_limit_minutes.as_field_group }}
+                {{ form.max_points.as_field_group }}
             </c-fieldset>
             <c-fieldset heading="Rubric Criteria (optional)">
                 <template x-for="(criterion, index) in criteria" :key="criterion.n">

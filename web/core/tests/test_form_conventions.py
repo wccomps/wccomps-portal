@@ -45,20 +45,22 @@ def test_forms_rendered_field_by_field_show_their_form_errors() -> None:
     fail_with("Forms whose own errors never render", found, FORM_ERRORS_ALLOWLIST)
 
 
-# A c-form_field given a form's field by hand: {{ form.x.as_field_group }} renders it with its ids and errors
-HAND_FED_FIELD = re.compile(r"<c-form_field\b[^>]*?(?::field=|\bform\.\w+)")
+# A form's field as a bare widget, or looped over: {{ form.notes }}, {% for radio in form.source %}
+BARE_FIELD = re.compile(r"{{\s*\w*form\.(\w+)\s*}}|{%\s*for\s+\w+\s+in\s+\w*form\.(\w+)\s*%}")
 
-HAND_FED_EXCEPTIONS = {
-    "scoring/submit_incident.html": "affected_boxes: its widget is a hidden select the box toggle buttons drive",
-    "scoring/submit_red_finding.html": "affected_boxes: its widget is a hidden select the box toggle buttons drive",
+# "template:field" -> why the page renders that field's widget itself
+BARE_FIELD_EXCEPTIONS = {
+    "registration/edit.html:unoffered_events": "the events the form doesn't offer, a list on the form, not a field",
+    "scoring/submit_red_finding.html:destination_ip_template": "a hidden input the page's script fills: no row to show",
 }
 
 
 def test_a_form_field_renders_as_its_field_group() -> None:
-    """A row built by hand from a form's field left out the ids aria-describedby names, and could drop its errors."""
+    """A widget rendered on its own has no label, help or errors from the form, and its aria-describedby names ids
+    that aren't on the page: {{ form.x.as_field_group }} renders all of them."""
     found = {
-        template_name(p): f"{len(HAND_FED_FIELD.findall(text(p)))} c-form_field fed a form's field"
+        f"{template_name(p)}:{m.group(1) or m.group(2)}": "render it with as_field_group"
         for p in page_templates()
-        if HAND_FED_FIELD.search(text(p))
+        for m in BARE_FIELD.finditer(text(p))
     }
-    fail_with("Form fields rendered through c-form_field", found, HAND_FED_EXCEPTIONS)
+    fail_with("Form fields rendered as bare widgets", found, BARE_FIELD_EXCEPTIONS)

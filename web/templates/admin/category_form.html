@@ -19,154 +19,25 @@
                    parent_url="{% url 'admin_categories' %}"
                    parent_label="Categories" />
     <c-module>
-        {% if error %}<c-alert variant="error">{{ error }}</c-alert>{% endif %}
         <c-form>
             {% csrf_token %}
+            <c-form_errors :form="form" />
             <c-fieldset heading="Category Details" aligned="true">
-                <c-form_field label="Display Name" required="true" id="id_display_name">
-                    <input type="text"
-                           name="display_name"
-                           id="id_display_name"
-                           class="vTextField"
-                           value="{% if form_data %}{{ form_data.display_name }}{% elif category %}{{ category.display_name }}{% endif %}"
-                           required>
-                </c-form_field>
-                <c-form_field label="Default Points" id="id_points">
-                    <input type="number"
-                           name="points"
-                           id="id_points"
-                           class="vIntegerField"
-                           value="{% if form_data %}{{ form_data.points }}{% elif category %}{{ category.points }}{% else %}0{% endif %}">
-                </c-form_field>
-                <c-form_field label="Playbook Steps"
-                              id="id_playbook"
-                              help_text="Optional step-by-step instructions for staff responding to tickets in this category (one step per line).">
-                    <textarea name="playbook"
-                              id="id_playbook"
-                              rows="4"
-                              class="vLargeTextField"
-                              placeholder="1. Verify service status (one step per line)">{% if form_data %}{{ form_data.playbook }}{% elif category %}{{ category.playbook }}{% endif %}</textarea>
-                </c-form_field>
-                <c-form_field label="Sort Order" id="id_sort_order">
-                    <input type="number"
-                           name="sort_order"
-                           id="id_sort_order"
-                           class="vIntegerField"
-                           value="{% if form_data %}{{ form_data.sort_order }}{% elif category %}{{ category.sort_order }}{% else %}0{% endif %}">
-                </c-form_field>
+                {{ form.display_name.as_field_group }}
+                {{ form.points.as_field_group }}
+                {{ form.playbook.as_field_group }}
+                {{ form.sort_order.as_field_group }}
             </c-fieldset>
-            <c-fieldset heading="Required Fields" aligned="true">
-                <c-form_field label="Required Fields"
-                              help_text="Fields the user must fill in when creating a ticket.">
-                    <div class="checkbox-group">
-                        <label class="d-flex items-center gap-10">
-                            <input type="checkbox"
-                                   name="required_fields"
-                                   value="hostname"
-                                   {% if category and category.required_fields and "hostname" in category.required_fields %}checked{% endif %}>
-                            hostname
-                        </label>
-                        <label class="d-flex items-center gap-10">
-                            <input type="checkbox"
-                                   name="required_fields"
-                                   value="ip_address"
-                                   {% if category and category.required_fields and "ip_address" in category.required_fields %}checked{% endif %}>
-                            ip_address
-                        </label>
-                        <label class="d-flex items-center gap-10">
-                            <input type="checkbox"
-                                   name="required_fields"
-                                   value="service_name"
-                                   {% if category and category.required_fields and "service_name" in category.required_fields %}checked{% endif %}>
-                            service_name
-                        </label>
-                        <label class="d-flex items-center gap-10">
-                            <input type="checkbox"
-                                   name="required_fields"
-                                   value="description"
-                                   {% if category and category.required_fields and "description" in category.required_fields %}checked{% endif %}>
-                            description
-                        </label>
-                    </div>
-                </c-form_field>
-            </c-fieldset>
-            <c-fieldset heading="Optional Fields" aligned="true">
-                <c-form_field label="Optional Fields" help_text="Fields shown but not required.">
-                    <div class="checkbox-group">
-                        <label class="d-flex items-center gap-10">
-                            <input type="checkbox"
-                                   name="optional_fields"
-                                   value="hostname"
-                                   {% if category and category.optional_fields and "hostname" in category.optional_fields %}checked{% endif %}>
-                            hostname
-                        </label>
-                        <label class="d-flex items-center gap-10">
-                            <input type="checkbox"
-                                   name="optional_fields"
-                                   value="ip_address"
-                                   {% if category and category.optional_fields and "ip_address" in category.optional_fields %}checked{% endif %}>
-                            ip_address
-                        </label>
-                        <label class="d-flex items-center gap-10">
-                            <input type="checkbox"
-                                   name="optional_fields"
-                                   value="service_name"
-                                   {% if category and category.optional_fields and "service_name" in category.optional_fields %}checked{% endif %}>
-                            service_name
-                        </label>
-                        <label class="d-flex items-center gap-10">
-                            <input type="checkbox"
-                                   name="optional_fields"
-                                   value="description"
-                                   {% if category and category.optional_fields and "description" in category.optional_fields %}checked{% endif %}>
-                            description
-                        </label>
-                    </div>
-                </c-form_field>
+            <c-fieldset heading="Ticket Fields" aligned="true">
+                {{ form.required_fields.as_field_group }}
+                {{ form.optional_fields.as_field_group }}
             </c-fieldset>
             <c-fieldset heading="Options" aligned="true">
-                <c-form_field label="Variable Points">
-                    <label class="d-flex items-center gap-10">
-                        <input type="checkbox"
-                               name="variable_points"
-                               {% if category and category.variable_points %}checked{% endif %}>
-                        Points vary per ticket
-                    </label>
-                </c-form_field>
-                <c-form_field label="User Visible">
-                    <label class="d-flex items-center gap-10">
-                        <input type="checkbox"
-                               name="user_creatable"
-                               {% if not category or category.user_creatable %}checked{% endif %}>
-                        Users can create tickets with this category
-                    </label>
-                </c-form_field>
-                <c-form_field label="Variable Cost Note"
-                              id="id_variable_cost_note"
-                              help_text="Shown to users when creating tickets for this category.">
-                    <textarea name="variable_cost_note"
-                              id="id_variable_cost_note"
-                              class="vLargeTextField"
-                              rows="3">{% if form_data %}{{ form_data.variable_cost_note }}{% elif category %}{{ category.variable_cost_note }}{% endif %}</textarea>
-                </c-form_field>
-                <c-form_field label="Min Points"
-                              id="id_min_points"
-                              help_text="Only applies when Variable Points is enabled.">
-                    <input type="number"
-                           name="min_points"
-                           id="id_min_points"
-                           class="vIntegerField"
-                           value="{% if form_data %}{{ form_data.min_points }}{% elif category %}{{ category.min_points }}{% else %}0{% endif %}">
-                </c-form_field>
-                <c-form_field label="Max Points"
-                              id="id_max_points"
-                              help_text="Only applies when Variable Points is enabled.">
-                    <input type="number"
-                           name="max_points"
-                           id="id_max_points"
-                           class="vIntegerField"
-                           value="{% if form_data %}{{ form_data.max_points }}{% elif category %}{{ category.max_points }}{% else %}0{% endif %}">
-                </c-form_field>
+                {{ form.variable_points.as_field_group }}
+                {{ form.user_creatable.as_field_group }}
+                {{ form.variable_cost_note.as_field_group }}
+                {{ form.min_points.as_field_group }}
+                {{ form.max_points.as_field_group }}
             </c-fieldset>
             <c-button_row class="mt-20 justify-end">
                 <c-link href="{% url 'admin_categories' %}" variant="cancel">Cancel</c-link>

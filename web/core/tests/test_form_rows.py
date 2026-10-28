@@ -1,5 +1,4 @@
-"""A form field renders as a portal form row through Django's own field group (field.as_field_group): the label,
-required mark, help text and errors come from the form, and the ids Django's aria-describedby names exist."""
+"""A form's field renders as a form row with its facts from the form and the ids its aria-describedby names."""
 
 import re
 
@@ -8,6 +7,7 @@ from django import forms
 
 class ExampleForm(forms.Form):
     email = forms.EmailField(label="Email Address", help_text="Where results go.")
+    notes = forms.CharField(label="", required=False, help_text="Tom & Jerry's <notes>")
     phone = forms.CharField(label="Phone", required=False)
     agree = forms.BooleanField(label="I agree", help_text="Read the rules first.")
     events = forms.MultipleChoiceField(
@@ -49,3 +49,11 @@ def test_a_choice_group_is_a_fieldset_with_a_legend() -> None:
     assert "<fieldset" in html
     assert re.search(r"<legend[^>]*>Events:</legend>", html)
     assert '<label for="id_events"' not in html
+
+
+def test_help_text_is_escaped_once() -> None:
+    assert "Tom &amp; Jerry&#x27;s &lt;notes&gt;" in row(ExampleForm(), "notes")
+
+
+def test_a_field_without_a_label_has_no_bare_colon() -> None:
+    assert "<label" not in row(ExampleForm(), "notes")

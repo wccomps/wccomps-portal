@@ -534,3 +534,56 @@ def test_a_season_activated_since_the_preview_refuses_the_import(client):
     assert b"Upload the file again" in response.content
     assert not Season.objects.filter(year=2027).exists()
     assert not SchoolInfo.objects.exists()
+
+
+def _field_error(html: str, field: str) -> str | None:
+    """The error shown in a field's own row, under the id its widget's aria-describedby names."""
+    import re
+    from html import unescape
+
+    match = re.search(rf'<p class="errornote" id="id_{field}_error">([^<]*)</p>', html)
+    return unescape(match.group(1)) if match else None
+
+
+def test_a_refused_upload_shows_the_posted_values_and_the_error_beside_its_field(client):
+    import re
+
+    event = _season_and_event()
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+
+    response = _upload(
+        client,
+        event="new",
+        mode="add",
+        new_name="Qualifier 9",
+        new_date="not a date",
+        new_type="qualifier",
+        new_season_name="2026-2027",
+        current_season=str(event.season.pk),
+    )
+    html = response.content.decode()
+
+    assert not SchoolInfo.objects.exists()
+    assert _field_error(html, "new_date") == "Give the new event a valid date."
+    assert _field_error(html, "new_name") is None
+    assert 'value="Qualifier 9"' in html
+    assert 'value="2026-2027"' in html
+    assert re.search(r'<option value="new" selected>New event</option>', html)
+    assert re.search(r'<option value="qualifier" selected>', html)
+    assert re.search(r'name="mode" value="add"[^>]* checked', html)
+
+
+def test_an_upload_without_an_event_says_so_beside_the_event(client):
+    _season_and_event()
+
+    html = _upload(client, event="").content.decode()
+
+    assert _field_error(html, "event") == "Pick the event this school list is for."
+    assert not SchoolInfo.objects.exists()
+
+
+def test_a_refused_upload_asks_for_the_file_again(client):
+    """A browser can't put a file back in its input, so a page shown again after a refusal says to pick it again."""
+    csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
+    response = client.post(reverse("school_info_import"), {"upload": "1", "csv_file": csv, "event": ""})
+    assert "Pick the file again" in response.content.decode()

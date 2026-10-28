@@ -1,5 +1,5 @@
 """In the findings table, a row's Delete deletes that finding and Approve Selected approves the checked rows; on the
-submit page, a team button selects that team."""
+submit page, a team button selects that team and Select All and Deselect All pick every team or none."""
 
 from decimal import Decimal
 
@@ -55,17 +55,23 @@ def test_a_team_button_on_the_submit_page_selects_that_team(live_server, pw_brow
     from team.models import Team
 
     user = role_user("red_team")
-    for number in (3, 4):
-        Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
+    teams = [Team.objects.create(team_number=n, team_name=f"Team {n:02d}", is_active=True) for n in (3, 4)]
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     try:
         page.goto(f"{live_server.url}{reverse('scoring:submit_red_score')}")
-        button = page.locator(".team-btn").nth(1)
+        button = page.get_by_role("button", name="Team 4")
         button.click()
-        checkbox_id = button.get_attribute("data-checkbox-id")
-        assert page.locator(f"#{checkbox_id}").is_checked()
-        assert "team-btn--selected" in (button.get_attribute("class") or "")
+        assert button.get_attribute("aria-pressed") == "true"
+        assert page.evaluate(
+            "Array.from(document.getElementById('id_affected_teams').selectedOptions, o => o.value)"
+        ) == [str(teams[1].pk)]
         assert page.locator("#selectedCount").inner_text() == "1"
+
+        page.get_by_role("button", name="Select All", exact=True).click()
+        assert page.locator("#selectedCount").inner_text() == "2"
+        page.get_by_role("button", name="Deselect All").click()
+        assert page.locator("#selectedCount").inner_text() == "0"
+        assert button.get_attribute("aria-pressed") == "false"
     finally:
         context.close()

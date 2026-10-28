@@ -107,6 +107,39 @@ function setTogglePressed(button, pressed) {
     button.setAttribute('aria-pressed', String(pressed));
 }
 
+/**
+ * A ToggleButtonSelectMultiple (templates/forms/widgets/toggle_buttons.html): a button picks its option in the
+ * hidden select, Select All and Deselect All pick every option or none, and each change fires the select's change.
+ */
+function togglePicker() {
+    return {
+        init() {
+            const select = this.$el.querySelector('select');
+            const buttons = this.$el.querySelectorAll('[data-value]');
+            const show = () => {
+                const picked = new Set(Array.from(select.selectedOptions, option => option.value));
+                buttons.forEach(button => setTogglePressed(button, picked.has(button.dataset.value)));
+            };
+            this.$el.addEventListener('click', event => {
+                const button = event.target.closest('button');
+                if (!button) return;
+                if (button.dataset.value !== undefined) {
+                    const option = Array.from(select.options).find(o => o.value === button.dataset.value);
+                    option.selected = !option.selected;
+                } else if (button.dataset.pick) {
+                    for (const option of select.options) option.selected = button.dataset.pick === 'all';
+                } else {
+                    return;
+                }
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+            select.addEventListener('change', show);
+            show();
+        }
+    };
+}
+document.addEventListener('alpine:init', () => Alpine.data('togglePicker', togglePicker));
+
 /* Alpine Mixins */
 
 /** Toast notification state: message, messageType, alertClass. */

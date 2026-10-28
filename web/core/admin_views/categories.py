@@ -16,28 +16,11 @@ def admin_categories(request: HttpRequest) -> HttpResponse:
 
 @require_permission("gold_team", "ticketing_admin")
 def admin_category_create(request: HttpRequest) -> HttpResponse:
-
-    if request.method == "POST":
-        form = TicketCategoryForm(request.POST)
-        if not form.is_valid():
-            error_msg = (
-                "Display name is required."
-                if "display_name" in form.errors
-                else str(next(iter(form.errors.values()))[0])
-            )
-            return render(
-                request,
-                "admin/category_form.html",
-                {
-                    "error": error_msg,
-                    "form_data": request.POST,
-                },
-            )
-
+    form = TicketCategoryForm(request.POST if request.method == "POST" else None)
+    if form.is_valid():
         form.save()
         return redirect("admin_categories")
-
-    return render(request, "admin/category_form.html", {})
+    return render(request, "admin/category_form.html", {"form": form})
 
 
 @require_permission("gold_team", "ticketing_admin")
@@ -45,29 +28,11 @@ def admin_category_edit(request: HttpRequest, category_id: int) -> HttpResponse:
     from ticketing.models import TicketCategory
 
     category = get_object_or_404(TicketCategory, pk=category_id)
-
-    if request.method == "POST":
-        form = TicketCategoryForm(request.POST, instance=category)
-        if not form.is_valid():
-            error_msg = (
-                "Display name is required."
-                if "display_name" in form.errors
-                else str(next(iter(form.errors.values()))[0])
-            )
-            return render(
-                request,
-                "admin/category_form.html",
-                {
-                    "category": category,
-                    "error": error_msg,
-                    "form_data": request.POST,
-                },
-            )
-
+    form = TicketCategoryForm(request.POST if request.method == "POST" else None, instance=category)
+    if form.is_valid():
         form.save()
         return redirect("admin_categories")
-
-    return render(request, "admin/category_form.html", {"category": category})
+    return render(request, "admin/category_form.html", {"category": category, "form": form})
 
 
 @require_permission("gold_team", "ticketing_admin")

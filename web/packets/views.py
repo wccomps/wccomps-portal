@@ -106,13 +106,8 @@ def packets_list(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET", "POST"])
 @require_permission("gold_team")
 def upload_packet(request: HttpRequest) -> HttpResponse:
-    if request.method == "POST":
-        form = PacketUploadForm(request.POST, request.FILES)
-        if not form.is_valid():
-            error_msg = " ".join(str(e) for errors in form.errors.values() for e in errors)
-            messages.error(request, error_msg)
-            return render(request, "packets/ops_upload_packet.html")
-
+    form = PacketUploadForm(request.POST, request.FILES) if request.method == "POST" else PacketUploadForm()
+    if form.is_valid():
         title = form.cleaned_data["title"]
         notes = form.cleaned_data["notes"]
         send_via_email = form.cleaned_data["send_via_email"]
@@ -144,7 +139,7 @@ def upload_packet(request: HttpRequest) -> HttpResponse:
         )
         return redirect("packets_list")
 
-    return render(request, "packets/ops_upload_packet.html")
+    return render(request, "packets/ops_upload_packet.html", {"form": form})
 
 
 @require_GET

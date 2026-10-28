@@ -63,19 +63,13 @@ forms by a variable name ending in `form`).
 <c-form_errors :form="form" />
 ```
 
-#### Form fields: `{{ form.x.as_field_group }}`
-A form's field renders itself as a form row through Django's field group (`templates/forms/field.html`, set by
-`core.form_renderer`): the label, the required mark, help text and errors come from the form, the help and error
-ids are the ones the widget's `aria-describedby` names, a checkbox comes before its label, and a choice group is a
-fieldset with a legend. Labels and help text belong on the form (`Meta.labels`, `Meta.help_texts`).
+#### `<c-form_field>`
+One form row: label, input, help text and errors. A form's field renders through it with
+`{{ form.x.as_field_group }}` (`templates/forms/field.html`, set by `core.form_renderer`), which passes the field's
+facts and the help and error ids its `aria-describedby` names (`core/tests/test_form_conventions.py` fails on a form
+field rendered as a bare widget). Write the tag only for an input that is no form's field.
 ```django
 {{ form.email.as_field_group }}
-```
-
-#### `<c-form_field>`
-A form row for an input that is no form's field: label, input, and optional help text/error
-(`core/tests/test_form_conventions.py` fails on one given a form's field).
-```django
 <c-form_field label="Upload Files" id="screenshots" help_text="Up to 20 files">
     <input type="file" id="screenshots" name="screenshots" multiple />
 </c-form_field>

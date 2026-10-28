@@ -4,7 +4,7 @@ from typing import TypedDict
 from django import forms
 from django.http import QueryDict
 
-from orange_team.models import MAX_POINTS, OrangeCheckCriterion
+from orange_team.models import MAX_POINTS, OrangeCheck, OrangeCheckCriterion
 
 # A check's time limit: at most a week
 MAX_MINUTES = 7 * 24 * 60
@@ -14,10 +14,39 @@ MAX_FOLLOW_UP_MINUTES = 8 * 60
 
 class OrangeCheckForm(forms.Form):
     title = forms.CharField(max_length=200)
-    description = forms.CharField(required=False)
-    scheduled_at = forms.DateTimeField(required=False)  # read in the viewer's timezone
-    max_points = forms.IntegerField(min_value=0, max_value=MAX_POINTS, required=False)
-    time_limit_minutes = forms.IntegerField(required=False, min_value=1, max_value=MAX_MINUTES)
+    description = forms.CharField(
+        required=False, widget=forms.Textarea(attrs={"rows": 4}), help_text="Steps/instructions for the orange teamer"
+    )
+    # Read in the viewer's timezone
+    scheduled_at = forms.DateTimeField(
+        required=False,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
+        help_text="When the window opens (optional)",
+    )
+    time_limit_minutes = forms.IntegerField(
+        required=False,
+        min_value=1,
+        max_value=MAX_MINUTES,
+        label="Time limit (minutes)",
+        help_text="How long the window stays open from the scheduled time (optional)",
+    )
+    max_points = forms.IntegerField(
+        min_value=0, max_value=MAX_POINTS, required=False, initial=0, help_text="Used when the check has no criteria"
+    )
+
+    @classmethod
+    def for_check(cls, check: OrangeCheck) -> OrangeCheckForm:
+        """The form showing a stored check."""
+        minutes = int(check.time_limit.total_seconds() // 60) if check.time_limit else None
+        return cls(
+            initial={
+                "title": check.title,
+                "description": check.description,
+                "scheduled_at": check.scheduled_at,
+                "time_limit_minutes": minutes,
+                "max_points": check.max_points,
+            }
+        )
 
 
 class FollowUpForm(forms.Form):

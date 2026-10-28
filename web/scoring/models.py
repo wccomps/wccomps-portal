@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import NamedTuple
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
@@ -190,6 +191,15 @@ class AttackType(models.Model):
         return self.name
 
 
+class Outcome(NamedTuple):
+    """One attack outcome a red team finding can claim: its model field and the points each affected team loses."""
+
+    field: str
+    points: int
+    label: str
+    description: str
+
+
 class RedTeamScore(Approvable):
     """Red team vulnerability score affecting one or more teams."""
 
@@ -247,41 +257,41 @@ class RedTeamScore(Approvable):
     # Access levels (only highest scored per attack)
     root_access = models.BooleanField(
         default=False,
-        help_text="Root/Administrator level access obtained (-100 pts)",
+        help_text="Root/Administrator level access obtained",
     )
     user_access = models.BooleanField(
         default=False,
-        help_text="User level access obtained (-25 pts, not scored if root_access)",
+        help_text="User level access obtained",
     )
     privilege_escalation = models.BooleanField(
         default=False,
-        help_text="User escalated to Root/Admin (-100 pts additional)",
+        help_text="User escalated to Root/Admin",
     )
 
     # Data recovery outcomes (cumulative)
     credentials_recovered = models.BooleanField(
         default=False,
-        help_text="User IDs and passwords recovered (-50 pts)",
+        help_text="User IDs and passwords recovered",
     )
     sensitive_files_recovered = models.BooleanField(
         default=False,
-        help_text="Config files, corporate data recovered (-25 pts)",
+        help_text="Config files, corporate data recovered",
     )
     credit_cards_recovered = models.BooleanField(
         default=False,
-        help_text="Customer credit card numbers recovered (-50 pts)",
+        help_text="Customer credit card numbers recovered",
     )
     pii_recovered = models.BooleanField(
         default=False,
-        help_text="PII recovered: name, address, CC# (-200 pts)",
+        help_text="PII recovered: name, address, CC#",
     )
     encrypted_db_recovered = models.BooleanField(
         default=False,
-        help_text="Encrypted customer data/database recovered (-25 pts)",
+        help_text="Encrypted customer data/database recovered",
     )
     db_decrypted = models.BooleanField(
         default=False,
-        help_text="Database was decrypted (-25 pts additional)",
+        help_text="Database was decrypted",
     )
 
     affected_teams = models.ManyToManyField(
@@ -322,39 +332,38 @@ class RedTeamScore(Approvable):
     def affected_boxes_display(self) -> str:
         return format_boxes_display(self.affected_boxes)
 
-    OUTCOME_SPECS: tuple[tuple[str, int, str], ...] = (
-        ("privilege_escalation", 100, "Privilege Escalation"),
-        ("credentials_recovered", 50, "Credentials"),
-        ("sensitive_files_recovered", 25, "Sensitive Files"),
-        ("credit_cards_recovered", 50, "Credit Cards"),
-        ("pii_recovered", 200, "PII"),
-        ("encrypted_db_recovered", 25, "Encrypted DB"),
-        ("db_decrypted", 25, "DB Decrypted"),
+    OUTCOMES: tuple[Outcome, ...] = (
+        Outcome("root_access", 100, "Root Access", "Root/Administrator level access obtained"),
+        Outcome("user_access", 25, "User Access", "User level access obtained (not scored with root access)"),
+        Outcome(
+            "privilege_escalation", 100, "Privilege Escalation", "User escalated to Root/Admin (additional penalty)"
+        ),
+        Outcome("credentials_recovered", 50, "Credentials", "User IDs and passwords recovered"),
+        Outcome("sensitive_files_recovered", 25, "Sensitive Files", "Config files, corporate data recovered"),
+        Outcome("credit_cards_recovered", 50, "Credit Cards", "Customer credit card numbers recovered"),
+        Outcome("pii_recovered", 200, "PII", "PII recovered: name, address, credit card number"),
+        Outcome("encrypted_db_recovered", 25, "Encrypted DB", "Encrypted customer data/database recovered"),
+        Outcome("db_decrypted", 25, "DB Decrypted", "Database was decrypted (additional penalty)"),
     )
+    # Access outcomes, highest first: a finding scores only the highest one it reached
+    ACCESS_TIERS: tuple[str, ...] = ("root_access", "user_access")
+
+    def scored_outcomes(self) -> list[Outcome]:
+        """The outcomes this finding scores, in table order."""
+        tier = next((field for field in self.ACCESS_TIERS if getattr(self, field)), None)
+        return [
+            outcome
+            for outcome in self.OUTCOMES
+            if getattr(self, outcome.field) and (outcome.field not in self.ACCESS_TIERS or outcome.field == tier)
+        ]
 
     def calculate_points(self) -> Decimal:
         """Points each affected team loses from the outcome checkboxes (stored positive; calculator subtracts it)."""
-        total = Decimal("0")
-        if self.root_access:
-            total += Decimal("100")
-        elif self.user_access:
-            total += Decimal("25")
-        for field_name, pts, _label in self.OUTCOME_SPECS:
-            if getattr(self, field_name):
-                total += Decimal(pts)
-        return total
+        return sum((Decimal(outcome.points) for outcome in self.scored_outcomes()), Decimal("0"))
 
     @property
     def outcomes_display(self) -> list[str]:
-        outcomes = []
-        if self.root_access:
-            outcomes.append("Root Access (-100)")
-        elif self.user_access:
-            outcomes.append("User Access (-25)")
-        for field_name, pts, label in self.OUTCOME_SPECS:
-            if getattr(self, field_name):
-                outcomes.append(f"{label} (-{pts})")
-        return outcomes
+        return [f"{outcome.label} (-{outcome.points})" for outcome in self.scored_outcomes()]
 
 
 class RedTeamScreenshot(models.Model):

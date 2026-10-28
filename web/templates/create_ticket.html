@@ -12,143 +12,20 @@
         <c-form id="ticketForm" x-data="ticketForm">
             {% csrf_token %}
             <c-module>
-                {% if error %}<c-alert variant="error">{{ error }}</c-alert>{% endif %}
+                <c-form_errors :form="form" />
                 {% if not box_names %}
                     <c-alert variant="warning">
                         Scoring engine is unavailable, so hostnames and services can't be listed. Type them in instead.
                     </c-alert>
                 {% endif %}
                 <c-fieldset heading="Ticket Details">
-                    {% if teams %}
-                        <c-form_field label="Team" required="true" id="team_id">
-                            <select name="team_id" id="team_id" required>
-                                <option value="">Select a team...</option>
-                                {% for t in teams %}
-                                    <option value="{{ t.id }}"
-                                            {% if form_data.team_id == t.id|stringformat:"s" %}selected{% endif %}>
-                                        Team {{ t.team_number }}
-                                    </option>
-                                {% endfor %}
-                            </select>
-                        </c-form_field>
-                    {% endif %}
-                    <c-form_field label="Category" required="true" id="category">
-                        <select name="category"
-                                id="category"
-                                required
-                                :value="selectedCategory"
-                                @change="onCategoryChange">
-                            <option value="">Select a category...</option>
-                            {% for cat in categories %}
-                                <option value="{{ cat.id }}"
-                                        data-points="{{ cat.points }}"
-                                        {% if form_data.category == cat.id|stringformat:"i" %}selected{% endif %}>
-                                    {{ cat.display_name }} (
-                                    {% if cat.variable_points %}
-                                        Variable
-                                    {% elif cat.points %}
-                                        {{ cat.points }}pt
-                                    {% else %}
-                                        Free
-                                    {% endif %}
-                                    )
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </c-form_field>
-                    <c-form_field label="Title"
-                                  required="true"
-                                  id="title"
-                                  help_text="Brief summary of the issue">
-                        <input type="text"
-                               name="title"
-                               id="title"
-                               class="vTextField"
-                               required
-                               maxlength="200"
-                               value="{{ form_data.title }}"
-                               placeholder="Brief summary of the issue">
-                    </c-form_field>
-                    <div x-show="showHostname" x-cloak id="field-hostname">
-                        <c-form_field label="Hostname" id="hostname">
-                            {% if box_names %}
-                                <div class="d-flex flex-wrap gap-10">
-                                    {% for box_name in box_names %}
-                                        <c-toggle_button @click="selectHostname" data-hostname="{{ box_name }}">
-                                            {{ box_name }}
-                                        </c-toggle_button>
-                                    {% endfor %}
-                                </div>
-                                <input type="hidden"
-                                       name="hostname"
-                                       id="hostname"
-                                       :value="selectedHostname"
-                                       :required="hostnameRequired">
-                            {% else %}
-                                <input type="text"
-                                       name="hostname"
-                                       id="hostname"
-                                       class="vTextField"
-                                       maxlength="255"
-                                       :value="selectedHostname"
-                                       @input="setField"
-                                       data-field="selectedHostname"
-                                       :required="hostnameRequired"
-                                       placeholder="e.g. web01">
-                            {% endif %}
-                        </c-form_field>
-                    </div>
-                    <div x-show="showIpAddress" x-cloak id="field-ip_address">
-                        <c-form_field label="IP Address"
-                                      id="ip_address"
-                                      help_text="{% if box_names %}Auto-filled from hostname selection{% else %}Enter the box's IP address{% endif %}">
-                            <input type="text"
-                                   name="ip_address"
-                                   id="ip_address"
-                                   class="vTextField"
-                                   :value="ipAddress"
-                                   @input="setField"
-                                   data-field="ipAddress"
-                                   :required="ipRequired"
-                                   maxlength="45"
-                                   placeholder="{% if box_names %}Select a hostname above{% else %}e.g. 10.0.1.5{% endif %}">
-                        </c-form_field>
-                    </div>
-                    <div x-show="showServiceName" x-cloak id="field-service_name">
-                        <c-form_field label="Service" id="service_name">
-                            {% if service_choices %}
-                                <select name="service_name"
-                                        id="service_name"
-                                        x-ref="serviceSelect"
-                                        :value="selectedService"
-                                        @change="onServiceChange"
-                                        :required="serviceRequired">
-                                    <option value="">Select a service...</option>
-                                </select>
-                            {% else %}
-                                <input type="text"
-                                       name="service_name"
-                                       id="service_name"
-                                       class="vTextField"
-                                       maxlength="100"
-                                       :value="selectedService"
-                                       @input="setField"
-                                       data-field="selectedService"
-                                       :required="serviceRequired"
-                                       placeholder="e.g. HTTP">
-                            {% endif %}
-                        </c-form_field>
-                    </div>
-                    <div x-show="showDescription" x-cloak id="field-description">
-                        <c-form_field label="Description" id="description">
-                            <textarea name="description"
-                                      id="description"
-                                      class="vTextField"
-                                      rows="8"
-                                      :required="descriptionRequired"
-                                      placeholder="Detailed description of the issue...">{{ form_data.description }}</textarea>
-                        </c-form_field>
-                    </div>
+                    {% if form.teams %}{{ form.team_id.as_field_group }}{% endif %}
+                    {{ form.category.as_field_group }}
+                    {{ form.title.as_field_group }}
+                    <div x-show="showHostname" x-cloak id="field-hostname">{{ form.hostname.as_field_group }}</div>
+                    <div x-show="showIpAddress" x-cloak id="field-ip_address">{{ form.ip_address.as_field_group }}</div>
+                    <div x-show="showServiceName" x-cloak id="field-service_name">{{ form.service_name.as_field_group }}</div>
+                    <div x-show="showDescription" x-cloak id="field-description">{{ form.description.as_field_group }}</div>
                 </c-fieldset>
                 <c-button_row class="justify-end">
                     <c-link href="{% url 'ticket_list' %}" variant="cancel">Cancel</c-link>
@@ -170,10 +47,10 @@
             const allServiceChoices = JSON.parse(document.getElementById('service-choices-data').textContent);
 
             return {
-                selectedCategory: '{{ form_data.category|default:""|escapejs }}',
-                selectedHostname: '{{ form_data.hostname|default:""|escapejs }}',
-                selectedService: '{{ form_data.service_name|default:""|escapejs }}',
-                ipAddress: '{{ form_data.ip_address|default:""|escapejs }}',
+                selectedCategory: '{{ form.category.value|default:""|escapejs }}',
+                selectedHostname: '{{ form.hostname.value|default:""|escapejs }}',
+                selectedService: '{{ form.service_name.value|default:""|escapejs }}',
+                ipAddress: '{{ form.ip_address.value|default:""|escapejs }}',
                 visibleFields: [],
                 requiredFields: [],
 
