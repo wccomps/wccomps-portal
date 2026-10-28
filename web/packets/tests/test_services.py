@@ -149,13 +149,17 @@ class PacketDistributionServiceTestCase(TestCase):
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
 
-        with patch("core.authentik_manager.AuthentikManager") as manager:
-            manager.return_value.reset_blueteam_password.return_value = (True, "")
+        with (
+            patch("core.authentik_utils.AuthentikManager"),
+            patch(
+                "core.authentik_utils._new_team_password", return_value=({"pk": 5, "username": "team01"}, "")
+            ) as new_password,
+        ):
             self.service.send_packet_email(distribution)
             self.service.send_test_packet_email(self.packet, team, "gold@example.com")
 
-        manager.return_value.reset_blueteam_password.assert_called_once()
-        password = manager.return_value.reset_blueteam_password.call_args.args[1]
+        new_password.assert_called_once()
+        password = new_password.call_args.args[2]
         self.assertEqual(SchoolInfo.objects.get(team=team).password, password)
         for call in mock_email_class.call_args_list:
             self.assertIn(password, call.kwargs["body"])
@@ -166,10 +170,12 @@ class PacketDistributionServiceTestCase(TestCase):
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
 
-        with patch("core.authentik_manager.AuthentikManager") as manager:
-            manager.return_value.reset_blueteam_password.return_value = (False, "HTTP 500")
-            with self.assertRaisesMessage(ValueError, "Failed to set Authentik password for team 1: HTTP 500"):
-                self.service.send_packet_email(distribution)
+        with (
+            patch("core.authentik_utils.AuthentikManager"),
+            patch("core.authentik_utils._new_team_password", return_value=(None, "HTTP 500")),
+            self.assertRaisesMessage(ValueError, "Failed to set Authentik password for team 1: HTTP 500"),
+        ):
+            self.service.send_packet_email(distribution)
 
         mock_email_class.return_value.send.assert_not_called()
         self.assertEqual(SchoolInfo.objects.get(team=team).password, "")

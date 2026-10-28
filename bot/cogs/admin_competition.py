@@ -9,7 +9,7 @@ from django.conf import settings
 
 from bot.competition_actions import deliver_team_broadcast, run_competition_cleanup
 from bot.permissions import permission_check
-from bot.utils import ConfirmView, log_to_ops_channel
+from bot.utils import ConfirmView, log_to_ops_channel, split_message
 from core.authentik_utils import (
     credentials_csv,
     parse_team_range,
@@ -111,19 +111,21 @@ class AdminCompetitionCog(commands.Cog):
             f"• Failed: {len(failed_resets)}",
         )
 
-        result_msg = f"Password reset complete\n• Success: {len(password_list)}/{total}\n"
-        result_msg += "".join(f"• Failed {username}: {error}\n" for username, error in failed_resets)
+        summary = f"Password reset complete\n• Success: {len(password_list)}/{total}\n"
+        details = "".join(f"• Failed {username}: {error}\n" for username, error in failed_resets)
         if sessions_failed:
-            result_msg += f"• Sessions: {sessions_failure_summary(sessions_failed)}\n"
-        if not password_list:
-            await interaction.followup.send(result_msg, ephemeral=True)
-            return
-
-        csv_content = credentials_csv((username, password) for _num, username, password in password_list)
-        file = discord.File(fp=io.BytesIO(csv_content.encode("utf-8")), filename="blueteam_passwords.csv")
-        await interaction.followup.send(
-            result_msg + "\nCSV attached with the new credentials.", file=file, ephemeral=True
-        )
+            details += f"• Sessions: {sessions_failure_summary(sessions_failed)}\n"
+        if password_list:
+            # The CSV rides on the short first message, so details past Discord's limit can't lose the passwords
+            csv_content = credentials_csv((username, password) for _num, username, password in password_list)
+            file = discord.File(fp=io.BytesIO(csv_content.encode("utf-8")), filename="blueteam_passwords.csv")
+            await interaction.followup.send(
+                summary + "\nCSV attached with the new credentials.", file=file, ephemeral=True
+            )
+        else:
+            details = summary + details
+        for part in split_message(details) if details else []:
+            await interaction.followup.send(part, ephemeral=True)
 
         logger.info(f"Password reset performed by {interaction.user}. Failed: {len(failed_resets)}")
 

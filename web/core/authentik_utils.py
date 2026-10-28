@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from team.models import MAX_TEAMS, team_username
 
-from .authentik_manager import AuthentikUser
+from .authentik_manager import AuthentikManager, AuthentikUser
 from .utils import shorten
 
 logger = logging.getLogger(__name__)
@@ -39,20 +39,32 @@ def _record_password(team_number: int, password: str) -> None:
     SchoolInfo.objects.filter(team__team_number=team_number).update(password=password)
 
 
-def reset_team_password(team_number: int) -> tuple[str | None, str]:
-    """Give a team account a new random password and record it on the team's school info for packet emails.
-
-    Returns (password, "") on success, (None, error) otherwise.
-    """
-    from .authentik_manager import AuthentikManager
-
-    password = generate_blueteam_password()
-    manager = AuthentikManager()
+def _new_team_password(manager: AuthentikManager, team_number: int, password: str) -> tuple[AuthentikUser | None, str]:
+    """Set the team account's password in Authentik: the account, or None and why not. Leaves is_active alone: team
+    accounts are enabled only while the competition runs."""
+    if team_number < 1 or team_number > MAX_TEAMS:
+        return None, f"Team number must be between 1 and {MAX_TEAMS}"
+    username = team_username(team_number)
     try:
-        success, error = manager.reset_blueteam_password(team_number, password)
-    finally:
-        manager.close()
-    if not success:
+        user = manager.find_user(username)
+        if not user:
+            return None, f"User {username} not found"
+        is_valid, error = validate_team_account(user, username)
+        if not is_valid:
+            return None, error
+        manager.set_password(user, password)
+    except Exception as e:
+        logger.exception(f"Failed to reset the password of {username}: {e}")
+        return None, "see the server logs"  # the callers say what failed
+    return user, ""
+
+
+def reset_team_password(team_number: int) -> tuple[str | None, str]:
+    """A new random password for the team account, recorded on its school info: (password, "") or (None, why not)."""
+    password = generate_blueteam_password()
+    with AuthentikManager() as manager:
+        user, error = _new_team_password(manager, team_number, password)
+    if user is None:
         return None, error
     _record_password(team_number, password)
     return password, ""
@@ -61,42 +73,39 @@ def reset_team_password(team_number: int) -> tuple[str | None, str]:
 @dataclass(frozen=True)
 class CredentialReset:
     """What resetting a team's credentials did: the new password (None when the reset failed, with error saying
-    why), and why the account's sessions weren't ended (None when they were, or when nothing was tried)."""
+    why), and why the account's Authentik sessions weren't ended (None when they were, or when nothing was tried)."""
 
     password: str | None
     error: str = ""
     sessions_error: str | None = None
 
     @property
-    def sessions_ended(self) -> bool:
-        return self.password is not None and self.sessions_error is None
-
-    @property
     def sessions_outcome(self) -> str:
-        return f"could not end its sessions: {self.sessions_error}" if self.sessions_error else "ended its sessions"
+        if self.sessions_error:
+            return f"could not end the team's Authentik sessions: {self.sessions_error}"
+        return "ended the team's Authentik sessions"
 
     def audit_details(self) -> dict[str, object]:
         return {
             "password_reset": self.password is not None,
-            "sessions_revoked": self.sessions_ended,
+            "sessions_revoked": self.password is not None and self.sessions_error is None,
             "sessions_error": self.sessions_error,
         }
 
 
-def reset_team_credentials(team_number: int) -> CredentialReset:
-    """Give a team account a new random password, then end the account's sessions."""
-    from .authentik_manager import AuthentikManager
-
+def _reset_credentials(manager: AuthentikManager, team_number: int) -> CredentialReset:
     password = generate_blueteam_password()
-    manager = AuthentikManager()
-    try:
-        reset_error, sessions_error = manager.reset_team_credentials(team_number, password)
-    finally:
-        manager.close()
-    if reset_error is not None:
-        return CredentialReset(password=None, error=reset_error)
+    user, error = _new_team_password(manager, team_number, password)
+    if user is None:
+        return CredentialReset(password=None, error=error)
     _record_password(team_number, password)
-    return CredentialReset(password=password, sessions_error=sessions_error)
+    return CredentialReset(password=password, sessions_error=manager.end_user_sessions(user))
+
+
+def reset_team_credentials(team_number: int) -> CredentialReset:
+    """Give a team account a new random password, then end the account's Authentik sessions."""
+    with AuthentikManager() as manager:
+        return _reset_credentials(manager, team_number)
 
 
 @dataclass(frozen=True)
@@ -127,9 +136,10 @@ def reset_teams_credentials(team_numbers: Iterable[int]) -> BulkPasswordResetRes
     failed_resets: list[tuple[str, str]] = []
     sessions_failed: list[tuple[str, str]] = []
 
-    for team_num in team_numbers:
+    with AuthentikManager() as manager:
+        resets = [(team_num, _reset_credentials(manager, team_num)) for team_num in team_numbers]
+    for team_num, reset in resets:
         username = team_username(team_num)
-        reset = reset_team_credentials(team_num)
         if reset.password is None:
             failed_resets.append((username, reset.error))
             continue

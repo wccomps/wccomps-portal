@@ -1,6 +1,7 @@
 """Authentik API manager for application control."""
 
 import logging
+import uuid
 from typing import TypedDict, cast
 from urllib.parse import quote
 
@@ -55,6 +56,14 @@ SESSIONS_HIDDEN = (
     "Authentik showed the portal's token no sessions at all: its Authentik user lacks the view Authenticated "
     "Session permission, or nobody is signed in to Authentik."
 )
+
+
+def _is_uuid(value: object) -> bool:
+    try:
+        uuid.UUID(str(value))
+    except ValueError:
+        return False
+    return True
 
 
 def _holds(value: object, kind: type) -> bool:
@@ -419,6 +428,8 @@ class AuthentikManager:
             )
             if any(session["user"] != user["pk"] for session in sessions):
                 return "Authentik answered sessions of other users, so none were ended"
+            if not all(_is_uuid(session["uuid"]) for session in sessions):
+                return "Authentik answered a session without a valid id, so none were ended"
             if not sessions and not self.sees_any_sessions():
                 return SESSIONS_HIDDEN
 
@@ -429,7 +440,8 @@ class AuthentikManager:
                 if response.is_error and response.status_code != 404:
                     refused.append(response.status_code)
             if refused:
-                return f"Authentik refused to end {len(refused)} of {len(sessions)} sessions (HTTP {refused[0]})"
+                # No counts: one reason shared by many teams must read the same for each
+                return f"Authentik refused to end sessions (HTTP {refused[0]})"
             return None
         except AuthentikAPIError as e:
             logger.warning(f"Ending the sessions of {user['username']} failed: {e}")
@@ -440,7 +452,8 @@ class AuthentikManager:
 
     def sees_any_sessions(self) -> bool:
         """Whether the token can see any session at all. False means it lacks the permission, or nobody is signed in
-        to Authentik. Raises AuthentikAPIError on an error status or an answer of another shape."""
+        to Authentik. Raises AuthentikAPIError on an error status or an answer of another shape, httpx.HTTPError when
+        Authentik can't be reached."""
         response = self.client.get(f"{self.base_url}/api/v3/core/authenticated_sessions/", params={"page_size": "1"})
         if response.is_error:
             raise self._handle_response_error(response, "List sessions")
@@ -475,61 +488,21 @@ class AuthentikManager:
             logger.exception(f"Failed to toggle {username}: {e}")
             return (False, "Account toggle failed. Check the server logs.")
 
-    def _team_user(self, team_number: int) -> tuple[AuthentikUser | None, str]:
-        """The team's account, or None and why not: a team number out of range, no such user, or an account that
-        isn't that team's. Raises AuthentikAPIError or httpx.HTTPError when Authentik can't be asked."""
-        from core.authentik_utils import validate_team_account
-        from team.models import MAX_TEAMS, team_username
-
-        if team_number < 1 or team_number > MAX_TEAMS:
-            return None, f"Team number must be between 1 and {MAX_TEAMS}"
-        username = team_username(team_number)
+    def find_user(self, username: str) -> AuthentikUser | None:
+        """The user with exactly this username, or None. Raises AuthentikAPIError or httpx.HTTPError when Authentik
+        can't be asked."""
         response = self.client.get(f"{self.base_url}/api/v3/core/users/", params={"username": username})
         if response.is_error:
             raise self._handle_response_error(response, f"Find user {username}")
-        user = self._first_user(response, f"Find user {username}")
-        if not user:
-            return None, f"User {username} not found"
-        is_valid, error = validate_team_account(user, username)
-        return (user, "") if is_valid else (None, error)
+        return self._first_user(response, f"Find user {username}")
 
-    def _set_password(self, user: AuthentikUser, password: str) -> None:
+    def set_password(self, user: AuthentikUser, password: str) -> None:
+        """Raises AuthentikAPIError or httpx.HTTPError when Authentik refuses or can't be reached."""
         response = self.client.post(
             f"{self.base_url}/api/v3/core/users/{user['pk']}/set_password/", json={"password": password}
         )
         if response.is_error:
             raise self._handle_response_error(response, f"Set the password of {user['username']}")
-
-    def reset_blueteam_password(self, team_number: int, password: str) -> tuple[bool, str]:
-        """Reset a blue team account's password in Authentik.
-
-        Leaves is_active alone: team accounts are enabled only while the competition runs.
-        """
-        try:
-            user, error = self._team_user(team_number)
-            if not user:
-                return (False, error)
-            self._set_password(user, password)
-            return (True, "")
-        except Exception as e:
-            logger.exception(f"Failed to reset the password of team {team_number}: {e}")
-            return (False, "see the server logs")  # the callers say what failed
-
-    def reset_team_credentials(self, team_number: int, password: str) -> tuple[str | None, str | None]:
-        """Set a team account's password, then end its sessions, finding the account once.
-
-        Returns (reset_error, sessions_error): reset_error None when the password was set; sessions_error None when
-        the sessions were ended, and always None when the password wasn't set (nothing was tried).
-        """
-        try:
-            user, error = self._team_user(team_number)
-            if not user:
-                return error, None
-            self._set_password(user, password)
-        except Exception as e:
-            logger.exception(f"Failed to reset the password of team {team_number}: {e}")
-            return "see the server logs", None
-        return None, self.end_user_sessions(user)
 
     def _list_all(self, path: str, params: dict[str, str], fields: dict[str, type]) -> list[dict[str, object]]:
         """Fetch every page of an Authentik list endpoint, each result holding these fields of these types (a list

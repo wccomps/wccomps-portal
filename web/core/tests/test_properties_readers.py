@@ -67,7 +67,7 @@ AUTHENTIK_USER = {
 }
 USERS = {"results": [AUTHENTIK_USER], "pagination": PAGE}
 GROUPS = {"results": [{"pk": "g1", "name": "WCComps_BlueTeam01", "parents": []}], "pagination": PAGE}
-SESSIONS = {"results": [{"uuid": "s-1", "user": 7}], "pagination": PAGE}
+SESSIONS = {"results": [{"uuid": "00000000-0000-4000-8000-000000000001", "user": 7}], "pagination": PAGE}
 PROVIDERS = {"results": [{"pk": 1, "assigned_application_slug": "netbird"}], "pagination": PAGE}
 APPLICATION = {"pk": "app-1", "slug": "netbird", "name": "Netbird"}
 BINDINGS = {"results": [{"pk": "b-1", "enabled": True, "group": "g1", "group_obj": {"name": "WCComps_BlueTeam"}}]}
@@ -467,17 +467,20 @@ READERS = [
         (f"{AM}.end_user_sessions", f"{AM}._list_all", *READ),
     ),
     Reader(
-        "reset_team_credentials",
-        lambda: authentik().reset_team_credentials(1, "Correct-Horse-1!"),
-        (USERS, DONE, SESSIONS, SESSIONS, DONE),
-        lambda r: outcome(
-            r,
-            lambda t: (
-                isinstance(t, tuple) and all(e is None or is_str(e) for e in t) and (t[0] is None or t[1] is None)
-            ),
-            "(reset error, sessions error), never both",
-        ),
-        (f"{AM}.reset_team_credentials", f"{AM}._team_user", f"{AM}._set_password", *USER),
+        "find_user",
+        lambda: authentik().find_user("team01"),
+        (USERS,),
+        lambda r: outcome(r, lambda u: u is None or (isinstance(u, dict) and is_int(u["pk"])), "a user or None"),
+        (f"{AM}.find_user", *USER),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "set_password",
+        lambda: authentik().set_password({"pk": 7, "username": "team01"}, "Correct-Horse-1!"),
+        (DONE,),
+        lambda r: outcome(r, lambda v: v is None, "None"),
+        (f"{AM}.set_password",),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "sees_any_sessions",
@@ -493,13 +496,6 @@ READERS = [
         (USERS, DONE),
         check_pair,
         (f"{AM}.toggle_user", *USER),
-    ),
-    Reader(
-        "reset_blueteam_password",
-        lambda: authentik().reset_blueteam_password(1, "Correct-Horse-1!"),
-        (USERS, DONE),
-        check_pair,
-        (f"{AM}.reset_blueteam_password", *USER),
     ),
     Reader(
         "list_all_users",

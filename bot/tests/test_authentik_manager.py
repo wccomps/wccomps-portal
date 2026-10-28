@@ -375,7 +375,9 @@ class TestAuthentikManager:
         return response
 
     def _sessions(self, *owners: int) -> Mock:
-        return self._answer({"results": [{"uuid": f"s-{i}", "user": pk} for i, pk in enumerate(owners)]})
+        return self._answer(
+            {"results": [{"uuid": f"00000000-0000-4000-8000-{i:012d}", "user": pk} for i, pk in enumerate(owners)]}
+        )
 
     TEAM01 = {"pk": 42, "username": "team01"}
 
@@ -429,7 +431,7 @@ class TestAuthentikManager:
         manager.client.get.return_value = self._sessions(42, 42)
         manager.client.delete.side_effect = [self._answer({}, 204), self._answer({"detail": "denied"}, 403)]
 
-        assert manager.end_user_sessions(self.TEAM01) == "Authentik refused to end 1 of 2 sessions (HTTP 403)"
+        assert manager.end_user_sessions(self.TEAM01) == "Authentik refused to end sessions (HTTP 403)"
 
     def test_end_user_sessions_refused_list_is_reported_not_unexpected(self, manager: AuthentikManager) -> None:
         manager.client.get.return_value = self._answer({"detail": "denied"}, 403)
@@ -445,13 +447,13 @@ class TestAuthentikManager:
         )
         refused_list = manager.end_user_sessions(self.TEAM01)
         manager.client.get.return_value = self._sessions(42)
-        manager.client.delete.side_effect = [self._answer({"detail": "denied"}, 403, url="https://a/s-0/")]
+        manager.client.delete.side_effect = [self._answer({"detail": "denied"}, 403, url="https://a/s/0000/")]
         refused_delete = manager.end_user_sessions(self.TEAM01)
         manager.client.get.side_effect = httpx.ConnectError("https://a/?user__username=team01")
         network = manager.end_user_sessions(self.TEAM01)
 
         for reason in (refused_list, refused_delete, network):
-            assert reason is not None and "team01" not in reason and "s-0" not in reason
+            assert reason is not None and "team01" not in reason and "0000" not in reason
 
     def test_end_user_sessions_network_error(self, manager: AuthentikManager) -> None:
         manager.client.get.side_effect = httpx.ConnectError("Network error")
@@ -465,31 +467,11 @@ class TestAuthentikManager:
         assert manager.sees_any_sessions() is False
         assert manager.client.get.call_args.kwargs["params"] == {"page_size": "1"}
 
-    def test_reset_team_credentials_finds_the_account_once(self, manager: AuthentikManager) -> None:
-        manager.client.get.side_effect = [self._answer({"results": [self.TEAM01]}), self._sessions(42)]
-        manager.client.post.return_value = self._answer({}, 204)
-        manager.client.delete.return_value = self._answer({}, 204)
+    def test_end_user_sessions_refuses_a_session_id_that_isnt_a_uuid(self, manager: AuthentikManager) -> None:
+        """A session id goes into the DELETE path, so one like ../users/5 must never be sent."""
+        manager.client.get.return_value = self._answer({"results": [{"uuid": "../users/5", "user": 42}]})
 
-        assert manager.reset_team_credentials(1, "New-Pass-1!") == (None, None)
+        error = manager.end_user_sessions(self.TEAM01)
 
-        user_lookups = [c for c in manager.client.get.call_args_list if c.args[0].endswith("/core/users/")]
-        assert len(user_lookups) == 1
-        manager.client.post.assert_called_once()
-
-    def test_reset_team_credentials_refuses_a_non_team_account(self, manager: AuthentikManager) -> None:
-        """Authentik answering another user for team01 must change neither its password nor its sessions."""
-        manager.client.get.return_value = self._answer({"results": [{"pk": 1, "username": "akadmin"}]})
-
-        reset_error, sessions_error = manager.reset_team_credentials(1, "New-Pass-1!")
-
-        assert reset_error is not None and "not a team account" in reset_error
-        assert sessions_error is None
-        manager.client.post.assert_not_called()
-        manager.client.delete.assert_not_called()
-
-    def test_reset_team_credentials_failed_password_tries_no_sessions(self, manager: AuthentikManager) -> None:
-        manager.client.get.return_value = self._answer({"results": [self.TEAM01]})
-        manager.client.post.return_value = self._answer({"detail": "no"}, 500)
-
-        assert manager.reset_team_credentials(1, "New-Pass-1!") == ("see the server logs", None)
+        assert error is not None and "valid id" in error
         manager.client.delete.assert_not_called()

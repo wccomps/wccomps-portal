@@ -8,14 +8,14 @@ from core.authentik_manager import SESSIONS_HIDDEN
 
 def test_passes_when_the_token_sees_sessions():
     with patch("core.admin_views.readiness.AuthentikManager") as manager:
-        manager.return_value.sees_any_sessions.return_value = True
+        manager.return_value.__enter__.return_value.sees_any_sessions.return_value = True
         severity, _, _ = _check_session_access()
     assert severity == "pass"
 
 
 def test_fails_when_the_token_sees_no_sessions():
     with patch("core.admin_views.readiness.AuthentikManager") as manager:
-        manager.return_value.sees_any_sessions.return_value = False
+        manager.return_value.__enter__.return_value.sees_any_sessions.return_value = False
         severity, detail, _ = _check_session_access()
     assert severity == "fail"
     assert detail.startswith(SESSIONS_HIDDEN)

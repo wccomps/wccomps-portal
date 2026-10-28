@@ -8,8 +8,14 @@ from django.test import Client
 from django.urls import reverse
 from registration.models import School
 
-from core.authentik_manager import AuthentikManager
-from core.authentik_utils import CredentialReset, reset_team_credentials, reset_team_password, sessions_failure_summary
+from core.authentik_manager import AuthentikAPIError, AuthentikManager
+from core.authentik_utils import (
+    CredentialReset,
+    reset_team_credentials,
+    reset_team_password,
+    reset_teams_credentials,
+    sessions_failure_summary,
+)
 from core.models import DiscordTask
 from team.models import DiscordLink, SchoolInfo, Team
 
@@ -24,21 +30,30 @@ def school_info() -> SchoolInfo:
     )
 
 
-def test_reset_records_the_new_password_on_the_school_info(school_info):
-    with patch("core.authentik_manager.AuthentikManager") as manager:
-        manager.return_value.reset_blueteam_password.return_value = (True, "")
-        password, error = reset_team_password(7)
+@pytest.fixture
+def manager():
+    """The AuthentikManager the reset helpers open, finding team07's account."""
+    with patch("core.authentik_utils.AuthentikManager") as cls:
+        opened = cls.return_value.__enter__.return_value
+        opened.find_user.return_value = {"pk": 5, "username": "team07"}
+        opened.end_user_sessions.return_value = None
+        yield opened
+
+
+def test_reset_records_the_new_password_on_the_school_info(school_info, manager):
+    password, error = reset_team_password(7)
 
     assert password and error == ""
-    manager.return_value.reset_blueteam_password.assert_called_once_with(7, password)
+    manager.set_password.assert_called_once_with({"pk": 5, "username": "team07"}, password)
+    manager.end_user_sessions.assert_not_called()
     school_info.refresh_from_db()
     assert school_info.password == password
 
 
-def test_failed_reset_records_nothing(school_info):
-    with patch("core.authentik_manager.AuthentikManager") as manager:
-        manager.return_value.reset_blueteam_password.return_value = (False, "HTTP 500")
-        assert reset_team_password(7) == (None, "HTTP 500")
+def test_failed_reset_records_nothing(school_info, manager):
+    manager.set_password.side_effect = AuthentikAPIError("Set the password of team07: Server error", 500)
+
+    assert reset_team_password(7) == (None, "see the server logs")
 
     school_info.refresh_from_db()
     assert school_info.password == "old"
@@ -46,17 +61,19 @@ def test_failed_reset_records_nothing(school_info):
 
 def test_authentik_reset_leaves_the_account_disabled():
     """Outside the competition team accounts stay disabled; a reset must not open them up."""
-    manager = AuthentikManager.__new__(AuthentikManager)
-    manager.base_url = "https://auth.example"
-    manager.client = MagicMock()
-    manager.client.get.return_value.is_error = False
-    manager.client.get.return_value.json.return_value = {"results": [{"pk": 5, "username": "team07"}]}
-    manager.client.post.return_value.is_error = False
+    real = AuthentikManager.__new__(AuthentikManager)
+    real.base_url = "https://auth.example"
+    real.client = MagicMock()
+    real.client.get.return_value.is_error = False
+    real.client.get.return_value.json.return_value = {"results": [{"pk": 5, "username": "team07"}]}
+    real.client.post.return_value.is_error = False
 
-    ok, _ = manager.reset_blueteam_password(7, "new-pass")
+    with patch("core.authentik_utils.AuthentikManager") as cls:
+        cls.return_value.__enter__.return_value = real
+        password, _ = reset_team_password(7)
 
-    assert ok
-    manager.client.patch.assert_not_called()
+    assert password
+    real.client.patch.assert_not_called()
 
 
 @pytest.mark.parametrize("action", ["unlink_user", "reset"])
@@ -75,25 +92,56 @@ def test_web_unlink_queues_a_role_sync_for_the_member(admin_user, action):
     assert not DiscordLink.objects.filter(discord_id=4242, is_active=True).exists()
 
 
-def test_reset_team_credentials_records_the_password_and_the_sessions_outcome(school_info):
-    with patch("core.authentik_manager.AuthentikManager") as manager:
-        manager.return_value.reset_team_credentials.return_value = (None, "HTTP 403")
-        reset = reset_team_credentials(7)
+def test_reset_team_credentials_records_the_password_and_the_sessions_outcome(school_info, manager):
+    manager.end_user_sessions.return_value = "Authentik refused to end sessions (HTTP 403)"
 
-    assert reset.password and reset.sessions_error == "HTTP 403" and not reset.sessions_ended
-    manager.return_value.reset_team_credentials.assert_called_once_with(7, reset.password)
-    manager.return_value.close.assert_called_once()
+    reset = reset_team_credentials(7)
+
+    assert reset.password and reset.sessions_error == "Authentik refused to end sessions (HTTP 403)"
+    manager.find_user.assert_called_once_with("team07")
+    manager.end_user_sessions.assert_called_once_with({"pk": 5, "username": "team07"})
     school_info.refresh_from_db()
     assert school_info.password == reset.password
 
 
-def test_reset_team_credentials_failure_records_nothing(school_info):
-    with patch("core.authentik_manager.AuthentikManager") as manager:
-        manager.return_value.reset_team_credentials.return_value = ("User team07 not found", None)
-        assert reset_team_credentials(7) == CredentialReset(password=None, error="User team07 not found")
+def test_reset_team_credentials_failure_records_nothing(school_info, manager):
+    manager.find_user.return_value = None
+
+    assert reset_team_credentials(7) == CredentialReset(password=None, error="User team07 not found")
 
     school_info.refresh_from_db()
     assert school_info.password == "old"
+
+
+def test_reset_team_credentials_refuses_a_non_team_account(manager):
+    """Authentik answering another user for team07 must change neither its password nor its sessions."""
+    manager.find_user.return_value = {"pk": 1, "username": "akadmin"}
+
+    reset = reset_team_credentials(7)
+
+    assert reset.password is None and "not a team account" in reset.error
+    manager.set_password.assert_not_called()
+    manager.end_user_sessions.assert_not_called()
+
+
+def test_reset_team_credentials_failed_password_tries_no_sessions(manager):
+    manager.set_password.side_effect = AuthentikAPIError("Set the password of team07: Server error", 500)
+
+    assert reset_team_credentials(7) == CredentialReset(password=None, error="see the server logs")
+    manager.end_user_sessions.assert_not_called()
+
+
+def test_bulk_reset_uses_one_manager(manager):
+    for number in (1, 2, 3):
+        Team.objects.create(team_number=number, team_name=f"Team {number}")
+    manager.find_user.side_effect = lambda username: {"pk": 9, "username": username}
+
+    with patch("core.authentik_utils.AuthentikManager") as cls:
+        cls.return_value.__enter__.return_value = manager
+        result = reset_teams_credentials([1, 2, 3])
+
+    assert cls.call_count == 1
+    assert [username for _num, username, _pw in result.password_list] == ["team01", "team02", "team03"]
 
 
 def test_credential_reset_audit_details():
@@ -120,13 +168,18 @@ def test_web_bulk_reset_defaults_to_the_active_teams(admin_user):
     client = Client()
     client.force_login(admin_user)
 
-    with patch(
-        "core.authentik_utils.reset_team_credentials",
-        side_effect=lambda n: CredentialReset(password=f"pw-{n}", sessions_error="HTTP 403" if n == 2 else None),
-    ) as reset:
+    with (
+        patch("core.authentik_utils.AuthentikManager"),
+        patch(
+            "core.authentik_utils._reset_credentials",
+            side_effect=lambda _m, n: CredentialReset(
+                password=f"pw-{n}", sessions_error="HTTP 403" if n == 2 else None
+            ),
+        ) as reset,
+    ):
         response = client.post(reverse("admin_competition_action"), {"action": "reset_passwords", "team_numbers": ""})
 
-    assert [c.args[0] for c in reset.call_args_list] == [1, 2]
+    assert [c.args[1] for c in reset.call_args_list] == [1, 2]
     body = response.json()
     assert body["csv"].splitlines()[1:] == ["team01,pw-1", "team02,pw-2"]
     assert body["message"] == "Reset 2/2 passwords; could not end sessions for team02: HTTP 403"
@@ -151,7 +204,7 @@ def test_team_page_password_reset_keeps_discord_links(admin_user):
     body = response.json()
     assert body == {
         "success": True,
-        "message": "New password set in Authentik; ended its sessions",
+        "message": "New password set in Authentik; ended the team's Authentik sessions",
         "password": "New-Pass-9!",
     }
     assert DiscordLink.objects.filter(discord_id=4343, is_active=True).exists()

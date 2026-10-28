@@ -88,9 +88,10 @@ class TestAdminCommands:
 
         callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
         with (
+            patch("core.authentik_utils.AuthentikManager"),
             patch(
-                "core.authentik_utils.reset_team_credentials",
-                side_effect=lambda n: CredentialReset(
+                "core.authentik_utils._reset_credentials",
+                side_effect=lambda _m, n: CredentialReset(
                     password=f"pw-{n}", sessions_error="HTTP 403" if n == 2 else None
                 ),
             ) as reset,
@@ -99,12 +100,12 @@ class TestAdminCommands:
             cog = AdminCompetitionCog(mock_bot)
             await cog.admin_reset_blueteam_passwords.callback(cog, mock_interaction, team_numbers="1-3")
 
-        assert [c.args[0] for c in reset.call_args_list] == [1, 2, 3]
+        assert [c.args[1] for c in reset.call_args_list] == [1, 2, 3]
         mock_interaction.response.defer.assert_called_once_with(ephemeral=True)
-        call_args = mock_interaction.followup.send.call_args
-        csv_text = call_args.kwargs["file"].fp.getvalue().decode()
+        first, *rest = mock_interaction.followup.send.call_args_list
+        csv_text = first.kwargs["file"].fp.getvalue().decode()
         assert csv_text.splitlines()[1:] == ["team01,pw-1", "team02,pw-2", "team03,pw-3"]
-        assert "Sessions: could not end sessions for team02: HTTP 403" in call_args.args[0]
+        assert any("Sessions: could not end sessions for team02: HTTP 403" in c.args[0] for c in rest)
 
     async def test_reset_blueteam_passwords_api_failure(
         self,
@@ -122,17 +123,45 @@ class TestAdminCommands:
         }
         callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
         with (
-            patch("core.authentik_utils.reset_team_credentials", side_effect=lambda n: results[n]),
+            patch("core.authentik_utils.AuthentikManager"),
+            patch("core.authentik_utils._reset_credentials", side_effect=lambda _m, n: results[n]),
             patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
         ):
             cog = AdminCompetitionCog(mock_bot)
             await cog.admin_reset_blueteam_passwords.callback(cog, mock_interaction, team_numbers="1-3")
 
-        call_args = mock_interaction.followup.send.call_args
-        assert "Success: 2/3" in call_args.args[0]
-        assert "team02: HTTP 500" in call_args.args[0]
-        csv_text = call_args.kwargs["file"].fp.getvalue().decode()
+        first, *rest = mock_interaction.followup.send.call_args_list
+        assert "Success: 2/3" in first.args[0]
+        assert any("team02: HTTP 500" in c.args[0] for c in rest)
+        csv_text = first.kwargs["file"].fp.getvalue().decode()
         assert "team02" not in csv_text, "a failed reset keeps its old password, so it must not be listed"
+
+    async def test_reset_blueteam_passwords_long_details_never_lose_the_csv(
+        self,
+        mock_interaction: Any,
+        mock_admin_user: Any,
+        mock_bot: Any,
+    ) -> None:
+        """Details past Discord's 2000 characters must not take the CSV of new passwords down with them."""
+        mock_interaction.user.id = mock_admin_user._discord_id
+        callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
+        with (
+            patch("core.authentik_utils.AuthentikManager"),
+            patch(
+                "core.authentik_utils._reset_credentials",
+                side_effect=lambda _m, n: CredentialReset(
+                    password=None if n % 2 else f"pw-{n}", error=f"failure {n} " + "x" * 80
+                ),
+            ),
+            patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
+        ):
+            cog = AdminCompetitionCog(mock_bot)
+            await cog.admin_reset_blueteam_passwords.callback(cog, mock_interaction, team_numbers="1-50")
+
+        sends = mock_interaction.followup.send.call_args_list
+        assert "file" in sends[0].kwargs
+        assert all(len(c.args[0]) <= 2000 for c in sends)
+        assert sum(c.args[0].count("failure ") for c in sends) == 25
 
     async def test_admin_remove_team(
         self,

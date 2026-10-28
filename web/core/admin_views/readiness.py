@@ -121,11 +121,13 @@ def _check_team_group_membership() -> CheckResult:
 
 def _check_session_access() -> CheckResult:
     """The portal's token must see sessions, or resetting a team's credentials leaves the team signed in."""
-    if AuthentikManager().sees_any_sessions():
+    with AuthentikManager() as manager:
+        visible = manager.sees_any_sessions()
+    if visible:
         return ("pass", "The portal's token can see Authentik sessions", None)
     return (
         "fail",
-        f"{SESSIONS_HIDDEN} If nobody is, sign in to Authentik and run the checks again. The token also needs the "
+        f"{SESSIONS_HIDDEN} Sign in to Authentik if you aren't, then run the checks again. The token also needs the "
         "delete permission, which this check can't test.",
         None,
     )
