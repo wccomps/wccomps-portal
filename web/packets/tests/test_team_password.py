@@ -36,8 +36,6 @@ def test_two_concurrent_sends_reset_the_password_once():
         manager = cls.return_value.__enter__.return_value
         manager.find_user.return_value = {"pk": 5, "username": "team01"}
         manager.set_password.side_effect = reset
-        manager.user_sessions.return_value = []
-        manager.end_sessions.return_value = None
         threads = [threading.Thread(target=send) for _ in range(2)]
         for thread in threads:
             thread.start()

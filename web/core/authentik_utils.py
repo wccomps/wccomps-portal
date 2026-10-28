@@ -85,8 +85,39 @@ def _end_sessions(manager: AuthentikManager, user: AuthentikUser, hidden: bool |
         return found, reason_for(e)
 
 
+def _new_password(manager: AuthentikManager, user: AuthentikUser, team_number: int) -> tuple[str | None, str]:
+    """(password, "") or (None, why not). Leaves is_active alone: team accounts are enabled only while the competition
+    runs."""
+    password = generate_blueteam_password()
+    try:
+        manager.set_password(user, password)
+    except (AuthentikAPIError, httpx.HTTPError) as e:
+        logger.warning(f"Failed to set the password of team {team_number}: {e}")
+        return None, reason_for(e)
+    # The copy packet emails send; a team with no school info has none
+    SchoolInfo.objects.filter(team__team_number=team_number).update(password=password)
+    return password, ""
+
+
+def set_team_password(team_number: int, actor: str) -> tuple[str | None, str]:
+    """A new random password for the team account, leaving its sessions alone; audited."""
+    with AuthentikManager() as manager:
+        try:
+            user = _team_user(manager, team_number)
+        except (AuthentikAPIError, httpx.HTTPError) as e:
+            user = reason_for(e)
+        password, error = (None, user) if isinstance(user, str) else _new_password(manager, user, team_number)
+    AuditLog.objects.create(
+        action="team_password_set",
+        admin_user=actor,
+        target_entity="team",
+        target_id=team_number,
+        details={"password_set": password is not None, "error": error or None},
+    )
+    return password, error
+
+
 def _reset_credentials(manager: AuthentikManager, team_number: int) -> CredentialReset:
-    """Leaves is_active alone: team accounts are enabled only while the competition runs."""
     try:
         user = _team_user(manager, team_number)
     except (AuthentikAPIError, httpx.HTTPError) as e:
@@ -95,14 +126,9 @@ def _reset_credentials(manager: AuthentikManager, team_number: int) -> Credentia
         return CredentialReset(password=None, error=user)
     # Before the password changes: Authentik may end sessions itself when it does, leaving nothing to count
     found, hidden = _count_sessions(manager, user)
-    password = generate_blueteam_password()
-    try:
-        manager.set_password(user, password)
-    except (AuthentikAPIError, httpx.HTTPError) as e:
-        logger.warning(f"Failed to reset the password of team {team_number}: {e}")
-        return CredentialReset(password=None, error=reason_for(e), sessions_found=found)
-    # The copy packet emails send; a team with no school info has none
-    SchoolInfo.objects.filter(team__team_number=team_number).update(password=password)
+    password, error = _new_password(manager, user, team_number)
+    if password is None:
+        return CredentialReset(password=None, error=error, sessions_found=found)
     listed_after, sessions_error = _end_sessions(manager, user, hidden)
     return CredentialReset(
         password=password, sessions_error=sessions_error, sessions_found=found, sessions_listed_after=listed_after

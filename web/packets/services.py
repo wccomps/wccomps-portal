@@ -12,9 +12,7 @@ from registration.locks import school_list_lock
 from registration.models import Event
 from registration.stage import ACTIONS, Action
 
-from core.authentik_utils import reset_team_credentials
-from core.discord_tasks import LogToChannel
-from core.models import DiscordTask
+from core.authentik_utils import set_team_password
 from core.utils import ndjson_done
 from core.utils import ndjson_progress as _progress
 from team.models import SchoolInfo, Team, team_username
@@ -162,19 +160,12 @@ class PacketDistributionService:
                 raise ValueError(f"Team {team.team_number} has no school info; import the school list first")
             if school_info.password:
                 return school_info.password
-            reset = reset_team_credentials(team.team_number, actor="packet distribution")
-            if reset.password is not None:
+            password, error = set_team_password(team.team_number, actor="packet distribution")
+            if password is not None:
                 logger.info(f"Generated credentials for team {team.team_number}")
-                if seen := max(reset.sessions_found or 0, reset.sessions_listed_after):
-                    alert = (
-                        f"Team {team.team_number}'s account had {seen} Authentik sessions before its packet went "
-                        "out; its credentials may have leaked."
-                    )
-                    logger.warning(alert)
-                    DiscordTask.enqueue(LogToChannel(message=alert))
-                return reset.password
-        # Outside the transaction, so the failed reset's audit row and ops note commit
-        raise ValueError(f"Failed to set Authentik password for team {team.team_number}: {reset.error}")
+                return password
+        # Outside the transaction, so the failed attempt's audit row commits
+        raise ValueError(f"Failed to set Authentik password for team {team.team_number}: {error}")
 
     def _build_packet_email(
         self,

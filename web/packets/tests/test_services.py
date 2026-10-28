@@ -1,12 +1,10 @@
 """Tests for packet services."""
 
-import uuid
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 from registration.models import School
 
-from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError
 from core.models import AuditLog, DiscordTask
 from team.models import SchoolInfo, Team
 
@@ -145,10 +143,6 @@ class PacketDistributionServiceTestCase(TestCase):
         distribution.refresh_from_db()
         self.assertEqual(distribution.email_status, "sent")
 
-    @staticmethod
-    def _ops_messages() -> list[str]:
-        return [task.payload["message"] for task in DiscordTask.objects.filter(task_type="log_to_channel")]
-
     @patch("packets.services.EmailMultiAlternatives")
     def test_first_send_sets_the_password_and_later_sends_reuse_it(self, mock_email_class):
         """The packet carries the team's credentials: a resend or test email must not change them."""
@@ -159,65 +153,22 @@ class PacketDistributionServiceTestCase(TestCase):
         with patch("core.authentik_utils.AuthentikManager") as cls:
             manager = cls.return_value.__enter__.return_value
             manager.find_user.return_value = {"pk": 5, "username": "team01"}
-            manager.user_sessions.return_value = []
-            manager.end_sessions.return_value = None
             self.service.send_packet_email(distribution)
             self.service.send_test_packet_email(self.packet, team, "gold@example.com")
 
         manager.set_password.assert_called_once()
-        manager.end_sessions.assert_called_once()
-        self.assertEqual(
-            self._ops_messages(),
-            ["Credentials reset for team 1 by packet distribution: ended the team's Authentik sessions"],
-        )
         password = manager.set_password.call_args.args[1]
         self.assertEqual(SchoolInfo.objects.get(team=team).password, password)
         for call in mock_email_class.call_args_list:
             self.assertIn(password, call.kwargs["body"])
-
-    @patch("packets.services.EmailMultiAlternatives")
-    def test_account_signed_in_before_its_packet_alerts_ops(self, mock_email_class):
-        team = Team.objects.get(team_number=1)
-        SchoolInfo.objects.filter(team=team).update(password="")
-        distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
-
-        with patch("core.authentik_utils.AuthentikManager") as cls:
-            manager = cls.return_value.__enter__.return_value
-            manager.find_user.return_value = {"pk": 5, "username": "team01"}
-            manager.user_sessions.side_effect = [[uuid.UUID(int=1), uuid.UUID(int=2)], []]
-            manager.end_sessions.return_value = None
-            self.service.send_packet_email(distribution)
-
-        alert = self._ops_messages()[-1]
-        self.assertIn("Team 1", alert)
-        self.assertIn("2 Authentik sessions", alert)
-        mock_email_class.return_value.send.assert_called_once()
-
-    @patch("packets.services.EmailMultiAlternatives")
-    def test_a_session_listed_only_after_the_count_alerts_ops(self, mock_email_class):
-        team = Team.objects.get(team_number=1)
-        SchoolInfo.objects.filter(team=team).update(password="")
-        distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
-
-        with patch("core.authentik_utils.AuthentikManager") as cls:
-            manager = cls.return_value.__enter__.return_value
-            manager.find_user.return_value = {"pk": 5, "username": "team01"}
-            manager.user_sessions.side_effect = [[], [uuid.UUID(int=1)]]
-            manager.end_sessions.return_value = "Authentik did not end sessions (HTTP 403)"
-            self.service.send_packet_email(distribution)
-
+        row = AuditLog.objects.get(action="team_password_set")
         self.assertEqual(
-            self._ops_messages(),
-            [
-                "Credentials reset for team 1 by packet distribution: could not end the team's Authentik sessions: "
-                "Authentik did not end sessions (HTTP 403)",
-                "Team 1's account had 1 Authentik sessions before its packet went out; its credentials may have "
-                "leaked.",
-            ],
+            (row.admin_user, row.target_id, row.details),
+            ("packet distribution", 1, {"password_set": True, "error": None}),
         )
 
     @patch("packets.services.EmailMultiAlternatives")
-    def test_sessions_listed_after_after_a_failed_count_alert_ops(self, mock_email_class):
+    def test_a_packet_send_leaves_sessions_and_the_ops_channel_alone(self, mock_email_class):
         team = Team.objects.get(team_number=1)
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
@@ -225,33 +176,11 @@ class PacketDistributionServiceTestCase(TestCase):
         with patch("core.authentik_utils.AuthentikManager") as cls:
             manager = cls.return_value.__enter__.return_value
             manager.find_user.return_value = {"pk": 5, "username": "team01"}
-            manager.user_sessions.side_effect = [
-                AuthentikAPIError("List sessions: Server error", 500),
-                [uuid.UUID(int=1)],
-            ]
-            manager.end_sessions.return_value = None
             self.service.send_packet_email(distribution)
 
-        self.assertIn(
-            "Team 1's account had 1 Authentik sessions before its packet went out; its credentials may have leaked.",
-            self._ops_messages(),
-        )
-
-    @patch("packets.services.EmailMultiAlternatives")
-    def test_hidden_sessions_are_reported_through_the_reset_note_alone(self, mock_email_class):
-        team = Team.objects.get(team_number=1)
-        SchoolInfo.objects.filter(team=team).update(password="")
-        distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
-
-        with patch("core.authentik_utils.AuthentikManager") as cls:
-            manager = cls.return_value.__enter__.return_value
-            manager.find_user.return_value = {"pk": 5, "username": "team01"}
-            manager.user_sessions.return_value = []
-            manager.sees_any_sessions.return_value = False
-            self.service.send_packet_email(distribution)
-
-        (note,) = self._ops_messages()
-        self.assertIn(SESSIONS_HIDDEN, note)
+        manager.user_sessions.assert_not_called()
+        manager.end_sessions.assert_not_called()
+        self.assertFalse(DiscordTask.objects.filter(task_type="log_to_channel").exists())
 
     @patch("packets.services.EmailMultiAlternatives")
     def test_failed_password_set_sends_nothing(self, mock_email_class):
@@ -267,10 +196,8 @@ class PacketDistributionServiceTestCase(TestCase):
             self.service.send_packet_email(distribution)
 
         mock_email_class.return_value.send.assert_not_called()
-        self.assertTrue(AuditLog.objects.filter(action="team_password_reset", target_id=1).exists())
-        self.assertEqual(
-            self._ops_messages(), ["Credentials reset for team 1 by packet distribution failed: User team01 not found"]
-        )
+        row = AuditLog.objects.get(action="team_password_set", target_id=1)
+        self.assertEqual(row.details, {"password_set": False, "error": "User team01 not found"})
         self.assertEqual(SchoolInfo.objects.get(team=team).password, "")
 
     @patch("packets.services.EmailMultiAlternatives")

@@ -159,7 +159,7 @@ def test_sessions_listed_before_a_failed_end_are_recorded(manager):
     assert (reset.sessions_listed_after, reset.sessions_error) == (1, "Network error (ConnectError)")
 
 
-def test_sessions_listed_after_after_a_failed_count_do_not_pass_for_a_count(manager):
+def test_sessions_listed_after_a_failed_count_do_not_pass_for_a_count(manager):
     manager.user_sessions.side_effect = [AuthentikAPIError("List sessions: Server error", 500), [uuid.UUID(int=1)]]
 
     reset = reset_team_credentials(7, actor="gold-admin")
