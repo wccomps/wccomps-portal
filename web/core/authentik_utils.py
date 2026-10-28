@@ -5,8 +5,6 @@ import secrets
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-import httpx
-
 from team.models import MAX_TEAMS, SchoolInfo, team_username
 
 from .authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, AuthentikUser, reason_for
@@ -18,8 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser | str:
-    """The team's Authentik account, or why not. Raises AuthentikAPIError or httpx.HTTPError when Authentik can't be
-    asked."""
+    """The team's Authentik account, or why not. Raises AuthentikAPIError when Authentik can't be asked."""
     if team_number < 1 or team_number > MAX_TEAMS:
         return f"Team number must be between 1 and {MAX_TEAMS}"
     username = team_username(team_number)
@@ -32,7 +29,7 @@ def set_team_account_active(manager: AuthentikManager, team_number: int, is_acti
         if isinstance(user, str):
             return False, user
         manager.set_user_active(user, is_active)
-    except (AuthentikAPIError, httpx.HTTPError) as e:
+    except AuthentikAPIError as e:
         logger.warning(f"Failed to set team {team_number} active={is_active}: {e}")
         return False, reason_for(e)
     return True, ""
@@ -64,7 +61,7 @@ def _count_sessions(manager: AuthentikManager, user: AuthentikUser) -> tuple[int
         session_ids = manager.user_sessions(user)
         if not session_ids and not manager.sees_any_sessions():
             return None, True
-    except (AuthentikAPIError, httpx.HTTPError) as e:
+    except AuthentikAPIError as e:
         logger.warning(f"Counting the sessions of {user['username']} failed: {e}")
         return None, None
     return len(session_ids), False
@@ -80,7 +77,7 @@ def _end_sessions(manager: AuthentikManager, user: AuthentikUser, hidden: bool |
         if not session_ids and (not manager.sees_any_sessions() if hidden is None else hidden):
             return 0, SESSIONS_HIDDEN
         return found, manager.end_sessions(session_ids)
-    except (AuthentikAPIError, httpx.HTTPError) as e:
+    except AuthentikAPIError as e:
         logger.warning(f"Ending the sessions of {user['username']} failed: {e}")
         return found, reason_for(e)
 
@@ -91,7 +88,7 @@ def _new_password(manager: AuthentikManager, user: AuthentikUser, team_number: i
     password = generate_blueteam_password()
     try:
         manager.set_password(user, password)
-    except (AuthentikAPIError, httpx.HTTPError) as e:
+    except AuthentikAPIError as e:
         logger.warning(f"Failed to set the password of team {team_number}: {e}")
         return None, reason_for(e)
     # The copy packet emails send; a team with no school info has none
@@ -104,7 +101,7 @@ def set_team_password(team_number: int, actor: str) -> tuple[str | None, str]:
     with AuthentikManager() as manager:
         try:
             user = _team_user(manager, team_number)
-        except (AuthentikAPIError, httpx.HTTPError) as e:
+        except AuthentikAPIError as e:
             user = reason_for(e)
         password, error = (None, user) if isinstance(user, str) else _new_password(manager, user, team_number)
     AuditLog.objects.create(
@@ -120,7 +117,7 @@ def set_team_password(team_number: int, actor: str) -> tuple[str | None, str]:
 def _reset_credentials(manager: AuthentikManager, team_number: int) -> CredentialReset:
     try:
         user = _team_user(manager, team_number)
-    except (AuthentikAPIError, httpx.HTTPError) as e:
+    except AuthentikAPIError as e:
         return CredentialReset(password=None, error=reason_for(e))
     if isinstance(user, str):
         return CredentialReset(password=None, error=user)

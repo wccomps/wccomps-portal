@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from functools import partial
 from typing import cast
 
-import httpx
 from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest
 from django.db import transaction
@@ -126,11 +125,11 @@ def _edit_controlled_app(
     if not form.is_valid():
         raise BadRequest("Please provide an app slug")
     slug = form.cleaned_data["app_slug"]
-    # Check with the lookup Start and Stop use; Authentik's app list omits apps the service account can't open
+    # Start and Stop's lookup: the picker's provider list misses apps without a provider
     if add:
         try:
             app = AuthentikManager().get_application_by_slug(slug)
-        except (AuthentikAPIError, httpx.HTTPError) as e:
+        except AuthentikAPIError as e:
             return JsonResponse(
                 {"success": False, "message": f"Could not ask Authentik about '{slug}': {reason_for(e)}"}
             )
@@ -486,11 +485,12 @@ def admin_competition_apps(request: HttpRequest) -> JsonResponse:
 
     Lists every app with a provider (see AuthentikManager.list_applications). A slug with no provider
     (e.g. a launcher-only app) won't appear but can still be typed; add validates it by direct lookup.
+    Authentik's failure comes back as 200: the request was fine, and the page says why the list is empty.
     """
     try:
         return JsonResponse({"apps": AuthentikManager().list_applications()})
-    except (AuthentikAPIError, httpx.HTTPError) as e:
-        return JsonResponse({"apps": [], "error": reason_for(e)})
+    except AuthentikAPIError as e:
+        return JsonResponse({"error": reason_for(e)})
 
 
 @json_endpoint

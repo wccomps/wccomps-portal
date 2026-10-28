@@ -419,7 +419,7 @@ READERS = [
         lambda: authentik().get_blueteam_binding("app-1"),
         (BINDINGS,),
         lambda r: outcome(r, lambda b: b is None or (isinstance(b, dict) and is_str(b.get("pk"))), "None or a binding"),
-        (f"{AM}.get_blueteam_binding", *READ),
+        (f"{AM}.get_blueteam_binding", f"{AM}._list_all", *READ),
         raises=(AuthentikAPIError,),
     ),
     Reader(
@@ -533,8 +533,9 @@ READERS = [
         "add_user_to_group",
         lambda: authentik().add_user_to_group(7, "g1"),
         (DONE,),
-        check_pair,
+        lambda r: outcome(r, lambda v: v is None, "None"),
         (f"{AM}.add_user_to_group",),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "get_infrastructure",

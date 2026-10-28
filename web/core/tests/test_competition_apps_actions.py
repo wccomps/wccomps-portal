@@ -2,7 +2,6 @@
 
 from unittest.mock import patch
 
-import httpx
 import pytest
 from django.test import Client
 from django.urls import reverse
@@ -183,7 +182,7 @@ def test_remove_app_does_not_need_authentik(admin_client, config, authentik_apps
 
 def test_add_app_says_when_authentik_cant_be_asked(admin_client, config, authentik_apps):
     """Authentik being down must not read as the app missing."""
-    authentik_apps.side_effect = httpx.ConnectError("refused")
+    authentik_apps.side_effect = AuthentikAPIError("Network error (ConnectError)")
 
     body = _post(admin_client, "add_app", app_slug="containerssh").json()
 
@@ -202,4 +201,4 @@ def test_the_app_list_says_when_authentik_cant_be_asked(admin_client):
     ):
         body = admin_client.get(reverse("admin_competition_apps")).json()
 
-    assert body == {"apps": [], "error": "List providers: Forbidden"}
+    assert body == {"error": "List providers: Forbidden"}

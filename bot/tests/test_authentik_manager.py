@@ -1,5 +1,6 @@
 """Tests for Authentik API manager."""
 
+import re
 import uuid
 from unittest.mock import Mock, patch
 
@@ -174,7 +175,7 @@ class TestAuthentikManager:
         """Test network error handling during application retrieval."""
         manager.client.get.side_effect = httpx.ConnectError("Connection refused")
 
-        with pytest.raises(httpx.ConnectError):
+        with pytest.raises(AuthentikAPIError, match=r"Network error \(ConnectError\)"):
             manager.get_application_by_slug("test-app")
 
     def test_get_blueteam_binding_success(self, manager: AuthentikManager) -> None:
@@ -184,6 +185,7 @@ class TestAuthentikManager:
             "results": [
                 {
                     "pk": "binding-123",
+                    "target": "app-123",
                     "group": "group-456",
                     "group_obj": {"name": "WCComps_BlueTeam", "pk": "group-456"},
                     "enabled": True,
@@ -205,6 +207,7 @@ class TestAuthentikManager:
             "results": [
                 {
                     "pk": "binding-123",
+                    "target": "app-123",
                     "group": "group-789",
                     "group_obj": {"name": "WCComps_GoldTeam", "pk": "group-789"},
                 }
@@ -213,6 +216,36 @@ class TestAuthentikManager:
         manager.client.get.return_value = mock_response
 
         assert manager.get_blueteam_binding("app-123") is None
+
+    def test_get_blueteam_binding_ignores_another_apps_binding(self, manager: AuthentikManager) -> None:
+        """Authentik ignores a filter it doesn't know; a binding on another app must never be the one toggled."""
+        manager.client.get.return_value = self._answer(
+            {"results": [{"pk": "b-9", "target": "app-999", "group_obj": {"name": "BlueTeam"}}]}
+        )
+
+        assert manager.get_blueteam_binding("app-123") is None
+
+    def test_get_blueteam_binding_refuses_a_binding_without_a_pk(self, manager: AuthentikManager) -> None:
+        manager.client.get.return_value = self._answer(
+            {"results": [{"pk": None, "target": "app-123", "group_obj": {"name": "BlueTeam"}}]}
+        )
+
+        with pytest.raises(AuthentikAPIError):
+            manager.get_blueteam_binding("app-123")
+
+    def test_get_group_by_name_refuses_the_group_without_a_pk(self, manager: AuthentikManager) -> None:
+        """A malformed group must not read as a missing one."""
+        manager.client.get.return_value = self._answer({"results": [{"name": "WCComps_BlueTeam01", "pk": 5}]})
+
+        with pytest.raises(AuthentikAPIError):
+            manager.get_group_by_name("WCComps_BlueTeam01")
+
+    def test_get_user_with_groups_refuses_a_user_without_groups(self, manager: AuthentikManager) -> None:
+        """No groups_obj must not read as a user in no groups, which the group fix would then re-add."""
+        manager.client.get.return_value = self._answer({"results": [{"pk": 42, "username": "team01"}]})
+
+        with pytest.raises(AuthentikAPIError):
+            manager.get_user_with_groups("team01")
 
     def test_get_blueteam_binding_empty_results(self, manager: AuthentikManager) -> None:
         """Test BlueTeam binding with no results."""
@@ -244,7 +277,7 @@ class TestAuthentikManager:
         binding = {"pk": "binding-123", "enabled": False}
         manager.client.put.side_effect = httpx.ConnectError("Network error")
 
-        with pytest.raises(httpx.ConnectError):
+        with pytest.raises(AuthentikAPIError, match=r"Network error \(ConnectError\)"):
             manager.update_binding_enabled(binding, True)
 
     def test_enable_application_success(self, manager: AuthentikManager) -> None:
@@ -441,3 +474,23 @@ class TestAuthentikManager:
 
         with pytest.raises(AuthentikAPIError):
             manager.set_user_active(self.TEAM01, True)
+
+
+# Methods that touch the client without asking Authentik anything
+NOT_ASKING = {"close": "closes the client's connections"}
+
+
+def test_every_method_that_asks_authentik_turns_a_network_error_into_its_own():
+    """Callers catch AuthentikAPIError alone; a method that asks Authentik without the decorator would let
+    httpx.HTTPError through them."""
+    import inspect
+
+    uses_client = re.compile(r"self\.(client|_list_all)\b")
+    asks = {
+        name
+        for name, method in vars(AuthentikManager).items()
+        if callable(method) and not name.startswith("_") and uses_client.search(inspect.getsource(method))
+    } - NOT_ASKING.keys()
+    undecorated = {name for name in asks if not hasattr(vars(AuthentikManager)[name], "__wrapped__")}
+
+    assert asks and not undecorated

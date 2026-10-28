@@ -5,12 +5,12 @@ import re
 from datetime import UTC, datetime
 from unittest.mock import patch
 
-import httpx
 import pytest
 from django.test import Client
 from django.urls import reverse
 from scoring.models import QuotientMetadataCache
 
+from core.authentik_manager import AuthentikAPIError
 from core.models import CompetitionConfig
 from team.models import Team
 
@@ -215,10 +215,10 @@ def test_readiness_failures_link_the_setup_section_that_fixes_them():
 
 
 def _authentik_down():
-    """An AuthentikManager whose every request fails to connect."""
+    """An AuthentikManager whose lookups fail to connect."""
     manager = patch("core.admin_views.readiness.AuthentikManager").start().return_value
     for lookup in ("get_user_with_groups", "get_group_by_name", "get_application_by_slug", "sees_any_sessions"):
-        getattr(manager, lookup).side_effect = httpx.ConnectError("refused")
+        getattr(manager, lookup).side_effect = AuthentikAPIError("Network error (ConnectError)")
     manager.__enter__.return_value = manager
     return manager
 
@@ -248,4 +248,22 @@ def test_fixing_group_membership_names_each_team_authentik_couldnt_answer_for(rf
     finally:
         patch.stopall()
 
-    assert body["failed"] == ["team01: Network error (ConnectError)"]
+    assert body == {"success": False, "message": "Fixed 0 account(s); failed: team01: Network error (ConnectError)"}
+
+
+def test_a_refused_group_add_never_shows_authentiks_url_or_answer(rf):
+    from core.admin_views import readiness
+
+    Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
+    manager = patch("core.admin_views.readiness.AuthentikManager").start().return_value
+    manager.get_user_with_groups.return_value = {"pk": 5, "username": "team01", "groups_obj": []}
+    manager.get_group_by_name.return_value = {"pk": "g1", "name": "WCComps_BlueTeam01"}
+    manager.add_user_to_group.side_effect = AuthentikAPIError(
+        "Add user 5 to group g1: Forbidden", 403, response_text='{"detail": "secret"}', url="https://auth.internal/x"
+    )
+    try:
+        message = json.loads(readiness._fix_group_membership(rf.post("/")).content)["message"]
+    finally:
+        patch.stopall()
+
+    assert message == "Fixed 0 account(s); failed: team01: Add user 5 to group g1: Forbidden"

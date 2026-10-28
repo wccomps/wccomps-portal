@@ -1,4 +1,4 @@
-"""Tests for AuthentikManager update_user_discord_id method."""
+"""Tests for AuthentikManager: storing the Discord ID, setting a binding, listing applications."""
 
 from unittest.mock import MagicMock, Mock, patch
 
@@ -157,7 +157,7 @@ class TestUpdateBindingEnabled:
             mgr.client = Mock()
             return mgr
 
-    def test_logs_response_body_on_http_error(self, manager, caplog):
+    def test_raises_with_the_response_body_on_http_error(self, manager):
         resp = MagicMock()
         resp.status_code = 400
         resp.url = "https://auth.example.com/api/v3/policies/bindings/abc/"

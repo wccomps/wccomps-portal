@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import cast
 
-import httpx
 from django.core.exceptions import BadRequest
 from django.db import models
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
@@ -359,7 +358,7 @@ def stream_readiness_checks() -> Iterator[str]:
     for i, (name, check_fn) in enumerate(ALL_CHECKS, 1):
         try:
             severity, detail, action = check_fn()
-        except (AuthentikAPIError, httpx.HTTPError) as e:
+        except AuthentikAPIError as e:
             severity, detail, action = "fail", f"Could not ask Authentik: {reason_for(e)}", None
         except Exception as e:
             severity, detail, action = "fail", f"Check error: {e}", None
@@ -399,23 +398,19 @@ def _fix_group_membership(request: HttpRequest) -> JsonResponse:
             if not user or any(g["name"] == expected_group for g in user["groups_obj"]):
                 continue
             group = mgr.get_group_by_name(expected_group)
-        except (AuthentikAPIError, httpx.HTTPError) as e:
+            if not group:
+                failed.append(f"{username}: group {expected_group} not found")
+                continue
+            mgr.add_user_to_group(user["pk"], group["pk"])
+        except AuthentikAPIError as e:
             failed.append(f"{username}: {reason_for(e)}")
             continue
-        if not group:
-            failed.append(f"{username}: group {expected_group} not found")
-            continue
-
-        success, error = mgr.add_user_to_group(user["pk"], group["pk"])
-        if success:
-            fixed += 1
-        else:
-            failed.append(f"{username}: {error}")
+        fixed += 1
 
     msg = f"Fixed {fixed} account(s)"
     if failed:
-        msg += f", {len(failed)} failed"
-    return JsonResponse({"success": True, "message": msg, "failed": failed})
+        msg += "; failed: " + "; ".join(failed)
+    return JsonResponse({"success": not failed, "message": msg})
 
 
 def _fix_sync_quotient(request: HttpRequest) -> JsonResponse:
