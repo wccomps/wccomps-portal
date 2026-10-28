@@ -335,7 +335,7 @@ document.addEventListener('alpine:init', () => {
             const teamDesc = this.teamNumbers ? `teams ${this.teamNumbers}` : 'every active team';
             return `Reset passwords for ${teamDesc}?\n\nThis will generate new passwords and end the teams' Authentik sessions.`;
         },
-        // The passwords have changed by the time the CSV arrives: keep it on screen (no reload)
+        // No reload: it would clear the CSV of passwords that already changed
         async resetPasswords() {
             const result = await this.doAction('reset_passwords', { team_numbers: this.teamNumbers }, { reload: false });
             if (result && result.csv) this.csvContent = result.csv;

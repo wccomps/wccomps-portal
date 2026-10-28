@@ -184,19 +184,6 @@ class AuthentikManager:
         has_next = bool(pagination.get("next")) if isinstance(pagination, dict) else False
         return results, has_next
 
-    def _first_user(self, response: httpx.Response, context: str) -> AuthentikUser | None:
-        """The first user a users query found, or None; AuthentikAPIError if it has no int pk, or a username that
-        isn't text."""
-        users, _ = self._results(response, context)
-        if not users:
-            return None
-        user = users[0]
-        if type(user.get("pk")) is not int or not isinstance(user.get("username", ""), str):
-            raise AuthentikAPIError(
-                f"{context}: the user has no pk, or a username that isn't text", url=str(response.url)
-            )
-        return cast(AuthentikUser, user)
-
     def list_applications(self) -> list[str]:
         """App slugs for the add-app picker, via /providers/all/.
 
@@ -402,38 +389,32 @@ class AuthentikManager:
             logger.exception(f"Failed to update discord_id for user {username}: {e}")
             return False
 
-    def end_user_sessions(self, user: AuthentikUser) -> tuple[int, str | None]:
-        """End every Authentik session of a user: (sessions found, 0 when they can't be trusted; None when all ended,
-        else why not).
-        The reason never names the user or counts sessions, so one reason shared by many teams reads once."""
-        found = 0
+    def user_sessions(self, user: AuthentikUser) -> list[uuid.UUID]:
+        """The user's Authentik session ids. Raises AuthentikAPIError when Authentik answers sessions of other users,
+        an id that isn't a UUID, or anything but a 2xx list; httpx.HTTPError when it can't be reached."""
+        # user__username: Authentik ignores a filter it doesn't know (user=<pk> is one) and answers every session the
+        # token may view
+        sessions = self._list_all(
+            "/api/v3/core/authenticated_sessions/", {"user__username": user["username"]}, {"uuid": str, "user": int}
+        )
+        if any(session["user"] != user["pk"] for session in sessions):
+            raise AuthentikAPIError("Authentik answered sessions of other users")
         try:
-            # user__username: Authentik ignores a filter it doesn't know (user=<pk> is one) and answers every session
-            # the token may view
-            sessions = self._list_all(
-                "/api/v3/core/authenticated_sessions/", {"user__username": user["username"]}, {"uuid": str, "user": int}
-            )
-            if any(session["user"] != user["pk"] for session in sessions):
-                return 0, "Authentik answered sessions of other users, so none were ended"
-            found = len(sessions)
-            try:
-                # Canonical: uuid.UUID also accepts {...} and urn:uuid: forms, which the delete path must not carry
-                session_ids = [uuid.UUID(str(session["uuid"])) for session in sessions]
-            except ValueError:
-                return found, "Authentik answered a session without a valid id, so none were ended"
-            if not sessions and not self.sees_any_sessions():
-                return found, SESSIONS_HIDDEN
+            # Canonical: uuid.UUID also accepts {...} and urn:uuid: forms, which the delete path must not carry
+            return [uuid.UUID(str(session["uuid"])) for session in sessions]
+        except ValueError:
+            raise AuthentikAPIError("Authentik answered a session without a valid id") from None
 
-            refused: int | None = None
-            for session_id in session_ids:
-                response = self.client.delete(f"{self.base_url}/api/v3/core/authenticated_sessions/{session_id}/")
-                # 404: the session ended between the list and the delete
-                if not response.is_success and response.status_code != 404 and refused is None:
-                    refused = response.status_code
-            return found, None if refused is None else f"Authentik did not end sessions (HTTP {refused})"
-        except (AuthentikAPIError, httpx.HTTPError) as e:
-            logger.warning(f"Ending the sessions of {user['username']} failed: {e}")
-            return found, reason_for(e)
+    def end_sessions(self, session_ids: list[uuid.UUID]) -> str | None:
+        """None when every session ended, else why not; never names the user or counts sessions, so one reason
+        shared by many teams reads once. Raises httpx.HTTPError when Authentik can't be reached."""
+        refused: int | None = None
+        for session_id in session_ids:
+            response = self.client.delete(f"{self.base_url}/api/v3/core/authenticated_sessions/{session_id}/")
+            # 404: the session ended between the list and the delete
+            if not response.is_success and response.status_code != 404 and refused is None:
+                refused = response.status_code
+        return None if refused is None else f"Authentik did not end sessions (HTTP {refused})"
 
     def sees_any_sessions(self) -> bool:
         """Whether the token can see any session at all (when not, see SESSIONS_HIDDEN). Raises AuthentikAPIError on
@@ -448,10 +429,14 @@ class AuthentikManager:
         self._check(response, f"Set {user['username']} active={is_active}")
 
     def find_user(self, username: str) -> AuthentikUser | None:
-        """The user Authentik answers for this username, or None; callers check the username it carries. Raises
-        AuthentikAPIError on an answer other than a 2xx list, httpx.HTTPError when Authentik can't be reached."""
+        """The user with exactly this username, or None. Raises AuthentikAPIError on an answer other than a 2xx list,
+        httpx.HTTPError when Authentik can't be reached."""
         response = self.client.get(f"{self.base_url}/api/v3/core/users/", params={"username": username})
-        return self._first_user(response, f"Find user {username}")
+        users, _ = self._results(response, f"Find user {username}")
+        user = next((u for u in users if u.get("username") == username), None)
+        if user is not None and type(user.get("pk")) is not int:
+            raise AuthentikAPIError(f"Find user {username}: the user has no pk")
+        return cast(AuthentikUser | None, user)
 
     def set_password(self, user: AuthentikUser, password: str) -> None:
         """Raises AuthentikAPIError on an answer other than 2xx (a redirect too), httpx.HTTPError when Authentik

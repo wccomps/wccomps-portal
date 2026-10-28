@@ -389,7 +389,7 @@ QJ = "web/quotient/client.py:_json"
 PX = "web/core/proxmox.py:ProxmoxClient"
 PJ = "web/core/proxmox.py:_json"
 READ = (f"{AM}._results", f"{AM}._json")
-USER = (f"{AM}._first_user", *READ)
+USER = (f"{AM}.find_user", *READ)
 READERS = [
     Reader(
         "_handle_response_error",
@@ -458,15 +458,12 @@ READERS = [
         (f"{AM}.update_user_discord_id", *USER),
     ),
     Reader(
-        "end_user_sessions",
-        lambda: authentik().end_user_sessions({"pk": 7, "username": "team01"}),
-        (SESSIONS, SESSIONS, DONE),
-        lambda r: outcome(
-            r,
-            lambda t: isinstance(t, tuple) and is_int(t[0]) and t[0] >= 0 and (t[1] is None or is_str(t[1])),
-            "(sessions found, None or why not)",
-        ),
-        (f"{AM}.end_user_sessions", f"{AM}._list_all", *READ),
+        "user_sessions",
+        lambda: authentik().user_sessions({"pk": 7, "username": "team01"}),
+        (SESSIONS,),
+        lambda r: outcome(r, lambda ids: isinstance(ids, list), "session ids"),
+        (f"{AM}.user_sessions", f"{AM}._list_all", *READ),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "find_user",
@@ -725,7 +722,7 @@ CALLERS = [
     Caller("sync_quotient_metadata", _sync_metadata, (DONE, METADATA, INJECTS), (ValueError,)),
     Caller("sync_service_scores", _sync_scores, (DONE, EXPORT, UPTIMES), (ValueError,)),
     Caller("refresh_user_groups", _refresh_groups, (GROUPS, USERS), (Exception,)),
-    Caller("reset_team_credentials", _reset_credentials, (USERS, SESSIONS, DONE, DONE, SESSIONS, DONE)),
+    Caller("reset_team_credentials", _reset_credentials, (USERS, SESSIONS, DONE, SESSIONS, DONE)),
     Caller("store_discord_id_in_authentik", _store_discord_id, (USERS, DONE)),
     Caller("run_competition_to_completion", _start_competition, (APPLICATION, BINDINGS, DONE, USERS, DONE, GROUPS)),
     Caller("stream_readiness_checks", _readiness, (USERS, USERS, SESSIONS, APPLICATION, BINDINGS, DONE, METADATA)),

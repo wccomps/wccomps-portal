@@ -260,3 +260,11 @@ def test_the_last_start_reader_returns_the_accounts_or_none():
         details={"accounts_ok": 2, "accounts_failed": 1},
     )
     assert last_start_accounts() == (2, 3)
+
+
+def test_a_failed_account_step_says_why(authentik, config):
+    authentik.team_account.return_value = (False, "User team02 not found")
+
+    steps = list(run_competition(True, "timer"))
+
+    assert any(s.message == "Failed team01: User team02 not found" for s in steps)

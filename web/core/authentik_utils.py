@@ -9,7 +9,7 @@ import httpx
 
 from team.models import MAX_TEAMS, SchoolInfo, team_username
 
-from .authentik_manager import AuthentikAPIError, AuthentikManager, AuthentikUser, reason_for
+from .authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, AuthentikUser, reason_for
 from .discord_tasks import LogToChannel
 from .models import AuditLog, DiscordTask
 from .utils import shorten
@@ -17,40 +17,16 @@ from .utils import shorten
 logger = logging.getLogger(__name__)
 
 
-def validate_team_account(user_data: AuthentikUser, expected_username: str) -> tuple[bool, str]:
-    """Validate that a user account is a legitimate team account."""
-    retrieved_username = user_data.get("username", "")
-
-    if not retrieved_username.startswith("team"):
-        return (
-            False,
-            f"Security error: User {retrieved_username} is not a team account",
-        )
-
-    if retrieved_username != expected_username:
-        return (
-            False,
-            f"Security error: Username mismatch (expected {expected_username}, got {retrieved_username})",
-        )
-
-    return (True, "")
-
-
 def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser | str:
-    """The team's Authentik account, or why not: out of range, no such user, or not that team's account. Raises
-    AuthentikAPIError or httpx.HTTPError when Authentik can't be asked."""
+    """The team's Authentik account, or why not. Raises AuthentikAPIError or httpx.HTTPError when Authentik can't be
+    asked."""
     if team_number < 1 or team_number > MAX_TEAMS:
         return f"Team number must be between 1 and {MAX_TEAMS}"
     username = team_username(team_number)
-    user = manager.find_user(username)
-    if not user:
-        return f"User {username} not found"
-    is_valid, error = validate_team_account(user, username)
-    return user if is_valid else error
+    return manager.find_user(username) or f"User {username} not found"
 
 
 def set_team_account_active(manager: AuthentikManager, team_number: int, is_active: bool) -> tuple[bool, str]:
-    """Enable or disable a team's Authentik account: (True, "") or (False, why not)."""
     try:
         user = _team_user(manager, team_number)
         if isinstance(user, str):
@@ -65,12 +41,12 @@ def set_team_account_active(manager: AuthentikManager, team_number: int, is_acti
 @dataclass(frozen=True)
 class CredentialReset:
     """The new password, or None and error; sessions_error is None when its Authentik sessions ended or weren't
-    tried."""
+    tried; sessions_found is None when they couldn't be counted."""
 
     password: str | None
     error: str = ""
     sessions_error: str | None = None
-    sessions_found: int = 0
+    sessions_found: int | None = 0
 
     @property
     def sessions_outcome(self) -> str:
@@ -78,33 +54,51 @@ class CredentialReset:
             return f"could not end the team's Authentik sessions: {self.sessions_error}"
         return "ended the team's Authentik sessions"
 
-    def audit_details(self) -> dict[str, object]:
-        return {
-            "password_reset": self.password is not None,
-            "sessions_revoked": self.password is not None and self.sessions_error is None,
-            "sessions_error": self.sessions_error,
-            "sessions_found": self.sessions_found,
-        }
+
+def _count_sessions(manager: AuthentikManager, user: AuthentikUser) -> tuple[int | None, str | None]:
+    """How many Authentik sessions the account has, or None and why they can't be counted."""
+    try:
+        session_ids = manager.user_sessions(user)
+        if not session_ids and not manager.sees_any_sessions():
+            return None, SESSIONS_HIDDEN
+    except (AuthentikAPIError, httpx.HTTPError) as e:
+        return None, reason_for(e)
+    return len(session_ids), None
+
+
+def _end_sessions(manager: AuthentikManager, user: AuthentikUser, uncounted: str | None) -> str | None:
+    """End the account's Authentik sessions: None when done, else why not."""
+    try:
+        session_ids = manager.user_sessions(user)
+        if not session_ids and uncounted:
+            return uncounted  # sessions it couldn't see before, it can't say are gone now
+        return manager.end_sessions(session_ids)
+    except (AuthentikAPIError, httpx.HTTPError) as e:
+        logger.warning(f"Ending the sessions of {user['username']} failed: {e}")
+        return reason_for(e)
 
 
 def _reset_credentials(manager: AuthentikManager, team_number: int) -> CredentialReset:
     """Leaves is_active alone: team accounts are enabled only while the competition runs."""
-    password = generate_blueteam_password()
     try:
         user = _team_user(manager, team_number)
-        if isinstance(user, str):
-            return CredentialReset(password=None, error=user)
-        # Counted before the password changes, in case Authentik ends sessions on a password change
-        found, _ = manager.end_user_sessions(user)
+    except (AuthentikAPIError, httpx.HTTPError) as e:
+        return CredentialReset(password=None, error=reason_for(e), sessions_found=None)
+    if isinstance(user, str):
+        return CredentialReset(password=None, error=user, sessions_found=None)
+    # Before the password changes: Authentik may end sessions itself when it does, leaving nothing to count
+    found, uncounted = _count_sessions(manager, user)
+    password = generate_blueteam_password()
+    try:
         manager.set_password(user, password)
     except (AuthentikAPIError, httpx.HTTPError) as e:
         logger.warning(f"Failed to reset the password of team {team_number}: {e}")
-        return CredentialReset(password=None, error=reason_for(e))
+        return CredentialReset(password=None, error=reason_for(e), sessions_found=found)
     # The copy packet emails send; a team with no school info has none
     SchoolInfo.objects.filter(team__team_number=team_number).update(password=password)
-    # Again after: a session opened with the old password before it changed
-    _, sessions_error = manager.end_user_sessions(user)
-    return CredentialReset(password=password, sessions_error=sessions_error, sessions_found=found)
+    return CredentialReset(
+        password=password, sessions_error=_end_sessions(manager, user, uncounted), sessions_found=found
+    )
 
 
 def reset_team_credentials(team_number: int, actor: str) -> CredentialReset:
@@ -116,7 +110,12 @@ def reset_team_credentials(team_number: int, actor: str) -> CredentialReset:
         admin_user=actor,
         target_entity="team",
         target_id=team_number,
-        details=reset.audit_details(),
+        details={
+            "password_reset": reset.password is not None,
+            "sessions_revoked": reset.password is not None and reset.sessions_error is None,
+            "sessions_error": reset.sessions_error,
+            "sessions_found": reset.sessions_found,
+        },
     )
     if reset.password is None:
         note = f"Credentials reset for team {team_number} by {actor} failed: {reset.error}"
@@ -161,7 +160,7 @@ def reset_teams_credentials(team_numbers: list[int], actor: str) -> BulkPassword
         resets = [(team_num, _reset_credentials(manager, team_num)) for team_num in team_numbers]
     for team_num, reset in resets:
         username = team_username(team_num)
-        sessions_found += reset.sessions_found
+        sessions_found += reset.sessions_found or 0
         if reset.password is None:
             failed_resets.append((username, reset.error))
             continue

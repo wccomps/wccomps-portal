@@ -1,5 +1,6 @@
 """Team password resets, and what unlinking a team member tells Discord."""
 
+import uuid
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -9,7 +10,7 @@ from django.test import Client
 from django.urls import reverse
 from registration.models import School
 
-from core.authentik_manager import AuthentikAPIError, AuthentikManager
+from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager
 from core.authentik_utils import (
     CredentialReset,
     reset_team_credentials,
@@ -37,7 +38,9 @@ def manager():
     with patch("core.authentik_utils.AuthentikManager") as cls:
         opened = cls.return_value.__enter__.return_value
         opened.find_user.return_value = {"pk": 5, "username": "team07"}
-        opened.end_user_sessions.return_value = (0, None)
+        opened.user_sessions.return_value = []
+        opened.sees_any_sessions.return_value = True
+        opened.end_sessions.return_value = None
         yield opened
 
 
@@ -75,32 +78,54 @@ def test_web_unlink_queues_a_role_sync_for_the_member(admin_user, action):
 
 
 def test_reset_team_credentials_records_the_password_and_the_sessions_outcome(school_info, manager):
-    manager.end_user_sessions.side_effect = [(2, None), (0, "Authentik did not end sessions (HTTP 403)")]
+    manager.user_sessions.side_effect = [[uuid.UUID(int=1), uuid.UUID(int=2)], [uuid.UUID(int=2)]]
+    manager.end_sessions.return_value = "Authentik did not end sessions (HTTP 403)"
 
     reset = reset_team_credentials(7, actor="gold-admin")
 
     assert reset.password and reset.sessions_error == "Authentik did not end sessions (HTTP 403)"
     assert reset.sessions_found == 2
-    manager.find_user.assert_called_once_with("team07")
+    manager.end_sessions.assert_called_once_with([uuid.UUID(int=2)])
     school_info.refresh_from_db()
     assert school_info.password == reset.password
 
 
-def test_reset_counts_sessions_before_the_password_changes(manager):
+def test_reset_counts_sessions_before_the_password_changes_and_ends_them_after(manager):
     """If Authentik ends sessions on a password change, a count taken after would always be 0."""
     calls: list[str] = []
-    manager.end_user_sessions.side_effect = lambda user: calls.append("end") or (0, None)
+    manager.user_sessions.side_effect = lambda user: calls.append("list") or []
     manager.set_password.side_effect = lambda user, password: calls.append("set")
+    manager.end_sessions.side_effect = lambda ids: calls.append("end")
 
     reset_team_credentials(7, actor="gold-admin")
 
-    assert calls == ["end", "set", "end"]
+    assert calls == ["list", "set", "list", "end"]
+
+
+def test_failed_password_keeps_the_count_and_ends_nothing(manager):
+    """Signing a team out without changing its password helps nobody, and the count is what the packet alert needs."""
+    manager.user_sessions.return_value = [uuid.UUID(int=1)]
+    manager.set_password.side_effect = AuthentikAPIError("Set the password of team07: Server error", 500)
+
+    reset = reset_team_credentials(7, actor="gold-admin")
+
+    assert (reset.password, reset.sessions_found) == (None, 1)
+    manager.end_sessions.assert_not_called()
+
+
+def test_uncounted_sessions_are_unknown_not_zero(manager):
+    manager.sees_any_sessions.return_value = False
+
+    reset = reset_team_credentials(7, actor="gold-admin")
+
+    assert reset.sessions_found is None
+    assert reset.sessions_error == SESSIONS_HIDDEN
 
 
 def test_reset_team_credentials_audits_and_tells_ops(manager):
     from core.models import AuditLog
 
-    manager.end_user_sessions.side_effect = [(1, None), (0, None)]
+    manager.user_sessions.side_effect = [[uuid.UUID(int=1)], []]
 
     reset_team_credentials(7, actor="gold-admin")
 
@@ -116,26 +141,15 @@ def test_reset_team_credentials_audits_and_tells_ops(manager):
     assert note == "Credentials reset for team 7 by gold-admin: ended the team's Authentik sessions"
 
 
-def test_reset_team_credentials_failure_records_nothing(school_info, manager):
+def test_reset_team_credentials_failure_keeps_the_old_password(school_info, manager):
     manager.find_user.return_value = None
 
     assert reset_team_credentials(7, actor="gold-admin") == CredentialReset(
-        password=None, error="User team07 not found"
+        password=None, error="User team07 not found", sessions_found=None
     )
 
     school_info.refresh_from_db()
     assert school_info.password == "old"
-
-
-def test_reset_team_credentials_refuses_a_non_team_account(manager):
-    """Authentik answering another user for team07 must change neither its password nor its sessions."""
-    manager.find_user.return_value = {"pk": 1, "username": "akadmin"}
-
-    reset = reset_team_credentials(7, actor="gold-admin")
-
-    assert reset.password is None and "not a team account" in reset.error
-    manager.set_password.assert_not_called()
-    manager.end_user_sessions.assert_not_called()
 
 
 def test_reset_team_credentials_failed_password_records_nothing(school_info, manager):
@@ -182,16 +196,6 @@ def test_bulk_reset_uses_one_manager(manager):
 
     assert cls.call_count == 1
     assert [username for _num, username, _pw in result.password_list] == ["team01", "team02", "team03"]
-
-
-def test_credential_reset_audit_details():
-    assert CredentialReset(password="pw", sessions_found=2).audit_details() == {
-        "password_reset": True,
-        "sessions_revoked": True,
-        "sessions_error": None,
-        "sessions_found": 2,
-    }
-    assert CredentialReset(password=None, error="x").audit_details()["sessions_revoked"] is False
 
 
 def test_one_reason_shared_by_many_teams_reads_once():
@@ -310,7 +314,7 @@ def _bulk_reset(admin_user, results):
 
 
 def test_web_bulk_reset_names_each_failed_team_and_keeps_the_csv(admin_user):
-    """A partial failure is an error that stays on screen, and the passwords that did change still arrive."""
+    """A partial failure is an error, and the passwords that did change still arrive."""
     body = _bulk_reset(
         admin_user,
         {1: CredentialReset(password="pw-1"), 2: CredentialReset(password=None, error="User team02 not found")},
@@ -333,15 +337,6 @@ def test_web_bulk_reset_where_every_team_failed_is_an_error(admin_user):
 def test_set_team_account_active_switches_the_teams_account(manager):
     assert set_team_account_active(manager, 7, True) == (True, "")
     manager.set_user_active.assert_called_once_with({"pk": 5, "username": "team07"}, True)
-
-
-def test_set_team_account_active_refuses_a_non_team_account(manager):
-    manager.find_user.return_value = {"pk": 1, "username": "akadmin"}
-
-    ok, why = set_team_account_active(manager, 7, False)
-
-    assert not ok and "not a team account" in why
-    manager.set_user_active.assert_not_called()
 
 
 def test_bulk_reset_tells_ops_once(manager):

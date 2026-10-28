@@ -52,6 +52,7 @@ class TestUpdateUserDiscordId:
             "results": [
                 {
                     "pk": 42,
+                    "username": "testuser",
                     "uid": "u-1",
                     "attributes": {"existing_attr": "value"},
                 }
@@ -85,6 +86,7 @@ class TestUpdateUserDiscordId:
             "results": [
                 {
                     "pk": 7,
+                    "username": "golduser",
                     "uid": "u-1",
                     "attributes": {"role": "admin", "team": "gold"},
                 }
@@ -104,7 +106,9 @@ class TestUpdateUserDiscordId:
     def test_refuses_to_write_to_a_different_identity_with_that_username(self, manager):
         """A stale portal username may now belong to someone else in Authentik: check the uid first."""
         mock_get_response = MagicMock()
-        mock_get_response.json.return_value = {"results": [{"pk": 9, "uid": "someone-else", "attributes": {}}]}
+        mock_get_response.json.return_value = {
+            "results": [{"pk": 9, "username": "reused", "uid": "someone-else", "attributes": {}}]
+        }
         manager.client.get.return_value = mock_get_response
 
         result = manager.update_user_discord_id("reused", 123456789, "my-uid")
@@ -133,7 +137,9 @@ class TestUpdateUserDiscordId:
     @pytest.mark.parametrize("status", [403, 500, 302])
     def test_refused_update_is_false(self, manager, status):
         mock_get_response = MagicMock()
-        mock_get_response.json.return_value = {"results": [{"pk": 42, "uid": "u-1", "attributes": {}}]}
+        mock_get_response.json.return_value = {
+            "results": [{"pk": 42, "username": "someuser", "uid": "u-1", "attributes": {}}]
+        }
         manager.client.get.return_value = mock_get_response
         manager.client.patch.return_value = MagicMock(status_code=status, text="refused", is_success=False)
 

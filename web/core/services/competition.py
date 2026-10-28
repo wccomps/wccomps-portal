@@ -117,13 +117,13 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
 
     for number in numbers:
         username = team_username(number)
-        ok, _ = set_team_account_active(manager, number, enable)
+        ok, why = set_team_account_active(manager, number, enable)
         step += 1
         if ok:
             result.accounts_ok += 1
         else:
             result.accounts_failed += 1
-        yield CompetitionStep(f"{verb} {username}" if ok else f"Failed {username}", step, total, ok=ok)
+        yield CompetitionStep(f"{verb} {username}" if ok else f"Failed {username}: {why}", step, total, ok=ok)
 
     # Team accounts' groups follow is_active; don't make teams wait for the periodic refresh.
     step += 1

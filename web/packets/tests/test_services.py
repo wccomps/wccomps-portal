@@ -1,11 +1,12 @@
 """Tests for packet services."""
 
+import uuid
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 from registration.models import School
 
-from core.models import DiscordTask
+from core.models import AuditLog, DiscordTask
 from team.models import SchoolInfo, Team
 
 from ..models import Packet, PacketDistribution
@@ -157,12 +158,13 @@ class PacketDistributionServiceTestCase(TestCase):
         with patch("core.authentik_utils.AuthentikManager") as cls:
             manager = cls.return_value.__enter__.return_value
             manager.find_user.return_value = {"pk": 5, "username": "team01"}
-            manager.end_user_sessions.return_value = (0, None)
+            manager.user_sessions.return_value = []
+            manager.end_sessions.return_value = None
             self.service.send_packet_email(distribution)
             self.service.send_test_packet_email(self.packet, team, "gold@example.com")
 
         manager.set_password.assert_called_once()
-        self.assertEqual(manager.end_user_sessions.call_count, 2)
+        manager.end_sessions.assert_called_once()
         self.assertEqual(
             self._ops_messages(),
             ["Credentials reset for team 1 by packet distribution: ended the team's Authentik sessions"],
@@ -174,7 +176,6 @@ class PacketDistributionServiceTestCase(TestCase):
 
     @patch("packets.services.EmailMultiAlternatives")
     def test_account_signed_in_before_its_packet_alerts_ops(self, mock_email_class):
-        """A team account signed in before its packet goes out may mean its credentials leaked."""
         team = Team.objects.get(team_number=1)
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
@@ -182,7 +183,8 @@ class PacketDistributionServiceTestCase(TestCase):
         with patch("core.authentik_utils.AuthentikManager") as cls:
             manager = cls.return_value.__enter__.return_value
             manager.find_user.return_value = {"pk": 5, "username": "team01"}
-            manager.end_user_sessions.side_effect = [(2, None), (0, None)]
+            manager.user_sessions.side_effect = [[uuid.UUID(int=1), uuid.UUID(int=2)], []]
+            manager.end_sessions.return_value = None
             self.service.send_packet_email(distribution)
 
         alert = self._ops_messages()[-1]
@@ -199,7 +201,8 @@ class PacketDistributionServiceTestCase(TestCase):
         with patch("core.authentik_utils.AuthentikManager") as cls:
             manager = cls.return_value.__enter__.return_value
             manager.find_user.return_value = {"pk": 5, "username": "team01"}
-            manager.end_user_sessions.side_effect = [(0, None), (0, "Authentik did not end sessions (HTTP 403)")]
+            manager.user_sessions.side_effect = [[], [uuid.UUID(int=1)]]
+            manager.end_sessions.return_value = "Authentik did not end sessions (HTTP 403)"
             self.service.send_packet_email(distribution)
 
         self.assertEqual(
@@ -208,6 +211,23 @@ class PacketDistributionServiceTestCase(TestCase):
                 "Credentials reset for team 1 by packet distribution: could not end the team's Authentik sessions: "
                 "Authentik did not end sessions (HTTP 403)"
             ],
+        )
+
+    @patch("packets.services.EmailMultiAlternatives")
+    def test_an_uncounted_session_total_alerts_ops(self, mock_email_class):
+        team = Team.objects.get(team_number=1)
+        SchoolInfo.objects.filter(team=team).update(password="")
+        distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
+
+        with patch("core.authentik_utils.AuthentikManager") as cls:
+            manager = cls.return_value.__enter__.return_value
+            manager.find_user.return_value = {"pk": 5, "username": "team01"}
+            manager.user_sessions.return_value = []
+            manager.sees_any_sessions.return_value = False
+            self.service.send_packet_email(distribution)
+
+        self.assertIn(
+            "Could not check whether team 1's account was signed in before its packet went out.", self._ops_messages()
         )
 
     @patch("packets.services.EmailMultiAlternatives")
@@ -224,6 +244,11 @@ class PacketDistributionServiceTestCase(TestCase):
             self.service.send_packet_email(distribution)
 
         mock_email_class.return_value.send.assert_not_called()
+        # Raised after the transaction commits, so the failed reset's own record survives
+        self.assertTrue(AuditLog.objects.filter(action="team_password_reset", target_id=1).exists())
+        self.assertEqual(
+            self._ops_messages(), ["Credentials reset for team 1 by packet distribution failed: User team01 not found"]
+        )
         self.assertEqual(SchoolInfo.objects.get(team=team).password, "")
 
     @patch("packets.services.EmailMultiAlternatives")

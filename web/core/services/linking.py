@@ -138,11 +138,7 @@ def store_discord_id_in_authentik(username: str, discord_id: int, authentik_id: 
     from core.authentik_manager import AuthentikManager
 
     with AuthentikManager() as manager:
-        stored = manager.update_user_discord_id(username, discord_id, authentik_id)
-    if stored:
-        logger.info(f"Stored discord_id {discord_id} in Authentik for user {username}")
-    else:
-        logger.warning(f"Could not store discord_id in Authentik for {username}; it stays in DiscordLink only")
+        manager.update_user_discord_id(username, discord_id, authentik_id)
 
 
 def execute_link(
