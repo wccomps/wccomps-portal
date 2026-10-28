@@ -218,7 +218,6 @@ class TestAuthentikManager:
         assert manager.get_blueteam_binding("app-123") is None
 
     def test_get_blueteam_binding_ignores_another_apps_binding(self, manager: AuthentikManager) -> None:
-        """Authentik ignores a filter it doesn't know; a binding on another app must never be the one toggled."""
         manager.client.get.return_value = self._answer(
             {"results": [{"pk": "b-9", "target": "app-999", "group_obj": {"name": "BlueTeam"}}]}
         )
@@ -476,21 +475,15 @@ class TestAuthentikManager:
             manager.set_user_active(self.TEAM01, True)
 
 
-# Methods that touch the client without asking Authentik anything
-NOT_ASKING = {"close": "closes the client's connections"}
-
-
-def test_every_method_that_asks_authentik_turns_a_network_error_into_its_own():
-    """Callers catch AuthentikAPIError alone; a method that asks Authentik without the decorator would let
-    httpx.HTTPError through them."""
+def test_only_request_sends_to_authentik():
+    """_request turns a network error into AuthentikAPIError, which is all callers catch; a request sent around it
+    would let httpx.HTTPError through them."""
     import inspect
 
-    uses_client = re.compile(r"self\.(client|_list_all)\b")
-    asks = {
+    senders = {
         name
-        for name, method in vars(AuthentikManager).items()
-        if callable(method) and not name.startswith("_") and uses_client.search(inspect.getsource(method))
-    } - NOT_ASKING.keys()
-    undecorated = {name for name in asks if not hasattr(vars(AuthentikManager)[name], "__wrapped__")}
+        for name, member in vars(AuthentikManager).items()
+        if callable(member) and re.search(r"self\.client\b", inspect.getsource(member))
+    }
 
-    assert asks and not undecorated
+    assert senders == {"__init__", "_request", "close"}

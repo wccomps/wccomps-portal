@@ -77,7 +77,7 @@ def test_a_user_of_another_shape_is_an_authentik_error_or_no_user(answers: list[
             user = authentik().get_user_with_groups("team01")
         except AuthentikAPIError:
             return
-    assert user is None or (type(user["pk"]) is int and all(isinstance(g, dict) for g in user.get("groups_obj", [])))
+    assert user is None or (type(user["pk"]) is int and all(isinstance(g, dict) for g in user["groups_obj"]))
 
 
 @example(slug=None)

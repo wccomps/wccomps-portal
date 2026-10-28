@@ -70,7 +70,11 @@ GROUPS = {"results": [{"pk": "g1", "name": "WCComps_BlueTeam01", "parents": []}]
 SESSIONS = {"results": [{"uuid": "00000000-0000-4000-8000-000000000001", "user": 7}], "pagination": PAGE}
 PROVIDERS = {"results": [{"pk": 1, "assigned_application_slug": "netbird"}], "pagination": PAGE}
 APPLICATION = {"pk": "app-1", "slug": "netbird", "name": "Netbird"}
-BINDINGS = {"results": [{"pk": "b-1", "enabled": True, "group": "g1", "group_obj": {"name": "WCComps_BlueTeam"}}]}
+BINDINGS = {
+    "results": [
+        {"pk": "b-1", "target": "app-1", "enabled": True, "group": "g1", "group_obj": {"name": "WCComps_BlueTeam"}}
+    ]
+}
 ERROR = {"detail": "Not allowed"}
 DONE: dict[str, Any] = {}
 
@@ -128,12 +132,6 @@ def outcome(result: object, ok: Callable[[object], bool], what: str) -> None:
     assert ok(result), f"{what}, not {result!r:.300}"
 
 
-def check_pair(result: object) -> None:
-    outcome(
-        result, lambda r: isinstance(r, tuple) and len(r) == 2 and type(r[0]) is bool and is_str(r[1]), "(bool, str)"
-    )
-
-
 def check_users(result: object) -> None:
     outcome(
         result,
@@ -178,8 +176,8 @@ def check_user(result: object) -> None:
                 isinstance(r, dict)
                 and is_int(r.get("pk"))
                 and is_str(r.get("username", ""))
-                and isinstance(r.get("groups_obj", []), list)
-                and all(isinstance(g, dict) and is_str(g.get("name")) for g in r.get("groups_obj", []))
+                and isinstance(r.get("groups_obj"), list)
+                and all(isinstance(g, dict) and is_str(g.get("name")) for g in r["groups_obj"])
             )
         ),
         "None or a user with an int pk and named groups",

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser | str:
-    """The team's Authentik account, or why not. Raises AuthentikAPIError when Authentik can't be asked."""
+    """The team's Authentik account, or why not."""
     if team_number < 1 or team_number > MAX_TEAMS:
         return f"Team number must be between 1 and {MAX_TEAMS}"
     username = team_username(team_number)

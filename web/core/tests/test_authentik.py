@@ -1,5 +1,3 @@
-"""Tests for AuthentikManager: storing the Discord ID, setting a binding, listing applications."""
-
 from unittest.mock import MagicMock, Mock, patch
 
 import httpx
@@ -69,7 +67,7 @@ class TestUpdateUserDiscordId:
 
         # Verify GET searched by username
         manager.client.get.assert_called_once()
-        assert manager.client.get.call_args.kwargs["params"] == {"username": "testuser"}
+        assert manager.client.get.call_args.kwargs["params"] == {"username": "testuser", "include_groups": "true"}
 
         # Verify PATCH used the integer PK
         manager.client.patch.assert_called_once()
