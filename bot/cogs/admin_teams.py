@@ -253,7 +253,7 @@ class AdminTeamsCog(commands.Cog):
 
     @teams_group.command(
         name="reset",
-        description="[ADMIN] Team reset: unlink users, reset password, revoke sessions, recreate channels",
+        description="[ADMIN] Team reset: unlink users, reset password, end Authentik sessions, recreate channels",
     )
     @app_commands.describe(
         team_number="Team number (1-50)",
@@ -266,7 +266,7 @@ class AdminTeamsCog(commands.Cog):
         team_number: int,
         recreate_channels: bool = True,
     ) -> None:
-        """Team reset: unlinks users, resets password, revokes sessions, and optionally recreates infrastructure."""
+        """Team reset: unlinks users, resets password, ends Authentik sessions, optionally recreates infrastructure."""
         if team_number < 1 or team_number > MAX_TEAMS:
             await interaction.response.send_message(f"Team number must be between 1 and {MAX_TEAMS}", ephemeral=True)
             return
@@ -294,15 +294,11 @@ class AdminTeamsCog(commands.Cog):
 
         results.append(f"Unlinked {unlinked_count} Discord user(s)")
 
-        new_password, error, sessions_revoked = await sync_to_async(reset_team_credentials)(team_number)
-        if new_password:
-            results.append("Reset the Authentik password")
-            if sessions_revoked:
-                results.append("Revoked active session(s)")
-            else:
-                results.append("Failed to revoke sessions")
+        reset = await sync_to_async(reset_team_credentials)(team_number)
+        if reset.password is not None:
+            results.append(f"Reset the Authentik password and {reset.sessions_outcome}")
         else:
-            results.append(f"Failed to reset the password: {error}")
+            results.append(f"Failed to reset the password: {reset.error}")
 
         if recreate_channels:
             deleted_items = await delete_team_infrastructure(
@@ -334,8 +330,7 @@ class AdminTeamsCog(commands.Cog):
             details={
                 "team_name": team.team_name,
                 "unlinked_members": unlinked_count,
-                "password_reset": new_password is not None,
-                "sessions_revoked": sessions_revoked,
+                **reset.audit_details(),
                 "recreated_channels": recreate_channels,
             },
         )
@@ -347,8 +342,8 @@ class AdminTeamsCog(commands.Cog):
         )
 
         response = f"**Team {team_number} Reset Complete**\n\n" + "\n".join(results)
-        if new_password:
-            response += f"\n\n**New Team Password:** `{new_password}`"
+        if reset.password is not None:
+            response += f"\n\n**New Team Password:** `{reset.password}`"
             response += "\n\nMake sure to securely share this password with the team."
         await interaction.followup.send(response, ephemeral=True)
 

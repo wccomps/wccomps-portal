@@ -67,7 +67,7 @@ AUTHENTIK_USER = {
 }
 USERS = {"results": [AUTHENTIK_USER], "pagination": PAGE}
 GROUPS = {"results": [{"pk": "g1", "name": "WCComps_BlueTeam01", "parents": []}], "pagination": PAGE}
-SESSIONS = {"results": [{"uuid": "s-1"}], "pagination": PAGE}
+SESSIONS = {"results": [{"uuid": "00000000-0000-4000-8000-000000000001", "user": 7}], "pagination": PAGE}
 PROVIDERS = {"results": [{"pk": 1, "assigned_application_slug": "netbird"}], "pagination": PAGE}
 APPLICATION = {"pk": "app-1", "slug": "netbird", "name": "Netbird"}
 BINDINGS = {"results": [{"pk": "b-1", "enabled": True, "group": "g1", "group_obj": {"name": "WCComps_BlueTeam"}}]}
@@ -460,21 +460,35 @@ READERS = [
         raises=(httpx.HTTPStatusError,),
     ),
     Reader(
-        "revoke_user_sessions",
-        lambda: authentik().revoke_user_sessions("team01"),
-        (USERS, SESSIONS, DONE),
-        lambda r: outcome(
-            r,
-            lambda t: (
-                isinstance(t, tuple)
-                and type(t[0]) is bool
-                and (t[1] is None or is_str(t[1]))
-                and is_int(t[2])
-                and t[2] >= 0
-            ),
-            "(ok, error, revoked)",
-        ),
-        (f"{AM}.revoke_user_sessions", *USER),
+        "end_user_sessions",
+        lambda: authentik().end_user_sessions({"pk": 7, "username": "team01"}),
+        (SESSIONS, SESSIONS, DONE),
+        lambda r: outcome(r, lambda e: e is None or is_str(e), "None or why not"),
+        (f"{AM}.end_user_sessions", f"{AM}._list_all", *READ),
+    ),
+    Reader(
+        "find_user",
+        lambda: authentik().find_user("team01"),
+        (USERS,),
+        lambda r: outcome(r, lambda u: u is None or (isinstance(u, dict) and is_int(u["pk"])), "a user or None"),
+        (f"{AM}.find_user", *USER),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "set_password",
+        lambda: authentik().set_password({"pk": 7, "username": "team01"}, "Correct-Horse-1!"),
+        (DONE,),
+        lambda r: outcome(r, lambda v: v is None, "None"),
+        (f"{AM}.set_password",),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "sees_any_sessions",
+        lambda: authentik().sees_any_sessions(),
+        (SESSIONS,),
+        lambda r: outcome(r, lambda b: type(b) is bool, "a bool"),
+        (f"{AM}.sees_any_sessions", *READ),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "toggle_user",
@@ -482,13 +496,6 @@ READERS = [
         (USERS, DONE),
         check_pair,
         (f"{AM}.toggle_user", *USER),
-    ),
-    Reader(
-        "reset_blueteam_password",
-        lambda: authentik().reset_blueteam_password(1, "Correct-Horse-1!"),
-        (USERS, DONE),
-        check_pair,
-        (f"{AM}.reset_blueteam_password", *USER),
     ),
     Reader(
         "list_all_users",
@@ -715,10 +722,10 @@ CALLERS = [
     Caller("sync_quotient_metadata", _sync_metadata, (DONE, METADATA, INJECTS), (ValueError,)),
     Caller("sync_service_scores", _sync_scores, (DONE, EXPORT, UPTIMES), (ValueError,)),
     Caller("refresh_user_groups", _refresh_groups, (GROUPS, USERS), (Exception,)),
-    Caller("reset_team_credentials", _reset_credentials, (USERS, DONE, USERS, SESSIONS, DONE)),
+    Caller("reset_team_credentials", _reset_credentials, (USERS, DONE, SESSIONS, SESSIONS, DONE)),
     Caller("store_discord_id_in_authentik", _store_discord_id, (USERS, DONE)),
     Caller("run_competition_to_completion", _start_competition, (APPLICATION, BINDINGS, DONE, USERS, DONE, GROUPS)),
-    Caller("stream_readiness_checks", _readiness, (USERS, USERS, APPLICATION, BINDINGS, DONE, METADATA)),
+    Caller("stream_readiness_checks", _readiness, (USERS, USERS, SESSIONS, APPLICATION, BINDINGS, DONE, METADATA)),
     Caller("_fix_group_membership", _fix_groups, (USERS, GROUPS, DONE)),
 ]
 SERVICES = {

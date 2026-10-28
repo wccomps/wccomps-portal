@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 from django.urls import reverse
 
+from core.authentik_utils import CredentialReset
 from core.tests.roles import role_user
 
 from .conftest import create_session_context
@@ -52,13 +53,13 @@ def test_a_question_answered_yes_posts(team_page):
 
     page.on("dialog", accept)
     with (
-        patch("core.admin_views.teams.reset_team_credentials", return_value=("Team-Pass-7!", "", True)),
+        patch("core.admin_views.teams.reset_team_credentials", return_value=CredentialReset(password="Team-Pass-7!")),
         page.expect_response(lambda r: r.url.endswith("/action/")),
     ):
         page.get_by_role("button", name="Reset Team").click()
     assert questions == [
-        "Reset this team? This unlinks all members, generates a new Authentik password and revokes all active "
-        "sessions. It cannot be undone."
+        "Reset this team? This unlinks all members, generates a new Authentik password and ends the team "
+        "account's Authentik sessions. It cannot be undone."
     ]
     assert len(posts) == 1
 

@@ -16,7 +16,7 @@ from orange_team.models import OrangeAssignment
 from scoring.models import IncidentReport, InjectScore, RedTeamScore
 
 from core.admin_views.places import SetupSection, setup_url
-from core.authentik_manager import AuthentikManager
+from core.authentik_manager import SESSIONS_HIDDEN, AuthentikManager
 from core.forms import ReadinessFixForm
 from core.models import CompetitionConfig
 from core.utils import ndjson_done
@@ -117,6 +117,20 @@ def _check_team_group_membership() -> CheckResult:
             {"type": "fix", "key": "fix_group_membership", "label": "Fix Group Membership"},
         )
     return ("pass", "All accounts in correct groups", None)
+
+
+def _check_session_access() -> CheckResult:
+    """The portal's token must see sessions, or a credentials reset leaves the team's Authentik sessions open."""
+    with AuthentikManager() as manager:
+        visible = manager.sees_any_sessions()
+    if visible:
+        return ("pass", "The portal's token can see Authentik sessions", None)
+    return (
+        "fail",
+        f"{SESSIONS_HIDDEN} Sign in to Authentik if you aren't, then run the checks again. The token also needs the "
+        "delete permission, which this check can't test.",
+        None,
+    )
 
 
 def _setup_link(section: SetupSection, label: str) -> dict[str, str]:
@@ -324,6 +338,7 @@ ALL_CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
     ("Discord IDs configured", _check_discord_settings),
     ("Team accounts exist", _check_team_accounts_exist),
     ("Group membership correct", _check_team_group_membership),
+    ("Authentik sessions visible", _check_session_access),
     ("App bindings configured", _check_blueteam_bindings),
     ("Multiple teams registered", _check_multiple_teams),
     ("School info configured", _check_school_info),

@@ -149,13 +149,14 @@ class PacketDistributionServiceTestCase(TestCase):
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
 
-        with patch("core.authentik_manager.AuthentikManager") as manager:
-            manager.return_value.reset_blueteam_password.return_value = (True, "")
+        with patch("core.authentik_utils.AuthentikManager") as cls:
+            manager = cls.return_value.__enter__.return_value
+            manager.find_user.return_value = {"pk": 5, "username": "team01"}
             self.service.send_packet_email(distribution)
             self.service.send_test_packet_email(self.packet, team, "gold@example.com")
 
-        manager.return_value.reset_blueteam_password.assert_called_once()
-        password = manager.return_value.reset_blueteam_password.call_args.args[1]
+        manager.set_password.assert_called_once()
+        password = manager.set_password.call_args.args[1]
         self.assertEqual(SchoolInfo.objects.get(team=team).password, password)
         for call in mock_email_class.call_args_list:
             self.assertIn(password, call.kwargs["body"])
@@ -166,10 +167,12 @@ class PacketDistributionServiceTestCase(TestCase):
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
 
-        with patch("core.authentik_manager.AuthentikManager") as manager:
-            manager.return_value.reset_blueteam_password.return_value = (False, "HTTP 500")
-            with self.assertRaisesMessage(ValueError, "Failed to set Authentik password for team 1: HTTP 500"):
-                self.service.send_packet_email(distribution)
+        with (
+            patch("core.authentik_utils.AuthentikManager") as cls,
+            self.assertRaisesMessage(ValueError, "Failed to set Authentik password for team 1: User team01 not found"),
+        ):
+            cls.return_value.__enter__.return_value.find_user.return_value = None
+            self.service.send_packet_email(distribution)
 
         mock_email_class.return_value.send.assert_not_called()
         self.assertEqual(SchoolInfo.objects.get(team=team).password, "")

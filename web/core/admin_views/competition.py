@@ -40,7 +40,7 @@ from core.admin_views.places import (
 )
 from core.admin_views.readiness import action_readiness_check, action_readiness_fix
 from core.authentik_manager import AuthentikManager
-from core.authentik_utils import credentials_csv, reset_teams_credentials
+from core.authentik_utils import credentials_csv, reset_teams_credentials, sessions_failure_summary
 from core.competition_utils import WipedData, competition_data_counts
 from core.discord_tasks import LogToChannel
 from core.errors import json_endpoint
@@ -286,7 +286,6 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
     team_numbers = form.cleaned_data["team_numbers"] or active_team_numbers()
     result = reset_teams_credentials(team_numbers)
     password_list = result.password_list
-    failed_resets = result.failed_resets
     sessions_failed = result.sessions_failed
 
     csv_content = credentials_csv((username, password) for _num, username, password in password_list)
@@ -298,16 +297,14 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
         target_id=0,
         details={
             "total_users": len(team_numbers),
-            "success_count": len(password_list),
-            "failed_count": len(failed_resets),
-            "sessions_failed": sessions_failed,
+            **result.audit_details(),
             "team_numbers": form.cleaned_data.get("team_numbers", "") or "all active",
         },
     )
 
     message = f"Reset {len(password_list)}/{len(team_numbers)} passwords"
     if sessions_failed:
-        message += f"; could not revoke sessions for {', '.join(sessions_failed)}"
+        message += f"; {sessions_failure_summary(sessions_failed)}"
     return JsonResponse(
         {
             "success": True,

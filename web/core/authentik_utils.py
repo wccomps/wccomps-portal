@@ -5,9 +5,11 @@ import secrets
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from team.models import MAX_TEAMS, team_username
+import httpx
 
-from .authentik_manager import AuthentikUser
+from team.models import MAX_TEAMS, SchoolInfo, team_username
+
+from .authentik_manager import AuthentikAPIError, AuthentikManager, AuthentikUser, reason_for
 from .utils import shorten
 
 logger = logging.getLogger(__name__)
@@ -32,60 +34,113 @@ def validate_team_account(user_data: AuthentikUser, expected_username: str) -> t
     return (True, "")
 
 
-def reset_team_password(team_number: int) -> tuple[str | None, str]:
-    """Give a team account a new random password and record it on the team's school info for packet emails.
-
-    A team with no school info gets the new password in Authentik only. Returns (password, "") on success,
-    (None, error) otherwise.
-    """
-    from team.models import SchoolInfo
-
-    from .authentik_manager import AuthentikManager
-
+def _new_team_password(manager: AuthentikManager, team_number: int) -> tuple[AuthentikUser, str] | str:
+    """(account, password), or why not. Leaves is_active alone: team accounts are enabled only while the competition
+    runs."""
+    if team_number < 1 or team_number > MAX_TEAMS:
+        return f"Team number must be between 1 and {MAX_TEAMS}"
+    username = team_username(team_number)
     password = generate_blueteam_password()
-    success, error = AuthentikManager().reset_blueteam_password(team_number, password)
-    if not success:
-        return None, error
+    try:
+        user = manager.find_user(username)
+        if not user:
+            return f"User {username} not found"
+        is_valid, error = validate_team_account(user, username)
+        if not is_valid:
+            return error
+        manager.set_password(user, password)
+    except (AuthentikAPIError, httpx.HTTPError) as e:
+        logger.warning(f"Failed to reset the password of {username}: {e}")
+        return reason_for(e)
+    # The copy packet emails send; a team with no school info has none
     SchoolInfo.objects.filter(team__team_number=team_number).update(password=password)
-    return password, ""
+    return user, password
 
 
-def reset_team_credentials(team_number: int) -> tuple[str | None, str, bool]:
-    """Reset a team account's password, then ask Authentik to end the account's sessions.
+def reset_team_password(team_number: int) -> tuple[str | None, str]:
+    """A new random password for the team account, recorded on its school info: (password, "") or (None, why not)."""
+    with AuthentikManager() as manager:
+        outcome = _new_team_password(manager, team_number)
+    if isinstance(outcome, str):
+        return None, outcome
+    return outcome[1], ""
 
-    Returns (password, error, sessions_revoked); password is None when the reset failed.
-    """
-    from .authentik_manager import AuthentikManager
 
-    password, error = reset_team_password(team_number)
-    if not password:
-        return None, error, False
-    revoked, _, _ = AuthentikManager().revoke_user_sessions(team_username(team_number))
-    return password, "", revoked
+@dataclass(frozen=True)
+class CredentialReset:
+    """The new password, or None and error; sessions_error is None when its Authentik sessions ended or weren't
+    tried."""
+
+    password: str | None
+    error: str = ""
+    sessions_error: str | None = None
+
+    @property
+    def sessions_outcome(self) -> str:
+        if self.sessions_error:
+            return f"could not end the team's Authentik sessions: {self.sessions_error}"
+        return "ended the team's Authentik sessions"
+
+    def audit_details(self) -> dict[str, object]:
+        return {
+            "password_reset": self.password is not None,
+            "sessions_revoked": self.password is not None and self.sessions_error is None,
+            "sessions_error": self.sessions_error,
+        }
+
+
+def _reset_credentials(manager: AuthentikManager, team_number: int) -> CredentialReset:
+    outcome = _new_team_password(manager, team_number)
+    if isinstance(outcome, str):
+        return CredentialReset(password=None, error=outcome)
+    user, password = outcome
+    return CredentialReset(password=password, sessions_error=manager.end_user_sessions(user))
+
+
+def reset_team_credentials(team_number: int) -> CredentialReset:
+    """Give a team account a new random password, then end the account's Authentik sessions."""
+    with AuthentikManager() as manager:
+        return _reset_credentials(manager, team_number)
 
 
 @dataclass(frozen=True)
 class BulkPasswordResetResult:
     password_list: list[tuple[int, str, str]]
     failed_resets: list[tuple[str, str]]
-    sessions_failed: list[str]
+    sessions_failed: list[tuple[str, str]]
+
+    def audit_details(self) -> dict[str, object]:
+        return {
+            "success_count": len(self.password_list),
+            "failed_count": len(self.failed_resets),
+            "sessions_failed": [f"{username}: {why}" for username, why in self.sessions_failed],
+        }
+
+
+def sessions_failure_summary(sessions_failed: list[tuple[str, str]]) -> str:
+    """'could not end sessions for team01, team02: <why>', one clause per distinct reason."""
+    by_reason: dict[str, list[str]] = {}
+    for username, reason in sessions_failed:
+        by_reason.setdefault(reason, []).append(username)
+    return "; ".join(f"could not end sessions for {', '.join(names)}: {why}" for why, names in by_reason.items())
 
 
 def reset_teams_credentials(team_numbers: Iterable[int]) -> BulkPasswordResetResult:
-    """Reset passwords and revoke sessions for multiple teams."""
+    """Reset passwords and end sessions for multiple teams."""
     password_list: list[tuple[int, str, str]] = []
     failed_resets: list[tuple[str, str]] = []
-    sessions_failed: list[str] = []
+    sessions_failed: list[tuple[str, str]] = []
 
-    for team_num in team_numbers:
+    with AuthentikManager() as manager:
+        resets = [(team_num, _reset_credentials(manager, team_num)) for team_num in team_numbers]
+    for team_num, reset in resets:
         username = team_username(team_num)
-        password, error, sessions_revoked = reset_team_credentials(team_num)
-        if password:
-            password_list.append((team_num, username, password))
-            if not sessions_revoked:
-                sessions_failed.append(username)
-        else:
-            failed_resets.append((username, error))
+        if reset.password is None:
+            failed_resets.append((username, reset.error))
+            continue
+        password_list.append((team_num, username, reset.password))
+        if reset.sessions_error:
+            sessions_failed.append((username, reset.sessions_error))
 
     return BulkPasswordResetResult(
         password_list=password_list,
