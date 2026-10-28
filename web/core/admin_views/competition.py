@@ -284,23 +284,11 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
         raise BadRequest(error_msg)
 
     team_numbers = form.cleaned_data["team_numbers"] or active_team_numbers()
-    result = reset_teams_credentials(team_numbers)
+    result = reset_teams_credentials(team_numbers, actor=authentik_username)
     password_list = result.password_list
     sessions_failed = result.sessions_failed
 
     csv_content = credentials_csv((username, password) for _num, username, password in password_list)
-
-    AuditLog.objects.create(
-        action="blueteam_passwords_reset",
-        admin_user=authentik_username,
-        target_entity="authentik_users",
-        target_id=0,
-        details={
-            "total_users": len(team_numbers),
-            **result.audit_details(),
-            "team_numbers": form.cleaned_data.get("team_numbers", "") or "all active",
-        },
-    )
 
     message = f"Reset {len(password_list)}/{len(team_numbers)} passwords"
     if sessions_failed:

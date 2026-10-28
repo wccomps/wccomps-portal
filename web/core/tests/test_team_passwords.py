@@ -138,7 +138,7 @@ def test_bulk_reset_uses_one_manager(manager):
 
     with patch("core.authentik_utils.AuthentikManager") as cls:
         cls.return_value.__enter__.return_value = manager
-        result = reset_teams_credentials([1, 2, 3])
+        result = reset_teams_credentials([1, 2, 3], actor="gold-admin")
 
     assert cls.call_count == 1
     assert [username for _num, username, _pw in result.password_list] == ["team01", "team02", "team03"]
@@ -223,3 +223,36 @@ def test_team_page_password_reset_reports_a_failure(admin_user):
         body = client.post(reverse("admin_team_action", args=[8]), {"action": "reset_password"}).json()
 
     assert body == {"success": False, "message": "Password reset failed: HTTP 500"}
+
+
+def test_bulk_reset_writes_its_own_audit_row(manager):
+    """Web and bot both call the shared reset, so the row has one shape: team numbers as numbers, the actor, and why
+    each team failed."""
+    from core.models import AuditLog
+
+    manager.find_user.side_effect = lambda username: {"pk": 9, "username": username} if username != "team02" else None
+    with patch("core.authentik_utils.AuthentikManager") as cls:
+        cls.return_value.__enter__.return_value = manager
+        reset_teams_credentials([1, 2], actor="gold-admin")
+
+    row = AuditLog.objects.get(action="blueteam_passwords_reset")
+    assert row.admin_user == "gold-admin"
+    assert row.details["team_numbers"] == [1, 2]
+    assert row.details["total_users"] == 2
+    assert row.details["success_count"] == 1
+    assert row.details["failed_resets"] == ["team02: User team02 not found"]
+
+
+def test_web_and_bot_bulk_resets_leave_one_audit_row_each(admin_user):
+    from core.models import AuditLog
+
+    Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
+    client = Client()
+    client.force_login(admin_user)
+    with (
+        patch("core.authentik_utils.AuthentikManager"),
+        patch("core.authentik_utils._reset_credentials", return_value=CredentialReset(password="pw")),
+    ):
+        client.post(reverse("admin_competition_action"), {"action": "reset_passwords", "team_numbers": ""})
+
+    assert AuditLog.objects.filter(action="blueteam_passwords_reset").count() == 1

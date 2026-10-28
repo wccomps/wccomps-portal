@@ -84,23 +84,11 @@ class AdminCompetitionCog(commands.Cog):
             teams = active
 
         # Only successful resets go in the CSV: a failed one leaves the old password in place.
-        result = await sync_to_async(reset_teams_credentials)(teams)
+        result = await sync_to_async(reset_teams_credentials)(teams, actor=str(interaction.user))
         password_list = result.password_list
         failed_resets = result.failed_resets
         sessions_failed = result.sessions_failed
-
         total = len(teams)
-        await AuditLog.objects.acreate(
-            action="blueteam_passwords_reset",
-            admin_user=str(interaction.user),
-            target_entity="authentik_users",
-            target_id=0,
-            details={
-                "total_users": total,
-                **result.audit_details(),
-                "team_numbers": team_numbers or "all active",
-            },
-        )
 
         teams_msg = f"teams {team_numbers}" if team_numbers else f"all {total} active team accounts"
         await log_to_ops_channel(

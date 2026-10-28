@@ -10,6 +10,7 @@ import httpx
 from team.models import MAX_TEAMS, SchoolInfo, team_username
 
 from .authentik_manager import AuthentikAPIError, AuthentikManager, AuthentikUser, reason_for
+from .models import AuditLog
 from .utils import shorten
 
 logger = logging.getLogger(__name__)
@@ -102,13 +103,6 @@ class BulkPasswordResetResult:
     failed_resets: list[tuple[str, str]]
     sessions_failed: list[tuple[str, str]]
 
-    def audit_details(self) -> dict[str, object]:
-        return {
-            "success_count": len(self.password_list),
-            "failed_count": len(self.failed_resets),
-            "sessions_failed": [f"{username}: {why}" for username, why in self.sessions_failed],
-        }
-
 
 def sessions_failure_summary(sessions_failed: list[tuple[str, str]]) -> str:
     """'could not end sessions for team01, team02: <why>', one clause per distinct reason."""
@@ -118,8 +112,9 @@ def sessions_failure_summary(sessions_failed: list[tuple[str, str]]) -> str:
     return "; ".join(f"could not end sessions for {', '.join(names)}: {why}" for why, names in by_reason.items())
 
 
-def reset_teams_credentials(team_numbers: Iterable[int]) -> BulkPasswordResetResult:
-    """Reset passwords and end sessions for multiple teams."""
+def reset_teams_credentials(team_numbers: Iterable[int], actor: str) -> BulkPasswordResetResult:
+    """Reset passwords and end sessions for multiple teams, and audit it."""
+    team_numbers = list(team_numbers)
     password_list: list[tuple[int, str, str]] = []
     failed_resets: list[tuple[str, str]] = []
     sessions_failed: list[tuple[str, str]] = []
@@ -135,6 +130,20 @@ def reset_teams_credentials(team_numbers: Iterable[int]) -> BulkPasswordResetRes
         if reset.sessions_error:
             sessions_failed.append((username, reset.sessions_error))
 
+    AuditLog.objects.create(
+        action="blueteam_passwords_reset",
+        admin_user=actor,
+        target_entity="authentik_users",
+        target_id=0,
+        details={
+            "team_numbers": team_numbers,
+            "total_users": len(team_numbers),
+            "success_count": len(password_list),
+            "failed_count": len(failed_resets),
+            "failed_resets": [f"{username}: {why}" for username, why in failed_resets],
+            "sessions_failed": [f"{username}: {why}" for username, why in sessions_failed],
+        },
+    )
     return BulkPasswordResetResult(
         password_list=password_list,
         failed_resets=failed_resets,

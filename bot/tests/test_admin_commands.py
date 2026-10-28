@@ -106,6 +106,8 @@ class TestAdminCommands:
         csv_text = first.kwargs["file"].fp.getvalue().decode()
         assert csv_text.splitlines()[1:] == ["team01,pw-1", "team02,pw-2", "team03,pw-3"]
         assert any("Sessions: could not end sessions for team02: HTTP 403" in c.args[0] for c in rest)
+        rows = [r.details["team_numbers"] async for r in AuditLog.objects.filter(action="blueteam_passwords_reset")]
+        assert rows == [[1, 2, 3]]
 
     async def test_reset_blueteam_passwords_api_failure(
         self,
