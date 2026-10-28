@@ -163,22 +163,17 @@ class PacketDistributionService:
         if school_info.password:
             return school_info.password
 
-        reset = reset_team_credentials(team.team_number)
+        reset = reset_team_credentials(team.team_number, actor="packet distribution")
         if reset.password is None:
             raise ValueError(f"Failed to set Authentik password for team {team.team_number}: {reset.error}")
         logger.info(f"Generated credentials for team {team.team_number}")
-        # Nobody should be signed in to a team account before its packet goes out: someone else has its credentials
-        alerts = []
         if reset.sessions_found:
-            alerts.append(
+            alert = (
                 f"Team {team.team_number}'s account had {reset.sessions_found} Authentik sessions before its packet "
                 "went out; its credentials may have leaked."
             )
-        if reset.sessions_error:
-            alerts.append(f"Team {team.team_number}: could not end its Authentik sessions: {reset.sessions_error}")
-        if alerts:
-            logger.warning(" ".join(alerts))
-            DiscordTask.enqueue(LogToChannel(message=" ".join(alerts)))
+            logger.warning(alert)
+            DiscordTask.enqueue(LogToChannel(message=alert))
         return reset.password
 
     def _build_packet_email(

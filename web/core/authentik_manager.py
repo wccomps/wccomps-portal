@@ -158,6 +158,11 @@ class AuthentikManager:
             url=str(response.url),
         )
 
+    def _check(self, response: httpx.Response, context: str) -> None:
+        """AuthentikAPIError unless the answer is 2xx (a redirect is a failure too)."""
+        if not response.is_success:
+            raise self._handle_response_error(response, context)
+
     def _json(self, response: httpx.Response, context: str) -> object:
         """The answer's JSON; AuthentikAPIError when it isn't JSON (or is nested too deep to read)."""
         try:
@@ -170,8 +175,7 @@ class AuthentikManager:
     def _results(self, response: httpx.Response, context: str) -> tuple[list[dict[str, object]], bool]:
         """A list endpoint's results (objects only) and whether another page follows; AuthentikAPIError for an
         answer other than 2xx (a redirect too) or of any other shape."""
-        if not response.is_success:
-            raise self._handle_response_error(response, context)
+        self._check(response, context)
         data = self._json(response, context)
         results = data.get("results") if isinstance(data, dict) else None
         if not isinstance(results, list) or not all(isinstance(r, dict) for r in results):
@@ -236,16 +240,15 @@ class AuthentikManager:
             if response.status_code == 404:
                 logger.warning(f"Application '{slug}' not found in Authentik")
                 return None
-            response.raise_for_status()
+            self._check(response, f"Get application '{slug}'")
             app = self._json(response, f"Get application '{slug}'")
             if not isinstance(app, dict) or not isinstance(app.get("pk"), str):
                 logger.error(f"Application '{slug}': Authentik's answer has no pk")
                 return None
             logger.info(f"Found application '{slug}' with pk={app['pk']}")
             return cast(AuthentikApplication, app)
-        except httpx.HTTPStatusError as e:
-            error = self._handle_response_error(e.response, f"Get application '{slug}'")
-            logger.exception(str(error))
+        except AuthentikAPIError as e:
+            logger.exception(str(e))
             return None
         except httpx.HTTPError as e:
             logger.exception(f"Network error getting application '{slug}': {e}")
@@ -262,7 +265,6 @@ class AuthentikManager:
             self._log_request("GET", url, params={"target": app_pk})
 
             response = self.client.get(url, params={"target": app_pk})
-            response.raise_for_status()
             bindings, _ = self._results(response, f"Query bindings for app {app_pk}")
 
             logger.debug(f"Found {len(bindings)} binding(s) for application {app_pk}")
@@ -286,10 +288,9 @@ class AuthentikManager:
             logger.error(error_msg)
             return None, error_msg
 
-        except httpx.HTTPStatusError as e:
-            error = self._handle_response_error(e.response, f"Query bindings for app {app_pk}")
-            logger.exception(f"Failed to query bindings: {error}")
-            return None, str(error)
+        except AuthentikAPIError as e:
+            logger.exception(f"Failed to query bindings: {e}")
+            return None, str(e)
         except httpx.HTTPError as e:
             error_msg = f"Network error querying bindings: {e}"
             logger.exception(error_msg)
@@ -311,13 +312,13 @@ class AuthentikManager:
                 f"{self.base_url}/api/v3/policies/bindings/{binding_pk}/",
                 json=binding,
             )
-            response.raise_for_status()
+            self._check(response, f"Update binding {binding_pk}")
             state = "enabled" if enabled else "disabled"
             logger.info(f"Set binding {binding_pk} to {state}")
             return True
-        except httpx.HTTPStatusError as e:
+        except AuthentikAPIError as e:
             # Log Authentik's response body (why the 400 etc.), not just the status code
-            logger.exception(str(self._handle_response_error(e.response, f"Update binding {binding_pk}")))
+            logger.exception(str(e))
             return False
         except Exception as e:
             logger.exception(f"Failed to update binding {binding.get('pk')}: {e}")
@@ -370,7 +371,7 @@ class AuthentikManager:
         return self._toggle_application(app_slug, enable=False)
 
     def update_user_discord_id(self, username: str, discord_id: int, uid: str) -> bool:
-        """Store Discord ID in Authentik user attributes, preserving existing attributes.
+        """Store Discord ID in Authentik user attributes, preserving existing attributes; False if it wasn't stored.
 
         Nothing is written unless the user found by username has this uid (OIDC sub): a stale
         username may since belong to someone else.
@@ -394,28 +395,16 @@ class AuthentikManager:
                 f"{self.base_url}/api/v3/core/users/{user_pk}/",
                 json={"attributes": attributes},
             )
-            response.raise_for_status()
+            self._check(response, f"Store the Discord ID of {username}")
             logger.info(f"Updated discord_id for Authentik user {username} (pk={user_pk})")
             return True
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 403:
-                logger.exception(
-                    f"Authentik API token lacks permission to update user {username}. Error: {e.response.text}"
-                )
-            else:
-                logger.exception(f"Failed to update Authentik user discord_id: {e}")
-            raise
-        except AuthentikAPIError as e:
-            logger.exception(f"Failed to update discord_id for user {username}: {e}")
-            if e.status_code is not None:  # Authentik refused the lookup: raise, as a refused update does
-                raise
-            return False
         except Exception as e:
             logger.exception(f"Failed to update discord_id for user {username}: {e}")
             return False
 
     def end_user_sessions(self, user: AuthentikUser) -> tuple[int, str | None]:
-        """End every Authentik session of a user: (sessions of theirs found, None when all ended or else why not).
+        """End every Authentik session of a user: (sessions found, 0 when they can't be trusted; None when all ended,
+        else why not).
         The reason never names the user or counts sessions, so one reason shared by many teams reads once."""
         found = 0
         try:
@@ -433,7 +422,7 @@ class AuthentikManager:
             except ValueError:
                 return found, "Authentik answered a session without a valid id, so none were ended"
             if not sessions and not self.sees_any_sessions():
-                return 0, SESSIONS_HIDDEN
+                return found, SESSIONS_HIDDEN
 
             refused: int | None = None
             for session_id in session_ids:
@@ -453,28 +442,10 @@ class AuthentikManager:
         sessions, _ = self._results(response, "List sessions")
         return bool(sessions)
 
-    def toggle_user(self, username: str, is_active: bool) -> tuple[bool, str]:
-        """Enable or disable a team account in Authentik, refusing accounts that aren't team accounts."""
-        from core.authentik_utils import validate_team_account
-
-        try:
-            user = self.find_user(username)
-            if not user:
-                return (False, "User not found")
-
-            is_valid, error = validate_team_account(user, username)
-            if not is_valid:
-                return (False, error)
-
-            response = self.client.patch(
-                f"{self.base_url}/api/v3/core/users/{user['pk']}/",
-                json={"is_active": is_active},
-            )
-            response.raise_for_status()
-            return (True, "")
-        except Exception as e:
-            logger.exception(f"Failed to toggle {username}: {e}")
-            return (False, "Account toggle failed. Check the server logs.")
+    def set_user_active(self, user: AuthentikUser, is_active: bool) -> None:
+        """Raises AuthentikAPIError on an answer other than 2xx, httpx.HTTPError when Authentik can't be reached."""
+        response = self.client.patch(f"{self.base_url}/api/v3/core/users/{user['pk']}/", json={"is_active": is_active})
+        self._check(response, f"Set {user['username']} active={is_active}")
 
     def find_user(self, username: str) -> AuthentikUser | None:
         """The user Authentik answers for this username, or None; callers check the username it carries. Raises
@@ -488,8 +459,7 @@ class AuthentikManager:
         response = self.client.post(
             f"{self.base_url}/api/v3/core/users/{user['pk']}/set_password/", json={"password": password}
         )
-        if not response.is_success:
-            raise self._handle_response_error(response, f"Set the password of {user['username']}")
+        self._check(response, f"Set the password of {user['username']}")
 
     def _list_all(self, path: str, params: dict[str, str], fields: dict[str, type]) -> list[dict[str, object]]:
         """Fetch every page of an Authentik list endpoint, each result holding these fields of these types (a list
@@ -565,12 +535,11 @@ class AuthentikManager:
                 f"{self.base_url}/api/v3/core/groups/{group_pk}/add_user/",
                 json={"pk": user_pk},
             )
-            response.raise_for_status()
+            self._check(response, f"Add user {user_pk} to group {group_pk}")
             return (True, "")
-        except httpx.HTTPStatusError as e:
-            error = self._handle_response_error(e.response, f"Add user {user_pk} to group {group_pk}")
-            logger.exception(str(error))
-            return (False, str(error))
+        except AuthentikAPIError as e:
+            logger.exception(str(e))
+            return (False, str(e))
         except Exception as e:
             logger.exception(f"Failed to add user {user_pk} to group {group_pk}: {e}")
             return (False, f"Failed to add user to group: {e}")

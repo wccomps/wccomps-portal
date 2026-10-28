@@ -143,6 +143,10 @@ class PacketDistributionServiceTestCase(TestCase):
         distribution.refresh_from_db()
         self.assertEqual(distribution.email_status, "sent")
 
+    @staticmethod
+    def _ops_messages() -> list[str]:
+        return [task.payload["message"] for task in DiscordTask.objects.filter(task_type="log_to_channel")]
+
     @patch("packets.services.EmailMultiAlternatives")
     def test_first_send_sets_the_password_and_later_sends_reuse_it(self, mock_email_class):
         """The packet carries the team's credentials: a resend or test email must not change them."""
@@ -158,8 +162,11 @@ class PacketDistributionServiceTestCase(TestCase):
             self.service.send_test_packet_email(self.packet, team, "gold@example.com")
 
         manager.set_password.assert_called_once()
-        manager.end_user_sessions.assert_called_once_with({"pk": 5, "username": "team01"})
-        self.assertFalse(DiscordTask.objects.filter(task_type="log_to_channel").exists())
+        self.assertEqual(manager.end_user_sessions.call_count, 2)
+        self.assertEqual(
+            self._ops_messages(),
+            ["Credentials reset for team 1 by packet distribution: ended the team's Authentik sessions"],
+        )
         password = manager.set_password.call_args.args[1]
         self.assertEqual(SchoolInfo.objects.get(team=team).password, password)
         for call in mock_email_class.call_args_list:
@@ -167,7 +174,7 @@ class PacketDistributionServiceTestCase(TestCase):
 
     @patch("packets.services.EmailMultiAlternatives")
     def test_account_signed_in_before_its_packet_alerts_ops(self, mock_email_class):
-        """Nobody should be signed in to a team account before its packet goes out: someone else has the credentials."""
+        """A team account signed in before its packet goes out may mean its credentials leaked."""
         team = Team.objects.get(team_number=1)
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
@@ -175,10 +182,10 @@ class PacketDistributionServiceTestCase(TestCase):
         with patch("core.authentik_utils.AuthentikManager") as cls:
             manager = cls.return_value.__enter__.return_value
             manager.find_user.return_value = {"pk": 5, "username": "team01"}
-            manager.end_user_sessions.return_value = (2, None)
+            manager.end_user_sessions.side_effect = [(2, None), (0, None)]
             self.service.send_packet_email(distribution)
 
-        alert = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+        alert = self._ops_messages()[-1]
         self.assertIn("Team 1", alert)
         self.assertIn("2 Authentik sessions", alert)
         mock_email_class.return_value.send.assert_called_once()
@@ -192,12 +199,16 @@ class PacketDistributionServiceTestCase(TestCase):
         with patch("core.authentik_utils.AuthentikManager") as cls:
             manager = cls.return_value.__enter__.return_value
             manager.find_user.return_value = {"pk": 5, "username": "team01"}
-            manager.end_user_sessions.return_value = (1, "Authentik did not end sessions (HTTP 403)")
+            manager.end_user_sessions.side_effect = [(0, None), (0, "Authentik did not end sessions (HTTP 403)")]
             self.service.send_packet_email(distribution)
 
-        alert = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
-        self.assertIn("could not end", alert)
-        self.assertIn("HTTP 403", alert)
+        self.assertEqual(
+            self._ops_messages(),
+            [
+                "Credentials reset for team 1 by packet distribution: could not end the team's Authentik sessions: "
+                "Authentik did not end sessions (HTTP 403)"
+            ],
+        )
 
     @patch("packets.services.EmailMultiAlternatives")
     def test_failed_password_set_sends_nothing(self, mock_email_class):

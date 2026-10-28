@@ -90,15 +90,6 @@ class AdminCompetitionCog(commands.Cog):
         sessions_failed = result.sessions_failed
         total = len(teams)
 
-        teams_msg = f"teams {team_numbers}" if team_numbers else f"all {total} active team accounts"
-        await log_to_ops_channel(
-            self.bot,
-            f"BlueTeam Password Reset by {interaction.user.mention}\n"
-            f"• Teams: {teams_msg}\n"
-            f"• Reset: {len(password_list)}/{total}\n"
-            f"• Failed: {len(failed_resets)}",
-        )
-
         summary = f"Password reset complete\n• Success: {len(password_list)}/{total}\n"
         details = "".join(f"• Failed {username}: {error}\n" for username, error in failed_resets)
         if sessions_failed:

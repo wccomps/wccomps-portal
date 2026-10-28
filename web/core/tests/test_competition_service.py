@@ -10,9 +10,19 @@ from django.utils import timezone
 from core.discord_tasks import BroadcastMessage
 from core.models import AuditLog, CompetitionConfig, DiscordTask
 from core.services.competition import run_competition, run_competition_to_completion
-from team.models import MAX_TEAMS, Team
+from team.models import MAX_TEAMS, Team, team_username
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.fixture(autouse=True)
+def _team_accounts_through_the_manager():
+    """Route team account switches to a team_account mock on whichever manager the test patched in."""
+    with patch(
+        "core.services.competition.set_team_account_active",
+        side_effect=lambda manager, number, is_active: manager.team_account(team_username(number), is_active=is_active),
+    ):
+        yield
 
 
 @pytest.fixture
@@ -20,7 +30,7 @@ def authentik() -> Iterator[MagicMock]:
     manager = MagicMock()
     manager.enable_application.return_value = (True, None)
     manager.disable_application.return_value = (True, None)
-    manager.toggle_user.return_value = (True, "")
+    manager.team_account.return_value = (True, "")
     with (
         patch("core.authentik_manager.AuthentikManager", return_value=manager),
         patch("core.services.user_groups.refresh_user_groups") as refresh,
@@ -78,9 +88,9 @@ def test_start_enables_only_the_active_teams_accounts(authentik, config):
     """Inactive teams' accounts keep their groups between events; enabling them would let them in."""
     run_competition_to_completion(True, "timer")
 
-    enabled = [c.args[0] for c in authentik.toggle_user.call_args_list]
+    enabled = [c.args[0] for c in authentik.team_account.call_args_list]
     assert enabled == ["team01", "team02", "team03"]
-    assert all(c.kwargs == {"is_active": True} for c in authentik.toggle_user.call_args_list)
+    assert all(c.kwargs == {"is_active": True} for c in authentik.team_account.call_args_list)
 
 
 def test_stop_disables_every_team_account(authentik, config):
@@ -89,7 +99,7 @@ def test_stop_disables_every_team_account(authentik, config):
 
     result = run_competition_to_completion(False, "timer")
 
-    assert authentik.toggle_user.call_count == result.accounts_total == MAX_TEAMS
+    assert authentik.team_account.call_count == result.accounts_total == MAX_TEAMS
     assert "Accounts disabled: 50/50" in result.summary()
 
 
@@ -153,7 +163,7 @@ def test_schedule_edited_during_a_run_survives(authentik, config):
         CompetitionConfig.objects.filter(pk=1).update(competition_end_time=new_end, max_team_members=7)
         return True, ""
 
-    authentik.toggle_user.side_effect = edit_schedule_midway
+    authentik.team_account.side_effect = edit_schedule_midway
     run_competition_to_completion(True, "timer")
 
     config.refresh_from_db()
@@ -174,7 +184,7 @@ def test_no_controlled_apps_changes_nothing(authentik, config):
     result = run_competition_to_completion(True, "timer")
 
     assert result.error == "No controlled applications configured"
-    authentik.toggle_user.assert_not_called()
+    authentik.team_account.assert_not_called()
     assert not AuditLog.objects.exists()
 
 

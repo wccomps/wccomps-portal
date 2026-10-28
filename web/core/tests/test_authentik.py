@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, Mock, patch
 import httpx
 import pytest
 
-from core.authentik_manager import AuthentikAPIError, AuthentikManager
+from core.authentik_manager import AuthentikManager
 
 
 class TestAuthentikManager:
@@ -124,28 +124,20 @@ class TestUpdateUserDiscordId:
         manager.client.patch.assert_not_called()
 
     @pytest.mark.parametrize("status", [403, 500, 302])
-    def test_raises_when_authentik_refuses_the_lookup(self, manager, status):
-        """A refused lookup raises (the caller treats it as non-fatal), as a refused update does."""
-        mock_response = MagicMock(status_code=status, text="refused", is_success=False)
-        manager.client.get.return_value = mock_response
+    def test_refused_lookup_stores_nothing(self, manager, status):
+        manager.client.get.return_value = MagicMock(status_code=status, text="refused", is_success=False)
 
-        with pytest.raises(AuthentikAPIError):
-            manager.update_user_discord_id("someuser", 123456789, "u-1")
-
+        assert manager.update_user_discord_id("someuser", 123456789, "u-1") is False
         manager.client.patch.assert_not_called()
 
-    def test_raises_on_a_refused_update(self, manager):
+    @pytest.mark.parametrize("status", [403, 500, 302])
+    def test_refused_update_is_false(self, manager, status):
         mock_get_response = MagicMock()
         mock_get_response.json.return_value = {"results": [{"pk": 42, "uid": "u-1", "attributes": {}}]}
         manager.client.get.return_value = mock_get_response
-        mock_patch_response = MagicMock(status_code=500, text="Server error")
-        mock_patch_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "error", request=MagicMock(), response=mock_patch_response
-        )
-        manager.client.patch.return_value = mock_patch_response
+        manager.client.patch.return_value = MagicMock(status_code=status, text="refused", is_success=False)
 
-        with pytest.raises(httpx.HTTPStatusError):
-            manager.update_user_discord_id("someuser", 123456789, "u-1")
+        assert manager.update_user_discord_id("someuser", 123456789, "u-1") is False
 
 
 class TestUpdateBindingEnabled:
@@ -166,7 +158,7 @@ class TestUpdateBindingEnabled:
         resp.url = "https://auth.example.com/api/v3/policies/bindings/abc/"
         resp.json.return_value = {"non_field_errors": ["Enabled cannot be set on this binding"]}
         resp.text = '{"non_field_errors": ["Enabled cannot be set on this binding"]}'
-        resp.raise_for_status.side_effect = httpx.HTTPStatusError("400", request=MagicMock(), response=resp)
+        resp.is_success = False
         manager.client.put.return_value = resp
 
         with caplog.at_level(logging.ERROR):

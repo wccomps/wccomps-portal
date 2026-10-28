@@ -15,6 +15,7 @@ from core.authentik_utils import (
     reset_team_credentials,
     reset_teams_credentials,
     sessions_failure_summary,
+    set_team_account_active,
 )
 from core.models import DiscordTask
 from team.models import DiscordLink, SchoolInfo, Team
@@ -51,7 +52,7 @@ def test_authentik_reset_leaves_the_account_disabled():
 
     with patch("core.authentik_utils.AuthentikManager") as cls:
         cls.return_value.__enter__.return_value = real
-        reset = reset_team_credentials(7)
+        reset = reset_team_credentials(7, actor="gold-admin")
 
     assert reset.password
     real.client.patch.assert_not_called()
@@ -74,21 +75,53 @@ def test_web_unlink_queues_a_role_sync_for_the_member(admin_user, action):
 
 
 def test_reset_team_credentials_records_the_password_and_the_sessions_outcome(school_info, manager):
-    manager.end_user_sessions.return_value = (1, "Authentik did not end sessions (HTTP 403)")
+    manager.end_user_sessions.side_effect = [(2, None), (0, "Authentik did not end sessions (HTTP 403)")]
 
-    reset = reset_team_credentials(7)
+    reset = reset_team_credentials(7, actor="gold-admin")
 
     assert reset.password and reset.sessions_error == "Authentik did not end sessions (HTTP 403)"
+    assert reset.sessions_found == 2
     manager.find_user.assert_called_once_with("team07")
-    manager.end_user_sessions.assert_called_once_with({"pk": 5, "username": "team07"})
     school_info.refresh_from_db()
     assert school_info.password == reset.password
+
+
+def test_reset_counts_sessions_before_the_password_changes(manager):
+    """If Authentik ends sessions on a password change, a count taken after would always be 0."""
+    calls: list[str] = []
+    manager.end_user_sessions.side_effect = lambda user: calls.append("end") or (0, None)
+    manager.set_password.side_effect = lambda user, password: calls.append("set")
+
+    reset_team_credentials(7, actor="gold-admin")
+
+    assert calls == ["end", "set", "end"]
+
+
+def test_reset_team_credentials_audits_and_tells_ops(manager):
+    from core.models import AuditLog
+
+    manager.end_user_sessions.side_effect = [(1, None), (0, None)]
+
+    reset_team_credentials(7, actor="gold-admin")
+
+    row = AuditLog.objects.get(action="team_password_reset")
+    assert (row.admin_user, row.target_id) == ("gold-admin", 7)
+    assert row.details == {
+        "password_reset": True,
+        "sessions_revoked": True,
+        "sessions_error": None,
+        "sessions_found": 1,
+    }
+    note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    assert note == "Credentials reset for team 7 by gold-admin: ended the team's Authentik sessions"
 
 
 def test_reset_team_credentials_failure_records_nothing(school_info, manager):
     manager.find_user.return_value = None
 
-    assert reset_team_credentials(7) == CredentialReset(password=None, error="User team07 not found")
+    assert reset_team_credentials(7, actor="gold-admin") == CredentialReset(
+        password=None, error="User team07 not found"
+    )
 
     school_info.refresh_from_db()
     assert school_info.password == "old"
@@ -98,18 +131,23 @@ def test_reset_team_credentials_refuses_a_non_team_account(manager):
     """Authentik answering another user for team07 must change neither its password nor its sessions."""
     manager.find_user.return_value = {"pk": 1, "username": "akadmin"}
 
-    reset = reset_team_credentials(7)
+    reset = reset_team_credentials(7, actor="gold-admin")
 
     assert reset.password is None and "not a team account" in reset.error
     manager.set_password.assert_not_called()
     manager.end_user_sessions.assert_not_called()
 
 
-def test_reset_team_credentials_failed_password_tries_no_sessions(manager):
+def test_reset_team_credentials_failed_password_records_nothing(school_info, manager):
     manager.set_password.side_effect = AuthentikAPIError("Set the password of team07: Server error", 500)
 
-    assert reset_team_credentials(7) == CredentialReset(password=None, error="Set the password of team07: Server error")
-    manager.end_user_sessions.assert_not_called()
+    assert reset_team_credentials(7, actor="gold-admin") == CredentialReset(
+        password=None, error="Set the password of team07: Server error"
+    )
+    school_info.refresh_from_db()
+    assert school_info.password == "old"
+    note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    assert note == "Credentials reset for team 7 by gold-admin failed: Set the password of team07: Server error"
 
 
 def test_reset_team_credentials_names_an_unlisted_status(manager):
@@ -120,13 +158,15 @@ def test_reset_team_credentials_names_an_unlisted_status(manager):
         AuthentikManager.__new__(AuthentikManager), response, "Set the password of team07"
     )
 
-    assert reset_team_credentials(7).error == "Set the password of team07: HTTP 400"
+    assert reset_team_credentials(7, actor="gold-admin").error == "Set the password of team07: HTTP 400"
 
 
 def test_reset_team_credentials_network_error_names_the_cause(school_info, manager):
     manager.set_password.side_effect = httpx.ConnectError("refused")
 
-    assert reset_team_credentials(7) == CredentialReset(password=None, error="Network error (ConnectError)")
+    assert reset_team_credentials(7, actor="gold-admin") == CredentialReset(
+        password=None, error="Network error (ConnectError)"
+    )
     school_info.refresh_from_db()
     assert school_info.password == "old"
 
@@ -145,10 +185,11 @@ def test_bulk_reset_uses_one_manager(manager):
 
 
 def test_credential_reset_audit_details():
-    assert CredentialReset(password="pw").audit_details() == {
+    assert CredentialReset(password="pw", sessions_found=2).audit_details() == {
         "password_reset": True,
         "sessions_revoked": True,
         "sessions_error": None,
+        "sessions_found": 2,
     }
     assert CredentialReset(password=None, error="x").audit_details()["sessions_revoked"] is False
 
@@ -200,7 +241,7 @@ def test_team_page_password_reset_keeps_discord_links(admin_user):
     ) as reset:
         response = client.post(reverse("admin_team_action", args=[8]), {"action": "reset_password"})
 
-    reset.assert_called_once_with(8)
+    assert reset.call_args.args == (8,) and reset.call_args.kwargs["actor"]
     body = response.json()
     assert body == {
         "success": True,
@@ -209,7 +250,7 @@ def test_team_page_password_reset_keeps_discord_links(admin_user):
     }
     assert DiscordLink.objects.filter(discord_id=4343, is_active=True).exists()
     assert not DiscordTask.objects.filter(task_type="sync_member_roles").exists()
-    assert AuditLog.objects.get(action="team_password_reset").details["sessions_revoked"] is True
+    assert not AuditLog.objects.filter(action="team_password_reset").exists(), "the shared reset writes that row"
 
 
 def test_team_page_password_reset_reports_a_failure(admin_user):
@@ -226,8 +267,6 @@ def test_team_page_password_reset_reports_a_failure(admin_user):
 
 
 def test_bulk_reset_writes_its_own_audit_row(manager):
-    """Web and bot both call the shared reset, so the row has one shape: team numbers as numbers, the actor, and why
-    each team failed."""
     from core.models import AuditLog
 
     manager.find_user.side_effect = lambda username: {"pk": 9, "username": username} if username != "team02" else None
@@ -243,7 +282,7 @@ def test_bulk_reset_writes_its_own_audit_row(manager):
     assert row.details["failed_resets"] == ["team02: User team02 not found"]
 
 
-def test_web_and_bot_bulk_resets_leave_one_audit_row_each(admin_user):
+def test_web_bulk_reset_leaves_one_audit_row(admin_user):
     from core.models import AuditLog
 
     Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
@@ -289,3 +328,27 @@ def test_web_bulk_reset_where_every_team_failed_is_an_error(admin_user):
     assert body["success"] is False
     assert body["message"].startswith("Reset 0/1 passwords")
     assert body["csv"] == ""
+
+
+def test_set_team_account_active_switches_the_teams_account(manager):
+    assert set_team_account_active(manager, 7, True) == (True, "")
+    manager.set_user_active.assert_called_once_with({"pk": 5, "username": "team07"}, True)
+
+
+def test_set_team_account_active_refuses_a_non_team_account(manager):
+    manager.find_user.return_value = {"pk": 1, "username": "akadmin"}
+
+    ok, why = set_team_account_active(manager, 7, False)
+
+    assert not ok and "not a team account" in why
+    manager.set_user_active.assert_not_called()
+
+
+def test_bulk_reset_tells_ops_once(manager):
+    manager.find_user.side_effect = lambda username: {"pk": 9, "username": username} if username != "team02" else None
+    with patch("core.authentik_utils.AuthentikManager") as cls:
+        cls.return_value.__enter__.return_value = manager
+        reset_teams_credentials([1, 2], actor="gold-admin")
+
+    notes = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    assert notes == ["Credentials reset by gold-admin: Reset 1/2 passwords; failed: team02: User team02 not found"]

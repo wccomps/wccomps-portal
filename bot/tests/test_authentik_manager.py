@@ -510,7 +510,6 @@ class TestAuthentikManager:
         )
 
     def test_end_user_sessions_counts_the_sessions_it_found(self, manager: AuthentikManager) -> None:
-        """A packet reset alerts ops when the account was already signed in, so the count must be the sessions found."""
         manager.client.get.return_value = self._sessions(42, 42)
         manager.client.delete.side_effect = [self._answer({}, 404), self._answer({}, 204)]
 
@@ -521,12 +520,17 @@ class TestAuthentikManager:
 
         assert manager.end_user_sessions(self.TEAM01) == (0, SESSIONS_HIDDEN)
 
-    def test_older_lookups_refuse_a_redirected_answer(self, manager: AuthentikManager) -> None:
-        """They share find_user and the list reader, so a redirect is a failure, never an answer to act on."""
+    def test_lookups_refuse_a_redirected_answer(self, manager: AuthentikManager) -> None:
         manager.client.get.return_value = self._answer({"results": [{"pk": 42, "username": "team01"}]}, 302)
 
-        assert manager.toggle_user("team01", is_active=True)[0] is False
+        with pytest.raises(AuthentikAPIError):
+            manager.find_user("team01")
         assert manager.get_user_with_groups("team01") is None
         assert manager.get_group_by_name("WCComps_BlueTeam01") is None
         assert manager.list_applications() == []
-        manager.client.patch.assert_not_called()
+
+    def test_set_user_active_refuses_a_redirect(self, manager: AuthentikManager) -> None:
+        manager.client.patch.return_value = self._answer({}, 302)
+
+        with pytest.raises(AuthentikAPIError):
+            manager.set_user_active(self.TEAM01, True)

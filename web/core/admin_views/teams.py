@@ -132,7 +132,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
 
         DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
 
-        reset = reset_team_credentials(team_number)
+        reset = reset_team_credentials(team_number, actor=authentik_username)
 
         AuditLog.objects.create(
             action="team_reset",
@@ -142,7 +142,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
             details={
                 "team_name": team.team_name,
                 "unlinked_members": unlinked,
-                **reset.audit_details(),
+                "password_reset": reset.password is not None,
                 "recreated_channels": True,
             },
         )
@@ -165,17 +165,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
 
     elif action == "reset_password":
         # Discord links stay, unlike "reset"
-        reset = reset_team_credentials(team_number)
-        AuditLog.objects.create(
-            action="team_password_reset",
-            admin_user=authentik_username,
-            target_entity="team",
-            target_id=team_number,
-            details={
-                "team_name": team.team_name,
-                **reset.audit_details(),
-            },
-        )
+        reset = reset_team_credentials(team_number, actor=authentik_username)
         if reset.password is None:
             return JsonResponse({"success": False, "message": f"Password reset failed: {reset.error}"})
         message = f"New password set in Authentik; {reset.sessions_outcome}"

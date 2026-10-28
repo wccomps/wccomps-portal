@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from django.db import transaction
 
+from core.authentik_utils import set_team_account_active
 from core.discord_tasks import BroadcastMessage
 from core.models import AuditLog, CompetitionConfig, DiscordTask
 from team.models import MAX_TEAMS, active_team_numbers, team_username
@@ -116,7 +117,7 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
 
     for number in numbers:
         username = team_username(number)
-        ok, _ = manager.toggle_user(username, is_active=enable)
+        ok, _ = set_team_account_active(manager, number, enable)
         step += 1
         if ok:
             result.accounts_ok += 1

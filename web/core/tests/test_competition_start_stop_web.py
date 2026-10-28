@@ -9,8 +9,19 @@ from django.test import Client
 from django.urls import reverse
 
 from core.models import CompetitionConfig, DiscordTask
+from team.models import team_username
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.fixture(autouse=True)
+def _team_accounts_through_the_manager():
+    """Route team account switches to a team_account mock on whichever manager the test patched in."""
+    with patch(
+        "core.services.competition.set_team_account_active",
+        side_effect=lambda manager, number, is_active: manager.team_account(team_username(number), is_active=is_active),
+    ):
+        yield
 
 
 @pytest.fixture
@@ -28,7 +39,7 @@ def test_start_streams_progress_and_posts_to_ops(admin_client):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"controlled_applications": ["scoring"]})
     manager = MagicMock()
     manager.enable_application.return_value = (True, None)
-    manager.toggle_user.return_value = (True, "")
+    manager.team_account.return_value = (True, "")
 
     with (
         patch("core.authentik_manager.AuthentikManager", return_value=manager),
@@ -50,7 +61,7 @@ def test_stop_streams_progress_syncs_scores_and_posts_to_ops(admin_client, admin
     )
     manager = MagicMock()
     manager.disable_application.return_value = (True, None)
-    manager.toggle_user.return_value = (True, "")
+    manager.team_account.return_value = (True, "")
 
     with (
         patch("core.authentik_manager.AuthentikManager", return_value=manager),
@@ -109,7 +120,7 @@ def test_start_finishes_after_the_browser_disconnects(admin_client):
         browser_gone.wait(timeout=10)
         return True, ""
 
-    manager.toggle_user.side_effect = toggle_once_the_browser_is_gone
+    manager.team_account.side_effect = toggle_once_the_browser_is_gone
 
     with (
         patch("core.authentik_manager.AuthentikManager", return_value=manager),
@@ -123,7 +134,7 @@ def test_start_finishes_after_the_browser_disconnects(admin_client):
         _join_detached_runs()
 
     assert first["step"] == "Enabled scoring"
-    assert [c.args[0] for c in manager.toggle_user.call_args_list] == ["team01", "team02", "team03"]
+    assert [c.args[0] for c in manager.team_account.call_args_list] == ["team01", "team02", "team03"]
     assert CompetitionConfig.get_config().applications_enabled
 
 
@@ -169,7 +180,7 @@ def test_a_partial_start_is_reported_incomplete_not_success(admin_client):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"controlled_applications": ["scoring"]})
     manager = MagicMock()
     manager.enable_application.return_value = (False, "HTTP 502")
-    manager.toggle_user.return_value = (True, "")
+    manager.team_account.return_value = (True, "")
 
     with (
         patch("core.authentik_manager.AuthentikManager", return_value=manager),

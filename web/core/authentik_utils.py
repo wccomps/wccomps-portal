@@ -10,7 +10,8 @@ import httpx
 from team.models import MAX_TEAMS, SchoolInfo, team_username
 
 from .authentik_manager import AuthentikAPIError, AuthentikManager, AuthentikUser, reason_for
-from .models import AuditLog
+from .discord_tasks import LogToChannel
+from .models import AuditLog, DiscordTask
 from .utils import shorten
 
 logger = logging.getLogger(__name__)
@@ -35,27 +36,30 @@ def validate_team_account(user_data: AuthentikUser, expected_username: str) -> t
     return (True, "")
 
 
-def _new_team_password(manager: AuthentikManager, team_number: int) -> tuple[AuthentikUser, str] | str:
-    """(account, password), or why not. Leaves is_active alone: team accounts are enabled only while the competition
-    runs."""
+def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser | str:
+    """The team's Authentik account, or why not: out of range, no such user, or not that team's account. Raises
+    AuthentikAPIError or httpx.HTTPError when Authentik can't be asked."""
     if team_number < 1 or team_number > MAX_TEAMS:
         return f"Team number must be between 1 and {MAX_TEAMS}"
     username = team_username(team_number)
-    password = generate_blueteam_password()
+    user = manager.find_user(username)
+    if not user:
+        return f"User {username} not found"
+    is_valid, error = validate_team_account(user, username)
+    return user if is_valid else error
+
+
+def set_team_account_active(manager: AuthentikManager, team_number: int, is_active: bool) -> tuple[bool, str]:
+    """Enable or disable a team's Authentik account: (True, "") or (False, why not)."""
     try:
-        user = manager.find_user(username)
-        if not user:
-            return f"User {username} not found"
-        is_valid, error = validate_team_account(user, username)
-        if not is_valid:
-            return error
-        manager.set_password(user, password)
+        user = _team_user(manager, team_number)
+        if isinstance(user, str):
+            return False, user
+        manager.set_user_active(user, is_active)
     except (AuthentikAPIError, httpx.HTTPError) as e:
-        logger.warning(f"Failed to reset the password of {username}: {e}")
-        return reason_for(e)
-    # The copy packet emails send; a team with no school info has none
-    SchoolInfo.objects.filter(team__team_number=team_number).update(password=password)
-    return user, password
+        logger.warning(f"Failed to set team {team_number} active={is_active}: {e}")
+        return False, reason_for(e)
+    return True, ""
 
 
 @dataclass(frozen=True)
@@ -79,22 +83,47 @@ class CredentialReset:
             "password_reset": self.password is not None,
             "sessions_revoked": self.password is not None and self.sessions_error is None,
             "sessions_error": self.sessions_error,
+            "sessions_found": self.sessions_found,
         }
 
 
 def _reset_credentials(manager: AuthentikManager, team_number: int) -> CredentialReset:
-    outcome = _new_team_password(manager, team_number)
-    if isinstance(outcome, str):
-        return CredentialReset(password=None, error=outcome)
-    user, password = outcome
-    found, sessions_error = manager.end_user_sessions(user)
+    """Leaves is_active alone: team accounts are enabled only while the competition runs."""
+    password = generate_blueteam_password()
+    try:
+        user = _team_user(manager, team_number)
+        if isinstance(user, str):
+            return CredentialReset(password=None, error=user)
+        # Counted before the password changes, in case Authentik ends sessions on a password change
+        found, _ = manager.end_user_sessions(user)
+        manager.set_password(user, password)
+    except (AuthentikAPIError, httpx.HTTPError) as e:
+        logger.warning(f"Failed to reset the password of team {team_number}: {e}")
+        return CredentialReset(password=None, error=reason_for(e))
+    # The copy packet emails send; a team with no school info has none
+    SchoolInfo.objects.filter(team__team_number=team_number).update(password=password)
+    # Again after: a session opened with the old password before it changed
+    _, sessions_error = manager.end_user_sessions(user)
     return CredentialReset(password=password, sessions_error=sessions_error, sessions_found=found)
 
 
-def reset_team_credentials(team_number: int) -> CredentialReset:
-    """Give a team account a new random password, then end the account's Authentik sessions."""
+def reset_team_credentials(team_number: int, actor: str) -> CredentialReset:
+    """Give a team account a new random password and end its Authentik sessions; audit it and tell ops."""
     with AuthentikManager() as manager:
-        return _reset_credentials(manager, team_number)
+        reset = _reset_credentials(manager, team_number)
+    AuditLog.objects.create(
+        action="team_password_reset",
+        admin_user=actor,
+        target_entity="team",
+        target_id=team_number,
+        details=reset.audit_details(),
+    )
+    if reset.password is None:
+        note = f"Credentials reset for team {team_number} by {actor} failed: {reset.error}"
+    else:
+        note = f"Credentials reset for team {team_number} by {actor}: {reset.sessions_outcome}"
+    DiscordTask.enqueue(LogToChannel(message=note))
+    return reset
 
 
 @dataclass(frozen=True)
@@ -102,6 +131,15 @@ class BulkPasswordResetResult:
     password_list: list[tuple[int, str, str]]
     failed_resets: list[tuple[str, str]]
     sessions_failed: list[tuple[str, str]]
+
+    def summary(self) -> str:
+        total = len(self.password_list) + len(self.failed_resets)
+        text = f"Reset {len(self.password_list)}/{total} passwords"
+        if self.failed_resets:
+            text += "; failed: " + "; ".join(f"{username}: {why}" for username, why in self.failed_resets)
+        if self.sessions_failed:
+            text += f"; {sessions_failure_summary(self.sessions_failed)}"
+        return text
 
 
 def sessions_failure_summary(sessions_failed: list[tuple[str, str]]) -> str:
@@ -112,23 +150,27 @@ def sessions_failure_summary(sessions_failed: list[tuple[str, str]]) -> str:
     return "; ".join(f"could not end sessions for {', '.join(names)}: {why}" for why, names in by_reason.items())
 
 
-def reset_teams_credentials(team_numbers: Iterable[int], actor: str) -> BulkPasswordResetResult:
-    """Reset passwords and end sessions for multiple teams, and audit it."""
-    team_numbers = list(team_numbers)
+def reset_teams_credentials(team_numbers: list[int], actor: str) -> BulkPasswordResetResult:
+    """Reset passwords and end sessions for multiple teams; audit it and tell ops."""
     password_list: list[tuple[int, str, str]] = []
     failed_resets: list[tuple[str, str]] = []
     sessions_failed: list[tuple[str, str]] = []
+    sessions_found = 0
 
     with AuthentikManager() as manager:
         resets = [(team_num, _reset_credentials(manager, team_num)) for team_num in team_numbers]
     for team_num, reset in resets:
         username = team_username(team_num)
+        sessions_found += reset.sessions_found
         if reset.password is None:
             failed_resets.append((username, reset.error))
             continue
         password_list.append((team_num, username, reset.password))
         if reset.sessions_error:
             sessions_failed.append((username, reset.sessions_error))
+    result = BulkPasswordResetResult(
+        password_list=password_list, failed_resets=failed_resets, sessions_failed=sessions_failed
+    )
 
     AuditLog.objects.create(
         action="blueteam_passwords_reset",
@@ -142,13 +184,11 @@ def reset_teams_credentials(team_numbers: Iterable[int], actor: str) -> BulkPass
             "failed_count": len(failed_resets),
             "failed_resets": [f"{username}: {why}" for username, why in failed_resets],
             "sessions_failed": [f"{username}: {why}" for username, why in sessions_failed],
+            "sessions_found": sessions_found,
         },
     )
-    return BulkPasswordResetResult(
-        password_list=password_list,
-        failed_resets=failed_resets,
-        sessions_failed=sessions_failed,
-    )
+    DiscordTask.enqueue(LogToChannel(message=f"Credentials reset by {actor}: {result.summary()}"))
+    return result
 
 
 def generate_blueteam_password() -> str:

@@ -100,7 +100,7 @@ def test_django_admin_team_pages_have_reset_password(live_server, pw_browser, pa
             with page.expect_response(lambda r: r.url.endswith("/action/")):
                 page.get_by_role("button", name="Reset Password").click()
             page.get_by_text("New-Pass-9!").wait_for()
-            reset.assert_called_once_with(8)
+            assert reset.call_args.args == (8,) and reset.call_args.kwargs["actor"]
             assert page.url.endswith("/change/"), "the click must not submit the admin form"
     finally:
         context.close()
@@ -138,8 +138,7 @@ def test_competition_reset_passwords_keeps_the_csv_and_its_download(live_server,
 
 
 def test_competition_reset_passwords_partial_failure_keeps_the_error_and_the_csv(live_server, pw_browser):
-    """A team that failed must stay on screen (an error does not fade), and the teams that did reset still get
-    their CSV."""
+    """A failure stays on screen and the CSV still holds the passwords that changed."""
     from team.models import Team
 
     for number in (3, 4):
