@@ -37,7 +37,8 @@
                     </tr>
                 </c-slot>
                 {% for score in scores %}
-                    <tr>
+                    {# The editor's scope is the row, so its own Save and Approve are not a click away from it #}
+                    <tr x-data="editableCell" @click.outside="stopEditing">
                         <td class="action-checkbox">
                             {% if not score.feedback_approved %}
                                 <input type="checkbox"
@@ -52,7 +53,7 @@
                         <td>{{ score.inject_name }}</td>
                         <td>Team {{ score.team.team_number }}</td>
                         <td class="text-right">{{ score.points_awarded|floatformat:0 }}/{{ score.max_points|floatformat:0 }}</td>
-                        <td x-data="editableCell">
+                        <td>
                             <div x-show="notEditing"
                                  @click="startEditing"
                                  class="click-to-edit"
@@ -62,9 +63,8 @@
                                  title="Click to edit">{{ score.feedback|default:"(click to add)" }}</div>
                             <textarea x-show="editing"
                                       x-ref="editor"
-                                      @click.away="stopEditing"
                                       @keydown.escape="stopEditing"
-                                      @input="autoResize"
+                                      @input="onInput"
                                       name="feedback"
                                       form="save-{{ score.id }}"
                                       aria-label="Feedback for {{ score.inject_name }} Team {{ score.team.team_number }}">{{ score.feedback }}</textarea>
@@ -89,7 +89,11 @@
                                 Save
                             </c-button>
                             {% if not score.feedback_approved %}
-                                <c-button type="submit" form="approve-{{ score.id }}" variant="primary">
+                                <c-button type="submit"
+                                          form="approve-{{ score.id }}"
+                                          variant="primary"
+                                          ::disabled="dirty"
+                                          ::title="approveHint">
                                     Approve
                                 </c-button>
                             {% endif %}

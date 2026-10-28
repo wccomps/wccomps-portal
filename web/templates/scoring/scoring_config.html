@@ -1,4 +1,4 @@
-{% extends "admin/base.html" %}
+{% extends "admin/ops_base.html" %}
 {% load cotton %}
 {% block title %}
     Scoring setup
@@ -17,22 +17,17 @@
         </p>
         <c-form>
             {% csrf_token %}
+            <c-form_errors :form="form" />
             <c-fieldset heading="Category Weights">
                 <p class="text-muted mb-10">Percentage of total score for each category. Must sum to 100.</p>
                 <div class="max-points-grid">
-                    <c-form_field label="Service Weight %"
-                                  help_text="{{ form.service_weight.help_text }}"
-                                  id="{{ form.service_weight.id_for_label }}">
+                    <c-form_field :field="form.service_weight">
                         {{ form.service_weight }}
                     </c-form_field>
-                    <c-form_field label="Inject Weight %"
-                                  help_text="{{ form.inject_weight.help_text }}"
-                                  id="{{ form.inject_weight.id_for_label }}">
+                    <c-form_field :field="form.inject_weight">
                         {{ form.inject_weight }}
                     </c-form_field>
-                    <c-form_field label="Orange Check Weight %"
-                                  help_text="{{ form.orange_weight.help_text }}"
-                                  id="{{ form.orange_weight.id_for_label }}">
+                    <c-form_field :field="form.orange_weight">
                         {{ form.orange_weight }}
                     </c-form_field>
                 </div>

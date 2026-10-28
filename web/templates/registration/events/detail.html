@@ -73,7 +73,7 @@
                             Status
                         </c-table_header>
                         <c-table_header sortable="false">
-                            Captain
+                            Contact
                         </c-table_header>
                         <c-table_header sortable="false">
                             Team #
@@ -92,13 +92,13 @@
                             </c-badge>
                         </td>
                         <td>
-                            {% for contact in item.registration.contacts.all %}
-                                {% if contact.role == "captain" %}
+                            {% with contact=item.registration.primary_contact %}
+                                {% if contact %}
                                     {{ contact.name }}
                                     <br>
                                     <small>{{ contact.email }}</small>
                                 {% endif %}
-                            {% endfor %}
+                            {% endwith %}
                         </td>
                         <td>
                             {% if item.assignment %}

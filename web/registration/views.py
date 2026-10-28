@@ -381,7 +381,8 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
         for enrollment in enrolled_registrations:
             registration = enrollment.registration
             key = normalize_school_name(registration.school_name)
-            contact_email = _primary_contact_email(registration)
+            contact = registration.primary_contact
+            contact_email = contact.email if contact else ""
             if key in taken:
                 skipped.append(registration.school_name)
             elif not contact_email:
@@ -432,12 +433,6 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
     if assigned:
         messages.success(request, f"Assigned {assigned} teams successfully.")
     return redirect("registration_event_detail", event_id=event_id)
-
-
-def _primary_contact_email(registration: TeamRegistration) -> str:
-    """The captain's email, else the first contact's; empty when the registration has none."""
-    contacts = sorted(registration.contacts.all(), key=lambda contact: (contact.role != "captain", contact.pk))
-    return contacts[0].email if contacts else ""
 
 
 @require_permission("gold_team")

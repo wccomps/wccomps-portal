@@ -55,11 +55,22 @@ Grouped form fields with heading.
 
 ### Forms
 
-#### `<c-form_field>`
-Form row with label, input, and optional help text/error.
+#### `<c-form_errors>`
+The errors of the form as a whole (raised in its `clean()`), which no field shows. A page that uses a form's fields
+one by one puts one at the top of its form (`core/tests/test_form_conventions.py` fails on a page without; it finds
+forms by a variable name ending in `form`).
 ```django
-<c-form_field label="Email" required="true" help_text="Enter your work email">
-    <input type="email" name="email" />
+<c-form_errors :form="form" />
+```
+
+#### `<c-form_field>`
+Form row with label, input, and optional help text/error. Given a form's field, it takes the label, the label's
+target, the required mark, the help text and the errors from it; a `label`, `help_text`, `id` or `error` passed
+with it overrides the field's (`required="true"` can only add the mark). Without a field, pass the props.
+```django
+<c-form_field :field="form.email">{{ form.email }}</c-form_field>
+<c-form_field label="Upload Files" id="screenshots" help_text="Up to 20 files">
+    <input type="file" id="screenshots" name="screenshots" multiple />
 </c-form_field>
 ```
 
@@ -196,7 +207,7 @@ Data table with header and body slots.
 </c-table>
 ```
 
-Props: `id`, `class`, `aria_label`, `role` (e.g. `grid` for a table whose cells are `gridcell`s), `fixed_layout`,
+Props: `id`, `class`, `aria_label`, `fixed_layout`,
 `widths` (column widths, space separated: `widths="40px 20% 30%"`; template tags may pick them).
 Slot: `headers`.
 
@@ -237,6 +248,9 @@ them; `core/cotton.py` does, for every component:
 - any other value is escaped: from the page's context (`:title="search"`, `title=search`, `:attrs="dict"`) or a
   plain literal (`title="Tom & Jerry"`). In a plain literal write the character, not an entity (a template lint
   fails on `&amp;` or `&quot;` there); quote the attribute with `'` when the value holds `"`.
+
+Every prop in a component's `<c-vars>` has a default (`name=""` at least): a prop with none that the tag doesn't pass
+reads the page's variable of the same name (`core/tests/test_template_vocabulary.py` fails on one).
 
 An Alpine binding on a component is written `::name` (cotton passes it through as `:name`). A `:name` that isn't in
 the page's context (and isn't a Python literal such as `0`) fails the render under DEBUG and in tests

@@ -5,10 +5,17 @@
     {{ title }} | {{ site_title|default:_("Django site admin") }}
 {% endblock title %}
 {% block branding %}
-    <h1 id="site-name">
+    <div id="site-name">
         <a href="{% url 'ticket_list' %}">WCComps Portal</a>
-    </h1>
+    </div>
 {% endblock branding %}
+{# A portal page titles itself with c-page_header; Django admin's own pages (site_header set) keep their headings #}
+{% block content_title %}
+    {% if site_header %}{{ block.super }}{% endif %}
+{% endblock content_title %}
+{% block content_subtitle %}
+    {% if site_header %}{{ block.super }}{% endif %}
+{% endblock content_subtitle %}
 {% block breadcrumbs %}
     {% block page_breadcrumbs %}
     {% endblock page_breadcrumbs %}
@@ -19,21 +26,24 @@
     {% if messages %}<c-messages :messages="messages" />{% endif %}
 {% endblock messages %}
 {% block nav-global %}
-    <nav class="primary-navigation" x-data="nav">
+    <nav class="primary-navigation"
+         aria-label="Main"
+         x-data="nav"
+         @keydown.escape="close">
         <button type="button"
                 class="nav-toggle"
                 @click="toggle"
                 :aria-expanded="navOpen"
                 aria-controls="nav-menu"
                 aria-label="Toggle navigation">
-            <span x-show="navClosed">☰</span>
-            <span x-show="navOpen" x-cloak>✕</span>
+            <span x-show="navClosed"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg></span>
+            <span x-show="navOpen" x-cloak><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18" /></svg></span>
         </button>
         <div id="nav-menu" class="nav-menu" :class="navMenuClass">
             <div class="nav-links">
                 {% if is_ticketing_support or is_blue_team and not is_gold_team %}
                     <a href="{% url 'ticket_list' %}"
-                       {% if nav_active == 'tickets' %}class="current"{% endif %}>Tickets
+                       {% if nav_active == 'tickets' %}class="current" aria-current="page"{% endif %}>Tickets
                         {% if is_ticketing_support %}
                             <span class="notif-count"
                                   x-text="openCount"
@@ -44,49 +54,51 @@
                 {% endif %}
                 {% if is_blue_team or is_white_team or is_gold_team or is_admin %}
                     <a href="{% url 'scoring:incident_list' %}"
-                       {% if nav_active == 'incident' %}class="current"{% endif %}>Incident Report</a>
+                       {% if nav_active == 'incident' %}class="current" aria-current="page"{% endif %}>Incident Report</a>
                 {% endif %}
                 {% if is_blue_team %}
                     <a href="{% url 'team_packet' %}"
-                       {% if nav_active == 'packets' %}class="current"{% endif %}>Packets</a>
+                       {% if nav_active == 'packets' %}class="current" aria-current="page"{% endif %}>Packets</a>
                 {% endif %}
                 {% if is_red_team or is_admin %}
                     <a href="{% url 'scoring:submit_red_score' %}"
-                       {% if nav_active == 'red_findings' %}class="current"{% endif %}>Red Team Findings</a>
+                       {% if nav_active == 'red_findings' %}class="current" aria-current="page"{% endif %}>Red Team Findings</a>
                 {% endif %}
                 {% if is_orange_team or is_admin %}
                     <a href="{% url 'orange_team:dashboard' %}"
-                       {% if nav_active == 'orange' %}class="current"{% endif %}>Orange Team</a>
+                       {% if nav_active == 'orange' %}class="current" aria-current="page"{% endif %}>Orange Team</a>
                 {% endif %}
                 {% if is_gold_team or is_white_team or is_red_team or is_orange_team or is_ticketing_support %}
                     <a href="{% url 'leaderboard_page' %}"
-                       {% if nav_active == 'leaderboard' %}class="current"{% endif %}>Leaderboard</a>
+                       {% if nav_active == 'leaderboard' %}class="current" aria-current="page"{% endif %}>Leaderboard</a>
                 {% endif %}
                 {% if is_gold_team or is_white_team or is_admin %}
                     <a href="{% url 'scoring:review_incidents' %}"
-                       {% if nav_active == 'scoring' %}class="current"{% endif %}>Scoring Review</a>
+                       {% if nav_active == 'scoring' %}class="current" aria-current="page"{% endif %}>Scoring Review</a>
                 {% endif %}
                 {% if is_white_team or is_gold_team or is_admin %}
                     <a href="{% url 'scoring:inject_grading' %}"
-                       {% if nav_active == 'white_team' %}class="current"{% endif %}>White Team</a>
+                       {% if nav_active == 'white_team' %}class="current" aria-current="page"{% endif %}>White Team</a>
                 {% endif %}
                 {% if is_gold_team or is_admin %}
                     <a href="{% url 'admin_competition' %}"
-                       {% if nav_active == 'ops_admin' %}class="current"{% endif %}>Competition</a>
+                       {% if nav_active == 'ops_admin' %}class="current" aria-current="page"{% endif %}>Competition</a>
                 {% endif %}
                 {% if is_admin %}
                     <a href="{% url 'admin:index' %}"
-                       {% if nav_active == 'admin' %}class="current"{% endif %}>Django Admin</a>
+                       {% if nav_active == 'admin' %}class="current" aria-current="page"{% endif %}>Django Admin</a>
                 {% endif %}
             </div>
             <span class="nav-spacer"></span>
             <div class="nav-utils">
                 <button type="button"
                         class="dark-mode-toggle"
-                        onclick="toggleDarkMode()"
-                        title="Toggle dark mode">
-                    <span class="light-icon">☀️</span>
-                    <span class="dark-icon">🌙</span>
+                        x-data="themeToggle"
+                        @click="toggle"
+                        aria-label="Dark mode"
+                        :aria-pressed="dark">
+                    <span x-show="light"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg></span>
+                    <span x-show="dark" x-cloak><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg></span>
                 </button>
                 {% if is_ticketing_support %}
                     <button type="button"
@@ -96,8 +108,8 @@
                             :title="label"
                             :aria-label="label"
                             x-cloak>
-                        <span x-show="disabled">🔇</span>
-                        <span x-show="enabled">🔔</span>
+                        <span x-show="disabled"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-9.3-5M6.3 6.3A6 6 0 0 0 6 8c0 7-3 9-3 9h14" /><path d="M13.7 21a2 2 0 0 1-3.4 0M2 2l20 20" /></svg></span>
+                        <span x-show="enabled"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg></span>
                     </button>
                 {% endif %}
                 <span class="nav-user">{% firstof authentik_username user.username %}</span>
@@ -118,9 +130,13 @@
              x-cloak
              role="status"
              aria-live="polite"
-             tabindex="0"
+             :tabindex="toastTabIndex"
              :aria-label="toastAriaLabel"
              @click="go"
+             @mouseenter="hover"
+             @mouseleave="unhover"
+             @focusin="focus"
+             @focusout="blur"
              @keydown.enter="go"
              @keydown.space.prevent="go">
             <div class="toast-line1">
@@ -134,7 +150,6 @@
 {% block extrastyle %}
     {{ block.super }}
     <link rel="stylesheet" href="{% static 'admin/css/forms.css' %}">
-    <link rel="stylesheet" href="{% static 'admin/css/dark_mode.css' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
     <script src="{% static 'js/utils.js' %}"></script>
     <script defer
@@ -151,18 +166,45 @@
             get navMenuClass() { return this.navOpen ? 'nav-menu--open' : ''; },
             get openCount() { return this.$store.ticketNotifs ? this.$store.ticketNotifs.openCount : 0; },
             get hasOpenTickets() { return this.openCount > 0; },
-            toggle() { this.navOpen = !this.navOpen; }
+            toggle() { this.navOpen = !this.navOpen; },
+            close() { this.navOpen = false; }
+        }));
+        // Django's admin/js/theme.js sets data-theme first: "auto" (the default) follows the OS
+        Alpine.data('themeToggle', () => ({
+            dark: false,
+            get light() { return !this.dark; },
+            init() {
+                const os = window.matchMedia('(prefers-color-scheme: dark)');
+                const shown = () => {
+                    const theme = document.documentElement.dataset.theme;
+                    this.dark = theme === 'dark' || (theme !== 'light' && os.matches);
+                };
+                shown();
+                os.addEventListener('change', shown);
+            },
+            toggle() {
+                this.dark = !this.dark;
+                const theme = this.dark ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-theme', theme);
+                localStorage.setItem('theme', theme);
+            }
         }));
         Alpine.data('toastClicker', () => ({
             get showToast() { return this.$store.ticketNotifs ? this.$store.ticketNotifs.showToast : false; },
             get toastNumber() { return this.$store.ticketNotifs ? this.$store.ticketNotifs.toastNumber : ''; },
             get toastTitle() { return this.$store.ticketNotifs ? this.$store.ticketNotifs.toastTitle : ''; },
             get toastCategory() { return this.$store.ticketNotifs ? this.$store.ticketNotifs.toastCategory : ''; },
+            // Neither pointer nor focus can land on a leaving toast, so nothing holds the next one by mistake
+            get toastTabIndex() { return this.showToast ? 0 : -1; },
             get toastAriaLabel() {
                 const s = this.$store.ticketNotifs;
                 return s ? 'New ticket: ' + s.toastNumber + ', ' + s.toastTitle + '. Click to view.' : '';
             },
-            go() { window.location.href = this.$store.ticketNotifs.toastUrl; }
+            go() { window.location.href = this.$store.ticketNotifs.toastUrl; },
+            hover() { this.$store.ticketNotifs.hold('_hovered'); },
+            unhover() { this.$store.ticketNotifs.release('_hovered'); },
+            focus() { this.$store.ticketNotifs.hold('_focused'); },
+            blur() { this.$store.ticketNotifs.release('_focused'); }
         }));
         Alpine.data('ticketListLink', ticketListLink);
         Alpine.data('audioToggle', () => ({
@@ -217,6 +259,9 @@
                 _lastSeenId: parseInt(localStorage.getItem('ticketLastSeenId') || '0', 10),
                 _queue: [],
                 _timer: null,
+                _hideTimer: null,
+                _hovered: false,
+                _focused: false,
                 _showing: false,
 
                 init() {
@@ -263,10 +308,26 @@
                     this.toastUrl = '/tickets/' + t.number + '/';
                     this.showToast = true;
                     this._playAudio();
-                    setTimeout(() => {
+                    if (!this._hovered && !this._focused) this._hideIn(6000);
+                },
+
+                _hideIn(ms) {
+                    clearTimeout(this._hideTimer);
+                    this._hideTimer = setTimeout(() => {
                         this.showToast = false;
                         setTimeout(() => this._showNext(), 1000);
-                    }, 6000);
+                    }, ms);
+                },
+
+                // Pointer or focus on the toast keeps it up (WCAG 2.2.1)
+                hold(by) {
+                    this[by] = true;
+                    clearTimeout(this._hideTimer);
+                },
+
+                release(by) {
+                    this[by] = false;
+                    if (this.showToast && !this._hovered && !this._focused) this._hideIn(2000);
                 },
 
                 _playAudio() {
@@ -290,23 +351,6 @@
         });
         </script>
     {% endif %}
-    <script>
-        function toggleDarkMode() {
-            const html = document.documentElement;
-            const currentTheme = html.getAttribute('data-theme');
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            html.setAttribute('data-theme', newTheme);
-            localStorage.setItem('theme', newTheme);
-        }
-        (function() {
-            const saved = localStorage.getItem('theme');
-            if (saved) {
-                document.documentElement.setAttribute('data-theme', saved);
-            } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                document.documentElement.setAttribute('data-theme', 'dark');
-            }
-        })();
-    </script>
 {% endblock extrastyle %}
 {% block extrahead %}
     {# Rendering the token also sets the csrftoken cookie; wcPost pages have no form of their own #}

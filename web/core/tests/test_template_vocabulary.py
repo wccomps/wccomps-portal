@@ -64,6 +64,7 @@ SHARED_COMPONENTS = {
     "filter_field.html",
     "filter_toolbar.html",
     "form.html",
+    "form_errors.html",
     "form_field.html",
     "image_grid.html",
     "info_box.html",
@@ -122,6 +123,7 @@ UNDEFINED_EXCEPTIONS: dict[str, str] = {}
 PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
     "admin/base_site.html:primary-navigation": CHROME + "the nav bar",
     "admin/base_site.html:nav-toggle": CHROME + "the phone menu button",
+    "admin/base_site.html:nav-icon": CHROME + "the menu, dark mode and sound buttons' icons",
     "admin/base_site.html:nav-menu": CHROME + "the nav links and tools",
     "admin/base_site.html:nav-menu--open": CHROME + "the phone menu, open",
     "admin/base_site.html:nav-links": CHROME + "the section links",
@@ -131,8 +133,6 @@ PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
     "admin/base_site.html:current": CHROME + "the current section's link",
     "admin/base_site.html:notif-count": CHROME + "open tickets on the Tickets link",
     "admin/base_site.html:dark-mode-toggle": CHROME + "the dark mode button",
-    "admin/base_site.html:light-icon": CHROME + "the dark mode button's sun",
-    "admin/base_site.html:dark-icon": CHROME + "the dark mode button's moon",
     "admin/base_site.html:audio-toggle": CHROME + "the ticket sound button",
     "admin/base_site.html:ticket-toast": CHROME + "the new-ticket toast",
     "admin/base_site.html:toast-line1": CHROME + "the new-ticket toast's number and title",
@@ -841,3 +841,44 @@ def test_every_app_css_class_is_used() -> None:
         {f"app.css:{name}": "" for name in app_css_classes() - used},
         UNUSED_CSS_EXCEPTIONS,
     )
+
+
+def component_reads(path: Path, name: str) -> bool:
+    """Whether the component's template reads `name` in a {{ }} or {% %} (comments aside)."""
+    content = re.sub(r"{#.*?#}", "", text(path), flags=re.DOTALL)
+    word = rf"(?<![\w.]){re.escape(name)}\b"
+    return bool(re.search(rf"{{{{[^}}]*{word}|{{%[^%]*{word}", content))
+
+
+def test_props_a_component_reads_are_declared() -> None:
+    """A prop missing from <c-vars> also lands in {{ attrs }}, so it leaks out as an HTML attribute."""
+    declared = {
+        path.stem: {name for tag in tags(path) if tag.name == "c-vars" for name in tag.attrs}
+        for path in shared_component_paths()
+    }
+    paths = {path.stem: path for path in shared_component_paths()}
+    found: dict[str, str] = {}
+    for page in portal_templates():
+        for tag in tags(page):
+            component = tag.name.removeprefix("c-")
+            if not tag.name.startswith("c-") or component not in paths:
+                continue
+            for attr in tag.attrs:
+                name = attr.lstrip(":")
+                # attrs is cotton's own: the attributes the component doesn't declare
+                if name != "attrs" and name not in declared[component] and component_reads(paths[component], name):
+                    found[f"cotton/{component}.html:{name}"] = f"passed by {template_name(page)}; add it to <c-vars>"
+    fail_with("Props a component reads but doesn't declare", found, {})
+
+
+def test_every_declared_prop_has_a_default() -> None:
+    """A <c-vars> name with no default that the tag doesn't pass reads the page's variable of the same name."""
+    found = {
+        f"cotton/{path.name}:{name}": 'give it a default (name="")'
+        for path in shared_component_paths()
+        for tag in tags(path)
+        if tag.name == "c-vars"
+        for name in tag.attrs
+        if not re.search(rf'(?<![\w-]){re.escape(name)}="', text(path).split("<c-vars", 1)[1].split("/>", 1)[0])
+    }
+    fail_with("Component props without a default", found, {})

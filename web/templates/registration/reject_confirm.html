@@ -11,14 +11,12 @@
         <c-module>
             <p>You are about to reject the registration for:</p>
             <c-detail_grid>
-                <c-slot name="items">
-                    <c-detail_row label="School Name">
-                        {{ registration.school_name }}
-                    </c-detail_row>
-                    <c-detail_row label="Contact Email">
-                        {{ registration.contact_email }}
-                    </c-detail_row>
-                </c-slot>
+                <c-detail_row label="School Name">
+                    {{ registration.school_name }}
+                </c-detail_row>
+                <c-detail_row label="Contact Email">
+                    {{ registration.primary_contact.email }}
+                </c-detail_row>
             </c-detail_grid>
             <c-form>
                 {% csrf_token %}

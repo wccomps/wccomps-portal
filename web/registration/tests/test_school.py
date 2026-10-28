@@ -409,3 +409,12 @@ def test_event_detail_offers_no_unassign_for_an_earlier_event(gold_team_user, ev
 
     assert "Team 04" in content
     assert not UNASSIGN.search(content)
+
+
+def test_event_detail_shows_the_contact_assignment_emails(gold_team_user, event):
+    """With no captain on record, assignment emails the coach: the Contact column names the same person."""
+    _enrolled(event, "Example University", ("coach", "coach@example.edu"))
+
+    content = _client(gold_team_user).get(reverse("registration_event_detail", args=[event.pk])).content.decode()
+
+    assert "coach@example.edu" in content

@@ -12,6 +12,7 @@ urlpatterns = [
     path("red-team/scores/", views.red_team_scores, name="red_team_scores"),
     path("red-team/score/<int:finding_id>/", views.view_red_score, name="view_red_score"),
     path("red/", views.red_team_findings, name="red_team_findings"),
+    path("red/<int:finding_id>/", views.review_red_finding, name="review_red_finding"),
     path("red-team/<int:finding_id>/delete/", views.delete_red_score, name="delete_red_score"),
     path("red-team/bulk-approve/", views.bulk_approve_red_scores, name="bulk_approve_red_scores"),
     path("red-team/screenshot/<int:screenshot_id>/", views.red_screenshot_download, name="red_screenshot"),

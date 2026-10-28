@@ -94,29 +94,15 @@
             <c-form>
                 {% if form.errors %}<c-alert variant="error">Please fix the errors below.</c-alert>{% endif %}
                 {% csrf_token %}
+                <c-form_errors :form="form" />
                 <c-fieldset aligned="true">
-                    <c-form_field label="{{ form.matched_to_red_score.label }}"
-                                  id="{{ form.matched_to_red_score.id_for_label }}"
-                                  help_text="{{ form.matched_to_red_score.help_text }}"
-                                  error="
-        {% for e in form.matched_to_red_score.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.matched_to_red_score">
                         {{ form.matched_to_red_score }}
                     </c-form_field>
-                    <c-form_field label="{{ form.points_returned.label }}"
-                                  id="{{ form.points_returned.id_for_label }}"
-                                  help_text="{{ form.points_returned.help_text }}"
-                                  error="
-        {% for e in form.points_returned.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.points_returned">
                         {{ form.points_returned }}
                     </c-form_field>
-                    <c-form_field label="{{ form.approval_notes.label }}"
-                                  id="{{ form.approval_notes.id_for_label }}"
-                                  help_text="{{ form.approval_notes.help_text }}"
-                                  error="
-        {% for e in form.approval_notes.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.approval_notes">
                         {{ form.approval_notes }}
                     </c-form_field>
                 </c-fieldset>

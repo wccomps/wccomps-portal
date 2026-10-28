@@ -1,6 +1,6 @@
 {# Usage: <c-alert variant="error">Something went wrong</c-alert> #}
 {# Props: variant (info|warning|error|success), class #}
-<c-vars variant="info" class />
+<c-vars variant="info" class="" />
 <div {{ attrs }}
      role="alert"
      class="alert {% if variant == 'error' %}alert--error{% elif variant == 'warning' %}alert--warning{% elif variant == 'success' %}alert--success{% elif variant == 'info' %}alert--info{% else %}alert--default{% endif %} {{ class }}">

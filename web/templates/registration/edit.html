@@ -13,40 +13,60 @@
             <p>Submitted: {{ registration.submitted_at|date:"F d, Y g:i A" }}</p>
             <c-form>
                 {% csrf_token %}
+                <c-form_errors :form="form" />
                 <c-fieldset heading="School Information" aligned="true">
-                    <c-form_field label="{{ form.school_name.label }}"
-                                  required="true"
-                                  id="{{ form.school_name.id_for_label }}"
-                                  error="
-            {% for e in form.school_name.errors %}{{ e }}{% endfor %}
-            ">
+                    <c-form_field :field="form.school_name">
                         {{ form.school_name }}
                     </c-form_field>
+                    <c-form_field :field="form.region">
+                        {{ form.region }}
+                    </c-form_field>
                 </c-fieldset>
-                <c-fieldset heading="Team Captain Contact" aligned="true">
-                    <c-form_field label="{{ form.contact_name.label }}"
-                                  required="true"
-                                  id="{{ form.contact_name.id_for_label }}"
-                                  error="
-            {% for e in form.contact_name.errors %}{{ e }}{% endfor %}
-            ">
-                        {{ form.contact_name }}
+                <c-fieldset heading="Team Captain" aligned="true">
+                    <c-form_field :field="form.captain_name">
+                        {{ form.captain_name }}
                     </c-form_field>
-                    <c-form_field label="{{ form.contact_email.label }}"
-                                  required="true"
-                                  id="{{ form.contact_email.id_for_label }}"
-                                  error="
-            {% for e in form.contact_email.errors %}{{ e }}{% endfor %}
-            ">
-                        {{ form.contact_email }}
+                    <c-form_field :field="form.captain_email">
+                        {{ form.captain_email }}
                     </c-form_field>
-                    <c-form_field label="{{ form.phone.label }}"
-                                  required="true"
-                                  id="{{ form.phone.id_for_label }}"
-                                  error="
-            {% for e in form.phone.errors %}{{ e }}{% endfor %}
-            ">
-                        {{ form.phone }}
+                    <c-form_field :field="form.captain_phone">
+                        {{ form.captain_phone }}
+                    </c-form_field>
+                </c-fieldset>
+                <c-fieldset heading="Coach" aligned="true">
+                    <c-form_field :field="form.coach_name">
+                        {{ form.coach_name }}
+                    </c-form_field>
+                    <c-form_field :field="form.coach_email">
+                        {{ form.coach_email }}
+                    </c-form_field>
+                    <c-form_field :field="form.coach_phone">
+                        {{ form.coach_phone }}
+                    </c-form_field>
+                </c-fieldset>
+                <c-fieldset heading="Events">
+                    {# What this render offers, never the posted list a failed save sends back #}
+                    <input type="hidden" name="events_listed" value="1">
+                    {% for event in form.events.field.queryset %}
+                        <input type="hidden" name="shown_events" value="{{ event.pk }}">
+                    {% endfor %}
+                    <c-form_field :field="form.events">
+                        {% if form.events.field.queryset.exists %}
+                            {{ form.events }}
+                        {% else %}
+                            <p>No events are currently open for registration.</p>
+                        {% endif %}
+                    </c-form_field>
+                    {% if form.unoffered_events %}
+                        <p>
+                            Also registered for:
+                            {% for event in form.unoffered_events %}{{ event.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                        </p>
+                    {% endif %}
+                </c-fieldset>
+                <c-fieldset heading="Competition Rules">
+                    <c-form_field :field="form.agree_to_rules">
+                        {{ form.agree_to_rules }}
                     </c-form_field>
                 </c-fieldset>
                 <c-button_row class="mt-20 justify-end">

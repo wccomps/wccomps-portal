@@ -2,7 +2,7 @@
 {# Usage: <c-fieldset heading="User Details">Form fields here</c-fieldset> #}
 {# Collapsible: <c-fieldset heading="Advanced" collapsible="true" collapsed="true">Hidden by default</c-fieldset> #}
 {# Props: heading, class, aligned (bool), collapsible (bool), collapsed (bool - initial state; a URL anchor matching the id opens it) #}
-<c-vars heading class aligned="false" collapsible="false" collapsed="false" />
+<c-vars heading="" class="" aligned="false" collapsible="false" collapsed="false" />
 {% if collapsible == "true" %}
     <fieldset {{ attrs }}
               x-data="collapsibleFieldset"

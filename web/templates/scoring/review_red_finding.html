@@ -1,0 +1,24 @@
+{% extends "scoring/base.html" %}
+{% load cotton %}
+{% block title %}
+    Red Team Finding #{{ finding.id }}
+{% endblock title %}
+{% block scoring_content %}
+    <c-page_header title="Red Team Finding #{{ finding.id }}"
+                   parent_url="{% url 'scoring:red_team_findings' %}"
+                   parent_label="Review Findings" />
+    <c-module>
+        {% include "scoring/_red_finding_body.html" %}
+        {% if not finding.is_approved %}
+            <c-button_row class="mt-20 justify-end">
+                <c-form action="{% url 'scoring:bulk_approve_red_scores' %}" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="finding_ids" value="{{ finding.id }}">
+                    <c-button type="submit" variant="primary">
+                        Approve
+                    </c-button>
+                </c-form>
+            </c-button_row>
+        {% endif %}
+    </c-module>
+{% endblock scoring_content %}

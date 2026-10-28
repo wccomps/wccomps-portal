@@ -1,6 +1,6 @@
 {# Info box component - highlighted content container #}
 {# Usage: <c-info_box variant="primary">Content here</c-info_box> #}
 {# Props: variant (default|primary), class #}
-<c-vars variant="default" class />
+<c-vars variant="default" class="" />
 <div {{ attrs }}
      class="info-box {% if variant == 'primary' %}info-box-primary{% endif %} {{ class }}">{{ slot }}</div>

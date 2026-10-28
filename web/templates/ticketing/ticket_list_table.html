@@ -42,13 +42,12 @@
         </div>
     {% endif %}
     <c-table id="result_list"
-             role="grid"
              widths="{% if is_ops %}4% 9% 20% 9% 13% 8% 9% 10% 18%{% else %}12% 35% 20% 13% 20%{% endif %}"
              aria_label="Tickets list">
         <c-slot name="headers">
-            <tr role="row">
+            <tr>
                 {% if is_ops %}
-                    <th scope="col" class="action-checkbox-column" role="columnheader">
+                    <th scope="col" class="action-checkbox-column">
                         <input type="checkbox"
                                :checked="allSelected"
                                :indeterminate="someSelected"
@@ -101,9 +100,9 @@
             </tr>
         </c-slot>
         {% for item in page_obj %}
-            <tr role="row">
+            <tr>
                 {% if is_ops %}
-                    <td class="action-checkbox" role="gridcell">
+                    <td class="action-checkbox">
                         <input type="checkbox"
                                @change="toggleItem"
                                :checked="selectedMap.{{ item.ticket.ticket_number|jskey }}"
@@ -112,7 +111,7 @@
                                aria-label="Select ticket {{ item.ticket.ticket_number }}" />
                     </td>
                 {% endif %}
-                <th role="gridcell">
+                <th scope="row">
                     {% if is_ops %}
                         <a href="{% url 'ticket_detail' ticket_number=item.ticket.ticket_number %}">
                             {{ item.ticket.ticket_number }}
@@ -133,17 +132,16 @@
                         </div>
                     {% endif %}
                 </th>
-                <td role="gridcell">{{ item.ticket.title|shorten:50 }}</td>
-                {% if is_ops %}<td role="gridcell">Team {{ item.ticket.team.team_number }}</td>{% endif %}
-                <td role="gridcell">{{ item.category_name }}</td>
-                <td role="gridcell">
-                    <c-badge variant="{{ item.ticket.status|badge_variant:'ticket' }}"
-                             aria_label="Status: {{ item.status_display }}">
+                <td>{{ item.ticket.title|shorten:50 }}</td>
+                {% if is_ops %}<td>Team {{ item.ticket.team.team_number }}</td>{% endif %}
+                <td>{{ item.category_name }}</td>
+                <td>
+                    <c-badge variant="{{ item.ticket.status|badge_variant:'ticket' }}">
                         {{ item.status_display }}
                     </c-badge>
                 </td>
                 {% if is_ops %}
-                    <td role="gridcell">
+                    <td>
                         {% if item.ticket.assigned_to %}
                             {{ item.ticket.assigned_to }}
                         {% else %}
@@ -151,9 +149,9 @@
                         {% endif %}
                     </td>
                 {% endif %}
-                <td role="gridcell">{{ item.ticket.created_at|timesince }} ago</td>
+                <td>{{ item.ticket.created_at|timesince }} ago</td>
                 {% if is_ops %}
-                    <td class="field-actions" role="gridcell">
+                    <td class="field-actions">
                         {% if item.ticket.status == "open" %}
                             <c-form action="{% url 'ticket_claim' item.ticket.ticket_number %}"
                                     class="d-inline">

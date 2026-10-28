@@ -172,9 +172,7 @@ def _url_templates() -> dict[str, set[str]]:
 
 
 def _below_the_chrome(path: Path) -> tuple[str, ...]:
-    """The template and those it extends up to the chrome, admin/base_site.html. Past it, the chrome's
-    {% extends "admin/base.html" %} loads the ops section's base too, whose content block (and sub-nav) a page under
-    any other base replaces."""
+    """The template and those it extends up to the chrome, admin/base_site.html; past it is Django's admin."""
     chain = extends_chain(path)
     return chain[: chain.index("admin/base_site.html")] if "admin/base_site.html" in chain else chain
 

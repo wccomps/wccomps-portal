@@ -495,6 +495,16 @@ def test_the_admin_site_alone_decides_who_gets_into_the_django_admin(gold_team_u
         assert client.get(reverse("admin:index")).status_code == 200
 
 
+def test_django_admin_pages_keep_their_heading(gold_team_user: User) -> None:
+    from django.contrib import admin
+
+    client = signed_in(gold_team_user)
+    with patch.object(admin.site.__class__, "has_permission", lambda self, request: True):
+        page = client.get(reverse("admin:index")).content.decode()
+    assert page.count("<h1") == 1
+    assert "<h1>Competition Management</h1>" in page
+
+
 def test_an_incident_report_refuses_a_role_it_doesnt_let_in_with_a_403(red_team_user: User) -> None:
     """A refusal by role answered with an error redirect to the leaderboard, which the role check took for a page
     that let the role in."""

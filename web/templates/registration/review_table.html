@@ -27,8 +27,10 @@
         {% for registration in registrations %}
             <tr>
                 <td>{{ registration.school_name }}</td>
-                <td>{{ registration.contact_email }}</td>
-                <td>{{ registration.phone }}</td>
+                {% with contact=registration.primary_contact %}
+                    <td>{{ contact.email }}</td>
+                    <td>{{ contact.phone }}</td>
+                {% endwith %}
                 <td>
                     <c-badge variant="{{ registration.status|badge_variant:'registration' }}">
                         {{ registration.get_status_display }}

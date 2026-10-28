@@ -1,19 +1,18 @@
 {% load cotton %}
 <div id="red-findings-content"
-     {% if is_gold_team %}x-data="redFindingsBulkSelect"{% endif %}>
-    {% if is_gold_team %}
+     {% if reviewing %}x-data="redFindingsBulkSelect"{% endif %}>
+    {% if reviewing %}
         {# The row checkboxes join this form with form=, so a row's own Delete form isn't nested in it #}
         <c-form id="bulk-approve-form" action="{% url 'scoring:bulk_approve_red_scores' %}" ::data-confirm="approveQuestion">
             {% csrf_token %}
         </c-form>
     {% endif %}
     <c-table id="result_list"
-             role="grid"
-             widths="{% if is_gold_team %}40px {% endif %}6% 23% 9% 9% 14% 11% 7% {% if is_gold_team %}7% {% endif %}7% 7%"
+             widths="{% if reviewing %}40px {% endif %}6% 23% 9% 9% 14% 11% 7% {% if reviewing %}7% {% endif %}7% 7%"
              aria_label="Red team findings list">
         <c-slot name="headers">
-            <tr role="row">
-                {% if is_gold_team %}
+            <tr>
+                {% if reviewing %}
                     <th scope="col" class="action-checkbox-column">
                         <input type="checkbox"
                                :checked="allSelected"
@@ -44,7 +43,7 @@
                 <c-table_header sortable="false">
                     Evidence
                 </c-table_header>
-                {% if is_gold_team %}<c-table_header sortable="false">Points</c-table_header>{% endif %}
+                {% if reviewing %}<c-table_header sortable="false">Points</c-table_header>{% endif %}
                 <c-table_header sortable="false">
                     Status
                 </c-table_header>
@@ -54,8 +53,8 @@
             </tr>
         </c-slot>
         {% for finding in findings %}
-            <tr role="row">
-                {% if is_gold_team %}
+            <tr>
+                {% if reviewing %}
                     <td class="action-checkbox">
                         {% if not finding.is_approved %}
                             <input type="checkbox"
@@ -70,7 +69,11 @@
                     </td>
                 {% endif %}
                 <th>
-                    <c-link href="{% url 'scoring:view_red_score' finding.id %}">#{{ finding.id }}</c-link>
+                    {% if reviewing %}
+                        <c-link href="{% url 'scoring:review_red_finding' finding.id %}">#{{ finding.id }}</c-link>
+                    {% else %}
+                        <c-link href="{% url 'scoring:view_red_score' finding.id %}">#{{ finding.id }}</c-link>
+                    {% endif %}
                 </th>
                 <td>{{ finding.attack_type.name|default:"Unknown" }}</td>
                 <td>{{ finding.affected_boxes_display }}</td>
@@ -100,7 +103,7 @@
                         <span class="text-muted">No evidence</span>
                     {% endif %}
                 </td>
-                {% if is_gold_team %}
+                {% if reviewing %}
                     <td>
                         <span class="score-negative">-{{ finding.points_per_team }}</span>
                         {% if finding.outcomes_display %}
@@ -137,7 +140,7 @@
             </tr>
         {% empty %}
             <tr>
-                <td colspan="{% if is_gold_team %}11{% else %}9{% endif %}"
+                <td colspan="{% if reviewing %}11{% else %}9{% endif %}"
                     class="text-center p-20">
                     {% if filtered %}
                         <c-no_matches items="findings" href="{{ request.path }}" />

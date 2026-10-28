@@ -2,7 +2,7 @@
 {# Usage: <c-form action="/url">...fields...<c-button type="submit">Save</c-button></c-form> #}
 {# Props: action, enctype, class, id. Also takes data-confirm (through attrs): the question asked first #}
 {# A form with its own page behaviour takes its Alpine component through attrs (x-data="name") #}
-<c-vars action enctype class id />
+<c-vars action="" enctype="" class="" id="" />
 <form method="post"
       data-post-once
       {% if action %}action="{{ action }}"{% endif %}

@@ -130,7 +130,7 @@ def test_in_production_a_dynamic_attribute_not_in_the_context_is_left_out() -> N
 @pytest.mark.parametrize(
     "source",
     [
-        '<c-badge :aria_label="missing">New</c-badge>',  # declared in its <c-vars>
+        '<c-badge :variant="missing">New</c-badge>',  # declared in its <c-vars>
         '<c-pagination :page_obj="missing" />',  # prints no {{ attrs }}
     ],
 )

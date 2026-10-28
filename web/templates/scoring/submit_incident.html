@@ -12,13 +12,10 @@
         {% if team or is_admin %}
             <c-form enctype="multipart/form-data" id="incidentForm">
                 {% csrf_token %}
+                <c-form_errors :form="form" />
                 <c-fieldset heading="Target Information">
                     {% if is_admin %}
-                        <c-form_field label="{{ form.team.label }}"
-                                      required="true"
-                                      :id="form.team.id_for_label"
-                                      help_text="{{ form.team.help_text }}"
-                                      error="{{ form.team.errors|join:', ' }}">
+                        <c-form_field :field="form.team">
                             {{ form.team }}
                         </c-form_field>
                     {% endif %}
@@ -36,43 +33,24 @@
                         {% endif %}
                     </c-form_field>
                     <div class="grid-2">
-                        <c-form_field label="{{ form.affected_service.label }}"
-                                      :id="form.affected_service.id_for_label"
-                                      help_text="{{ form.affected_service.help_text }}"
-                                      error="{{ form.affected_service.errors|join:', ' }}">
+                        <c-form_field :field="form.affected_service">
                             {{ form.affected_service }}
                         </c-form_field>
-                        <c-form_field label="{{ form.destination_ip.label }}"
-                                      required="true"
-                                      :id="form.destination_ip.id_for_label"
-                                      help_text="Auto-populated based on selected boxes"
-                                      error="{{ form.destination_ip.errors|join:', ' }}">
+                        <c-form_field :field="form.destination_ip">
                             {{ form.destination_ip }}
                         </c-form_field>
                     </div>
                 </c-fieldset>
                 <c-fieldset heading="Attack Details">
                     <div class="grid-2">
-                        <c-form_field label="{{ form.source_ip.label }}"
-                                      required="true"
-                                      :id="form.source_ip.id_for_label"
-                                      help_text="{{ form.source_ip.help_text }}"
-                                      error="{{ form.source_ip.errors|join:', ' }}">
+                        <c-form_field :field="form.source_ip">
                             {{ form.source_ip }}
                         </c-form_field>
-                        <c-form_field label="{{ form.attack_detected_at.label }}"
-                                      required="true"
-                                      :id="form.attack_detected_at.id_for_label"
-                                      help_text="{{ form.attack_detected_at.help_text }}"
-                                      error="{{ form.attack_detected_at.errors|join:', ' }}">
+                        <c-form_field :field="form.attack_detected_at">
                             {{ form.attack_detected_at }}
                         </c-form_field>
                     </div>
-                    <c-form_field label="{{ form.attack_description.label }}"
-                                  required="true"
-                                  :id="form.attack_description.id_for_label"
-                                  help_text="{{ form.attack_description.help_text }}"
-                                  error="{{ form.attack_description.errors|join:', ' }}">
+                    <c-form_field :field="form.attack_description">
                         {{ form.attack_description }}
                     </c-form_field>
                     <div class="p-10">
@@ -165,17 +143,21 @@
             });
         }
 
-        function updateIP() {
-            const ipField = document.getElementById('id_destination_ip');
+        // The IP the boxes last filled in: a box change replaces it, never an IP the team typed
+        let filledIP = '';
+
+        function boxIP() {
             const currentTeam = getSelectedTeamNumber();
             const boxes = getSelectedBoxes();
+            const box = boxes.length > 0 ? boxMetadata[boxes[0]] : null;
+            return box && box.ip && currentTeam ? box.ip.replace('_', currentTeam.toString().padStart(2, '0')) : '';
+        }
 
-            if (boxes.length > 0 && boxMetadata[boxes[0]] && ipField && currentTeam) {
-                const teamStr = currentTeam.toString().padStart(2, '0');
-                ipField.value = boxMetadata[boxes[0]].ip.replace('_', teamStr);
-            } else if (ipField) {
-                ipField.value = '';
-            }
+        function updateIP() {
+            const ipField = document.getElementById('id_destination_ip');
+            if (!ipField || (ipField.value !== '' && ipField.value !== filledIP)) return;
+            filledIP = boxIP();
+            ipField.value = filledIP;
         }
 
         function updateServiceDropdown() {
@@ -267,7 +249,10 @@
                 btn.addEventListener('click', () => toggleBox(btn.dataset.box));
             });
 
-            // Initialize on page load
+            // A re-rendered form's IP counts as box-filled only when it matches the boxes
+            const ipField = document.getElementById('id_destination_ip');
+            if (ipField && ipField.value === boxIP()) filledIP = ipField.value;
+
             updateBoxButtons();
             if (getSelectedBoxes().length > 0) {
                 onBoxSelectionChange();

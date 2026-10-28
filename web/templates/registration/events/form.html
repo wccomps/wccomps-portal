@@ -12,70 +12,35 @@
         <c-module>
             <c-form>
                 {% csrf_token %}
+                <c-form_errors :form="form" />
                 <c-fieldset heading="Event Details" aligned="true">
-                    <c-form_field label="{{ form.name.label }}"
-                                  required="true"
-                                  id="{{ form.name.id_for_label }}"
-                                  error="
-        {% for e in form.name.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.name">
                         {{ form.name }}
                     </c-form_field>
-                    <c-form_field label="{{ form.event_type.label }}"
-                                  required="true"
-                                  id="{{ form.event_type.id_for_label }}"
-                                  error="
-        {% for e in form.event_type.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.event_type">
                         {{ form.event_type }}
                     </c-form_field>
-                    <c-form_field label="{{ form.event_number.label }}"
-                                  id="{{ form.event_number.id_for_label }}"
-                                  error="
-        {% for e in form.event_number.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.event_number">
                         {{ form.event_number }}
                     </c-form_field>
-                    <c-form_field label="{{ form.date.label }}"
-                                  required="true"
-                                  id="{{ form.date.id_for_label }}"
-                                  error="
-        {% for e in form.date.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.date">
                         {{ form.date }}
                     </c-form_field>
-                    <c-form_field label="{{ form.start_time.label }}"
-                                  id="{{ form.start_time.id_for_label }}"
-                                  error="
-        {% for e in form.start_time.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.start_time">
                         {{ form.start_time }}
                     </c-form_field>
-                    <c-form_field label="{{ form.end_time.label }}"
-                                  id="{{ form.end_time.id_for_label }}"
-                                  error="
-        {% for e in form.end_time.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.end_time">
                         {{ form.end_time }}
                     </c-form_field>
-                    <c-form_field label="{{ form.max_teams.label }}"
-                                  id="{{ form.max_teams.id_for_label }}"
-                                  error="
-        {% for e in form.max_teams.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.max_teams">
                         {{ form.max_teams }}
                     </c-form_field>
                 </c-fieldset>
                 <c-fieldset heading="Registration Settings" aligned="true">
-                    <c-form_field label="{{ form.registration_open.label }}"
-                                  id="{{ form.registration_open.id_for_label }}">
+                    <c-form_field :field="form.registration_open">
                         {{ form.registration_open }}
                     </c-form_field>
-                    <c-form_field label="{{ form.registration_deadline.label }}"
-                                  id="{{ form.registration_deadline.id_for_label }}"
-                                  error="
-        {% for e in form.registration_deadline.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.registration_deadline">
                         {{ form.registration_deadline }}
                     </c-form_field>
                 </c-fieldset>

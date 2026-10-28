@@ -89,6 +89,12 @@ class TeamRegistration(models.Model):
     def __str__(self) -> str:
         return f"{self.school_name} ({self.status})"
 
+    @property
+    def primary_contact(self) -> RegistrationContact | None:
+        """The captain, else the first contact; None when it has none. Reads contacts.all(), so a prefetch serves it."""
+        contacts = sorted(self.contacts.all(), key=lambda contact: (contact.role != "captain", contact.pk))
+        return contacts[0] if contacts else None
+
     def approve(self, user: User) -> bool:
         """Approve it if it is still pending; False when it no longer is."""
         return self._decide(status="approved", approved_at=timezone.now(), approved_by=user)

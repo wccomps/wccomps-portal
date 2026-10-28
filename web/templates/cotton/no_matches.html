@@ -1,7 +1,7 @@
 {# No matches component - the empty state of a list whose filters hide every row #}
 {# Usage: <c-no_matches items="tickets" href="{% url 'ticket_list' %}" /> (the slot adds to the suggestion) #}
 {# Props: items (what the list shows, plural), href (the list without its filters) #}
-<c-vars items href />
+<c-vars items="" href="" />
 <c-empty_state title="No {{ items }} match your filters" :attrs="attrs">
     Try <c-link href="{{ href }}">clearing all filters</c-link>{% if slot %} {{ slot }}{% endif %}
 </c-empty_state>

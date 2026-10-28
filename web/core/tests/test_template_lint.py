@@ -4,6 +4,9 @@ Catches issues that are silent at runtime or hard to spot in code review.
 """
 
 import re
+from pathlib import Path
+
+import django
 
 from core.tests.guards import (
     Tag,
@@ -281,3 +284,44 @@ def test_a_page_asks_through_data_confirm() -> None:
         if m := BARE_CONFIRM_RE.search(js):
             found[name] = f"line {js.count(chr(10), 0, m.start()) + 1}"
     fail_with("confirm() called outside the data-confirm listener", found, BARE_CONFIRM_EXCEPTIONS)
+
+
+# ---------------------------------------------------------------------------
+# 9. ARIA grid roles
+# ---------------------------------------------------------------------------
+
+GRID_ROLES = {"grid", "treegrid", "gridcell", "row", "rowgroup", "columnheader", "rowheader"}
+
+
+def test_tables_keep_table_semantics() -> None:
+    """role="grid" tells a screen reader to hand the arrow keys to the page, which none of ours handles, and a
+    gridcell <th> loses its header meaning: a plain table already says rows, cells and headers."""
+    found = {
+        f"{template_name(path)}:{tag.line}:{tag.name}": f'role="{tag.attrs["role"]}"'
+        for path in tracked_templates()
+        for tag in tags(path)
+        if tag.attrs.get("role") in GRID_ROLES
+    }
+    fail_with("Grid roles on markup", found, {})
+
+
+# ---------------------------------------------------------------------------
+# 10. Templates named like one of Django admin's
+# ---------------------------------------------------------------------------
+
+DJANGO_ADMIN_TEMPLATES = Path(django.__file__).parent / "contrib/admin/templates"
+ADMIN_OVERRIDES = {
+    "admin/base_site.html": "the portal chrome, which Django admin's own pages share",
+    "admin/index.html": "the portal's Django admin index, which Django renders by name",
+}
+
+
+def test_no_template_shadows_django_admin_by_accident() -> None:
+    """base_site.html extends "admin/base.html": a portal template of that name would sit under every page, its blocks
+    rendering wherever a page leaves them out."""
+    found = {
+        template_name(path): "takes the name of a Django admin template"
+        for path in tracked_templates()
+        if (DJANGO_ADMIN_TEMPLATES / template_name(path)).is_file()
+    }
+    fail_with("Templates that shadow Django admin's", found, ADMIN_OVERRIDES)

@@ -1,5 +1,5 @@
 {# Button row component: a row of buttons and links that ends a section (see README) #}
 {# Usage: <c-button_row><c-link href="..." variant="cancel">Cancel</c-link><c-button type="submit" variant="primary">Save</c-button></c-button_row> #}
 {# Props: class (additional classes - e.g., justify-end, mt-20), boxed (bool: a grey bar, for a row that is the whole section) #}
-<c-vars class boxed="false" />
+<c-vars class="" boxed="false" />
 <div {{ attrs }} class="submit-row d-flex items-center gap-10 {% if boxed == 'true' %}submit-row--boxed {% endif %}{{ class }}">{{ slot }}</div>

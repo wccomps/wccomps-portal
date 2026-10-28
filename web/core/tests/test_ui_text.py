@@ -59,17 +59,10 @@ QUOTED_RE = re.compile(r""""([^"]*)"|'([^']*)'""")
 JS_STRING_RE = re.compile(r"""'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`""")
 JS_ESCAPE_RE = re.compile(r"\\(.)")
 JS_ESCAPES = {"n": "\n", "t": "\t"}
-CHROME = "labelled for screen readers"
 
 # "template:line:problem" or "file.py:function:line:problem" (fnmatch) -> why that string reads right, or isn't UI
 # text
 UI_TEXT_EXCEPTIONS = {
-    "admin/base_site.html:*:☰": "the menu button's icon, " + CHROME,
-    "admin/base_site.html:*:✕": "the menu's close icon, " + CHROME,
-    "admin/base_site.html:*:☀": "the dark mode toggle's icon, " + CHROME,
-    "admin/base_site.html:*:\U0001f319": "the dark mode toggle's icon, " + CHROME,
-    "admin/base_site.html:*:\U0001f507": "the notification sound toggle's icon, " + CHROME,
-    "admin/base_site.html:*:\U0001f514": "the notification sound toggle's icon, " + CHROME,
     "cotton/table_header.html:*:▲": "the sort direction arrow on the sorted column",
     "cotton/table_header.html:*:▼": "the sort direction arrow on the sorted column",
     "cotton/fieldset.html:*:▶": "the collapsible fieldset's expand arrow",

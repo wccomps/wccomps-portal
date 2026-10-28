@@ -119,6 +119,10 @@ PAGES: list[PageDef] = [
         needs_data="finding",
     ),
     PageDef(
+        url_name="scoring:review_red_finding",
+        needs_data="finding",
+    ),
+    PageDef(
         url_name="scoring:ip_pool_list",
     ),
     PageDef(

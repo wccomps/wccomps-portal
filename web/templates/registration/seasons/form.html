@@ -11,26 +11,15 @@
         <c-module>
             <c-form>
                 {% csrf_token %}
+                <c-form_errors :form="form" />
                 <c-fieldset heading="Season Details" aligned="true">
-                    <c-form_field label="{{ form.name.label }}"
-                                  required="true"
-                                  id="{{ form.name.id_for_label }}"
-                                  error="
-        {% for e in form.name.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.name">
                         {{ form.name }}
                     </c-form_field>
-                    <c-form_field label="{{ form.year.label }}"
-                                  required="true"
-                                  id="{{ form.year.id_for_label }}"
-                                  error="
-        {% for e in form.year.errors %}{{ e }}{% endfor %}
-        ">
+                    <c-form_field :field="form.year">
                         {{ form.year }}
                     </c-form_field>
-                    <c-form_field label="{{ form.is_active.label }}"
-                                  id="{{ form.is_active.id_for_label }}"
-                                  help_text="{{ form.is_active.help_text }}">
+                    <c-form_field :field="form.is_active">
                         {{ form.is_active }}
                     </c-form_field>
                 </c-fieldset>
