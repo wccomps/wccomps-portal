@@ -57,6 +57,11 @@ SESSIONS_HIDDEN = (
 )
 
 
+def reason_for(error: AuthentikAPIError | httpx.HTTPError) -> str:
+    """Why an Authentik call failed, for an operator: the message with its status, never the URL or the answer."""
+    return error.message if isinstance(error, AuthentikAPIError) else f"Network error ({type(error).__name__})"
+
+
 def _is_uuid(value: object) -> bool:
     try:
         uuid.UUID(str(value))
@@ -172,7 +177,9 @@ class AuthentikManager:
 
     def _results(self, response: httpx.Response, context: str) -> tuple[list[dict[str, object]], bool]:
         """A list endpoint's results (objects only) and whether another page follows; AuthentikAPIError for an
-        answer of any other shape."""
+        answer other than 2xx (a redirect too) or of any other shape."""
+        if not response.is_success:
+            raise self._handle_response_error(response, context)
         data = self._json(response, context)
         results = data.get("results") if isinstance(data, dict) else None
         if not isinstance(results, list) or not all(isinstance(r, dict) for r in results):
@@ -434,24 +441,20 @@ class AuthentikManager:
 
             refused: int | None = None
             for session in sessions:
-                response = self.client.delete(f"{self.base_url}/api/v3/core/authenticated_sessions/{session['uuid']}/")
+                session_id = uuid.UUID(str(session["uuid"]))  # canonical, whatever form Authentik answered
+                response = self.client.delete(f"{self.base_url}/api/v3/core/authenticated_sessions/{session_id}/")
                 # 404: the session ended between the list and the delete
                 if not response.is_success and response.status_code != 404 and refused is None:
                     refused = response.status_code
             return None if refused is None else f"Authentik did not end sessions (HTTP {refused})"
-        except AuthentikAPIError as e:
+        except (AuthentikAPIError, httpx.HTTPError) as e:
             logger.warning(f"Ending the sessions of {user['username']} failed: {e}")
-            return e.message
-        except httpx.HTTPError as e:
-            logger.warning(f"Ending the sessions of {user['username']} failed: {e}")
-            return f"Network error ending sessions ({type(e).__name__})"
+            return reason_for(e)
 
     def sees_any_sessions(self) -> bool:
         """Whether the token can see any session at all (when not, see SESSIONS_HIDDEN). Raises AuthentikAPIError on
         an answer other than a 2xx list, httpx.HTTPError when Authentik can't be reached."""
         response = self.client.get(f"{self.base_url}/api/v3/core/authenticated_sessions/", params={"page_size": "1"})
-        if not response.is_success:
-            raise self._handle_response_error(response, "List sessions")
         sessions, _ = self._results(response, "List sessions")
         return bool(sessions)
 
@@ -487,8 +490,6 @@ class AuthentikManager:
         """The user Authentik answers for this username, or None; callers check the username it carries. Raises
         AuthentikAPIError on an answer other than a 2xx list, httpx.HTTPError when Authentik can't be reached."""
         response = self.client.get(f"{self.base_url}/api/v3/core/users/", params={"username": username})
-        if not response.is_success:
-            raise self._handle_response_error(response, f"Find user {username}")
         return self._first_user(response, f"Find user {username}")
 
     def set_password(self, user: AuthentikUser, password: str) -> None:
@@ -502,14 +503,13 @@ class AuthentikManager:
 
     def _list_all(self, path: str, params: dict[str, str], fields: dict[str, type]) -> list[dict[str, object]]:
         """Fetch every page of an Authentik list endpoint, each result holding these fields of these types (a list
-        field: of strings). Raises AuthentikAPIError on an answer other than a 2xx list."""
+        field: of strings). Raises AuthentikAPIError on an answer other than a 2xx list of that shape, or past
+        MAX_PAGES."""
         results: list[dict[str, object]] = []
         for page in range(1, MAX_PAGES + 1):
             response = self.client.get(
                 f"{self.base_url}{path}", params={**params, "page": str(page), "page_size": "100"}
             )
-            if not response.is_success:
-                raise self._handle_response_error(response, f"List {path}")
             found, has_next = self._results(response, f"List {path}")
             for result in found:
                 if not all(_holds(result.get(name), kind) for name, kind in fields.items()):

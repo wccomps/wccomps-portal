@@ -7,9 +7,9 @@ from dataclasses import dataclass
 
 import httpx
 
-from team.models import MAX_TEAMS, team_username
+from team.models import MAX_TEAMS, SchoolInfo, team_username
 
-from .authentik_manager import AuthentikAPIError, AuthentikManager, AuthentikUser
+from .authentik_manager import AuthentikAPIError, AuthentikManager, AuthentikUser, reason_for
 from .utils import shorten
 
 logger = logging.getLogger(__name__)
@@ -34,13 +34,6 @@ def validate_team_account(user_data: AuthentikUser, expected_username: str) -> t
     return (True, "")
 
 
-def _record_password(team_number: int, password: str) -> None:
-    """Keep the team's password on its school info, for packet emails; a team with no school info has no copy."""
-    from team.models import SchoolInfo
-
-    SchoolInfo.objects.filter(team__team_number=team_number).update(password=password)
-
-
 def _new_team_password(manager: AuthentikManager, team_number: int) -> tuple[AuthentikUser, str] | str:
     """Give the team account a new random password in Authentik and record it on the team's school info: the
     account and the password, or why not. Leaves is_active alone: team accounts are enabled only while the
@@ -57,13 +50,11 @@ def _new_team_password(manager: AuthentikManager, team_number: int) -> tuple[Aut
         if not is_valid:
             return error
         manager.set_password(user, password)
-    except AuthentikAPIError as e:
+    except (AuthentikAPIError, httpx.HTTPError) as e:
         logger.warning(f"Failed to reset the password of {username}: {e}")
-        return e.message
-    except httpx.HTTPError as e:
-        logger.warning(f"Failed to reset the password of {username}: {e}")
-        return f"Network error setting the password ({type(e).__name__})"
-    _record_password(team_number, password)
+        return reason_for(e)
+    # The copy packet emails send; a team with no school info has none
+    SchoolInfo.objects.filter(team__team_number=team_number).update(password=password)
     return user, password
 
 

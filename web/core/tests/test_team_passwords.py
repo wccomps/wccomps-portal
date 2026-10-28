@@ -65,9 +65,9 @@ def test_authentik_reset_leaves_the_account_disabled():
     real = AuthentikManager.__new__(AuthentikManager)
     real.base_url = "https://auth.example"
     real.client = MagicMock()
-    real.client.get.return_value.is_error = False
+    real.client.get.return_value.is_success = True
     real.client.get.return_value.json.return_value = {"results": [{"pk": 5, "username": "team07"}]}
-    real.client.post.return_value.is_error = False
+    real.client.post.return_value.is_success = True
 
     with patch("core.authentik_utils.AuthentikManager") as cls:
         cls.return_value.__enter__.return_value = real
@@ -123,6 +123,7 @@ def test_reset_team_credentials_refuses_a_non_team_account(manager):
     assert reset.password is None and "not a team account" in reset.error
     manager.set_password.assert_not_called()
     manager.end_user_sessions.assert_not_called()
+    manager.end_user_sessions.assert_not_called()
 
 
 def test_reset_team_credentials_failed_password_tries_no_sessions(manager):
@@ -146,9 +147,7 @@ def test_reset_team_credentials_names_an_unlisted_status(manager):
 def test_reset_team_credentials_network_error_names_the_cause(school_info, manager):
     manager.set_password.side_effect = httpx.ConnectError("refused")
 
-    assert reset_team_credentials(7) == CredentialReset(
-        password=None, error="Network error setting the password (ConnectError)"
-    )
+    assert reset_team_credentials(7) == CredentialReset(password=None, error="Network error (ConnectError)")
     school_info.refresh_from_db()
     assert school_info.password == "old"
 

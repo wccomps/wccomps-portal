@@ -368,7 +368,7 @@ class TestAuthentikManager:
 
     @staticmethod
     def _answer(body: dict, status: int = 200, url: str = "https://auth.test.local/x") -> Mock:
-        response = Mock(is_error=status >= 400, is_success=200 <= status < 300, status_code=status, text="", url=url)
+        response = Mock(is_success=200 <= status < 300, status_code=status, text="", url=url)
         response.json.return_value = body
         if status >= 400:
             response.raise_for_status.side_effect = httpx.HTTPStatusError("error", request=Mock(), response=response)
@@ -457,7 +457,7 @@ class TestAuthentikManager:
     def test_end_user_sessions_network_error(self, manager: AuthentikManager) -> None:
         manager.client.get.side_effect = httpx.ConnectError("Network error")
 
-        assert manager.end_user_sessions(self.TEAM01) == "Network error ending sessions (ConnectError)"
+        assert manager.end_user_sessions(self.TEAM01) == "Network error (ConnectError)"
 
     def test_sees_any_sessions(self, manager: AuthentikManager) -> None:
         manager.client.get.side_effect = [self._sessions(7), self._sessions()]
@@ -495,3 +495,16 @@ class TestAuthentikManager:
 
         assert manager.end_user_sessions(self.TEAM01) is not None
         manager.client.delete.assert_not_called()
+
+    def test_end_user_sessions_deletes_by_the_canonical_session_id(self, manager: AuthentikManager) -> None:
+        """uuid.UUID accepts {...} and urn:uuid: forms; the delete path must be the plain form."""
+        manager.client.get.return_value = self._answer(
+            {"results": [{"uuid": "{00000000-0000-4000-8000-000000000001}", "user": 42}]}
+        )
+        manager.client.delete.return_value = self._answer({}, 204)
+
+        assert manager.end_user_sessions(self.TEAM01) is None
+
+        assert manager.client.delete.call_args.args[0].endswith(
+            "/authenticated_sessions/00000000-0000-4000-8000-000000000001/"
+        )
