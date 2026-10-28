@@ -208,7 +208,6 @@ class AuthentikManager:
                 params: dict[str, str | int] = {"page_size": 100, "page": page}
                 self._log_request("GET", url, params=params)
                 response = self.client.get(url, params=params)
-                response.raise_for_status()
                 providers, has_next = self._results(response, "List providers")
                 for provider in providers:
                     slug = provider.get("assigned_application_slug")
@@ -377,12 +376,7 @@ class AuthentikManager:
         username may since belong to someone else.
         """
         try:
-            response = self.client.get(
-                f"{self.base_url}/api/v3/core/users/?username={quote(username, safe='')}",
-            )
-            response.raise_for_status()
-            user = self._first_user(response, f"Find user {username}")
-
+            user = self.find_user(username)
             if not user:
                 logger.warning(f"Authentik user not found for username {username}")
                 return False
@@ -411,6 +405,11 @@ class AuthentikManager:
             else:
                 logger.exception(f"Failed to update Authentik user discord_id: {e}")
             raise
+        except AuthentikAPIError as e:
+            logger.exception(f"Failed to update discord_id for user {username}: {e}")
+            if e.status_code is not None:  # Authentik refused the lookup: raise, as a refused update does
+                raise
+            return False
         except Exception as e:
             logger.exception(f"Failed to update discord_id for user {username}: {e}")
             return False
@@ -459,12 +458,7 @@ class AuthentikManager:
         from core.authentik_utils import validate_team_account
 
         try:
-            response = self.client.get(
-                f"{self.base_url}/api/v3/core/users/?username={quote(username, safe='')}",
-            )
-            response.raise_for_status()
-            user = self._first_user(response, f"Find user {username}")
-
+            user = self.find_user(username)
             if not user:
                 return (False, "User not found")
 
@@ -536,12 +530,7 @@ class AuthentikManager:
     def get_user_with_groups(self, username: str) -> AuthentikUserWithGroups | None:
         """Get an Authentik user with their groups_obj, or None if not found or the lookup failed (logged)."""
         try:
-            response = self.client.get(
-                f"{self.base_url}/api/v3/core/users/",
-                params={"username": username},
-            )
-            response.raise_for_status()
-            user = self._first_user(response, f"Find user {username}")
+            user = self.find_user(username)
             if user is None:
                 return None
             raw = cast(dict[str, object], user)
@@ -549,7 +538,7 @@ class AuthentikManager:
             if not isinstance(groups, list) or not all(
                 isinstance(g, dict) and isinstance(g.get("name"), str) for g in groups
             ):
-                raise AuthentikAPIError(f"Find user {username}: groups without names", url=str(response.url))
+                raise AuthentikAPIError(f"Find user {username}: groups without names")
             return cast(AuthentikUserWithGroups, raw)
         except Exception as e:
             logger.exception(f"Failed to get user {username}: {e}")
@@ -562,7 +551,6 @@ class AuthentikManager:
                 f"{self.base_url}/api/v3/core/groups/",
                 params={"name": name},
             )
-            response.raise_for_status()
             groups, _ = self._results(response, f"Find group {name}")
             found = next((g for g in groups if g.get("name") == name and isinstance(g.get("pk"), str)), None)
             return cast(AuthentikGroup | None, found)

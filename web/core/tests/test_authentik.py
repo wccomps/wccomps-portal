@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, Mock, patch
 import httpx
 import pytest
 
-from core.authentik_manager import AuthentikManager
+from core.authentik_manager import AuthentikAPIError, AuthentikManager
 
 
 class TestAuthentikManager:
@@ -69,7 +69,7 @@ class TestUpdateUserDiscordId:
 
         # Verify GET searched by username
         manager.client.get.assert_called_once()
-        assert "username=testuser" in manager.client.get.call_args[0][0]
+        assert manager.client.get.call_args.kwargs["params"] == {"username": "testuser"}
 
         # Verify PATCH used the integer PK
         manager.client.patch.assert_called_once()
@@ -123,28 +123,26 @@ class TestUpdateUserDiscordId:
         assert result is False
         manager.client.patch.assert_not_called()
 
-    def test_raises_on_403_error(self, manager):
-        """Should raise on 403 Forbidden (permission issue)."""
-        mock_response = MagicMock()
-        mock_response.status_code = 403
-        mock_response.text = "Permission denied"
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "error", request=MagicMock(), response=mock_response
-        )
+    @pytest.mark.parametrize("status", [403, 500, 302])
+    def test_raises_when_authentik_refuses_the_lookup(self, manager, status):
+        """A refused lookup raises (the caller treats it as non-fatal), as a refused update does."""
+        mock_response = MagicMock(status_code=status, text="refused", is_success=False)
         manager.client.get.return_value = mock_response
 
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(AuthentikAPIError):
             manager.update_user_discord_id("someuser", 123456789, "u-1")
 
-    def test_raises_on_other_http_errors(self, manager):
-        """Should raise on other HTTP errors."""
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        mock_response.text = "Server error"
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "error", request=MagicMock(), response=mock_response
+        manager.client.patch.assert_not_called()
+
+    def test_raises_on_a_refused_update(self, manager):
+        mock_get_response = MagicMock()
+        mock_get_response.json.return_value = {"results": [{"pk": 42, "uid": "u-1", "attributes": {}}]}
+        manager.client.get.return_value = mock_get_response
+        mock_patch_response = MagicMock(status_code=500, text="Server error")
+        mock_patch_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "error", request=MagicMock(), response=mock_patch_response
         )
-        manager.client.get.return_value = mock_response
+        manager.client.patch.return_value = mock_patch_response
 
         with pytest.raises(httpx.HTTPStatusError):
             manager.update_user_discord_id("someuser", 123456789, "u-1")

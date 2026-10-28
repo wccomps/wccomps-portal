@@ -457,7 +457,7 @@ READERS = [
         (USERS, DONE),
         check_bool,
         (f"{AM}.update_user_discord_id", *USER),
-        raises=(httpx.HTTPStatusError,),
+        raises=(httpx.HTTPStatusError, AuthentikAPIError),
     ),
     Reader(
         "end_user_sessions",

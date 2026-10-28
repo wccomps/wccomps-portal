@@ -520,3 +520,13 @@ class TestAuthentikManager:
         manager.client.get.side_effect = [self._sessions(), self._sessions()]
 
         assert manager.end_user_sessions(self.TEAM01) == (0, SESSIONS_HIDDEN)
+
+    def test_older_lookups_refuse_a_redirected_answer(self, manager: AuthentikManager) -> None:
+        """They share find_user and the list reader, so a redirect is a failure, never an answer to act on."""
+        manager.client.get.return_value = self._answer({"results": [{"pk": 42, "username": "team01"}]}, 302)
+
+        assert manager.toggle_user("team01", is_active=True)[0] is False
+        assert manager.get_user_with_groups("team01") is None
+        assert manager.get_group_by_name("WCComps_BlueTeam01") is None
+        assert manager.list_applications() == []
+        manager.client.patch.assert_not_called()
