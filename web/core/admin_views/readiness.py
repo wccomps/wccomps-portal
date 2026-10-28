@@ -125,7 +125,8 @@ def _check_session_access() -> CheckResult:
         return ("pass", "The portal's token can see Authentik sessions", None)
     return (
         "fail",
-        f"{SESSIONS_HIDDEN} If nobody is, sign in to Authentik and run the checks again.",
+        f"{SESSIONS_HIDDEN} If nobody is, sign in to Authentik and run the checks again. The token also needs the "
+        "delete permission, which this check can't test.",
         None,
     )
 

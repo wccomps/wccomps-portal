@@ -52,8 +52,8 @@ MAX_PAGES = 100  # of 100 results each: a list endpoint still saying "next" past
 
 # Authentik lists only the sessions the token may view, so an empty list can mean a missing permission
 SESSIONS_HIDDEN = (
-    "Authentik showed the portal's token no sessions at all, so none were ended. Either its Authentik user lacks "
-    "the view and delete Authenticated Session permissions, or nobody is signed in to Authentik."
+    "Authentik showed the portal's token no sessions at all: its Authentik user lacks the view Authenticated "
+    "Session permission, or nobody is signed in to Authentik."
 )
 
 
@@ -408,50 +408,35 @@ class AuthentikManager:
             logger.exception(f"Failed to update discord_id for user {username}: {e}")
             return False
 
-    def revoke_user_sessions(self, username: str) -> str | None:
-        """End every Authentik session of a user: None when done, else why not (some may have ended)."""
+    def end_user_sessions(self, user: AuthentikUser) -> str | None:
+        """End every Authentik session of a user: None when done, else why not (some may have ended). The reason
+        never names the user, so one reason shared by many teams reads once."""
         try:
-            response = self.client.get(
-                f"{self.base_url}/api/v3/core/users/",
-                params={"username": username},
-            )
-            response.raise_for_status()
-            user = self._first_user(response, f"Find user {username}")
-            if not user:
-                return f"User {username} not found"
-
             # user__username: Authentik ignores a filter it doesn't know (user=<pk> is one) and answers every session
+            # the token may view
             sessions = self._list_all(
-                "/api/v3/core/authenticated_sessions/", {"user__username": username}, {"uuid": str, "user": int}
+                "/api/v3/core/authenticated_sessions/", {"user__username": user["username"]}, {"uuid": str, "user": int}
             )
             if any(session["user"] != user["pk"] for session in sessions):
-                return f"Authentik answered sessions of other users for {username}, so none were ended"
+                return "Authentik answered sessions of other users, so none were ended"
             if not sessions and not self.sees_any_sessions():
                 return SESSIONS_HIDDEN
 
-            failures: list[str] = []
+            refused: list[int] = []
             for session in sessions:
                 response = self.client.delete(f"{self.base_url}/api/v3/core/authenticated_sessions/{session['uuid']}/")
                 # 404: the session ended between the list and the delete
                 if response.is_error and response.status_code != 404:
-                    failures.append(str(self._handle_response_error(response, f"End a session of {username}")))
-            if failures:
-                return f"Ended {len(sessions) - len(failures)} of {len(sessions)} sessions of {username}: {failures[0]}"
-            logger.info(f"Ended {len(sessions)} session(s) of {username}")
+                    refused.append(response.status_code)
+            if refused:
+                return f"Authentik refused to end {len(refused)} of {len(sessions)} sessions (HTTP {refused[0]})"
             return None
-
-        except httpx.HTTPStatusError as e:
-            error = self._handle_response_error(e.response, f"Revoke sessions for user {username}")
-            logger.exception(str(error))
-            return str(error)
+        except AuthentikAPIError as e:
+            logger.warning(f"Ending the sessions of {user['username']} failed: {e}")
+            return e.message
         except httpx.HTTPError as e:
-            error_msg = f"Network error revoking sessions: {e}"
-            logger.exception(error_msg)
-            return error_msg
-        except Exception as e:
-            error_msg = f"Unexpected error revoking sessions: {e}"
-            logger.error(error_msg, exc_info=True)
-            return error_msg
+            logger.warning(f"Ending the sessions of {user['username']} failed: {e}")
+            return f"Network error ending sessions ({type(e).__name__})"
 
     def sees_any_sessions(self) -> bool:
         """Whether the token can see any session at all. False means it lacks the permission, or nobody is signed in
@@ -490,46 +475,61 @@ class AuthentikManager:
             logger.exception(f"Failed to toggle {username}: {e}")
             return (False, "Account toggle failed. Check the server logs.")
 
+    def _team_user(self, team_number: int) -> tuple[AuthentikUser | None, str]:
+        """The team's account, or None and why not: a team number out of range, no such user, or an account that
+        isn't that team's. Raises AuthentikAPIError or httpx.HTTPError when Authentik can't be asked."""
+        from core.authentik_utils import validate_team_account
+        from team.models import MAX_TEAMS, team_username
+
+        if team_number < 1 or team_number > MAX_TEAMS:
+            return None, f"Team number must be between 1 and {MAX_TEAMS}"
+        username = team_username(team_number)
+        response = self.client.get(f"{self.base_url}/api/v3/core/users/", params={"username": username})
+        if response.is_error:
+            raise self._handle_response_error(response, f"Find user {username}")
+        user = self._first_user(response, f"Find user {username}")
+        if not user:
+            return None, f"User {username} not found"
+        is_valid, error = validate_team_account(user, username)
+        return (user, "") if is_valid else (None, error)
+
+    def _set_password(self, user: AuthentikUser, password: str) -> None:
+        response = self.client.post(
+            f"{self.base_url}/api/v3/core/users/{user['pk']}/set_password/", json={"password": password}
+        )
+        if response.is_error:
+            raise self._handle_response_error(response, f"Set the password of {user['username']}")
+
     def reset_blueteam_password(self, team_number: int, password: str) -> tuple[bool, str]:
         """Reset a blue team account's password in Authentik.
 
         Leaves is_active alone: team accounts are enabled only while the competition runs.
         """
-        from core.authentik_utils import validate_team_account
-        from team.models import MAX_TEAMS, team_username
-
-        if team_number < 1 or team_number > MAX_TEAMS:
-            return (False, f"Team number must be between 1 and {MAX_TEAMS}")
-
-        username = team_username(team_number)
-
         try:
-            response = self.client.get(
-                f"{self.base_url}/api/v3/core/users/?username={quote(username, safe='')}",
-            )
-            response.raise_for_status()
-            user = self._first_user(response, f"Find user {username}")
-
+            user, error = self._team_user(team_number)
             if not user:
-                return (False, f"User {username} not found")
-
-            user_pk: int = user["pk"]
-
-            is_valid, error = validate_team_account(user, username)
-            if not is_valid:
                 return (False, error)
-
-            response = self.client.post(
-                f"{self.base_url}/api/v3/core/users/{user_pk}/set_password/",
-                json={"password": password},
-            )
-            response.raise_for_status()
-
+            self._set_password(user, password)
             return (True, "")
-
         except Exception as e:
-            logger.exception(f"Failed to reset password for {username}: {e}")
+            logger.exception(f"Failed to reset the password of team {team_number}: {e}")
             return (False, "see the server logs")  # the callers say what failed
+
+    def reset_team_credentials(self, team_number: int, password: str) -> tuple[str | None, str | None]:
+        """Set a team account's password, then end its sessions, finding the account once.
+
+        Returns (reset_error, sessions_error): reset_error None when the password was set; sessions_error None when
+        the sessions were ended, and always None when the password wasn't set (nothing was tried).
+        """
+        try:
+            user, error = self._team_user(team_number)
+            if not user:
+                return error, None
+            self._set_password(user, password)
+        except Exception as e:
+            logger.exception(f"Failed to reset the password of team {team_number}: {e}")
+            return "see the server logs", None
+        return None, self.end_user_sessions(user)
 
     def _list_all(self, path: str, params: dict[str, str], fields: dict[str, type]) -> list[dict[str, object]]:
         """Fetch every page of an Authentik list endpoint, each result holding these fields of these types (a list

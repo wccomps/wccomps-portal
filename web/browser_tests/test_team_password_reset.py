@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 from django.urls import reverse
 
+from core.authentik_utils import CredentialReset
 from core.tests.roles import role_user
 
 from .conftest import create_session_context
@@ -22,7 +23,9 @@ def test_reset_password_shows_the_new_password_without_reloading(live_server, pw
     page.on("dialog", lambda dialog: dialog.accept())
 
     try:
-        with patch("core.admin_views.teams.reset_team_credentials", return_value=("New-Pass-9!", "", None)):
+        with patch(
+            "core.admin_views.teams.reset_team_credentials", return_value=CredentialReset(password="New-Pass-9!")
+        ):
             page.goto(live_server.url + reverse("admin_team_detail", args=[8]))
             with page.expect_response(lambda r: r.url.endswith("/action/")):
                 page.get_by_role("button", name="Reset Password").click()
@@ -51,7 +54,9 @@ def test_reset_team_keeps_the_password_up_and_hides_the_unlinked_members(live_se
     page.on("dialog", lambda dialog: dialog.accept())
 
     try:
-        with patch("core.admin_views.teams.reset_team_credentials", return_value=("Team-Pass-7!", "", None)):
+        with patch(
+            "core.admin_views.teams.reset_team_credentials", return_value=CredentialReset(password="Team-Pass-7!")
+        ):
             page.goto(live_server.url + reverse("admin_team_detail", args=[8]))
             assert page.get_by_text("memberdiscord").is_visible()
             with page.expect_response(lambda r: r.url.endswith("/action/")):
@@ -88,7 +93,9 @@ def test_django_admin_team_pages_have_reset_password(live_server, pw_browser, pa
     page.on("dialog", lambda dialog: dialog.accept())
 
     try:
-        with patch("core.admin_views.teams.reset_team_credentials", return_value=("New-Pass-9!", "", None)) as reset:
+        with patch(
+            "core.admin_views.teams.reset_team_credentials", return_value=CredentialReset(password="New-Pass-9!")
+        ) as reset:
             page.goto(live_server.url + page_path.format(team_pk=team.pk, school_pk=school.pk))
             with page.expect_response(lambda r: r.url.endswith("/action/")):
                 page.get_by_role("button", name="Reset Password").click()
@@ -110,7 +117,7 @@ def test_competition_reset_passwords_keeps_the_csv_and_its_download(live_server,
     page.on("dialog", lambda dialog: dialog.accept())
 
     try:
-        with patch("core.authentik_utils.reset_team_credentials", return_value=("Csv-Pass-3!", "", None)):
+        with patch("core.authentik_utils.reset_team_credentials", return_value=CredentialReset(password="Csv-Pass-3!")):
             page.goto(live_server.url + reverse("admin_competition"))
             page.get_by_role("button", name="Advanced: reset team passwords").click()
             page.get_by_label("Team Numbers").fill("3")

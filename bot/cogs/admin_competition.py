@@ -97,9 +97,7 @@ class AdminCompetitionCog(commands.Cog):
             target_id=0,
             details={
                 "total_users": total,
-                "success_count": len(password_list),
-                "failed_resets": len(failed_resets),
-                "sessions_failed": [f"{username}: {why}" for username, why in sessions_failed],
+                **result.audit_details(),
                 "team_numbers": team_numbers or "all active",
             },
         )

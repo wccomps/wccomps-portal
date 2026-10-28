@@ -286,7 +286,6 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
     team_numbers = form.cleaned_data["team_numbers"] or active_team_numbers()
     result = reset_teams_credentials(team_numbers)
     password_list = result.password_list
-    failed_resets = result.failed_resets
     sessions_failed = result.sessions_failed
 
     csv_content = credentials_csv((username, password) for _num, username, password in password_list)
@@ -298,9 +297,7 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
         target_id=0,
         details={
             "total_users": len(team_numbers),
-            "success_count": len(password_list),
-            "failed_count": len(failed_resets),
-            "sessions_failed": [f"{username}: {why}" for username, why in sessions_failed],
+            **result.audit_details(),
             "team_numbers": form.cleaned_data.get("team_numbers", "") or "all active",
         },
     )

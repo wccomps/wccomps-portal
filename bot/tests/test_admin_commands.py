@@ -11,6 +11,7 @@ from django.contrib.auth.models import User
 from bot.cogs.admin_competition import AdminCompetitionCog
 from bot.cogs.admin_teams import AdminTeamsCog
 from bot.cogs.admin_tickets import AdminTicketsCog
+from core.authentik_utils import CredentialReset
 from core.models import AuditLog
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
@@ -89,7 +90,9 @@ class TestAdminCommands:
         with (
             patch(
                 "core.authentik_utils.reset_team_credentials",
-                side_effect=lambda n: (f"pw-{n}", "", "HTTP 403" if n == 2 else None),
+                side_effect=lambda n: CredentialReset(
+                    password=f"pw-{n}", sessions_error="HTTP 403" if n == 2 else None
+                ),
             ) as reset,
             patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
         ):
@@ -112,7 +115,11 @@ class TestAdminCommands:
         """Test /admin reset-blueteam-passwords handles API failures."""
         mock_interaction.user.id = mock_admin_user._discord_id
 
-        results = {1: ("pw-1", "", None), 2: (None, "HTTP 500", None), 3: ("pw-3", "", None)}
+        results = {
+            1: CredentialReset(password="pw-1"),
+            2: CredentialReset(password=None, error="HTTP 500"),
+            3: CredentialReset(password="pw-3"),
+        }
         callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
         with (
             patch("core.authentik_utils.reset_team_credentials", side_effect=lambda n: results[n]),

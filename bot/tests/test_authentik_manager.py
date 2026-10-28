@@ -367,8 +367,8 @@ class TestAuthentikManager:
         assert result is False
 
     @staticmethod
-    def _answer(body: dict, status: int = 200) -> Mock:
-        response = Mock(is_error=status >= 400, status_code=status, text="", url="https://auth.test.local/x")
+    def _answer(body: dict, status: int = 200, url: str = "https://auth.test.local/x") -> Mock:
+        response = Mock(is_error=status >= 400, status_code=status, text="", url=url)
         response.json.return_value = body
         if status >= 400:
             response.raise_for_status.side_effect = httpx.HTTPStatusError("error", request=Mock(), response=response)
@@ -377,77 +377,86 @@ class TestAuthentikManager:
     def _sessions(self, *owners: int) -> Mock:
         return self._answer({"results": [{"uuid": f"s-{i}", "user": pk} for i, pk in enumerate(owners)]})
 
-    def test_revoke_user_sessions_ends_each_of_the_users_sessions(self, manager: AuthentikManager) -> None:
-        manager.client.get.side_effect = [self._answer({"results": [{"pk": 42}]}), self._sessions(42, 42)]
+    TEAM01 = {"pk": 42, "username": "team01"}
+
+    def test_end_user_sessions_ends_each_of_the_users_sessions(self, manager: AuthentikManager) -> None:
+        manager.client.get.return_value = self._sessions(42, 42)
         manager.client.delete.return_value = self._answer({}, 204)
 
-        assert manager.revoke_user_sessions("team01") is None
+        assert manager.end_user_sessions(self.TEAM01) is None
 
         assert manager.client.delete.call_count == 2
 
-    def test_revoke_user_sessions_filters_by_username(self, manager: AuthentikManager) -> None:
+    def test_end_user_sessions_filters_by_username(self, manager: AuthentikManager) -> None:
         """Authentik ignores an unknown filter such as user=<pk> and answers every session it lets the token see."""
-        manager.client.get.side_effect = [self._answer({"results": [{"pk": 42}]}), self._sessions(42)]
+        manager.client.get.return_value = self._sessions(42)
         manager.client.delete.return_value = self._answer({}, 204)
 
-        manager.revoke_user_sessions("team01")
+        manager.end_user_sessions(self.TEAM01)
 
-        assert manager.client.get.call_args_list[1].kwargs["params"]["user__username"] == "team01"
+        assert manager.client.get.call_args.kwargs["params"]["user__username"] == "team01"
 
-    def test_revoke_user_sessions_refuses_other_users_sessions(self, manager: AuthentikManager) -> None:
-        manager.client.get.side_effect = [self._answer({"results": [{"pk": 42}]}), self._sessions(42, 99)]
+    def test_end_user_sessions_refuses_other_users_sessions(self, manager: AuthentikManager) -> None:
+        manager.client.get.return_value = self._sessions(42, 99)
 
-        error = manager.revoke_user_sessions("team01")
+        error = manager.end_user_sessions(self.TEAM01)
 
         assert error is not None and "other users" in error
         manager.client.delete.assert_not_called()
 
-    def test_revoke_user_sessions_user_not_found(self, manager: AuthentikManager) -> None:
-        manager.client.get.return_value = self._answer({"results": []})
-
-        error = manager.revoke_user_sessions("nonexistent")
-
-        assert error is not None and "not found" in error
-
-    def test_revoke_user_sessions_no_sessions(self, manager: AuthentikManager) -> None:
+    def test_end_user_sessions_no_sessions(self, manager: AuthentikManager) -> None:
         """No sessions of the user, while the token sees someone's: nothing to end."""
-        manager.client.get.side_effect = [
-            self._answer({"results": [{"pk": 42}]}),
-            self._sessions(),
-            self._sessions(7),
-        ]
+        manager.client.get.side_effect = [self._sessions(), self._sessions(7)]
 
-        assert manager.revoke_user_sessions("team01") is None
+        assert manager.end_user_sessions(self.TEAM01) is None
 
-    def test_revoke_user_sessions_fails_when_sessions_are_hidden(self, manager: AuthentikManager) -> None:
+    def test_end_user_sessions_fails_when_sessions_are_hidden(self, manager: AuthentikManager) -> None:
         """No sessions found, and the token sees no one's: it may not see sessions at all, so nothing was ended."""
-        manager.client.get.side_effect = [self._answer({"results": [{"pk": 42}]}), self._sessions(), self._sessions()]
+        manager.client.get.side_effect = [self._sessions(), self._sessions()]
 
-        assert manager.revoke_user_sessions("team01") == SESSIONS_HIDDEN
+        assert manager.end_user_sessions(self.TEAM01) == SESSIONS_HIDDEN
         manager.client.delete.assert_not_called()
 
-    def test_revoke_user_sessions_already_ended_session_is_fine(self, manager: AuthentikManager) -> None:
+    def test_end_user_sessions_already_ended_session_is_fine(self, manager: AuthentikManager) -> None:
         """A session that expired between the list and the delete answers 404."""
-        manager.client.get.side_effect = [self._answer({"results": [{"pk": 42}]}), self._sessions(42, 42)]
+        manager.client.get.return_value = self._sessions(42, 42)
         manager.client.delete.side_effect = [self._answer({}, 404), self._answer({}, 204)]
 
-        assert manager.revoke_user_sessions("team01") is None
+        assert manager.end_user_sessions(self.TEAM01) is None
 
-    def test_revoke_user_sessions_failed_delete_is_reported(self, manager: AuthentikManager) -> None:
+    def test_end_user_sessions_failed_delete_is_reported(self, manager: AuthentikManager) -> None:
         """A token that may view but not delete sessions must not report them ended."""
-        manager.client.get.side_effect = [self._answer({"results": [{"pk": 42}]}), self._sessions(42, 42)]
+        manager.client.get.return_value = self._sessions(42, 42)
         manager.client.delete.side_effect = [self._answer({}, 204), self._answer({"detail": "denied"}, 403)]
 
-        error = manager.revoke_user_sessions("team01")
+        assert manager.end_user_sessions(self.TEAM01) == "Authentik refused to end 1 of 2 sessions (HTTP 403)"
 
-        assert error is not None and "1 of 2" in error
+    def test_end_user_sessions_refused_list_is_reported_not_unexpected(self, manager: AuthentikManager) -> None:
+        manager.client.get.return_value = self._answer({"detail": "denied"}, 403)
 
-    def test_revoke_user_sessions_network_error(self, manager: AuthentikManager) -> None:
+        error = manager.end_user_sessions(self.TEAM01)
+
+        assert error is not None and "Permission denied" in error and "Unexpected" not in error
+
+    def test_end_user_sessions_reasons_never_name_the_user(self, manager: AuthentikManager) -> None:
+        """One reason shared by many teams must read once in a bulk reset, so it can't carry the username."""
+        manager.client.get.return_value = self._answer(
+            {"detail": "denied"}, 403, url="https://a/?user__username=team01"
+        )
+        refused_list = manager.end_user_sessions(self.TEAM01)
+        manager.client.get.return_value = self._sessions(42)
+        manager.client.delete.side_effect = [self._answer({"detail": "denied"}, 403, url="https://a/s-0/")]
+        refused_delete = manager.end_user_sessions(self.TEAM01)
+        manager.client.get.side_effect = httpx.ConnectError("https://a/?user__username=team01")
+        network = manager.end_user_sessions(self.TEAM01)
+
+        for reason in (refused_list, refused_delete, network):
+            assert reason is not None and "team01" not in reason and "s-0" not in reason
+
+    def test_end_user_sessions_network_error(self, manager: AuthentikManager) -> None:
         manager.client.get.side_effect = httpx.ConnectError("Network error")
 
-        error = manager.revoke_user_sessions("team01")
-
-        assert error is not None and "Network error" in error
+        assert manager.end_user_sessions(self.TEAM01) == "Network error ending sessions (ConnectError)"
 
     def test_sees_any_sessions(self, manager: AuthentikManager) -> None:
         manager.client.get.side_effect = [self._sessions(7), self._sessions()]
@@ -455,3 +464,32 @@ class TestAuthentikManager:
         assert manager.sees_any_sessions() is True
         assert manager.sees_any_sessions() is False
         assert manager.client.get.call_args.kwargs["params"] == {"page_size": "1"}
+
+    def test_reset_team_credentials_finds_the_account_once(self, manager: AuthentikManager) -> None:
+        manager.client.get.side_effect = [self._answer({"results": [self.TEAM01]}), self._sessions(42)]
+        manager.client.post.return_value = self._answer({}, 204)
+        manager.client.delete.return_value = self._answer({}, 204)
+
+        assert manager.reset_team_credentials(1, "New-Pass-1!") == (None, None)
+
+        user_lookups = [c for c in manager.client.get.call_args_list if c.args[0].endswith("/core/users/")]
+        assert len(user_lookups) == 1
+        manager.client.post.assert_called_once()
+
+    def test_reset_team_credentials_refuses_a_non_team_account(self, manager: AuthentikManager) -> None:
+        """Authentik answering another user for team01 must change neither its password nor its sessions."""
+        manager.client.get.return_value = self._answer({"results": [{"pk": 1, "username": "akadmin"}]})
+
+        reset_error, sessions_error = manager.reset_team_credentials(1, "New-Pass-1!")
+
+        assert reset_error is not None and "not a team account" in reset_error
+        assert sessions_error is None
+        manager.client.post.assert_not_called()
+        manager.client.delete.assert_not_called()
+
+    def test_reset_team_credentials_failed_password_tries_no_sessions(self, manager: AuthentikManager) -> None:
+        manager.client.get.return_value = self._answer({"results": [self.TEAM01]})
+        manager.client.post.return_value = self._answer({"detail": "no"}, 500)
+
+        assert manager.reset_team_credentials(1, "New-Pass-1!") == ("see the server logs", None)
+        manager.client.delete.assert_not_called()

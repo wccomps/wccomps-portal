@@ -9,7 +9,7 @@ from django.urls import reverse
 from registration.models import School
 
 from core.authentik_manager import AuthentikManager
-from core.authentik_utils import reset_team_credentials, reset_team_password
+from core.authentik_utils import CredentialReset, reset_team_credentials, reset_team_password, sessions_failure_summary
 from core.models import DiscordTask
 from team.models import DiscordLink, SchoolInfo, Team
 
@@ -49,7 +49,9 @@ def test_authentik_reset_leaves_the_account_disabled():
     manager = AuthentikManager.__new__(AuthentikManager)
     manager.base_url = "https://auth.example"
     manager.client = MagicMock()
+    manager.client.get.return_value.is_error = False
     manager.client.get.return_value.json.return_value = {"results": [{"pk": 5, "username": "team07"}]}
+    manager.client.post.return_value.is_error = False
 
     ok, _ = manager.reset_blueteam_password(7, "new-pass")
 
@@ -65,7 +67,7 @@ def test_web_unlink_queues_a_role_sync_for_the_member(admin_user, action):
     client = Client()
     client.force_login(admin_user)
 
-    with patch("core.admin_views.teams.reset_team_credentials", return_value=("pw", "", None)):
+    with patch("core.admin_views.teams.reset_team_credentials", return_value=CredentialReset(password="pw")):
         client.post(reverse("admin_team_action", args=[8]), {"action": action, "discord_id": 4242})
 
     task = DiscordTask.objects.get(task_type="sync_member_roles")
@@ -73,25 +75,42 @@ def test_web_unlink_queues_a_role_sync_for_the_member(admin_user, action):
     assert not DiscordLink.objects.filter(discord_id=4242, is_active=True).exists()
 
 
-def test_reset_team_credentials_revokes_the_accounts_sessions():
-    with (
-        patch("core.authentik_utils.reset_team_password", return_value=("pw", "")),
-        patch("core.authentik_manager.AuthentikManager") as manager,
-    ):
-        manager.return_value.revoke_user_sessions.return_value = None
-        assert reset_team_credentials(7) == ("pw", "", None)
+def test_reset_team_credentials_records_the_password_and_the_sessions_outcome(school_info):
+    with patch("core.authentik_manager.AuthentikManager") as manager:
+        manager.return_value.reset_team_credentials.return_value = (None, "HTTP 403")
+        reset = reset_team_credentials(7)
 
-    manager.return_value.revoke_user_sessions.assert_called_once_with("team07")
+    assert reset.password and reset.sessions_error == "HTTP 403" and not reset.sessions_ended
+    manager.return_value.reset_team_credentials.assert_called_once_with(7, reset.password)
+    manager.return_value.close.assert_called_once()
+    school_info.refresh_from_db()
+    assert school_info.password == reset.password
 
 
-def test_reset_team_credentials_skips_sessions_when_the_reset_fails():
-    with (
-        patch("core.authentik_utils.reset_team_password", return_value=(None, "HTTP 500")),
-        patch("core.authentik_manager.AuthentikManager") as manager,
-    ):
-        assert reset_team_credentials(7) == (None, "HTTP 500", None)
+def test_reset_team_credentials_failure_records_nothing(school_info):
+    with patch("core.authentik_manager.AuthentikManager") as manager:
+        manager.return_value.reset_team_credentials.return_value = ("User team07 not found", None)
+        assert reset_team_credentials(7) == CredentialReset(password=None, error="User team07 not found")
 
-    manager.return_value.revoke_user_sessions.assert_not_called()
+    school_info.refresh_from_db()
+    assert school_info.password == "old"
+
+
+def test_credential_reset_audit_details():
+    assert CredentialReset(password="pw").audit_details() == {
+        "password_reset": True,
+        "sessions_revoked": True,
+        "sessions_error": None,
+    }
+    assert CredentialReset(password=None, error="x").audit_details()["sessions_revoked"] is False
+
+
+def test_one_reason_shared_by_many_teams_reads_once():
+    """A bulk reset where every team fails the same way must stay short (the bot's reply is capped by Discord)."""
+    summary = sessions_failure_summary([(f"team{n:02d}", "HTTP 403") for n in range(1, 51)])
+
+    assert summary.count("HTTP 403") == 1
+    assert len(summary) < 600
 
 
 def test_web_bulk_reset_defaults_to_the_active_teams(admin_user):
@@ -103,7 +122,7 @@ def test_web_bulk_reset_defaults_to_the_active_teams(admin_user):
 
     with patch(
         "core.authentik_utils.reset_team_credentials",
-        side_effect=lambda n: (f"pw-{n}", "", "HTTP 403" if n == 2 else None),
+        side_effect=lambda n: CredentialReset(password=f"pw-{n}", sessions_error="HTTP 403" if n == 2 else None),
     ) as reset:
         response = client.post(reverse("admin_competition_action"), {"action": "reset_passwords", "team_numbers": ""})
 
@@ -123,7 +142,9 @@ def test_team_page_password_reset_keeps_discord_links(admin_user):
     client = Client()
     client.force_login(admin_user)
 
-    with patch("core.admin_views.teams.reset_team_credentials", return_value=("New-Pass-9!", "", None)) as reset:
+    with patch(
+        "core.admin_views.teams.reset_team_credentials", return_value=CredentialReset(password="New-Pass-9!")
+    ) as reset:
         response = client.post(reverse("admin_team_action", args=[8]), {"action": "reset_password"})
 
     reset.assert_called_once_with(8)
@@ -143,7 +164,9 @@ def test_team_page_password_reset_reports_a_failure(admin_user):
     client = Client()
     client.force_login(admin_user)
 
-    with patch("core.admin_views.teams.reset_team_credentials", return_value=(None, "HTTP 500", False)):
+    with patch(
+        "core.admin_views.teams.reset_team_credentials", return_value=CredentialReset(password=None, error="HTTP 500")
+    ):
         body = client.post(reverse("admin_team_action", args=[8]), {"action": "reset_password"}).json()
 
     assert body == {"success": False, "message": "Password reset failed: HTTP 500"}

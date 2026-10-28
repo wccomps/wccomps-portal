@@ -460,11 +460,24 @@ READERS = [
         raises=(httpx.HTTPStatusError,),
     ),
     Reader(
-        "revoke_user_sessions",
-        lambda: authentik().revoke_user_sessions("team01"),
-        (USERS, SESSIONS, SESSIONS, DONE),
+        "end_user_sessions",
+        lambda: authentik().end_user_sessions({"pk": 7, "username": "team01"}),
+        (SESSIONS, SESSIONS, DONE),
         lambda r: outcome(r, lambda e: e is None or is_str(e), "None or why not"),
-        (f"{AM}.revoke_user_sessions", f"{AM}._list_all", *USER),
+        (f"{AM}.end_user_sessions", f"{AM}._list_all", *READ),
+    ),
+    Reader(
+        "reset_team_credentials",
+        lambda: authentik().reset_team_credentials(1, "Correct-Horse-1!"),
+        (USERS, DONE, SESSIONS, SESSIONS, DONE),
+        lambda r: outcome(
+            r,
+            lambda t: (
+                isinstance(t, tuple) and all(e is None or is_str(e) for e in t) and (t[0] is None or t[1] is None)
+            ),
+            "(reset error, sessions error), never both",
+        ),
+        (f"{AM}.reset_team_credentials", f"{AM}._team_user", f"{AM}._set_password", *USER),
     ),
     Reader(
         "sees_any_sessions",
@@ -713,10 +726,10 @@ CALLERS = [
     Caller("sync_quotient_metadata", _sync_metadata, (DONE, METADATA, INJECTS), (ValueError,)),
     Caller("sync_service_scores", _sync_scores, (DONE, EXPORT, UPTIMES), (ValueError,)),
     Caller("refresh_user_groups", _refresh_groups, (GROUPS, USERS), (Exception,)),
-    Caller("reset_team_credentials", _reset_credentials, (USERS, DONE, USERS, SESSIONS, SESSIONS, DONE)),
+    Caller("reset_team_credentials", _reset_credentials, (USERS, DONE, SESSIONS, SESSIONS, DONE)),
     Caller("store_discord_id_in_authentik", _store_discord_id, (USERS, DONE)),
     Caller("run_competition_to_completion", _start_competition, (APPLICATION, BINDINGS, DONE, USERS, DONE, GROUPS)),
-    Caller("stream_readiness_checks", _readiness, (USERS, USERS, APPLICATION, BINDINGS, DONE, METADATA)),
+    Caller("stream_readiness_checks", _readiness, (USERS, USERS, SESSIONS, APPLICATION, BINDINGS, DONE, METADATA)),
     Caller("_fix_group_membership", _fix_groups, (USERS, GROUPS, DONE)),
 ]
 SERVICES = {
