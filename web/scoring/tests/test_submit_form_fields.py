@@ -120,7 +120,8 @@ def test_root_access_is_the_higher_access_tier() -> None:
 
 
 def test_a_finding_on_many_boxes_keeps_every_box_s_ip_template():
+    from django.db import models
+
     from scoring.models import RedTeamScore
 
-    field = RedTeamScore._meta.get_field("destination_ip_template")
-    assert field.max_length is None or field.max_length >= 500
+    assert isinstance(RedTeamScore._meta.get_field("destination_ip_template"), models.TextField)

@@ -596,4 +596,4 @@ def test_a_new_event_with_a_bad_season_says_why(client):
     response = client.post(
         reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields, "current_season": "x"}
     )
-    assert "Enter a whole number." in response.content.decode()
+    assert "Current season: Enter a whole number." in response.content.decode()

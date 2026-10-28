@@ -200,22 +200,23 @@ class Outcome(NamedTuple):
     description: str
 
 
-RED_TEAM_OUTCOMES: tuple[Outcome, ...] = (
-    Outcome("root_access", 100, "Root Access", "Root/Administrator level access obtained"),
-    Outcome("user_access", 25, "User Access", "User level access obtained (not scored with root access)"),
-    Outcome("privilege_escalation", 100, "Privilege Escalation", "User escalated to Root/Admin (additional penalty)"),
-    Outcome("credentials_recovered", 50, "Credentials", "User IDs and passwords recovered"),
-    Outcome("sensitive_files_recovered", 25, "Sensitive Files", "Config files, corporate data recovered"),
-    Outcome("credit_cards_recovered", 50, "Credit Cards", "Customer credit card numbers recovered"),
-    Outcome("pii_recovered", 200, "PII", "PII recovered: name, address, credit card number"),
-    Outcome("encrypted_db_recovered", 25, "Encrypted DB", "Encrypted customer data/database recovered"),
-    Outcome("db_decrypted", 25, "DB Decrypted", "Database was decrypted (additional penalty)"),
-)
-OUTCOME_HELP = {outcome.field: outcome.description for outcome in RED_TEAM_OUTCOMES}
-
-
 class RedTeamScore(Approvable):
     """Red team vulnerability score affecting one or more teams."""
+
+    OUTCOMES: tuple[Outcome, ...] = (
+        Outcome("root_access", 100, "Root Access", "Root/Administrator level access obtained"),
+        Outcome("user_access", 25, "User Access", "User level access obtained (not scored with root access)"),
+        Outcome(
+            "privilege_escalation", 100, "Privilege Escalation", "User escalated to Root/Admin (additional penalty)"
+        ),
+        Outcome("credentials_recovered", 50, "Credentials", "User IDs and passwords recovered"),
+        Outcome("sensitive_files_recovered", 25, "Sensitive Files", "Config files, corporate data recovered"),
+        Outcome("credit_cards_recovered", 50, "Credit Cards", "Customer credit card numbers recovered"),
+        Outcome("pii_recovered", 200, "PII", "PII recovered: name, address, credit card number"),
+        Outcome("encrypted_db_recovered", 25, "Encrypted DB", "Encrypted customer data/database recovered"),
+        Outcome("db_decrypted", 25, "DB Decrypted", "Database was decrypted (additional penalty)"),
+    )
+    OUTCOME_HELP = {outcome.field: outcome.description for outcome in OUTCOMES}
 
     submitted_by = models.ForeignKey(
         User,
@@ -345,7 +346,6 @@ class RedTeamScore(Approvable):
     def affected_boxes_display(self) -> str:
         return format_boxes_display(self.affected_boxes)
 
-    OUTCOMES = RED_TEAM_OUTCOMES
     # Access outcomes, highest first: a finding scores only the highest one it reached
     ACCESS_TIERS: tuple[str, ...] = ("root_access", "user_access")
 

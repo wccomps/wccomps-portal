@@ -103,11 +103,11 @@ async function wcStream(url, data, onProgress, onDone) {
 
 /** Shows a c-toggle_button as pressed or not: its pressed look and, for screen readers, aria-pressed. */
 function setTogglePressed(button, pressed) {
-    button.classList.toggle('box-toggle--selected', pressed);
+    button.classList.toggle('button--pressed', pressed);
     button.setAttribute('aria-pressed', String(pressed));
 }
 
-/** A ToggleButtonSelect(Multiple) (forms/widgets/toggle_buttons.html): each button toggles its option in the hidden select (a single select unpicks the others itself), data-pick buttons pick all or none, and every change fires the select's change. */
+/** Keeps a ToggleButtonSelect(Multiple)'s buttons and hidden select in step; each click fires the select's change. */
 function togglePicker() {
     return {
         init() {

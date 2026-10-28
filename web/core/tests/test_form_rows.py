@@ -63,11 +63,10 @@ class HiddenFieldForm(forms.Form):
     season = forms.IntegerField(widget=forms.HiddenInput)
 
 
-def test_a_hidden_field_s_error_shows_with_the_form_s_own() -> None:
-    """A hidden input has no row to show its error beside, so it shows at the top of the form."""
+def test_a_hidden_field_s_error_shows_with_the_form_s_own_named_by_label() -> None:
     from django.template import Context, Template
     from django_cotton.compiler_regex import CottonCompiler
 
     template = Template(CottonCompiler().process('{% load cotton %}<c-form_errors :form="form" />'))
     html = template.render(Context({"form": HiddenFieldForm({"season": "x"})}))
-    assert "Enter a whole number." in html
+    assert "Season: Enter a whole number." in html

@@ -105,7 +105,6 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
         widget=forms.RadioSelect(),
         label="Source IP",
     )
-    # Stored as a JSON list of box names
     affected_boxes = forms.MultipleChoiceField(
         required=False, widget=ToggleButtonSelectMultiple(), label="Affected Boxes"
     )
@@ -254,7 +253,6 @@ class IncidentReportForm(forms.ModelForm[IncidentReport]):
         label="Team",
     )
 
-    # Stored as a JSON list of box names
     affected_boxes = forms.MultipleChoiceField(
         required=False, widget=ToggleButtonSelectMultiple(), label="Affected Boxes"
     )

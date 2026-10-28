@@ -127,9 +127,7 @@ def _category_label(category: TicketCategory) -> str:
 class CreateTicketForm(forms.Form):
     """A new ticket, from the web form or Discord's commands and modals. Validates the category against the ones the
     caller may use, fills in hostname and IP from Quotient's service and box maps when known, and requires the
-    category's required fields.
-
-    Widget attrs bind to create_ticket.html's Alpine state."""
+    category's required fields."""
 
     title = forms.CharField(
         max_length=255,
@@ -149,6 +147,7 @@ class CreateTicketForm(forms.Form):
             attrs={
                 ":value": "selectedHostname",
                 "x-on:input": "setField",
+                "x-on:change": "pickHostname",
                 "data-field": "selectedHostname",
                 ":required": "hostnameRequired",
                 "placeholder": "e.g. web01",
@@ -220,7 +219,7 @@ class CreateTicketForm(forms.Form):
                 ("", "Select a category..."),
                 *((cat.pk, _category_label(cat)) for cat in self._categories),
             ]
-        if teams:
+        if teams is not None:
             team_id = cast(TeamChoiceField, self.fields["team_id"])
             team_id.queryset = teams
             team_id.required = True

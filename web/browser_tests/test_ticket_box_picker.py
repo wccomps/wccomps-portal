@@ -1,5 +1,4 @@
-"""The ticket form's box picker presses one box at a time, fills the box's IP, follows a picked service's box, and
-keeps the posted box pressed after a failed save."""
+"""The create ticket page's box picker."""
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch

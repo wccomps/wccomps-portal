@@ -410,20 +410,6 @@ def bound_page_uses() -> dict[str, set[str]]:
     return found
 
 
-@cache
-def hooks() -> frozenset[str]:
-    """Classes the portal's script reads to find elements (a querySelector('.name') call). Such a class counts as
-    defined even with no rule of its own."""
-    portal = portal_templates()
-    return frozenset(
-        name
-        for path in portal
-        for script in script_texts(path)
-        for m in SELECTOR_CALL_RE.finditer(script)
-        for name in CSS_CLASS_RE.findall(m.group(2))
-    )
-
-
 def css_rules(css: str) -> list[list[str]]:
     """Each selector's class names, in order, one list per comma-separated selector."""
     css = CSS_COMMENT_RE.sub(" ", css)
@@ -494,7 +480,7 @@ def test_utilities_section_is_marked() -> None:
 
 def test_every_class_is_defined() -> None:
     """A class no stylesheet defines does nothing (no Bootstrap is loaded), unless script reads it as a hook."""
-    defined = app_css_classes() | admin_css_classes() | hooks()
+    defined = app_css_classes() | admin_css_classes()
     found = (
         by_use(page_uses(), set(page_uses()) - defined)
         | by_use(bound_page_uses(), set(bound_page_uses()) - defined)

@@ -80,13 +80,8 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
 
     if request.method == "POST":
         valid = form.is_valid()
-        if form.cleaned_data.get("team_id"):
-            team = form.cleaned_data["team_id"]
+        team = form.cleaned_data.get("team_id") or team
         if not valid:
-            return form_page()
-
-        if is_admin and not team:
-            form.add_error(None, "Please select a team.")
             return form_page()
 
         if not team or not form.category_obj:

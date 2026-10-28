@@ -4,9 +4,8 @@ from django import forms
 
 
 class ToggleButtonSelect(forms.Select):
-    """Choices as toggle buttons over the hidden native select the form posts (forms/widgets/toggle_buttons.html).
-    A page reacting to the choice listens for the select's change event. An empty choice gets no button: it is the
-    value when no button is pressed."""
+    """Choices as toggle buttons over the hidden select the form posts; an empty choice has no button and is the value
+    with none pressed. A page reacting to the choice listens for the select's change."""
 
     template_name = "forms/widgets/toggle_buttons.html"
     use_fieldset = True

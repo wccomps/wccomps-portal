@@ -421,7 +421,7 @@ a.btn-secondary:focus-visible {
 }
 
 /* Toggle button (c-toggle_button): pressed while its choice is picked */
-.box-toggle--selected {
+.button--pressed {
     background: var(--primary, #417690);
     border-color: var(--primary, #417690);
     color: white;

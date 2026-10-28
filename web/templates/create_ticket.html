@@ -141,15 +141,10 @@
                     const svc = allServiceChoices.find(s => s.value === this.selectedService);
                     if (svc) {
                         if (this.visibleFields.includes('hostname') && !this.selectedHostname) {
-                            // The box picker's select, so its buttons follow; a typed hostname is the text input
+                            // Through the field, so the box picker's buttons follow
                             const hostname = document.getElementById('hostname');
-                            if (hostname.tagName === 'SELECT') {
-                                hostname.value = svc.box_name;
-                                hostname.dispatchEvent(new Event('change', { bubbles: true }));
-                            } else {
-                                this.selectedHostname = svc.box_name;
-                                this.onHostnameChange();
-                            }
+                            hostname.value = svc.box_name;
+                            hostname.dispatchEvent(new Event('change', { bubbles: true }));
                         }
                         if (this.visibleFields.includes('ip_address')) {
                             this.ipAddress = svc.box_ip;

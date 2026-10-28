@@ -56,7 +56,7 @@ Grouped form fields with heading.
 ### Forms
 
 #### `<c-form_errors>`
-The errors of the form as a whole (raised in its `clean()`), which no field shows. A page that uses a form's fields
+The errors no field row shows: the form's non-field errors, and its hidden fields' named by label. A page that uses a form's fields
 one by one puts one at the top of its form (`core/tests/test_form_conventions.py` fails on a page without; it finds
 forms by a variable name ending in `form`).
 ```django
@@ -117,9 +117,8 @@ Props:
 - `class`, `id`, `name`, `value`
 
 #### `<c-toggle_button>`
-A button that stays pressed while its choice is picked (`pressed="true"` for the initial state); its script (the
-toggle-button widget's `togglePicker`, or the page's) calls `setTogglePressed(button, pressed)` from
-`static/js/utils.js`, which sets its look and `aria-pressed`.
+A button that stays pressed while its choice is picked (`pressed="true"` for the initial state); `togglePicker` calls
+`setTogglePressed(button, pressed)` from `static/js/utils.js`, which sets its look and `aria-pressed`.
 ```django
 <c-toggle_button data-value="web01">web01</c-toggle_button>
 ```

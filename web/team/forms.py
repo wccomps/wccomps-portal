@@ -214,7 +214,7 @@ class ImportEventForm(NewEventFields):
         data = super().clean() or {}
         choice = data.get("event")
         if choice == "new":
-            # A new-event field's own error already shows: beside its row, or at the top for the hidden season
+            # A new-event field's own error already shows
             if not any(name in self.errors for name in (*self.NEW_FIELDS, *self.SEASON_FIELDS)):
                 self.event_to_import = self.new_event()
         elif self.wants_new_season():
