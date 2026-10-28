@@ -1,4 +1,4 @@
-{% extends "admin/base.html" %}
+{% extends "admin/ops_base.html" %}
 {% load cotton status_variants %}
 {% block title %}
     Packet: {{ packet.title }} - WCComps Portal
@@ -12,8 +12,7 @@
         <div class="status-bar">
             <div class="d-flex justify-between items-center flex-wrap gap-10">
                 <div class="d-flex items-center gap-10 flex-wrap">
-                    <c-badge variant="{{ packet.status|badge_variant:'packet' }}"
-                             aria_label="{{ packet.get_status_display }}">
+                    <c-badge variant="{{ packet.status|badge_variant:'packet' }}">
                         {{ packet.get_status_display }}
                     </c-badge>
                     <span>{{ packet.filename }} ({{ packet.file_size|filesizeformat }})</span>
@@ -116,8 +115,7 @@
                         <tr>
                                 <td>Team {{ dist.team.team_number }}</td>
                                 <td>
-                                    <c-badge variant="{{ dist.email_status|badge_variant:'packet_email' }}"
-                                             aria_label="{{ dist.get_email_status_display }}">
+                                    <c-badge variant="{{ dist.email_status|badge_variant:'packet_email' }}">
                                         {{ dist.get_email_status_display }}
                                     </c-badge>
                                 </td>

@@ -8,11 +8,10 @@
         </c-form>
     {% endif %}
     <c-table id="result_list"
-             role="grid"
              widths="{% if is_gold_team %}40px {% endif %}6% 23% 9% 9% 14% 11% 7% {% if is_gold_team %}7% {% endif %}7% 7%"
              aria_label="Red team findings list">
         <c-slot name="headers">
-            <tr role="row">
+            <tr>
                 {% if is_gold_team %}
                     <th scope="col" class="action-checkbox-column">
                         <input type="checkbox"
@@ -54,7 +53,7 @@
             </tr>
         </c-slot>
         {% for finding in findings %}
-            <tr role="row">
+            <tr>
                 {% if is_gold_team %}
                     <td class="action-checkbox">
                         {% if not finding.is_approved %}

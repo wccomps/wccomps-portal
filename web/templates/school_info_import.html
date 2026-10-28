@@ -1,4 +1,4 @@
-{% extends "admin/base.html" %}
+{% extends "admin/ops_base.html" %}
 {% load static cotton page_titles %}
 {% block title %}
     Import School Information - WCComps Portal
@@ -141,6 +141,7 @@ Community College,contact@college.edu,,Remote team
 Tech Institute,admin@techinst.edu,,</pre>
                     <c-form enctype="multipart/form-data" class="mt-20" x-data="schoolImportForm">
                         {% csrf_token %}
+                        <c-form_errors :form="form" />
                         <input type="hidden" name="upload" value="true">
                         <c-fieldset aligned="true">
                             <c-form_field label="CSV File"

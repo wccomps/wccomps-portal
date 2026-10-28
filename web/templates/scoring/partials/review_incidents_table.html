@@ -6,7 +6,7 @@
         {% csrf_token %}
         <c-table id="result_list" aria_label="Incident reports list">
             <c-slot name="headers">
-                <tr role="row">
+                <tr>
                     <th scope="col" class="action-checkbox-column">
                         <input type="checkbox"
                                :checked="allSelected"
@@ -44,7 +44,7 @@
                 </tr>
             </c-slot>
             {% for incident in page_obj %}
-                <tr role="row">
+                <tr>
                     <td class="action-checkbox">
                         {% if not incident.is_approved %}
                             <input type="checkbox"

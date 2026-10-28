@@ -471,7 +471,7 @@ def test_a_page_a_step_links_names_itself_with_the_title_the_step_shows(admin_cl
     page = _flat(response.content.decode())
 
     parent = r"(<a [^>]*>[^<]*</a><span[^>]*>[^<]*</span>)?"
-    assert re.search(rf'class="breadcrumbs">{parent}{re.escape(place.page_title)}<', page)
+    assert re.search(rf'class="breadcrumbs">{parent}<h1>{re.escape(place.page_title)}</h1><', page)
 
 
 def test_the_guide_page_is_gone(client):

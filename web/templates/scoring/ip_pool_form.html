@@ -17,6 +17,7 @@
     <c-module>
         <c-form>
             {% csrf_token %}
+            <c-form_errors :form="form" />
             <c-form_field label="{{ form.name.label }}"
                           required="true"
                           :id="form.name.id_for_label"

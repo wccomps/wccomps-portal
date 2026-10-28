@@ -30,7 +30,7 @@ def test_ticking_two_statuses_filters_list(live_server, pw_browser):
         page.goto(f"{live_server.url}/tickets/")
 
         def cell(title: str):  # table cells only (a new-ticket toast can repeat the title)
-            return page.get_by_role("gridcell", name=title, exact=True)
+            return page.get_by_role("cell", name=title, exact=True)
 
         assert cell("resolved ticket").is_visible()
 

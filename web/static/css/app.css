@@ -767,6 +767,14 @@ label.required::after {
     background: var(--darkened-bg, #f8f8f8);
     border-bottom: 1px solid var(--hairline-color, #ddd);
 }
+/* c-page_header's title: the page's h1, set as breadcrumb text */
+.breadcrumbs h1 {
+    display: inline;
+    margin: 0;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+}
 .breadcrumbs a {
     color: var(--link-fg, #447e9b);
     text-decoration: none;
@@ -829,6 +837,13 @@ label.required::after {
 .primary-navigation a:focus {
     outline: 2px solid var(--header-link-color, #fff);
     outline-offset: 2px;
+}
+
+/* The nav bar's icons (menu, dark mode, ticket sound) */
+.nav-icon {
+    display: block;
+    width: 18px;
+    height: 18px;
 }
 
 /* Hamburger toggle - hidden on desktop */
@@ -982,6 +997,7 @@ button[type="submit"]:hover {
 /* Dark mode toggle - uses Django admin's built-in dark mode CSS */
 .dark-mode-toggle {
     background: transparent;
+    color: var(--header-link-color, #fff);
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
     padding: 6px 10px;
@@ -1015,6 +1031,7 @@ html[data-theme="dark"] .dark-mode-toggle .light-icon {
 
 .audio-toggle {
     background: transparent;
+    color: var(--header-link-color, #fff);
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
     padding: 6px 10px;

@@ -171,13 +171,15 @@ def view_red_score(request: HttpRequest, finding_id: int) -> HttpResponse:
         id=finding_id,
     )
     user = cast(User, request.user)
-    is_gold_team = has_permission(user, "gold_team")
-    can_delete = finding.submitted_by == user and not finding.is_approved
+    is_red_team = has_permission(user, "red_team")
 
+    # A Gold Team reviewer without the Red Team role reaches this page from the review list, under the review nav
     context = {
         "finding": finding,
-        "is_gold_team": is_gold_team,
-        "can_delete": can_delete,
+        "base_template": "scoring/red_base.html" if is_red_team else "scoring/base.html",
+        "is_red_team": is_red_team,
+        "can_approve": has_permission(user, "gold_team") and not finding.is_approved,
+        "can_delete": is_red_team and finding.submitted_by == user and not finding.is_approved,
     }
     return render(request, "scoring/view_red_finding.html", context)
 

@@ -25,7 +25,7 @@ def test_the_refresh_lists_a_new_ticket_and_keeps_the_selection(live_server, pw_
         Ticket.objects.create(ticket_number="TEAM01-009", title="Arrived later", team=ticket.team, status="open")
         with page.expect_response(lambda r: r.url.startswith(f"{live_server.url}/tickets/")):
             page.clock.run_for("00:31")
-        page.get_by_role("gridcell", name="Arrived later").wait_for()
+        page.get_by_role("cell", name="Arrived later").wait_for()
 
         assert page.get_by_label(f"Select ticket {ticket.ticket_number}").is_checked()
         assert not page.get_by_label("Select ticket TEAM01-009").is_checked()

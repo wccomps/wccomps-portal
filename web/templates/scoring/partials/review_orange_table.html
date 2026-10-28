@@ -4,9 +4,9 @@
      x-data="orangeBulkSelect">
     <c-form id="bulk-approve-form" action="{% url 'scoring:bulk_approve_orange_adjustments' %}" ::data-confirm="approveQuestion">
         {% csrf_token %}
-        <c-table id="result_list" role="grid" aria_label="Orange team checks list">
+        <c-table id="result_list" aria_label="Orange team checks list">
             <c-slot name="headers">
-                <tr role="row">
+                <tr>
                     <th scope="col" class="action-checkbox-column">
                         <input type="checkbox"
                                :checked="allSelected"
@@ -42,7 +42,7 @@
                 </tr>
             </c-slot>
             {% for check in page_obj %}
-                <tr role="row">
+                <tr>
                     <td class="action-checkbox">
                         {% if not check.is_approved %}
                             <input type="checkbox"

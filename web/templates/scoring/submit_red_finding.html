@@ -9,6 +9,7 @@
     <c-module>
         <c-form enctype="multipart/form-data" id="findingForm">
             {% csrf_token %}
+            <c-form_errors :form="form" />
             <c-fieldset heading="Attack Details">
                 <c-form_field label="{{ form.attack_type.label }}"
                               required="true"

@@ -435,9 +435,9 @@ def assign_teams(request: HttpRequest, event_id: int) -> HttpResponse:
 
 
 def _primary_contact_email(registration: TeamRegistration) -> str:
-    """The captain's email, else the first contact's; empty when the registration has none."""
-    contacts = sorted(registration.contacts.all(), key=lambda contact: (contact.role != "captain", contact.pk))
-    return contacts[0].email if contacts else ""
+    """The primary contact's email; empty when the registration has none."""
+    contact = registration.primary_contact
+    return contact.email if contact else ""
 
 
 @require_permission("gold_team")

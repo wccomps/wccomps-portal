@@ -12,6 +12,7 @@
         {% if team or is_admin %}
             <c-form enctype="multipart/form-data" id="incidentForm">
                 {% csrf_token %}
+                <c-form_errors :form="form" />
                 <c-fieldset heading="Target Information">
                     {% if is_admin %}
                         <c-form_field label="{{ form.team.label }}"
@@ -43,9 +44,8 @@
                             {{ form.affected_service }}
                         </c-form_field>
                         <c-form_field label="{{ form.destination_ip.label }}"
-                                      required="true"
                                       :id="form.destination_ip.id_for_label"
-                                      help_text="Auto-populated based on selected boxes"
+                                      help_text="Filled in from the first box you pick; type or change it if needed"
                                       error="{{ form.destination_ip.errors|join:', ' }}">
                             {{ form.destination_ip }}
                         </c-form_field>
@@ -165,17 +165,18 @@
             });
         }
 
+        // The IP the boxes last filled in: a box change replaces it, never an IP the team typed
+        let filledIP = '';
+
         function updateIP() {
             const ipField = document.getElementById('id_destination_ip');
+            if (!ipField || (ipField.value !== '' && ipField.value !== filledIP)) return;
             const currentTeam = getSelectedTeamNumber();
             const boxes = getSelectedBoxes();
+            const box = boxes.length > 0 ? boxMetadata[boxes[0]] : null;
 
-            if (boxes.length > 0 && boxMetadata[boxes[0]] && ipField && currentTeam) {
-                const teamStr = currentTeam.toString().padStart(2, '0');
-                ipField.value = boxMetadata[boxes[0]].ip.replace('_', teamStr);
-            } else if (ipField) {
-                ipField.value = '';
-            }
+            filledIP = box && box.ip && currentTeam ? box.ip.replace('_', currentTeam.toString().padStart(2, '0')) : '';
+            ipField.value = filledIP;
         }
 
         function updateServiceDropdown() {

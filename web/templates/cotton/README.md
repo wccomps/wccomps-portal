@@ -55,6 +55,13 @@ Grouped form fields with heading.
 
 ### Forms
 
+#### `<c-form_errors>`
+The errors of the form as a whole (raised in its `clean()`), which no field shows. Every page that renders a form
+field by field puts one at the top of its form (`core/tests/test_form_conventions.py` fails on one without).
+```django
+<c-form_errors :form="form" />
+```
+
 #### `<c-form_field>`
 Form row with label, input, and optional help text/error.
 ```django

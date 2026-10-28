@@ -1,4 +1,4 @@
-{# Page header component - breadcrumb-style title bar #}
+{# Page header component - breadcrumb-style title bar; the title is the page's h1 #}
 {# Usage: <c-page_header title="Tickets" /> #}
 {# Usage: <c-page_header title="#T010-15" parent_url="/tickets/" parent_label="Tickets" /> #}
 {# Props: title, subtitle, parent_url, parent_label #}
@@ -8,7 +8,7 @@
         <a href="{{ parent_url }}">{{ parent_label }}</a>
         <span class="bc-separator">›</span>
     {% endif %}
-    {{ title }}
+    <h1>{{ title }}</h1>
 </div>
 {% if subtitle %}<p class="page-header-subtitle">{{ subtitle }}</p>{% endif %}
 {{ slot }}

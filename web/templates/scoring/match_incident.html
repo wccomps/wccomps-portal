@@ -94,6 +94,7 @@
             <c-form>
                 {% if form.errors %}<c-alert variant="error">Please fix the errors below.</c-alert>{% endif %}
                 {% csrf_token %}
+                <c-form_errors :form="form" />
                 <c-fieldset aligned="true">
                     <c-form_field label="{{ form.matched_to_red_score.label }}"
                                   id="{{ form.matched_to_red_score.id_for_label }}"

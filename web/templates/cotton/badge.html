@@ -1,9 +1,7 @@
 {# Status badge component - displays ticket/item status with appropriate styling #}
 {# Usage: <c-badge variant="success">Active</c-badge> #}
-{# Props: variant (info|warning|success|neutral|danger|default; a stored status maps to one with |badge_variant), aria_label (optional: otherwise the visible text is what's announced) #}
+{# Props: variant (info|warning|success|neutral|danger|default; a stored status maps to one with |badge_variant) #}
 {# variant="" leaves the badge--* class to the caller: a row rendered in the browser binds it with ::class #}
-<c-vars variant="default" aria_label />
-<span role="status"
-      {% if aria_label %}aria-label="{{ aria_label }}"{% endif %}
-      {{ attrs }}
+<c-vars variant="default" />
+<span {{ attrs }}
       class="badge {% if variant == 'info' %}badge--info{% elif variant == 'warning' %}badge--warning{% elif variant == 'success' %}badge--success{% elif variant == 'neutral' %}badge--neutral{% elif variant == 'danger' %}badge--danger{% elif variant %}badge--default{% endif %}">{{ slot }}</span>

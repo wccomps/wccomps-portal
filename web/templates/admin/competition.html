@@ -1,4 +1,4 @@
-{% extends "admin/base.html" %}
+{% extends "admin/ops_base.html" %}
 {% load cotton static %}
 {% block title %}
     Competition - WCComps Portal
@@ -38,7 +38,7 @@
                     </c-detail_row>
                 {% endif %}
                 <c-detail_row label="Status">
-                    <c-badge variant="{{ panel.status_badge }}" aria_label="Status">
+                    <c-badge variant="{{ panel.status_badge }}">
                         {{ panel.status_word }}
                     </c-badge>
                     {% if not panel.stage.event %}{{ panel.stage.status }}{% endif %}
@@ -86,7 +86,7 @@
                             {% if row.detail %}<p class="help">{{ row.detail }}</p>{% endif %}
                         </td>
                         <td>
-                            <c-badge variant="{{ row.badge }}" aria_label="{{ row.label }}">
+                            <c-badge variant="{{ row.badge }}">
                                 {{ row.label }}
                             </c-badge>
                         </td>

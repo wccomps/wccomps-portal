@@ -281,3 +281,22 @@ def test_a_page_asks_through_data_confirm() -> None:
         if m := BARE_CONFIRM_RE.search(js):
             found[name] = f"line {js.count(chr(10), 0, m.start()) + 1}"
     fail_with("confirm() called outside the data-confirm listener", found, BARE_CONFIRM_EXCEPTIONS)
+
+
+# ---------------------------------------------------------------------------
+# 9. ARIA grid roles: a promise of arrow-key navigation no page keeps
+# ---------------------------------------------------------------------------
+
+GRID_ROLES = {"grid", "treegrid", "gridcell", "row", "rowgroup", "columnheader", "rowheader"}
+
+
+def test_tables_keep_table_semantics() -> None:
+    """role="grid" tells a screen reader to hand the arrow keys to the page, which none of ours handles, and a
+    gridcell <th> loses its header meaning: a plain table already says rows, cells and headers."""
+    found = {
+        f"{template_name(path)}:{tag.line}:{tag.name}": f'role="{tag.attrs["role"]}"'
+        for path in tracked_templates()
+        for tag in tags(path)
+        if tag.attrs.get("role") in GRID_ROLES
+    }
+    fail_with("Grid roles on markup", found, {})

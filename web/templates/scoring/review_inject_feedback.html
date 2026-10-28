@@ -9,19 +9,30 @@
         Alpine.data('feedbackBulkSelect', () => bulkSelectMixin('feedback-id', 'feedback item'));
         Alpine.data('editableCell', () => ({
             editing: false,
+            // The row's feedback has an edit not yet saved: Approve would approve the stored text instead
+            dirty: false,
             originalValue: '',
             get notEditing() { return !this.editing; },
+            get approveHint() { return this.dirty ? 'Save the edited feedback before approving it' : ''; },
             startEditing() {
+                this.originalValue = this.$refs.editor.value;
                 this.editing = true;
-                this.$nextTick(() => { this.originalValue = this.$refs.editor.value; });
             },
             stopEditing() {
-                if (this.$refs.editor && this.$refs.editor.value !== this.originalValue) {
+                if (!this.editing) return;
+                if (this.dirty) {
                     if (!confirm('You have unsaved changes. Discard?')) return;
+                    this.$refs.editor.value = this.originalValue;
+                    this.dirty = false;
                 }
                 this.editing = false;
             },
-            autoResize() { this.$el.style.height = 'auto'; this.$el.style.height = this.$el.scrollHeight + 'px'; },
+            onInput() {
+                const editor = this.$refs.editor;
+                this.dirty = editor.value !== this.originalValue;
+                editor.style.height = 'auto';
+                editor.style.height = editor.scrollHeight + 'px';
+            },
             init() {
                 this.$watch('editing', v => {
                     if (v) this.$nextTick(() => {

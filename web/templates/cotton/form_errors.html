@@ -1,0 +1,11 @@
+{# Form errors component - the errors of a form as a whole (its clean()), which no c-form_field shows #}
+{# Usage: <c-form_errors :form="form" /> at the top of the <c-form>; renders nothing while there are none #}
+{# Props: form (a Django form) #}
+<c-vars form />
+{% if form.non_field_errors %}
+    <c-alert variant="error" :attrs="attrs">
+        {% for error in form.non_field_errors %}
+            <p>{{ error }}</p>
+        {% endfor %}
+    </c-alert>
+{% endif %}

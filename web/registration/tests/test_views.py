@@ -79,6 +79,30 @@ class RegistrationViewTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFormError(response.context["form"], "school_name", "This field is required.")
 
+    def test_form_level_error_is_shown(self):
+        """A non-WRCCDC school choosing a Qualifier gets the form's own error, which belongs to no field."""
+        qualifier = Event.objects.create(
+            season=self.season,
+            name="Qualifier",
+            event_type="qualifier",
+            event_number=2,
+            date="2026-02-15",
+            registration_open=True,
+        )
+        form_data = {
+            "school_name": "Test High School",
+            "region": "mwccdc",
+            "captain_name": "John Doe",
+            "captain_email": "captain@example.com",
+            "captain_phone": "555-1234",
+            "coach_name": "Dr. Smith",
+            "coach_email": "coach@example.com",
+            "events": [qualifier.id],
+            "agree_to_rules": True,
+        }
+        response = self.client.post(reverse("registration_register"), data=form_data)
+        self.assertContains(response, "Please remove: Qualifier")
+
     def test_rate_limit_after_10_successful_submissions(self):
         """Test that 11th registration from same IP gets 429."""
         url = reverse("registration_register")
@@ -152,6 +176,13 @@ class AdminReviewListViewTestCase(TestCase):
         self.client.force_login(self.gold_user)
         response = self.client.get(reverse("registration_review_list"))
         self.assertContains(response, "Test School")
+
+    def test_review_list_shows_captain_contact(self):
+        """The contact columns show the captain's email and phone."""
+        self.client.force_login(self.gold_user)
+        response = self.client.get(reverse("registration_review_list"))
+        self.assertContains(response, "test@example.com")
+        self.assertContains(response, "555-1234")
 
     def test_review_list_filters_by_status(self):
         """Test review list can filter by status."""
@@ -234,6 +265,13 @@ class AdminRejectViewTestCase(TestCase):
         self.assertEqual(self.registration.status, "rejected")
         self.assertEqual(self.registration.rejection_reason, "Incomplete information")
 
+    def test_reject_page_shows_the_registration(self):
+        """The confirmation names the registration being rejected and its contact."""
+        self.client.force_login(self.gold_user)
+        response = self.client.get(reverse("registration_reject", args=[self.registration.id]))
+        self.assertContains(response, "Test School")
+        self.assertContains(response, "test@example.com")
+
     def test_reject_requires_reason(self):
         """Test reject action requires a reason."""
         self.client.force_login(self.gold_user)
@@ -277,6 +315,38 @@ class TokenEditViewTestCase(TestCase):
         response = self.client.get(reverse("registration_edit", args=[self.registration.edit_token]))
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "registration/edit.html")
+
+    def test_edit_page_renders_every_form_field(self):
+        """Every field the form needs is an input on the page, filled in from the registration."""
+        response = self.client.get(reverse("registration_edit", args=[self.registration.edit_token]))
+        for name in response.context["form"].fields:
+            self.assertContains(response, f'name="{name}"')
+        self.assertContains(response, 'value="john@example.com"')
+        self.assertContains(response, 'value="coach@example.com"')
+
+    def test_edit_page_shows_form_level_error(self):
+        """A non-WRCCDC school choosing a Qualifier gets the form's own error on the edit page too."""
+        qualifier = Event.objects.create(
+            season=self.season,
+            name="Qualifier",
+            event_type="qualifier",
+            event_number=2,
+            date="2026-02-15",
+            registration_open=True,
+        )
+        form_data = {
+            "school_name": "Test School",
+            "region": "mwccdc",
+            "captain_name": "John Doe",
+            "captain_email": "john@example.com",
+            "captain_phone": "555-1234",
+            "coach_name": "Dr. Coach",
+            "coach_email": "coach@example.com",
+            "events": [qualifier.id],
+            "agree_to_rules": True,
+        }
+        response = self.client.post(reverse("registration_edit", args=[self.registration.edit_token]), data=form_data)
+        self.assertContains(response, "Please remove: Qualifier")
 
     def test_edit_page_404_with_invalid_token(self):
         """Test edit page returns 404 with invalid token."""
