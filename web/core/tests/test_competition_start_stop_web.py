@@ -16,7 +16,6 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture(autouse=True)
 def _team_accounts_through_the_manager():
-    """Route team account switches to a team_account mock on whichever manager the test patched in."""
     with patch(
         "core.services.competition.set_team_account_active",
         side_effect=lambda manager, number, is_active: manager.team_account(team_username(number), is_active=is_active),

@@ -120,8 +120,7 @@ class SchoolInfoAdmin(PortalModelAdmin[SchoolInfo]):
     list_select_related = ["school", "team"]
     search_fields = ["school__name", "contact_email", "team__team_name"]
     # password mirrors the team account's Authentik password for packet emails; editing it here would change
-    # only this copy, so it's set solely by core.authentik_utils.reset_team_credentials. The school is set through
-    # registration.services.
+    # only this copy, so it's set solely by the credential resets in core.authentik_utils.
     exclude = ["password"]
     readonly_fields = ["team", "school", "created_at", "updated_at", "updated_by", "password_with_reset"]
     ordering = ["team__team_number"]

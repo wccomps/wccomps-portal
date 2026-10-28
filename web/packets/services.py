@@ -155,8 +155,7 @@ class PacketDistributionService:
         """The team account's password for this competition, setting a new one in Authentik on first use.
 
         The team's school info row stays locked until the new password is stored on it, so concurrent sends set it
-        once and all carry it. A failed reset raises only once that transaction commits, keeping its audit row and
-        ops note."""
+        once and all carry it."""
         with transaction.atomic():
             school_info = SchoolInfo.objects.select_for_update().filter(team=team).first()
             if school_info is None:
@@ -166,25 +165,16 @@ class PacketDistributionService:
             reset = reset_team_credentials(team.team_number, actor="packet distribution")
             if reset.password is not None:
                 logger.info(f"Generated credentials for team {team.team_number}")
-                self._alert_if_signed_in(team, reset.sessions_found)
+                if reset.sessions_found:
+                    alert = (
+                        f"Team {team.team_number}'s account had {reset.sessions_found} Authentik sessions before its "
+                        "packet went out; its credentials may have leaked."
+                    )
+                    logger.warning(alert)
+                    DiscordTask.enqueue(LogToChannel(message=alert))
                 return reset.password
+        # Outside the transaction, so the failed reset's audit row and ops note commit
         raise ValueError(f"Failed to set Authentik password for team {team.team_number}: {reset.error}")
-
-    @staticmethod
-    def _alert_if_signed_in(team: Team, sessions_found: int | None) -> None:
-        if sessions_found == 0:
-            return
-        if sessions_found is None:
-            alert = (
-                f"Could not check whether team {team.team_number}'s account was signed in before its packet went out."
-            )
-        else:
-            alert = (
-                f"Team {team.team_number}'s account had {sessions_found} Authentik sessions before its packet "
-                "went out; its credentials may have leaked."
-            )
-        logger.warning(alert)
-        DiscordTask.enqueue(LogToChannel(message=alert))
 
     def _build_packet_email(
         self,

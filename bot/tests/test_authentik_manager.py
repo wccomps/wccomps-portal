@@ -435,7 +435,7 @@ class TestAuthentikManager:
         assert manager.client.get.call_args.kwargs["params"] == {"page_size": "1"}
 
     def test_find_user_returns_only_the_exact_username(self, manager: AuthentikManager) -> None:
-        """Authentik answering another user for team01 (a filter it ignores) must not be taken as team01."""
+        """Authentik answering another user for team01 must not be taken as team01."""
         manager.client.get.return_value = self._answer({"results": [{"pk": 1, "username": "akadmin"}]})
 
         assert manager.find_user("team01") is None

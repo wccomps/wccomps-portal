@@ -429,8 +429,8 @@ class AuthentikManager:
         self._check(response, f"Set {user['username']} active={is_active}")
 
     def find_user(self, username: str) -> AuthentikUser | None:
-        """The user with exactly this username, or None. Raises AuthentikAPIError on an answer other than a 2xx list,
-        httpx.HTTPError when Authentik can't be reached."""
+        """The user with exactly this username, or None. Raises AuthentikAPIError on an answer other than a 2xx list
+        or a user without a pk, httpx.HTTPError when Authentik can't be reached."""
         response = self.client.get(f"{self.base_url}/api/v3/core/users/", params={"username": username})
         users, _ = self._results(response, f"Find user {username}")
         user = next((u for u in users if u.get("username") == username), None)

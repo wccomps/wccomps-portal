@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 from registration.models import School
 
+from core.authentik_manager import SESSIONS_HIDDEN
 from core.models import AuditLog, DiscordTask
 from team.models import SchoolInfo, Team
 
@@ -214,7 +215,8 @@ class PacketDistributionServiceTestCase(TestCase):
         )
 
     @patch("packets.services.EmailMultiAlternatives")
-    def test_an_uncounted_session_total_alerts_ops(self, mock_email_class):
+    def test_an_uncounted_session_total_is_reported_once(self, mock_email_class):
+        """The reset's own note already says why the sessions couldn't be checked."""
         team = Team.objects.get(team_number=1)
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
@@ -226,9 +228,8 @@ class PacketDistributionServiceTestCase(TestCase):
             manager.sees_any_sessions.return_value = False
             self.service.send_packet_email(distribution)
 
-        self.assertIn(
-            "Could not check whether team 1's account was signed in before its packet went out.", self._ops_messages()
-        )
+        (note,) = self._ops_messages()
+        self.assertIn(SESSIONS_HIDDEN, note)
 
     @patch("packets.services.EmailMultiAlternatives")
     def test_failed_password_set_sends_nothing(self, mock_email_class):
@@ -244,7 +245,6 @@ class PacketDistributionServiceTestCase(TestCase):
             self.service.send_packet_email(distribution)
 
         mock_email_class.return_value.send.assert_not_called()
-        # Raised after the transaction commits, so the failed reset's own record survives
         self.assertTrue(AuditLog.objects.filter(action="team_password_reset", target_id=1).exists())
         self.assertEqual(
             self._ops_messages(), ["Credentials reset for team 1 by packet distribution failed: User team01 not found"]

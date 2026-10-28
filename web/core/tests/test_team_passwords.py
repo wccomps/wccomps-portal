@@ -91,7 +91,6 @@ def test_reset_team_credentials_records_the_password_and_the_sessions_outcome(sc
 
 
 def test_reset_counts_sessions_before_the_password_changes_and_ends_them_after(manager):
-    """If Authentik ends sessions on a password change, a count taken after would always be 0."""
     calls: list[str] = []
     manager.user_sessions.side_effect = lambda user: calls.append("list") or []
     manager.set_password.side_effect = lambda user, password: calls.append("set")
@@ -103,7 +102,7 @@ def test_reset_counts_sessions_before_the_password_changes_and_ends_them_after(m
 
 
 def test_failed_password_keeps_the_count_and_ends_nothing(manager):
-    """Signing a team out without changing its password helps nobody, and the count is what the packet alert needs."""
+    """Signing a team out without changing its password helps nobody, and the count belongs in the audit row."""
     manager.user_sessions.return_value = [uuid.UUID(int=1)]
     manager.set_password.side_effect = AuthentikAPIError("Set the password of team07: Server error", 500)
 
@@ -120,6 +119,23 @@ def test_uncounted_sessions_are_unknown_not_zero(manager):
 
     assert reset.sessions_found is None
     assert reset.sessions_error == SESSIONS_HIDDEN
+
+
+def test_a_transient_count_error_does_not_fail_the_end_step(manager):
+    """Only a token that sees no sessions makes the second, empty list meaningless."""
+    manager.user_sessions.side_effect = [AuthentikAPIError("List sessions: Server error", 500), []]
+
+    reset = reset_team_credentials(7, actor="gold-admin")
+
+    assert (reset.sessions_found, reset.sessions_error) == (None, None)
+
+
+def test_sessions_the_end_step_finds_count_when_the_first_count_failed(manager):
+    manager.user_sessions.side_effect = [AuthentikAPIError("List sessions: Server error", 500), [uuid.UUID(int=1)]]
+
+    reset = reset_team_credentials(7, actor="gold-admin")
+
+    assert reset.sessions_found == 1
 
 
 def test_reset_team_credentials_audits_and_tells_ops(manager):
@@ -152,11 +168,11 @@ def test_reset_team_credentials_failure_keeps_the_old_password(school_info, mana
     assert school_info.password == "old"
 
 
-def test_reset_team_credentials_failed_password_records_nothing(school_info, manager):
+def test_reset_team_credentials_failed_password_tells_ops(school_info, manager):
     manager.set_password.side_effect = AuthentikAPIError("Set the password of team07: Server error", 500)
 
     assert reset_team_credentials(7, actor="gold-admin") == CredentialReset(
-        password=None, error="Set the password of team07: Server error"
+        password=None, error="Set the password of team07: Server error", sessions_found=0
     )
     school_info.refresh_from_db()
     assert school_info.password == "old"
@@ -179,7 +195,7 @@ def test_reset_team_credentials_network_error_names_the_cause(school_info, manag
     manager.set_password.side_effect = httpx.ConnectError("refused")
 
     assert reset_team_credentials(7, actor="gold-admin") == CredentialReset(
-        password=None, error="Network error (ConnectError)"
+        password=None, error="Network error (ConnectError)", sessions_found=0
     )
     school_info.refresh_from_db()
     assert school_info.password == "old"
@@ -284,6 +300,19 @@ def test_bulk_reset_writes_its_own_audit_row(manager):
     assert row.details["total_users"] == 2
     assert row.details["success_count"] == 1
     assert row.details["failed_resets"] == ["team02: User team02 not found"]
+    assert (row.details["sessions_found"], row.details["sessions_uncounted"]) == (0, [])
+
+
+def test_bulk_audit_names_the_teams_it_could_not_count(manager):
+    from core.models import AuditLog
+
+    manager.user_sessions.side_effect = AuthentikAPIError("List sessions: Server error", 500)
+    with patch("core.authentik_utils.AuthentikManager") as cls:
+        cls.return_value.__enter__.return_value = manager
+        reset_teams_credentials([1], actor="gold-admin")
+
+    row = AuditLog.objects.get(action="blueteam_passwords_reset")
+    assert (row.details["sessions_found"], row.details["sessions_uncounted"]) == (0, ["team01"])
 
 
 def test_web_bulk_reset_leaves_one_audit_row(admin_user):
