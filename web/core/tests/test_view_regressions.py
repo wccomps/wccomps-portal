@@ -496,7 +496,6 @@ def test_the_admin_site_alone_decides_who_gets_into_the_django_admin(gold_team_u
 
 
 def test_django_admin_pages_keep_their_heading(gold_team_user: User) -> None:
-    """The chrome prints Django's title heading only where the admin site set site_header: its own pages keep it."""
     from django.contrib import admin
 
     client = signed_in(gold_team_user)

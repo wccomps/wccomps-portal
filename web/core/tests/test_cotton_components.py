@@ -30,7 +30,7 @@ def test_an_optional_field_is_not_marked_required() -> None:
     assert "errornote" not in html
 
 
-def test_a_prop_overrides_what_the_field_says() -> None:
+def test_a_label_or_help_text_overrides_the_field_s() -> None:
     html = render(
         '<c-form_field :field="form.email" label="Contact" help_text="Shown instead">{{ form.email }}</c-form_field>',
         ExampleForm(),

@@ -130,7 +130,7 @@
              x-cloak
              role="status"
              aria-live="polite"
-             tabindex="0"
+             :tabindex="toastTabIndex"
              :aria-label="toastAriaLabel"
              @click="go"
              @mouseenter="hover"
@@ -194,6 +194,8 @@
             get toastNumber() { return this.$store.ticketNotifs ? this.$store.ticketNotifs.toastNumber : ''; },
             get toastTitle() { return this.$store.ticketNotifs ? this.$store.ticketNotifs.toastTitle : ''; },
             get toastCategory() { return this.$store.ticketNotifs ? this.$store.ticketNotifs.toastCategory : ''; },
+            // Neither pointer nor focus can land on a leaving toast, so nothing holds the next one by mistake
+            get toastTabIndex() { return this.showToast ? 0 : -1; },
             get toastAriaLabel() {
                 const s = this.$store.ticketNotifs;
                 return s ? 'New ticket: ' + s.toastNumber + ', ' + s.toastTitle + '. Click to view.' : '';
@@ -317,7 +319,7 @@
                     }, ms);
                 },
 
-                // Pointer or focus on the toast keeps it up (WCAG 2.2.1); it takes no pointer while leaving
+                // Pointer or focus on the toast keeps it up (WCAG 2.2.1)
                 hold(by) {
                     this[by] = true;
                     clearTimeout(this._hideTimer);

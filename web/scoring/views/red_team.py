@@ -80,7 +80,7 @@ def red_team_findings(request: HttpRequest) -> HttpResponse:
     context = {
         **findings_list(request, default_status="pending", page_size=50),
         "pending_findings": RedTeamScore.objects.filter(is_approved=False).exists(),
-        # A Red Team reader's rows link to the Red Team page: the review page is Gold Team's
+        # Red Team may read the review list; only Gold Team reviews
         "reviewing": has_permission(cast(User, request.user), "gold_team"),
     }
     if request.headers.get("HX-Request"):

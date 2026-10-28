@@ -45,7 +45,10 @@
                     </c-form_field>
                 </c-fieldset>
                 <c-fieldset heading="Events">
-                    {{ form.shown_events }}
+                    {# What this render offers, never the posted list a failed save sends back #}
+                    {% for event in form.events.field.queryset %}
+                        <input type="hidden" name="shown_events" value="{{ event.pk }}">
+                    {% endfor %}
                     <c-form_field :field="form.events">
                         {% if form.events.field.queryset.exists %}
                             {{ form.events }}
@@ -55,7 +58,7 @@
                     </c-form_field>
                     {% if form.unoffered_events %}
                         <p>
-                            Also registered for (registration closed):
+                            Also registered for:
                             {% for event in form.unoffered_events %}{{ event.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
                         </p>
                     {% endif %}

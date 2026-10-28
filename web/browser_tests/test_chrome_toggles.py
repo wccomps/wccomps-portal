@@ -12,8 +12,7 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 
 def test_the_dark_mode_button_follows_the_os_until_clicked(live_server, pw_browser):
-    """With no saved choice the page follows the OS, while it stays open too: the button reads pressed and shows the
-    moon whenever the page is dark."""
+    """With no saved choice the button tracks the OS theme, including changes while the page is open."""
     context = create_session_context(pw_browser, live_server, role_user("gold_team"))
     page = context.new_page()
     try:

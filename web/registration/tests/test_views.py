@@ -1,5 +1,7 @@
 """Tests for registration views."""
 
+import re
+
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -426,17 +428,16 @@ class TokenEditViewTestCase(TestCase):
         self.assertEqual(self.registration.region, "wrccdc")
 
     def test_edit_shows_why_a_ticked_event_that_closed_meanwhile_is_refused(self):
-        """The page was loaded while the event was open; by the save its registration had closed."""
         self.event.registration_open = False
         self.event.save()
         response = self.client.post(
             reverse("registration_edit", args=[self.registration.edit_token]),
             data=self._contact_data(events=[self.event.id], shown_events=[self.event.id]),
         )
-        self.assertContains(response, "Select a valid choice")
+        self.assertContains(response, "Invitational 1 is no longer open for registration")
 
     def test_edit_keeps_an_enrollment_in_an_event_that_reopened_meanwhile(self):
-        """Only the events the page showed can be unticked: one that opened after the page loaded keeps its team."""
+        """An event that opened after the page loaded keeps its team."""
         closed = self._closed_event_enrollment()
         closed.registration_open = True
         closed.save()
@@ -446,6 +447,65 @@ class TokenEditViewTestCase(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(self.registration.event_enrollments.filter(event=closed).exists())
+
+    def test_edit_saves_with_nothing_open_and_nothing_enrolled(self):
+        self.event.registration_open = False
+        self.event.save()
+        response = self.client.post(
+            reverse("registration_edit", args=[self.registration.edit_token]), data=self._contact_data()
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def test_edit_cannot_untick_an_event_that_is_not_open(self):
+        """The hidden list is the page's say, not the client's: a closed event in it stays enrolled, and counts."""
+        qualifier = self._closed_qualifier_enrollment()
+        response = self.client.post(
+            reverse("registration_edit", args=[self.registration.edit_token]),
+            data=self._contact_data(
+                region="mwccdc", events=[self.event.id], shown_events=[self.event.id, qualifier.id]
+            ),
+        )
+        self.assertContains(response, "Closed Qualifier")
+        self.assertTrue(self.registration.event_enrollments.filter(event=qualifier).exists())
+
+    def test_edit_resubmitted_after_an_event_closed_keeps_it(self):
+        """The re-rendered page offers what is open now, so its hidden list no longer names the closed event."""
+        qualifier = Event.objects.create(
+            season=self.season,
+            name="Qualifier",
+            event_type="qualifier",
+            event_number=6,
+            date="2026-02-20",
+            registration_open=True,
+        )
+        RegistrationEventEnrollment.objects.create(registration=self.registration, event=qualifier)
+        url = reverse("registration_edit", args=[self.registration.edit_token])
+        qualifier.registration_open = False
+        qualifier.save()
+        first = self.client.post(
+            url,
+            data=self._contact_data(events=[self.event.id, qualifier.id], shown_events=[self.event.id, qualifier.id]),
+        )
+        shown = re.findall(r'name="shown_events" value="(\d+)"', first.content.decode())
+        self.assertEqual(shown, [str(self.event.id)])
+
+    def test_edit_without_a_hidden_list_still_unticks_open_events(self):
+        """A page loaded before the list existed posts none: it showed every open event."""
+        RegistrationEventEnrollment.objects.create(registration=self.registration, event=self.event)
+        other = Event.objects.create(
+            season=self.season,
+            name="Invitational 2",
+            event_type="invitational",
+            event_number=7,
+            date="2026-03-01",
+            registration_open=True,
+        )
+        response = self.client.post(
+            reverse("registration_edit", args=[self.registration.edit_token]),
+            data=self._contact_data(events=[other.id]),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(self.registration.event_enrollments.filter(event=self.event).exists())
 
     def test_edit_unticking_a_shown_event_drops_it(self):
         other = Event.objects.create(

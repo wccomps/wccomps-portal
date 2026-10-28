@@ -14,8 +14,22 @@ RESTRICTED_EVENT_TYPES = ("qualifier", "regional")
 
 
 def open_events() -> QuerySet[Event]:
-    """The events a registration can choose: open, in the active season."""
     return Event.objects.filter(season__is_active=True, registration_open=True).order_by("date")
+
+
+class OpenEventsField(forms.ModelMultipleChoiceField[Event]):
+    """Refuses an event that closed after the page loaded by its name, not its id."""
+
+    def clean(self, value: object) -> QuerySet[Event]:
+        try:
+            return super().clean(value)
+        except ValidationError as error:
+            pk = (error.params or {}).get("value") if error.code == "invalid_choice" else None
+            closed = Event.objects.filter(pk=pk).first() if pk is not None else None
+            if closed is None:
+                raise
+            message = f"{closed.name} is no longer open for registration."
+            raise ValidationError(message, code="invalid_choice") from error
 
 
 class RegistrationForm(forms.ModelForm[TeamRegistration]):
@@ -30,7 +44,7 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
     coach_email = forms.EmailField(max_length=CONTACT_EMAIL_MAX_LENGTH, label="Email Address")
     coach_phone = forms.CharField(max_length=50, label="Phone Number", required=False)
 
-    events = forms.ModelMultipleChoiceField(
+    events = OpenEventsField(
         queryset=Event.objects.none(),
         widget=forms.CheckboxSelectMultiple,
         required=True,
@@ -55,38 +69,35 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
-        events_field = self.fields["events"]
-        if isinstance(events_field, forms.ModelMultipleChoiceField):
-            events_field.queryset = open_events()
-            if self.instance.pk:
-                # Only the events the page showed can be unticked; clean() requires one when nothing else is kept
-                events_field.required = False
-                self.fields["shown_events"] = forms.ModelMultipleChoiceField(
-                    queryset=Event.objects.all(),
-                    required=False,
-                    widget=forms.MultipleHiddenInput,
-                    initial=[event.pk for event in events_field.queryset],
-                )
+        events_field = cast(OpenEventsField, self.fields["events"])
+        offered = open_events()
+        events_field.queryset = offered
+        self.unoffered_events: list[Event] = []
+        self.untickable: set[Event] = set()
+        if self.instance.pk:
+            self.unoffered_events = self._enrolled_outside(offered)
+            # An enrollment the checkboxes don't offer already registers the team for something
+            events_field.required = offered.exists() and not self.unoffered_events
+            self.fields["shown_events"] = forms.ModelMultipleChoiceField(
+                queryset=Event.objects.all(), required=False, widget=forms.MultipleHiddenInput
+            )
 
-    def kept_events(self, shown: Iterable[Event]) -> list[Event]:
-        """The events this registration is enrolled in that the page didn't offer, which a save leaves alone."""
-        if not self.instance.pk:
-            return []
-        enrollments = self.instance.event_enrollments.select_related("event").exclude(event__in=list(shown))
+    def _enrolled_outside(self, events: Iterable[Event]) -> list[Event]:
+        enrollments = self.instance.event_enrollments.select_related("event").exclude(event__in=list(events))
         return [enrollment.event for enrollment in enrollments.order_by("event__date")]
 
-    @property
-    def unoffered_events(self) -> list[Event]:
-        return self.kept_events(open_events())
-
     def clean(self) -> dict[str, object]:
-        """Validate that non-WRCCDC teams only register for invitationals, counting the enrollments kept."""
+        """No Qualifier or Regional for a non-WRCCDC team, counting the enrollments an edit keeps."""
         cleaned_data = super().clean() or {}
         region = cleaned_data.get("region")
         events = list(cast(Iterable[Event], cleaned_data.get("events") or []))
-        kept = self.kept_events(cast(Iterable[Event], cleaned_data.get("shown_events") or []))
-        if self.instance.pk and not events and not kept and "events" not in self.errors:
-            self.add_error("events", forms.Field.default_error_messages["required"])
+        kept: list[Event] = []
+        if self.instance.pk:
+            # A save unticks only events open now that the page showed; a page without the list showed them all
+            offered = set(open_events())
+            shown = set(cast(Iterable[Event], cleaned_data.get("shown_events") or []))
+            self.untickable = offered & shown if "shown_events" in self.data else offered
+            kept = self._enrolled_outside(self.untickable)
 
         if region and region != "wrccdc":
             restricted = [e.name for e in events if e.event_type in RESTRICTED_EVENT_TYPES]
@@ -99,8 +110,8 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
                 )
             if closed:
                 problems.append(
-                    f"This team is registered for {', '.join(closed)}, which only WRCCDC teams can enter and whose "
-                    "registration has closed: contact the organizers to change the region."
+                    f"This team is registered for {', '.join(closed)}, which only WRCCDC teams can enter and which "
+                    "can't be changed here: contact the organizers to change the region."
                 )
             if problems:
                 raise forms.ValidationError(problems)
@@ -140,8 +151,7 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
                 },
             )
             selected = list(self.cleaned_data["events"])
-            shown = self.cleaned_data.get("shown_events") or []
-            RegistrationEventEnrollment.objects.filter(registration=registration, event__in=shown).exclude(
+            RegistrationEventEnrollment.objects.filter(registration=registration, event__in=self.untickable).exclude(
                 event__in=selected
             ).delete()
             for event in selected:

@@ -22,13 +22,21 @@ from core.tests.views_harness import (
 GOLD = may("gold_team")
 
 
+REGIONS = {"region": st.sampled_from(["wrccdc", "prccdc", "x"])}
+
+
 def _registration(w: World) -> Fields:
-    return form_fields(RegistrationForm(), {"region": st.sampled_from(["wrccdc", "prccdc", "x"])})
+    return form_fields(RegistrationForm(), REGIONS)
+
+
+def _edited_registration(w: World) -> Fields:
+    """The edit form has the hidden list of events its page offered."""
+    return form_fields(RegistrationForm(instance=TeamRegistration.objects.first()), REGIONS)
 
 
 CASES = [
     ViewCase("registration_register", EVERYONE, post=_registration),
-    ViewCase("registration_edit", EVERYONE, params={"token": "edit_token"}, post=_registration),
+    ViewCase("registration_edit", EVERYONE, params={"token": "edit_token"}, post=_edited_registration),
     ViewCase(
         "registration_review_list",
         GOLD,
