@@ -404,6 +404,7 @@ READERS = [
         (PROVIDERS,),
         lambda r: outcome(r, _strs, "slugs"),
         (f"{AM}.list_applications", *READ),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "get_application_by_slug",
@@ -411,30 +412,23 @@ READERS = [
         (APPLICATION,),
         lambda r: outcome(r, lambda a: a is None or (isinstance(a, dict) and is_str(a.get("pk"))), "None or an app"),
         (f"{AM}.get_application_by_slug",),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "get_blueteam_binding",
         lambda: authentik().get_blueteam_binding("app-1"),
         (BINDINGS,),
-        lambda r: outcome(
-            r,
-            lambda b: (
-                isinstance(b, tuple)
-                and (
-                    (isinstance(b[0], dict) and is_str(b[0].get("pk")) and b[1] is None)
-                    or (b[0] is None and is_str(b[1]))
-                )
-            ),
-            "(binding, None) or (None, why)",
-        ),
+        lambda r: outcome(r, lambda b: b is None or (isinstance(b, dict) and is_str(b.get("pk"))), "None or a binding"),
         (f"{AM}.get_blueteam_binding", *READ),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "update_binding_enabled",
         lambda: authentik().update_binding_enabled({"pk": "b-1", "enabled": True}, enabled=False),
         (DONE,),
-        check_bool,
+        lambda r: outcome(r, lambda v: v is None, "None"),
         (f"{AM}.update_binding_enabled",),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "enable_application",
@@ -519,6 +513,7 @@ READERS = [
         (USERS,),
         check_user,
         (f"{AM}.get_user_with_groups", *USER),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "get_group_by_name",
@@ -532,6 +527,7 @@ READERS = [
             "None or the group",
         ),
         (f"{AM}.get_group_by_name", *READ),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "add_user_to_group",

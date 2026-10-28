@@ -2,10 +2,12 @@
 
 from unittest.mock import patch
 
+import httpx
 import pytest
 from django.test import Client
 from django.urls import reverse
 
+from core.authentik_manager import AuthentikAPIError
 from core.models import AuditLog, CompetitionConfig
 
 pytestmark = pytest.mark.django_db
@@ -177,3 +179,27 @@ def test_remove_app_does_not_need_authentik(admin_client, config, authentik_apps
     _post(admin_client, "remove_app", app_slug="netbird")
 
     authentik_apps.assert_not_called()
+
+
+def test_add_app_says_when_authentik_cant_be_asked(admin_client, config, authentik_apps):
+    """Authentik being down must not read as the app missing."""
+    authentik_apps.side_effect = httpx.ConnectError("refused")
+
+    body = _post(admin_client, "add_app", app_slug="containerssh").json()
+
+    assert body == {
+        "success": False,
+        "message": "Could not ask Authentik about 'containerssh': Network error (ConnectError)",
+    }
+    config.refresh_from_db()
+    assert config.controlled_applications == ["scoring", "netbird"]
+
+
+def test_the_app_list_says_when_authentik_cant_be_asked(admin_client):
+    with patch(
+        "core.admin_views.competition.AuthentikManager.list_applications",
+        side_effect=AuthentikAPIError("List providers: Forbidden", 403),
+    ):
+        body = admin_client.get(reverse("admin_competition_apps")).json()
+
+    assert body == {"apps": [], "error": "List providers: Forbidden"}

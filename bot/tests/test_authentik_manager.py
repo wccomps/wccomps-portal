@@ -167,18 +167,15 @@ class TestAuthentikManager:
         )
         manager.client.get.return_value = mock_response
 
-        app = manager.get_application_by_slug("test-app")
-
-        assert app is None
-        manager.client.get.assert_called_once()
+        with pytest.raises(AuthentikAPIError):
+            manager.get_application_by_slug("test-app")
 
     def test_get_application_by_slug_network_error(self, manager: AuthentikManager) -> None:
         """Test network error handling during application retrieval."""
         manager.client.get.side_effect = httpx.ConnectError("Connection refused")
 
-        app = manager.get_application_by_slug("test-app")
-
-        assert app is None
+        with pytest.raises(httpx.ConnectError):
+            manager.get_application_by_slug("test-app")
 
     def test_get_blueteam_binding_success(self, manager: AuthentikManager) -> None:
         """Test successful BlueTeam binding retrieval."""
@@ -195,10 +192,9 @@ class TestAuthentikManager:
         }
         manager.client.get.return_value = mock_response
 
-        binding, error = manager.get_blueteam_binding("app-123")
+        binding = manager.get_blueteam_binding("app-123")
 
         assert binding is not None
-        assert error is None
         assert binding["pk"] == "binding-123"
         assert "blueteam" in binding["group_obj"]["name"].lower()
 
@@ -216,11 +212,7 @@ class TestAuthentikManager:
         }
         manager.client.get.return_value = mock_response
 
-        binding, error = manager.get_blueteam_binding("app-123")
-
-        assert binding is None
-        assert error is not None
-        assert "No BlueTeam group binding found" in error
+        assert manager.get_blueteam_binding("app-123") is None
 
     def test_get_blueteam_binding_empty_results(self, manager: AuthentikManager) -> None:
         """Test BlueTeam binding with no results."""
@@ -228,11 +220,7 @@ class TestAuthentikManager:
         mock_response.json.return_value = {"results": []}
         manager.client.get.return_value = mock_response
 
-        binding, error = manager.get_blueteam_binding("app-123")
-
-        assert binding is None
-        assert error is not None
-        assert "No BlueTeam group binding found" in error
+        assert manager.get_blueteam_binding("app-123") is None
 
     def test_update_binding_enabled_success(self, manager: AuthentikManager) -> None:
         """Test successfully updating binding enabled state."""
@@ -245,9 +233,8 @@ class TestAuthentikManager:
         mock_response = Mock()
         manager.client.put.return_value = mock_response
 
-        result = manager.update_binding_enabled(binding, True)
+        manager.update_binding_enabled(binding, True)
 
-        assert result is True
         manager.client.put.assert_called_once()
         call_args = manager.client.put.call_args
         assert call_args[1]["json"]["enabled"] is True
@@ -257,9 +244,8 @@ class TestAuthentikManager:
         binding = {"pk": "binding-123", "enabled": False}
         manager.client.put.side_effect = httpx.ConnectError("Network error")
 
-        result = manager.update_binding_enabled(binding, True)
-
-        assert result is False
+        with pytest.raises(httpx.ConnectError):
+            manager.update_binding_enabled(binding, True)
 
     def test_enable_application_success(self, manager: AuthentikManager) -> None:
         """Test successfully enabling an application."""
@@ -269,11 +255,7 @@ class TestAuthentikManager:
             patch.object(manager, "update_binding_enabled") as mock_update,
         ):
             mock_get_app.return_value = {"pk": "app-123", "slug": "netbird"}
-            mock_get_binding.return_value = (
-                {"pk": "binding-456", "enabled": False},
-                None,
-            )
-            mock_update.return_value = True
+            mock_get_binding.return_value = {"pk": "binding-456", "enabled": False}
 
             success, error = manager.enable_application("netbird")
 
@@ -304,13 +286,18 @@ class TestAuthentikManager:
             patch.object(manager, "get_blueteam_binding") as mock_get_binding,
         ):
             mock_get_app.return_value = {"pk": "app-123"}
-            mock_get_binding.return_value = (None, "No binding found")
+            mock_get_binding.return_value = None
 
-            success, error = manager.enable_application("test-app")
+            assert manager.enable_application("test-app") == (
+                False,
+                "Application 'test-app' has no BlueTeam group binding",
+            )
 
-            assert success is False
-            assert error is not None
-            assert "No binding found" in error
+    def test_enable_application_names_why_authentik_could_not_be_asked(self, manager: AuthentikManager) -> None:
+        """Authentik being down must not read as the app being missing."""
+        manager.client.get.side_effect = httpx.ConnectError("Connection refused")
+
+        assert manager.enable_application("netbird") == (False, "Network error (ConnectError)")
 
     def test_disable_application_success(self, manager: AuthentikManager) -> None:
         """Test successfully disabling an application."""
@@ -320,11 +307,7 @@ class TestAuthentikManager:
             patch.object(manager, "update_binding_enabled") as mock_update,
         ):
             mock_get_app.return_value = {"pk": "app-123"}
-            mock_get_binding.return_value = (
-                {"pk": "binding-456", "enabled": True},
-                None,
-            )
-            mock_update.return_value = True
+            mock_get_binding.return_value = {"pk": "binding-456", "enabled": True}
 
             success, error = manager.disable_application("netbird")
 
@@ -445,9 +428,13 @@ class TestAuthentikManager:
 
         with pytest.raises(AuthentikAPIError):
             manager.find_user("team01")
-        assert manager.get_user_with_groups("team01") is None
-        assert manager.get_group_by_name("WCComps_BlueTeam01") is None
-        assert manager.list_applications() == []
+        for lookup in (
+            lambda: manager.get_user_with_groups("team01"),
+            lambda: manager.get_group_by_name("WCComps_BlueTeam01"),
+            manager.list_applications,
+        ):
+            with pytest.raises(AuthentikAPIError):
+                lookup()
 
     def test_set_user_active_refuses_a_redirect(self, manager: AuthentikManager) -> None:
         manager.client.patch.return_value = self._answer({}, 302)

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import cast
 
+import httpx
 from django.core.exceptions import BadRequest
 from django.db import models
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
@@ -16,7 +17,7 @@ from orange_team.models import OrangeAssignment
 from scoring.models import IncidentReport, InjectScore, RedTeamScore
 
 from core.admin_views.places import SetupSection, setup_url
-from core.authentik_manager import SESSIONS_HIDDEN, AuthentikManager
+from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, reason_for
 from core.forms import ReadinessFixForm
 from core.models import CompetitionConfig
 from core.utils import ndjson_done
@@ -156,8 +157,7 @@ def _check_blueteam_bindings() -> CheckResult:
         if not app:
             missing.append(f"{slug} (not found)")
             continue
-        binding, _ = mgr.get_blueteam_binding(app["pk"])
-        if not binding:
+        if not mgr.get_blueteam_binding(app["pk"]):
             missing.append(slug)
 
     if missing:
@@ -359,6 +359,8 @@ def stream_readiness_checks() -> Iterator[str]:
     for i, (name, check_fn) in enumerate(ALL_CHECKS, 1):
         try:
             severity, detail, action = check_fn()
+        except (AuthentikAPIError, httpx.HTTPError) as e:
+            severity, detail, action = "fail", f"Could not ask Authentik: {reason_for(e)}", None
         except Exception as e:
             severity, detail, action = "fail", f"Check error: {e}", None
 
@@ -392,14 +394,14 @@ def _fix_group_membership(request: HttpRequest) -> JsonResponse:
     for team in active_teams:
         username = team_username(team.team_number)
         expected_group = team.authentik_group
-        user = mgr.get_user_with_groups(username)
-        if not user:
+        try:
+            user = mgr.get_user_with_groups(username)
+            if not user or any(g["name"] == expected_group for g in user["groups_obj"]):
+                continue
+            group = mgr.get_group_by_name(expected_group)
+        except (AuthentikAPIError, httpx.HTTPError) as e:
+            failed.append(f"{username}: {reason_for(e)}")
             continue
-
-        if any(g["name"] == expected_group for g in user["groups_obj"]):
-            continue
-
-        group = mgr.get_group_by_name(expected_group)
         if not group:
             failed.append(f"{username}: group {expected_group} not found")
             continue

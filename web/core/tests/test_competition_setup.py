@@ -1,15 +1,18 @@
 """The Competition setup page: the schedule, start message, team access, scoring engine and readiness check."""
 
+import json
 import re
 from datetime import UTC, datetime
 from unittest.mock import patch
 
+import httpx
 import pytest
 from django.test import Client
 from django.urls import reverse
 from scoring.models import QuotientMetadataCache
 
 from core.models import CompetitionConfig
+from team.models import Team
 
 pytestmark = pytest.mark.django_db
 
@@ -209,3 +212,40 @@ def test_readiness_failures_link_the_setup_section_that_fixes_them():
         severity, _, action = readiness._check_quotient_api()
     assert severity == "fail"
     assert action is not None and action["url"] == setup_url(SetupSection.SCORING_ENGINE)
+
+
+def _authentik_down():
+    """An AuthentikManager whose every request fails to connect."""
+    manager = patch("core.admin_views.readiness.AuthentikManager").start().return_value
+    for lookup in ("get_user_with_groups", "get_group_by_name", "get_application_by_slug", "sees_any_sessions"):
+        getattr(manager, lookup).side_effect = httpx.ConnectError("refused")
+    manager.__enter__.return_value = manager
+    return manager
+
+
+def test_a_readiness_check_says_when_authentik_cant_be_asked():
+    """Authentik being down must not list every team account as missing."""
+    from core.admin_views import readiness
+
+    Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
+    _authentik_down()
+    try:
+        with patch.object(readiness, "ALL_CHECKS", [("Team accounts exist", readiness._check_team_accounts_exist)]):
+            line = json.loads(next(readiness.stream_readiness_checks()))
+    finally:
+        patch.stopall()
+
+    assert (line["severity"], line["detail"]) == ("fail", "Could not ask Authentik: Network error (ConnectError)")
+
+
+def test_fixing_group_membership_names_each_team_authentik_couldnt_answer_for(rf):
+    from core.admin_views import readiness
+
+    Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
+    _authentik_down()
+    try:
+        body = json.loads(readiness._fix_group_membership(rf.post("/")).content)
+    finally:
+        patch.stopall()
+
+    assert body["failed"] == ["team01: Network error (ConnectError)"]

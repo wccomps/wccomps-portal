@@ -258,7 +258,9 @@ document.addEventListener('alpine:init', () => {
         async init() {
             try {
                 const response = await fetch('{% url "admin_competition_apps" %}');
-                this.availableApps = (await response.json()).apps || [];
+                const body = await response.json();
+                if (body.error) throw new Error(body.error);
+                this.availableApps = body.apps;
             } catch (e) {
                 this.message = 'Could not load the Authentik app list: ' + e.message;
                 this.messageType = 'error';

@@ -190,164 +190,88 @@ class AuthentikManager:
         This lists every app that has a provider, regardless of which apps the service account may
         open (the application list would return only those). It needs the service account's role to
         hold the "Can view provider" global permission (authentik_core.view_provider); without it the
-        request 403s and this returns nothing.
+        request 403s. Raises AuthentikAPIError or httpx.HTTPError when Authentik can't be asked.
         """
         url = f"{self.base_url}/api/v3/providers/all/"
         slugs: set[str] = set()
-        try:
-            for page in range(1, MAX_PAGES + 1):
-                params: dict[str, str | int] = {"page_size": 100, "page": page}
-                self._log_request("GET", url, params=params)
-                response = self.client.get(url, params=params)
-                providers, has_next = self._results(response, "List providers")
-                for provider in providers:
-                    slug = provider.get("assigned_application_slug")
-                    if isinstance(slug, str) and slug:
-                        slugs.add(slug)
-                if not has_next:
-                    break
-            else:
-                raise AuthentikAPIError(f"List providers: more than {MAX_PAGES} pages")
-            logger.info(f"Found {len(slugs)} application slugs via providers")
-            return sorted(slugs)
-        except Exception as e:
-            logger.exception(f"Failed to list applications via providers: {e}")
-            return []
+        for page in range(1, MAX_PAGES + 1):
+            params: dict[str, str | int] = {"page_size": 100, "page": page}
+            self._log_request("GET", url, params=params)
+            response = self.client.get(url, params=params)
+            providers, has_next = self._results(response, "List providers")
+            for provider in providers:
+                slug = provider.get("assigned_application_slug")
+                if isinstance(slug, str) and slug:
+                    slugs.add(slug)
+            if not has_next:
+                break
+        else:
+            raise AuthentikAPIError(f"List providers: more than {MAX_PAGES} pages")
+        logger.info(f"Found {len(slugs)} application slugs via providers")
+        return sorted(slugs)
 
     def get_application_by_slug(self, slug: str) -> AuthentikApplication | None:
         """Get application details by exact slug, via the retrieve endpoint.
 
         The list endpoint ignores ?slug= and, for non-superusers, returns only a per-user cached
-        "allowed" list, which can omit apps the service account can access.
+        "allowed" list, which can omit apps the service account can access. None only on a 404; raises
+        AuthentikAPIError or httpx.HTTPError when Authentik can't be asked.
         """
         url = f"{self.base_url}/api/v3/core/applications/{quote(slug, safe='')}/"
-        try:
-            self._log_request("GET", url)
-            response = self.client.get(url)
-            if response.status_code == 404:
-                logger.warning(f"Application '{slug}' not found in Authentik")
-                return None
-            self._check(response, f"Get application '{slug}'")
-            app = self._json(response, f"Get application '{slug}'")
-            if not isinstance(app, dict) or not isinstance(app.get("pk"), str):
-                logger.error(f"Application '{slug}': Authentik's answer has no pk")
-                return None
-            logger.info(f"Found application '{slug}' with pk={app['pk']}")
-            return cast(AuthentikApplication, app)
-        except AuthentikAPIError as e:
-            logger.exception(str(e))
+        self._log_request("GET", url)
+        response = self.client.get(url)
+        if response.status_code == 404:
+            logger.warning(f"Application '{slug}' not found in Authentik")
             return None
-        except httpx.HTTPError as e:
-            logger.exception(f"Network error getting application '{slug}': {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error getting application '{slug}': {e}", exc_info=True)
-            return None
+        self._check(response, f"Get application '{slug}'")
+        app = self._json(response, f"Get application '{slug}'")
+        if not isinstance(app, dict) or not isinstance(app.get("pk"), str):
+            raise AuthentikAPIError(f"Get application '{slug}': the answer has no pk")
+        logger.info(f"Found application '{slug}' with pk={app['pk']}")
+        return cast(AuthentikApplication, app)
 
-    def get_blueteam_binding(self, app_pk: str) -> tuple[AuthentikBinding | None, str | None]:
-        """Find the application's BlueTeam group binding, returning (binding, error_message)."""
+    def get_blueteam_binding(self, app_pk: str) -> AuthentikBinding | None:
+        """The application's BlueTeam group binding, or None when it has none. Raises AuthentikAPIError or
+        httpx.HTTPError when Authentik can't be asked."""
         url = f"{self.base_url}/api/v3/policies/bindings/"
-        try:
-            logger.debug(f"Querying bindings for application {app_pk}")
-            self._log_request("GET", url, params={"target": app_pk})
+        self._log_request("GET", url, params={"target": app_pk})
+        response = self.client.get(url, params={"target": app_pk})
+        bindings, _ = self._results(response, f"Query bindings for app {app_pk}")
+        for binding in bindings:
+            group_obj = binding.get("group_obj")
+            group_name = group_obj.get("name") if isinstance(group_obj, dict) else None
+            if isinstance(group_name, str) and isinstance(binding.get("pk"), str) and "blueteam" in group_name.lower():
+                logger.info(f"Found blueteam group binding: {binding['pk']} (group={group_name})")
+                return cast(AuthentikBinding, binding)
+        logger.warning(f"No BlueTeam group binding among {len(bindings)} for application {app_pk}")
+        return None
 
-            response = self.client.get(url, params={"target": app_pk})
-            bindings, _ = self._results(response, f"Query bindings for app {app_pk}")
-
-            logger.debug(f"Found {len(bindings)} binding(s) for application {app_pk}")
-
-            for binding in bindings:
-                group_obj = binding.get("group_obj")
-                binding_pk = binding.get("pk")
-                group_name = group_obj.get("name") if isinstance(group_obj, dict) else None
-
-                if isinstance(group_name, str) and isinstance(binding_pk, str):
-                    logger.debug(f"Found group binding: {group_name} (pk={binding_pk})")
-
-                    if "blueteam" in group_name.lower():
-                        logger.info(f"Found blueteam group binding: {binding_pk} (group={group_name})")
-                        return cast(AuthentikBinding, binding), None
-
-            error_msg = (
-                f"No BlueTeam group binding found for application {app_pk}. "
-                f"Found {len(bindings)} binding(s) but none matched."
-            )
-            logger.error(error_msg)
-            return None, error_msg
-
-        except AuthentikAPIError as e:
-            logger.exception(f"Failed to query bindings: {e}")
-            return None, str(e)
-        except httpx.HTTPError as e:
-            error_msg = f"Network error querying bindings: {e}"
-            logger.exception(error_msg)
-            return None, error_msg
-        except Exception as e:
-            error_msg = f"Unexpected error querying bindings: {e}"
-            logger.error(error_msg, exc_info=True)
-            return None, error_msg
-
-    def update_binding_enabled(self, binding: AuthentikBinding, enabled: bool) -> bool:
-        """Set a binding's enabled state; an enabled binding allows the group access."""
-        try:
-            binding_pk = binding["pk"]
-
-            # Modify the enabled field and PUT the entire object back
-            binding["enabled"] = enabled
-
-            response = self.client.put(
-                f"{self.base_url}/api/v3/policies/bindings/{binding_pk}/",
-                json=binding,
-            )
-            self._check(response, f"Update binding {binding_pk}")
-            state = "enabled" if enabled else "disabled"
-            logger.info(f"Set binding {binding_pk} to {state}")
-            return True
-        except AuthentikAPIError as e:
-            # Log Authentik's response body (why the 400 etc.), not just the status code
-            logger.exception(str(e))
-            return False
-        except Exception as e:
-            logger.exception(f"Failed to update binding {binding.get('pk')}: {e}")
-            return False
+    def update_binding_enabled(self, binding: AuthentikBinding, enabled: bool) -> None:
+        """Set a binding's enabled state; an enabled binding allows the group access. Raises AuthentikAPIError or
+        httpx.HTTPError when it isn't set."""
+        binding_pk = binding["pk"]
+        # Modify the enabled field and PUT the entire object back
+        binding["enabled"] = enabled
+        response = self.client.put(f"{self.base_url}/api/v3/policies/bindings/{binding_pk}/", json=binding)
+        self._check(response, f"Update binding {binding_pk}")
+        logger.info(f"Set binding {binding_pk} to {'enabled' if enabled else 'disabled'}")
 
     def _toggle_application(self, app_slug: str, *, enable: bool) -> tuple[bool, str | None]:
         """Enable or disable an application for blue teams via its BlueTeam group binding."""
         action = "enable" if enable else "disable"
         try:
-            logger.info(f"Attempting to {action} application '{app_slug}'")
-
             app = self.get_application_by_slug(app_slug)
             if not app:
-                error_msg = f"Application '{app_slug}' not found in Authentik"
-                logger.error(error_msg)
-                return False, error_msg
-
-            app_pk = app["pk"]
-            logger.debug(f"Application '{app_slug}' has pk={app_pk}")
-
-            binding, binding_error = self.get_blueteam_binding(app_pk)
+                return False, f"Application '{app_slug}' not found in Authentik"
+            binding = self.get_blueteam_binding(app["pk"])
             if not binding:
-                error_msg = f"Could not find BlueTeam group binding: {binding_error}"
-                logger.error(error_msg)
-                return False, error_msg
-
-            logger.debug(f"Using binding pk={binding['pk']}")
-
-            success = self.update_binding_enabled(binding, enabled=enable)
-
-            if success:
-                state = "enabled" if enable else "disabled"
-                logger.info(f"Application '{app_slug}' {state} for blue teams")
-                return True, None
-            error_msg = f"Failed to {action} binding for application '{app_slug}'"
-            logger.error(error_msg)
-            return False, error_msg
-
-        except Exception as e:
-            error_msg = f"Unexpected error {action}ing application '{app_slug}': {e!s}"
-            logger.error(error_msg, exc_info=True)
-            return False, error_msg
+                return False, f"Application '{app_slug}' has no BlueTeam group binding"
+            self.update_binding_enabled(binding, enabled=enable)
+        except (AuthentikAPIError, httpx.HTTPError) as e:
+            logger.warning(f"Failed to {action} application '{app_slug}': {e}")
+            return False, reason_for(e)
+        logger.info(f"Application '{app_slug}' {action}d for blue teams")
+        return True, None
 
     def enable_application(self, app_slug: str) -> tuple[bool, str | None]:
         """Enable application for blue teams by enabling the BlueTeam group binding."""
@@ -483,35 +407,25 @@ class AuthentikManager:
         )
 
     def get_user_with_groups(self, username: str) -> AuthentikUserWithGroups | None:
-        """Get an Authentik user with their groups_obj, or None if not found or the lookup failed (logged)."""
-        try:
-            user = self.find_user(username)
-            if user is None:
-                return None
-            raw = cast(dict[str, object], user)
-            groups = raw.setdefault("groups_obj", [])
-            if not isinstance(groups, list) or not all(
-                isinstance(g, dict) and isinstance(g.get("name"), str) for g in groups
-            ):
-                raise AuthentikAPIError(f"Find user {username}: groups without names")
-            return cast(AuthentikUserWithGroups, raw)
-        except Exception as e:
-            logger.exception(f"Failed to get user {username}: {e}")
+        """An Authentik user with their groups_obj, or None if there is none. Raises AuthentikAPIError or
+        httpx.HTTPError when Authentik can't be asked."""
+        user = self.find_user(username)
+        if user is None:
             return None
+        raw = cast(dict[str, object], user)
+        groups = raw.setdefault("groups_obj", [])
+        named = isinstance(groups, list) and all(isinstance(g, dict) and isinstance(g.get("name"), str) for g in groups)
+        if not named:
+            raise AuthentikAPIError(f"Find user {username}: groups without names")
+        return cast(AuthentikUserWithGroups, raw)
 
     def get_group_by_name(self, name: str) -> AuthentikGroup | None:
-        """Look up an Authentik group by exact name, or None if not found."""
-        try:
-            response = self.client.get(
-                f"{self.base_url}/api/v3/core/groups/",
-                params={"name": name},
-            )
-            groups, _ = self._results(response, f"Find group {name}")
-            found = next((g for g in groups if g.get("name") == name and isinstance(g.get("pk"), str)), None)
-            return cast(AuthentikGroup | None, found)
-        except Exception as e:
-            logger.exception(f"Failed to look up group {name}: {e}")
-            return None
+        """An Authentik group by exact name, or None if there is none. Raises AuthentikAPIError or httpx.HTTPError
+        when Authentik can't be asked."""
+        response = self.client.get(f"{self.base_url}/api/v3/core/groups/", params={"name": name})
+        groups, _ = self._results(response, f"Find group {name}")
+        found = next((g for g in groups if g.get("name") == name and isinstance(g.get("pk"), str)), None)
+        return cast(AuthentikGroup | None, found)
 
     def add_user_to_group(self, user_pk: int, group_pk: str) -> tuple[bool, str]:
         """Add a user to an Authentik group."""

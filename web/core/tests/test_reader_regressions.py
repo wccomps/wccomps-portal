@@ -35,9 +35,10 @@ def test_an_error_answer_of_any_shape_reads_as_an_authentik_error(answers: list[
     """An error answer whose JSON wasn't an object raised AttributeError while reading its detail, inside the
     readers' except clauses, so it escaped them (the competition page's app check answered 500)."""
     with serving(answers):
-        assert isinstance(authentik().get_application_by_slug("netbird"), dict | None)
-        binding, error = authentik().get_blueteam_binding("app-1")
-        assert binding is None or isinstance(binding, dict)
+        with contextlib.suppress(AuthentikAPIError):
+            assert isinstance(authentik().get_application_by_slug("netbird"), dict | None)
+        with contextlib.suppress(AuthentikAPIError):
+            assert isinstance(authentik().get_blueteam_binding("app-1"), dict | None)
 
 
 @example(answers=[answer({**PROVIDERS, "pagination": {"next": 2}})])
@@ -45,7 +46,7 @@ def test_an_error_answer_of_any_shape_reads_as_an_authentik_error(answers: list[
 def test_a_list_that_never_ends_stops(answers: list[Answer]) -> None:
     """A provider list whose every page said there was a next one was read forever (list_applications), and
     _list_all likewise: the page and the refresh loop hung."""
-    with serving(answers):
+    with serving(answers), contextlib.suppress(AuthentikAPIError):
         assert isinstance(authentik().list_applications(), list)
 
 
@@ -68,21 +69,23 @@ def test_a_user_list_of_another_shape_is_an_authentik_error(answers: list[Answer
 @example(answers=[answer({"results": [{**USER, "groups_obj": ["WCComps_BlueTeam01"]}]})])
 @example(answers=[answer({"results": "none"})])
 @given(answers=answer_lists(USERS))
-def test_a_user_of_another_shape_is_no_user(answers: list[Answer]) -> None:
+def test_a_user_of_another_shape_is_an_authentik_error_or_no_user(answers: list[Answer]) -> None:
     """get_user_with_groups returned whatever the first result was: a pk that wasn't a number, or groups that
     weren't objects, failed the readiness checks and their group fix."""
     with serving(answers):
-        user = authentik().get_user_with_groups("team01")
+        try:
+            user = authentik().get_user_with_groups("team01")
+        except AuthentikAPIError:
+            return
     assert user is None or (type(user["pk"]) is int and all(isinstance(g, dict) for g in user.get("groups_obj", [])))
 
 
 @example(slug=None)
 @given(slug=st.one_of(st.none(), st.integers(), st.lists(st.text(max_size=3), max_size=2)))
-def test_an_application_without_a_text_pk_is_not_found(slug: object) -> None:
+def test_an_application_without_a_text_pk_is_an_authentik_error(slug: object) -> None:
     """get_application_by_slug returned any JSON as the application, and its callers read app["pk"]."""
-    with serving([answer({"pk": slug, "slug": "netbird"})]):
-        app = authentik().get_application_by_slug("netbird")
-    assert app is None or isinstance(app["pk"], str)
+    with serving([answer({"pk": slug, "slug": "netbird"})]), pytest.raises(AuthentikAPIError):
+        authentik().get_application_by_slug("netbird")
 
 
 QUOTIENT = {"QUOTIENT_USERNAME": "property", "QUOTIENT_PASSWORD": "property"}
