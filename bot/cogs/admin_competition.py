@@ -84,37 +84,18 @@ class AdminCompetitionCog(commands.Cog):
             teams = active
 
         # Only successful resets go in the CSV: a failed one leaves the old password in place.
-        result = await sync_to_async(reset_teams_credentials)(teams)
+        result = await sync_to_async(reset_teams_credentials)(teams, actor=str(interaction.user))
         password_list = result.password_list
         failed_resets = result.failed_resets
         sessions_failed = result.sessions_failed
-
         total = len(teams)
-        await AuditLog.objects.acreate(
-            action="blueteam_passwords_reset",
-            admin_user=str(interaction.user),
-            target_entity="authentik_users",
-            target_id=0,
-            details={
-                "total_users": total,
-                **result.audit_details(),
-                "team_numbers": team_numbers or "all active",
-            },
-        )
-
-        teams_msg = f"teams {team_numbers}" if team_numbers else f"all {total} active team accounts"
-        await log_to_ops_channel(
-            self.bot,
-            f"BlueTeam Password Reset by {interaction.user.mention}\n"
-            f"• Teams: {teams_msg}\n"
-            f"• Reset: {len(password_list)}/{total}\n"
-            f"• Failed: {len(failed_resets)}",
-        )
 
         summary = f"Password reset complete\n• Success: {len(password_list)}/{total}\n"
         details = "".join(f"• Failed {username}: {error}\n" for username, error in failed_resets)
         if sessions_failed:
             details += f"• Sessions: {sessions_failure_summary(sessions_failed)}\n"
+        if result.sessions_uncounted:
+            details += f"• Could not count the sessions of {', '.join(result.sessions_uncounted)}\n"
         if password_list:
             # The CSV rides on the short first message, so details past Discord's limit can't lose the passwords
             csv_content = credentials_csv((username, password) for _num, username, password in password_list)

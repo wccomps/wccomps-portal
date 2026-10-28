@@ -52,6 +52,7 @@ class TestUpdateUserDiscordId:
             "results": [
                 {
                     "pk": 42,
+                    "username": "testuser",
                     "uid": "u-1",
                     "attributes": {"existing_attr": "value"},
                 }
@@ -69,7 +70,7 @@ class TestUpdateUserDiscordId:
 
         # Verify GET searched by username
         manager.client.get.assert_called_once()
-        assert "username=testuser" in manager.client.get.call_args[0][0]
+        assert manager.client.get.call_args.kwargs["params"] == {"username": "testuser"}
 
         # Verify PATCH used the integer PK
         manager.client.patch.assert_called_once()
@@ -85,6 +86,7 @@ class TestUpdateUserDiscordId:
             "results": [
                 {
                     "pk": 7,
+                    "username": "golduser",
                     "uid": "u-1",
                     "attributes": {"role": "admin", "team": "gold"},
                 }
@@ -104,7 +106,9 @@ class TestUpdateUserDiscordId:
     def test_refuses_to_write_to_a_different_identity_with_that_username(self, manager):
         """A stale portal username may now belong to someone else in Authentik: check the uid first."""
         mock_get_response = MagicMock()
-        mock_get_response.json.return_value = {"results": [{"pk": 9, "uid": "someone-else", "attributes": {}}]}
+        mock_get_response.json.return_value = {
+            "results": [{"pk": 9, "username": "reused", "uid": "someone-else", "attributes": {}}]
+        }
         manager.client.get.return_value = mock_get_response
 
         result = manager.update_user_discord_id("reused", 123456789, "my-uid")
@@ -123,31 +127,23 @@ class TestUpdateUserDiscordId:
         assert result is False
         manager.client.patch.assert_not_called()
 
-    def test_raises_on_403_error(self, manager):
-        """Should raise on 403 Forbidden (permission issue)."""
-        mock_response = MagicMock()
-        mock_response.status_code = 403
-        mock_response.text = "Permission denied"
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "error", request=MagicMock(), response=mock_response
-        )
-        manager.client.get.return_value = mock_response
+    @pytest.mark.parametrize("status", [403, 500, 302])
+    def test_refused_lookup_stores_nothing(self, manager, status):
+        manager.client.get.return_value = MagicMock(status_code=status, text="refused", is_success=False)
 
-        with pytest.raises(httpx.HTTPStatusError):
-            manager.update_user_discord_id("someuser", 123456789, "u-1")
+        assert manager.update_user_discord_id("someuser", 123456789, "u-1") is False
+        manager.client.patch.assert_not_called()
 
-    def test_raises_on_other_http_errors(self, manager):
-        """Should raise on other HTTP errors."""
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        mock_response.text = "Server error"
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "error", request=MagicMock(), response=mock_response
-        )
-        manager.client.get.return_value = mock_response
+    @pytest.mark.parametrize("status", [403, 500, 302])
+    def test_refused_update_is_false(self, manager, status):
+        mock_get_response = MagicMock()
+        mock_get_response.json.return_value = {
+            "results": [{"pk": 42, "username": "someuser", "uid": "u-1", "attributes": {}}]
+        }
+        manager.client.get.return_value = mock_get_response
+        manager.client.patch.return_value = MagicMock(status_code=status, text="refused", is_success=False)
 
-        with pytest.raises(httpx.HTTPStatusError):
-            manager.update_user_discord_id("someuser", 123456789, "u-1")
+        assert manager.update_user_discord_id("someuser", 123456789, "u-1") is False
 
 
 class TestUpdateBindingEnabled:
@@ -168,7 +164,7 @@ class TestUpdateBindingEnabled:
         resp.url = "https://auth.example.com/api/v3/policies/bindings/abc/"
         resp.json.return_value = {"non_field_errors": ["Enabled cannot be set on this binding"]}
         resp.text = '{"non_field_errors": ["Enabled cannot be set on this binding"]}'
-        resp.raise_for_status.side_effect = httpx.HTTPStatusError("400", request=MagicMock(), response=resp)
+        resp.is_success = False
         manager.client.put.return_value = resp
 
         with caplog.at_level(logging.ERROR):

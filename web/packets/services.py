@@ -12,7 +12,7 @@ from registration.locks import school_list_lock
 from registration.models import Event
 from registration.stage import ACTIONS, Action
 
-from core.authentik_utils import reset_team_password
+from core.authentik_utils import set_team_password
 from core.utils import ndjson_done
 from core.utils import ndjson_progress as _progress
 from team.models import SchoolInfo, Team, team_username
@@ -149,23 +149,23 @@ class PacketDistributionService:
 
         return {"sent": sent_count, "failed": failed_count}
 
-    @transaction.atomic
     def _team_password(self, team: Team) -> str:
         """The team account's password for this competition, setting a new one in Authentik on first use.
 
         The team's school info row stays locked until the new password is stored on it, so concurrent sends set it
         once and all carry it."""
-        school_info = SchoolInfo.objects.select_for_update().filter(team=team).first()
-        if school_info is None:
-            raise ValueError(f"Team {team.team_number} has no school info; import the school list first")
-        if school_info.password:
-            return school_info.password
-
-        password, error = reset_team_password(team.team_number)
-        if password is None:
-            raise ValueError(f"Failed to set Authentik password for team {team.team_number}: {error}")
-        logger.info(f"Generated credentials for team {team.team_number}")
-        return password
+        with transaction.atomic():
+            school_info = SchoolInfo.objects.select_for_update().filter(team=team).first()
+            if school_info is None:
+                raise ValueError(f"Team {team.team_number} has no school info; import the school list first")
+            if school_info.password:
+                return school_info.password
+            password, error = set_team_password(team.team_number, actor="packet distribution")
+            if password is not None:
+                logger.info(f"Generated credentials for team {team.team_number}")
+                return password
+        # Outside the transaction, so the failed attempt's audit row commits
+        raise ValueError(f"Failed to set Authentik password for team {team.team_number}: {error}")
 
     def _build_packet_email(
         self,

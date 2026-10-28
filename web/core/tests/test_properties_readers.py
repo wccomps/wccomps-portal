@@ -358,7 +358,6 @@ def proxmox() -> ProxmoxClient:
 
 def error_from_answer() -> object:
     """_handle_response_error reads an error answer's body: it gets the first answer served, as is."""
-    import httpx
 
     response = httpx.Client().get("https://auth.test/api/v3/core/users/")
     return authentik()._handle_response_error(response, "Read")
@@ -390,7 +389,7 @@ QJ = "web/quotient/client.py:_json"
 PX = "web/core/proxmox.py:ProxmoxClient"
 PJ = "web/core/proxmox.py:_json"
 READ = (f"{AM}._results", f"{AM}._json")
-USER = (f"{AM}._first_user", *READ)
+USER = (f"{AM}.find_user", *READ)
 READERS = [
     Reader(
         "_handle_response_error",
@@ -457,14 +456,14 @@ READERS = [
         (USERS, DONE),
         check_bool,
         (f"{AM}.update_user_discord_id", *USER),
-        raises=(httpx.HTTPStatusError,),
     ),
     Reader(
-        "end_user_sessions",
-        lambda: authentik().end_user_sessions({"pk": 7, "username": "team01"}),
-        (SESSIONS, SESSIONS, DONE),
-        lambda r: outcome(r, lambda e: e is None or is_str(e), "None or why not"),
-        (f"{AM}.end_user_sessions", f"{AM}._list_all", *READ),
+        "user_sessions",
+        lambda: authentik().user_sessions({"pk": 7, "username": "team01"}),
+        (SESSIONS,),
+        lambda r: outcome(r, lambda ids: isinstance(ids, list), "session ids"),
+        (f"{AM}.user_sessions", f"{AM}._list_all", *READ),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "find_user",
@@ -479,7 +478,7 @@ READERS = [
         lambda: authentik().set_password({"pk": 7, "username": "team01"}, "Correct-Horse-1!"),
         (DONE,),
         lambda r: outcome(r, lambda v: v is None, "None"),
-        (f"{AM}.set_password",),
+        (f"{AM}.set_password", f"{AM}._check"),
         raises=(AuthentikAPIError,),
     ),
     Reader(
@@ -491,11 +490,12 @@ READERS = [
         raises=(AuthentikAPIError,),
     ),
     Reader(
-        "toggle_user",
-        lambda: authentik().toggle_user("team01", True),
-        (USERS, DONE),
-        check_pair,
-        (f"{AM}.toggle_user", *USER),
+        "set_user_active",
+        lambda: authentik().set_user_active({"pk": 7, "username": "team01"}, True),
+        (DONE,),
+        lambda r: outcome(r, lambda v: v is None, "None"),
+        (f"{AM}.set_user_active",),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "list_all_users",
@@ -687,7 +687,7 @@ def _refresh_groups() -> object:
 def _reset_credentials() -> object:
     from core.authentik_utils import reset_team_credentials
 
-    return reset_team_credentials(1)
+    return reset_team_credentials(1, actor="gold-admin")
 
 
 def _store_discord_id() -> object:
@@ -722,7 +722,7 @@ CALLERS = [
     Caller("sync_quotient_metadata", _sync_metadata, (DONE, METADATA, INJECTS), (ValueError,)),
     Caller("sync_service_scores", _sync_scores, (DONE, EXPORT, UPTIMES), (ValueError,)),
     Caller("refresh_user_groups", _refresh_groups, (GROUPS, USERS), (Exception,)),
-    Caller("reset_team_credentials", _reset_credentials, (USERS, DONE, SESSIONS, SESSIONS, DONE)),
+    Caller("reset_team_credentials", _reset_credentials, (USERS, SESSIONS, DONE, SESSIONS, DONE)),
     Caller("store_discord_id_in_authentik", _store_discord_id, (USERS, DONE)),
     Caller("run_competition_to_completion", _start_competition, (APPLICATION, BINDINGS, DONE, USERS, DONE, GROUPS)),
     Caller("stream_readiness_checks", _readiness, (USERS, USERS, SESSIONS, APPLICATION, BINDINGS, DONE, METADATA)),

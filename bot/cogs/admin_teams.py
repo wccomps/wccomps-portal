@@ -294,7 +294,7 @@ class AdminTeamsCog(commands.Cog):
 
         results.append(f"Unlinked {unlinked_count} Discord user(s)")
 
-        reset = await sync_to_async(reset_team_credentials)(team_number)
+        reset = await sync_to_async(reset_team_credentials)(team_number, actor=str(interaction.user))
         if reset.password is not None:
             results.append(f"Reset the Authentik password and {reset.sessions_outcome}")
         else:
@@ -330,7 +330,7 @@ class AdminTeamsCog(commands.Cog):
             details={
                 "team_name": team.team_name,
                 "unlinked_members": unlinked_count,
-                **reset.audit_details(),
+                "password_reset": reset.password is not None,
                 "recreated_channels": recreate_channels,
             },
         )

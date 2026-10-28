@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 from registration.models import School
 
+from core.models import AuditLog, DiscordTask
 from team.models import SchoolInfo, Team
 
 from ..models import Packet, PacketDistribution
@@ -160,6 +161,26 @@ class PacketDistributionServiceTestCase(TestCase):
         self.assertEqual(SchoolInfo.objects.get(team=team).password, password)
         for call in mock_email_class.call_args_list:
             self.assertIn(password, call.kwargs["body"])
+        row = AuditLog.objects.get(action="team_password_set")
+        self.assertEqual(
+            (row.admin_user, row.target_id, row.details),
+            ("packet distribution", 1, {"password_set": True, "error": None}),
+        )
+
+    @patch("packets.services.EmailMultiAlternatives")
+    def test_a_packet_send_leaves_sessions_and_the_ops_channel_alone(self, mock_email_class):
+        team = Team.objects.get(team_number=1)
+        SchoolInfo.objects.filter(team=team).update(password="")
+        distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
+
+        with patch("core.authentik_utils.AuthentikManager") as cls:
+            manager = cls.return_value.__enter__.return_value
+            manager.find_user.return_value = {"pk": 5, "username": "team01"}
+            self.service.send_packet_email(distribution)
+
+        manager.user_sessions.assert_not_called()
+        manager.end_sessions.assert_not_called()
+        self.assertFalse(DiscordTask.objects.filter(task_type="log_to_channel").exists())
 
     @patch("packets.services.EmailMultiAlternatives")
     def test_failed_password_set_sends_nothing(self, mock_email_class):
@@ -175,6 +196,8 @@ class PacketDistributionServiceTestCase(TestCase):
             self.service.send_packet_email(distribution)
 
         mock_email_class.return_value.send.assert_not_called()
+        row = AuditLog.objects.get(action="team_password_set", target_id=1)
+        self.assertEqual(row.details, {"password_set": False, "error": "User team01 not found"})
         self.assertEqual(SchoolInfo.objects.get(team=team).password, "")
 
     @patch("packets.services.EmailMultiAlternatives")
