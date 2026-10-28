@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 from registration.models import School
 
-from core.authentik_manager import SESSIONS_HIDDEN
+from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError
 from core.models import AuditLog, DiscordTask
 from team.models import SchoolInfo, Team
 
@@ -194,7 +194,7 @@ class PacketDistributionServiceTestCase(TestCase):
         mock_email_class.return_value.send.assert_called_once()
 
     @patch("packets.services.EmailMultiAlternatives")
-    def test_sessions_that_could_not_be_ended_alert_ops(self, mock_email_class):
+    def test_a_session_opened_after_the_count_alerts_ops_too(self, mock_email_class):
         team = Team.objects.get(team_number=1)
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
@@ -210,8 +210,31 @@ class PacketDistributionServiceTestCase(TestCase):
             self._ops_messages(),
             [
                 "Credentials reset for team 1 by packet distribution: could not end the team's Authentik sessions: "
-                "Authentik did not end sessions (HTTP 403)"
+                "Authentik did not end sessions (HTTP 403)",
+                "Team 1's account had 1 Authentik sessions before its packet went out; its credentials may have "
+                "leaked.",
             ],
+        )
+
+    @patch("packets.services.EmailMultiAlternatives")
+    def test_sessions_left_after_a_failed_count_alert_ops(self, mock_email_class):
+        team = Team.objects.get(team_number=1)
+        SchoolInfo.objects.filter(team=team).update(password="")
+        distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
+
+        with patch("core.authentik_utils.AuthentikManager") as cls:
+            manager = cls.return_value.__enter__.return_value
+            manager.find_user.return_value = {"pk": 5, "username": "team01"}
+            manager.user_sessions.side_effect = [
+                AuthentikAPIError("List sessions: Server error", 500),
+                [uuid.UUID(int=1)],
+            ]
+            manager.end_sessions.return_value = None
+            self.service.send_packet_email(distribution)
+
+        self.assertIn(
+            "Team 1's account had 1 Authentik sessions before its packet went out; its credentials may have leaked.",
+            self._ops_messages(),
         )
 
     @patch("packets.services.EmailMultiAlternatives")

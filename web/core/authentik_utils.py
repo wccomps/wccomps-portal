@@ -3,7 +3,7 @@ import io
 import logging
 import secrets
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -41,12 +41,14 @@ def set_team_account_active(manager: AuthentikManager, team_number: int, is_acti
 @dataclass(frozen=True)
 class CredentialReset:
     """The new password, or None and error; sessions_error is None when its Authentik sessions ended or weren't
-    tried; sessions_found is None when they couldn't be counted."""
+    tried; sessions_found is the count before the password changed, None when it couldn't be taken; sessions_left
+    is how many were still listed after it."""
 
     password: str | None
     error: str = ""
     sessions_error: str | None = None
     sessions_found: int | None = None
+    sessions_left: int = 0
 
     @property
     def sessions_outcome(self) -> str:
@@ -75,8 +77,7 @@ def _end_sessions(manager: AuthentikManager, user: AuthentikUser, hidden: bool |
     try:
         session_ids = manager.user_sessions(user)
         found = len(session_ids)
-        # An empty list proves nothing to a token that sees no sessions. Asked only when the count couldn't say:
-        # after the password change Authentik may have ended the only session the token could see
+        # Recheck only if the count failed: the password change may have ended the only session the token saw
         if not session_ids and (not manager.sees_any_sessions() if hidden is None else hidden):
             return 0, SESSIONS_HIDDEN
         return found, manager.end_sessions(session_ids)
@@ -103,10 +104,8 @@ def _reset_credentials(manager: AuthentikManager, team_number: int) -> Credentia
         return CredentialReset(password=None, error=reason_for(e), sessions_found=found)
     # The copy packet emails send; a team with no school info has none
     SchoolInfo.objects.filter(team__team_number=team_number).update(password=password)
-    found_after, sessions_error = _end_sessions(manager, user, hidden)
-    if found is None and found_after:
-        found = found_after
-    return CredentialReset(password=password, sessions_error=sessions_error, sessions_found=found)
+    left, sessions_error = _end_sessions(manager, user, hidden)
+    return CredentialReset(password=password, sessions_error=sessions_error, sessions_found=found, sessions_left=left)
 
 
 def reset_team_credentials(team_number: int, actor: str) -> CredentialReset:
@@ -123,6 +122,7 @@ def reset_team_credentials(team_number: int, actor: str) -> CredentialReset:
             "sessions_revoked": reset.password is not None and reset.sessions_error is None,
             "sessions_error": reset.sessions_error,
             "sessions_found": reset.sessions_found,
+            "sessions_left": reset.sessions_left,
         },
     )
     if reset.password is None:
@@ -138,6 +138,7 @@ class BulkPasswordResetResult:
     password_list: list[tuple[int, str, str]]
     failed_resets: list[tuple[str, str]]
     sessions_failed: list[tuple[str, str]]
+    sessions_uncounted: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         total = len(self.password_list) + len(self.failed_resets)
@@ -146,6 +147,8 @@ class BulkPasswordResetResult:
             text += "; failed: " + "; ".join(f"{username}: {why}" for username, why in self.failed_resets)
         if self.sessions_failed:
             text += f"; {sessions_failure_summary(self.sessions_failed)}"
+        if self.sessions_uncounted:
+            text += "; could not count the sessions of " + ", ".join(self.sessions_uncounted)
         return text
 
 
@@ -180,7 +183,10 @@ def reset_teams_credentials(team_numbers: list[int], actor: str) -> BulkPassword
         if reset.sessions_error:
             sessions_failed.append((username, reset.sessions_error))
     result = BulkPasswordResetResult(
-        password_list=password_list, failed_resets=failed_resets, sessions_failed=sessions_failed
+        password_list=password_list,
+        failed_resets=failed_resets,
+        sessions_failed=sessions_failed,
+        sessions_uncounted=uncounted,
     )
 
     AuditLog.objects.create(

@@ -165,10 +165,10 @@ class PacketDistributionService:
             reset = reset_team_credentials(team.team_number, actor="packet distribution")
             if reset.password is not None:
                 logger.info(f"Generated credentials for team {team.team_number}")
-                if reset.sessions_found:
+                if seen := max(reset.sessions_found or 0, reset.sessions_left):
                     alert = (
-                        f"Team {team.team_number}'s account had {reset.sessions_found} Authentik sessions before its "
-                        "packet went out; its credentials may have leaked."
+                        f"Team {team.team_number}'s account had {seen} Authentik sessions before its packet went "
+                        "out; its credentials may have leaked."
                     )
                     logger.warning(alert)
                     DiscordTask.enqueue(LogToChannel(message=alert))

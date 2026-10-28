@@ -143,7 +143,6 @@ def test_a_failed_count_asks_whether_the_token_sees_sessions_before_trusting_an_
 
 
 def test_a_counted_empty_list_is_trusted_after_the_password_change(manager):
-    """Authentik may end the only session the token could see when the password changes."""
     manager.sees_any_sessions.side_effect = [True, False]
 
     reset = reset_team_credentials(7, actor="gold-admin")
@@ -157,15 +156,17 @@ def test_sessions_listed_before_a_failed_end_still_count(manager):
 
     reset = reset_team_credentials(7, actor="gold-admin")
 
-    assert (reset.sessions_found, reset.sessions_error) == (1, "Network error (ConnectError)")
+    assert (reset.sessions_left, reset.sessions_error) == (1, "Network error (ConnectError)")
 
 
-def test_sessions_the_end_step_finds_count_when_the_first_count_failed(manager):
+def test_sessions_left_after_a_failed_count_do_not_pass_for_a_count(manager):
     manager.user_sessions.side_effect = [AuthentikAPIError("List sessions: Server error", 500), [uuid.UUID(int=1)]]
 
     reset = reset_team_credentials(7, actor="gold-admin")
 
-    assert reset.sessions_found == 1
+    assert (reset.sessions_found, reset.sessions_left) == (None, 1)
+    note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    assert note.endswith("but could not count them first")
 
 
 def test_reset_team_credentials_audits_and_tells_ops(manager):
@@ -182,6 +183,7 @@ def test_reset_team_credentials_audits_and_tells_ops(manager):
         "sessions_revoked": True,
         "sessions_error": None,
         "sessions_found": 1,
+        "sessions_left": 0,
     }
     note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
     assert note == "Credentials reset for team 7 by gold-admin: ended the team's Authentik sessions"
@@ -264,7 +266,7 @@ def test_web_bulk_reset_defaults_to_the_active_teams(admin_user):
         patch(
             "core.authentik_utils._reset_credentials",
             side_effect=lambda _m, n: CredentialReset(
-                password=f"pw-{n}", sessions_error="HTTP 403" if n == 2 else None
+                password=f"pw-{n}", sessions_error="HTTP 403" if n == 2 else None, sessions_found=0
             ),
         ) as reset,
     ):
@@ -344,6 +346,8 @@ def test_bulk_audit_names_the_teams_it_could_not_count(manager):
 
     row = AuditLog.objects.get(action="blueteam_passwords_reset")
     assert (row.details["sessions_found"], row.details["sessions_uncounted"]) == (0, ["team01"])
+    note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    assert note.endswith("; could not count the sessions of team01")
 
 
 def test_web_bulk_reset_leaves_one_audit_row(admin_user):
