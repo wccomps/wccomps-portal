@@ -508,7 +508,7 @@ class TokenEditViewTestCase(TestCase):
         self.assertFalse(self.registration.event_enrollments.filter(event=self.event).exists())
 
     def test_edit_offering_nothing_keeps_an_event_that_reopened_meanwhile(self):
-        """A page that offered no event posts an empty list, which is not a page that never had one."""
+        """A page that offered no event posts only the marker, which is not a page that never had one."""
         past = self._closed_event_enrollment()
         self.event.registration_open = False
         self.event.save()
@@ -546,6 +546,31 @@ class TokenEditViewTestCase(TestCase):
             data=self._contact_data(events=[self.event.id], shown_events=[self.event.id, 999999, "x"]),
         )
         self.assertEqual(response.status_code, 302)
+
+    def test_edit_ignores_a_listed_id_int_cannot_read(self):
+        response = self.client.post(
+            reverse("registration_edit", args=[self.registration.edit_token]),
+            data=self._contact_data(events=[self.event.id], shown_events=["\u00b2"]),
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def test_edit_refuses_an_unlisted_open_qualifier_once(self):
+        """A Qualifier that opened since the page loaded is the team's to untick, so it is refused as a ticked event."""
+        qualifier = Event.objects.create(
+            season=self.season,
+            name="Open Qualifier",
+            event_type="qualifier",
+            event_number=8,
+            date="2026-02-25",
+            registration_open=True,
+        )
+        RegistrationEventEnrollment.objects.create(registration=self.registration, event=qualifier)
+        response = self.client.post(
+            reverse("registration_edit", args=[self.registration.edit_token]),
+            data=self._contact_data(region="mwccdc", events=[self.event.id], shown_events=[self.event.id]),
+        )
+        self.assertContains(response, "Please remove: Open Qualifier")
+        self.assertNotContains(response, "can&#x27;t be changed here")
 
     def test_edit_names_only_an_event_that_is_not_open(self):
         response = self.client.post(

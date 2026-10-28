@@ -84,7 +84,7 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
             self.untickable = offered_pks
             if self.is_bound and LISTED in self.data:
                 # The edit page posts the open events it offered: only those can be unticked
-                listed = {int(v) for v in self._posted("shown_events") if v.isdigit()}
+                listed = {int(v) for v in self._posted("shown_events") if v.isascii() and v.isdigit()}
                 self.untickable = offered_pks & listed
                 if unlisted := (enrolled & offered_pks) - listed:
                     # Opened since the page loaded: a re-render shows them ticked, as the team has them
@@ -117,10 +117,8 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
         cleaned_data = super().clean() or {}
         region = cleaned_data.get("region")
         events = list(cast(Iterable[Event], cleaned_data.get("events") or []))
-        kept: list[Event] = []
-        if self.instance.pk:
-            enrollments = self.instance.event_enrollments.select_related("event")
-            kept = [enrollment.event for enrollment in enrollments.exclude(event_id__in=self.untickable)]
+        # An open event the team holds is among the ticked ones (__init__ adds any the page didn't list)
+        kept = self.unoffered_events
 
         if region and region != "wrccdc":
             restricted = [e.name for e in events if e.event_type in RESTRICTED_EVENT_TYPES]
