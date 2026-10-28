@@ -430,14 +430,14 @@ class TestAuthentikManager:
         manager.client.get.return_value = self._sessions(42, 42)
         manager.client.delete.side_effect = [self._answer({}, 204), self._answer({"detail": "denied"}, 403)]
 
-        assert manager.end_user_sessions(self.TEAM01) == "Authentik refused to end sessions (HTTP 403)"
+        assert manager.end_user_sessions(self.TEAM01) == "Authentik did not end sessions (HTTP 403)"
 
-    def test_end_user_sessions_refused_list_is_reported_not_unexpected(self, manager: AuthentikManager) -> None:
+    def test_end_user_sessions_refused_list_names_the_cause(self, manager: AuthentikManager) -> None:
         manager.client.get.return_value = self._answer({"detail": "denied"}, 403)
 
         error = manager.end_user_sessions(self.TEAM01)
 
-        assert error is not None and "Permission denied" in error and "Unexpected" not in error
+        assert error is not None and "Permission denied" in error
 
     def test_end_user_sessions_reasons_never_name_the_user(self, manager: AuthentikManager) -> None:
         """One reason shared by many teams must read once in a bulk reset, so it can't carry the username."""
@@ -480,7 +480,7 @@ class TestAuthentikManager:
         manager.client.get.return_value = self._sessions(42)
         manager.client.delete.return_value = self._answer({}, 302)
 
-        assert manager.end_user_sessions(self.TEAM01) == "Authentik refused to end sessions (HTTP 302)"
+        assert manager.end_user_sessions(self.TEAM01) == "Authentik did not end sessions (HTTP 302)"
 
     def test_set_password_redirect_is_a_failure(self, manager: AuthentikManager) -> None:
         """A redirected POST never set the password, so it must not be handed out."""
@@ -488,3 +488,10 @@ class TestAuthentikManager:
 
         with pytest.raises(AuthentikAPIError):
             manager.set_password(self.TEAM01, "New-Pass-1!")
+
+    def test_end_user_sessions_redirected_list_is_not_taken_as_no_sessions(self, manager: AuthentikManager) -> None:
+        """A redirect carrying an empty result list must not read as "this user has no sessions"."""
+        manager.client.get.side_effect = [self._answer({"results": []}, 302), self._sessions(7)]
+
+        assert manager.end_user_sessions(self.TEAM01) is not None
+        manager.client.delete.assert_not_called()

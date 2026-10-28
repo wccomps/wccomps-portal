@@ -51,7 +51,6 @@ logger = logging.getLogger(__name__)
 
 MAX_PAGES = 100  # of 100 results each: a list endpoint still saying "next" past this is broken, not long
 
-# Authentik lists only the sessions the token may view, so an empty list can mean a missing permission
 SESSIONS_HIDDEN = (
     "Authentik showed the portal's token no sessions at all: its Authentik user lacks the view Authenticated "
     "Session permission, or nobody is signed in to Authentik."
@@ -152,7 +151,7 @@ class AuthentikManager:
             503: "Service unavailable (Authentik may be overloaded)",
         }
 
-        status_msg = status_messages.get(response.status_code, "HTTP error")
+        status_msg = status_messages.get(response.status_code, f"HTTP {response.status_code}")
         message = f"{context}: {status_msg}"
 
         return AuthentikAPIError(
@@ -439,7 +438,7 @@ class AuthentikManager:
                 # 404: the session ended between the list and the delete
                 if not response.is_success and response.status_code != 404 and refused is None:
                     refused = response.status_code
-            return None if refused is None else f"Authentik refused to end sessions (HTTP {refused})"
+            return None if refused is None else f"Authentik did not end sessions (HTTP {refused})"
         except AuthentikAPIError as e:
             logger.warning(f"Ending the sessions of {user['username']} failed: {e}")
             return e.message
@@ -448,9 +447,8 @@ class AuthentikManager:
             return f"Network error ending sessions ({type(e).__name__})"
 
     def sees_any_sessions(self) -> bool:
-        """Whether the token can see any session at all. False most likely means it lacks the view permission, or
-        nobody is signed in to Authentik. Raises AuthentikAPIError on an answer other than a 2xx list, httpx.HTTPError
-        when Authentik can't be reached."""
+        """Whether the token can see any session at all (when not, see SESSIONS_HIDDEN). Raises AuthentikAPIError on
+        an answer other than a 2xx list, httpx.HTTPError when Authentik can't be reached."""
         response = self.client.get(f"{self.base_url}/api/v3/core/authenticated_sessions/", params={"page_size": "1"})
         if not response.is_success:
             raise self._handle_response_error(response, "List sessions")
@@ -504,13 +502,13 @@ class AuthentikManager:
 
     def _list_all(self, path: str, params: dict[str, str], fields: dict[str, type]) -> list[dict[str, object]]:
         """Fetch every page of an Authentik list endpoint, each result holding these fields of these types (a list
-        field: of strings). Raises AuthentikAPIError on any HTTP error or an answer of another shape."""
+        field: of strings). Raises AuthentikAPIError on an answer other than a 2xx list."""
         results: list[dict[str, object]] = []
         for page in range(1, MAX_PAGES + 1):
             response = self.client.get(
                 f"{self.base_url}{path}", params={**params, "page": str(page), "page_size": "100"}
             )
-            if response.is_error:
+            if not response.is_success:
                 raise self._handle_response_error(response, f"List {path}")
             found, has_next = self._results(response, f"List {path}")
             for result in found:

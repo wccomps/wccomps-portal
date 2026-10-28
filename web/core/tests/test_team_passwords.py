@@ -94,11 +94,11 @@ def test_web_unlink_queues_a_role_sync_for_the_member(admin_user, action):
 
 
 def test_reset_team_credentials_records_the_password_and_the_sessions_outcome(school_info, manager):
-    manager.end_user_sessions.return_value = "Authentik refused to end sessions (HTTP 403)"
+    manager.end_user_sessions.return_value = "Authentik did not end sessions (HTTP 403)"
 
     reset = reset_team_credentials(7)
 
-    assert reset.password and reset.sessions_error == "Authentik refused to end sessions (HTTP 403)"
+    assert reset.password and reset.sessions_error == "Authentik did not end sessions (HTTP 403)"
     manager.find_user.assert_called_once_with("team07")
     manager.end_user_sessions.assert_called_once_with({"pk": 5, "username": "team07"})
     school_info.refresh_from_db()
@@ -130,6 +130,17 @@ def test_reset_team_credentials_failed_password_tries_no_sessions(manager):
 
     assert reset_team_credentials(7) == CredentialReset(password=None, error="Set the password of team07: Server error")
     manager.end_user_sessions.assert_not_called()
+
+
+def test_reset_team_credentials_names_an_unlisted_status(manager):
+    """A status without a message of its own still says which it was, not just "HTTP error"."""
+    response = MagicMock(status_code=400, text='{"password": ["too common"]}', url="https://a/x")
+    response.json.return_value = {"password": ["too common"]}
+    manager.set_password.side_effect = AuthentikManager._handle_response_error(
+        AuthentikManager.__new__(AuthentikManager), response, "Set the password of team07"
+    )
+
+    assert reset_team_credentials(7).error == "Set the password of team07: HTTP 400"
 
 
 def test_reset_team_credentials_network_error_names_the_cause(school_info, manager):
@@ -165,7 +176,7 @@ def test_credential_reset_audit_details():
 
 
 def test_one_reason_shared_by_many_teams_reads_once():
-    """A bulk reset where every team fails the same way must stay short (the bot's reply is capped by Discord)."""
+    """A bulk reset where every team fails the same way reads one reason, not fifty copies of it."""
     summary = sessions_failure_summary([(f"team{n:02d}", "HTTP 403") for n in range(1, 51)])
 
     assert summary.count("HTTP 403") == 1
