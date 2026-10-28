@@ -1,4 +1,4 @@
-{# A RegistrationForm field as a row of the public register page (registration.views.public_registration_form); the help and error ids are the ones the widget's aria-describedby names #}
+{# A RegistrationForm field as a row of the public register page; its help and error ids are the ones its aria-describedby names #}
 <div class="field">
     {% if field.use_fieldset %}
         <fieldset {% if field.aria_describedby %}aria-describedby="{{ field.aria_describedby }}"{% endif %}>

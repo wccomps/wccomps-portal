@@ -117,10 +117,11 @@ Props:
 - `class`, `id`, `name`, `value`
 
 #### `<c-toggle_button>`
-A button that stays pressed while its choice is picked (`pressed="true"` for the initial state); the page's
-script calls `setTogglePressed(button, pressed)` from `static/js/utils.js`, which sets its look and `aria-pressed`.
+A button that stays pressed while its choice is picked (`pressed="true"` for the initial state); its script (the
+toggle-button widget's `togglePicker`, or the page's) calls `setTogglePressed(button, pressed)` from
+`static/js/utils.js`, which sets its look and `aria-pressed`.
 ```django
-<c-toggle_button data-box="web01">web01</c-toggle_button>
+<c-toggle_button data-value="web01">web01</c-toggle_button>
 ```
 
 #### `<c-link>`

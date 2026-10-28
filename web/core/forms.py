@@ -9,6 +9,12 @@ from core.authentik_utils import parse_team_range
 from team.models import SchoolInfo
 
 
+def ask_for_the_file_again(form: forms.BaseForm, field: str) -> None:
+    """A browser can't put a file back in its input, so a form shown again over an accepted file says to pick it."""
+    if field in form.cleaned_data:
+        form.add_error(field, "Pick the file again: a page shown again with errors can't keep it.")
+
+
 class SchoolInfoEditForm(forms.Form):
     school_name = forms.CharField(max_length=SCHOOL_NAME_MAX_LENGTH)
     # The columns' lengths: a form EmailField alone accepts 320 characters

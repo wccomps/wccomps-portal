@@ -43,7 +43,7 @@ from .services import (
 
 
 class PublicPageRenderer(PortalFormRenderer):
-    """Renders a field as a row of the standalone register page, in its own look (the edit page keeps the portal's)."""
+    """Renders a field as a row of the standalone register page, in its own look."""
 
     field_template_name = "registration/public/field.html"
 

@@ -214,14 +214,14 @@ class ImportEventForm(NewEventFields):
         data = super().clean() or {}
         choice = data.get("event")
         if choice == "new":
-            # A new-event field's own error shows beside it
+            # A new-event field's own error already shows: beside its row, or at the top for the hidden season
             if not any(name in self.errors for name in (*self.NEW_FIELDS, *self.SEASON_FIELDS)):
                 self.event_to_import = self.new_event()
         elif self.wants_new_season():
             raise ValidationError("A new season needs a new event: choose New event, or leave the new season empty.")
         elif choice:
             self.event_to_import = self.open_events[str(choice)]
-        self.import_mode = str(data.get("mode") or "replace")
+        self.import_mode = str(data.get("mode", "replace"))
         return data
 
 

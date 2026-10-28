@@ -245,8 +245,8 @@ def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
 def _posted_check(
     request: HttpRequest, orange_check: OrangeCheck | None
 ) -> tuple[OrangeCheckForm, list[CriterionInput] | None]:
-    """The bound check form, and its rubric when the form and the rubric are valid; otherwise the rubric is None and
-    the rubric's problems are the form's own errors."""
+    """The bound form and its rubric, or None when either is invalid; rubric and point-total problems become the
+    form's errors."""
     form = OrangeCheckForm(request.POST)
     valid = form.is_valid()
     try:

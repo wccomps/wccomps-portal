@@ -412,7 +412,7 @@ def bound_page_uses() -> dict[str, set[str]]:
 
 @cache
 def hooks() -> frozenset[str]:
-    """Classes the portal's script reads to find elements (querySelector('.box-toggle')). Such a class counts as
+    """Classes the portal's script reads to find elements (a querySelector('.name') call). Such a class counts as
     defined even with no rule of its own."""
     portal = portal_templates()
     return frozenset(
@@ -639,7 +639,7 @@ def test_fieldset_children_are_padded() -> None:
     found: dict[str, str] = {}
     for path in page_templates():
         with_parents = list(with_open_elements(path))
-        # Direct children of <c-fieldset> that themselves wrap a padded row (c-form_field, a field group, c-table)
+        # Direct children of <c-fieldset> that wrap a padded row
         wrappers_with_padded_child = {
             open_tags[i + 1].line
             for tag, open_tags in with_parents

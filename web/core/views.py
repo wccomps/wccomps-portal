@@ -52,7 +52,7 @@ from .auth_utils import (
     team_for_groups,
 )
 from .errors import json_endpoint
-from .forms import LinkConfirmForm, SchoolInfoEditForm
+from .forms import LinkConfirmForm, SchoolInfoEditForm, ask_for_the_file_again
 
 logger = logging.getLogger(__name__)
 
@@ -452,8 +452,8 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
                         )
                         preview_data["event_label"] = str(event)
                         preview_data["mode_label"] = mode.label.format(event=event)
-            if preview_data is None and "csv_file" in form.cleaned_data:
-                form.add_error("csv_file", "Pick the file again: a page shown again with errors can't keep it.")
+            if preview_data is None:
+                ask_for_the_file_again(form, "csv_file")
 
         elif "confirm" in request.POST:
             stored = request.session.get(PREVIEWS_KEY)

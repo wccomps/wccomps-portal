@@ -431,6 +431,9 @@ a.btn-secondary:focus-visible {
 .form-row {
     overflow: visible;
 }
+.form-row .errornote {
+    padding: 4px 8px;
+}
 .form-row > div > label:first-child,
 .form-row fieldset > legend {
     display: block;
@@ -1218,8 +1221,6 @@ button[type="submit"]:hover {
     padding: 15px 20px;
     border-top: 1px solid var(--hairline-color, #e8e8e8);
 }
-
-/* Category form: its checkbox lists (admin/category_form.html) */
 
 /* Broadcast recipients (admin/broadcast.html) */
 .team-list { columns: 2; list-style: disc inside; padding: 0; }

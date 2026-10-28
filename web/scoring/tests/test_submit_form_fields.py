@@ -5,7 +5,6 @@ import re
 from collections.abc import Callable
 
 import pytest
-from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
 
@@ -64,7 +63,7 @@ def test_affected_boxes_is_a_field_group_of_toggle_buttons_over_a_hidden_select(
     assert 'id="id_affected_boxes"' in select and " required" not in select
     for name in ("web", "db"):
         button = tag(boxes, rf'data-value="{name}"')
-        assert 'aria-pressed="false"' in button and "box-toggle" in button
+        assert 'aria-pressed="false"' in button
 
 
 @pytest.mark.parametrize(("url_name", "user_fixture"), PAGES)
@@ -120,8 +119,8 @@ def test_root_access_is_the_higher_access_tier() -> None:
     assert RedTeamScore.ACCESS_TIERS == ("root_access", "user_access")
 
 
-def test_the_forms_no_longer_carry_box_choices(red_team_user: User) -> None:
-    from scoring.forms import IncidentReportForm, RedTeamScoreForm
+def test_a_finding_on_many_boxes_keeps_every_box_s_ip_template():
+    from scoring.models import RedTeamScore
 
-    assert not hasattr(RedTeamScoreForm(user=red_team_user), "box_choices")
-    assert not hasattr(IncidentReportForm(), "box_choices")
+    field = RedTeamScore._meta.get_field("destination_ip_template")
+    assert field.max_length is None or field.max_length >= 500

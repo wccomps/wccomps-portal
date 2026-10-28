@@ -107,10 +107,7 @@ function setTogglePressed(button, pressed) {
     button.setAttribute('aria-pressed', String(pressed));
 }
 
-/**
- * A ToggleButtonSelectMultiple (templates/forms/widgets/toggle_buttons.html): a button picks its option in the
- * hidden select, Select All and Deselect All pick every option or none, and each change fires the select's change.
- */
+/** A ToggleButtonSelect(Multiple) (forms/widgets/toggle_buttons.html): each button toggles its option in the hidden select (a single select unpicks the others itself), data-pick buttons pick all or none, and every change fires the select's change. */
 function togglePicker() {
     return {
         init() {
@@ -126,10 +123,8 @@ function togglePicker() {
                 if (button.dataset.value !== undefined) {
                     const option = Array.from(select.options).find(o => o.value === button.dataset.value);
                     option.selected = !option.selected;
-                } else if (button.dataset.pick) {
-                    for (const option of select.options) option.selected = button.dataset.pick === 'all';
                 } else {
-                    return;
+                    for (const option of select.options) option.selected = button.dataset.pick === 'all';
                 }
                 select.dispatchEvent(new Event('change', { bubbles: true }));
             });

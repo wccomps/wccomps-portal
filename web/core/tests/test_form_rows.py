@@ -57,3 +57,17 @@ def test_help_text_is_escaped_once() -> None:
 
 def test_a_field_without_a_label_has_no_bare_colon() -> None:
     assert "<label" not in row(ExampleForm(), "notes")
+
+
+class HiddenFieldForm(forms.Form):
+    season = forms.IntegerField(widget=forms.HiddenInput)
+
+
+def test_a_hidden_field_s_error_shows_with_the_form_s_own() -> None:
+    """A hidden input has no row to show its error beside, so it shows at the top of the form."""
+    from django.template import Context, Template
+    from django_cotton.compiler_regex import CottonCompiler
+
+    template = Template(CottonCompiler().process('{% load cotton %}<c-form_errors :form="form" />'))
+    html = template.render(Context({"form": HiddenFieldForm({"season": "x"})}))
+    assert "Enter a whole number." in html

@@ -4,6 +4,7 @@ import re
 
 from django import forms
 
+from core.forms import ask_for_the_file_again
 from team.models import SchoolInfo
 
 TEAM_EXTRAS_HELP = "Give a 'team' column and a row per team, with its number (like Team01 or 3)."
@@ -80,8 +81,8 @@ class PacketUploadForm(forms.Form):
 
     def clean(self) -> dict[str, object] | None:
         cleaned = super().clean()
-        if self.errors and "packet_file" in self.cleaned_data:
-            self.add_error("packet_file", "Pick the file again: a page shown again with errors can't keep it.")
+        if self.errors:
+            ask_for_the_file_again(self, "packet_file")
         return cleaned
 
 

@@ -200,6 +200,20 @@ class Outcome(NamedTuple):
     description: str
 
 
+RED_TEAM_OUTCOMES: tuple[Outcome, ...] = (
+    Outcome("root_access", 100, "Root Access", "Root/Administrator level access obtained"),
+    Outcome("user_access", 25, "User Access", "User level access obtained (not scored with root access)"),
+    Outcome("privilege_escalation", 100, "Privilege Escalation", "User escalated to Root/Admin (additional penalty)"),
+    Outcome("credentials_recovered", 50, "Credentials", "User IDs and passwords recovered"),
+    Outcome("sensitive_files_recovered", 25, "Sensitive Files", "Config files, corporate data recovered"),
+    Outcome("credit_cards_recovered", 50, "Credit Cards", "Customer credit card numbers recovered"),
+    Outcome("pii_recovered", 200, "PII", "PII recovered: name, address, credit card number"),
+    Outcome("encrypted_db_recovered", 25, "Encrypted DB", "Encrypted customer data/database recovered"),
+    Outcome("db_decrypted", 25, "DB Decrypted", "Database was decrypted (additional penalty)"),
+)
+OUTCOME_HELP = {outcome.field: outcome.description for outcome in RED_TEAM_OUTCOMES}
+
+
 class RedTeamScore(Approvable):
     """Red team vulnerability score affecting one or more teams."""
 
@@ -230,8 +244,7 @@ class RedTeamScore(Approvable):
         related_name="findings",
         help_text="Pool of rotating source IPs (use this OR source_ip)",
     )
-    destination_ip_template = models.CharField(
-        max_length=50,
+    destination_ip_template = models.TextField(
         blank=True,
         help_text="IP template (e.g., 10.100.1X.22 where X is team number)",
     )
@@ -257,41 +270,41 @@ class RedTeamScore(Approvable):
     # Access levels (only highest scored per attack)
     root_access = models.BooleanField(
         default=False,
-        help_text="Root/Administrator level access obtained",
+        help_text=OUTCOME_HELP["root_access"],
     )
     user_access = models.BooleanField(
         default=False,
-        help_text="User level access obtained",
+        help_text=OUTCOME_HELP["user_access"],
     )
     privilege_escalation = models.BooleanField(
         default=False,
-        help_text="User escalated to Root/Admin",
+        help_text=OUTCOME_HELP["privilege_escalation"],
     )
 
     # Data recovery outcomes (cumulative)
     credentials_recovered = models.BooleanField(
         default=False,
-        help_text="User IDs and passwords recovered",
+        help_text=OUTCOME_HELP["credentials_recovered"],
     )
     sensitive_files_recovered = models.BooleanField(
         default=False,
-        help_text="Config files, corporate data recovered",
+        help_text=OUTCOME_HELP["sensitive_files_recovered"],
     )
     credit_cards_recovered = models.BooleanField(
         default=False,
-        help_text="Customer credit card numbers recovered",
+        help_text=OUTCOME_HELP["credit_cards_recovered"],
     )
     pii_recovered = models.BooleanField(
         default=False,
-        help_text="PII recovered: name, address, CC#",
+        help_text=OUTCOME_HELP["pii_recovered"],
     )
     encrypted_db_recovered = models.BooleanField(
         default=False,
-        help_text="Encrypted customer data/database recovered",
+        help_text=OUTCOME_HELP["encrypted_db_recovered"],
     )
     db_decrypted = models.BooleanField(
         default=False,
-        help_text="Database was decrypted",
+        help_text=OUTCOME_HELP["db_decrypted"],
     )
 
     affected_teams = models.ManyToManyField(
@@ -332,19 +345,7 @@ class RedTeamScore(Approvable):
     def affected_boxes_display(self) -> str:
         return format_boxes_display(self.affected_boxes)
 
-    OUTCOMES: tuple[Outcome, ...] = (
-        Outcome("root_access", 100, "Root Access", "Root/Administrator level access obtained"),
-        Outcome("user_access", 25, "User Access", "User level access obtained (not scored with root access)"),
-        Outcome(
-            "privilege_escalation", 100, "Privilege Escalation", "User escalated to Root/Admin (additional penalty)"
-        ),
-        Outcome("credentials_recovered", 50, "Credentials", "User IDs and passwords recovered"),
-        Outcome("sensitive_files_recovered", 25, "Sensitive Files", "Config files, corporate data recovered"),
-        Outcome("credit_cards_recovered", 50, "Credit Cards", "Customer credit card numbers recovered"),
-        Outcome("pii_recovered", 200, "PII", "PII recovered: name, address, credit card number"),
-        Outcome("encrypted_db_recovered", 25, "Encrypted DB", "Encrypted customer data/database recovered"),
-        Outcome("db_decrypted", 25, "DB Decrypted", "Database was decrypted (additional penalty)"),
-    )
+    OUTCOMES = RED_TEAM_OUTCOMES
     # Access outcomes, highest first: a finding scores only the highest one it reached
     ACCESS_TIERS: tuple[str, ...] = ("root_access", "user_access")
 

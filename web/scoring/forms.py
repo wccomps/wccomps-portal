@@ -5,6 +5,7 @@ from django import forms
 from django.contrib.auth.models import User
 from django.db.models import QuerySet
 
+from core.widgets import ToggleButtonSelectMultiple
 from team.models import Team
 
 from .models import (
@@ -15,27 +16,6 @@ from .models import (
     ScoringTemplate,
 )
 from .quotient_sync import get_box_choices, get_service_choices
-
-
-class ToggleButtonSelectMultiple(forms.SelectMultiple):
-    """Choices as toggle buttons over the hidden native select the form posts (forms/widgets/toggle_buttons.html).
-    A page reacting to the choice listens for the select's change event."""
-
-    template_name = "forms/widgets/toggle_buttons.html"
-    use_fieldset = True
-
-    def __init__(self, attrs: dict[str, object] | None = None, select_all: bool = False) -> None:
-        super().__init__(attrs)
-        self.select_all = select_all
-
-    def get_context(self, name: str, value: object, attrs: dict[str, object] | None) -> dict[str, object]:
-        context = super().get_context(name, value, attrs)
-        cast(dict[str, object], context["widget"])["select_all"] = self.select_all
-        return context
-
-    def use_required_attribute(self, initial: object) -> bool:
-        # A hidden required select blocks the submit with nothing the user can see
-        return False
 
 
 class TeamNumberChoiceField(forms.ModelMultipleChoiceField["Team"]):
@@ -125,7 +105,7 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
         widget=forms.RadioSelect(),
         label="Source IP",
     )
-    # Stored as a JSON list of box names; __init__ sets the choices from the synced metadata
+    # Stored as a JSON list of box names
     affected_boxes = forms.MultipleChoiceField(
         required=False, widget=ToggleButtonSelectMultiple(), label="Affected Boxes"
     )
@@ -232,7 +212,6 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
         for outcome in RedTeamScore.OUTCOMES:
             field = self.fields[outcome.field]
             field.label = f"{outcome.label} (-{outcome.points})"
-            field.help_text = outcome.description
             field.widget.attrs["data-points"] = outcome.points
             if outcome.field in RedTeamScore.ACCESS_TIERS:
                 field.widget.attrs["data-access-tier"] = RedTeamScore.ACCESS_TIERS.index(outcome.field)
@@ -275,7 +254,7 @@ class IncidentReportForm(forms.ModelForm[IncidentReport]):
         label="Team",
     )
 
-    # Stored as a JSON list of box names; __init__ sets the choices from the synced metadata
+    # Stored as a JSON list of box names
     affected_boxes = forms.MultipleChoiceField(
         required=False, widget=ToggleButtonSelectMultiple(), label="Affected Boxes"
     )

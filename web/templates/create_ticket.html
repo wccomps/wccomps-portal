@@ -19,7 +19,7 @@
                     </c-alert>
                 {% endif %}
                 <c-fieldset heading="Ticket Details">
-                    {% if form.teams %}{{ form.team_id.as_field_group }}{% endif %}
+                    {% if not form.team_id.field.disabled %}{{ form.team_id.as_field_group }}{% endif %}
                     {{ form.category.as_field_group }}
                     {{ form.title.as_field_group }}
                     <div x-show="showHostname" x-cloak id="field-hostname">{{ form.hostname.as_field_group }}</div>
@@ -65,14 +65,9 @@
 
                 setField(e) { this[e.target.dataset.field] = e.target.value; },
 
-                selectHostname(e) {
-                    const hostname = e.currentTarget.dataset.hostname;
-                    this.selectedHostname = this.selectedHostname === hostname ? '' : hostname;
+                pickHostname(e) {
+                    this.selectedHostname = e.target.value;
                     this.onHostnameChange();
-                    // Update button styling
-                    document.querySelectorAll('.box-toggle').forEach(btn => {
-                        setTogglePressed(btn, btn.dataset.hostname === this.selectedHostname);
-                    });
                 },
 
                 init() {
@@ -83,12 +78,6 @@
                     if (this.selectedHostname) {
                         this.onHostnameChange();
                     }
-                    // Keep button styling in sync
-                    this.$watch('selectedHostname', (value) => {
-                        document.querySelectorAll('.box-toggle').forEach(btn => {
-                            setTogglePressed(btn, btn.dataset.hostname === value);
-                        });
-                    });
                 },
 
                 getFilteredServices() {
@@ -152,8 +141,15 @@
                     const svc = allServiceChoices.find(s => s.value === this.selectedService);
                     if (svc) {
                         if (this.visibleFields.includes('hostname') && !this.selectedHostname) {
-                            this.selectedHostname = svc.box_name;
-                            this.onHostnameChange();
+                            // The box picker's select, so its buttons follow; a typed hostname is the text input
+                            const hostname = document.getElementById('hostname');
+                            if (hostname.tagName === 'SELECT') {
+                                hostname.value = svc.box_name;
+                                hostname.dispatchEvent(new Event('change', { bubbles: true }));
+                            } else {
+                                this.selectedHostname = svc.box_name;
+                                this.onHostnameChange();
+                            }
                         }
                         if (this.visibleFields.includes('ip_address')) {
                             this.ipAddress = svc.box_ip;

@@ -1,4 +1,3 @@
-import contextlib
 import logging
 from typing import cast
 
@@ -81,9 +80,8 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
 
     if request.method == "POST":
         valid = form.is_valid()
-        if is_admin and form.cleaned_data.get("team_id"):
-            with contextlib.suppress(Team.DoesNotExist):
-                team = Team.objects.get(id=form.cleaned_data["team_id"], is_active=True)
+        if form.cleaned_data.get("team_id"):
+            team = form.cleaned_data["team_id"]
         if not valid:
             return form_page()
 

@@ -90,8 +90,8 @@ def test_the_box_picker_is_the_hostname_field(blue_team_user, blue_team):
         html = _client(blue_team_user).get(reverse("create_ticket")).content.decode()
 
     assert re.search(r"<legend[^>]*>Hostname:</legend>", html)
-    assert 'data-hostname="web01"' in html
-    assert re.search(r'<input type="hidden" name="hostname"[^>]* id="hostname"', html)
+    assert re.search(r'<select name="hostname" hidden[^>]* id="hostname"', html)
+    assert re.findall(r'<button type="button"\s+data-value="([^"]*)"', html) == ["web01"]
 
 
 def test_a_refused_ticket_keeps_the_picked_box_pressed(blue_team_user, blue_team, box_reset_category):
@@ -104,5 +104,5 @@ def test_a_refused_ticket_keeps_the_picked_box_pressed(blue_team_user, blue_team
             .content.decode()
         )
 
-    assert re.search(r'data-hostname="web01"\s+aria-pressed="true"', html)
-    assert re.search(r'data-hostname="db01"\s+aria-pressed="false"', html)
+    assert re.search(r'data-value="web01"\s+aria-pressed="true"', html)
+    assert re.search(r'data-value="db01"\s+aria-pressed="false"', html)

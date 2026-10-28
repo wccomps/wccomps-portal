@@ -1,5 +1,5 @@
 {% load cotton %}
-{# ToggleButtonSelectMultiple (scoring/forms.py): the select posts the choice; togglePicker (static/js/utils.js) keeps its buttons in step #}
+{# ToggleButtonSelect and ToggleButtonSelectMultiple (scoring/forms.py): the select posts the choice; togglePicker (static/js/utils.js) keeps its buttons in step #}
 <div x-data="togglePicker">
     <select name="{{ widget.name }}" hidden{% include "django/forms/widgets/attrs.html" %}>
         {% for group_name, group_choices, group_index in widget.optgroups %}
@@ -17,9 +17,11 @@
     <div class="d-flex flex-wrap gap-10">
         {% for group_name, group_choices, group_index in widget.optgroups %}
             {% for option in group_choices %}
-                <c-toggle_button data-value="{{ option.value|stringformat:'s' }}" pressed="{{ option.selected|yesno:'true,false' }}">
-                    {{ option.label }}
-                </c-toggle_button>
+                {% if option.value != "" %}
+                    <c-toggle_button data-value="{{ option.value|stringformat:'s' }}" pressed="{{ option.selected|yesno:'true,false' }}">
+                        {{ option.label }}
+                    </c-toggle_button>
+                {% endif %}
             {% endfor %}
         {% endfor %}
     </div>

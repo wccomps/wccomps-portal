@@ -70,9 +70,8 @@ def template_name(path: Path) -> str:
 
 @cache
 def is_standalone_document(path: Path) -> bool:
-    """A template with an <html> of its own (emails, the print scorecard, the 500 page, the public registration
-    form), or a part only such a page renders (registration/public/: the public form's field rows): it carries its
-    own styles and never loads the portal's base template or app.css."""
+    """A template with its own <html>, or a part only such a page renders (registration/public/): neither loads the
+    portal's base template or app.css."""
     return template_name(path).startswith("registration/public/") or any(tag.name == "html" for tag in elements(path))
 
 

@@ -587,3 +587,13 @@ def test_a_refused_upload_asks_for_the_file_again(client):
     csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
     response = client.post(reverse("school_info_import"), {"upload": "1", "csv_file": csv, "event": ""})
     assert "Pick the file again" in response.content.decode()
+
+
+def test_a_new_event_with_a_bad_season_says_why(client):
+    _season_and_event(name="Earlier")
+    csv = SimpleUploadedFile("schools.csv", b"school_name,contact_email\nExample University,coach@example.edu\n")
+    fields = {"event": "new", "new_name": "Inv", "new_date": "2026-11-07", "new_type": "invitational"}
+    response = client.post(
+        reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields, "current_season": "x"}
+    )
+    assert "Enter a whole number." in response.content.decode()

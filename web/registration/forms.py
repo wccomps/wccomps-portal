@@ -304,7 +304,8 @@ class ShownSchoolForm(forms.Form):
 
 class NewEventFields(forms.Form):
     """The fields of an event to create (the import's new event, Close Out's event for scores that ran without an
-    import) and the season the page showed as active. new_event() checks them together, as non-field errors."""
+    import) and the season the page showed as active. new_event() checks them together; Close Out shows its problems
+    as one message, the import beside each field."""
 
     NEW_FIELDS = ("new_name", "new_date", "new_type", "current_season")
     MISSING = "Give the new event a name, a date and a type."
@@ -319,7 +320,7 @@ class NewEventFields(forms.Form):
         error_messages={"invalid_choice": "Choose a valid event type."},
     )
     # The id of the season the page showed as active, empty when none was
-    current_season = forms.IntegerField(required=False)
+    current_season = forms.IntegerField(required=False, widget=forms.HiddenInput)
 
     def new_season(self) -> NewSeason | None:
         """The new season for the event; only the import starts one."""

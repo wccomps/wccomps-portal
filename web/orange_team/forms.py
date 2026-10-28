@@ -36,7 +36,6 @@ class OrangeCheckForm(forms.Form):
 
     @classmethod
     def for_check(cls, check: OrangeCheck) -> OrangeCheckForm:
-        """The form showing a stored check."""
         minutes = int(check.time_limit.total_seconds() // 60) if check.time_limit else None
         return cls(
             initial={
