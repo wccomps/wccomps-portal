@@ -69,7 +69,9 @@ def test_web_unlink_queues_a_role_sync_for_the_member(admin_user, action):
     client = Client()
     client.force_login(admin_user)
 
-    with patch("core.admin_views.teams.reset_team_credentials", return_value=CredentialReset(password="pw")):
+    with patch(
+        "core.admin_views.teams.reset_team_credentials", return_value=CredentialReset(password="pw", sessions_found=0)
+    ):
         client.post(reverse("admin_team_action", args=[8]), {"action": action, "discord_id": 4242})
 
     task = DiscordTask.objects.get(task_type="sync_member_roles")
@@ -121,13 +123,41 @@ def test_uncounted_sessions_are_unknown_not_zero(manager):
     assert reset.sessions_error == SESSIONS_HIDDEN
 
 
-def test_a_transient_count_error_does_not_fail_the_end_step(manager):
-    """Only a token that sees no sessions makes the second, empty list meaningless."""
+def test_a_transient_count_error_does_not_fail_the_end_step_but_tells_ops(manager):
     manager.user_sessions.side_effect = [AuthentikAPIError("List sessions: Server error", 500), []]
 
     reset = reset_team_credentials(7, actor="gold-admin")
 
     assert (reset.sessions_found, reset.sessions_error) == (None, None)
+    note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    assert note.endswith("ended the team's Authentik sessions, but could not count them first")
+
+
+def test_a_failed_count_asks_whether_the_token_sees_sessions_before_trusting_an_empty_list(manager):
+    manager.user_sessions.side_effect = [AuthentikAPIError("List sessions: Server error", 500), []]
+    manager.sees_any_sessions.return_value = False
+
+    reset = reset_team_credentials(7, actor="gold-admin")
+
+    assert reset.sessions_error == SESSIONS_HIDDEN
+
+
+def test_a_counted_empty_list_is_trusted_after_the_password_change(manager):
+    """Authentik may end the only session the token could see when the password changes."""
+    manager.sees_any_sessions.side_effect = [True, False]
+
+    reset = reset_team_credentials(7, actor="gold-admin")
+
+    assert (reset.sessions_found, reset.sessions_error) == (0, None)
+
+
+def test_sessions_listed_before_a_failed_end_still_count(manager):
+    manager.user_sessions.side_effect = [AuthentikAPIError("List sessions: Server error", 500), [uuid.UUID(int=1)]]
+    manager.end_sessions.side_effect = httpx.ConnectError("refused")
+
+    reset = reset_team_credentials(7, actor="gold-admin")
+
+    assert (reset.sessions_found, reset.sessions_error) == (1, "Network error (ConnectError)")
 
 
 def test_sessions_the_end_step_finds_count_when_the_first_count_failed(manager):
@@ -257,7 +287,8 @@ def test_team_page_password_reset_keeps_discord_links(admin_user):
     client.force_login(admin_user)
 
     with patch(
-        "core.admin_views.teams.reset_team_credentials", return_value=CredentialReset(password="New-Pass-9!")
+        "core.admin_views.teams.reset_team_credentials",
+        return_value=CredentialReset(password="New-Pass-9!", sessions_found=0),
     ) as reset:
         response = client.post(reverse("admin_team_action", args=[8]), {"action": "reset_password"})
 
@@ -323,7 +354,7 @@ def test_web_bulk_reset_leaves_one_audit_row(admin_user):
     client.force_login(admin_user)
     with (
         patch("core.authentik_utils.AuthentikManager"),
-        patch("core.authentik_utils._reset_credentials", return_value=CredentialReset(password="pw")),
+        patch("core.authentik_utils._reset_credentials", return_value=CredentialReset(password="pw", sessions_found=0)),
     ):
         client.post(reverse("admin_competition_action"), {"action": "reset_passwords", "team_numbers": ""})
 
@@ -346,7 +377,10 @@ def test_web_bulk_reset_names_each_failed_team_and_keeps_the_csv(admin_user):
     """A partial failure is an error, and the passwords that did change still arrive."""
     body = _bulk_reset(
         admin_user,
-        {1: CredentialReset(password="pw-1"), 2: CredentialReset(password=None, error="User team02 not found")},
+        {
+            1: CredentialReset(password="pw-1", sessions_found=0),
+            2: CredentialReset(password=None, error="User team02 not found"),
+        },
     ).json()
 
     assert body["success"] is False

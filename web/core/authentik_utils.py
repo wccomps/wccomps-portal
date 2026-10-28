@@ -52,31 +52,37 @@ class CredentialReset:
     def sessions_outcome(self) -> str:
         if self.sessions_error:
             return f"could not end the team's Authentik sessions: {self.sessions_error}"
+        if self.sessions_found is None:
+            return "ended the team's Authentik sessions, but could not count them first"
         return "ended the team's Authentik sessions"
 
 
-def _count_sessions(manager: AuthentikManager, user: AuthentikUser) -> tuple[int | None, bool]:
-    """(how many Authentik sessions the account has, or None when they can't be counted; whether the token sees no
-    sessions at all)."""
+def _count_sessions(manager: AuthentikManager, user: AuthentikUser) -> tuple[int | None, bool | None]:
+    """(session count or None; whether the token sees no sessions at all, None when the count failed)."""
     try:
         session_ids = manager.user_sessions(user)
         if not session_ids and not manager.sees_any_sessions():
             return None, True
-    except AuthentikAPIError, httpx.HTTPError:
-        return None, False
+    except (AuthentikAPIError, httpx.HTTPError) as e:
+        logger.warning(f"Counting the sessions of {user['username']} failed: {e}")
+        return None, None
     return len(session_ids), False
 
 
-def _end_sessions(manager: AuthentikManager, user: AuthentikUser, hidden: bool) -> tuple[int, str | None]:
-    """(sessions found now, None when they ended, else why not)."""
+def _end_sessions(manager: AuthentikManager, user: AuthentikUser, hidden: bool | None) -> tuple[int, str | None]:
+    """(sessions listed, None when they ended, else why not)."""
+    found = 0
     try:
         session_ids = manager.user_sessions(user)
-        if not session_ids and hidden:
-            return 0, SESSIONS_HIDDEN  # an empty list proves nothing to a token that sees no sessions
-        return len(session_ids), manager.end_sessions(session_ids)
+        found = len(session_ids)
+        # An empty list proves nothing to a token that sees no sessions. Asked only when the count couldn't say:
+        # after the password change Authentik may have ended the only session the token could see
+        if not session_ids and (not manager.sees_any_sessions() if hidden is None else hidden):
+            return 0, SESSIONS_HIDDEN
+        return found, manager.end_sessions(session_ids)
     except (AuthentikAPIError, httpx.HTTPError) as e:
         logger.warning(f"Ending the sessions of {user['username']} failed: {e}")
-        return 0, reason_for(e)
+        return found, reason_for(e)
 
 
 def _reset_credentials(manager: AuthentikManager, team_number: int) -> CredentialReset:

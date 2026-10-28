@@ -119,9 +119,9 @@ class TestAdminCommands:
         mock_interaction.user.id = mock_admin_user._discord_id
 
         results = {
-            1: CredentialReset(password="pw-1"),
+            1: CredentialReset(password="pw-1", sessions_found=0),
             2: CredentialReset(password=None, error="HTTP 500"),
-            3: CredentialReset(password="pw-3"),
+            3: CredentialReset(password="pw-3", sessions_found=0),
         }
         callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
         with (

@@ -215,8 +215,7 @@ class PacketDistributionServiceTestCase(TestCase):
         )
 
     @patch("packets.services.EmailMultiAlternatives")
-    def test_an_uncounted_session_total_is_reported_once(self, mock_email_class):
-        """The reset's own note already says why the sessions couldn't be checked."""
+    def test_hidden_sessions_are_reported_through_the_reset_note_alone(self, mock_email_class):
         team = Team.objects.get(team_number=1)
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
