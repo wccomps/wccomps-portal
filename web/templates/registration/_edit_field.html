@@ -1,9 +1,0 @@
-{# One field of the registration edit form: field, required ("true"), help_text #}
-{% load cotton %}
-<c-form_field label="{{ field.label }}"
-              required="{{ required|default:'false' }}"
-              id="{{ field.id_for_label }}"
-              help_text="{{ help_text }}"
-              error="{{ field.errors|join:' ' }}">
-    {{ field }}
-</c-form_field>

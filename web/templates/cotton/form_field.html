@@ -1,14 +1,20 @@
 {# Form field component - standard form row with label and input #}
-{# Usage: <c-form_field label="Email" required="true">{{ form.email }}</c-form_field> #}
-{# Props: label, required (bool), help_text, error, id #}
-<c-vars label required="false" help_text error id />
+{# Usage: <c-form_field :field="form.email">{{ form.email }}</c-form_field>, or label="Email" for an input with no form field #}
+{# Props: field (a bound form field: supplies the rest), label, required (bool), help_text, error, id #}
+<c-vars field="" label="" required="false" help_text="" error="" id="" />
+{% firstof id field.id_for_label as label_for %}
+{% firstof label field.label as label_text %}
+{% firstof help_text field.help_text as help_line %}
 <div {{ attrs }} class="form-row">
     <div>
-        <label {% if id %}for="{{ id }}"{% endif %}
-               {% if required == "true" %}class="required"{% endif %}>{{ label }}:</label>
+        <label {% if label_for %}for="{{ label_for }}"{% endif %}
+               {% if required == "true" or field.field.required %}class="required"{% endif %}>{{ label_text }}:</label>
         {{ slot }}
-        {% if help_text %}<p class="help-text">{{ help_text }}</p>{% endif %}
-        {# Callers pass loops that djlint wraps across lines: an error of only whitespace is no error #}
-        {% if error.strip %}<p class="errornote">{{ error.strip }}</p>{% endif %}
+        {% if help_line %}<p class="help-text">{{ help_line }}</p>{% endif %}
+        {% if error %}
+            <p class="errornote">{{ error }}</p>
+        {% elif field.errors %}
+            <p class="errornote">{{ field.errors|join:" " }}</p>
+        {% endif %}
     </div>
 </div>

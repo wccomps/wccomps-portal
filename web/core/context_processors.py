@@ -117,6 +117,7 @@ NAV_MAPPING: dict[str, tuple[str, str]] = {
     "leaderboard_scorecard_pdf": ("leaderboard", ""),
     # Scoring review pages
     "red_team_findings": ("scoring", "red_team"),
+    "review_red_finding": ("scoring", "red_team"),
     "bulk_approve_red_scores": ("scoring", "red_team"),
     "review_orange": ("scoring", "orange_team"),
     "review_incidents": ("scoring", "review_incidents"),

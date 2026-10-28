@@ -1,7 +1,7 @@
 {# Filter field component - individual filter input in toolbar #}
 {# Usage: <c-filter_field label="Status" id="id_status">{{ select_field }}</c-filter_field> #}
 {# Props: label, id, min_width #}
-<c-vars label id min_width="140px" />
+<c-vars label="" id="" min_width="140px" />
 <div {{ attrs }} class="filter-field" style="min-width: {{ min_width }};">
     {# djlint:on #}
     <label {% if id %}for="{{ id }}"{% endif %} class="filter-field-label">{{ label }}</label>

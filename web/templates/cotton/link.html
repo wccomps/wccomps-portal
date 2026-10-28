@@ -1,6 +1,6 @@
 {# Usage: <c-link href="/back">Back</c-link> #}
 {# Props: href, variant (default|primary|secondary|add|change|danger|warning|cancel), class, id, role #}
-<c-vars href="#" variant="default" class id role="" />
+<c-vars href="#" variant="default" class="" id="" role="" />
 <a href="{{ href }}"
    {% if id %}id="{{ id }}"{% endif %}
    {% if role %}role="{{ role }}"{% elif variant == 'primary' or variant == 'secondary' or variant == 'danger' or variant == 'warning' or variant == 'cancel' or 'button' in class %}role="button"{% endif %}

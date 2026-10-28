@@ -1,7 +1,7 @@
 {# Table header component - sortable column header with optional tooltip #}
 {# Usage: <c-table_header sort_field="team__team_number" current_sort="-created_at">Team</c-table_header> #}
 {# Props: sort_field, current_sort, sortable (bool), tooltip (optional help text). The link keeps the page's query and goes to page 1 #}
-<c-vars sort_field current_sort sortable="true" tooltip />
+<c-vars sort_field="" current_sort="" sortable="true" tooltip="" />
 <th scope="col"
     {{ attrs }}
     {% if tooltip %}title="{{ tooltip }}"{% endif %}>

@@ -21,22 +21,16 @@
             <c-fieldset heading="Category Weights">
                 <p class="text-muted mb-10">Percentage of total score for each category. Must sum to 100.</p>
                 <div class="max-points-grid">
-                    <c-form_field label="Service Weight %"
-                                  help_text="{{ form.service_weight.help_text }}"
-                                  id="{{ form.service_weight.id_for_label }}"
-                                  error="{{ form.service_weight.errors|join:' ' }}">
+                    <c-form_field :field="form.service_weight"
+                                  label="Service Weight %">
                         {{ form.service_weight }}
                     </c-form_field>
-                    <c-form_field label="Inject Weight %"
-                                  help_text="{{ form.inject_weight.help_text }}"
-                                  id="{{ form.inject_weight.id_for_label }}"
-                                  error="{{ form.inject_weight.errors|join:' ' }}">
+                    <c-form_field :field="form.inject_weight"
+                                  label="Inject Weight %">
                         {{ form.inject_weight }}
                     </c-form_field>
-                    <c-form_field label="Orange Check Weight %"
-                                  help_text="{{ form.orange_weight.help_text }}"
-                                  id="{{ form.orange_weight.id_for_label }}"
-                                  error="{{ form.orange_weight.errors|join:' ' }}">
+                    <c-form_field :field="form.orange_weight"
+                                  label="Orange Check Weight %">
                         {{ form.orange_weight }}
                     </c-form_field>
                 </div>

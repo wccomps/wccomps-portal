@@ -133,8 +133,6 @@ PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
     "admin/base_site.html:current": CHROME + "the current section's link",
     "admin/base_site.html:notif-count": CHROME + "open tickets on the Tickets link",
     "admin/base_site.html:dark-mode-toggle": CHROME + "the dark mode button",
-    "admin/base_site.html:light-icon": CHROME + "the dark mode button's sun",
-    "admin/base_site.html:dark-icon": CHROME + "the dark mode button's moon",
     "admin/base_site.html:audio-toggle": CHROME + "the ticket sound button",
     "admin/base_site.html:ticket-toast": CHROME + "the new-ticket toast",
     "admin/base_site.html:toast-line1": CHROME + "the new-ticket toast's number and title",
@@ -853,8 +851,7 @@ def component_reads(path: Path, name: str) -> bool:
 
 
 def test_props_a_component_reads_are_declared() -> None:
-    """A prop missing from the component's <c-vars> lands in {{ attrs }} as well: c-module's title also became a
-    title attribute on the module, a tooltip over everything in it."""
+    """A prop missing from <c-vars> also lands in {{ attrs }}, so it leaks out as an HTML attribute."""
     declared = {
         path.stem: {name for tag in tags(path) if tag.name == "c-vars" for name in tag.attrs}
         for path in shared_component_paths()
@@ -872,3 +869,17 @@ def test_props_a_component_reads_are_declared() -> None:
                 if name != "attrs" and name not in declared[component] and component_reads(paths[component], name):
                     found[f"cotton/{component}.html:{name}"] = f"passed by {template_name(page)}; add it to <c-vars>"
     fail_with("Props a component reads but doesn't declare", found, {})
+
+
+def test_every_declared_prop_has_a_default() -> None:
+    """A <c-vars> name with no default that the tag doesn't pass reads the page's variable of the same name (a view's
+    title became every c-module's heading)."""
+    found = {
+        f"cotton/{path.name}:{name}": 'give it a default (name="")'
+        for path in shared_component_paths()
+        for tag in tags(path)
+        if tag.name == "c-vars"
+        for name in tag.attrs
+        if not re.search(rf'(?<![\w-]){re.escape(name)}="', text(path).split("<c-vars", 1)[1].split("/>", 1)[0])
+    }
+    fail_with("Component props without a default", found, {})

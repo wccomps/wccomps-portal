@@ -30,7 +30,9 @@ def test_pages_do_not_render_messages_themselves() -> None:
 FIELD_USE = re.compile(r"{[{%][^}]*?\b\w*form\.(?!non_field_errors\b|errors\b|is_bound\b)\w+")
 
 # Templates that render fields one by one without <c-form_errors>, with the reason.
-FORM_ERRORS_ALLOWLIST: dict[str, str] = {}
+FORM_ERRORS_ALLOWLIST = {
+    "registration/register.html": "the standalone public page, styled on its own: it renders form.non_field_errors",
+}
 
 
 def test_forms_rendered_field_by_field_show_their_form_errors() -> None:
@@ -39,9 +41,6 @@ def test_forms_rendered_field_by_field_show_their_form_errors() -> None:
     found = {
         template_name(p): 'uses form fields one by one; add <c-form_errors :form="form" />'
         for p in tracked_templates()
-        if p not in component_templates()
-        and FIELD_USE.search(text(p))
-        and "<c-form_errors" not in text(p)
-        and "non_field_errors" not in text(p)
+        if p not in component_templates() and FIELD_USE.search(text(p)) and "<c-form_errors" not in text(p)
     }
     fail_with("Forms whose own errors never render", found, FORM_ERRORS_ALLOWLIST)

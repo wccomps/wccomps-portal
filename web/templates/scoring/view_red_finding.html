@@ -1,11 +1,26 @@
-{% extends base_template %}
-{# base_template: scoring/red_base.html for the Red Team, scoring/base.html for a Gold Team reviewer #}
+{% extends "scoring/red_base.html" %}
+{% load cotton %}
 {% block title %}
     Red Team Finding #{{ finding.id }}
 {% endblock title %}
 {% block red_content %}
-    {% include "scoring/_red_finding_body.html" %}
+    <c-page_header title="Red Team Finding #{{ finding.id }}"
+                   parent_url="{% url 'scoring:red_team_scores' %}"
+                   parent_label="Findings" />
+    <c-module>
+        {% include "scoring/_red_finding_body.html" %}
+        <c-button_row class="mt-20 justify-end">
+            {% if can_delete %}
+                <c-form action="{% url 'scoring:delete_red_score' finding.id %}"
+                        class="d-inline"
+                        data-confirm="Are you sure you want to delete this finding? This cannot be undone.">
+                    {% csrf_token %}
+                    <c-button type="submit" variant="danger">
+                        Delete Finding
+                    </c-button>
+                </c-form>
+            {% endif %}
+            <c-link href="{% url 'scoring:submit_red_score' %}" variant="primary">Submit Another</c-link>
+        </c-button_row>
+    </c-module>
 {% endblock red_content %}
-{% block scoring_content %}
-    {% include "scoring/_red_finding_body.html" %}
-{% endblock scoring_content %}

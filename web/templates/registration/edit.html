@@ -15,24 +15,38 @@
                 {% csrf_token %}
                 <c-form_errors :form="form" />
                 <c-fieldset heading="School Information" aligned="true">
-                    {% include "registration/_edit_field.html" with field=form.school_name required="true" %}
-                    {% include "registration/_edit_field.html" with field=form.region required="true" help_text="Only WRCCDC teams can register for Qualifiers and Regionals." %}
+                    <c-form_field :field="form.school_name">
+                        {{ form.school_name }}
+                    </c-form_field>
+                    <c-form_field :field="form.region">
+                        {{ form.region }}
+                    </c-form_field>
                 </c-fieldset>
                 <c-fieldset heading="Team Captain" aligned="true">
-                    {% include "registration/_edit_field.html" with field=form.captain_name required="true" %}
-                    {% include "registration/_edit_field.html" with field=form.captain_email required="true" %}
-                    {% include "registration/_edit_field.html" with field=form.captain_phone required="true" %}
+                    <c-form_field :field="form.captain_name">
+                        {{ form.captain_name }}
+                    </c-form_field>
+                    <c-form_field :field="form.captain_email">
+                        {{ form.captain_email }}
+                    </c-form_field>
+                    <c-form_field :field="form.captain_phone">
+                        {{ form.captain_phone }}
+                    </c-form_field>
                 </c-fieldset>
                 <c-fieldset heading="Coach" aligned="true">
-                    {% include "registration/_edit_field.html" with field=form.coach_name required="true" %}
-                    {% include "registration/_edit_field.html" with field=form.coach_email required="true" %}
-                    {% include "registration/_edit_field.html" with field=form.coach_phone %}
+                    <c-form_field :field="form.coach_name">
+                        {{ form.coach_name }}
+                    </c-form_field>
+                    <c-form_field :field="form.coach_email">
+                        {{ form.coach_email }}
+                    </c-form_field>
+                    <c-form_field :field="form.coach_phone">
+                        {{ form.coach_phone }}
+                    </c-form_field>
                 </c-fieldset>
                 <c-fieldset heading="Events">
                     {% if form.events.field.queryset.exists %}
-                        <c-form_field label="{{ form.events.label }}"
-                                      required="true"
-                                      error="{{ form.events.errors|join:' ' }}">
+                        <c-form_field :field="form.events">
                             {{ form.events }}
                         </c-form_field>
                     {% else %}
@@ -40,7 +54,9 @@
                     {% endif %}
                 </c-fieldset>
                 <c-fieldset heading="Competition Rules">
-                    {% include "registration/_edit_field.html" with field=form.agree_to_rules required="true" %}
+                    <c-form_field :field="form.agree_to_rules">
+                        {{ form.agree_to_rules }}
+                    </c-form_field>
                 </c-fieldset>
                 <c-button_row class="mt-20 justify-end">
                     <c-button type="submit" variant="primary">

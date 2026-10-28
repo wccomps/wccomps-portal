@@ -144,13 +144,8 @@ Tech Institute,admin@techinst.edu,,</pre>
                         <c-form_errors :form="form" />
                         <input type="hidden" name="upload" value="true">
                         <c-fieldset aligned="true">
-                            <c-form_field label="CSV File"
-                                          required="true"
-                                          id="id_csv_file"
-                                          help_text="{{ form.csv_file.help_text }}"
-                                          error="
-                {% for error in form.csv_file.errors %}{{ error }}{% endfor %}
-                ">
+                            <c-form_field :field="form.csv_file"
+                                          label="CSV File">
                                 {{ form.csv_file }}
                             </c-form_field>
                             <c-form_field label="Event"

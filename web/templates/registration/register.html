@@ -684,9 +684,7 @@
                                 {% if form.region.errors %}
                                     <p class="error-text">{{ form.region.errors.0 }}</p>
                                 {% else %}
-                                    <p class="help-text">
-                                        Select your school's CCDC region. Note: Only WRCCDC teams can register for Qualifiers and Regionals.
-                                    </p>
+                                    <p class="help-text">{{ form.region.help_text }}</p>
                                 {% endif %}
                             </div>
                         </div>

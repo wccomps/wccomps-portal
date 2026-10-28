@@ -1,6 +1,6 @@
 {# Renders queued Django messages as alerts. Included once by admin/base_site.html; pages never loop over messages themselves. #}
 {# Usage: <c-messages :messages="messages" /> #}
 {# Props: messages (the Django messages iterable) #}
-<c-vars messages />
+<c-vars messages="" />
 {% load status_variants %}
 {% for message in messages %}<c-alert variant="{{ message.level_tag|alert_variant }}">{{ message }}</c-alert>{% endfor %}

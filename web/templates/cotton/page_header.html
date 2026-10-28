@@ -2,7 +2,7 @@
 {# Usage: <c-page_header title="Tickets" /> #}
 {# Usage: <c-page_header title="#T010-15" parent_url="/tickets/" parent_label="Tickets" /> #}
 {# Props: title, subtitle, parent_url, parent_label #}
-<c-vars title subtitle parent_url parent_label />
+<c-vars title="" subtitle="" parent_url="" parent_label="" />
 <div {{ attrs }} class="breadcrumbs">
     {% if parent_url %}
         <a href="{{ parent_url }}">{{ parent_label }}</a>

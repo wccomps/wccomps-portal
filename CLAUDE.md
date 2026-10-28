@@ -76,7 +76,7 @@ the unparenthesized form is used intentionally throughout.
 - A handler's return value is stored in `DiscordTask.result`; the payload is input only
 
 ### UI Components
-- Pages extend `admin/base_site.html`, directly or through a section base (`admin/base.html`,
+- Pages extend `admin/base_site.html`, directly or through a section base (`admin/ops_base.html`,
   `scoring/base.html`, `orange_team/base.html`, ...)
 - Use django-cotton components from `templates/cotton/`
 - `core/cotton.py` escapes every value a component writes with `{{ attrs }}` (see "Attributes and Escaping" in

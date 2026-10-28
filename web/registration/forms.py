@@ -39,6 +39,9 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
             "school_name": "School Name",
             "region": "CCDC Region",
         }
+        help_texts = {
+            "region": "Select your school's CCDC region. Only WRCCDC teams can register for Qualifiers and Regionals.",
+        }
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
@@ -48,6 +51,12 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
                 season__is_active=True,
                 registration_open=True,
             ).order_by("date")
+            if self.instance.pk:
+                # An enrollment in an event that has since closed already registers the team for something
+                events_field.required = (
+                    events_field.queryset.exists()
+                    and not self.instance.event_enrollments.exclude(event__in=events_field.queryset).exists()
+                )
 
     def clean(self) -> dict[str, object]:
         """Validate that non-WRCCDC teams only register for invitationals."""
@@ -99,7 +108,10 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
                 },
             )
             selected = list(self.cleaned_data["events"])
-            RegistrationEventEnrollment.objects.filter(registration=registration).exclude(event__in=selected).delete()
+            offered = self.fields["events"].queryset  # type: ignore[attr-defined]
+            RegistrationEventEnrollment.objects.filter(registration=registration, event__in=offered).exclude(
+                event__in=selected
+            ).delete()
             for event in selected:
                 RegistrationEventEnrollment.objects.get_or_create(
                     registration=registration,

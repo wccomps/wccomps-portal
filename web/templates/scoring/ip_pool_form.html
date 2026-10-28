@@ -18,18 +18,10 @@
         <c-form>
             {% csrf_token %}
             <c-form_errors :form="form" />
-            <c-form_field label="{{ form.name.label }}"
-                          required="true"
-                          :id="form.name.id_for_label"
-                          help_text="{{ form.name.help_text }}"
-                          error="{{ form.name.errors|join:', ' }}">
+            <c-form_field :field="form.name">
                 {{ form.name }}
             </c-form_field>
-            <c-form_field label="{{ form.ip_addresses.label }}"
-                          required="true"
-                          :id="form.ip_addresses.id_for_label"
-                          help_text="{{ form.ip_addresses.help_text }}"
-                          error="{{ form.ip_addresses.errors|join:', ' }}">
+            <c-form_field :field="form.ip_addresses">
                 {{ form.ip_addresses }}
             </c-form_field>
             <div class="help-text mb-20">

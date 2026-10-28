@@ -767,7 +767,7 @@ label.required::after {
     background: var(--darkened-bg, #f8f8f8);
     border-bottom: 1px solid var(--hairline-color, #ddd);
 }
-/* c-page_header's title: the page's h1, set as breadcrumb text */
+/* c-page_header's h1, styled as breadcrumb text */
 .breadcrumbs h1 {
     display: inline;
     margin: 0;
@@ -839,7 +839,6 @@ label.required::after {
     outline-offset: 2px;
 }
 
-/* The nav bar's icons (menu, dark mode, ticket sound) */
 .nav-icon {
     display: block;
     width: 18px;
@@ -1011,22 +1010,6 @@ button[type="submit"]:hover {
 
 .dark-mode-toggle:hover {
     background: var(--primary-dark, #2e5266);
-}
-
-.dark-mode-toggle .dark-icon {
-    display: none;
-}
-
-.dark-mode-toggle .light-icon {
-    display: inline;
-}
-
-html[data-theme="dark"] .dark-mode-toggle .dark-icon {
-    display: inline;
-}
-
-html[data-theme="dark"] .dark-mode-toggle .light-icon {
-    display: none;
 }
 
 .audio-toggle {

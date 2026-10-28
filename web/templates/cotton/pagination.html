@@ -1,6 +1,6 @@
 {# Usage: <c-pagination :page_obj="page_obj" /> #}
 {# Props: page_obj (Django Paginator). Each link keeps the page's query and changes only page #}
-<c-vars page_obj />
+<c-vars page_obj="" />
 {% if page_obj %}
     <p class="paginator">
         Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} results

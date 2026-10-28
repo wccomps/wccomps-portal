@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 from django.urls import reverse
+from playwright.sync_api import expect
 
 from core.tests.roles import role_user
 
@@ -80,10 +81,50 @@ def test_a_discarded_edit_is_not_saved_later(page, score):
 
     answer["accept"] = True
     page.get_by_role("columnheader", name="Inject").click()
-    assert editor.is_hidden()
+    expect(editor).to_be_hidden()
     assert editor.input_value() == "Good work"
 
     with page.expect_navigation():
         page.get_by_role("button", name="Save", exact=True).click()
     score.refresh_from_db()
+    assert score.feedback == "Good work"
+
+
+def _approve_selected_with_a_draft(page, *, discard: bool) -> tuple[list[str], list[str]]:
+    """Check the row, edit it, and press Approve Selected, answering the discard question with `discard` and the
+    approve question yes. The questions asked and the POSTs sent."""
+    questions: list[str] = []
+    posts: list[str] = []
+
+    def reply(dialog):
+        questions.append(dialog.message)
+        dialog.accept() if discard or not dialog.message.endswith("Discard?") else dialog.dismiss()
+
+    page.on("dialog", reply)
+    page.on("request", lambda request: posts.append(request.url) if request.method == "POST" else None)
+    page.get_by_role("checkbox", name="Select Inject 1 Team 1").check()
+    _edit(page, "Draft to keep")
+    return questions, posts
+
+
+def test_keeping_a_draft_stops_approve_selected(page, score):
+    questions, posts = _approve_selected_with_a_draft(page, discard=False)
+    page.get_by_role("button", name="Approve Selected").click()
+    page.wait_for_load_state("networkidle")
+    assert questions == ["You have unsaved changes. Discard?"]
+    assert posts == []
+    editor = page.get_by_role("textbox", name="Feedback for Inject 1 Team 1")
+    assert editor.input_value() == "Draft to keep"
+    score.refresh_from_db()
+    assert not score.feedback_approved
+
+
+def test_discarding_a_draft_lets_approve_selected_go_on(page, score):
+    questions, posts = _approve_selected_with_a_draft(page, discard=True)
+    with page.expect_navigation():
+        page.get_by_role("button", name="Approve Selected").click()
+    assert questions == ["You have unsaved changes. Discard?", "Approve 1 feedback item(s)? This cannot be undone."]
+    assert posts == [f"{page.url.split('/scoring/')[0]}{reverse('scoring:bulk_approve_inject_feedback')}"]
+    score.refresh_from_db()
+    assert score.feedback_approved
     assert score.feedback == "Good work"

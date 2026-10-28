@@ -121,6 +121,7 @@ CASES = [
     ViewCase("scoring:red_team_scores", RED, query=_filters),
     ViewCase("scoring:view_red_score", may("red_team", "gold_team")),
     ViewCase("scoring:red_team_findings", may("red_team", "gold_team"), query=_filters),
+    ViewCase("scoring:review_red_finding", GOLD),
     ViewCase("scoring:delete_red_score", RED),
     ViewCase(
         "scoring:bulk_approve_red_scores",

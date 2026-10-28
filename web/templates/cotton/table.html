@@ -2,9 +2,9 @@
 {# Usage: <c-table id="results"><c-slot name="headers">...</c-slot>rows go here</c-table> #}
 {# Props: id, class, aria_label, fixed_layout (bool), widths (column widths, space separated: "40px 20% 30%"); slot: headers #}
 <c-vars id="result_list"
-        class
+        class=""
         aria_label="Data table"
-        widths
+        widths=""
         fixed_layout="false" />
 <div {{ attrs }} class="results">
     <table id="{{ id }}"

@@ -18,10 +18,15 @@
                 this.originalValue = this.$refs.editor.value;
                 this.editing = true;
             },
-            stopEditing() {
+            stopEditing(event) {
                 if (!this.editing) return;
                 if (this.dirty) {
-                    if (!confirm('You have unsaved changes. Discard?')) return;
+                    if (!confirm('You have unsaved changes. Discard?')) {
+                        // Kept: the click that asked (Approve Selected, another row's Save) must not go on
+                        event.preventDefault();
+                        event.stopPropagation();
+                        return;
+                    }
                     this.$refs.editor.value = this.originalValue;
                     this.dirty = false;
                 }

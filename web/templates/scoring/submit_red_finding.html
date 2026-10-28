@@ -11,11 +11,7 @@
             {% csrf_token %}
             <c-form_errors :form="form" />
             <c-fieldset heading="Attack Details">
-                <c-form_field label="{{ form.attack_type.label }}"
-                              required="true"
-                              :id="form.attack_type.id_for_label"
-                              help_text="{{ form.attack_type.help_text }}"
-                              error="{{ form.attack_type.errors|join:', ' }}">
+                <c-form_field :field="form.attack_type">
                     {{ form.attack_type }}
                 </c-form_field>
                 <c-form_field label="Source IP">
@@ -29,20 +25,14 @@
                     </div>
                 </c-form_field>
                 <div id="singleIpSection">
-                    <c-form_field label="{{ form.source_ip.label }}"
-                                  :id="form.source_ip.id_for_label"
-                                  help_text="{{ form.source_ip.help_text }}"
-                                  error="{{ form.source_ip.errors|join:', ' }}">
+                    <c-form_field :field="form.source_ip">
                         {{ form.source_ip }}
                     </c-form_field>
                 </div>
                 <div id="poolSection" class="d-none">
                     <div class="d-flex gap-10 items-end flex-wrap">
                         <div class="flex-grow-1">
-                            <c-form_field label="{{ form.source_ip_pool.label }}"
-                                          :id="form.source_ip_pool.id_for_label"
-                                          help_text="{{ form.source_ip_pool.help_text }}"
-                                          error="{{ form.source_ip_pool.errors|join:', ' }}">
+                            <c-form_field :field="form.source_ip_pool">
                                 {{ form.source_ip_pool }}
                             </c-form_field>
                         </div>
@@ -77,9 +67,7 @@
                         Target IPs: <span id="ipList"></span>
                     </div>
                 </c-form_field>
-                <c-form_field label="{{ form.affected_service.label }}"
-                              :id="form.affected_service.id_for_label"
-                              error="{{ form.affected_service.errors|join:', ' }}">
+                <c-form_field :field="form.affected_service">
                     {{ form.affected_service }}
                 </c-form_field>
                 <input type="hidden"
@@ -239,10 +227,7 @@
                 <div id="screenshotPreview" class="grid-4 mb-15 px-10" aria-live="polite"></div>
             </c-fieldset>
             <c-fieldset heading="Additional Information">
-                <c-form_field label="{{ form.notes.label }}"
-                              :id="form.notes.id_for_label"
-                              help_text="{{ form.notes.help_text }}"
-                              error="{{ form.notes.errors|join:', ' }}">
+                <c-form_field :field="form.notes">
                     {{ form.notes }}
                 </c-form_field>
             </c-fieldset>

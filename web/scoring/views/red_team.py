@@ -80,7 +80,8 @@ def red_team_findings(request: HttpRequest) -> HttpResponse:
     context = {
         **findings_list(request, default_status="pending", page_size=50),
         "pending_findings": RedTeamScore.objects.filter(is_approved=False).exists(),
-        "is_gold_team": has_permission(cast(User, request.user), "gold_team"),
+        # A Red Team member may read the review list but reviews nothing: their rows open their own finding page
+        "reviewing": has_permission(cast(User, request.user), "gold_team"),
     }
     if request.headers.get("HX-Request"):
         return render(request, "scoring/partials/red_findings_table.html", context)
@@ -93,7 +94,7 @@ def red_team_findings(request: HttpRequest) -> HttpResponse:
 )
 def red_team_scores(request: HttpRequest) -> HttpResponse:
     """Red team view of all findings (read-only, can delete own)."""
-    context = {**findings_list(request, default_status="all", page_size=25), "is_gold_team": False}
+    context = findings_list(request, default_status="all", page_size=25)
     if request.headers.get("HX-Request"):
         return render(request, "scoring/partials/red_findings_table.html", context)
     return render(request, "scoring/red_team_findings.html", context)
@@ -161,27 +162,29 @@ def _create_red_score(
     return redirect("scoring:red_team_scores")
 
 
-@require_permission("red_team", "gold_team", error_message="Only Red Team or Gold Team can view findings")
-def view_red_score(request: HttpRequest, finding_id: int) -> HttpResponse:
-    """View red team finding details with screenshot previews."""
-    finding = get_object_or_404(
+def _finding(finding_id: int) -> RedTeamScore:
+    return get_object_or_404(
         RedTeamScore.objects.select_related(
             "attack_type", "submitted_by", "approved_by", "source_ip_pool"
         ).prefetch_related("affected_teams", "screenshots"),
         id=finding_id,
     )
-    user = cast(User, request.user)
-    is_red_team = has_permission(user, "red_team")
 
-    # A Gold Team reviewer without the Red Team role reaches this page from the review list, under the review nav
-    context = {
-        "finding": finding,
-        "base_template": "scoring/red_base.html" if is_red_team else "scoring/base.html",
-        "is_red_team": is_red_team,
-        "can_approve": has_permission(user, "gold_team") and not finding.is_approved,
-        "can_delete": is_red_team and finding.submitted_by == user and not finding.is_approved,
-    }
+
+@require_permission("red_team", "gold_team", error_message="Only Red Team or Gold Team can view findings")
+def view_red_score(request: HttpRequest, finding_id: int) -> HttpResponse:
+    """A finding's Red Team page; a Gold Team reviewer's page for it is the review page."""
+    user = cast(User, request.user)
+    if not has_permission(user, "red_team"):
+        return redirect("scoring:review_red_finding", finding_id=finding_id)
+    finding = _finding(finding_id)
+    context = {"finding": finding, "can_delete": finding.submitted_by == user and not finding.is_approved}
     return render(request, "scoring/view_red_finding.html", context)
+
+
+@require_permission("gold_team", error_message="Only Gold Team members can review findings")
+def review_red_finding(request: HttpRequest, finding_id: int) -> HttpResponse:
+    return render(request, "scoring/review_red_finding.html", {"finding": _finding(finding_id)})
 
 
 @require_permission("red_team", error_message="Only Red Team members can delete findings")

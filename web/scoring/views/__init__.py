@@ -46,6 +46,7 @@ from .red_team import (
     red_screenshot_download,
     red_team_findings,
     red_team_scores,
+    review_red_finding,
     submit_red_score,
     view_red_score,
 )
@@ -59,6 +60,7 @@ __all__ = [
     "bulk_approve_red_scores",
     "submit_red_score",
     "view_red_score",
+    "review_red_finding",
     "delete_red_score",
     "red_screenshot_download",
     "ip_pool_list",

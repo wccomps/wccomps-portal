@@ -4,6 +4,9 @@ Catches issues that are silent at runtime or hard to spot in code review.
 """
 
 import re
+from pathlib import Path
+
+import django
 
 from core.tests.guards import (
     Tag,
@@ -284,7 +287,7 @@ def test_a_page_asks_through_data_confirm() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 9. ARIA grid roles: a promise of arrow-key navigation no page keeps
+# 9. ARIA grid and table roles: a table says rows, cells and headers itself; role="grid" promises arrow keys
 # ---------------------------------------------------------------------------
 
 GRID_ROLES = {"grid", "treegrid", "gridcell", "row", "rowgroup", "columnheader", "rowheader"}
@@ -300,3 +303,43 @@ def test_tables_keep_table_semantics() -> None:
         if tag.attrs.get("role") in GRID_ROLES
     }
     fail_with("Grid roles on markup", found, {})
+
+
+# ---------------------------------------------------------------------------
+# 10. A view's `title`: Django's admin base prints it as an h1 above the page header's
+# ---------------------------------------------------------------------------
+
+CONTEXT_TITLE_RE = re.compile(r"{{\s*title\b")
+
+
+def test_page_header_pages_take_no_title_from_the_view() -> None:
+    """admin/base.html's content_title block renders a context `title` as an h1, so a page with its own
+    c-page_header gets two."""
+    found = {
+        template_name(path): "reads {{ title }}; pass it from the view under another name"
+        for path in page_templates()
+        if any(tag.name == "c-page_header" for tag in tags(path)) and CONTEXT_TITLE_RE.search(text(path))
+    }
+    fail_with("Page header pages that read a context title", found, {})
+
+
+# ---------------------------------------------------------------------------
+# 11. A portal template named like one of Django admin's replaces it for every page that extends that name
+# ---------------------------------------------------------------------------
+
+DJANGO_ADMIN_TEMPLATES = Path(django.__file__).parent / "contrib/admin/templates"
+ADMIN_OVERRIDES = {
+    "admin/base_site.html": "the portal chrome, which Django admin's own pages share",
+    "admin/index.html": "the portal's Django admin index, which Django renders by name",
+}
+
+
+def test_no_template_shadows_django_admin_by_accident() -> None:
+    """base_site.html extends "admin/base.html": a portal template of that name would sit under every page, its blocks
+    rendering wherever a page leaves them out."""
+    found = {
+        template_name(path): "takes the name of a Django admin template"
+        for path in tracked_templates()
+        if (DJANGO_ADMIN_TEMPLATES / template_name(path)).is_file()
+    }
+    fail_with("Templates that shadow Django admin's", found, ADMIN_OVERRIDES)
