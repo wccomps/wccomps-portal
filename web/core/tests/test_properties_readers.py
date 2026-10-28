@@ -462,7 +462,7 @@ READERS = [
     Reader(
         "revoke_user_sessions",
         lambda: authentik().revoke_user_sessions("team01"),
-        (USERS, SESSIONS, DONE),
+        (USERS, SESSIONS, SESSIONS, DONE),
         lambda r: outcome(
             r,
             lambda t: (
@@ -475,6 +475,14 @@ READERS = [
             "(ok, error, revoked)",
         ),
         (f"{AM}.revoke_user_sessions", *USER),
+    ),
+    Reader(
+        "sees_any_sessions",
+        lambda: authentik().sees_any_sessions(),
+        (SESSIONS,),
+        lambda r: outcome(r, lambda b: type(b) is bool, "a bool"),
+        (f"{AM}.sees_any_sessions", *READ),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "toggle_user",

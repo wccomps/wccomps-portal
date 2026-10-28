@@ -50,6 +50,13 @@ logger = logging.getLogger(__name__)
 
 MAX_PAGES = 100  # of 100 results each: a list endpoint still saying "next" past this is broken, not long
 
+# Authentik answers a session list with only the sessions the token may view, so a token without that permission
+# finds none and every revoke looks like a success
+SESSIONS_HIDDEN = (
+    "The portal's Authentik token can't see sessions, so none were ended. Give its Authentik user the view and "
+    "delete Authenticated Session permissions."
+)
+
 
 def _holds(value: object, kind: type) -> bool:
     """Whether a JSON value matches kind: list means list[str]; exact type check so bool does not match int."""
@@ -426,6 +433,8 @@ class AuthentikManager:
             sessions, _ = self._results(response, f"List sessions of {username}")
 
             logger.info(f"Found {len(sessions)} session(s) for user {username}")
+            if not sessions and not self.sees_any_sessions():
+                return False, SESSIONS_HIDDEN, 0
 
             revoked_count = 0
             for session in sessions:
@@ -457,6 +466,15 @@ class AuthentikManager:
             error_msg = f"Unexpected error revoking sessions: {e}"
             logger.error(error_msg, exc_info=True)
             return False, error_msg, 0
+
+    def sees_any_sessions(self) -> bool:
+        """Whether the token can see any session at all. False means it lacks the permission, or nobody is signed in
+        to Authentik. Raises AuthentikAPIError on an HTTP error or an answer of another shape."""
+        response = self.client.get(f"{self.base_url}/api/v3/core/authenticated_sessions/", params={"page_size": "1"})
+        if response.is_error:
+            raise self._handle_response_error(response, "List sessions")
+        sessions, _ = self._results(response, "List sessions")
+        return bool(sessions)
 
     def toggle_user(self, username: str, is_active: bool) -> tuple[bool, str]:
         """Enable or disable a team account in Authentik, refusing accounts that aren't team accounts."""

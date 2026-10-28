@@ -7,7 +7,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from core.authentik_manager import AuthentikAPIError, AuthentikManager
+from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager
 
 
 class TestAuthentikAPIError:
@@ -411,13 +411,44 @@ class TestAuthentikManager:
         mock_sessions_response = Mock()
         mock_sessions_response.json.return_value = {"results": []}
 
-        manager.client.get.side_effect = [mock_user_response, mock_sessions_response]
+        visible_response = Mock(is_error=False)
+        visible_response.json.return_value = {"results": [{"uuid": "someone-else"}]}
+
+        manager.client.get.side_effect = [mock_user_response, mock_sessions_response, visible_response]
 
         success, error, count = manager.revoke_user_sessions("team01")
 
         assert success is True
         assert error is None
         assert count == 0
+
+    def test_revoke_user_sessions_fails_when_sessions_are_hidden(self, manager: AuthentikManager) -> None:
+        """No sessions found, and the token sees no one's: it can't see sessions, so nothing was ended."""
+        mock_user_response = Mock()
+        mock_user_response.json.return_value = {"results": [{"pk": 42}]}
+
+        empty_response = Mock(is_error=False)
+        empty_response.json.return_value = {"results": []}
+
+        manager.client.get.side_effect = [mock_user_response, empty_response, empty_response]
+
+        success, error, count = manager.revoke_user_sessions("team01")
+
+        assert success is False
+        assert error == SESSIONS_HIDDEN
+        assert count == 0
+        manager.client.delete.assert_not_called()
+
+    def test_sees_any_sessions(self, manager: AuthentikManager) -> None:
+        visible = Mock(is_error=False)
+        visible.json.return_value = {"results": [{"uuid": "s-1"}]}
+        hidden = Mock(is_error=False)
+        hidden.json.return_value = {"results": []}
+        manager.client.get.side_effect = [visible, hidden]
+
+        assert manager.sees_any_sessions() is True
+        assert manager.sees_any_sessions() is False
+        assert manager.client.get.call_args.kwargs["params"] == {"page_size": "1"}
 
     def test_revoke_user_sessions_network_error(self, manager: AuthentikManager) -> None:
         """Test handling network error during session revocation."""

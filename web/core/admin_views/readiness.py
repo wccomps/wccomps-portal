@@ -16,7 +16,7 @@ from orange_team.models import OrangeAssignment
 from scoring.models import IncidentReport, InjectScore, RedTeamScore
 
 from core.admin_views.places import SetupSection, setup_url
-from core.authentik_manager import AuthentikManager
+from core.authentik_manager import SESSIONS_HIDDEN, AuthentikManager
 from core.forms import ReadinessFixForm
 from core.models import CompetitionConfig
 from core.utils import ndjson_done
@@ -117,6 +117,17 @@ def _check_team_group_membership() -> CheckResult:
             {"type": "fix", "key": "fix_group_membership", "label": "Fix Group Membership"},
         )
     return ("pass", "All accounts in correct groups", None)
+
+
+def _check_session_access() -> CheckResult:
+    """The portal's token must see sessions, or resetting a team's credentials leaves the team signed in."""
+    if AuthentikManager().sees_any_sessions():
+        return ("pass", "The portal can end team sessions", None)
+    return (
+        "fail",
+        f"{SESSIONS_HIDDEN} If nobody is signed in to Authentik right now, sign in and run the checks again.",
+        None,
+    )
 
 
 def _setup_link(section: SetupSection, label: str) -> dict[str, str]:
@@ -324,6 +335,7 @@ ALL_CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
     ("Discord IDs configured", _check_discord_settings),
     ("Team accounts exist", _check_team_accounts_exist),
     ("Group membership correct", _check_team_group_membership),
+    ("Team sessions can be ended", _check_session_access),
     ("App bindings configured", _check_blueteam_bindings),
     ("Multiple teams registered", _check_multiple_teams),
     ("School info configured", _check_school_info),
