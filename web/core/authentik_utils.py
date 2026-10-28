@@ -35,9 +35,8 @@ def validate_team_account(user_data: AuthentikUser, expected_username: str) -> t
 
 
 def _new_team_password(manager: AuthentikManager, team_number: int) -> tuple[AuthentikUser, str] | str:
-    """Give the team account a new random password in Authentik and record it on the team's school info: the
-    account and the password, or why not. Leaves is_active alone: team accounts are enabled only while the
-    competition runs."""
+    """(account, password), or why not. Leaves is_active alone: team accounts are enabled only while the competition
+    runs."""
     if team_number < 1 or team_number > MAX_TEAMS:
         return f"Team number must be between 1 and {MAX_TEAMS}"
     username = team_username(team_number)

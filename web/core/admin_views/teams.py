@@ -164,7 +164,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
             )
 
     elif action == "reset_password":
-        # A new password only: Discord links stay, unlike "reset"
+        # Discord links stay, unlike "reset"
         reset = reset_team_credentials(team_number)
         AuditLog.objects.create(
             action="team_password_reset",

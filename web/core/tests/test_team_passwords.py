@@ -123,7 +123,6 @@ def test_reset_team_credentials_refuses_a_non_team_account(manager):
     assert reset.password is None and "not a team account" in reset.error
     manager.set_password.assert_not_called()
     manager.end_user_sessions.assert_not_called()
-    manager.end_user_sessions.assert_not_called()
 
 
 def test_reset_team_credentials_failed_password_tries_no_sessions(manager):
@@ -134,7 +133,7 @@ def test_reset_team_credentials_failed_password_tries_no_sessions(manager):
 
 
 def test_reset_team_credentials_names_an_unlisted_status(manager):
-    """A status without a message of its own still says which it was, not just "HTTP error"."""
+    """A status without a message of its own still says which it was."""
     response = MagicMock(status_code=400, text='{"password": ["too common"]}', url="https://a/x")
     response.json.return_value = {"password": ["too common"]}
     manager.set_password.side_effect = AuthentikManager._handle_response_error(

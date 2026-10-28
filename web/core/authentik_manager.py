@@ -58,16 +58,8 @@ SESSIONS_HIDDEN = (
 
 
 def reason_for(error: AuthentikAPIError | httpx.HTTPError) -> str:
-    """Why an Authentik call failed, for an operator: the message with its status, never the URL or the answer."""
+    """Why an Authentik call failed, for an operator: never the URL or the answer."""
     return error.message if isinstance(error, AuthentikAPIError) else f"Network error ({type(error).__name__})"
-
-
-def _is_uuid(value: object) -> bool:
-    try:
-        uuid.UUID(str(value))
-    except ValueError:
-        return False
-    return True
 
 
 def _holds(value: object, kind: type) -> bool:
@@ -434,14 +426,16 @@ class AuthentikManager:
             )
             if any(session["user"] != user["pk"] for session in sessions):
                 return "Authentik answered sessions of other users, so none were ended"
-            if not all(_is_uuid(session["uuid"]) for session in sessions):
+            try:
+                # Canonical: uuid.UUID also accepts {...} and urn:uuid: forms, which the delete path must not carry
+                session_ids = [uuid.UUID(str(session["uuid"])) for session in sessions]
+            except ValueError:
                 return "Authentik answered a session without a valid id, so none were ended"
             if not sessions and not self.sees_any_sessions():
                 return SESSIONS_HIDDEN
 
             refused: int | None = None
-            for session in sessions:
-                session_id = uuid.UUID(str(session["uuid"]))  # canonical, whatever form Authentik answered
+            for session_id in session_ids:
                 response = self.client.delete(f"{self.base_url}/api/v3/core/authenticated_sessions/{session_id}/")
                 # 404: the session ended between the list and the delete
                 if not response.is_success and response.status_code != 404 and refused is None:
