@@ -70,7 +70,11 @@ GROUPS = {"results": [{"pk": "g1", "name": "WCComps_BlueTeam01", "parents": []}]
 SESSIONS = {"results": [{"uuid": "00000000-0000-4000-8000-000000000001", "user": 7}], "pagination": PAGE}
 PROVIDERS = {"results": [{"pk": 1, "assigned_application_slug": "netbird"}], "pagination": PAGE}
 APPLICATION = {"pk": "app-1", "slug": "netbird", "name": "Netbird"}
-BINDINGS = {"results": [{"pk": "b-1", "enabled": True, "group": "g1", "group_obj": {"name": "WCComps_BlueTeam"}}]}
+BINDINGS = {
+    "results": [
+        {"pk": "b-1", "target": "app-1", "enabled": True, "group": "g1", "group_obj": {"name": "WCComps_BlueTeam"}}
+    ]
+}
 ERROR = {"detail": "Not allowed"}
 DONE: dict[str, Any] = {}
 
@@ -128,12 +132,6 @@ def outcome(result: object, ok: Callable[[object], bool], what: str) -> None:
     assert ok(result), f"{what}, not {result!r:.300}"
 
 
-def check_pair(result: object) -> None:
-    outcome(
-        result, lambda r: isinstance(r, tuple) and len(r) == 2 and type(r[0]) is bool and is_str(r[1]), "(bool, str)"
-    )
-
-
 def check_users(result: object) -> None:
     outcome(
         result,
@@ -178,8 +176,8 @@ def check_user(result: object) -> None:
                 isinstance(r, dict)
                 and is_int(r.get("pk"))
                 and is_str(r.get("username", ""))
-                and isinstance(r.get("groups_obj", []), list)
-                and all(isinstance(g, dict) and is_str(g.get("name")) for g in r.get("groups_obj", []))
+                and isinstance(r.get("groups_obj"), list)
+                and all(isinstance(g, dict) and is_str(g.get("name")) for g in r["groups_obj"])
             )
         ),
         "None or a user with an int pk and named groups",
@@ -404,6 +402,7 @@ READERS = [
         (PROVIDERS,),
         lambda r: outcome(r, _strs, "slugs"),
         (f"{AM}.list_applications", *READ),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "get_application_by_slug",
@@ -411,30 +410,23 @@ READERS = [
         (APPLICATION,),
         lambda r: outcome(r, lambda a: a is None or (isinstance(a, dict) and is_str(a.get("pk"))), "None or an app"),
         (f"{AM}.get_application_by_slug",),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "get_blueteam_binding",
         lambda: authentik().get_blueteam_binding("app-1"),
         (BINDINGS,),
-        lambda r: outcome(
-            r,
-            lambda b: (
-                isinstance(b, tuple)
-                and (
-                    (isinstance(b[0], dict) and is_str(b[0].get("pk")) and b[1] is None)
-                    or (b[0] is None and is_str(b[1]))
-                )
-            ),
-            "(binding, None) or (None, why)",
-        ),
-        (f"{AM}.get_blueteam_binding", *READ),
+        lambda r: outcome(r, lambda b: b is None or (isinstance(b, dict) and is_str(b.get("pk"))), "None or a binding"),
+        (f"{AM}.get_blueteam_binding", f"{AM}._list_all", *READ),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "update_binding_enabled",
         lambda: authentik().update_binding_enabled({"pk": "b-1", "enabled": True}, enabled=False),
         (DONE,),
-        check_bool,
+        lambda r: outcome(r, lambda v: v is None, "None"),
         (f"{AM}.update_binding_enabled",),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "enable_application",
@@ -519,6 +511,7 @@ READERS = [
         (USERS,),
         check_user,
         (f"{AM}.get_user_with_groups", *USER),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "get_group_by_name",
@@ -532,13 +525,15 @@ READERS = [
             "None or the group",
         ),
         (f"{AM}.get_group_by_name", *READ),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "add_user_to_group",
         lambda: authentik().add_user_to_group(7, "g1"),
         (DONE,),
-        check_pair,
+        lambda r: outcome(r, lambda v: v is None, "None"),
         (f"{AM}.add_user_to_group",),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "get_infrastructure",

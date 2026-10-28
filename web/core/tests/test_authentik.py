@@ -1,12 +1,9 @@
-"""Tests for AuthentikManager update_user_discord_id method."""
-
-import logging
 from unittest.mock import MagicMock, Mock, patch
 
 import httpx
 import pytest
 
-from core.authentik_manager import AuthentikManager
+from core.authentik_manager import AuthentikAPIError, AuthentikManager
 
 
 class TestAuthentikManager:
@@ -70,7 +67,7 @@ class TestUpdateUserDiscordId:
 
         # Verify GET searched by username
         manager.client.get.assert_called_once()
-        assert manager.client.get.call_args.kwargs["params"] == {"username": "testuser"}
+        assert manager.client.get.call_args.kwargs["params"] == {"username": "testuser", "include_groups": "true"}
 
         # Verify PATCH used the integer PK
         manager.client.patch.assert_called_once()
@@ -158,7 +155,7 @@ class TestUpdateBindingEnabled:
             mgr.client = Mock()
             return mgr
 
-    def test_logs_response_body_on_http_error(self, manager, caplog):
+    def test_raises_with_the_response_body_on_http_error(self, manager):
         resp = MagicMock()
         resp.status_code = 400
         resp.url = "https://auth.example.com/api/v3/policies/bindings/abc/"
@@ -167,11 +164,8 @@ class TestUpdateBindingEnabled:
         resp.is_success = False
         manager.client.put.return_value = resp
 
-        with caplog.at_level(logging.ERROR):
-            result = manager.update_binding_enabled({"pk": "abc", "enabled": False}, True)
-
-        assert result is False
-        assert "Enabled cannot be set on this binding" in caplog.text
+        with pytest.raises(AuthentikAPIError, match="Enabled cannot be set on this binding"):
+            manager.update_binding_enabled({"pk": "abc", "enabled": False}, True)
 
 
 class TestListApplications:
@@ -202,10 +196,13 @@ class TestListApplications:
         assert manager.list_applications() == ["competitions", "scoring"]
         assert "providers/all" in manager.client.get.call_args.args[0]
 
-    def test_returns_empty_without_view_provider_permission(self, manager):
+    def test_raises_without_view_provider_permission(self, manager):
+        """A refused list must not read as an Authentik with no apps."""
         resp = MagicMock()
         resp.status_code = 403
+        resp.is_success = False
         resp.raise_for_status.side_effect = httpx.HTTPStatusError("403", request=MagicMock(), response=resp)
         manager.client.get.return_value = resp
 
-        assert manager.list_applications() == []
+        with pytest.raises(AuthentikAPIError):
+            manager.list_applications()

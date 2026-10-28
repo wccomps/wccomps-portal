@@ -87,7 +87,7 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
     from django.contrib.auth.models import User
     from scoring.quotient_sync import sync_quotient_metadata, sync_service_scores
 
-    from core.authentik_manager import AuthentikManager
+    from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
     from core.services.user_groups import refresh_user_groups
 
     config = CompetitionConfig.get_config()
@@ -132,7 +132,8 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
         yield CompetitionStep("Refreshed team permissions", step, total)
     except Exception as e:
         logger.warning(f"Group refresh after competition {'start' if enable else 'stop'} failed: {e}")
-        yield CompetitionStep(f"Permission refresh failed (retried within 5 minutes): {e}", step, total, ok=False)
+        why = reason_for(e) if isinstance(e, AuthentikAPIError) else str(e)
+        yield CompetitionStep(f"Permission refresh failed (retried within 5 minutes): {why}", step, total, ok=False)
 
     step += 1
     actor_user = User.objects.filter(username=actor).first()

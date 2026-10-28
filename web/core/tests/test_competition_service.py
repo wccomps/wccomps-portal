@@ -267,3 +267,18 @@ def test_a_failed_account_step_says_why(authentik, config):
     steps = list(run_competition(True, "timer"))
 
     assert any(s.message == "Failed team01: User team02 not found" for s in steps)
+
+
+def test_a_failed_group_refresh_never_shows_authentiks_url_or_answer(authentik, config):
+    from core.authentik_manager import AuthentikAPIError
+
+    authentik.refresh.side_effect = AuthentikAPIError(
+        "List /api/v3/core/groups/: Forbidden", 403, response_text='{"detail": "secret"}', url="https://auth.internal/x"
+    )
+
+    steps = list(run_competition(True, "timer"))
+
+    assert any(
+        s.message == "Permission refresh failed (retried within 5 minutes): List /api/v3/core/groups/: Forbidden"
+        for s in steps
+    )

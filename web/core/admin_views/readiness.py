@@ -16,7 +16,7 @@ from orange_team.models import OrangeAssignment
 from scoring.models import IncidentReport, InjectScore, RedTeamScore
 
 from core.admin_views.places import SetupSection, setup_url
-from core.authentik_manager import SESSIONS_HIDDEN, AuthentikManager
+from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, reason_for
 from core.forms import ReadinessFixForm
 from core.models import CompetitionConfig
 from core.utils import ndjson_done
@@ -156,8 +156,7 @@ def _check_blueteam_bindings() -> CheckResult:
         if not app:
             missing.append(f"{slug} (not found)")
             continue
-        binding, _ = mgr.get_blueteam_binding(app["pk"])
-        if not binding:
+        if not mgr.get_blueteam_binding(app["pk"]):
             missing.append(slug)
 
     if missing:
@@ -359,6 +358,8 @@ def stream_readiness_checks() -> Iterator[str]:
     for i, (name, check_fn) in enumerate(ALL_CHECKS, 1):
         try:
             severity, detail, action = check_fn()
+        except AuthentikAPIError as e:
+            severity, detail, action = "fail", f"Could not ask Authentik: {reason_for(e)}", None
         except Exception as e:
             severity, detail, action = "fail", f"Check error: {e}", None
 
@@ -392,28 +393,24 @@ def _fix_group_membership(request: HttpRequest) -> JsonResponse:
     for team in active_teams:
         username = team_username(team.team_number)
         expected_group = team.authentik_group
-        user = mgr.get_user_with_groups(username)
-        if not user:
+        try:
+            user = mgr.get_user_with_groups(username)
+            if not user or any(g["name"] == expected_group for g in user["groups_obj"]):
+                continue
+            group = mgr.get_group_by_name(expected_group)
+            if not group:
+                failed.append(f"{username}: group {expected_group} not found")
+                continue
+            mgr.add_user_to_group(user["pk"], group["pk"])
+        except AuthentikAPIError as e:
+            failed.append(f"{username}: {reason_for(e)}")
             continue
-
-        if any(g["name"] == expected_group for g in user["groups_obj"]):
-            continue
-
-        group = mgr.get_group_by_name(expected_group)
-        if not group:
-            failed.append(f"{username}: group {expected_group} not found")
-            continue
-
-        success, error = mgr.add_user_to_group(user["pk"], group["pk"])
-        if success:
-            fixed += 1
-        else:
-            failed.append(f"{username}: {error}")
+        fixed += 1
 
     msg = f"Fixed {fixed} account(s)"
     if failed:
-        msg += f", {len(failed)} failed"
-    return JsonResponse({"success": True, "message": msg, "failed": failed})
+        msg += "; failed: " + "; ".join(failed)
+    return JsonResponse({"success": not failed, "message": msg})
 
 
 def _fix_sync_quotient(request: HttpRequest) -> JsonResponse:

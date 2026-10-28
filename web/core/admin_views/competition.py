@@ -39,7 +39,7 @@ from core.admin_views.places import (
     setup_url,
 )
 from core.admin_views.readiness import action_readiness_check, action_readiness_fix
-from core.authentik_manager import AuthentikManager
+from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
 from core.authentik_utils import credentials_csv, reset_teams_credentials
 from core.competition_utils import WipedData, competition_data_counts
 from core.discord_tasks import LogToChannel
@@ -125,9 +125,16 @@ def _edit_controlled_app(
     if not form.is_valid():
         raise BadRequest("Please provide an app slug")
     slug = form.cleaned_data["app_slug"]
-    # Check with the lookup Start and Stop use; Authentik's app list omits apps the service account can't open
-    if add and AuthentikManager().get_application_by_slug(slug) is None:
-        raise BadRequest(f"No Authentik application with the slug '{slug}'")
+    # Start and Stop's lookup: the picker's provider list misses apps without a provider
+    if add:
+        try:
+            app = AuthentikManager().get_application_by_slug(slug)
+        except AuthentikAPIError as e:
+            return JsonResponse(
+                {"success": False, "message": f"Could not ask Authentik about '{slug}': {reason_for(e)}"}
+            )
+        if app is None:
+            raise BadRequest(f"No Authentik application with the slug '{slug}'")
 
     with transaction.atomic():
         config = CompetitionConfig.objects.select_for_update().get(pk=config.pk)
@@ -478,8 +485,12 @@ def admin_competition_apps(request: HttpRequest) -> JsonResponse:
 
     Lists every app with a provider (see AuthentikManager.list_applications). A slug with no provider
     (e.g. a launcher-only app) won't appear but can still be typed; add validates it by direct lookup.
+    Authentik's failure comes back as 200: the request was fine, and the page says why the list is empty.
     """
-    return JsonResponse({"apps": AuthentikManager().list_applications()})
+    try:
+        return JsonResponse({"apps": AuthentikManager().list_applications()})
+    except AuthentikAPIError as e:
+        return JsonResponse({"error": reason_for(e)})
 
 
 @json_endpoint

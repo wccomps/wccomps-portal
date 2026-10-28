@@ -3,7 +3,6 @@
 import uuid
 from unittest.mock import MagicMock, patch
 
-import httpx
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
@@ -152,7 +151,7 @@ def test_a_counted_empty_list_is_trusted_after_the_password_change(manager):
 
 def test_sessions_listed_before_a_failed_end_are_recorded(manager):
     manager.user_sessions.side_effect = [AuthentikAPIError("List sessions: Server error", 500), [uuid.UUID(int=1)]]
-    manager.end_sessions.side_effect = httpx.ConnectError("refused")
+    manager.end_sessions.side_effect = AuthentikAPIError("Network error (ConnectError)")
 
     reset = reset_team_credentials(7, actor="gold-admin")
 
@@ -224,7 +223,7 @@ def test_reset_team_credentials_names_an_unlisted_status(manager):
 
 
 def test_reset_team_credentials_network_error_names_the_cause(school_info, manager):
-    manager.set_password.side_effect = httpx.ConnectError("refused")
+    manager.set_password.side_effect = AuthentikAPIError("Network error (ConnectError)")
 
     assert reset_team_credentials(7, actor="gold-admin") == CredentialReset(
         password=None, error="Network error (ConnectError)", sessions_found=0
