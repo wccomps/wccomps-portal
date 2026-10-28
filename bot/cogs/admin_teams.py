@@ -253,7 +253,7 @@ class AdminTeamsCog(commands.Cog):
 
     @teams_group.command(
         name="reset",
-        description="[ADMIN] Team reset: unlink users, reset password, revoke sessions, recreate channels",
+        description="[ADMIN] Team reset: unlink users, reset password, end Authentik sessions, recreate channels",
     )
     @app_commands.describe(
         team_number="Team number (1-50)",
@@ -266,7 +266,7 @@ class AdminTeamsCog(commands.Cog):
         team_number: int,
         recreate_channels: bool = True,
     ) -> None:
-        """Team reset: unlinks users, resets password, revokes sessions, and optionally recreates infrastructure."""
+        """Team reset: unlinks users, resets password, ends Authentik sessions, optionally recreates infrastructure."""
         if team_number < 1 or team_number > MAX_TEAMS:
             await interaction.response.send_message(f"Team number must be between 1 and {MAX_TEAMS}", ephemeral=True)
             return

@@ -149,17 +149,14 @@ class PacketDistributionServiceTestCase(TestCase):
         SchoolInfo.objects.filter(team=team).update(password="")
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
 
-        with (
-            patch("core.authentik_utils.AuthentikManager"),
-            patch(
-                "core.authentik_utils._new_team_password", return_value=({"pk": 5, "username": "team01"}, "")
-            ) as new_password,
-        ):
+        with patch("core.authentik_utils.AuthentikManager") as cls:
+            manager = cls.return_value.__enter__.return_value
+            manager.find_user.return_value = {"pk": 5, "username": "team01"}
             self.service.send_packet_email(distribution)
             self.service.send_test_packet_email(self.packet, team, "gold@example.com")
 
-        new_password.assert_called_once()
-        password = new_password.call_args.args[2]
+        manager.set_password.assert_called_once()
+        password = manager.set_password.call_args.args[1]
         self.assertEqual(SchoolInfo.objects.get(team=team).password, password)
         for call in mock_email_class.call_args_list:
             self.assertIn(password, call.kwargs["body"])
@@ -171,10 +168,10 @@ class PacketDistributionServiceTestCase(TestCase):
         distribution = PacketDistribution.objects.create(packet=self.packet, team=team)
 
         with (
-            patch("core.authentik_utils.AuthentikManager"),
-            patch("core.authentik_utils._new_team_password", return_value=(None, "HTTP 500")),
-            self.assertRaisesMessage(ValueError, "Failed to set Authentik password for team 1: HTTP 500"),
+            patch("core.authentik_utils.AuthentikManager") as cls,
+            self.assertRaisesMessage(ValueError, "Failed to set Authentik password for team 1: User team01 not found"),
         ):
+            cls.return_value.__enter__.return_value.find_user.return_value = None
             self.service.send_packet_email(distribution)
 
         mock_email_class.return_value.send.assert_not_called()

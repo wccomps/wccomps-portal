@@ -5,9 +5,11 @@ import secrets
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+import httpx
+
 from team.models import MAX_TEAMS, team_username
 
-from .authentik_manager import AuthentikManager, AuthentikUser
+from .authentik_manager import AuthentikAPIError, AuthentikManager, AuthentikUser
 from .utils import shorten
 
 logger = logging.getLogger(__name__)
@@ -39,41 +41,45 @@ def _record_password(team_number: int, password: str) -> None:
     SchoolInfo.objects.filter(team__team_number=team_number).update(password=password)
 
 
-def _new_team_password(manager: AuthentikManager, team_number: int, password: str) -> tuple[AuthentikUser | None, str]:
-    """Set the team account's password in Authentik: the account, or None and why not. Leaves is_active alone: team
-    accounts are enabled only while the competition runs."""
+def _new_team_password(manager: AuthentikManager, team_number: int) -> tuple[AuthentikUser, str] | str:
+    """Give the team account a new random password in Authentik and record it on the team's school info: the
+    account and the password, or why not. Leaves is_active alone: team accounts are enabled only while the
+    competition runs."""
     if team_number < 1 or team_number > MAX_TEAMS:
-        return None, f"Team number must be between 1 and {MAX_TEAMS}"
+        return f"Team number must be between 1 and {MAX_TEAMS}"
     username = team_username(team_number)
+    password = generate_blueteam_password()
     try:
         user = manager.find_user(username)
         if not user:
-            return None, f"User {username} not found"
+            return f"User {username} not found"
         is_valid, error = validate_team_account(user, username)
         if not is_valid:
-            return None, error
+            return error
         manager.set_password(user, password)
-    except Exception as e:
-        logger.exception(f"Failed to reset the password of {username}: {e}")
-        return None, "see the server logs"  # the callers say what failed
-    return user, ""
+    except AuthentikAPIError as e:
+        logger.warning(f"Failed to reset the password of {username}: {e}")
+        return e.message
+    except httpx.HTTPError as e:
+        logger.warning(f"Failed to reset the password of {username}: {e}")
+        return f"Network error setting the password ({type(e).__name__})"
+    _record_password(team_number, password)
+    return user, password
 
 
 def reset_team_password(team_number: int) -> tuple[str | None, str]:
     """A new random password for the team account, recorded on its school info: (password, "") or (None, why not)."""
-    password = generate_blueteam_password()
     with AuthentikManager() as manager:
-        user, error = _new_team_password(manager, team_number, password)
-    if user is None:
-        return None, error
-    _record_password(team_number, password)
-    return password, ""
+        outcome = _new_team_password(manager, team_number)
+    if isinstance(outcome, str):
+        return None, outcome
+    return outcome[1], ""
 
 
 @dataclass(frozen=True)
 class CredentialReset:
-    """What resetting a team's credentials did: the new password (None when the reset failed, with error saying
-    why), and why the account's Authentik sessions weren't ended (None when they were, or when nothing was tried)."""
+    """The new password, or None and error; sessions_error is None when its Authentik sessions ended or weren't
+    tried."""
 
     password: str | None
     error: str = ""
@@ -94,11 +100,10 @@ class CredentialReset:
 
 
 def _reset_credentials(manager: AuthentikManager, team_number: int) -> CredentialReset:
-    password = generate_blueteam_password()
-    user, error = _new_team_password(manager, team_number, password)
-    if user is None:
-        return CredentialReset(password=None, error=error)
-    _record_password(team_number, password)
+    outcome = _new_team_password(manager, team_number)
+    if isinstance(outcome, str):
+        return CredentialReset(password=None, error=outcome)
+    user, password = outcome
     return CredentialReset(password=password, sessions_error=manager.end_user_sessions(user))
 
 

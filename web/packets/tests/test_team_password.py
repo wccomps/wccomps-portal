@@ -20,10 +20,9 @@ def test_two_concurrent_sends_reset_the_password_once():
     SchoolInfo.objects.create(team=team, school=School.for_name("School One"), contact_email="c@example.edu")
     resets = []
 
-    def reset(_manager, team_number, password):
+    def reset(_user, password):
         resets.append(password)
         time.sleep(0.3)
-        return {"pk": 5, "username": f"team{team_number:02d}"}, ""
 
     passwords = []
 
@@ -33,10 +32,10 @@ def test_two_concurrent_sends_reset_the_password_once():
         finally:
             close_old_connections()
 
-    with (
-        patch("core.authentik_utils.AuthentikManager"),
-        patch("core.authentik_utils._new_team_password", side_effect=reset),
-    ):
+    with patch("core.authentik_utils.AuthentikManager") as cls:
+        manager = cls.return_value.__enter__.return_value
+        manager.find_user.return_value = {"pk": 5, "username": "team01"}
+        manager.set_password.side_effect = reset
         threads = [threading.Thread(target=send) for _ in range(2)]
         for thread in threads:
             thread.start()

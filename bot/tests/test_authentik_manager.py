@@ -368,7 +368,7 @@ class TestAuthentikManager:
 
     @staticmethod
     def _answer(body: dict, status: int = 200, url: str = "https://auth.test.local/x") -> Mock:
-        response = Mock(is_error=status >= 400, status_code=status, text="", url=url)
+        response = Mock(is_error=status >= 400, is_success=200 <= status < 300, status_code=status, text="", url=url)
         response.json.return_value = body
         if status >= 400:
             response.raise_for_status.side_effect = httpx.HTTPStatusError("error", request=Mock(), response=response)
@@ -390,7 +390,6 @@ class TestAuthentikManager:
         assert manager.client.delete.call_count == 2
 
     def test_end_user_sessions_filters_by_username(self, manager: AuthentikManager) -> None:
-        """Authentik ignores an unknown filter such as user=<pk> and answers every session it lets the token see."""
         manager.client.get.return_value = self._sessions(42)
         manager.client.delete.return_value = self._answer({}, 204)
 
@@ -475,3 +474,17 @@ class TestAuthentikManager:
 
         assert error is not None and "valid id" in error
         manager.client.delete.assert_not_called()
+
+    def test_end_user_sessions_redirected_delete_is_not_ended(self, manager: AuthentikManager) -> None:
+        """A redirect isn't an error status, but the session wasn't ended either."""
+        manager.client.get.return_value = self._sessions(42)
+        manager.client.delete.return_value = self._answer({}, 302)
+
+        assert manager.end_user_sessions(self.TEAM01) == "Authentik refused to end sessions (HTTP 302)"
+
+    def test_set_password_redirect_is_a_failure(self, manager: AuthentikManager) -> None:
+        """A redirected POST never set the password, so it must not be handed out."""
+        manager.client.post.return_value = self._answer({}, 302)
+
+        with pytest.raises(AuthentikAPIError):
+            manager.set_password(self.TEAM01, "New-Pass-1!")

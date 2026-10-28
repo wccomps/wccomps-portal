@@ -67,7 +67,7 @@
                             Activate Team
                         </c-button>
                     {% endif %}
-                    <c-button variant="danger" @click="resetTeam" ::disabled="loading" data-confirm="Reset this team? This unlinks all members, generates a new Authentik password and revokes all active sessions. It cannot be undone.">
+                    <c-button variant="danger" @click="resetTeam" ::disabled="loading" data-confirm="Reset this team? This unlinks all members, generates a new Authentik password and ends the team account's Authentik sessions. It cannot be undone.">
                         Reset Team
                     </c-button>
                     <c-button variant="default"

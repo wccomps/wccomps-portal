@@ -1,4 +1,4 @@
-"""The portal's Authentik token must be able to see sessions, or ending a team's sessions does nothing."""
+"""The portal's Authentik token must be able to see sessions, or ending a team's sessions ends nothing."""
 
 from unittest.mock import patch
 

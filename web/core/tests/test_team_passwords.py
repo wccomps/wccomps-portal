@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
@@ -53,7 +54,7 @@ def test_reset_records_the_new_password_on_the_school_info(school_info, manager)
 def test_failed_reset_records_nothing(school_info, manager):
     manager.set_password.side_effect = AuthentikAPIError("Set the password of team07: Server error", 500)
 
-    assert reset_team_password(7) == (None, "see the server logs")
+    assert reset_team_password(7) == (None, "Set the password of team07: Server error")
 
     school_info.refresh_from_db()
     assert school_info.password == "old"
@@ -127,8 +128,18 @@ def test_reset_team_credentials_refuses_a_non_team_account(manager):
 def test_reset_team_credentials_failed_password_tries_no_sessions(manager):
     manager.set_password.side_effect = AuthentikAPIError("Set the password of team07: Server error", 500)
 
-    assert reset_team_credentials(7) == CredentialReset(password=None, error="see the server logs")
+    assert reset_team_credentials(7) == CredentialReset(password=None, error="Set the password of team07: Server error")
     manager.end_user_sessions.assert_not_called()
+
+
+def test_reset_team_credentials_network_error_names_the_cause(school_info, manager):
+    manager.set_password.side_effect = httpx.ConnectError("refused")
+
+    assert reset_team_credentials(7) == CredentialReset(
+        password=None, error="Network error setting the password (ConnectError)"
+    )
+    school_info.refresh_from_db()
+    assert school_info.password == "old"
 
 
 def test_bulk_reset_uses_one_manager(manager):

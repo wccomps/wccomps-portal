@@ -419,7 +419,7 @@ class AuthentikManager:
 
     def end_user_sessions(self, user: AuthentikUser) -> str | None:
         """End every Authentik session of a user: None when done, else why not (some may have ended). The reason
-        never names the user, so one reason shared by many teams reads once."""
+        never names the user or counts sessions, so one reason shared by many teams reads once."""
         try:
             # user__username: Authentik ignores a filter it doesn't know (user=<pk> is one) and answers every session
             # the token may view
@@ -433,16 +433,13 @@ class AuthentikManager:
             if not sessions and not self.sees_any_sessions():
                 return SESSIONS_HIDDEN
 
-            refused: list[int] = []
+            refused: int | None = None
             for session in sessions:
                 response = self.client.delete(f"{self.base_url}/api/v3/core/authenticated_sessions/{session['uuid']}/")
                 # 404: the session ended between the list and the delete
-                if response.is_error and response.status_code != 404:
-                    refused.append(response.status_code)
-            if refused:
-                # No counts: one reason shared by many teams must read the same for each
-                return f"Authentik refused to end sessions (HTTP {refused[0]})"
-            return None
+                if not response.is_success and response.status_code != 404 and refused is None:
+                    refused = response.status_code
+            return None if refused is None else f"Authentik refused to end sessions (HTTP {refused})"
         except AuthentikAPIError as e:
             logger.warning(f"Ending the sessions of {user['username']} failed: {e}")
             return e.message
@@ -451,11 +448,11 @@ class AuthentikManager:
             return f"Network error ending sessions ({type(e).__name__})"
 
     def sees_any_sessions(self) -> bool:
-        """Whether the token can see any session at all. False means it lacks the permission, or nobody is signed in
-        to Authentik. Raises AuthentikAPIError on an error status or an answer of another shape, httpx.HTTPError when
-        Authentik can't be reached."""
+        """Whether the token can see any session at all. False most likely means it lacks the view permission, or
+        nobody is signed in to Authentik. Raises AuthentikAPIError on an answer other than a 2xx list, httpx.HTTPError
+        when Authentik can't be reached."""
         response = self.client.get(f"{self.base_url}/api/v3/core/authenticated_sessions/", params={"page_size": "1"})
-        if response.is_error:
+        if not response.is_success:
             raise self._handle_response_error(response, "List sessions")
         sessions, _ = self._results(response, "List sessions")
         return bool(sessions)
@@ -489,19 +486,20 @@ class AuthentikManager:
             return (False, "Account toggle failed. Check the server logs.")
 
     def find_user(self, username: str) -> AuthentikUser | None:
-        """The user with exactly this username, or None. Raises AuthentikAPIError or httpx.HTTPError when Authentik
-        can't be asked."""
+        """The user Authentik answers for this username, or None; callers check the username it carries. Raises
+        AuthentikAPIError on an answer other than a 2xx list, httpx.HTTPError when Authentik can't be reached."""
         response = self.client.get(f"{self.base_url}/api/v3/core/users/", params={"username": username})
-        if response.is_error:
+        if not response.is_success:
             raise self._handle_response_error(response, f"Find user {username}")
         return self._first_user(response, f"Find user {username}")
 
     def set_password(self, user: AuthentikUser, password: str) -> None:
-        """Raises AuthentikAPIError or httpx.HTTPError when Authentik refuses or can't be reached."""
+        """Raises AuthentikAPIError on an answer other than 2xx (a redirect too), httpx.HTTPError when Authentik
+        can't be reached."""
         response = self.client.post(
             f"{self.base_url}/api/v3/core/users/{user['pk']}/set_password/", json={"password": password}
         )
-        if response.is_error:
+        if not response.is_success:
             raise self._handle_response_error(response, f"Set the password of {user['username']}")
 
     def _list_all(self, path: str, params: dict[str, str], fields: dict[str, type]) -> list[dict[str, object]]:

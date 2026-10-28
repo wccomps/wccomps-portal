@@ -120,7 +120,7 @@ def _check_team_group_membership() -> CheckResult:
 
 
 def _check_session_access() -> CheckResult:
-    """The portal's token must see sessions, or resetting a team's credentials leaves the team signed in."""
+    """The portal's token must see sessions, or a credentials reset leaves the team's Authentik sessions open."""
     with AuthentikManager() as manager:
         visible = manager.sees_any_sessions()
     if visible:

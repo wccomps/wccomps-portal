@@ -58,8 +58,8 @@ def test_a_question_answered_yes_posts(team_page):
     ):
         page.get_by_role("button", name="Reset Team").click()
     assert questions == [
-        "Reset this team? This unlinks all members, generates a new Authentik password and revokes all active "
-        "sessions. It cannot be undone."
+        "Reset this team? This unlinks all members, generates a new Authentik password and ends the team "
+        "account's Authentik sessions. It cannot be undone."
     ]
     assert len(posts) == 1
 
