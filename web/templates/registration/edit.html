@@ -45,12 +45,19 @@
                     </c-form_field>
                 </c-fieldset>
                 <c-fieldset heading="Events">
-                    {% if form.events.field.queryset.exists %}
-                        <c-form_field :field="form.events">
+                    {{ form.shown_events }}
+                    <c-form_field :field="form.events">
+                        {% if form.events.field.queryset.exists %}
                             {{ form.events }}
-                        </c-form_field>
-                    {% else %}
-                        <p>No events are currently open for registration.</p>
+                        {% else %}
+                            <p>No events are currently open for registration.</p>
+                        {% endif %}
+                    </c-form_field>
+                    {% if form.unoffered_events %}
+                        <p>
+                            Also registered for (registration closed):
+                            {% for event in form.unoffered_events %}{{ event.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                        </p>
                     {% endif %}
                 </c-fieldset>
                 <c-fieldset heading="Competition Rules">

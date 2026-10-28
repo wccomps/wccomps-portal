@@ -872,8 +872,7 @@ def test_props_a_component_reads_are_declared() -> None:
 
 
 def test_every_declared_prop_has_a_default() -> None:
-    """A <c-vars> name with no default that the tag doesn't pass reads the page's variable of the same name (a view's
-    title became every c-module's heading)."""
+    """A <c-vars> name with no default that the tag doesn't pass reads the page's variable of the same name."""
     found = {
         f"cotton/{path.name}:{name}": 'give it a default (name="")'
         for path in shared_component_paths()

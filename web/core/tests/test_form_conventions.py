@@ -29,7 +29,6 @@ def test_pages_do_not_render_messages_themselves() -> None:
 # {% for e in grading_form.points.errors %}
 FIELD_USE = re.compile(r"{[{%][^}]*?\b\w*form\.(?!non_field_errors\b|errors\b|is_bound\b)\w+")
 
-# Templates that render fields one by one without <c-form_errors>, with the reason.
 FORM_ERRORS_ALLOWLIST = {
     "registration/register.html": "the standalone public page, styled on its own: it renders form.non_field_errors",
 }

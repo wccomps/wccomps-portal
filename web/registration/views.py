@@ -176,7 +176,7 @@ def season_create(request: HttpRequest) -> HttpResponse:
     else:
         form = SeasonForm()
 
-    return render(request, "registration/seasons/form.html", {"form": form, "heading": "Create Season"})
+    return render(request, "registration/seasons/form.html", {"form": form, "title": "Create Season"})
 
 
 @require_permission("gold_team")
@@ -195,7 +195,7 @@ def season_edit(request: HttpRequest, season_id: int) -> HttpResponse:
     return render(
         request,
         "registration/seasons/form.html",
-        {"form": form, "heading": "Edit Season"},
+        {"form": form, "title": "Edit Season"},
     )
 
 
@@ -246,7 +246,7 @@ def event_create(request: HttpRequest, season_id: int) -> HttpResponse:
     return render(
         request,
         "registration/events/form.html",
-        {"form": form, "season": season, "heading": "Create Event"},
+        {"form": form, "season": season, "title": "Create Event"},
     )
 
 
@@ -267,7 +267,7 @@ def event_edit(request: HttpRequest, event_id: int) -> HttpResponse:
     return render(
         request,
         "registration/events/form.html",
-        {"form": form, "season": event.season, "heading": "Edit Event"},
+        {"form": form, "season": event.season, "title": "Edit Event"},
     )
 
 

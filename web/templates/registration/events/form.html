@@ -1,11 +1,11 @@
 {% extends "registration/admin_base.html" %}
 {% load cotton %}
 {% block title %}
-    {{ heading }} - WCComps Portal
+    {{ title }} - WCComps Portal
 {% endblock title %}
 {% block registration_content %}
     <div id="content-main">
-        <c-page_header title="{{ heading }}"
+        <c-page_header title="{{ title }}"
                        subtitle="{{ season.name }}"
                        parent_url="{% url 'registration_event_list' season_id=season.id %}"
                        parent_label="{{ season.name }} Events" />

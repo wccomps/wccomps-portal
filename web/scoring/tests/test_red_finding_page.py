@@ -1,6 +1,4 @@
-"""A finding's two pages: the Gold Team review page, under the scoring review nav with a way back to the review list
-and an Approve button on a pending finding, never a link that answers them 403; and the Red Team page, under the
-Red Team nav with Delete for its owner while it is pending."""
+"""A finding's Gold Team review page and its Red Team page each keep their own nav, links and actions."""
 
 import re
 from collections.abc import Callable
@@ -39,8 +37,7 @@ def _targets(html: str) -> set[str]:
     return set(re.findall(r'(?:href|action)="([^"]+)"', html))
 
 
-def _current(html: str) -> set[str]:
-    """The hrefs of the links marked as the current page."""
+def _current_hrefs(html: str) -> set[str]:
     tags = [tag for tag in re.findall(r"<a\b[^>]*>", html) if 'aria-current="page"' in tag]
     return {m.group(1) for tag in tags if (m := re.search(r'href="([^"]+)"', tag))}
 
@@ -68,7 +65,7 @@ def test_a_gold_reviewer_goes_back_to_the_review_list(gold_user: User, finding: 
 def test_the_review_page_marks_scoring_review_and_its_red_team_tab_current(
     gold_user: User, finding: RedTeamScore
 ) -> None:
-    assert _current(_review(gold_user, finding)) == {
+    assert _current_hrefs(_review(gold_user, finding)) == {
         reverse("scoring:review_incidents"),
         reverse("scoring:red_team_findings"),
     }
@@ -122,14 +119,16 @@ def test_the_red_team_list_links_each_finding_to_its_red_team_page(red_team_user
     assert reverse("scoring:review_red_finding", args=[finding.pk]) not in targets
 
 
-def test_a_red_team_member_reading_the_review_list_gets_their_own_finding_pages(
+def test_a_red_team_member_reading_the_review_list_gets_the_red_team_pages(
     red_team_user: User, finding: RedTeamScore
 ) -> None:
     """The review list admits the Red Team to read; the review page is Gold Team's, so their rows open the Red Team
     page instead of a 403."""
-    targets = _targets(_get(red_team_user, reverse("scoring:red_team_findings")))
+    html = _get(red_team_user, reverse("scoring:red_team_findings"))
+    targets = _targets(html)
     assert reverse("scoring:view_red_score", args=[finding.pk]) in targets
     assert reverse("scoring:review_red_finding", args=[finding.pk]) not in targets
+    assert "Approve Selected" not in html
 
 
 def test_a_red_team_member_keeps_the_red_team_nav_and_no_approve(red_team_user: User, finding: RedTeamScore) -> None:
@@ -138,7 +137,7 @@ def test_a_red_team_member_keeps_the_red_team_nav_and_no_approve(red_team_user: 
     assert {reverse(name) for name in RED_TEAM_ONLY} <= targets
     assert reverse("scoring:submit_red_score") in targets
     assert reverse("scoring:bulk_approve_red_scores") not in targets
-    assert reverse("scoring:red_team_scores") in _current(html)
+    assert reverse("scoring:red_team_scores") in _current_hrefs(html)
 
 
 def test_only_the_owner_can_delete_and_only_while_pending(red_team_user: User, finding: RedTeamScore) -> None:

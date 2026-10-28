@@ -1100,6 +1100,7 @@ button[type="submit"]:hover {
 
 .toast-leave {
     transition: all 0.2s ease-in;
+    pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

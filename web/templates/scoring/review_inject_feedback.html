@@ -22,9 +22,8 @@
                 if (!this.editing) return;
                 if (this.dirty) {
                     if (!confirm('You have unsaved changes. Discard?')) {
-                        // Kept: the click that asked (Approve Selected, another row's Save) must not go on
+                        // Keeping the edit cancels what the click would submit or follow
                         event.preventDefault();
-                        event.stopPropagation();
                         return;
                     }
                     this.$refs.editor.value = this.originalValue;

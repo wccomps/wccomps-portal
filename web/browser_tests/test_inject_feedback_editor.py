@@ -1,5 +1,4 @@
-"""Inject feedback's in-place editor: the row's own Save posts the edit without asking about unsaved changes, Approve
-waits until the edit is saved, and a discarded edit puts the stored text back so a later Save doesn't send it."""
+"""Inject feedback's in-place editor never approves, or later saves, text other than what the reviewer kept."""
 
 from decimal import Decimal
 
@@ -59,7 +58,7 @@ def test_the_rows_save_posts_the_edit_without_asking(page, score):
     assert score.feedback == "Better work"
 
 
-def test_approve_waits_until_the_edit_is_saved(page):
+def test_approve_is_disabled_while_the_edit_is_unsaved(page):
     approve = page.get_by_role("button", name="Approve", exact=True)
     assert approve.is_enabled()
     editor = _edit(page, "Better work")
@@ -72,7 +71,7 @@ def test_a_discarded_edit_is_not_saved_later(page, score):
     answer = {"accept": False}
     page.on("dialog", lambda dialog: dialog.accept() if answer["accept"] else dialog.dismiss())
     _edit(page, "Draft to throw away")
-    # A hidden textarea has no role, so the closed editor is found by its name
+    # get_by_role skips hidden elements, so the closed editor is found by its name
     editor = page.locator('textarea[name="feedback"]')
 
     page.get_by_role("columnheader", name="Inject").click()

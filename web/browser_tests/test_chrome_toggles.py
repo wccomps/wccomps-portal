@@ -2,6 +2,7 @@
 pointer or keyboard focus is on it."""
 
 import pytest
+from playwright.sync_api import expect
 
 from core.tests.roles import role_user
 
@@ -11,14 +12,21 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 
 def test_the_dark_mode_button_follows_the_os_until_clicked(live_server, pw_browser):
-    """With no saved choice the page follows the OS: dark there means the button reads pressed and shows the moon."""
+    """With no saved choice the page follows the OS, while it stays open too: the button reads pressed and shows the
+    moon whenever the page is dark."""
     context = create_session_context(pw_browser, live_server, role_user("gold_team"))
     page = context.new_page()
     try:
-        page.emulate_media(color_scheme="dark")
+        page.emulate_media(color_scheme="light")
         page.goto(f"{live_server.url}/ops/admin/teams/")
         button = page.get_by_role("button", name="Dark mode")
-        assert button.get_attribute("aria-pressed") == "true"
+        moon = button.locator("span").nth(1)
+        assert button.get_attribute("aria-pressed") == "false"
+        assert not moon.is_visible()
+
+        page.emulate_media(color_scheme="dark")
+        expect(button).to_have_attribute("aria-pressed", "true")
+        assert moon.is_visible()
 
         button.click()
         assert button.get_attribute("aria-pressed") == "false"

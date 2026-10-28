@@ -1,5 +1,5 @@
 """A team can always file an incident report: the affected IP is optional, as the model has it, and editable, so a
-report without boxes, or with a box that has no IP on record, still goes in."""
+report without boxes still goes in."""
 
 import re
 

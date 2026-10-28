@@ -16,7 +16,7 @@
                           hx_target="#red-findings-content"
                           hx_swap="outerHTML"
                           hx_push_url="true">
-            {% if pending_findings %}
+            {% if reviewing and pending_findings %}
                 <c-slot name="actions">
                     <c-button type="submit" form="bulk-approve-form" variant="primary">
                         Approve Selected

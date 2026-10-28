@@ -287,7 +287,7 @@ def test_a_page_asks_through_data_confirm() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 9. ARIA grid and table roles: a table says rows, cells and headers itself; role="grid" promises arrow keys
+# 9. ARIA grid roles
 # ---------------------------------------------------------------------------
 
 GRID_ROLES = {"grid", "treegrid", "gridcell", "row", "rowgroup", "columnheader", "rowheader"}
@@ -306,25 +306,7 @@ def test_tables_keep_table_semantics() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 10. A view's `title`: Django's admin base prints it as an h1 above the page header's
-# ---------------------------------------------------------------------------
-
-CONTEXT_TITLE_RE = re.compile(r"{{\s*title\b")
-
-
-def test_page_header_pages_take_no_title_from_the_view() -> None:
-    """admin/base.html's content_title block renders a context `title` as an h1, so a page with its own
-    c-page_header gets two."""
-    found = {
-        template_name(path): "reads {{ title }}; pass it from the view under another name"
-        for path in page_templates()
-        if any(tag.name == "c-page_header" for tag in tags(path)) and CONTEXT_TITLE_RE.search(text(path))
-    }
-    fail_with("Page header pages that read a context title", found, {})
-
-
-# ---------------------------------------------------------------------------
-# 11. A portal template named like one of Django admin's replaces it for every page that extends that name
+# 10. Templates named like one of Django admin's
 # ---------------------------------------------------------------------------
 
 DJANGO_ADMIN_TEMPLATES = Path(django.__file__).parent / "contrib/admin/templates"

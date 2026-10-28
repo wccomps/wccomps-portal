@@ -65,8 +65,8 @@ forms by a variable name ending in `form`).
 
 #### `<c-form_field>`
 Form row with label, input, and optional help text/error. Given a form's field, it takes the label, the label's
-target, the required mark, the help text and the errors from it; a `label` or `help_text` prop overrides the field's.
-Pass the strings only for an input that is no form's field.
+target, the required mark, the help text and the errors from it; a prop passed with it overrides what the field
+supplies. Without a field, pass the props.
 ```django
 <c-form_field :field="form.email">{{ form.email }}</c-form_field>
 <c-form_field label="Upload Files" id="screenshots" help_text="Up to 20 files">

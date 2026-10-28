@@ -277,7 +277,7 @@ class IncidentReportForm(forms.ModelForm[IncidentReport]):
             "attack_mitigated": "Attack Mitigated",
         }
         help_texts = {
-            "destination_ip": "",
+            "destination_ip": "Filled in from the first box you pick; type or change it if needed",
             "affected_service": "",
             "source_ip": "",
             "attack_detected_at": "",
@@ -377,6 +377,11 @@ class ScoringTemplateForm(forms.ModelForm[ScoringTemplate]):
             "inject_weight",
             "orange_weight",
         ]
+        labels = {
+            "service_weight": "Service Weight %",
+            "inject_weight": "Inject Weight %",
+            "orange_weight": "Orange Check Weight %",
+        }
         weight_attrs = {"min": "0", "max": "100", "step": "1"}
         widgets = {
             "service_weight": forms.NumberInput(attrs=weight_attrs),

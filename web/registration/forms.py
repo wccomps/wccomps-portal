@@ -1,11 +1,21 @@
+from collections.abc import Iterable
+from typing import cast
+
 from django import forms
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import QuerySet
 
 from .models import Event, RegistrationContact, Season, TeamRegistration
 from .services import NewEvent, NewSeason, new_event_problem
 
 CONTACT_EMAIL_MAX_LENGTH = RegistrationContact._meta.get_field("email").max_length
+RESTRICTED_EVENT_TYPES = ("qualifier", "regional")
+
+
+def open_events() -> QuerySet[Event]:
+    """The events a registration can choose: open, in the active season."""
+    return Event.objects.filter(season__is_active=True, registration_open=True).order_by("date")
 
 
 class RegistrationForm(forms.ModelForm[TeamRegistration]):
@@ -47,31 +57,53 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         events_field = self.fields["events"]
         if isinstance(events_field, forms.ModelMultipleChoiceField):
-            events_field.queryset = Event.objects.filter(
-                season__is_active=True,
-                registration_open=True,
-            ).order_by("date")
+            events_field.queryset = open_events()
             if self.instance.pk:
-                # An enrollment in an event that has since closed already registers the team for something
-                events_field.required = (
-                    events_field.queryset.exists()
-                    and not self.instance.event_enrollments.exclude(event__in=events_field.queryset).exists()
+                # Only the events the page showed can be unticked; clean() requires one when nothing else is kept
+                events_field.required = False
+                self.fields["shown_events"] = forms.ModelMultipleChoiceField(
+                    queryset=Event.objects.all(),
+                    required=False,
+                    widget=forms.MultipleHiddenInput,
+                    initial=[event.pk for event in events_field.queryset],
                 )
+
+    def kept_events(self, shown: Iterable[Event]) -> list[Event]:
+        """The events this registration is enrolled in that the page didn't offer, which a save leaves alone."""
+        if not self.instance.pk:
+            return []
+        enrollments = self.instance.event_enrollments.select_related("event").exclude(event__in=list(shown))
+        return [enrollment.event for enrollment in enrollments.order_by("event__date")]
+
+    @property
+    def unoffered_events(self) -> list[Event]:
+        return self.kept_events(open_events())
 
     def clean(self) -> dict[str, object]:
-        """Validate that non-WRCCDC teams only register for invitationals."""
+        """Validate that non-WRCCDC teams only register for invitationals, counting the enrollments kept."""
         cleaned_data = super().clean() or {}
         region = cleaned_data.get("region")
-        events = cleaned_data.get("events")
+        events = list(cast(Iterable[Event], cleaned_data.get("events") or []))
+        kept = self.kept_events(cast(Iterable[Event], cleaned_data.get("shown_events") or []))
+        if self.instance.pk and not events and not kept and "events" not in self.errors:
+            self.add_error("events", forms.Field.default_error_messages["required"])
 
-        if region and region != "wrccdc" and events:
-            restricted_events = [e for e in events if e.event_type in ("qualifier", "regional")]
-            if restricted_events:
-                event_names = ", ".join(e.name for e in restricted_events)
-                raise forms.ValidationError(
-                    f"Only Western Regional (WRCCDC) teams can register for Qualifiers and Regionals. "
-                    f"Please remove: {event_names}"
+        if region and region != "wrccdc":
+            restricted = [e.name for e in events if e.event_type in RESTRICTED_EVENT_TYPES]
+            closed = [e.name for e in kept if e.event_type in RESTRICTED_EVENT_TYPES]
+            problems = []
+            if restricted:
+                problems.append(
+                    "Only Western Regional (WRCCDC) teams can register for Qualifiers and Regionals. "
+                    f"Please remove: {', '.join(restricted)}"
                 )
+            if closed:
+                problems.append(
+                    f"This team is registered for {', '.join(closed)}, which only WRCCDC teams can enter and whose "
+                    "registration has closed: contact the organizers to change the region."
+                )
+            if problems:
+                raise forms.ValidationError(problems)
 
         return cleaned_data
 
@@ -108,8 +140,8 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
                 },
             )
             selected = list(self.cleaned_data["events"])
-            offered = self.fields["events"].queryset  # type: ignore[attr-defined]
-            RegistrationEventEnrollment.objects.filter(registration=registration, event__in=offered).exclude(
+            shown = self.cleaned_data.get("shown_events") or []
+            RegistrationEventEnrollment.objects.filter(registration=registration, event__in=shown).exclude(
                 event__in=selected
             ).delete()
             for event in selected:

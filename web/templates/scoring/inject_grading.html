@@ -27,9 +27,9 @@
                         hx-include="this"
                         name="inject">
                     <option value="">Select an inject to grade</option>
-                    {% for id, inject_title in inject_choices %}
+                    {% for id, title in inject_choices %}
                         <option value="{{ id }}"
-                                {% if id == selected_inject_id %}selected{% endif %}>{{ inject_title }}</option>
+                                {% if id == selected_inject_id %}selected{% endif %}>{{ title }}</option>
                     {% endfor %}
                 </select>
             </c-form_field>

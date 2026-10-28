@@ -178,7 +178,6 @@ class AdminReviewListViewTestCase(TestCase):
         self.assertContains(response, "Test School")
 
     def test_review_list_shows_captain_contact(self):
-        """The contact columns show the captain's email and phone."""
         self.client.force_login(self.gold_user)
         response = self.client.get(reverse("registration_review_list"))
         self.assertContains(response, "test@example.com")
@@ -266,7 +265,6 @@ class AdminRejectViewTestCase(TestCase):
         self.assertEqual(self.registration.rejection_reason, "Incomplete information")
 
     def test_reject_page_shows_the_registration(self):
-        """The confirmation names the registration being rejected and its contact."""
         self.client.force_login(self.gold_user)
         response = self.client.get(reverse("registration_reject", args=[self.registration.id]))
         self.assertContains(response, "Test School")
@@ -404,6 +402,74 @@ class TokenEditViewTestCase(TestCase):
         )
         self.assertEqual(response.status_code, 302)
 
+    def _closed_qualifier_enrollment(self):
+        qualifier = Event.objects.create(
+            season=self.season,
+            name="Closed Qualifier",
+            event_type="qualifier",
+            event_number=4,
+            date="2026-02-01",
+            registration_open=False,
+        )
+        RegistrationEventEnrollment.objects.create(registration=self.registration, event=qualifier)
+        return qualifier
+
+    def test_edit_checks_the_region_against_enrollments_it_keeps(self):
+        """A team in a Qualifier whose registration closed can't save itself into a region that may not enter it."""
+        self._closed_qualifier_enrollment()
+        response = self.client.post(
+            reverse("registration_edit", args=[self.registration.edit_token]),
+            data=self._contact_data(region="mwccdc", events=[self.event.id], shown_events=[self.event.id]),
+        )
+        self.assertContains(response, "Closed Qualifier")
+        self.registration.refresh_from_db()
+        self.assertEqual(self.registration.region, "wrccdc")
+
+    def test_edit_shows_why_a_ticked_event_that_closed_meanwhile_is_refused(self):
+        """The page was loaded while the event was open; by the save its registration had closed."""
+        self.event.registration_open = False
+        self.event.save()
+        response = self.client.post(
+            reverse("registration_edit", args=[self.registration.edit_token]),
+            data=self._contact_data(events=[self.event.id], shown_events=[self.event.id]),
+        )
+        self.assertContains(response, "Select a valid choice")
+
+    def test_edit_keeps_an_enrollment_in_an_event_that_reopened_meanwhile(self):
+        """Only the events the page showed can be unticked: one that opened after the page loaded keeps its team."""
+        closed = self._closed_event_enrollment()
+        closed.registration_open = True
+        closed.save()
+        response = self.client.post(
+            reverse("registration_edit", args=[self.registration.edit_token]),
+            data=self._contact_data(events=[self.event.id], shown_events=[self.event.id]),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(self.registration.event_enrollments.filter(event=closed).exists())
+
+    def test_edit_unticking_a_shown_event_drops_it(self):
+        other = Event.objects.create(
+            season=self.season,
+            name="Invitational 2",
+            event_type="invitational",
+            event_number=5,
+            date="2026-03-01",
+            registration_open=True,
+        )
+        RegistrationEventEnrollment.objects.create(registration=self.registration, event=other)
+        response = self.client.post(
+            reverse("registration_edit", args=[self.registration.edit_token]),
+            data=self._contact_data(events=[self.event.id], shown_events=[self.event.id, other.id]),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(self.registration.event_enrollments.filter(event=other).exists())
+
+    def test_edit_page_lists_enrollments_in_closed_events(self):
+        """The checkboxes offer only open events, so the page says what else the team is registered for."""
+        self._closed_event_enrollment()
+        response = self.client.get(reverse("registration_edit", args=[self.registration.edit_token]))
+        self.assertContains(response, "Closed Invitational")
+
     def test_edit_page_404_with_invalid_token(self):
         """Test edit page returns 404 with invalid token."""
         response = self.client.get(reverse("registration_edit", args=["invalid-token"]))
@@ -467,10 +533,10 @@ class SeasonViewTestCase(TestCase):
         self.assertTemplateUsed(response, "registration/seasons/list.html")
 
     def test_season_form_has_one_heading(self):
-        """The page header is the page's only h1."""
+        """The view passes title, which Django's admin base prints as an h1 of its own on Django admin's pages."""
         self.client.force_login(self.gold_user)
         response = self.client.get(reverse("registration_season_create"))
-        self.assertEqual(response.content.decode().count("<h1>Create Season</h1>"), 1)
+        self.assertEqual(response.content.decode().count("<h1"), 1)
 
     def test_season_create(self):
         """Test creating a season."""

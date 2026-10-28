@@ -1,5 +1,5 @@
-"""What a cotton component renders from what its tag passes: c-form_field given a bound field takes its label, label
-target, required mark, help text and errors from the form, and no component reads a page variable it wasn't passed."""
+"""c-form_field given a bound field takes its label, label target, required mark, help text and errors from the form;
+a declared prop the tag doesn't pass stays empty."""
 
 from django import forms
 from django.template import Context, Template
@@ -40,8 +40,7 @@ def test_a_prop_overrides_what_the_field_says() -> None:
     assert "Where results go." not in html
 
 
-def test_a_component_does_not_read_the_page_s_variables() -> None:
-    """A prop the tag doesn't pass stays empty, whatever the page's variables are called."""
+def test_an_unpassed_prop_ignores_a_page_variable_of_its_name() -> None:
     html = Template(CottonCompiler().process("{% load cotton %}<c-module>x</c-module>")).render(
         Context({"title": "From the view"})
     )

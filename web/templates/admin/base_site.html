@@ -9,6 +9,13 @@
         <a href="{% url 'ticket_list' %}">WCComps Portal</a>
     </div>
 {% endblock branding %}
+{# A portal page titles itself with c-page_header; Django admin's own pages (site_header set) keep their headings #}
+{% block content_title %}
+    {% if site_header %}{{ block.super }}{% endif %}
+{% endblock content_title %}
+{% block content_subtitle %}
+    {% if site_header %}{{ block.super }}{% endif %}
+{% endblock content_subtitle %}
 {% block breadcrumbs %}
     {% block page_breadcrumbs %}
     {% endblock page_breadcrumbs %}
@@ -164,9 +171,17 @@
         }));
         // Django's admin/js/theme.js sets data-theme first: "auto" (the default) follows the OS
         Alpine.data('themeToggle', () => ({
-            dark: document.documentElement.dataset.theme === 'dark' || (document.documentElement.dataset.theme !== 'light'
-                && window.matchMedia('(prefers-color-scheme: dark)').matches),
+            dark: false,
             get light() { return !this.dark; },
+            init() {
+                const os = window.matchMedia('(prefers-color-scheme: dark)');
+                const shown = () => {
+                    const theme = document.documentElement.dataset.theme;
+                    this.dark = theme === 'dark' || (theme !== 'light' && os.matches);
+                };
+                shown();
+                os.addEventListener('change', shown);
+            },
             toggle() {
                 this.dark = !this.dark;
                 const theme = this.dark ? 'dark' : 'light';
@@ -291,19 +306,18 @@
                     this.toastUrl = '/tickets/' + t.number + '/';
                     this.showToast = true;
                     this._playAudio();
-                    this._hideIn(6000);
+                    if (!this._hovered && !this._focused) this._hideIn(6000);
                 },
 
                 _hideIn(ms) {
                     clearTimeout(this._hideTimer);
                     this._hideTimer = setTimeout(() => {
                         this.showToast = false;
-                        this._hovered = this._focused = false;
                         setTimeout(() => this._showNext(), 1000);
                     }, ms);
                 },
 
-                // Pointer or focus on the toast keeps it up (WCAG 2.2.1); once both leave it hides after a moment
+                // Pointer or focus on the toast keeps it up (WCAG 2.2.1); it takes no pointer while leaving
                 hold(by) {
                     this[by] = true;
                     clearTimeout(this._hideTimer);
