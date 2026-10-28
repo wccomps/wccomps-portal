@@ -46,6 +46,7 @@
                 </c-fieldset>
                 <c-fieldset heading="Events">
                     {# What this render offers, never the posted list a failed save sends back #}
+                    <input type="hidden" name="events_listed" value="1">
                     {% for event in form.events.field.queryset %}
                         <input type="hidden" name="shown_events" value="{{ event.pk }}">
                     {% endfor %}

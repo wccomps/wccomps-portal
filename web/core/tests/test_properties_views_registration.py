@@ -30,8 +30,13 @@ def _registration(w: World) -> Fields:
 
 
 def _edited_registration(w: World) -> Fields:
-    """The edit form has the hidden list of events its page offered."""
-    return form_fields(RegistrationForm(instance=TeamRegistration.objects.first()), REGIONS)
+    """The edit page also posts the event ids it offered, beside a marker that it posted them."""
+    events = [str(pk) for pk in Event.objects.values_list("pk", flat=True)] or ["1"]
+    return {
+        **_registration(w),
+        "shown_events": st.lists(st.one_of(st.sampled_from(events), hostile_text()), max_size=4),
+        "events_listed": st.sampled_from(["1", ""]),
+    }
 
 
 CASES = [

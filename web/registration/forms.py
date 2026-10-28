@@ -5,12 +5,15 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import QuerySet
+from django.http import QueryDict
 
 from .models import Event, RegistrationContact, Season, TeamRegistration
 from .services import NewEvent, NewSeason, new_event_problem
 
 CONTACT_EMAIL_MAX_LENGTH = RegistrationContact._meta.get_field("email").max_length
 RESTRICTED_EVENT_TYPES = ("qualifier", "regional")
+# The registration edit page always posts this beside the open events it offered (shown_events)
+LISTED = "events_listed"
 
 
 def open_events() -> QuerySet[Event]:
@@ -18,14 +21,15 @@ def open_events() -> QuerySet[Event]:
 
 
 class OpenEventsField(forms.ModelMultipleChoiceField[Event]):
-    """Refuses an event that closed after the page loaded by its name, not its id."""
+    """Names a ticked event that isn't open, where Django's invalid choice error gives only the posted id."""
 
     def clean(self, value: object) -> QuerySet[Event]:
         try:
             return super().clean(value)
         except ValidationError as error:
             pk = (error.params or {}).get("value") if error.code == "invalid_choice" else None
-            closed = Event.objects.filter(pk=pk).first() if pk is not None else None
+            offered = cast(QuerySet[Event], self.queryset).values_list("pk", flat=True)
+            closed = Event.objects.filter(pk=pk).exclude(pk__in=offered).first() if pk else None
             if closed is None:
                 raise
             message = f"{closed.name} is no longer open for registration."
@@ -73,18 +77,40 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
         offered = open_events()
         events_field.queryset = offered
         self.unoffered_events: list[Event] = []
-        self.untickable: set[Event] = set()
+        self.untickable: set[int] = set()
         if self.instance.pk:
-            self.unoffered_events = self._enrolled_outside(offered)
-            # An enrollment the checkboxes don't offer already registers the team for something
-            events_field.required = offered.exists() and not self.unoffered_events
-            self.fields["shown_events"] = forms.ModelMultipleChoiceField(
-                queryset=Event.objects.all(), required=False, widget=forms.MultipleHiddenInput
-            )
+            offered_pks = set(offered.values_list("pk", flat=True))
+            enrolled = set(self.instance.event_enrollments.values_list("event_id", flat=True))
+            self.untickable = offered_pks
+            if self.is_bound and LISTED in self.data:
+                # The edit page posts the open events it offered: only those can be unticked
+                listed = {int(v) for v in self._posted("shown_events") if v.isdigit()}
+                self.untickable = offered_pks & listed
+                if unlisted := (enrolled & offered_pks) - listed:
+                    # Opened since the page loaded: a re-render shows them ticked, as the team has them
+                    self._post("events", [*self._posted("events"), *map(str, unlisted)])
+            self.unoffered_events = [
+                enrollment.event
+                for enrollment in self.instance.event_enrollments.select_related("event")
+                .exclude(event__in=offered)
+                .order_by("event__date")
+            ]
+            # An enrollment a save can't untick already registers the team for something
+            events_field.required = bool(offered_pks) and not (enrolled - self.untickable)
 
-    def _enrolled_outside(self, events: Iterable[Event]) -> list[Event]:
-        enrollments = self.instance.event_enrollments.select_related("event").exclude(event__in=list(events))
-        return [enrollment.event for enrollment in enrollments.order_by("event__date")]
+    def _posted(self, name: str) -> list[str]:
+        if isinstance(self.data, QueryDict):
+            return self.data.getlist(name)
+        values = self.data.get(name, [])
+        return [str(v) for v in (values if isinstance(values, list | tuple) else [values])]
+
+    def _post(self, name: str, values: list[str]) -> None:
+        if isinstance(self.data, QueryDict):
+            data = self.data.copy()
+            data.setlist(name, values)
+            self.data = data
+        else:
+            self.data = {**self.data, name: values}
 
     def clean(self) -> dict[str, object]:
         """No Qualifier or Regional for a non-WRCCDC team, counting the enrollments an edit keeps."""
@@ -93,11 +119,8 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
         events = list(cast(Iterable[Event], cleaned_data.get("events") or []))
         kept: list[Event] = []
         if self.instance.pk:
-            # A save unticks only events open now that the page showed; a page without the list showed them all
-            offered = set(open_events())
-            shown = set(cast(Iterable[Event], cleaned_data.get("shown_events") or []))
-            self.untickable = offered & shown if "shown_events" in self.data else offered
-            kept = self._enrolled_outside(self.untickable)
+            enrollments = self.instance.event_enrollments.select_related("event")
+            kept = [enrollment.event for enrollment in enrollments.exclude(event_id__in=self.untickable)]
 
         if region and region != "wrccdc":
             restricted = [e.name for e in events if e.event_type in RESTRICTED_EVENT_TYPES]
@@ -151,7 +174,7 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
                 },
             )
             selected = list(self.cleaned_data["events"])
-            RegistrationEventEnrollment.objects.filter(registration=registration, event__in=self.untickable).exclude(
+            RegistrationEventEnrollment.objects.filter(registration=registration, event_id__in=self.untickable).exclude(
                 event__in=selected
             ).delete()
             for event in selected:

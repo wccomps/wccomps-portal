@@ -163,6 +163,7 @@ class TestRegistrationFormSave:
 
         valid_form_data["events"] = [event2.id]
         valid_form_data["shown_events"] = [event1.id, event2.id]
+        valid_form_data["events_listed"] = "1"
         edit_form = RegistrationForm(data=valid_form_data, instance=registration)
         assert edit_form.is_valid(), edit_form.errors
         edit_form.save()
