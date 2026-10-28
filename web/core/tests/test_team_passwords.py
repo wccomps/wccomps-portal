@@ -256,3 +256,36 @@ def test_web_and_bot_bulk_resets_leave_one_audit_row_each(admin_user):
         client.post(reverse("admin_competition_action"), {"action": "reset_passwords", "team_numbers": ""})
 
     assert AuditLog.objects.filter(action="blueteam_passwords_reset").count() == 1
+
+
+def _bulk_reset(admin_user, results):
+    for number in results:
+        Team.objects.create(team_number=number, team_name=f"Team {number}", is_active=True)
+    client = Client()
+    client.force_login(admin_user)
+    with (
+        patch("core.authentik_utils.AuthentikManager"),
+        patch("core.authentik_utils._reset_credentials", side_effect=lambda _m, n: results[n]),
+    ):
+        return client.post(reverse("admin_competition_action"), {"action": "reset_passwords", "team_numbers": ""})
+
+
+def test_web_bulk_reset_names_each_failed_team_and_keeps_the_csv(admin_user):
+    """A partial failure is an error that stays on screen, and the passwords that did change still arrive."""
+    body = _bulk_reset(
+        admin_user,
+        {1: CredentialReset(password="pw-1"), 2: CredentialReset(password=None, error="User team02 not found")},
+    ).json()
+
+    assert body["success"] is False
+    assert "Reset 1/2 passwords" in body["message"]
+    assert "team02: User team02 not found" in body["message"]
+    assert body["csv"].splitlines()[1:] == ["team01,pw-1"]
+
+
+def test_web_bulk_reset_where_every_team_failed_is_an_error(admin_user):
+    body = _bulk_reset(admin_user, {1: CredentialReset(password=None, error="Find user team01: HTTP 500")}).json()
+
+    assert body["success"] is False
+    assert body["message"].startswith("Reset 0/1 passwords")
+    assert body["csv"] == ""

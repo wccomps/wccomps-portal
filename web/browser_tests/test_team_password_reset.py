@@ -135,3 +135,38 @@ def test_competition_reset_passwords_keeps_the_csv_and_its_download(live_server,
             assert download.value.suggested_filename == "blueteam_passwords.csv"
     finally:
         context.close()
+
+
+def test_competition_reset_passwords_partial_failure_keeps_the_error_and_the_csv(live_server, pw_browser):
+    """A team that failed must stay on screen (an error does not fade), and the teams that did reset still get
+    their CSV."""
+    from team.models import Team
+
+    for number in (3, 4):
+        Team.objects.create(team_number=number, team_name=f"Team 0{number}", is_active=True)
+    results = {
+        3: CredentialReset(password="Csv-Pass-3!"),
+        4: CredentialReset(password=None, error="User team04 not found"),
+    }
+    user = role_user("admin")
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    page.on("dialog", lambda dialog: dialog.accept())
+
+    try:
+        with (
+            patch("core.authentik_utils.AuthentikManager"),
+            patch("core.authentik_utils._reset_credentials", side_effect=lambda _m, n: results[n]),
+        ):
+            page.goto(live_server.url + reverse("admin_competition"))
+            page.get_by_role("button", name="Advanced: reset team passwords").click()
+            page.get_by_label("Team Numbers").fill("3-4")
+            with page.expect_response(lambda r: r.url.endswith("/action/")):
+                page.get_by_role("button", name="Reset Passwords").click()
+            csv = page.locator("textarea[readonly]")
+            csv.wait_for()
+            page.wait_for_timeout(6000)
+            assert "Csv-Pass-3!" in csv.input_value()
+            assert page.get_by_text("team04: User team04 not found").is_visible(), "the failure must not fade"
+    finally:
+        context.close()

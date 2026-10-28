@@ -288,18 +288,17 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
     password_list = result.password_list
     sessions_failed = result.sessions_failed
 
-    csv_content = credentials_csv((username, password) for _num, username, password in password_list)
+    csv_content = (
+        credentials_csv((username, password) for _num, username, password in password_list) if password_list else ""
+    )
 
     message = f"Reset {len(password_list)}/{len(team_numbers)} passwords"
+    if result.failed_resets:
+        message += "; failed: " + "; ".join(f"{username}: {why}" for username, why in result.failed_resets)
     if sessions_failed:
         message += f"; {sessions_failure_summary(sessions_failed)}"
-    return JsonResponse(
-        {
-            "success": True,
-            "message": message,
-            "csv": csv_content,
-        }
-    )
+    # Any failed team makes it an error, which stays on screen; the CSV still carries the passwords that changed
+    return JsonResponse({"success": not result.failed_resets, "message": message, "csv": csv_content})
 
 
 def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
