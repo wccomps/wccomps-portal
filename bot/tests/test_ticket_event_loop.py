@@ -9,6 +9,7 @@ from django.contrib.auth.models import User
 
 from bot.cogs.admin_tickets import AdminTicketsCog
 from bot.discord_queue import DiscordQueueProcessor
+from bot.tests.discord_fakes import competition_thread
 from bot.ticket_dashboard import ResolveTicketModal, TicketActionView
 from core.models import DiscordTask
 from team.models import Team
@@ -82,10 +83,14 @@ async def test_resolve_button_opens_modal_and_rejects_out_of_range_points(
 
 
 async def test_updates_for_threadless_ticket_complete_and_refresh_dashboard(claimed_ticket: Ticket) -> None:
+    """The team has no chat channel to give the ticket a thread in."""
     bot = MagicMock(spec=discord.Client)
     bot.unified_dashboard = MagicMock()
     bot.unified_dashboard.trigger_update = MagicMock()
     processor = DiscordQueueProcessor(bot)
+    guild = MagicMock(spec=discord.Guild)
+    guild.categories = []
+    processor._guild = MagicMock(return_value=guild)
 
     update = await DiscordTask.objects.acreate(
         task_type="post_ticket_update",
@@ -107,7 +112,7 @@ async def test_reopen_unlocks_the_archived_thread(claimed_ticket: Ticket, action
     """Resolving archives and locks the thread; a team can't post in it again until the reopen unlocks it."""
     claimed_ticket.discord_thread_id = 5551
     await claimed_ticket.asave(update_fields=["discord_thread_id"])
-    thread = MagicMock(spec=discord.Thread)
+    thread = competition_thread()
     thread.archived = True
     thread.locked = True
     calls: list[str] = []
@@ -123,7 +128,8 @@ async def test_reopen_unlocks_the_archived_thread(claimed_ticket: Ticket, action
         ticket=claimed_ticket,
         payload={"ticket_id": claimed_ticket.id, "action": action, "actor": "v"},
     )
-    await processor._handle_post_ticket_update(task.typed_payload())
+    with patch("bot.discord_queue.ensure_ticket_thread", new=AsyncMock(return_value=thread)):
+        await processor._handle_post_ticket_update(task.typed_payload())
 
     expected = ["edit {'archived': False, 'locked': False}", "send"] if unlocks else ["send"]
     assert calls == expected

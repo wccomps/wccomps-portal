@@ -120,6 +120,9 @@ class Ticket(Approvable):
     points_charged = models.IntegerField(default=0)
 
     discord_thread_id = models.BigIntegerField(unique=True, null=True, blank=True)
+    discord_ticket_message_id = models.BigIntegerField(
+        null=True, blank=True, help_text="The bot's ticket message with action buttons in the thread"
+    )
     thread_archive_scheduled_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

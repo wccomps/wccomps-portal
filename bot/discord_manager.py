@@ -45,7 +45,9 @@ async def delete_team_infrastructure(guild: discord.Guild, team: Team, reason: s
             else:
                 chat_deleted = chat_deleted or channel == chat_channel
         if chat_deleted:
-            await Ticket.objects.filter(team=team, discord_thread_id__isnull=False).aupdate(discord_thread_id=None)
+            await Ticket.objects.filter(team=team, discord_thread_id__isnull=False).aupdate(
+                discord_thread_id=None, discord_ticket_message_id=None
+            )
 
         try:
             await category.delete(reason=reason)

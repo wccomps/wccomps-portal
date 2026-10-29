@@ -227,11 +227,6 @@ def category_chat_channel(category: discord.CategoryChannel) -> discord.TextChan
     return next((c for c in category.channels if isinstance(c, discord.TextChannel) and "chat" in c.name.lower()), None)
 
 
-@sync_to_async
-def get_team_member_discord_ids(team: Team) -> list[int]:
-    return list(team.members.filter(is_active=True).values_list("discord_id", flat=True))
-
-
 class ConfirmView(discord.ui.View):
     def __init__(
         self,

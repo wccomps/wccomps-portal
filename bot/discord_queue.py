@@ -16,14 +16,13 @@ from bot.competition_actions import deliver_team_broadcast, run_competition_clea
 from bot.discord_manager import recreate_team_infrastructure, setup_team_infrastructure
 from bot.heartbeat import record as record_heartbeat
 from bot.role_sync import competition_guild, sync_member_roles, sync_roles
-from bot.thread_creator import publish_new_ticket
+from bot.thread_creator import add_to_team_threads, ensure_ticket_thread
 from bot.ticket_dashboard import trigger_dashboard
 from bot.utils import (
     add_field,
     log_to_ops_channel,
     recycle_db_connection,
     send_parts,
-    split_message,
 )
 from core.discord_tasks import (
     AddUserToThread,
@@ -42,7 +41,7 @@ from core.discord_tasks import (
 )
 from core.models import DiscordTask
 from core.utils import role_sync_summary
-from team.models import Team
+from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketComment
 
 logger = logging.getLogger(__name__)
@@ -218,9 +217,7 @@ class DiscordQueueProcessor:
             try:
                 member = await guild.fetch_member(payload.discord_id)
             except discord.NotFound:
-                logger.info(
-                    f"Member {payload.discord_id} not in the guild; the periodic role sync covers them once they join"
-                )
+                logger.info(f"Member {payload.discord_id} not in the guild; joining queues their sync")
                 return
 
         # Problems are logged, not raised: retrying can't fix a missing permission or role, and the
@@ -230,6 +227,9 @@ class DiscordQueueProcessor:
             f"Synced roles for {member}: {stats['roles_added']} added, {stats['roles_removed']} removed"
             + (f"; problems: {'; '.join(c for c in stats['changes'] if c.startswith('⚠'))}" if stats["errors"] else "")
         )
+        link = await DiscordLink.objects.filter(discord_id=payload.discord_id, is_active=True).afirst()
+        if link and link.team_id:
+            await add_to_team_threads(self.bot, member, link.team_id)
 
     async def _handle_cleanup_competition(self, payload: CleanupCompetition) -> None:
         """Run the competition cleanup Close Out Event queued: only the Discord side for a close-out."""
@@ -253,66 +253,36 @@ class DiscordQueueProcessor:
 
     async def _handle_ticket_created_web(self, payload: TicketCreatedWeb) -> None:
         ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
-
-        # A retry after a partial failure must not create a second thread.
-        if ticket.discord_thread_id:
+        try:
+            await ensure_ticket_thread(self.bot, self._guild(), ticket)
+        finally:
             trigger_dashboard(self.bot)
-            return
-
-        await publish_new_ticket(self.bot, competition_guild(self.bot), ticket)
-
-    async def _get_ticket_thread(self, thread_id: int) -> discord.TextChannel | discord.Thread:
-        thread = self.bot.get_channel(thread_id)
-        if not thread:
-            try:
-                thread = await self.bot.fetch_channel(thread_id)
-            except Exception as e:
-                raise ValueError(f"Could not find thread {thread_id}: {e}") from e
-        if not isinstance(thread, (discord.TextChannel, discord.Thread)):
-            raise TypeError(f"Channel {thread_id} is not a text channel or thread")
-        return thread
 
     async def _handle_post_comment(self, payload: PostComment) -> None:
-        comment_id = payload.comment_id
-        ticket = await _target(Ticket.objects.all(), id=payload.ticket_id)
-        comment = await _target(TicketComment.objects.select_related("author"), id=comment_id)
+        ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
+        comment = await _target(TicketComment.objects.select_related("author"), id=payload.comment_id)
 
-        if not ticket.discord_thread_id:
-            logger.info(f"Ticket {ticket.ticket_number} has no Discord thread; comment {comment_id} not mirrored")
+        thread = await ensure_ticket_thread(self.bot, self._guild(), ticket)
+        if thread is None:
+            logger.info(f"Ticket {ticket.ticket_number} has no Discord thread; comment {comment.id} not mirrored")
             return
 
-        thread = await self._get_ticket_thread(ticket.discord_thread_id)
-
-        author_display = "Unknown"
-        if comment.author:
-            author_display = comment.author.username or "Unknown"
-        message_content = f"**{author_display}**\n{comment.comment_text}"
-
+        author_display = (comment.author.username if comment.author else "") or "Unknown"
         # A web comment has no length limit; send all of it, in as many messages as it takes
-        messages = [await thread.send(part) for part in split_message(message_content)]
-        message = messages[0]
-
-        @sync_to_async
-        def save_message_id() -> None:
-            comment.discord_message_id = message.id
-            comment.save()
-
-        await save_message_id()
-
-        logger.info(f"Posted comment {comment_id} to thread {thread.id} (message {message.id})")
+        await send_parts(thread, f"**{author_display}**\n{comment.comment_text}")
+        logger.info(f"Posted comment {comment.id} to thread {thread.id}")
 
     async def _handle_post_ticket_update(self, payload: PostTicketUpdate) -> None:
         action = payload.action
         actor = payload.actor
 
-        ticket = await _target(Ticket.objects.all(), id=payload.ticket_id)
+        ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
         trigger_dashboard(self.bot)
 
-        if not ticket.discord_thread_id:
+        thread = await ensure_ticket_thread(self.bot, self._guild(), ticket)
+        if thread is None:
             logger.info(f"Ticket {ticket.ticket_number} has no Discord thread; update '{action}' not mirrored")
             return
-
-        thread = await self._get_ticket_thread(ticket.discord_thread_id)
 
         if action == "resolved":
             notes = payload.resolution_notes
@@ -335,7 +305,7 @@ class DiscordQueueProcessor:
             await thread.send(f"Ticket cancelled by **{actor}**")
         elif action == "reopened":
             # Resolving archived and locked the thread (cogs/ticketing.py); only staff can post in a locked one
-            if isinstance(thread, discord.Thread) and (thread.archived or thread.locked):
+            if thread.archived or thread.locked:
                 await thread.edit(archived=False, locked=False)
             msg = f"Ticket reopened by **{actor}**"
             if payload.reason:
@@ -344,21 +314,16 @@ class DiscordQueueProcessor:
         else:
             await thread.send(f"Ticket updated: {action} by **{actor}**")
 
-        logger.info(f"Posted ticket update ({action}) to thread {ticket.discord_thread_id}")
+        logger.info(f"Posted ticket update ({action}) to thread {thread.id}")
 
     async def _handle_add_user_to_thread(self, payload: AddUserToThread) -> None:
         discord_id = payload.discord_id
-        thread_id = payload.thread_id
+        ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
 
-        thread = self.bot.get_channel(thread_id)
-        if not thread:
-            try:
-                thread = await self.bot.fetch_channel(thread_id)
-            except Exception as e:
-                raise ValueError(f"Could not find thread {thread_id}: {e}") from e
-
-        if not isinstance(thread, discord.Thread):
-            raise TypeError(f"Channel {thread_id} is not a thread")
+        thread = await ensure_ticket_thread(self.bot, self._guild(), ticket)
+        if thread is None:
+            logger.info(f"Ticket {ticket.ticket_number} has no Discord thread; user {discord_id} not added")
+            return
 
         user = self.bot.get_user(discord_id)
         if not user:
@@ -369,7 +334,7 @@ class DiscordQueueProcessor:
 
         await thread.add_user(user)
 
-        logger.info(f"Added user {discord_id} to thread {thread_id}")
+        logger.info(f"Added user {discord_id} to thread {thread.id}")
 
     async def _handle_sync_roles(self, payload: SyncRoles) -> SyncRolesResult:
         """Run the Authentik role sync; its result is what the web Sync Roles page shows."""

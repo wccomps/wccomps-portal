@@ -112,7 +112,7 @@ def _record(
 
 
 def _invite(ticket: Ticket, assignee: User, discord_id: int | None) -> None:
-    """Queue adding the new assignee to the ticket's thread, if both exist on Discord."""
+    """Queue adding the assignee to the ticket's thread; with no thread the bot adds them when it makes one."""
     if not ticket.discord_thread_id:
         return
     if discord_id is None:
@@ -144,6 +144,8 @@ def _give(
     assignee = get_user_for_ticket(discord_id=discord_id, user=user)
     if not assignee:
         return None, "Could not find a valid user to assign."
+    if not has_permission(assignee, "ticketing_support"):
+        return None, f"{assignee.username} can't be given tickets: they aren't ticketing staff."
 
     if action == "claim":
         ticket.status = Ticket.STATUS_CLAIMED
@@ -284,8 +286,7 @@ def resolve_ticket(
         ticket.points_charged = point_penalty
         if not ticket.assigned_to and resolver:
             ticket.assigned_to = resolver
-        if ticket.discord_thread_id:
-            ticket.thread_archive_scheduled_at = timezone.now() + THREAD_ARCHIVE_DELAY
+        ticket.thread_archive_scheduled_at = timezone.now() + THREAD_ARCHIVE_DELAY
         ticket.save()
 
         _record(
@@ -334,8 +335,7 @@ def cancel_ticket(
         ticket.resolved_at = timezone.now()
         ticket.resolution_notes = reason or f"Cancelled by {actor_username}"
         ticket.points_charged = 0
-        if ticket.discord_thread_id:
-            ticket.thread_archive_scheduled_at = timezone.now() + THREAD_ARCHIVE_DELAY
+        ticket.thread_archive_scheduled_at = timezone.now() + THREAD_ARCHIVE_DELAY
         ticket.save()
 
         _record(ticket, "cancelled", user, actor_username, {"cancelled_by": actor_username, "reason": reason})

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock
 import discord
 import pytest
 import pytest_asyncio
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.utils import timezone
 
@@ -86,6 +87,7 @@ class TestTicketingCog:
 
         # Mock thread
         mock_thread = AsyncMock(spec=discord.Thread)
+        mock_thread.guild.id = settings.COMPETITION_GUILD_ID
         mock_thread.edit = AsyncMock()
         cog.bot.get_channel = Mock(return_value=mock_thread)
 
@@ -122,6 +124,7 @@ class TestTicketingCog:
         )
 
         mock_thread = AsyncMock(spec=discord.Thread)
+        mock_thread.guild.id = settings.COMPETITION_GUILD_ID
         cog.bot.get_channel = Mock(return_value=mock_thread)
 
         await cog.archive_threads_task()
@@ -299,6 +302,7 @@ class TestTicketingCog:
         mock_threads = {}
         for ticket in tickets:
             mock_thread = AsyncMock(spec=discord.Thread)
+            mock_thread.guild.id = settings.COMPETITION_GUILD_ID
             mock_thread.edit = AsyncMock()
             mock_threads[ticket.discord_thread_id] = mock_thread
 
@@ -588,7 +592,7 @@ class TestTicketCommand:
 
         interaction.guild.get_channel = Mock(return_value=mock_category)
 
-        with patch("bot.ticket_dashboard.trigger_dashboard"):
+        with patch("bot.thread_creator.trigger_dashboard"):
             await cog.create_ticket.callback(
                 cog,
                 interaction,
@@ -657,7 +661,7 @@ class TestTicketCommand:
         interaction.guild.get_channel = Mock(return_value=mock_category)
 
         with (
-            patch("bot.ticket_dashboard.trigger_dashboard"),
+            patch("bot.thread_creator.trigger_dashboard"),
             patch("bot.cogs.ticketing.get_quotient_client", return_value=mock_client),
         ):
             await cog.create_ticket.callback(

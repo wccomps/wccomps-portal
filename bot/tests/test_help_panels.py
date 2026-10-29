@@ -92,7 +92,7 @@ async def test_help_panel_ticket_gets_thread_and_no_malformed_task(
 
     thread = MagicMock(spec=discord.Thread)
     thread.id = 777
-    thread.send = AsyncMock()
+    thread.send = AsyncMock(return_value=MagicMock(id=7771, pin=AsyncMock()))
     thread.add_user = AsyncMock()
     chat = Mock(spec=discord.TextChannel)
     chat.name = "team-chat"
@@ -105,7 +105,7 @@ async def test_help_panel_ticket_gets_thread_and_no_malformed_task(
     mock_interaction.guild.get_member = Mock(return_value=None)
     mock_interaction.client = mock_bot
 
-    with patch("bot.ticket_dashboard.trigger_dashboard") as dashboard:
+    with patch("bot.thread_creator.trigger_dashboard") as dashboard:
         await create_ticket(mock_interaction, category_id=str(consult.pk), description="help with dns")
 
     ticket = await Ticket.objects.aget(team=team)

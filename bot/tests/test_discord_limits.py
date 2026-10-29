@@ -10,6 +10,7 @@ from asgiref.sync import sync_to_async
 from hypothesis import given
 from hypothesis import strategies as st
 
+from bot.tests.discord_fakes import competition_thread
 from bot.utils import DISCORD_MESSAGE_CHAR_LIMIT, fit, split_message
 
 
@@ -56,20 +57,19 @@ async def test_web_comment_over_the_message_limit_is_sent_in_parts() -> None:
     text = "\n".join("y" * 99 for _ in range(45))
     comment = await TicketComment.objects.acreate(ticket=ticket, author=author, comment_text=text)
 
-    thread = MagicMock(spec=discord.Thread)
-    thread.send = AsyncMock(side_effect=lambda content: SimpleNamespace(id=1000 + len(content)))
+    thread = competition_thread()
+    thread.send = AsyncMock(side_effect=lambda content, **_kwargs: SimpleNamespace(id=1000 + len(content)))
     bot = MagicMock(spec=discord.Client)
     bot.get_channel.return_value = thread
 
-    await DiscordQueueProcessor(bot)._handle_post_comment(PostComment(ticket_id=ticket.id, comment_id=comment.id))
+    with patch("bot.discord_queue.ensure_ticket_thread", new=AsyncMock(return_value=thread)):
+        await DiscordQueueProcessor(bot)._handle_post_comment(PostComment(ticket_id=ticket.id, comment_id=comment.id))
 
     sent = [call.args[0] for call in thread.send.call_args_list]
     assert len(sent) == 3
     assert all(len(part) <= DISCORD_MESSAGE_CHAR_LIMIT for part in sent)
     assert sent[0].startswith("**volunteer**\n")
     assert "".join(sent).count("y") == text.count("y")
-    await sync_to_async(comment.refresh_from_db)()
-    assert comment.discord_message_id == 1000 + len(sent[0])
 
 
 @pytest.mark.asyncio
