@@ -106,6 +106,7 @@ from team.forms import CSVUploadForm, ImportConfirmForm, ImportEventForm, parse_
 from team.models import DiscordLink, LinkToken, Team
 from ticketing.forms import (
     CreateTicketForm,
+    CreateTicketPageForm,
     TicketBoxResetForm,
     TicketBulkActionForm,
     TicketCategoryForm,
@@ -412,14 +413,25 @@ def _import_event_make(w: World, draw: st.DataObject) -> Factory:
     return lambda data, files: ImportEventForm(data, files, season=season)
 
 
+def _ticket_hints(w: World) -> dict[str, st.SearchStrategy[Any]]:
+    return {
+        "category": st.sampled_from(
+            [str(pk) for pk in TicketCategory.objects.filter(user_creatable=True).values_list("pk", flat=True)]
+        ),
+        "description": st.text(min_size=1, max_size=200),
+        "hostname": st.text(min_size=1, max_size=50),
+        "ip_address": st.ip_addresses().map(str),
+        "service_name": st.text(min_size=1, max_size=50),
+    }
+
+
 def _create_ticket(w: World, form: CreateTicketForm) -> None:
     from ticketing.utils import create_ticket_atomic
 
-    assert form.category_obj is not None
     cd = form.cleaned_data
     create_ticket_atomic(
         team=w.teams[0],
-        category=form.category_obj,
+        category=cd["category"],
         title=cd["title"],
         description=cd["description"],
         hostname=cd["hostname"],
@@ -667,17 +679,18 @@ CASES = [
         examples=(lambda w: {"event": str(w.open_event.pk), "current_season": str(w.season.pk)},),
     ),
     FormCase(ImportConfirmForm),
+    FormCase(CreateTicketForm, hints=_ticket_hints, use=lambda w, f: _create_ticket(w, f)),
     FormCase(
-        CreateTicketForm,
-        hints=lambda w: {
-            "category": st.sampled_from(
-                [str(pk) for pk in TicketCategory.objects.filter(user_creatable=True).values_list("pk", flat=True)]
-            ),
-            "description": st.text(min_size=1, max_size=200),
-            "hostname": st.text(min_size=1, max_size=50),
-            "ip_address": st.ip_addresses().map(str),
-            "service_name": st.text(min_size=1, max_size=50),
-        },
+        CreateTicketPageForm,
+        make=lambda w, draw: (
+            lambda data, files: CreateTicketPageForm(
+                data,
+                files,
+                box_names=["web01", "db01"],
+                service_choices=[{"value": "web01-http", "box_name": "web01", "box_ip": "10.0.1.5"}],
+            )
+        ),
+        hints=_ticket_hints,
         use=lambda w, f: _create_ticket(w, f),
     ),
     FormCase(TicketCommentForm, use=posts_to(lambda w: reverse("ticket_comment", args=[w.claimed.ticket_number]))),

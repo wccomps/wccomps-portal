@@ -3,7 +3,7 @@
     <head>
         <meta charset="utf-8" />
         <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-        <title>Team Registration - WCComps Portal</title>
+        <title>{% if form.events_open and error_summary %}Error: {% endif %}Team Registration - WCComps Portal</title>
         <style>
             *,
             *::before,
@@ -11,6 +11,12 @@
                 box-sizing: border-box;
                 margin: 0;
                 padding: 0;
+            }
+
+            html {
+                /* Keeps a focused field clear of the sticky header and submit bar */
+                scroll-padding-top: 5rem;
+                scroll-padding-bottom: 6.5rem;
             }
 
             :root {
@@ -103,22 +109,24 @@
                 transition: color 0.2s;
             }
 
-            .mobile-menu {
-                display: none;
-            }
-
             @media (max-width: 768px) {
+                html {
+                    scroll-padding-top: 1rem;
+                }
+
+                .header {
+                    position: static;
+                }
+
                 .header-inner {
                     padding: 0.75rem 1rem;
+                    flex-wrap: wrap;
+                    gap: 0.5rem 1rem;
                 }
 
                 .nav {
-                    display: none;
-                }
-
-                .mobile-menu {
-                    display: block;
-                    color: var(--text);
+                    flex-wrap: wrap;
+                    gap: 0.5rem 1rem;
                 }
             }
 
@@ -188,6 +196,20 @@
                 background: rgba(var(--error-rgb), 0.1);
                 border-color: rgba(var(--error-rgb), 0.3);
                 color: var(--error);
+            }
+
+            .error-summary {
+                align-items: flex-start;
+                margin-bottom: 0;
+            }
+
+            .error-summary ul {
+                margin-top: 0.25rem;
+                padding-left: 1.25rem;
+            }
+
+            .error-summary a {
+                text-decoration: underline;
             }
 
             .alert-success {
@@ -271,10 +293,16 @@
                 flex-direction: column;
             }
 
-            .field-full {
-                grid-column: 1 / -1;
+            .form-grid.form-grid-single {
+                grid-template-columns: 1fr;
             }
 
+            fieldset {
+                border: 0;
+                min-width: 0;
+            }
+
+            legend,
             label {
                 font-size: 0.75rem;
                 font-weight: 600;
@@ -284,28 +312,32 @@
                 letter-spacing: 0.025em;
             }
 
-            label .required {
+            legend {
+                margin-bottom: 0.75rem;
+            }
+
+            .required {
                 color: var(--error);
+            }
+
+            .visually-hidden {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                overflow: hidden;
+                clip-path: inset(50%);
+                white-space: nowrap;
+            }
+
+            .required-note {
+                font-size: 0.875rem;
+                color: var(--text-muted);
             }
 
             label .optional {
                 color: var(--text-dim);
                 font-weight: 400;
                 text-transform: none;
-            }
-
-            .input-wrapper {
-                position: relative;
-            }
-
-            .input-wrapper svg {
-                position: absolute;
-                left: 0.75rem;
-                top: 50%;
-                transform: translateY(-50%);
-                width: 1.25rem;
-                height: 1.25rem;
-                color: var(--text-dim);
             }
 
             input[type="text"],
@@ -337,19 +369,23 @@
                 color: var(--text);
             }
 
-            input:focus,
+            input:not([type="checkbox"]):focus,
             select:focus {
                 outline: none;
                 border-color: var(--primary);
                 box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.2);
             }
 
-            input.has-icon {
+            #id_school_name {
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8' stroke-width='1.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z'/%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: left 0.75rem center;
+                background-size: 1.25rem;
                 padding-left: 2.5rem;
             }
 
-            input.error,
-            select.error {
+            input[aria-invalid="true"],
+            select[aria-invalid="true"] {
                 border-color: var(--error);
             }
 
@@ -388,16 +424,34 @@
                 transition: border-color 0.2s, background 0.2s;
             }
 
+            .checkbox-item,
+            .rules-checkbox label {
+                font-size: 1rem;
+                font-weight: 400;
+                text-transform: none;
+                letter-spacing: normal;
+                color: var(--text);
+                margin-bottom: 0;
+            }
+
+            .checkbox-item:has(:focus-visible),
+            .rules-checkbox:has(:focus-visible) {
+                outline: 2px solid var(--info);
+                outline-offset: 2px;
+            }
+
             .checkbox-item:hover {
                 border-color: var(--border-light);
             }
 
-            .checkbox-item.selected {
+            .checkbox-item:has(input:checked) {
                 border-color: var(--primary);
                 background: rgba(var(--primary-rgb), 0.1);
             }
 
-            .checkbox-item input[type="checkbox"] {
+            .checkbox-item input[type="checkbox"],
+            .rules-checkbox input[type="checkbox"] {
+                flex-shrink: 0;
                 width: 1.25rem;
                 height: 1.25rem;
                 margin-top: 0.125rem;
@@ -407,6 +461,11 @@
 
             .checkbox-content {
                 flex: 1;
+            }
+
+            .checkbox-label,
+            .checkbox-description {
+                display: block;
             }
 
             .checkbox-label {
@@ -432,19 +491,11 @@
             }
 
             .rules-checkbox input[type="checkbox"] {
-                width: 1.25rem;
-                height: 1.25rem;
-                accent-color: var(--primary);
-                cursor: pointer;
+                margin-top: 0;
             }
 
             .rules-checkbox label {
-                font-size: 0.875rem;
-                font-weight: 500;
-                text-transform: none;
-                color: var(--text);
                 cursor: pointer;
-                margin-bottom: 0;
             }
 
             .rules-checkbox a {
@@ -530,13 +581,6 @@
                     justify-content: space-between;
                 }
             }
-
-            /* No events message */
-            .no-events {
-                padding: 2rem;
-                text-align: center;
-                color: var(--text-muted);
-            }
         </style>
     </head>
     <body>
@@ -559,29 +603,21 @@
                     <a href="https://wrccdc.org/participate/">Participate</a>
                     <a href="https://wrccdc.org/seasons/">Seasons</a>
                 </nav>
-                <div class="mobile-menu">
-                    <svg width="24"
-                         height="24"
-                         fill="none"
-                         stroke="currentColor"
-                         stroke-width="1.5"
-                         viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-                    </svg>
-                </div>
             </div>
         </header>
         <main>
             <section class="page-header">
-                <div class="badge">
-                    <svg fill="none"
-                         stroke="currentColor"
-                         stroke-width="1.5"
-                         viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z" />
-                    </svg>
-                    <span>Registration Open</span>
-                </div>
+                {% if form.events_open %}
+                    <div class="badge">
+                        <svg fill="none"
+                             stroke="currentColor"
+                             stroke-width="1.5"
+                             viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z" />
+                        </svg>
+                        <span>Registration Open</span>
+                    </div>
+                {% endif %}
                 <h1>Team Registration</h1>
                 <p class="subtitle">Register your school's team for the upcoming Western Coalition Competitions season.</p>
             </section>
@@ -614,273 +650,146 @@
                     </div>
                 {% endfor %}
             {% endif %}
-            <form method="post">
-                {% csrf_token %}
-                {% for error in form.non_field_errors %}
-                    <div class="alert alert-error" role="alert">
-                        <svg fill="none"
-                             stroke="currentColor"
-                             stroke-width="1.5"
-                             viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-                        </svg>
-                        <span>{{ error }}</span>
-                    </div>
-                {% endfor %}
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-icon">
+            {% if not form.events_open %}
+                <div class="alert alert-info">
+                    <svg fill="none"
+                         stroke="currentColor"
+                         stroke-width="1.5"
+                         viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                    </svg>
+                    <span>{{ form.events.help_text }}</span>
+                </div>
+            {% else %}
+                <form method="post">
+                    {% csrf_token %}
+                    {% if error_summary %}
+                        <div class="alert alert-error error-summary" role="alert">
                             <svg fill="none"
                                  stroke="currentColor"
                                  stroke-width="1.5"
                                  viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                             </svg>
-                        </div>
-                        <h2 class="card-title">School Information</h2>
-                    </div>
-                    <div class="card-body">
-                        <div class="form-grid">
-                            <div class="field field-full">
-                                <label for="{{ form.school_name.id_for_label }}">
-                                    School / University Name <span class="required">*</span>
-                                </label>
-                                <div class="input-wrapper">
-                                    <svg fill="none"
-                                         stroke="currentColor"
-                                         stroke-width="1.5"
-                                         viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                                    </svg>
-                                    <input type="text"
-                                           class="has-icon{% if form.school_name.errors %} error{% endif %}"
-                                           name="{{ form.school_name.name }}"
-                                           id="{{ form.school_name.id_for_label }}"
-                                           value="{{ form.school_name.value|default:'' }}"
-                                           placeholder="e.g. Riverdale State University"
-                                           required />
-                                </div>
-                                {% if form.school_name.errors %}
-                                    <p class="error-text">{{ form.school_name.errors.0 }}</p>
-                                {% else %}
-                                    <p class="help-text">Enter the full official name of your institution.</p>
-                                {% endif %}
-                            </div>
-                            <div class="field field-full">
-                                <label for="{{ form.region.id_for_label }}">
-                                    CCDC Region <span class="required">*</span>
-                                </label>
-                                <select name="{{ form.region.name }}"
-                                        id="{{ form.region.id_for_label }}"
-                                        class="{% if form.region.errors %}error{% endif %}"
-                                        required>
-                                    {% for value, label in form.region.field.choices %}
-                                        <option value="{{ value }}"
-                                                {% if form.region.value == value %}selected{% endif %}>
-                                            {{ label }}
-                                        </option>
+                            <div>
+                                <p>Your registration was not submitted. Fix the following:</p>
+                                <ul>
+                                    {% for href, line in error_summary %}
+                                        <li>
+                                            {% if href %}
+                                                <a href="{{ href }}">{{ line }}</a>
+                                            {% else %}
+                                                {{ line }}
+                                            {% endif %}
+                                        </li>
                                     {% endfor %}
-                                </select>
-                                {% if form.region.errors %}
-                                    <p class="error-text">{{ form.region.errors.0 }}</p>
-                                {% else %}
-                                    <p class="help-text">{{ form.region.help_text }}</p>
-                                {% endif %}
+                                </ul>
+                            </div>
+                        </div>
+                    {% endif %}
+                    <p class="required-note">
+                        <span class="required" aria-hidden="true">*</span> required
+                    </p>
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-icon">
+                                <svg fill="none"
+                                     stroke="currentColor"
+                                     stroke-width="1.5"
+                                     viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z" />
+                                </svg>
+                            </div>
+                            <h2 class="card-title">School Information</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-grid form-grid-single">
+                                {{ form.school_name.as_field_group }}
+                                {{ form.region.as_field_group }}
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-icon">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-icon">
+                                <svg fill="none"
+                                     stroke="currentColor"
+                                     stroke-width="1.5"
+                                     viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                                </svg>
+                            </div>
+                            <h2 class="card-title">Team Captain</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-grid">
+                                {{ form.captain_name.as_field_group }}
+                                {{ form.captain_email.as_field_group }}
+                                {{ form.captain_phone.as_field_group }}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-icon">
+                                <svg fill="none"
+                                     stroke="currentColor"
+                                     stroke-width="1.5"
+                                     viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.26 10.147a60.438 60.438 0 0 0-.491 6.347A48.62 48.62 0 0 1 12 20.904a48.62 48.62 0 0 1 8.232-4.41 60.46 60.46 0 0 0-.491-6.347m-15.482 0a50.636 50.636 0 0 0-2.658-.813A59.906 59.906 0 0 1 12 3.493a59.903 59.903 0 0 1 10.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.717 50.717 0 0 1 12 13.489a50.702 50.702 0 0 1 7.74-3.342M6.75 15a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm0 0v-3.675A55.378 55.378 0 0 1 12 8.443m-7.007 11.55A5.981 5.981 0 0 0 6.75 15.75v-1.5" />
+                                </svg>
+                            </div>
+                            <h2 class="card-title">Coach / Faculty Advisor</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-grid">
+                                {{ form.coach_name.as_field_group }}
+                                {{ form.coach_email.as_field_group }}
+                                {{ form.coach_phone.as_field_group }}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-icon">
+                                <svg fill="none"
+                                     stroke="currentColor"
+                                     stroke-width="1.5"
+                                     viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
+                                </svg>
+                            </div>
+                            <h2 class="card-title">Event Selection</h2>
+                        </div>
+                        <div class="card-body">{{ form.events.as_field_group }}</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-icon">
+                                <svg fill="none"
+                                     stroke="currentColor"
+                                     stroke-width="1.5"
+                                     viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+                                </svg>
+                            </div>
+                            <h2 class="card-title">Rules Agreement</h2>
+                        </div>
+                        <div class="card-body">{{ form.agree_to_rules.as_field_group }}</div>
+                    </div>
+                    <div class="action-bar">
+                        <button type="submit" class="btn btn-primary">
+                            <span>Submit Registration</span>
                             <svg fill="none"
                                  stroke="currentColor"
-                                 stroke-width="1.5"
+                                 stroke-width="2"
                                  viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
                             </svg>
-                        </div>
-                        <h2 class="card-title">Team Captain</h2>
+                        </button>
                     </div>
-                    <div class="card-body">
-                        <div class="form-grid">
-                            <div class="field">
-                                <label for="{{ form.captain_name.id_for_label }}">
-                                    Full Name <span class="required">*</span>
-                                </label>
-                                <input type="text"
-                                       class="{% if form.captain_name.errors %}error{% endif %}"
-                                       name="{{ form.captain_name.name }}"
-                                       id="{{ form.captain_name.id_for_label }}"
-                                       value="{{ form.captain_name.value|default:'' }}"
-                                       placeholder="Jane Doe"
-                                       required />
-                                {% if form.captain_name.errors %}<p class="error-text">{{ form.captain_name.errors.0 }}</p>{% endif %}
-                            </div>
-                            <div class="field">
-                                <label for="{{ form.captain_email.id_for_label }}">
-                                    Email Address <span class="required">*</span>
-                                </label>
-                                <input type="email"
-                                       class="{% if form.captain_email.errors %}error{% endif %}"
-                                       name="{{ form.captain_email.name }}"
-                                       id="{{ form.captain_email.id_for_label }}"
-                                       value="{{ form.captain_email.value|default:'' }}"
-                                       placeholder="jane.doe@university.edu"
-                                       required />
-                                {% if form.captain_email.errors %}<p class="error-text">{{ form.captain_email.errors.0 }}</p>{% endif %}
-                            </div>
-                            <div class="field">
-                                <label for="{{ form.captain_phone.id_for_label }}">
-                                    Phone Number <span class="required">*</span>
-                                </label>
-                                <input type="tel"
-                                       class="{% if form.captain_phone.errors %}error{% endif %}"
-                                       name="{{ form.captain_phone.name }}"
-                                       id="{{ form.captain_phone.id_for_label }}"
-                                       value="{{ form.captain_phone.value|default:'' }}"
-                                       placeholder="(555) 123-4567"
-                                       required />
-                                {% if form.captain_phone.errors %}<p class="error-text">{{ form.captain_phone.errors.0 }}</p>{% endif %}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-icon">
-                            <svg fill="none"
-                                 stroke="currentColor"
-                                 stroke-width="1.5"
-                                 viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M4.26 10.147a60.438 60.438 0 0 0-.491 6.347A48.62 48.62 0 0 1 12 20.904a48.62 48.62 0 0 1 8.232-4.41 60.46 60.46 0 0 0-.491-6.347m-15.482 0a50.636 50.636 0 0 0-2.658-.813A59.906 59.906 0 0 1 12 3.493a59.903 59.903 0 0 1 10.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.717 50.717 0 0 1 12 13.489a50.702 50.702 0 0 1 7.74-3.342M6.75 15a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm0 0v-3.675A55.378 55.378 0 0 1 12 8.443m-7.007 11.55A5.981 5.981 0 0 0 6.75 15.75v-1.5" />
-                            </svg>
-                        </div>
-                        <h2 class="card-title">Coach / Faculty Advisor</h2>
-                    </div>
-                    <div class="card-body">
-                        <div class="form-grid">
-                            <div class="field">
-                                <label for="{{ form.coach_name.id_for_label }}">
-                                    Full Name <span class="required">*</span>
-                                </label>
-                                <input type="text"
-                                       class="{% if form.coach_name.errors %}error{% endif %}"
-                                       name="{{ form.coach_name.name }}"
-                                       id="{{ form.coach_name.id_for_label }}"
-                                       value="{{ form.coach_name.value|default:'' }}"
-                                       placeholder="Dr. John Smith"
-                                       required />
-                                {% if form.coach_name.errors %}<p class="error-text">{{ form.coach_name.errors.0 }}</p>{% endif %}
-                            </div>
-                            <div class="field">
-                                <label for="{{ form.coach_email.id_for_label }}">
-                                    Email Address <span class="required">*</span>
-                                </label>
-                                <input type="email"
-                                       class="{% if form.coach_email.errors %}error{% endif %}"
-                                       name="{{ form.coach_email.name }}"
-                                       id="{{ form.coach_email.id_for_label }}"
-                                       value="{{ form.coach_email.value|default:'' }}"
-                                       placeholder="jsmith@university.edu"
-                                       required />
-                                {% if form.coach_email.errors %}<p class="error-text">{{ form.coach_email.errors.0 }}</p>{% endif %}
-                            </div>
-                            <div class="field">
-                                <label for="{{ form.coach_phone.id_for_label }}">
-                                    Phone Number <span class="optional">(optional)</span>
-                                </label>
-                                <input type="tel"
-                                       class="{% if form.coach_phone.errors %}error{% endif %}"
-                                       name="{{ form.coach_phone.name }}"
-                                       id="{{ form.coach_phone.id_for_label }}"
-                                       value="{{ form.coach_phone.value|default:'' }}"
-                                       placeholder="(555) 123-4567" />
-                                {% if form.coach_phone.errors %}<p class="error-text">{{ form.coach_phone.errors.0 }}</p>{% endif %}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-icon">
-                            <svg fill="none"
-                                 stroke="currentColor"
-                                 stroke-width="1.5"
-                                 viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
-                            </svg>
-                        </div>
-                        <h2 class="card-title">Event Selection</h2>
-                    </div>
-                    <div class="card-body">
-                        {% if form.events.field.queryset.exists %}
-                            <p class="help-text mb-16">
-                                Select all events your team plans to participate in. <span class="required">*</span>
-                            </p>
-                            {% if form.events.errors %}<p class="error-text mb-16">{{ form.events.errors.0 }}</p>{% endif %}
-                            <div class="checkbox-group">
-                                {% for event in form.events.field.queryset %}
-                                    <label class="checkbox-item" id="event-label-{{ event.id }}">
-                                        <input type="checkbox"
-                                               name="{{ form.events.name }}"
-                                               value="{{ event.id }}"
-                                               {% if event.id|stringformat:"s" in form.events.value %}checked{% endif %}
-                                               onchange="this.closest('.checkbox-item').classList.toggle('selected', this.checked)" />
-                                        <div class="checkbox-content">
-                                            <div class="checkbox-label">{{ event.name }}</div>
-                                            <div class="checkbox-description">{{ event.date|date:"F j, Y" }} • {{ event.get_event_type_display }}</div>
-                                        </div>
-                                    </label>
-                                {% endfor %}
-                            </div>
-                        {% else %}
-                            <div class="no-events">
-                                <p>No events are currently open for registration.</p>
-                                <p class="mt-8">Please check back later or contact us for more information.</p>
-                            </div>
-                        {% endif %}
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-icon">
-                            <svg fill="none"
-                                 stroke="currentColor"
-                                 stroke-width="1.5"
-                                 viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
-                            </svg>
-                        </div>
-                        <h2 class="card-title">Rules Agreement</h2>
-                    </div>
-                    <div class="card-body">
-                        {% if form.agree_to_rules.errors %}<p class="error-text mb-16">{{ form.agree_to_rules.errors.0 }}</p>{% endif %}
-                        <div class="rules-checkbox">
-                            <input type="checkbox"
-                                   name="{{ form.agree_to_rules.name }}"
-                                   id="{{ form.agree_to_rules.id_for_label }}"
-                                   {% if form.agree_to_rules.value %}checked{% endif %}
-                                   required />
-                            <label for="{{ form.agree_to_rules.id_for_label }}">
-                                I have read and agree to the <a href="https://wrccdc.org/about/rules/"
-    target="_blank">competition rules and guidelines</a>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-                <div class="action-bar">
-                    <button type="submit" class="btn btn-primary">
-                        <span>Submit Registration</span>
-                        <svg fill="none"
-                             stroke="currentColor"
-                             stroke-width="2"
-                             viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-                        </svg>
-                    </button>
-                </div>
-            </form>
+                </form>
+            {% endif %}
         </main>
         <footer>
             <div class="footer-inner">
@@ -892,11 +801,5 @@
                 </div>
             </div>
         </footer>
-        <script>
-            // Initialize selected state for pre-checked checkboxes
-            document.querySelectorAll('.checkbox-item input[type="checkbox"]:checked').forEach(function(cb) {
-                cb.closest('.checkbox-item').classList.add('selected');
-            });
-        </script>
     </body>
 </html>

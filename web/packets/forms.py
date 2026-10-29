@@ -4,6 +4,7 @@ import re
 
 from django import forms
 
+from core.form_errors import ask_for_the_file_again
 from team.models import SchoolInfo
 
 TEAM_EXTRAS_HELP = "Give a 'team' column and a row per team, with its number (like Team01 or 3)."
@@ -38,12 +39,34 @@ def parse_team_extras(csv_text: str) -> dict[str, dict[str, str]]:
 
 
 class PacketUploadForm(forms.Form):
-    title = forms.CharField(max_length=255)
-    notes = forms.CharField(required=False)
-    send_via_email = forms.BooleanField(required=False)
-    web_access_enabled = forms.BooleanField(required=False)
-    team_extras = forms.CharField(required=False)
-    packet_file = forms.FileField()
+    title = forms.CharField(max_length=255, help_text="Brief description of the packet (e.g., '2026 Qualifier Packet')")
+    packet_file = forms.FileField(label="File", help_text="Maximum file size: 25 MB. All file types supported.")
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 4}),
+        help_text="Shown to teams on their packet page and in the packet email",
+    )
+    team_extras = forms.CharField(
+        required=False,
+        label="Team data CSV",
+        widget=forms.Textarea(
+            attrs={"rows": 6, "placeholder": "team,api_key,max_spend_usd\nTeam01,sk-abc123,100\nTeam02,sk-def456,100"}
+        ),
+        help_text="Paste CSV with a 'team' column header (e.g. Team01). Extra columns are included in each team's "
+        "notification email. Teams without a row receive no extra data.",
+    )
+    send_via_email = forms.BooleanField(
+        required=False,
+        initial=True,
+        help_text="Emails each school on the list the packet and its team's username and password (set the first "
+        "time the team is sent a packet)",
+    )
+    web_access_enabled = forms.BooleanField(
+        required=False,
+        initial=True,
+        label="Enable web access",
+        help_text="Allow teams to download from web interface",
+    )
 
     def clean_team_extras(self) -> dict[str, dict[str, str]]:
         text: str = self.cleaned_data["team_extras"]
@@ -55,6 +78,12 @@ class PacketUploadForm(forms.Form):
         if f.size and f.size > max_size:
             raise forms.ValidationError("File size must not exceed 25 MB.")
         return f
+
+    def clean(self) -> dict[str, object] | None:
+        cleaned = super().clean()
+        if self.errors:
+            ask_for_the_file_again(self, "packet_file")
+        return cleaned
 
 
 class PacketActionForm(forms.Form):

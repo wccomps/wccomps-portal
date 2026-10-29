@@ -78,3 +78,43 @@ def test_blue_team_still_files_only_for_own_team(blue_team_user, teams):
     _post(_client(blue_team_user), team_id=teams[1].id)
 
     assert Ticket.objects.get(title="Filed by staff").team == teams[0]
+
+
+def test_the_team_picker_cleans_to_the_picked_team(teams):
+    from ticketing.forms import CreateTicketForm
+
+    form = CreateTicketForm(
+        {"title": "x", "category": 6, "description": "x", "team_id": str(teams[1].id)},
+        staff=True,
+        teams=Team.objects.filter(is_active=True),
+    )
+
+    assert form.is_valid(), form.errors
+    assert form.cleaned_data["team_id"] == teams[1]
+
+
+def test_an_inactive_team_is_refused_beside_the_team_picker(ticketing_admin_user, teams):
+    teams[1].is_active = False
+    teams[1].save()
+
+    html = _post(_client(ticketing_admin_user), team_id=teams[1].id).content.decode()
+
+    assert '<p class="errornote" id="team_id_error">Please select a team.</p>' in html
+    assert not Ticket.objects.exists()
+
+
+def test_a_refused_ticket_names_the_picked_team(ticketing_admin_user, teams):
+    response = _client(ticketing_admin_user).post(
+        reverse("create_ticket"), {"category": 6, "description": "x", "team_id": teams[1].id}
+    )
+
+    assert '<p class="page-header-subtitle">Team 7</p>' in response.content.decode()
+
+
+def test_without_a_team_picker_a_posted_team_is_ignored():
+    from ticketing.forms import CreateTicketForm
+
+    form = CreateTicketForm({"title": "x", "category": 6, "description": "x", "team_id": "not a team"})
+
+    assert form.is_valid(), form.errors
+    assert form.cleaned_data["team_id"] is None

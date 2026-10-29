@@ -18,12 +18,8 @@
         <c-form>
             {% csrf_token %}
             <c-form_errors :form="form" />
-            <c-form_field :field="form.name">
-                {{ form.name }}
-            </c-form_field>
-            <c-form_field :field="form.ip_addresses">
-                {{ form.ip_addresses }}
-            </c-form_field>
+            {{ form.name.as_field_group }}
+            {{ form.ip_addresses.as_field_group }}
             <div class="help-text mb-20">
                 <span id="ipCount">0</span> IP addresses entered
             </div>

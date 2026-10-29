@@ -174,7 +174,7 @@ def test_a_team_given_a_school_between_preview_and_confirm_refuses_the_add(clien
 def test_an_unknown_mode_is_refused(client, event, teams):
     content = _upload(client, event.pk, "School Two", mode="merge").content.decode()
 
-    assert "Pick Replace or Add." in content
+    assert re.search(r'<p class="errornote" id="id_mode_error">Pick Replace or Add.</p>', content)
     assert not SchoolInfo.objects.exists()
 
 
@@ -195,8 +195,8 @@ def test_a_replace_preview_says_so(client, event, teams):
 def test_the_mode_label_names_no_single_radio(client, event):
     content = client.get(reverse("school_info_import")).content.decode()
 
-    assert content.count('id="id_mode_replace"') == 1
-    assert 'for="id_mode_replace"' not in content
+    assert re.search(r"<legend[^>]*>Mode:</legend>", content)
+    assert 'for="id_mode"' not in content
     assert "Add schools to Invitational (2026)" in content
 
 

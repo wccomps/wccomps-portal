@@ -420,20 +420,56 @@ a.btn-secondary:focus-visible {
     text-decoration: none;
 }
 
-/* Toggle button (c-toggle_button): pressed while its choice is picked */
-.box-toggle--selected {
-    background: var(--primary, #417690);
-    border-color: var(--primary, #417690);
-    color: white;
+/* Toggle button: pressed reads without colour; text stays 4.5:1 or more in both themes */
+.toggle-button.button {
+    background: var(--body-bg, #fff);
+    color: var(--body-fg, #333);
+    border: 1px solid var(--border-color, #ccc);
+}
+.toggle-button.button:hover,
+.toggle-button.button:focus-visible {
+    background: var(--darkened-bg, #f8f8f8);
+}
+.toggle-button.button[aria-pressed="true"] {
+    background: var(--button-bg, #417690);
+    color: var(--button-fg, #fff);
+    border-color: var(--button-bg, #417690);
+    font-weight: bold;
+    box-shadow: 0 0 0 2px var(--body-bg, #fff), 0 0 0 4px var(--button-bg, #417690);
+}
+.toggle-button.button[aria-pressed="true"]:hover {
+    background: var(--button-hover-bg, #205067);
 }
 
 /* Override admin forms.css float clearfix: Cotton components don't use floats */
 .form-row {
     overflow: visible;
 }
-.form-row > div > label:first-child {
+.form-row .errornote {
+    width: fit-content;
+    padding: 4px 8px;
+}
+.form-row > div > label:first-child,
+.form-row fieldset > legend {
     display: block;
     margin-bottom: 4px;
+}
+/* admin's .aligned legend floats beside its fieldset: a choice group's legend heads its options */
+.form-row fieldset > legend {
+    float: none;
+}
+/* A choice group's fieldset is part of its row, not a section of the form */
+.form-row fieldset {
+    border-top: none;
+}
+/* Django's choice list (a div of option divs, not the toggle picker) sits under its legend in 24px rows */
+.form-row fieldset > div:not([x-data]) {
+    margin-top: 0;
+}
+.form-row fieldset > div:not([x-data]) > div {
+    min-height: 24px;
+    display: flex;
+    align-items: center;
 }
 .vTextField,
 .vLargeTextField {
@@ -694,10 +730,21 @@ p.help {
     display: block;
 }
 
-/* Required field labels (c-form_field) */
-label.required::after {
+label.required::after,
+legend.required::after {
     content: " *";
     color: var(--error-fg, #ba2121);
+}
+legend.required::after {
+    content: " *" / " required";
+}
+/* Silent where the input's required attribute announces it; the :has rule stands alone, since a browser without
+   :has drops any selector list holding it */
+label.required::after {
+    content: " *" / "";
+}
+fieldset:has([required]) > legend.required::after {
+    content: " *" / "";
 }
 
 /* ============================================
@@ -1210,9 +1257,6 @@ button[type="submit"]:hover {
     border-top: 1px solid var(--hairline-color, #e8e8e8);
 }
 
-/* Category form: its checkbox lists (admin/category_form.html) */
-.checkbox-group { display: flex; flex-direction: column; gap: 8px; }
-
 /* Broadcast recipients (admin/broadcast.html) */
 .team-list { columns: 2; list-style: disc inside; padding: 0; }
 @media (min-width: 768px) { .team-list { columns: 3; } }
@@ -1284,36 +1328,6 @@ button[type="submit"]:hover {
     padding: 15px;
 }
 .module-header-success { background: var(--success-fg); }
-
-/* Red team finding: the team picker (scoring/submit_red_finding.html) */
-.team-btn {
-    padding: 8px 16px;
-    min-width: 60px;
-    font-weight: 500;
-    border: 1px solid var(--hairline-color, #ddd);
-    background: var(--body-bg, white);
-    color: var(--body-fg, #333);
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-.team-btn:hover {
-    border-color: var(--primary, #417690);
-}
-.team-btn--selected {
-    background: var(--error-fg, #dc3545);
-    border-color: var(--error-fg, #dc3545);
-    color: white;
-}
-.team-btn--selected:hover {
-    background: var(--error-fg, #c82333);
-    border-color: var(--error-fg, #c82333);
-}
-@media (prefers-reduced-motion: reduce) {
-    .team-btn {
-        transition: none;
-    }
-}
 
 /* Scorecard (scoring/_scorecard_body.html, scoring/scorecard.html) */
 .neighbors {

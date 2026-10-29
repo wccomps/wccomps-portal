@@ -5,6 +5,7 @@ from django.db import connection
 from django.test import Client
 from django.urls import reverse
 
+from core.tests.form_html import field_error
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory
 
@@ -346,3 +347,57 @@ def test_post_refuses_points_its_column_cannot_hold(gold_team_user):
     response = client.post("/ops/admin/categories/create/", {"display_name": "Huge", "points": str(2**31)})
     assert response.status_code == 200
     assert TicketCategory.objects.count() == before
+
+
+def test_a_failed_create_shows_the_posted_values_and_the_error_beside_its_field(gold_team_user):
+    client = Client()
+    client.force_login(gold_team_user)
+    response = client.post(
+        reverse("admin_category_create"),
+        {
+            "display_name": "Keeps Its Name",
+            "points": str(2**31),
+            "playbook": "1. Posted step",
+            "required_fields": ["ip_address"],
+            "variable_points": "on",
+        },
+    )
+    html = response.content.decode()
+
+    assert response.status_code == 200
+    assert field_error(html, "id_points") == "Ensure this value is less than or equal to 2147483647."
+    assert field_error(html, "id_display_name") is None
+    assert 'value="Keeps Its Name"' in html
+    assert f'value="{2**31}"' in html
+    assert "1. Posted step</textarea>" in html
+    assert 'value="ip_address" id="id_required_fields_1" checked' in html
+    assert 'name="variable_points" id="id_variable_points" checked' in html
+
+
+def test_a_failed_edit_shows_the_posted_values_not_the_saved_ones(gold_team_user, category):
+    client = Client()
+    client.force_login(gold_team_user)
+    response = client.post(
+        reverse("admin_category_edit", kwargs={"category_id": category.pk}),
+        {"display_name": "", "points": "33", "sort_order": "4"},
+    )
+    html = response.content.decode()
+
+    assert field_error(html, "id_display_name") == "Display name is required."
+    assert 'value="33"' in html
+    assert 'value="50"' not in html
+
+
+def test_a_ticket_field_cannot_be_both_required_and_optional(gold_team_user):
+    client = Client()
+    client.force_login(gold_team_user)
+    response = client.post(
+        reverse("admin_category_create"),
+        {"display_name": "Both", "required_fields": ["hostname", "ip_address"], "optional_fields": ["hostname"]},
+    )
+
+    assert response.status_code == 200
+    assert not TicketCategory.objects.filter(display_name="Both").exists()
+    assert field_error(response.content.decode(), "id_optional_fields") == (
+        "Hostname is already required; a field is either required or optional."
+    )

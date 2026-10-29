@@ -1,15 +1,19 @@
 import random
 from enum import StrEnum
+from typing import cast
 
 from django.contrib import messages
 from django.db import IntegrityError, transaction
-from django.http import HttpRequest, HttpResponse
+from django.forms import CheckboxSelectMultiple
+from django.http import HttpRequest, HttpResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from django_stubs_ext import WithAnnotations
 from packets.models import packets_sent
 
 from core.auth_utils import require_permission
+from core.form_errors import fields_with_errors
+from core.form_renderer import PortalFormRenderer
 from core.utils import client_ip, list_filters
 from team.models import SchoolInfo
 
@@ -73,6 +77,30 @@ EVENT_DETAIL_STATUS_SHOWN: dict[RegistrationPageStatus, tuple[str, str]] = {
 }
 
 
+class PublicPageRenderer(PortalFormRenderer):
+    """Renders a field as a row of the standalone register page, in its own look."""
+
+    field_template_name = "registration/public/field.html"
+
+
+def public_registration_form(data: QueryDict | None = None) -> RegistrationForm:
+    form = RegistrationForm(data, renderer=PublicPageRenderer())
+    events = cast(CheckboxSelectMultiple, form.fields["events"].widget)
+    events.template_name = "registration/public/event_cards.html"
+    events.option_template_name = "registration/public/event_card.html"
+    return form
+
+
+def error_summary(form: RegistrationForm) -> list[tuple[str, str]]:
+    """The register page's failed-submit summary: (link to the field, or "" for the form's own error, line)."""
+    lines = [("", str(error)) for error in form.non_field_errors()]
+    for field, label, anchor in fields_with_errors(form):
+        # The events' and rules' own messages name what to do; their labels are whole sentences
+        named = not (field.use_fieldset or field.widget_type == "checkbox")
+        lines += [(f"#{anchor}", f"{label}: {error}" if named else str(error)) for error in field.errors]
+    return lines
+
+
 def register(request: HttpRequest) -> HttpResponse:
     """Public registration form (no authentication required)."""
     if request.method == "POST":
@@ -80,18 +108,18 @@ def register(request: HttpRequest) -> HttpResponse:
         ip = client_ip(request)
         if RegistrationRateLimit.over_limit(ip):
             messages.error(request, "Too many registration submissions. Please try again later.")
-            return render(request, "registration/register.html", {"form": RegistrationForm()}, status=429)
+            return render(request, "registration/register.html", {"form": public_registration_form()}, status=429)
 
-        form = RegistrationForm(request.POST)
+        form = public_registration_form(request.POST)
         if form.is_valid():
             RegistrationRateLimit.record(ip)  # Only count successful submissions
             form.save()
             messages.success(request, "Registration submitted successfully!")
             return redirect("registration_register")
     else:
-        form = RegistrationForm()
+        form = public_registration_form()
 
-    return render(request, "registration/register.html", {"form": form})
+    return render(request, "registration/register.html", {"form": form, "error_summary": error_summary(form)})
 
 
 @require_permission("gold_team")

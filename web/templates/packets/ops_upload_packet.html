@@ -9,55 +9,18 @@
                    parent_label="Packets" />
     <c-form enctype="multipart/form-data">
         {% csrf_token %}
+        <c-form_errors :form="form" />
         <c-fieldset heading="Packet Information">
-            <c-form_field label="Title"
-                          required="true"
-                          id="id_title"
-                          help_text="Brief description of the packet (e.g., '2026 Qualifier Packet')">
-                <input type="text"
-                       name="title"
-                       id="id_title"
-                       class="vTextField"
-                       required
-                       maxlength="255">
-            </c-form_field>
-            <c-form_field label="File"
-                          required="true"
-                          id="id_packet_file"
-                          help_text="Maximum file size: 25 MB. All file types supported.">
-                <input type="file" name="packet_file" id="id_packet_file" required>
-            </c-form_field>
-            <c-form_field label="Notes (optional)"
-                          id="id_notes"
-                          help_text="Shown to teams on their packet page and in the packet email">
-                <textarea name="notes" id="id_notes" class="vLargeTextField" rows="4"></textarea>
-            </c-form_field>
+            {{ form.title.as_field_group }}
+            {{ form.packet_file.as_field_group }}
+            {{ form.notes.as_field_group }}
         </c-fieldset>
         <c-fieldset heading="Per-Team Email Data (optional)">
-            <c-form_field label="Team data CSV"
-                          id="id_team_extras"
-                          help_text="Paste CSV with a 'team' column header (e.g. Team01). Extra columns are included in each team's notification email. Teams without a row receive no extra data.">
-                <textarea name="team_extras"
-                          id="id_team_extras"
-                          class="vLargeTextField"
-                          rows="6"
-                          placeholder="team,api_key,max_spend_usd&#10;Team01,sk-abc123,100&#10;Team02,sk-def456,100"></textarea>
-            </c-form_field>
+            {{ form.team_extras.as_field_group }}
         </c-fieldset>
         <c-fieldset heading="Distribution Settings">
-            <c-form_field label="Send via email"
-                          id="id_send_via_email"
-                          help_text="Emails each school on the list the packet and its team's username and password (set the first time the team is sent a packet)">
-                <input type="checkbox" name="send_via_email" id="id_send_via_email" checked>
-            </c-form_field>
-            <c-form_field label="Enable web access"
-                          id="id_web_access_enabled"
-                          help_text="Allow teams to download from web interface">
-                <input type="checkbox"
-                       name="web_access_enabled"
-                       id="id_web_access_enabled"
-                       checked>
-            </c-form_field>
+            {{ form.send_via_email.as_field_group }}
+            {{ form.web_access_enabled.as_field_group }}
         </c-fieldset>
         <c-button_row class="justify-end">
             <c-link href="{% url 'packets_list' %}" variant="cancel">Cancel</c-link>

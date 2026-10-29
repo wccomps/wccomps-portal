@@ -101,11 +101,33 @@ async function wcStream(url, data, onProgress, onDone) {
     }
 }
 
-/** Shows a c-toggle_button as pressed or not: its pressed look and, for screen readers, aria-pressed. */
-function setTogglePressed(button, pressed) {
-    button.classList.toggle('box-toggle--selected', pressed);
-    button.setAttribute('aria-pressed', String(pressed));
+/** Keeps a ToggleButtonSelect(Multiple)'s buttons and hidden select in step; each click fires the select's change. */
+function togglePicker() {
+    return {
+        init() {
+            const select = this.$el.querySelector('select');
+            const buttons = this.$el.querySelectorAll('[data-value]');
+            const show = () => {
+                const picked = new Set(Array.from(select.selectedOptions, option => option.value));
+                buttons.forEach(button => button.setAttribute('aria-pressed', String(picked.has(button.dataset.value))));
+            };
+            this.$el.addEventListener('click', event => {
+                const button = event.target.closest('button');
+                if (!button) return;
+                if (button.dataset.value !== undefined) {
+                    const option = Array.from(select.options).find(o => o.value === button.dataset.value);
+                    option.selected = !option.selected;
+                } else {
+                    for (const option of select.options) option.selected = button.dataset.pick === 'all';
+                }
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+            select.addEventListener('change', show);
+            show();
+        }
+    };
 }
+document.addEventListener('alpine:init', () => Alpine.data('togglePicker', togglePicker));
 
 /* Alpine Mixins */
 

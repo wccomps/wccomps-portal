@@ -28,6 +28,7 @@ from registration import views as registration_views
 from core import status_variants
 from core.admin_views import event_panel
 from core.tests.guards import (
+    FIELD_GROUP,
     REPO_DIR,
     TEMPLATES_DIR,
     WEB_DIR,
@@ -143,7 +144,6 @@ PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
     "admin/base_site.html:toast-enter-end": CHROME + "the new-ticket toast's slide in and out",
     "admin/base_site.html:toast-leave": CHROME + "the new-ticket toast's slide out",
     "admin/broadcast.html:team-list": "The recipient list flows into 2 to 4 columns by width; no utility sets columns",
-    "admin/category_form.html:checkbox-group": "Stacks the field checkboxes 8px apart; no utility stacks with that gap",
     "ticketing/comments_list.html:comment-list": COMMENTS,
     "ticketing/comments_list.html:comment-item": COMMENTS,
     "ticketing/comments_list.html:comment-header": COMMENTS,
@@ -188,8 +188,6 @@ PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
     "scoring/submit_incident.html:screenshot-preview-name": "A chosen screenshot's file name",
     "scoring/submit_red_finding.html:screenshot-preview-img": "A chosen screenshot's preview image",
     "scoring/submit_red_finding.html:screenshot-preview-name": "A chosen screenshot's file name",
-    "scoring/submit_red_finding.html:team-btn": "The team picker's buttons, outlined",
-    "scoring/submit_red_finding.html:team-btn--selected": "A picked team's button, red",
     "scoring/submit_red_finding.html:modal": MODAL,
     "scoring/submit_red_finding.html:modal--open": MODAL,
     "scoring/submit_red_finding.html:modal-backdrop": MODAL,
@@ -271,7 +269,6 @@ VARIANT_FILTER_RE = re.compile(r"""^{{\s*(?P<expr>[\w.]+)\s*\|\s*badge_variant\s
 CLASSLIST_RE = re.compile(
     r"""classList\.(?:add|remove|toggle|replace)\(\s*(["'])([^"']+)\1(?:\s*,\s*(["'])([^"']+)\3)?"""
 )
-SELECTOR_CALL_RE = re.compile(r"""(?:querySelector(?:All)?|closest|matches)\(\s*(["'`])([^"'`]+)\1""")
 DICT_CLASS_RE = re.compile(r"""["']class["']\s*:\s*["']([^"']+)["']""")
 CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 CSS_RULE_RE = re.compile(r"([^{}]+)\{[^{}]*\}")
@@ -421,20 +418,6 @@ def bound_page_uses() -> dict[str, set[str]]:
     return found
 
 
-@cache
-def hooks() -> frozenset[str]:
-    """Classes the portal's script reads to find elements (querySelector('.box-toggle')). Such a class counts as
-    defined even with no rule of its own."""
-    portal = portal_templates()
-    return frozenset(
-        name
-        for path in portal
-        for script in script_texts(path)
-        for m in SELECTOR_CALL_RE.finditer(script)
-        for name in CSS_CLASS_RE.findall(m.group(2))
-    )
-
-
 def css_rules(css: str) -> list[list[str]]:
     """Each selector's class names, in order, one list per comma-separated selector."""
     css = CSS_COMMENT_RE.sub(" ", css)
@@ -504,8 +487,8 @@ def test_utilities_section_is_marked() -> None:
 
 
 def test_every_class_is_defined() -> None:
-    """A class no stylesheet defines does nothing (no Bootstrap is loaded), unless script reads it as a hook."""
-    defined = app_css_classes() | admin_css_classes() | hooks()
+    """A class no stylesheet defines does nothing (no Bootstrap is loaded)."""
+    defined = app_css_classes() | admin_css_classes()
     found = (
         by_use(page_uses(), set(page_uses()) - defined)
         | by_use(bound_page_uses(), set(bound_page_uses()) - defined)
@@ -606,6 +589,7 @@ def test_boxed_button_rows_are_action_toolbars() -> None:
 
 
 FIELDSET_PADDED_TAGS = {
+    FIELD_GROUP,
     "c-action_box",
     "c-alert",
     "c-button_row",
@@ -647,12 +631,12 @@ def test_fieldset_children_are_padded() -> None:
     found: dict[str, str] = {}
     for path in page_templates():
         with_parents = list(with_open_elements(path))
-        # Direct children of <c-fieldset> that themselves wrap a padded component (c-form_field, c-table)
+        # Direct children of <c-fieldset> that wrap a padded row
         wrappers_with_padded_child = {
             open_tags[i + 1].line
             for tag, open_tags in with_parents
             for i, ancestor in enumerate(open_tags[:-1])
-            if ancestor.name == "c-fieldset" and tag.name in ("c-form_field", "c-table")
+            if ancestor.name == "c-fieldset" and tag.name in ("c-form_field", FIELD_GROUP, "c-table")
         }
         for tag, open_tags in with_parents:
             if not open_tags or open_tags[-1].name != "c-fieldset":

@@ -65,7 +65,7 @@ def test_add_mode_adds_a_late_school_and_keeps_the_list(live_server, pw_browser,
     try:
         page.goto(f"{live_server.url}/ops/school-info/import/")
         page.select_option("select[name=event]", str(event.pk))
-        page.check("#id_mode_add")
+        page.check("input[name=mode][value=add]")
         page.set_input_files("#id_csv_file", str(csv_file))
         page.get_by_role("button", name="Upload and Preview").click()
         page.wait_for_load_state("networkidle")
@@ -109,5 +109,26 @@ def test_with_no_active_season_the_import_creates_one(live_server, pw_browser, t
         assert page.get_by_text("Created the 2026-2027 season and made it the active one.").is_visible()
         assert Season.objects.active().year == 2027
         assert Event.objects.open().name == "Invitational 1"
+    finally:
+        context.close()
+
+
+def test_a_refused_new_event_shows_its_fields_again(live_server, pw_browser, tmp_path):
+    csv_file = tmp_path / "schools.csv"
+    csv_file.write_text(CSV)
+    user = role_user("gold_team")
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    try:
+        page.goto(f"{live_server.url}/ops/school-info/import/")
+        page.select_option("select[name=event]", "new")
+        page.fill("#id_new_name", "Invitational 1")
+        page.set_input_files("#id_csv_file", str(csv_file))
+        page.get_by_role("button", name="Upload and Preview").click()
+        page.wait_for_load_state("networkidle")
+
+        assert page.get_by_text("Give the new event a name, a date and a type.").is_visible()
+        assert page.locator("#id_new_name").is_visible()
+        assert page.locator("#id_new_name").input_value() == "Invitational 1"
     finally:
         context.close()

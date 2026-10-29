@@ -56,19 +56,20 @@ Grouped form fields with heading.
 ### Forms
 
 #### `<c-form_errors>`
-The errors of the form as a whole (raised in its `clean()`), which no field shows. A page that uses a form's fields
-one by one puts one at the top of its form (`core/tests/test_form_conventions.py` fails on a page without; it finds
-forms by a variable name ending in `form`).
+What a failed save says at the top: the form's non-field errors, its hidden fields' (named by label), and a link to
+each field with an error. A page that uses a form's fields one by one puts one at the top of its form
+(`core/tests/test_form_conventions.py` fails on a page without; it finds forms by a variable name ending in `form`).
 ```django
 <c-form_errors :form="form" />
 ```
 
 #### `<c-form_field>`
-Form row with label, input, and optional help text/error. Given a form's field, it takes the label, the label's
-target, the required mark, the help text and the errors from it; a `label`, `help_text`, `id` or `error` passed
-with it overrides the field's (`required="true"` can only add the mark). Without a field, pass the props.
+One form row: label, input, help text and errors. A form's field renders through it with
+`{{ form.x.as_field_group }}` (`templates/forms/field.html`, set by `core.form_renderer`), which passes the field's
+facts and the help and error ids its `aria-describedby` names (`core/tests/test_form_conventions.py` fails on a form
+field rendered as a bare widget). Write the tag only for an input that is no form's field.
 ```django
-<c-form_field :field="form.email">{{ form.email }}</c-form_field>
+{{ form.email.as_field_group }}
 <c-form_field label="Upload Files" id="screenshots" help_text="Up to 20 files">
     <input type="file" id="screenshots" name="screenshots" multiple />
 </c-form_field>
@@ -116,10 +117,10 @@ Props:
 - `class`, `id`, `name`, `value`
 
 #### `<c-toggle_button>`
-A button that stays pressed while its choice is picked (`pressed="true"` for the initial state); the page's
-script calls `setTogglePressed(button, pressed)` from `static/js/utils.js`, which sets its look and `aria-pressed`.
+A button that stays pressed while its choice is picked (`pressed="true"` for the initial state); its pressed look
+follows `aria-pressed`, which `togglePicker` (`static/js/utils.js`) sets.
 ```django
-<c-toggle_button data-box="web01">web01</c-toggle_button>
+<c-toggle_button data-value="web01">web01</c-toggle_button>
 ```
 
 #### `<c-link>`
