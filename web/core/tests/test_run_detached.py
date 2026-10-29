@@ -7,13 +7,8 @@ from collections.abc import Iterator
 import pytest
 from django.db import transaction
 
+from core.tests.detached import join_detached_runs
 from core.utils import run_detached
-
-
-def _join() -> None:
-    for thread in threading.enumerate():
-        if thread.name == "run-detached":
-            thread.join(timeout=10)
 
 
 def test_relays_every_line_in_order():
@@ -35,7 +30,7 @@ def test_operation_finishes_after_the_reader_stops():
     assert next(stream) == "0\n"
     stream.close()
     reader_gone.set()
-    _join()
+    join_detached_runs()
 
     assert done == [0, 1, 2]
 
@@ -59,10 +54,16 @@ def _which_thread() -> Iterator[str]:
     yield threading.current_thread().name + "\n"
 
 
+@pytest.mark.django_db(transaction=True)
+def test_inside_an_open_transaction_it_still_runs_in_its_own_thread():
+    """No production stream is read inside a transaction (the view has returned by its first read)."""
+    with transaction.atomic():
+        assert _threads_of(run_detached(_which_thread())) == ["run-detached"]
+
+
 @pytest.mark.django_db
-def test_inside_an_open_transaction_it_runs_inline_and_sees_the_transaction():
-    """A thread's own connection can't see the transaction's uncommitted rows (a test's), so inside one the operation
-    runs in the caller's thread."""
+def test_in_a_tests_transaction_a_stream_runs_inline_and_sees_it():
+    """A thread's own connection can't see a TestCase's uncommitted rows, so the conftest runs streams inline there."""
     from team.models import Team
 
     Team.objects.create(team_number=7, team_name="Uncommitted")
@@ -71,9 +72,7 @@ def test_inside_an_open_transaction_it_runs_inline_and_sees_the_transaction():
         yield threading.current_thread().name + "\n"
         yield f"{Team.objects.filter(team_number=7).exists()}\n"
 
-    with transaction.atomic():
-        lines = _threads_of(run_detached(operation()))
-    assert lines == [threading.current_thread().name, "True"]
+    assert _threads_of(run_detached(operation())) == [threading.current_thread().name, "True"]
 
 
 @pytest.mark.django_db
@@ -82,10 +81,10 @@ def test_a_failing_inline_operation_ends_the_stream_with_an_error():
         yield "started\n"
         raise RuntimeError("Authentik is down")
 
-    with transaction.atomic():
-        lines = list(run_detached(operation()))
+    lines = list(run_detached(operation()))
     assert json.loads(lines[-1]) == {"done": True, "success": False, "message": "Failed: Authentik is down"}
 
 
 def test_outside_a_transaction_it_runs_in_its_own_thread():
     assert _threads_of(run_detached(_which_thread())) == ["run-detached"]
+

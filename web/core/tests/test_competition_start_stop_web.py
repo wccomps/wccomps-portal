@@ -9,6 +9,7 @@ from django.test import Client
 from django.urls import reverse
 
 from core.models import CompetitionConfig, DiscordTask
+from core.tests.detached import join_detached_runs
 from team.models import team_username
 
 pytestmark = pytest.mark.django_db
@@ -92,15 +93,7 @@ def test_setting_a_start_time_mid_competition_keeps_it_running(admin_client):
     assert config.competition_start_time is not None
 
 
-def _join_detached_runs() -> None:
-    import threading
-
-    for thread in threading.enumerate():
-        if thread.name == "run-detached":
-            thread.join(timeout=10)
-
-
-# This one tests the detached thread itself, which runs only outside a transaction (core.utils.run_detached)
+# This one tests the detached thread itself, which a test gets only outside a TestCase's transaction
 @pytest.mark.django_db(transaction=True)
 def test_start_finishes_after_the_browser_disconnects(admin_client):
     """A closed tab or a proxy timeout used to stop the start partway: some accounts enabled, state not saved."""
@@ -130,7 +123,7 @@ def test_start_finishes_after_the_browser_disconnects(admin_client):
         first = json.loads(next(iter(response.streaming_content)))
         response.close()
         browser_gone.set()
-        _join_detached_runs()
+        join_detached_runs()
 
     assert first["step"] == "Enabled scoring"
     assert [c.args[0] for c in manager.team_account.call_args_list] == ["team01", "team02", "team03"]

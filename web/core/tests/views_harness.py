@@ -918,7 +918,7 @@ _OFFLINE_SSL_CONTEXT = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 @contextmanager
 def offline() -> Iterator[None]:
     """Every other service down (Authentik, Quotient, Discord webhooks), configured as in production. (Streamed
-    operations run inline in the test's transaction, core.utils.run_detached; packet emails still go out from worker
+    operations run inline in the test's transaction, web/conftest.py; packet emails still go out from worker
     threads, packets.services, with connections of their own.)"""
     import httpx._config
     from django.test import override_settings

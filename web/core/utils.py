@@ -154,19 +154,15 @@ def _inline(lines: Iterator[str]) -> Iterator[str]:
         yield ndjson_done(f"Failed: {e}", success=False)
 
 
+RUN_DETACHED_THREAD = "run-detached"
+
+
 def run_detached(lines: Iterator[str]) -> Iterator[str]:
     """Run a streamed operation to the end in its own thread, relaying its lines while the client listens.
 
     A streaming view's generator stops at its next line once the client goes away (a closed tab, a proxy
     timeout), leaving the operation half done. Here the client only stops the relay; the work finishes.
-
-    Inside an open transaction (a test's) the operation runs inline: a thread's connection can't see uncommitted
-    rows. This is checked at the stream's first read, after the view returned, when a production request is in no
-    transaction.
     """
-    if connection.in_atomic_block:
-        yield from _inline(lines)
-        return
     relay: queue.Queue[str | None] = queue.Queue()
 
     def run() -> None:
@@ -174,14 +170,24 @@ def run_detached(lines: Iterator[str]) -> Iterator[str]:
             for line in _inline(lines):
                 relay.put(line)
         finally:
-            # This thread's own DB connection; nothing else would close it
-            connection.close()
             relay.put(None)
 
-    # Not a daemon: a worker shutting down (a deploy) waits for the operation, up to gunicorn's graceful timeout
-    threading.Thread(target=run, name="run-detached", daemon=False).start()
+    _start(run)
     while (line := relay.get()) is not None:
         yield line
+
+
+def _start(run: Callable[[], None]) -> None:
+    """Run it in a thread of its own, which closes its DB connection when done: nothing else closes that thread's."""
+
+    def target() -> None:
+        try:
+            run()
+        finally:
+            connection.close()
+
+    # Not a daemon: a worker shutting down (a deploy) waits for the operation, up to gunicorn's graceful timeout
+    threading.Thread(target=target, name=RUN_DETACHED_THREAD, daemon=False).start()
 
 
 def optional_int(value: str) -> int | None:
