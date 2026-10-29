@@ -261,7 +261,6 @@ CODE_EXCEPTIONS = {
     "*:fieldsets": DJANGO_ADMIN_OPTION,
     "*:inlines": DJANGO_ADMIN_OPTION,
     "*:extra": DJANGO_ADMIN_OPTION,
-    "*:labels": DJANGO_FORM_OPTION,
     "*:help_texts": DJANGO_FORM_OPTION,
     "*:empty_label": DJANGO_FORM_OPTION,
     "*/urls*.py:urlpatterns": "Django reads urlpatterns from each URLconf",

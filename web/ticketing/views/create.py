@@ -2,7 +2,7 @@ import logging
 from typing import cast
 
 from django.contrib.auth.models import User
-from django.core.exceptions import BadRequest, PermissionDenied
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
@@ -83,9 +83,7 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
         team = form.cleaned_data.get("team_id") or team
         if not valid:
             return form_page()
-
-        if not team or not form.category_obj:
-            raise BadRequest("Team is required to create a ticket.")
+        team = form.team_to_file(team)
 
         from ticketing.utils import TicketRateLimitError, create_ticket_atomic
 
@@ -95,7 +93,7 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
             with transaction.atomic():
                 ticket = create_ticket_atomic(
                     team=team,
-                    category=form.category_obj,
+                    category=form.category_to_file,
                     title=cd["title"],
                     description=cd["description"],
                     hostname=cd["hostname"],

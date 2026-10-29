@@ -4,7 +4,7 @@
         <fieldset {% if field.aria_describedby %}aria-describedby="{{ field.aria_describedby }}"{% endif %}>
             <legend>
                 {{ field.label }}
-                {% if field.field.required %}<span class="required">*</span>{% endif %}
+                {% if field.field.required %}<span class="required" aria-hidden="true">*</span>{% endif %}
             </legend>
             {{ field }}
         </fieldset>
@@ -17,7 +17,7 @@
         <label for="{{ field.id_for_label }}">
             {{ field.label }}
             {% if field.field.required %}
-                <span class="required">*</span>
+                <span class="required" aria-hidden="true">*</span>
             {% else %}
                 <span class="optional">(optional)</span>
             {% endif %}

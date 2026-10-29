@@ -30,7 +30,7 @@ def test_pages_do_not_render_messages_themselves() -> None:
 FIELD_USE = re.compile(r"{[{%][^}]*?\b\w*form\.(?!non_field_errors\b|errors\b|is_bound\b)\w+")
 
 FORM_ERRORS_ALLOWLIST = {
-    "registration/register.html": "the standalone public page, styled on its own: it renders form.non_field_errors",
+    "registration/register.html": "the standalone public page, styled on its own: its summary shows the form's errors",
 }
 
 

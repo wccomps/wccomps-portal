@@ -15,6 +15,7 @@ CONTACT_EMAIL_MAX_LENGTH = RegistrationContact._meta.get_field("email").max_leng
 RESTRICTED_EVENT_TYPES = ("qualifier", "regional")
 RULES_URL = "https://wrccdc.org/about/rules/"
 PHONE = "(555) 123-4567"
+EMAIL = "name@school.edu"
 # The registration edit page always posts this beside the open events it offered (shown_events)
 LISTED = "events_listed"
 
@@ -42,26 +43,22 @@ class OpenEventsField(forms.ModelMultipleChoiceField[Event]):
 class RegistrationForm(forms.ModelForm[TeamRegistration]):
     """Combined form for registration with captain, coach, events, and rules."""
 
-    captain_name = forms.CharField(
-        max_length=255, label="Full Name", widget=forms.TextInput(attrs={"placeholder": "Jane Doe"})
-    )
+    captain_name = forms.CharField(max_length=255, label="Full Name")
     # The column's length: a form EmailField alone accepts 320 characters
     captain_email = forms.EmailField(
         max_length=CONTACT_EMAIL_MAX_LENGTH,
         label="Email Address",
-        widget=forms.EmailInput(attrs={"placeholder": "jane.doe@example.edu"}),
+        widget=forms.EmailInput(attrs={"placeholder": EMAIL}),
     )
     captain_phone = forms.CharField(
         max_length=50, label="Phone Number", widget=forms.TextInput(attrs={"type": "tel", "placeholder": PHONE})
     )
 
-    coach_name = forms.CharField(
-        max_length=255, label="Full Name", widget=forms.TextInput(attrs={"placeholder": "Dr. John Smith"})
-    )
+    coach_name = forms.CharField(max_length=255, label="Full Name")
     coach_email = forms.EmailField(
         max_length=CONTACT_EMAIL_MAX_LENGTH,
         label="Email Address",
-        widget=forms.EmailInput(attrs={"placeholder": "jsmith@example.edu"}),
+        widget=forms.EmailInput(attrs={"placeholder": EMAIL}),
     )
     coach_phone = forms.CharField(
         max_length=50,
@@ -75,6 +72,7 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
         widget=forms.CheckboxSelectMultiple,
         required=True,
         label="Select all events your team plans to participate in",
+        error_messages={"required": "Select at least one event."},
     )
 
     agree_to_rules = forms.BooleanField(
@@ -83,6 +81,7 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
             'I have read and agree to the <a href="{}" target="_blank">competition rules and guidelines</a>',
             RULES_URL,
         ),
+        error_messages={"required": "Agree to the competition rules to register."},
     )
 
     class Meta:
@@ -104,8 +103,9 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
         offered = open_events()
         events_field.queryset = offered
         offered_pks = set(offered.values_list("pk", flat=True))
+        self.events_open = bool(offered_pks)
         if not offered_pks:
-            events_field.help_text = "No events are currently open for registration."
+            events_field.help_text = "No events are open for registration right now. Check back later."
         self.unoffered_events: list[Event] = []
         self.untickable: set[int] = set()
         if self.instance.pk:
@@ -152,19 +152,19 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
         if region and region != "wrccdc":
             restricted = [e.name for e in events if e.event_type in RESTRICTED_EVENT_TYPES]
             closed = [e.name for e in kept if e.event_type in RESTRICTED_EVENT_TYPES]
-            problems = []
             if restricted:
-                problems.append(
+                self.add_error(
+                    "events",
                     "Only Western Regional (WRCCDC) teams can register for Qualifiers and Regionals. "
-                    f"Please remove: {', '.join(restricted)}"
+                    f"Please remove: {', '.join(restricted)}",
                 )
             if closed:
-                problems.append(
+                # Unticking can't fix it, so it belongs to no field
+                self.add_error(
+                    None,
                     f"This team is registered for {', '.join(closed)}, which only WRCCDC teams can enter and which "
-                    "can't be changed here: contact the organizers to change the region."
+                    "can't be changed here: contact the organizers to change the region.",
                 )
-            if problems:
-                raise forms.ValidationError(problems)
 
         return cleaned_data
 
@@ -326,10 +326,8 @@ class NewEventFields(forms.Form):
         return None
 
     def new_event(self) -> NewEvent:
-        """The event to create, from the cleaned fields. Call from clean(); ValidationError says what is wrong."""
-        for name in self.NEW_FIELDS:
-            if name in self.errors:
-                raise forms.ValidationError(self.errors[name][0])
+        """The event to create, from the cleaned fields. Call from clean() once those fields have no errors of their
+        own; ValidationError says what is wrong."""
         data = self.cleaned_data
         if not (data.get("new_name") and data.get("new_date") and data.get("new_type")):
             raise forms.ValidationError(self.MISSING)

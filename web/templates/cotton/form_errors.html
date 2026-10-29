@@ -1,13 +1,18 @@
-{# Form errors component - the errors no field row shows: the form's non-field errors and its hidden fields' #}
+{# Form errors component - what a failed save says at the top: the errors no row shows, and links to each field that has one #}
 {# Usage: <c-form_errors :form="form" /> at the top of the <c-form> #}
-{# Props: form (a Django form) #}
+{# Props: form (a Django form; required) #}
 <c-vars form="" />
-{% with errors=form|top_errors %}
-    {% if errors %}
+{% with errors=form|top_errors fields=form|fields_with_errors %}
+    {% if errors or fields %}
         <c-alert variant="error" :attrs="attrs">
             {% for error in errors %}
                 <p>{{ error }}</p>
             {% endfor %}
+            {% if fields %}
+                <p>
+                    Check: {% for label, anchor in fields %}<a href="#{{ anchor }}">{{ label }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+                </p>
+            {% endif %}
         </c-alert>
     {% endif %}
 {% endwith %}

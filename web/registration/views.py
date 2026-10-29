@@ -6,6 +6,7 @@ from django.db import IntegrityError, transaction
 from django.forms import CheckboxSelectMultiple
 from django.http import HttpRequest, HttpResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.html import strip_tags
 from django.views.decorators.http import require_POST
 from packets.models import packets_sent
 
@@ -57,6 +58,22 @@ def public_registration_form(data: QueryDict | None = None) -> RegistrationForm:
     return form
 
 
+def error_summary(form: RegistrationForm) -> list[tuple[str, str]]:
+    """The register page's failed-submit summary: (link to the field, or "" for the form's own error, line)."""
+    labels = [strip_tags(str(field.label)) for field in form.fields.values()]
+    lines = [("", str(error)) for error in form.non_field_errors()]
+    for field in form.visible_fields():
+        label = strip_tags(str(field.label))
+        if labels.count(label) > 1:
+            # Captain and coach rows share their labels
+            label = f"{field.name.split('_')[0].title()} {label.lower()}"
+        target = f"{field.auto_id}_0" if field.use_fieldset else field.auto_id
+        # The events' and rules' own messages name what to do; their labels are whole sentences
+        named = not (field.use_fieldset or field.widget_type == "checkbox")
+        lines += [(f"#{target}", f"{label}: {error}" if named else str(error)) for error in field.errors]
+    return lines
+
+
 def register(request: HttpRequest) -> HttpResponse:
     """Public registration form (no authentication required)."""
     if request.method == "POST":
@@ -75,7 +92,7 @@ def register(request: HttpRequest) -> HttpResponse:
     else:
         form = public_registration_form()
 
-    return render(request, "registration/register.html", {"form": form})
+    return render(request, "registration/register.html", {"form": form, "error_summary": error_summary(form)})
 
 
 def registration_edit(request: HttpRequest, token: str) -> HttpResponse:

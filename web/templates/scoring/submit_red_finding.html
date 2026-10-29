@@ -42,6 +42,10 @@
                 </div>
                 {{ form.affected_service.as_field_group }}
                 {{ form.destination_ip_template }}
+                {{ form.affected_teams.as_field_group }}
+                <p class="text-muted px-10" aria-live="polite">
+                    <span id="selectedCount">0</span> teams selected
+                </p>
             </c-fieldset>
             <c-fieldset heading="Attack Characteristics">
                 {{ form.universally_attempted.as_field_group }}
@@ -64,12 +68,6 @@
                      aria-live="polite">
                     Total: <span id="pointsValue">0</span> pts per team
                 </div>
-            </c-fieldset>
-            <c-fieldset heading="Affected Teams">
-                {{ form.affected_teams.as_field_group }}
-                <p class="text-muted px-10" aria-live="polite">
-                    <span id="selectedCount">0</span> teams selected
-                </p>
             </c-fieldset>
             <c-fieldset heading="Evidence">
                 <c-form_field label="Upload Files"

@@ -242,6 +242,20 @@ class CreateTicketForm(forms.Form):
                 },
             )
 
+    @property
+    def category_to_file(self) -> TicketCategory:
+        """The ticket's category; read only once is_valid() is True."""
+        if self.category_obj is None:
+            raise ValueError("category_to_file read before the form was valid")
+        return self.category_obj
+
+    def team_to_file(self, own_team: Team | None) -> Team:
+        """The ticket's team: the picked one, else the poster's own; call only once is_valid() is True."""
+        team = self.cleaned_data.get("team_id") or own_team
+        if team is None:
+            raise ValueError("team_to_file read before the form was valid")
+        return team
+
     def clean(self) -> dict[str, object]:
         cleaned = super().clean() or {}
         category_id = cleaned.get("category")

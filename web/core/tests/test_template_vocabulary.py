@@ -260,7 +260,6 @@ VARIANT_FILTER_RE = re.compile(r"""^{{\s*(?P<expr>[\w.]+)\s*\|\s*badge_variant\s
 CLASSLIST_RE = re.compile(
     r"""classList\.(?:add|remove|toggle|replace)\(\s*(["'])([^"']+)\1(?:\s*,\s*(["'])([^"']+)\3)?"""
 )
-SELECTOR_CALL_RE = re.compile(r"""(?:querySelector(?:All)?|closest|matches)\(\s*(["'`])([^"'`]+)\1""")
 DICT_CLASS_RE = re.compile(r"""["']class["']\s*:\s*["']([^"']+)["']""")
 CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 CSS_RULE_RE = re.compile(r"([^{}]+)\{[^{}]*\}")
@@ -479,7 +478,7 @@ def test_utilities_section_is_marked() -> None:
 
 
 def test_every_class_is_defined() -> None:
-    """A class no stylesheet defines does nothing (no Bootstrap is loaded), unless script reads it as a hook."""
+    """A class no stylesheet defines does nothing (no Bootstrap is loaded)."""
     defined = app_css_classes() | admin_css_classes()
     found = (
         by_use(page_uses(), set(page_uses()) - defined)

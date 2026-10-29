@@ -151,7 +151,7 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
             "destination_ip_template": "Target IP Template (auto-populated)",
             "universally_attempted": "Attempted against all teams",
             "persistence_established": "Persistence established",
-            "affected_teams": "Affected Teams (select all that apply)",
+            "affected_teams": "Affected Teams",
             "notes": "Description",
         }
         help_texts = {
@@ -204,7 +204,7 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
         self.fields["affected_teams"] = TeamNumberChoiceField(
             queryset=queryset,
             widget=ToggleButtonSelectMultiple(select_all=True),
-            label="Affected Teams (select all that apply)",
+            label="Affected Teams",
             help_text="Select all teams that were successfully compromised.",
         )
 

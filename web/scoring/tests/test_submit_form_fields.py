@@ -79,7 +79,7 @@ def test_a_failed_submit_shows_the_picked_boxes_pressed(
 
 def test_affected_teams_is_a_field_group_with_its_help_errors_and_select_all(page: Callable[..., str]) -> None:
     teams = [Team.objects.create(team_number=n, team_name=f"Team {n:02d}", is_active=True) for n in (3, 4)]
-    teams_group = group(page("scoring:submit_red_score", "red_team_user", {}), "Affected Teams (select all that apply)")
+    teams_group = group(page("scoring:submit_red_score", "red_team_user", {}), "Affected Teams")
 
     fieldset = tag(teams_group, "fieldset")
     assert 'aria-describedby="id_affected_teams_helptext id_affected_teams_error"' in fieldset

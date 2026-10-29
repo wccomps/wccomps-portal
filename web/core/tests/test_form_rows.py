@@ -70,3 +70,16 @@ def test_a_hidden_field_s_error_shows_with_the_form_s_own_named_by_label() -> No
     template = Template(CottonCompiler().process('{% load cotton %}<c-form_errors :form="form" />'))
     html = template.render(Context({"form": HiddenFieldForm({"season": "x"})}))
     assert "Season: Enter a whole number." in html
+
+
+def test_the_form_errors_box_links_each_field_with_an_error() -> None:
+    """A long form's first error can be screens down: the box at the top names each field that needs attention."""
+    from django.template import Context, Template
+    from django_cotton.compiler_regex import CottonCompiler
+
+    template = Template(CottonCompiler().process('{% load cotton %}<c-form_errors :form="form" />'))
+    html = template.render(Context({"form": ExampleForm({"email": "nope"})}))
+    assert '<a href="#id_email">Email Address</a>' in html
+    assert '<a href="#id_agree">I agree</a>' in html
+    assert '<a href="#id_events_0">Events</a>' in html
+    assert "#id_phone" not in html
