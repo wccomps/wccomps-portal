@@ -8,7 +8,7 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest, ValidationError
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Case, Count, F, Q, Value, When
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -410,13 +410,17 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
         raise BadRequest("Invalid data")
     criterion_id, met = posted
 
-    result = get_object_or_404(OrangeAssignmentResult, assignment=assignment, criterion_id=criterion_id)
-    result.met = met
-    result.save()
-
-    if assignment.status == "pending":
-        assignment.status = "in_progress"
-        assignment.save(update_fields=["status"])
+    with transaction.atomic():
+        still_open = (
+            OrangeAssignment.objects.filter(pk=assignment.pk, user=user)
+            .exclude(status__in=("submitted", "approved"))
+            .update(status=Case(When(status="pending", then=Value("in_progress")), default=F("status")))
+        )
+        if not still_open:
+            raise BadRequest("Assignment already submitted")
+        result = get_object_or_404(OrangeAssignmentResult, assignment=assignment, criterion_id=criterion_id)
+        result.met = met
+        result.save(update_fields=["met"])
 
     score = assignment.calculate_score()
     max_score = assignment.orange_check.max_score
@@ -425,9 +429,10 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
 
 @require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
 @require_POST
+@transaction.atomic
 def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
     user = cast(User, request.user)
-    assignment = get_object_or_404(OrangeAssignment, pk=assignment_id, user=user)
+    assignment = get_object_or_404(OrangeAssignment.objects.select_for_update(), pk=assignment_id, user=user)
 
     if assignment.status in ("submitted", "approved"):
         messages.error(request, "Assignment already submitted.")
