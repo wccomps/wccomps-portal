@@ -205,19 +205,6 @@ async def find_team(team_number: int) -> Team | str:
     return team or f"Team {team_number} not found"
 
 
-async def get_team_or_respond(interaction: discord.Interaction, team_number: int) -> Team | None:
-    """Get a team by number, or send the user an error and return None."""
-    if team_number < 1 or team_number > MAX_TEAMS:
-        await interaction.response.send_message(f"Team number must be between 1 and {MAX_TEAMS}", ephemeral=True)
-        return None
-
-    team = await Team.objects.filter(team_number=team_number).afirst()
-    if not team:
-        await interaction.response.send_message(f"Team {team_number} not found", ephemeral=True)
-        return None
-    return team
-
-
 def team_chat_channel(guild: discord.Guild, team: Team) -> discord.TextChannel | None:
     """The text channel with "chat" in its name in the team's category, which may predate the bot."""
     category = guild.get_channel(team.discord_category_id) if team.discord_category_id else None

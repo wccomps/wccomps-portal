@@ -7,16 +7,15 @@ from asgiref.sync import sync_to_async
 from discord import app_commands
 from discord.ext import commands, tasks
 from django.utils import timezone
-from quotient.client import get_quotient_client
+from scoring.quotient_sync import ticket_infrastructure
 
 from bot.permissions import check_blue_team, linked_team_member
-from bot.thread_creator import publish_new_ticket
-from bot.ticket_input import read_ticket
-from bot.utils import add_field, choices, pinging
+from bot.ticket_input import file_ticket
+from bot.utils import add_field, choices, pinging, run_blocking
 from core.stored_files import clean_name
 from core.utils import shorten
 from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
-from ticketing.utils import TicketRateLimitError, acreate_ticket_atomic, get_user_for_ticket
+from ticketing.utils import get_user_for_ticket
 
 logger = logging.getLogger(__name__)
 
@@ -77,37 +76,18 @@ class TicketingCog(commands.Cog):
     async def before_archive_threads_task(self) -> None:
         await self.bot.wait_until_ready()
 
-    async def _get_infrastructure_data(self) -> tuple[list[str], dict[str, str], list[dict[str, str]]]:
-        """Get infrastructure data from Quotient, off the event loop (a cache miss is an HTTP call)."""
-        return await sync_to_async(self._load_infrastructure_data)()
-
-    @staticmethod
-    def _load_infrastructure_data() -> tuple[list[str], dict[str, str], list[dict[str, str]]]:
-        try:
-            client = get_quotient_client()
-            infrastructure = client.get_infrastructure()
-            if not infrastructure:
-                return [], {}, []
-
-            box_names = [box.name for box in infrastructure.boxes]
-            box_ip_map = {box.name: box.ip for box in infrastructure.boxes}
-            service_choices = client.get_service_choices()
-            return box_names, box_ip_map, service_choices
-        except Exception as e:
-            logger.warning(f"Failed to get infrastructure data: {e}")
-            return [], {}, []
-
     async def hostname_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        box_names, box_ip_map, _ = await self._get_infrastructure_data()
+        # The metadata the sync stores: one quick read a keystroke, no Quotient call
+        box_names, box_ip_map, _ = await sync_to_async(ticket_infrastructure)()
         matches = [name for name in box_names if current.lower() in name.lower()]
         return choices([(f"{name} ({box_ip_map.get(name, '')})", name) for name in matches])
 
     async def service_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        _, _, service_choices = await self._get_infrastructure_data()
+        _, _, service_choices = await sync_to_async(ticket_infrastructure)()
         matches = [s for s in service_choices if current.lower() in s["label"].lower()]
         return choices([(s["label"], s["value"]) for s in matches])
 
@@ -145,40 +125,31 @@ class TicketingCog(commands.Cog):
         if not interaction.guild:
             await interaction.response.send_message("This command must be used in a guild", ephemeral=True)
             return
+        # Discord rejects a first answer after 3 seconds
+        await interaction.response.defer(ephemeral=True)
 
         member = await linked_team_member(interaction.user.id)
         if not member:
+            await interaction.followup.send("Your Discord account is no longer linked to a team.", ephemeral=True)
             return
         team = member.team
 
-        ticket_input = await sync_to_async(read_ticket)(
+        filed = await run_blocking(
+            file_ticket,
+            team,
             category,
             staff=False,
+            actor=f"discord:{interaction.user}",
             description=description,
             hostname=hostname or "",
             ip_address=ip_address or "",
             service_name=service or "",
         )
-        if isinstance(ticket_input, str):
-            await interaction.response.send_message(ticket_input, ephemeral=True)
+        if isinstance(filed, str):
+            await interaction.followup.send(filed, ephemeral=True)
             return
-        cat = ticket_input.category
-
-        try:
-            ticket = await acreate_ticket_atomic(
-                team=team,
-                category=cat,
-                title=cat.display_name,
-                description=ticket_input.description,
-                hostname=ticket_input.hostname,
-                ip_address=ticket_input.ip_address,
-                service_name=ticket_input.service_name,
-                actor_username=f"discord:{interaction.user}",
-            )
-        except TicketRateLimitError as e:
-            logger.warning(f"Ticket rate limit hit by {interaction.user} for {team.team_name}")
-            await interaction.response.send_message(str(e), ephemeral=True)
-            return
+        ticket, cat = filed
+        logger.info(f"Ticket {ticket.ticket_number} created by {interaction.user} for {team.team_name}")
 
         embed = discord.Embed(
             title="Ticket Created",
@@ -189,7 +160,7 @@ class TicketingCog(commands.Cog):
         embed.add_field(name="Status", value="Open", inline=True)
         add_field(embed, "Team", team.team_name, inline=True)
         embed.add_field(name="Point Cost", value=cat.points_display, inline=True)
-        add_field(embed, "Description", ticket_input.description)
+        add_field(embed, "Description", ticket.description)
 
         embed.add_field(
             name="Need to attach files?",
@@ -200,10 +171,7 @@ class TicketingCog(commands.Cog):
 
         embed.set_footer(text="Volunteers will be notified in #ticket-queue")
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        logger.info(f"Ticket {ticket.ticket_number} created by {interaction.user} for {team.team_name}")
-
-        await publish_new_ticket(self.bot, interaction.guild, ticket)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:

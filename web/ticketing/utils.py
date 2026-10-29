@@ -1,7 +1,7 @@
 """Ticketing utilities: atomic ticket creation and clearing.
 
-Status, assignee, and category changes live in ticketing.lifecycle. Each *_atomic function has an async
-variant with an 'a' prefix (e.g. acreate_ticket_atomic) created via _make_async().
+Status, assignee, and category changes live in ticketing.lifecycle. Async callers use variants with an 'a'
+prefix (e.g. aclear_all_tickets) made with _make_async().
 """
 
 import functools
@@ -14,6 +14,8 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
+from core.discord_tasks import TicketCreatedWeb
+from core.models import DiscordTask
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 
@@ -73,7 +75,8 @@ def create_ticket_atomic(
     actor_username: str = "system",
     enforce_team_limit: bool = True,
 ) -> Ticket:
-    """Create a ticket with an atomically generated ticket number.
+    """Create a ticket with an atomically generated ticket number, and queue the bot task that gives it its
+    Discord thread in the same transaction, so a ticket never exists without that task.
 
     Raises TicketRateLimitError when enforce_team_limit is set (False for staff filing on a
     team's behalf) and the team hit TEAM_TICKET_LIMIT.
@@ -113,11 +116,9 @@ def create_ticket_atomic(
             action="created",
             details={"created_by": actor_username},
         )
+        DiscordTask.enqueue(TicketCreatedWeb(ticket_id=ticket.id))
 
     return ticket
-
-
-acreate_ticket_atomic = _make_async(create_ticket_atomic)
 
 
 def clear_all_tickets(actor: str) -> dict[str, int]:

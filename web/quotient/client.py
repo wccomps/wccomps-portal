@@ -455,33 +455,6 @@ class QuotientClient:
             logger.exception(f"Failed to parse uptimes: {e}")
             return None
 
-    def get_service_choices(self) -> list[dict[str, str]]:
-        """Service choices for the ticket dropdown (keys: value, label, box_ip, box_name, service_name)."""
-        infrastructure = self.get_infrastructure()
-        if not infrastructure:
-            return []
-
-        choices = [
-            {
-                "value": f"{box.name}:{service.name}",
-                "label": f"{box.name}: {service.display_name}",
-                "box_ip": box.ip,
-                "box_name": box.name,
-                "service_name": service.name,
-            }
-            for box in infrastructure.boxes
-            for service in box.services
-        ]
-
-        return sorted(choices, key=lambda x: x["label"])
-
-    def get_box_names(self) -> list[str]:
-        infrastructure = self.get_infrastructure()
-        if not infrastructure:
-            return []
-
-        return sorted([box.name for box in infrastructure.boxes])
-
     def get_service_checks(
         self,
         team_number: int,

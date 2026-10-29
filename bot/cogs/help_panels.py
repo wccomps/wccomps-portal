@@ -5,16 +5,19 @@ from collections.abc import Awaitable, Callable, Iterable
 from typing import cast
 
 import discord
-from asgiref.sync import sync_to_async
 from discord.ext import commands
 from django.conf import settings
 
 from bot.permissions import linked_team_member
-from bot.thread_creator import publish_new_ticket
-from bot.ticket_input import read_ticket
-from bot.utils import DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT, DISCORD_SELECT_OPTION_LIMIT, fit, fit_lines
+from bot.ticket_input import file_ticket
+from bot.utils import (
+    DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT,
+    DISCORD_SELECT_OPTION_LIMIT,
+    fit,
+    fit_lines,
+    run_blocking,
+)
 from ticketing.models import TicketCategory
-from ticketing.utils import TicketRateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -39,40 +42,25 @@ async def create_ticket(
         return
 
     try:
-        ticket_input = await sync_to_async(read_ticket)(
+        filed = await run_blocking(
+            file_ticket,
+            member.team,
             category_id,
             staff=False,
+            actor=f"discord:{interaction.user.name}",
             description=description,
             hostname=hostname,
             ip_address=ip_address,
             service_name=service_name,
         )
-        if isinstance(ticket_input, str):
-            await interaction.followup.send(ticket_input, ephemeral=True)
-            return
-        category = ticket_input.category
-
-        from ticketing.utils import acreate_ticket_atomic
-
-        ticket = await acreate_ticket_atomic(
-            team=member.team,
-            category=category,
-            title=category.display_name,
-            description=ticket_input.description,
-            hostname=ticket_input.hostname,
-            ip_address=ticket_input.ip_address,
-            service_name=ticket_input.service_name,
-            actor_username=f"discord:{interaction.user.name}",
-        )
-
-    except TicketRateLimitError as e:
-        logger.warning(f"Ticket rate limit hit by {interaction.user.name} for {member.team.team_name}")
-        await interaction.followup.send(str(e), ephemeral=True)
-        return
     except Exception as e:
         logger.error(f"Failed to create ticket: {e}", exc_info=True)
         await interaction.followup.send(f"Failed to create ticket: {e!s}", ephemeral=True)
         return
+    if isinstance(filed, str):
+        await interaction.followup.send(filed, ephemeral=True)
+        return
+    ticket, category = filed
 
     await interaction.followup.send(
         f"Ticket **{ticket.ticket_number}** created.\n"
@@ -81,7 +69,6 @@ async def create_ticket(
         f"A volunteer will respond shortly.",
         ephemeral=True,
     )
-    await publish_new_ticket(interaction.client, interaction.guild, ticket)
 
 
 _MODAL_FIELD_SPECS: dict[str, tuple[str, str, discord.TextStyle, int]] = {

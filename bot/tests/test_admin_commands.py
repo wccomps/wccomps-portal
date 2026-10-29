@@ -2,7 +2,7 @@
 
 from contextlib import contextmanager
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import discord
 import pytest
@@ -12,7 +12,7 @@ from bot.cogs.admin_competition import AdminCompetitionCog
 from bot.cogs.admin_teams import AdminTeamsCog
 from bot.cogs.admin_tickets import AdminTicketsCog
 from core.authentik_utils import CredentialReset
-from core.models import AuditLog
+from core.models import AuditLog, DiscordTask
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
@@ -167,6 +167,48 @@ class TestAdminCommands:
         assert "file" in sends[0].kwargs
         assert all(len(c.args[0]) <= 2000 for c in sends)
         assert sum(c.args[0].count("failure ") for c in sends) == 25
+
+    async def test_admin_ticket_create_defers_first_and_queues_the_thread_even_if_the_reply_fails(
+        self, mock_interaction: Any, mock_admin_user: Any, mock_bot: Any, box_reset_category: Any
+    ) -> None:
+        mock_interaction.user.id = mock_admin_user._discord_id
+        team = await Team.objects.acreate(team_number=14, team_name="Team Fourteen")
+        mock_interaction.followup.send.side_effect = discord.NotFound(MagicMock(status=404, reason="Not Found"), "x")
+
+        callback = AdminTicketsCog.admin_ticket_create.callback
+        with (
+            patch_globals(callback, {"log_to_ops_channel": AsyncMock()}),
+            pytest.raises(discord.NotFound),
+        ):
+            cog = AdminTicketsCog(mock_bot)
+            await callback(
+                cog,
+                mock_interaction,
+                team_number=14,
+                category="2",
+                description="reset",
+                hostname="web01",
+                ip_address="10.0.0.5",
+            )
+
+        assert mock_interaction.mock_calls[0] == call.response.defer(ephemeral=True)
+        mock_interaction.response.send_message.assert_not_called()
+        ticket = await Ticket.objects.aget(team=team)
+        thread_tasks = DiscordTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
+        assert await thread_tasks.acount() == 1
+
+    async def test_admin_ticket_create_for_a_missing_team_answers_after_deferring(
+        self, mock_interaction: Any, mock_admin_user: Any, mock_bot: Any
+    ) -> None:
+        mock_interaction.user.id = mock_admin_user._discord_id
+
+        cog = AdminTicketsCog(mock_bot)
+        await AdminTicketsCog.admin_ticket_create.callback(
+            cog, mock_interaction, team_number=15, category="2", description="reset"
+        )
+
+        mock_interaction.response.send_message.assert_not_called()
+        assert "not found" in mock_interaction.followup.send.call_args.args[0]
 
     @pytest.mark.parametrize("command", ["admin_remove_team", "admin_reset_team"])
     @pytest.mark.parametrize(("number", "answer"), [(51, "between 1 and 50"), (49, "Team 49 not found")])

@@ -56,6 +56,41 @@ def _interaction() -> AsyncMock:
     return interaction
 
 
+async def _ticket_command(blocked: Callable[..., Any]) -> None:
+    from bot.cogs import ticketing
+
+    cog = ticketing.TicketingCog.__new__(ticketing.TicketingCog)
+    member = MagicMock()
+    with (
+        patch.object(ticketing, "linked_team_member", AsyncMock(return_value=member)),
+        patch.object(ticketing, "file_ticket", blocked),
+    ):
+        await ticketing.TicketingCog.create_ticket.callback(cog, _interaction(), category="2", description="x")
+
+
+async def _help_panel_ticket(blocked: Callable[..., Any]) -> None:
+    from bot.cogs import help_panels
+
+    with (
+        patch.object(help_panels, "linked_team_member", AsyncMock(return_value=MagicMock())),
+        patch.object(help_panels, "file_ticket", blocked),
+    ):
+        await help_panels.create_ticket(_interaction(), category_id="2", description="x")
+
+
+async def _admin_ticket_command(blocked: Callable[..., Any]) -> None:
+    from bot.cogs import admin_tickets
+
+    cog = admin_tickets.AdminTicketsCog(MagicMock())
+    with (
+        patch.object(admin_tickets, "find_team", AsyncMock(return_value=MagicMock())),
+        patch.object(admin_tickets, "file_ticket", blocked),
+    ):
+        await admin_tickets.AdminTicketsCog.admin_ticket_create.callback(
+            cog, _interaction(), team_number=1, category="2", description="x"
+        )
+
+
 async def _team_reset(blocked: Callable[..., Any]) -> None:
     from bot.cogs import admin_teams
     from team.models import Team
@@ -78,11 +113,17 @@ async def _team_reset(blocked: Callable[..., Any]) -> None:
     [
         _group_refresh,
         _quotient_sync,
+        _ticket_command,
+        _help_panel_ticket,
+        _admin_ticket_command,
         _team_reset,
     ],
     ids=[
         "group-refresh",
         "quotient-sync",
+        "ticket",
+        "help-panel-ticket",
+        "admin-ticket",
         "team-reset",
     ],
 )

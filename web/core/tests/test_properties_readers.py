@@ -373,14 +373,6 @@ def check_toggle(result: object) -> None:
     )
 
 
-def check_choices(result: object) -> None:
-    outcome(
-        result,
-        lambda r: isinstance(r, list) and all(isinstance(c, dict) and all(is_str(v) for v in c.values()) for c in r),
-        "choices of text",
-    )
-
-
 AM = "web/core/authentik_manager.py:AuthentikManager"
 QC = "web/quotient/client.py:QuotientClient"
 QJ = "web/quotient/client.py:_json"
@@ -541,20 +533,6 @@ READERS = [
         (DONE, METADATA),
         check_infrastructure,
         (f"{QC}.get_infrastructure", QJ),
-    ),
-    Reader(
-        "get_service_choices",
-        lambda: quotient().get_service_choices(),
-        (DONE, METADATA),
-        check_choices,
-        (f"{QC}.get_service_choices",),
-    ),
-    Reader(
-        "get_box_names",
-        lambda: quotient().get_box_names(),
-        (DONE, METADATA),
-        lambda r: outcome(r, _strs, "box names"),
-        (f"{QC}.get_box_names",),
     ),
     Reader(
         "get_injects",

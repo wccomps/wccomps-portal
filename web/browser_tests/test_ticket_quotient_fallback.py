@@ -1,6 +1,7 @@
-"""With Quotient down, a team can still file tickets that need a hostname, IP, or service."""
+"""With no Quotient metadata synced, a team can still file tickets that need a hostname, IP, or service; with some
+synced, Quotient being down changes nothing."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -11,12 +12,8 @@ from .conftest import create_session_context
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 
-def _unavailable_quotient() -> MagicMock:
-    client = MagicMock()
-    client.get_infrastructure.return_value = None
-    client.get_box_names.return_value = []
-    client.get_service_choices.return_value = []
-    return client
+def _quotient_down():
+    return patch("quotient.client.get_quotient_client", side_effect=AssertionError("the ticket form asked Quotient"))
 
 
 @pytest.mark.parametrize(
@@ -36,7 +33,7 @@ def test_ticket_filed_with_typed_fields(category, fields, live_server, pw_browse
     page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
 
     try:
-        with patch("quotient.client.get_quotient_client", return_value=_unavailable_quotient()):
+        with _quotient_down():
             page.goto(f"{live_server.url}/tickets/create/")
             assert page.get_by_text("Scoring engine is unavailable").is_visible()
 
@@ -52,5 +49,33 @@ def test_ticket_filed_with_typed_fields(category, fields, live_server, pw_browse
         assert ticket.ip_address in (fields.get("#ip_address", ""), None)
         assert ticket.service_name == fields.get("#service_name", "")
         assert not console_errors, console_errors
+    finally:
+        context.close()
+
+
+def test_the_last_synced_boxes_and_services_stay_pickable_while_quotient_is_down(live_server, pw_browser):
+    from scoring.models import QuotientMetadataCache
+
+    from ticketing.models import Ticket
+
+    QuotientMetadataCache.objects.create(
+        boxes=[{"name": "web01", "ip": "10.0.1.5", "services": [{"name": "HTTP", "display_name": "HTTP"}]}]
+    )
+    user = role_user("blue_team")
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+
+    try:
+        with _quotient_down():
+            page.goto(f"{live_server.url}/tickets/create/")
+            assert not page.get_by_text("Scoring engine is unavailable").is_visible()
+
+            page.select_option("#category", "3")
+            page.fill("#title", "Picked service")
+            page.select_option("#service_name", "web01:HTTP")
+            with page.expect_navigation():
+                page.click("button[type=submit]")
+
+        assert Ticket.objects.get(title="Picked service").service_name == "web01:HTTP"
     finally:
         context.close()

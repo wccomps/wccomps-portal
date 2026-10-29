@@ -1,6 +1,6 @@
 """Ticketing admins can create tickets on a team's behalf (issue #39)."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.test import Client
@@ -13,12 +13,9 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture(autouse=True)
-def _no_quotient():
-    client = MagicMock()
-    client.get_infrastructure.return_value = None
-    client.get_box_names.return_value = []
-    client.get_service_choices.return_value = []
-    with patch("quotient.client.get_quotient_client", return_value=client):
+def _quotient_never_asked():
+    """The form reads the synced snapshot; a live Quotient call would hang it while Quotient is down."""
+    with patch("quotient.client.get_quotient_client", side_effect=AssertionError("the ticket form asked Quotient")):
         yield
 
 

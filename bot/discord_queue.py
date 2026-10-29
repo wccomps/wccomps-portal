@@ -8,19 +8,20 @@ from typing import assert_never
 
 import discord
 from asgiref.sync import sync_to_async
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 
 from bot.discord_manager import DiscordManager
 from bot.heartbeat import record as record_heartbeat
 from bot.role_sync import competition_guild
-from bot.thread_creator import publish_new_ticket
+from bot.thread_creator import add_team_members, create_ticket_thread, post_ticket_message
 from bot.ticket_dashboard import trigger_dashboard
 from bot.utils import (
     add_field,
     recycle_db_connection,
     send_parts,
     split_message,
+    team_chat_channel,
 )
 from core.discord_tasks import (
     PAYLOAD_TYPES,
@@ -104,7 +105,10 @@ class DiscordQueueProcessor:
         """
         cutoff = timezone.now() - DiscordQueueProcessor.STRANDED_TASK_MAX_AGE
         stranded = DiscordTask.objects.filter(status="processing")
-        requeued = stranded.filter(created_at__gte=cutoff).update(status="pending", next_retry_at=None)
+        # A rerun counts as a retry: its handler may find what the cut-short run did
+        requeued = stranded.filter(created_at__gte=cutoff).update(
+            status="pending", next_retry_at=None, retry_count=F("retry_count") + 1
+        )
         failed = stranded.filter(created_at__lt=cutoff).update(
             status="failed", error_message="Left in processing by a bot restart; too old to retry"
         )
@@ -142,7 +146,7 @@ class DiscordQueueProcessor:
                 task.error_message = f"Unknown task type: {task.task_type}"
                 await task.asave()
                 return
-            task_result = await self._dispatch(task.typed_payload())
+            task_result = await self._dispatch(task.typed_payload(), task)
 
             @sync_to_async
             def mark_completed() -> None:
@@ -202,7 +206,7 @@ class DiscordQueueProcessor:
             else:
                 logger.warning(f"Task {task.id} failed (attempt {task.retry_count}), retrying in {value}s")
 
-    async def _dispatch(self, payload: TaskPayload) -> Mapping[str, object] | None:
+    async def _dispatch(self, payload: TaskPayload, task: DiscordTask | None = None) -> Mapping[str, object] | None:
         """Run the handler for payload; what it returns is stored as the task's result."""
         match payload:
             case SyncMemberRoles():
@@ -212,7 +216,7 @@ class DiscordQueueProcessor:
             case LogToChannel():
                 await self._handle_log_to_channel(payload)
             case TicketCreatedWeb():
-                await self._handle_ticket_created_web(payload)
+                await self._handle_ticket_created_web(payload, rerun=task is not None and task.retry_count > 0)
             case CleanupCompetition():
                 await self._handle_cleanup_competition(payload)
             case PostComment():
@@ -284,15 +288,62 @@ class DiscordQueueProcessor:
 
         await log_to_ops_channel(self.bot, payload.message)
 
-    async def _handle_ticket_created_web(self, payload: TicketCreatedWeb) -> None:
+    async def _handle_ticket_created_web(self, payload: TicketCreatedWeb, *, rerun: bool = False) -> None:
+        """Give a new ticket its team thread. A team without a chat channel is reported to ops and the task completes;
+        any other failure raises, so the queue retries it."""
         ticket = await Ticket.objects.select_related("team").aget(id=payload.ticket_id)
+        try:
+            # A rerun makes no second thread
+            if not ticket.discord_thread_id:
+                guild = self._guild()
+                chat = team_chat_channel(guild, ticket.team)
+                if chat is None:
+                    from bot.utils import log_to_ops_channel
 
-        # A retry after a partial failure must not create a second thread.
-        if ticket.discord_thread_id:
+                    await log_to_ops_channel(
+                        self.bot,
+                        f"Ticket {ticket.ticket_number} has no Discord thread: {ticket.team.team_name} has no "
+                        "category or chat channel",
+                    )
+                    return
+                earlier = self._thread_an_earlier_run_made(chat, ticket) if rerun else None
+                if earlier is None:
+                    await create_ticket_thread(guild=guild, ticket=ticket)
+                    return
+                ticket.discord_thread_id = earlier.id
+                await Ticket.objects.filter(pk=ticket.pk).aupdate(discord_thread_id=earlier.id)
+            thread = await self._get_ticket_thread(ticket.discord_thread_id)
+            if isinstance(thread, discord.Thread):
+                await add_team_members(self._guild(), thread, ticket.team)
+            if not await self._holds_ticket_message(thread):
+                await post_ticket_message(thread, ticket)
+        finally:
             trigger_dashboard(self.bot)
-            return
 
-        await publish_new_ticket(self.bot, competition_guild(self.bot), ticket)
+    def _thread_an_earlier_run_made(self, chat: discord.TextChannel, ticket: Ticket) -> discord.Thread | None:
+        """The bot's thread named for this ticket and made no more than ten minutes before it was filed."""
+        prefix, me = f"{ticket.ticket_number}:", self.bot.user.id if self.bot.user else None
+        return next(
+            (
+                t
+                for t in chat.threads
+                if t.name.startswith(prefix)
+                and t.owner_id == me
+                # Allows for clock skew; a number repeats only in a later event, days on
+                and discord.utils.snowflake_time(t.id) >= ticket.created_at - timedelta(minutes=10)
+            ),
+            None,
+        )
+
+    async def _holds_ticket_message(self, thread: discord.TextChannel | discord.Thread) -> bool:
+        """Whether the bot's ticket message is in the thread: pinned, or (its pin failed) among the first messages."""
+        async for pinned in thread.pins():
+            if pinned.author == self.bot.user:
+                return True
+        async for message in thread.history(limit=50, oldest_first=True):
+            if message.author == self.bot.user and message.embeds:
+                return True
+        return False
 
     async def _get_ticket_thread(self, thread_id: int) -> discord.TextChannel | discord.Thread:
         thread = self.bot.get_channel(thread_id)

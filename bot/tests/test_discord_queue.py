@@ -667,3 +667,174 @@ class TestCompetitionGuildLookup:
 
         with pytest.raises(RuntimeError, match="Competition guild not found"):
             DiscordQueueProcessor(bot)._guild()
+
+
+async def _thread_task(test_team: Team) -> tuple[DiscordTask, object]:
+    from core.discord_tasks import TicketCreatedWeb
+    from ticketing.models import Ticket, TicketCategory
+
+    category = await TicketCategory.objects.acreate(pk=97, display_name="Other", sort_order=97)
+    ticket = await Ticket.objects.acreate(ticket_number="T030-001", team=test_team, category=category, title="t")
+    return await sync_to_async(DiscordTask.enqueue)(TicketCreatedWeb(ticket_id=ticket.pk)), ticket
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("failure", ["no guild", "thread error"])
+async def test_a_ticket_whose_thread_fails_is_retried_and_still_reaches_the_dashboard(
+    failure: str, test_team: Team
+) -> None:
+    """The queue's retry is the only one a ticket's thread gets."""
+    task, _ticket = await _thread_task(test_team)
+    bot = MagicMock()
+    bot.get_guild.return_value = None if failure == "no guild" else MagicMock()
+    error = discord.HTTPException(MagicMock(status=500, reason="x"), "x")
+
+    with (
+        patch("bot.discord_queue.team_chat_channel", return_value=MagicMock(threads=[])),
+        patch("bot.discord_queue.create_ticket_thread", AsyncMock(side_effect=error)),
+        patch("bot.discord_queue.trigger_dashboard") as dashboard,
+    ):
+        await DiscordQueueProcessor(bot)._process_task(task)
+
+    await task.arefresh_from_db()
+    assert (task.status, task.retry_count) == ("pending", 1)
+    dashboard.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_team_without_a_chat_channel_tells_ops_once_instead_of_retrying(test_team: Team) -> None:
+    task, _ticket = await _thread_task(test_team)
+
+    with (
+        patch("bot.discord_queue.team_chat_channel", return_value=None),
+        patch("bot.discord_queue.create_ticket_thread") as make_thread,
+        patch("bot.utils.log_to_ops_channel", new_callable=AsyncMock) as ops,
+        patch("bot.discord_queue.trigger_dashboard"),
+    ):
+        await DiscordQueueProcessor(MagicMock())._process_task(task)
+
+    await task.arefresh_from_db()
+    assert task.status == "completed"
+    make_thread.assert_not_called()
+    assert "T030-001" in ops.await_args.args[1]
+
+
+def _bot_thread(bot: MagicMock, thread_id: int, name: str) -> MagicMock:
+    thread = MagicMock(spec=discord.Thread, id=thread_id, owner_id=bot.user.id)
+    thread.name = name
+    return thread
+
+
+async def _run_thread_task(bot: MagicMock, task: DiscordTask, threads: list[MagicMock]) -> tuple[MagicMock, MagicMock]:
+    with (
+        patch("bot.discord_queue.team_chat_channel", return_value=MagicMock(threads=threads)),
+        patch("bot.discord_queue.create_ticket_thread", new_callable=AsyncMock) as make_thread,
+        patch.object(DiscordQueueProcessor, "_holds_ticket_message", AsyncMock(return_value=False)),
+        patch("bot.discord_queue.post_ticket_message", new_callable=AsyncMock) as post,
+        patch("bot.discord_queue.trigger_dashboard"),
+    ):
+        await DiscordQueueProcessor(bot)._process_task(task)
+    return make_thread, post
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("rerun", ["retry", "restart"])
+async def test_a_rerun_adopts_the_thread_an_earlier_run_made_before_it_could_store_it(
+    rerun: str, test_team: Team
+) -> None:
+    """A restart, or a failure between creating the thread and storing its id, must not make a second thread."""
+    task, ticket = await _thread_task(test_team)
+    if rerun == "retry":
+        await DiscordTask.objects.filter(pk=task.pk).aupdate(retry_count=1)
+    else:
+        await DiscordTask.objects.filter(pk=task.pk).aupdate(status="processing")
+        await DiscordQueueProcessor._recover_stranded_tasks()
+    bot = MagicMock()
+    made = discord.utils.time_snowflake(ticket.created_at + timedelta(seconds=5))
+    earlier = _bot_thread(bot, made, "T030-001: Team 30, t")
+    other = _bot_thread(bot, made + 1, "T030-002: Team 30, t")
+    bot.get_channel.return_value = earlier
+
+    make_thread, post = await _run_thread_task(bot, await DiscordTask.objects.aget(pk=task.pk), [other, earlier])
+
+    await ticket.arefresh_from_db()
+    assert ticket.discord_thread_id == earlier.id
+    make_thread.assert_not_called()
+    assert post.await_args.args[0] is earlier
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("thread_was", ["adopted", "stored"])
+async def test_a_rerun_adds_the_team_to_its_thread(thread_was: str, test_team: Team) -> None:
+    """Ticket threads are private: a run cut short before its member adds left the team unable to see its ticket."""
+    task, ticket = await _thread_task(test_team)
+    await DiscordTask.objects.filter(pk=task.pk).aupdate(retry_count=1)
+    bot = MagicMock()
+    thread = _bot_thread(bot, discord.utils.time_snowflake(ticket.created_at), "T030-001: Team 30, t")
+    thread.add_user = AsyncMock()
+    if thread_was == "stored":
+        from ticketing.models import Ticket
+
+        await Ticket.objects.filter(pk=ticket.pk).aupdate(discord_thread_id=thread.id)
+    bot.get_channel.return_value = thread
+    members = {11: MagicMock(name="member 11"), 12: MagicMock(name="member 12")}
+    bot.get_guild.return_value.get_member.side_effect = members.get
+
+    with patch("bot.utils.get_team_member_discord_ids", AsyncMock(return_value=[11, 12])):
+        await _run_thread_task(bot, await DiscordTask.objects.aget(pk=task.pk), [thread])
+
+    assert [c.args[0] for c in thread.add_user.await_args_list] == [members[11], members[12]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_rerun_adopts_a_thread_whose_clock_ran_a_little_behind_the_ticket_s(test_team: Team) -> None:
+    """Discord's clock and the portal's differ by seconds, not the days between events."""
+    task, ticket = await _thread_task(test_team)
+    await DiscordTask.objects.filter(pk=task.pk).aupdate(retry_count=1)
+    bot = MagicMock()
+    earlier = _bot_thread(
+        bot, discord.utils.time_snowflake(ticket.created_at - timedelta(seconds=30)), "T030-001: Team 30, t"
+    )
+    bot.get_channel.return_value = earlier
+
+    make_thread, _post = await _run_thread_task(bot, await DiscordTask.objects.aget(pk=task.pk), [earlier])
+
+    make_thread.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_rerun_leaves_an_older_ticket_s_thread_with_the_same_number_alone(test_team: Team) -> None:
+    """The ticket counter restarts each event: a practice round's T030-001 thread is not this T030-001's."""
+    task, ticket = await _thread_task(test_team)
+    await DiscordTask.objects.filter(pk=task.pk).aupdate(retry_count=1)
+    bot = MagicMock()
+    practice = _bot_thread(
+        bot, discord.utils.time_snowflake(ticket.created_at - timedelta(days=2)), "T030-001: Team 30, practice"
+    )
+
+    make_thread, _post = await _run_thread_task(bot, await DiscordTask.objects.aget(pk=task.pk), [practice])
+
+    await ticket.arefresh_from_db()
+    assert ticket.discord_thread_id is None
+    make_thread.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_first_run_makes_its_own_thread(test_team: Team) -> None:
+    """Only a rerun can have made a thread already."""
+    task, ticket = await _thread_task(test_team)
+    bot = MagicMock()
+    look_alike = _bot_thread(
+        bot, discord.utils.time_snowflake(ticket.created_at + timedelta(seconds=5)), "T030-001: Team 30, t"
+    )
+
+    make_thread, _post = await _run_thread_task(bot, task, [look_alike])
+
+    make_thread.assert_awaited_once()
