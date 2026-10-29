@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from typing import ClassVar, TypedDict, get_args
 
 
+class PermanentTaskError(Exception):
+    """Queued work that retrying can't fix: a queue that honours it fails the task at once."""
+
+
 @dataclass(frozen=True, kw_only=True)
 class PostComment:
     task_type: ClassVar = "post_comment"
