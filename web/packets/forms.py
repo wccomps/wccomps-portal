@@ -4,7 +4,7 @@ import re
 
 from django import forms
 
-from core.forms import ask_for_the_file_again
+from core.form_renderer import ask_for_the_file_again
 from team.models import SchoolInfo
 
 TEAM_EXTRAS_HELP = "Give a 'team' column and a row per team, with its number (like Team01 or 3)."

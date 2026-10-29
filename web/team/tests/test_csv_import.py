@@ -463,3 +463,13 @@ def test_an_event_choice_that_is_not_an_event_is_an_error_on_the_event(choice, e
 
     assert not form.is_valid()
     assert form.errors["event"] == [error]
+
+
+@pytest.mark.parametrize("choice", ["", "7"])
+def test_with_no_season_active_any_event_choice_but_new_says_so(choice):
+    from team.forms import ImportEventForm
+
+    form = ImportEventForm({"event": choice}, season=None)
+
+    assert not form.is_valid()
+    assert form.errors["event"] == ["No season is active: import into a new event, with a new season."]

@@ -1,4 +1,5 @@
 import re
+from datetime import timedelta
 from typing import TypedDict
 
 from django import forms
@@ -46,6 +47,17 @@ class OrangeCheckForm(forms.Form):
                 "max_points": check.max_points,
             }
         )
+
+    def check_fields(self) -> dict[str, object]:
+        """The check's model fields from a valid form: for_check() turned the other way."""
+        minutes = self.cleaned_data.get("time_limit_minutes")
+        return {
+            "title": self.cleaned_data["title"],
+            "description": self.cleaned_data["description"],
+            "scheduled_at": self.cleaned_data["scheduled_at"] or None,
+            "max_points": self.cleaned_data.get("max_points") or 0,
+            "time_limit": timedelta(minutes=minutes) if minutes else None,
+        }
 
 
 class FollowUpForm(forms.Form):

@@ -147,12 +147,12 @@ class ImportEventForm(NewEventFields):
     """The event a school list is for: an unfinalized event of the active season, or a new one, in a new season when
     none is active or at a new school year; and the import mode's key (IMPORT_MODES), Replace when not given."""
 
-    SEASON_FIELDS = ("new_season_name", "new_season_year")
-    CLOSED = "That event was closed out or removed: pick another."
-
     event = forms.ChoiceField(
         help_text="The event this school list is for. Importing opens it; packets sent from then on belong to it.",
-        error_messages={"required": "Pick the event this school list is for.", "invalid_choice": CLOSED},
+        error_messages={
+            "required": "Pick the event this school list is for.",
+            "invalid_choice": "That event was closed out or removed: pick another.",
+        },
     )
     mode = forms.ChoiceField(
         required=False,
@@ -180,7 +180,8 @@ class ImportEventForm(NewEventFields):
         self.open_events = {str(ev.pk): ev for ev in season.events.filter(is_finalized=False)} if season else {}
         event = cast(forms.ChoiceField, self.fields["event"])
         if season is None:
-            event.error_messages["required"] = "No season is active: import into a new event, with a new season."
+            no_season = "No season is active: import into a new event, with a new season."
+            event.error_messages["required"] = event.error_messages["invalid_choice"] = no_season
         event.choices = [
             ("", "Choose an event"),
             *((pk, f"{ev.name} ({date_format(ev.date)})") for pk, ev in self.open_events.items()),
@@ -207,21 +208,17 @@ class ImportEventForm(NewEventFields):
             raise ValidationError("Give the new season a name and a year.")
         return NewSeason(name=data["new_season_name"], year=data["new_season_year"])
 
-    def clean_mode(self) -> str:
-        return self.cleaned_data["mode"] or "replace"
-
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}
         choice = data.get("event")
         if choice == "new":
-            # A new-event field's own error already shows
-            if not any(name in self.errors for name in (*self.NEW_FIELDS, *self.SEASON_FIELDS)):
+            if not self.errors:
                 self.event_to_import = self.new_event()
         elif self.wants_new_season():
             raise ValidationError("A new season needs a new event: choose New event, or leave the new season empty.")
         elif choice:
             self.event_to_import = self.open_events[str(choice)]
-        self.import_mode = str(data.get("mode", "replace"))
+        self.import_mode = str(data.get("mode") or "replace")
         return data
 
 

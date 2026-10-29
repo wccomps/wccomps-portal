@@ -198,14 +198,18 @@ class Outcome(NamedTuple):
     points: int
     label: str
     description: str
+    # An access outcome's rank, 0 the highest: a finding scores only the highest one it reached
+    access_tier: int | None = None
 
 
 class RedTeamScore(Approvable):
     """Red team vulnerability score affecting one or more teams."""
 
     OUTCOMES: tuple[Outcome, ...] = (
-        Outcome("root_access", 100, "Root Access", "Root/Administrator level access obtained"),
-        Outcome("user_access", 25, "User Access", "User level access obtained (not scored with root access)"),
+        Outcome("root_access", 100, "Root Access", "Root/Administrator level access obtained", access_tier=0),
+        Outcome(
+            "user_access", 25, "User Access", "User level access obtained (not scored with root access)", access_tier=1
+        ),
         Outcome(
             "privilege_escalation", 100, "Privilege Escalation", "User escalated to Root/Admin (additional penalty)"
         ),
@@ -346,17 +350,11 @@ class RedTeamScore(Approvable):
     def affected_boxes_display(self) -> str:
         return format_boxes_display(self.affected_boxes)
 
-    # Access outcomes, highest first: a finding scores only the highest one it reached
-    ACCESS_TIERS: tuple[str, ...] = ("root_access", "user_access")
-
     def scored_outcomes(self) -> list[Outcome]:
         """The outcomes this finding scores, in table order."""
-        tier = next((field for field in self.ACCESS_TIERS if getattr(self, field)), None)
-        return [
-            outcome
-            for outcome in self.OUTCOMES
-            if getattr(self, outcome.field) and (outcome.field not in self.ACCESS_TIERS or outcome.field == tier)
-        ]
+        reached = [outcome for outcome in self.OUTCOMES if getattr(self, outcome.field)]
+        top = min((o.access_tier for o in reached if o.access_tier is not None), default=None)
+        return [outcome for outcome in reached if outcome.access_tier in (None, top)]
 
     def calculate_points(self) -> Decimal:
         """Points each affected team loses from the outcome checkboxes (stored positive; calculator subtracts it)."""

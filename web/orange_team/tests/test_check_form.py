@@ -7,6 +7,7 @@ from django.contrib.auth.models import User
 from django.test import Client
 from django.utils import timezone
 
+from core.tests.form_html import field_error
 from orange_team.forms import MAX_MINUTES
 from orange_team.models import MAX_POINTS, OrangeCheck
 
@@ -50,12 +51,6 @@ def test_edit_check_updates_max_and_window(lead_client: Client) -> None:
     assert check.time_limit == timedelta(minutes=15)
 
 
-def _field_error(html: str, field: str) -> str | None:
-    """The error shown in a field's own row, under the id its widget's aria-describedby names."""
-    match = re.search(rf'<p class="errornote" id="id_{field}_error">([^<]*)</p>', html)
-    return match.group(1) if match else None
-
-
 def test_a_refused_create_shows_the_posted_values_and_the_error_beside_its_field(lead_client: Client) -> None:
     response = lead_client.post(
         "/orange-team/checks/create/",
@@ -71,8 +66,8 @@ def test_a_refused_create_shows_the_posted_values_and_the_error_beside_its_field
 
     assert response.status_code == 200
     assert not OrangeCheck.objects.filter(title="Keeps its title").exists()
-    assert _field_error(html, "max_points") == f"Ensure this value is less than or equal to {MAX_POINTS}."
-    assert _field_error(html, "title") is None
+    assert field_error(html, "id_max_points") == f"Ensure this value is less than or equal to {MAX_POINTS}."
+    assert field_error(html, "id_title") is None
     assert 'value="Keeps its title"' in html
     assert "Posted steps</textarea>" in html
     assert 'value="2026-10-30T09:15"' in html

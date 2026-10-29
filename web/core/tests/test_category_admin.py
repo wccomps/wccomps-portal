@@ -5,6 +5,7 @@ from django.db import connection
 from django.test import Client
 from django.urls import reverse
 
+from core.tests.form_html import field_error
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory
 
@@ -348,14 +349,6 @@ def test_post_refuses_points_its_column_cannot_hold(gold_team_user):
     assert TicketCategory.objects.count() == before
 
 
-def _field_error(html: str, field: str) -> str | None:
-    """The error shown in a field's own row, under the id its widget's aria-describedby names."""
-    import re
-
-    match = re.search(rf'<p class="errornote" id="id_{field}_error">([^<]*)</p>', html)
-    return match.group(1) if match else None
-
-
 def test_a_failed_create_shows_the_posted_values_and_the_error_beside_its_field(gold_team_user):
     client = Client()
     client.force_login(gold_team_user)
@@ -372,8 +365,8 @@ def test_a_failed_create_shows_the_posted_values_and_the_error_beside_its_field(
     html = response.content.decode()
 
     assert response.status_code == 200
-    assert _field_error(html, "points") == "Ensure this value is less than or equal to 2147483647."
-    assert _field_error(html, "display_name") is None
+    assert field_error(html, "id_points") == "Ensure this value is less than or equal to 2147483647."
+    assert field_error(html, "id_display_name") is None
     assert 'value="Keeps Its Name"' in html
     assert f'value="{2**31}"' in html
     assert "1. Posted step</textarea>" in html
@@ -390,7 +383,7 @@ def test_a_failed_edit_shows_the_posted_values_not_the_saved_ones(gold_team_user
     )
     html = response.content.decode()
 
-    assert _field_error(html, "display_name") == "Display name is required."
+    assert field_error(html, "id_display_name") == "Display name is required."
     assert 'value="33"' in html
     assert 'value="50"' not in html
 
@@ -405,6 +398,6 @@ def test_a_ticket_field_cannot_be_both_required_and_optional(gold_team_user):
 
     assert response.status_code == 200
     assert not TicketCategory.objects.filter(display_name="Both").exists()
-    assert _field_error(response.content.decode(), "optional_fields") == (
+    assert field_error(response.content.decode(), "id_optional_fields") == (
         "Hostname is already required; a field is either required or optional."
     )

@@ -105,10 +105,9 @@ def test_each_outcome_takes_its_label_help_and_points_from_the_outcome_table(pag
     for rank, outcome in enumerate(RedTeamScore.OUTCOMES):
         checkbox = tag(html, rf'name="{outcome.field}"')
         assert f'data-points="{outcome.points}"' in checkbox
-        tier = RedTeamScore.ACCESS_TIERS.index(outcome.field) if outcome.field in RedTeamScore.ACCESS_TIERS else None
-        assert ("data-access-tier" in checkbox) == (tier is not None), outcome.field
-        if tier is not None:
-            assert f'data-access-tier="{tier}"' in checkbox
+        assert ("data-access-tier" in checkbox) == (outcome.access_tier is not None), outcome.field
+        if outcome.access_tier is not None:
+            assert f'data-access-tier="{outcome.access_tier}"' in checkbox
         assert re.search(
             rf'<label for="id_{outcome.field}"[^>]*>{re.escape(f"{outcome.label} (-{outcome.points})")}</label>', html
         ), rank
@@ -116,7 +115,8 @@ def test_each_outcome_takes_its_label_help_and_points_from_the_outcome_table(pag
 
 
 def test_root_access_is_the_higher_access_tier() -> None:
-    assert RedTeamScore.ACCESS_TIERS == ("root_access", "user_access")
+    tiers = {outcome.field: outcome.access_tier for outcome in RedTeamScore.OUTCOMES if outcome.access_tier is not None}
+    assert tiers == {"root_access": 0, "user_access": 1}
 
 
 def test_a_finding_on_many_boxes_keeps_every_box_s_ip_template():

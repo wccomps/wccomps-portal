@@ -11,8 +11,7 @@ from core.auth_utils import get_user_team, has_permission
 from core.discord_tasks import TicketCreatedWeb
 from core.models import DiscordTask
 from team.models import Team
-from ticketing.forms import CreateTicketForm
-from ticketing.models import TicketCategory
+from ticketing.forms import CreateTicketPageForm
 
 logger = logging.getLogger(__name__)
 
@@ -50,16 +49,9 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
     except QuotientAPIError:
         logger.warning("Quotient API unavailable, ticket form will have limited functionality")
 
-    # Staff file tickets in any category; teams only in user-creatable ones.
-    categories = list(TicketCategory.objects.all() if is_admin else TicketCategory.objects.filter(user_creatable=True))
-    categories_json = {
-        cat.pk: {"required_fields": cat.required_fields, "optional_fields": cat.optional_fields} for cat in categories
-    }
-
-    form = CreateTicketForm(
+    form = CreateTicketPageForm(
         request.POST if request.method == "POST" else None,
         staff=is_admin,
-        categories=categories,
         box_ip_map=box_ip_map,
         service_choices=service_choices,
         teams=teams,
@@ -67,6 +59,11 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
         box_names=box_names,
         auto_id="%s",
     )
+
+    categories_json = {
+        cat.pk: {"required_fields": cat.required_fields, "optional_fields": cat.optional_fields}
+        for cat in form.categories
+    }
 
     def form_page(status: int = 200) -> HttpResponse:
         context: dict[str, object] = {

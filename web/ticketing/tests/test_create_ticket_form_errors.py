@@ -1,7 +1,6 @@
 """A refused ticket shows what was posted again, with each error beside its field."""
 
 import re
-from html import unescape
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -9,6 +8,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
+from core.tests.form_html import field_error
 from team.models import Team
 from ticketing.models import Ticket
 
@@ -37,12 +37,6 @@ def _client(user):
     return client
 
 
-def _field_error(html: str, field: str) -> str | None:
-    """The error shown in a field's own row, under the id its widget's aria-describedby names."""
-    match = re.search(rf'<p class="errornote" id="{field}_error">([^<]*)</p>', html)
-    return unescape(match.group(1)) if match else None
-
-
 def test_a_refused_ticket_shows_the_posted_values_and_the_error_beside_its_field(
     blue_team_user, blue_team, box_reset_category
 ):
@@ -59,8 +53,8 @@ def test_a_refused_ticket_shows_the_posted_values_and_the_error_beside_its_field
 
     assert response.status_code == 200
     assert not Ticket.objects.exists()
-    assert _field_error(html, "ip_address") == "IP Address is required for this category."
-    assert _field_error(html, "hostname") is None
+    assert field_error(html, "ip_address") == "IP Address is required for this category."
+    assert field_error(html, "hostname") is None
     assert 'value="Web box won&#x27;t boot"' in html
     assert "Stuck at the boot loader</textarea>" in html
     assert re.search(rf'<option value="{box_reset_category.pk}" selected>', html)
@@ -70,7 +64,7 @@ def test_a_refused_ticket_shows_the_posted_values_and_the_error_beside_its_field
 def test_a_missing_title_is_an_error_beside_the_title(blue_team_user, blue_team):
     html = _client(blue_team_user).post(reverse("create_ticket"), {"category": 6}).content.decode()
 
-    assert _field_error(html, "title") == "This field is required."
+    assert field_error(html, "title") == "This field is required."
 
 
 def test_staff_who_pick_no_team_are_told_beside_the_team_picker(ticketing_admin_user, blue_team):
@@ -81,7 +75,7 @@ def test_staff_who_pick_no_team_are_told_beside_the_team_picker(ticketing_admin_
         .content.decode()
     )
 
-    assert _field_error(html, "team_id") == "Please select a team."
+    assert field_error(html, "team_id") == "Please select a team."
     assert f'<option value="{other.id}">Team 7</option>' in html
 
 

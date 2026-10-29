@@ -10,8 +10,7 @@ from django.views.decorators.http import require_POST
 from packets.models import packets_sent
 
 from core.auth_utils import require_permission
-from core.form_renderer import PortalFormRenderer
-from core.forms import fields_with_errors
+from core.form_renderer import PortalFormRenderer, fields_with_errors
 from core.utils import client_ip, list_filters
 from team.models import SchoolInfo
 

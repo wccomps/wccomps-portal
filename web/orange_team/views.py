@@ -195,7 +195,7 @@ def check_create(request: HttpRequest) -> HttpResponse:
 
     user = cast(User, request.user)
     with transaction.atomic():
-        orange_check = OrangeCheck.objects.create(**_check_fields(form), created_by=user)
+        orange_check = OrangeCheck.objects.create(**form.check_fields(), created_by=user)
         for c in criteria:
             OrangeCheckCriterion.objects.create(
                 orange_check=orange_check, label=c["label"], points=c["points"], sort_order=c["sort_order"]
@@ -233,7 +233,7 @@ def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
         return _check_page(request, orange_check, form, criterion_rows(request.POST))
 
     with transaction.atomic():
-        for name, value in _check_fields(form).items():
+        for name, value in form.check_fields().items():
             setattr(orange_check, name, value)
         orange_check.save()
         update_check_criteria(orange_check, criteria)
@@ -258,17 +258,6 @@ def _posted_check(
     if valid and (problem := scores_total_problem(orange_check.pk if orange_check else None, worth)):
         form.add_error(None, problem)
     return form, criteria if form.is_valid() else None
-
-
-def _check_fields(form: OrangeCheckForm) -> dict[str, object]:
-    minutes = form.cleaned_data.get("time_limit_minutes")
-    return {
-        "title": form.cleaned_data["title"],
-        "description": form.cleaned_data["description"],
-        "scheduled_at": form.cleaned_data["scheduled_at"] or None,
-        "max_points": form.cleaned_data.get("max_points") or 0,
-        "time_limit": timedelta(minutes=minutes) if minutes else None,
-    }
 
 
 def _check_page(

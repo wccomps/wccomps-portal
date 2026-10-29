@@ -1,5 +1,5 @@
 from collections.abc import Iterable, Mapping
-from typing import cast
+from typing import ClassVar, cast
 
 from django import forms
 from django.db.models import QuerySet
@@ -114,18 +114,14 @@ HOSTNAME_MAX: int = Ticket._meta.get_field("hostname").max_length  # type: ignor
 IP_MAX: int = Ticket._meta.get_field("ip_address").max_length  # type: ignore[assignment]
 
 
-class TeamChoiceField(forms.ModelChoiceField[Team]):
-    def label_from_instance(self, obj: Team) -> str:
-        return f"Team {obj.team_number}"
-
-
-def _category_label(category: TicketCategory) -> str:
-    worth = "Variable" if category.variable_points else f"{category.points}pt" if category.points else "Free"
-    return f"{category.display_name} ({worth})"
+class CategoryChoiceField(forms.ModelChoiceField[TicketCategory]):
+    def label_from_instance(self, obj: TicketCategory) -> str:
+        worth = "Variable" if obj.variable_points else f"{obj.points}pt" if obj.points else "Free"
+        return f"{obj.display_name} ({worth})"
 
 
 class CreateTicketForm(forms.Form):
-    """A new ticket; the web form and the bot's commands and modals (bot/ticket_input.py) share these rules."""
+    """A new ticket's rules, shared by the web form and the bot's commands and modals."""
 
     title = forms.CharField(
         max_length=255,
@@ -134,58 +130,33 @@ class CreateTicketForm(forms.Form):
     )
     description = forms.CharField(
         required=False,
-        widget=forms.Textarea(
-            attrs={"rows": 8, ":required": "descriptionRequired", "placeholder": "Detailed description of the issue..."}
-        ),
+        widget=forms.Textarea(attrs={"rows": 8, "placeholder": "Detailed description of the issue..."}),
     )
     hostname = forms.CharField(
         max_length=HOSTNAME_MAX,
         required=False,
-        widget=forms.TextInput(
-            attrs={
-                ":value": "selectedHostname",
-                "x-on:input": "setField",
-                "x-on:change": "pickHostname",
-                "data-field": "selectedHostname",
-                ":required": "hostnameRequired",
-                "placeholder": "e.g. web01",
-            }
-        ),
+        widget=forms.TextInput(attrs={"placeholder": "e.g. web01"}),
     )
     ip_address = forms.CharField(
         max_length=IP_MAX,
         required=False,
         label="IP Address",
         help_text="Enter the box's IP address",
-        widget=forms.TextInput(
-            attrs={
-                ":value": "ipAddress",
-                "x-on:input": "setField",
-                "data-field": "ipAddress",
-                ":required": "ipRequired",
-                "placeholder": "e.g. 10.0.1.5",
-            }
-        ),
+        widget=forms.TextInput(attrs={"placeholder": "e.g. 10.0.1.5"}),
     )
     service_name = forms.CharField(
         max_length=100,
         required=False,
         label="Service",
-        widget=forms.TextInput(
-            attrs={
-                ":value": "selectedService",
-                "x-on:input": "setField",
-                "data-field": "selectedService",
-                ":required": "serviceRequired",
-                "placeholder": "e.g. HTTP",
-            }
-        ),
+        widget=forms.TextInput(attrs={"placeholder": "e.g. HTTP"}),
     )
-    category = forms.IntegerField(
-        widget=forms.Select(attrs={":value": "selectedCategory", "x-on:change": "onCategoryChange"})
+    category = CategoryChoiceField(
+        TicketCategory.objects.none(),
+        empty_label="Select a category...",
+        error_messages={"invalid_choice": "Invalid ticket category selected."},
     )
     # Staff pick the team when the caller passes teams; without them it is off and a posted team is ignored
-    team_id = TeamChoiceField(
+    team_id = forms.ModelChoiceField(
         Team.objects.none(),
         required=False,
         disabled=True,
@@ -198,70 +169,32 @@ class CreateTicketForm(forms.Form):
         self,
         *args: object,
         staff: bool = False,
-        categories: Iterable[TicketCategory] | None = None,
         box_ip_map: Mapping[str, str] | None = None,
         service_choices: Iterable[Mapping[str, str]] = (),
         teams: QuerySet[Team] | None = None,
         own_team: Team | None = None,
-        box_names: Iterable[str] = (),
         **kwargs: object,
     ) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
-        self.staff = staff
         self.own_team = own_team
-        self._categories = categories
         self.box_ip_map = box_ip_map or {}
         self.service_choices = service_choices
-        if self._categories is not None:
-            self.fields["category"].widget.choices = [
-                ("", "Select a category..."),
-                *((cat.pk, _category_label(cat)) for cat in self._categories),
-            ]
+        # Staff file in any category; teams only in the ones teams may create
+        self.categories = TicketCategory.objects.all() if staff else TicketCategory.objects.filter(user_creatable=True)
+        cast(CategoryChoiceField, self.fields["category"]).queryset = self.categories
         if teams is not None:
-            team_id = cast(TeamChoiceField, self.fields["team_id"])
+            team_id = cast(forms.ModelChoiceField[Team], self.fields["team_id"])
             team_id.queryset = teams
             team_id.required = True
             team_id.disabled = False
-        if box_names := list(box_names):
-            self.fields["hostname"].widget = ToggleButtonSelect(
-                attrs={"x-on:change": "pickHostname"}, choices=[("", ""), *((box, box) for box in box_names)]
-            )
-            ip_address = self.fields["ip_address"]
-            ip_address.help_text = "Auto-filled from hostname selection"
-            ip_address.widget.attrs["placeholder"] = "Select a hostname above"
-        if self.service_choices:
-            self.fields["service_name"].widget = forms.Select(
-                choices=[("", "Select a service...")],
-                attrs={
-                    "x-ref": "serviceSelect",
-                    ":value": "selectedService",
-                    "x-on:change": "onServiceChange",
-                    ":required": "serviceRequired",
-                },
-            )
 
     def clean(self) -> dict[str, object]:
         cleaned = super().clean() or {}
         # Before the early returns: the view titles an invalid form's page with this team too
         cleaned["team"] = cleaned.get("team_id") or self.own_team
-        category_id = cleaned.get("category")
-        if category_id is None:
+        category = cleaned.get("category")
+        if not isinstance(category, TicketCategory):
             return cleaned
-        allowed = (
-            {cat.pk: cat for cat in self._categories}
-            if self._categories is not None
-            else {
-                cat.pk: cat
-                for cat in (
-                    TicketCategory.objects.all() if self.staff else TicketCategory.objects.filter(user_creatable=True)
-                )
-            }
-        )
-        if category_id not in allowed:
-            self.add_error("category", "Invalid ticket category selected.")
-            return cleaned
-
-        category = cleaned["category"] = allowed[category_id]
 
         hostname = str(cleaned.get("hostname", ""))
         ip_address = str(cleaned.get("ip_address", ""))
@@ -282,6 +215,57 @@ class CreateTicketForm(forms.Form):
             if field in REQUIRED_FIELD_ERRORS and field not in self.errors and not cleaned.get(field):
                 self.add_error(field, REQUIRED_FIELD_ERRORS[field])
         return cleaned
+
+
+class CreateTicketPageForm(CreateTicketForm):
+    """CreateTicketForm on the create ticket page: its fields bound to the page's ticketForm Alpine component, and
+    Quotient's boxes and services as pickers."""
+
+    ALPINE: ClassVar[dict[str, dict[str, str]]] = {
+        "description": {":required": "descriptionRequired"},
+        "hostname": {
+            ":value": "selectedHostname",
+            "x-on:input": "setField",
+            "x-on:change": "pickHostname",
+            "data-field": "selectedHostname",
+            ":required": "hostnameRequired",
+        },
+        "ip_address": {
+            ":value": "ipAddress",
+            "x-on:input": "setField",
+            "data-field": "ipAddress",
+            ":required": "ipRequired",
+        },
+        "service_name": {
+            ":value": "selectedService",
+            "x-on:input": "setField",
+            "data-field": "selectedService",
+            ":required": "serviceRequired",
+        },
+        "category": {":value": "selectedCategory", "x-on:change": "onCategoryChange"},
+    }
+
+    def __init__(self, *args: object, box_names: Iterable[str] = (), **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        for name, attrs in self.ALPINE.items():
+            self.fields[name].widget.attrs.update(attrs)
+        if box_names := list(box_names):
+            self.fields["hostname"].widget = ToggleButtonSelect(
+                attrs={"x-on:change": "pickHostname"}, choices=[("", ""), *((box, box) for box in box_names)]
+            )
+            ip_address = self.fields["ip_address"]
+            ip_address.help_text = "Auto-filled from hostname selection"
+            ip_address.widget.attrs["placeholder"] = "Select a hostname above"
+        if self.service_choices:
+            self.fields["service_name"].widget = forms.Select(
+                choices=[("", "Select a service...")],
+                attrs={
+                    "x-ref": "serviceSelect",
+                    ":value": "selectedService",
+                    "x-on:change": "onServiceChange",
+                    ":required": "serviceRequired",
+                },
+            )
 
 
 class TicketCommentForm(forms.Form):

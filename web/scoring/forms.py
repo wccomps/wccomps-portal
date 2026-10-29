@@ -212,8 +212,8 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
             field = self.fields[outcome.field]
             field.label = f"{outcome.label} (-{outcome.points})"
             field.widget.attrs["data-points"] = outcome.points
-            if outcome.field in RedTeamScore.ACCESS_TIERS:
-                field.widget.attrs["data-access-tier"] = RedTeamScore.ACCESS_TIERS.index(outcome.field)
+            if outcome.access_tier is not None:
+                field.widget.attrs["data-access-tier"] = outcome.access_tier
 
     def clean(self) -> dict[str, object]:
         """Validate that either source_ip or source_ip_pool is provided."""

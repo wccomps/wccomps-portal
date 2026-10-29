@@ -738,7 +738,8 @@ legend.required::after {
 legend.required::after {
     content: " *" / " required";
 }
-/* Silent where the input's own required attribute already announces it to assistive tech */
+/* Silent where the input's required attribute announces it; the :has rule stands alone, as a list it is in is
+   dropped whole where :has is unsupported */
 label.required::after {
     content: " *" / "";
 }

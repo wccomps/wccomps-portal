@@ -5,6 +5,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
 from django.urls import reverse
 
+from core.tests.form_html import field_error
 from team.models import SchoolInfo, Team
 
 pytestmark = pytest.mark.django_db
@@ -536,15 +537,6 @@ def test_a_season_activated_since_the_preview_refuses_the_import(client):
     assert not SchoolInfo.objects.exists()
 
 
-def _field_error(html: str, field: str) -> str | None:
-    """The error shown in a field's own row, under the id its widget's aria-describedby names."""
-    import re
-    from html import unescape
-
-    match = re.search(rf'<p class="errornote" id="id_{field}_error">([^<]*)</p>', html)
-    return unescape(match.group(1)) if match else None
-
-
 def test_a_refused_upload_shows_the_posted_values_and_the_error_beside_its_field(client):
     import re
 
@@ -564,8 +556,8 @@ def test_a_refused_upload_shows_the_posted_values_and_the_error_beside_its_field
     html = response.content.decode()
 
     assert not SchoolInfo.objects.exists()
-    assert _field_error(html, "new_date") == "Give the new event a valid date."
-    assert _field_error(html, "new_name") is None
+    assert field_error(html, "id_new_date") == "Give the new event a valid date."
+    assert field_error(html, "id_new_name") is None
     assert 'value="Qualifier 9"' in html
     assert 'value="2026-2027"' in html
     assert re.search(r'<option value="new" selected>New event</option>', html)
@@ -578,7 +570,7 @@ def test_an_upload_without_an_event_says_so_beside_the_event(client):
 
     html = _upload(client, event="").content.decode()
 
-    assert _field_error(html, "event") == "Pick the event this school list is for."
+    assert field_error(html, "id_event") == "Pick the event this school list is for."
     assert not SchoolInfo.objects.exists()
 
 

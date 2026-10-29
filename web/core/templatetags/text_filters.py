@@ -1,15 +1,9 @@
-from django import forms, template
+from django import template
 
-from core.forms import fields_with_errors
+from core.form_renderer import fields_with_errors, top_errors
 from core.utils import shorten
 
 register = template.Library()
 register.filter("shorten", shorten)
+register.filter("top_errors", top_errors)
 register.filter("fields_with_errors", fields_with_errors)
-
-
-@register.filter
-def top_errors(form: forms.BaseForm) -> list[str]:
-    """The form's own errors, and its hidden fields' (which have no row to show them beside) named by label."""
-    errors = [str(error) for error in form.non_field_errors()]
-    return errors + [f"{field.label}: {error}" for field in form.hidden_fields() for error in field.errors]
