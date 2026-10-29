@@ -1,4 +1,4 @@
-"""Discord task queue processor for rate limit resilience."""
+"""Run the Discord tasks the portal queues, retrying failures with backoff."""
 
 import asyncio
 import logging
@@ -8,26 +8,29 @@ from typing import assert_never
 
 import discord
 from asgiref.sync import sync_to_async
-from django.db.models import Q
+from django.core.exceptions import ObjectDoesNotExist
+from django.db.models import Model, Q, QuerySet
 from django.utils import timezone
 
-from bot.discord_manager import DiscordManager
+from bot.competition_actions import deliver_team_broadcast, run_competition_cleanup
+from bot.discord_manager import DiscordManager, delete_team_infrastructure
 from bot.heartbeat import record as record_heartbeat
-from bot.role_sync import competition_guild
+from bot.role_sync import competition_guild, sync_member_roles, sync_roles
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_dashboard import trigger_dashboard
 from bot.utils import (
     add_field,
+    log_to_ops_channel,
     recycle_db_connection,
     send_parts,
     split_message,
 )
 from core.discord_tasks import (
-    PAYLOAD_TYPES,
     AddUserToThread,
     BroadcastMessage,
     CleanupCompetition,
     LogToChannel,
+    PermanentTaskError,
     PostComment,
     PostTicketUpdate,
     SetupTeamInfrastructure,
@@ -43,6 +46,14 @@ from team.models import Team
 from ticketing.models import Ticket, TicketComment
 
 logger = logging.getLogger(__name__)
+
+
+async def _target[M: Model](queryset: QuerySet[M], **lookup: object) -> M:
+    """The record a task is about; its absence fails the task at once."""
+    try:
+        return await queryset.aget(**lookup)
+    except ObjectDoesNotExist:
+        raise PermanentTaskError(f"{queryset.model.__name__} {lookup} does not exist") from None
 
 
 class DiscordQueueProcessor:
@@ -136,71 +147,45 @@ class DiscordQueueProcessor:
         task.status = "processing"
 
         try:
-            if task.task_type not in PAYLOAD_TYPES:
-                logger.warning(f"Unknown task type: {task.task_type}")
-                task.status = "failed"
-                task.error_message = f"Unknown task type: {task.task_type}"
-                await task.asave()
-                return
             task_result = await self._dispatch(task.typed_payload())
-
-            @sync_to_async
-            def mark_completed() -> None:
-                task.status = "completed"
-                task.completed_at = timezone.now()
-                task.result = dict(task_result) if task_result is not None else None
-                task.save()
-
-            await mark_completed()
-            logger.info(f"Completed task {task.id}: {task.task_type}")
-
-        except discord.errors.RateLimited as rate_limit_error:
-
-            @sync_to_async
-            def handle_rate_limit(error: discord.errors.RateLimited) -> float:
-                retry_after = error.retry_after
-                task.retry_count += 1
-                task.next_retry_at = timezone.now() + timedelta(seconds=retry_after)
-                task.status = "pending"
-                task.error_message = f"Rate limited, retry after {retry_after}s"
-                task.save()
-                return retry_after
-
-            retry_after = await handle_rate_limit(rate_limit_error)
-            logger.warning(f"Task {task.id} rate limited, retrying in {retry_after}s")
-
+        except PermanentTaskError as error:
+            if await self._record(task, status="failed", error_message=str(error)):
+                logger.error(f"Task {task.id} ({task.task_type}) can never succeed: {error}")
+                await log_to_ops_channel(
+                    self.bot, f"Task {task.id} ({task.task_type}) failed and was not retried: {error}"
+                )
         except Exception as error:
-
-            @sync_to_async
-            def handle_error(exc: Exception) -> tuple[str, int]:
-                task.retry_count += 1
-                task.error_message = str(exc)
-
-                if task.retry_count >= task.max_retries:
-                    task.status = "failed"
-                    task.save()
-                    return "failed", task.max_retries
-                backoff_seconds = min(2**task.retry_count, DiscordQueueProcessor.MAX_BACKOFF_SECONDS)
-                task.next_retry_at = timezone.now() + timedelta(seconds=backoff_seconds)
-                task.status = "pending"
-                task.save()
-                return "retry", backoff_seconds
-
-            result, value = await handle_error(error)
-
-            if result == "failed":
-                logger.exception(f"Task {task.id} failed after {value} retries: {error}")
-                try:
-                    from bot.utils import log_to_ops_channel
-
+            retry_count = task.retry_count + 1
+            if retry_count >= task.max_retries:
+                if await self._record(task, status="failed", retry_count=retry_count, error_message=str(error)):
+                    logger.exception(f"Task {task.id} failed after {task.max_retries} retries: {error}")
                     await log_to_ops_channel(
-                        self.bot,
-                        f"Task {task.id} ({task.task_type}) failed after {value} retries: {error}",
+                        self.bot, f"Task {task.id} ({task.task_type}) failed after {task.max_retries} retries: {error}"
                     )
-                except Exception as log_error:
-                    logger.exception(f"Failed to log error to ops channel: {log_error}")
-            else:
-                logger.warning(f"Task {task.id} failed (attempt {task.retry_count}), retrying in {value}s")
+                return
+            backoff_seconds = min(2**retry_count, DiscordQueueProcessor.MAX_BACKOFF_SECONDS)
+            if await self._record(
+                task,
+                status="pending",
+                retry_count=retry_count,
+                error_message=str(error),
+                next_retry_at=timezone.now() + timedelta(seconds=backoff_seconds),
+            ):
+                logger.warning(f"Task {task.id} failed (attempt {retry_count}), retrying in {backoff_seconds}s")
+        else:
+            result = dict(task_result) if task_result is not None else None
+            if await self._record(task, status="completed", completed_at=timezone.now(), result=result):
+                logger.info(f"Completed task {task.id}: {task.task_type}")
+
+    @staticmethod
+    async def _record(task: DiscordTask, **outcome: object) -> bool:
+        """Write the task's outcome; False when its row is gone (deleting a ticket deletes its tasks)."""
+        if not await DiscordTask.objects.filter(pk=task.pk).aupdate(**outcome):
+            logger.info(f"Task {task.id} ({task.task_type}) was deleted while it ran")
+            return False
+        for name, value in outcome.items():
+            setattr(task, name, value)
+        return True
 
     async def _dispatch(self, payload: TaskPayload) -> Mapping[str, object] | None:
         """Run the handler for payload; what it returns is stored as the task's result."""
@@ -230,8 +215,6 @@ class DiscordQueueProcessor:
         return None
 
     async def _handle_sync_member_roles(self, payload: SyncMemberRoles) -> None:
-        from bot.role_sync import sync_member_roles
-
         guild = self._guild()
         member = guild.get_member(payload.discord_id)
         if not member:
@@ -253,8 +236,6 @@ class DiscordQueueProcessor:
 
     async def _handle_cleanup_competition(self, payload: CleanupCompetition) -> None:
         """Run the competition cleanup Close Out Event queued: only the Discord side for a close-out."""
-        from bot.competition_actions import run_competition_cleanup
-
         await run_competition_cleanup(
             self.bot, self._guild(), payload.requested_by, closed_out_event_id=payload.closed_out_event_id
         )
@@ -262,8 +243,6 @@ class DiscordQueueProcessor:
     async def _handle_setup_team_infrastructure(self, payload: SetupTeamInfrastructure) -> None:
         team_number = payload.team_number
         if payload.recreate:
-            from bot.discord_manager import delete_team_infrastructure
-
             team = await Team.objects.filter(team_number=team_number).afirst()
             if team:
                 await delete_team_infrastructure(
@@ -278,14 +257,12 @@ class DiscordQueueProcessor:
 
     async def _handle_log_to_channel(self, payload: LogToChannel) -> None:
         if not payload.message:
-            raise ValueError("Missing message in payload")
-
-        from bot.utils import log_to_ops_channel
+            raise PermanentTaskError("Missing message in payload")
 
         await log_to_ops_channel(self.bot, payload.message)
 
     async def _handle_ticket_created_web(self, payload: TicketCreatedWeb) -> None:
-        ticket = await Ticket.objects.select_related("team").aget(id=payload.ticket_id)
+        ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
 
         # A retry after a partial failure must not create a second thread.
         if ticket.discord_thread_id:
@@ -306,16 +283,9 @@ class DiscordQueueProcessor:
         return thread
 
     async def _handle_post_comment(self, payload: PostComment) -> None:
-        ticket_id = payload.ticket_id
         comment_id = payload.comment_id
-
-        @sync_to_async
-        def get_data() -> tuple[Ticket, TicketComment]:
-            ticket = Ticket.objects.get(id=ticket_id)
-            comment = TicketComment.objects.select_related("author").get(id=comment_id)
-            return ticket, comment
-
-        ticket, comment = await get_data()
+        ticket = await _target(Ticket.objects.all(), id=payload.ticket_id)
+        comment = await _target(TicketComment.objects.select_related("author"), id=comment_id)
 
         if not ticket.discord_thread_id:
             logger.info(f"Ticket {ticket.ticket_number} has no Discord thread; comment {comment_id} not mirrored")
@@ -345,7 +315,7 @@ class DiscordQueueProcessor:
         action = payload.action
         actor = payload.actor
 
-        ticket = await Ticket.objects.aget(id=payload.ticket_id)
+        ticket = await _target(Ticket.objects.all(), id=payload.ticket_id)
         trigger_dashboard(self.bot)
 
         if not ticket.discord_thread_id:
@@ -413,9 +383,6 @@ class DiscordQueueProcessor:
 
     async def _handle_sync_roles(self, payload: SyncRoles) -> SyncRolesResult:
         """Run the Authentik role sync; its result is what the web Sync Roles page shows."""
-        from bot.role_sync import sync_roles
-        from bot.utils import log_to_ops_channel
-
         dry_run = payload.dry_run
         guild = self._guild()
 
@@ -432,22 +399,19 @@ class DiscordQueueProcessor:
         return stats
 
     async def _handle_broadcast_message(self, payload: BroadcastMessage) -> dict[str, object]:
-        from bot.competition_actions import deliver_team_broadcast
-        from bot.utils import log_to_ops_channel
-
         target = payload.target
         message = payload.message
         sender = payload.sender
 
         if not target or not message:
-            raise ValueError("Missing target or message in payload")
+            raise PermanentTaskError("Missing target or message in payload")
 
         guild = self._guild()
 
         try:
             sent_count, queued_count, failed_channels = await deliver_team_broadcast(guild, target, message, sender)
         except ValueError as e:
-            raise ValueError(f"Invalid team range: {e}") from e
+            raise PermanentTaskError(f"Invalid team range: {e}") from e
 
         if target.lower().strip() == "announcements" and failed_channels:
             raise RuntimeError(failed_channels[0])

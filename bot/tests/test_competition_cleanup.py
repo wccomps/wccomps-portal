@@ -125,7 +125,7 @@ async def test_queued_cleanup_runs_the_shared_function(payload: dict[str, object
     processor = DiscordQueueProcessor(MagicMock())
     guild = MagicMock()
     processor._guild = MagicMock(return_value=guild)
-    with patch("bot.competition_actions.run_competition_cleanup", new_callable=AsyncMock) as cleanup:
+    with patch("bot.discord_queue.run_competition_cleanup", new_callable=AsyncMock) as cleanup:
         await processor._handle_cleanup_competition(task.typed_payload())
 
     cleanup.assert_awaited_once_with(processor.bot, guild, "web:admin", closed_out_event_id=closed_out)
