@@ -735,13 +735,15 @@ legend.required::after {
     content: " *";
     color: var(--error-fg, #ba2121);
 }
-/* Silent where an input's required attribute already says it; a checkbox or toggle group's inputs carry none */
-label.required::after,
-fieldset:has([required]) > legend.required::after {
-    content: " *" / "";
-}
 legend.required::after {
     content: " *" / " required";
+}
+/* Silent where the input's own required attribute already announces it to assistive tech */
+label.required::after {
+    content: " *" / "";
+}
+fieldset:has([required]) > legend.required::after {
+    content: " *" / "";
 }
 
 /* ============================================

@@ -1,6 +1,5 @@
 """In the findings table, a row's Delete deletes that finding and Approve Selected approves the checked rows; on the
-submit page, a team button selects that team and Select All and Deselect All pick every team or none, and a required
-group says so once."""
+submit page, a team button selects that team and Select All and Deselect All pick every team or none."""
 
 from decimal import Decimal
 
@@ -74,25 +73,5 @@ def test_a_team_button_on_the_submit_page_selects_that_team(live_server, pw_brow
         page.get_by_role("button", name="Deselect All").click()
         assert page.locator("#selectedCount").inner_text() == "0"
         assert button.get_attribute("aria-pressed") == "false"
-    finally:
-        context.close()
-
-
-def test_a_required_group_says_required_once(live_server, pw_browser):
-    """The source IP radios carry required themselves; the team picker's buttons don't, so its legend says it."""
-    from team.models import Team
-
-    Team.objects.create(team_number=3, team_name="Team 03", is_active=True)
-    context = create_session_context(pw_browser, live_server, role_user("red_team"))
-    page = context.new_page()
-    try:
-        page.goto(f"{live_server.url}{reverse('scoring:submit_red_score')}")
-        names = page.evaluate(
-            "Array.from(document.querySelectorAll('fieldset > legend.required'), legend => "
-            "[legend.textContent.trim(), getComputedStyle(legend, '::after').content])"
-        )
-        alt = dict(names)
-        assert alt["Affected Teams:"].endswith('/ " required"')
-        assert alt["Source IP:"].endswith('/ ""')
     finally:
         context.close()

@@ -125,9 +125,7 @@ def _category_label(category: TicketCategory) -> str:
 
 
 class CreateTicketForm(forms.Form):
-    """A new ticket, from the web form or Discord's commands and modals. Validates the category against the ones the
-    caller may use, fills in hostname and IP from Quotient's service and box maps when known, and requires the
-    category's required fields."""
+    """A new ticket; the web form and the bot's commands and modals (bot/ticket_input.py) share these rules."""
 
     title = forms.CharField(
         max_length=255,
@@ -244,7 +242,7 @@ class CreateTicketForm(forms.Form):
 
     def clean(self) -> dict[str, object]:
         cleaned = super().clean() or {}
-        # The team filed for: the picked one, else own_team (None when the caller gives neither)
+        # Before the early returns: the view titles an invalid form's page with this team too
         cleaned["team"] = cleaned.get("team_id") or self.own_team
         category_id = cleaned.get("category")
         if category_id is None:

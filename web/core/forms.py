@@ -12,7 +12,7 @@ from team.models import SchoolInfo
 
 
 def fields_with_errors(form: forms.BaseForm) -> list[tuple[forms.BoundField, str, str]]:
-    """(field, label as text, id to link to) for each shown field with an error; a repeated label is named by field."""
+    """Each shown field with an error, its label and link target; a group with no label target links to option 0."""
     labels = [strip_tags(str(field.label)) for field in form.visible_fields()]
     found = []
     for field in form.visible_fields():
