@@ -2,7 +2,7 @@
 
 import asyncio
 import threading
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Generator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -53,7 +53,25 @@ async def _quotient_sync(blocked: Callable[..., Any]) -> None:
 def _interaction() -> AsyncMock:
     interaction = AsyncMock(spec=discord.Interaction)
     interaction.response, interaction.followup = AsyncMock(), AsyncMock()
+    interaction.created_at = discord.utils.utcnow()
     return interaction
+
+
+def _one_batch(blocked: Callable[..., Any]) -> Generator[object, None, object]:
+    yield blocked()
+    return MagicMock(team_numbers=[1])
+
+
+async def _bulk_reset(blocked: Callable[..., Any]) -> None:
+    from bot.cogs import admin_competition
+
+    interaction = _interaction()
+    cog = admin_competition.AdminCompetitionCog(MagicMock())
+    with (
+        patch.object(admin_competition, "reset_teams_credentials", lambda *_a: _one_batch(blocked)),
+        patch.object(admin_competition, "settings", MagicMock(AUTHENTIK_TOKEN="t")),
+    ):
+        await cog.admin_reset_blueteam_passwords.callback(cog, interaction, team_numbers="1")
 
 
 async def _ticket_command(blocked: Callable[..., Any]) -> None:
@@ -113,6 +131,7 @@ async def _team_reset(blocked: Callable[..., Any]) -> None:
     [
         _group_refresh,
         _quotient_sync,
+        _bulk_reset,
         _ticket_command,
         _help_panel_ticket,
         _admin_ticket_command,
@@ -121,6 +140,7 @@ async def _team_reset(blocked: Callable[..., Any]) -> None:
     ids=[
         "group-refresh",
         "quotient-sync",
+        "bulk-reset",
         "ticket",
         "help-panel-ticket",
         "admin-ticket",

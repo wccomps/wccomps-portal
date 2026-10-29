@@ -90,6 +90,7 @@ def mock_interaction() -> Any:
     # Mock response
     interaction.response = AsyncMock()
     interaction.followup = AsyncMock()
+    interaction.created_at = discord.utils.utcnow()
 
     return interaction
 

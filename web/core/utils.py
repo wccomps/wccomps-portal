@@ -5,7 +5,7 @@ import logging
 import queue
 import re
 import threading
-from collections.abc import Callable, Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, TypedDict
@@ -339,3 +339,29 @@ REQUIRED_DISCORD_SETTINGS: dict[str, str] = {
 def missing_discord_settings() -> list[str]:
     """Environment variable names of required Discord IDs that are unset (0)."""
     return [env for name, env in REQUIRED_DISCORD_SETTINGS.items() if not getattr(settings, name, 0)]
+
+
+class Stepped[Y, R]:
+    """A generator's items, `for item in Stepped(gen)`, then `.result` is what it returned."""
+
+    def __init__(self, steps: Generator[Y, None, R]) -> None:
+        self._steps = steps
+        self._returned: tuple[R] | None = None
+
+    def __iter__(self) -> Generator[Y]:
+        returned = yield from self._steps
+        self._returned = (returned,)
+
+    @property
+    def result(self) -> R:
+        if self._returned is None:
+            raise RuntimeError("The generator has not finished")
+        return self._returned[0]
+
+
+def drain[R](steps: Generator[object, None, R]) -> R:
+    """Run a generator to the end; what it returned."""
+    stepped = Stepped(steps)
+    for _ in stepped:
+        pass
+    return stepped.result

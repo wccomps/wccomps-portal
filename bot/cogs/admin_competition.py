@@ -1,5 +1,7 @@
 import io
 import logging
+from contextlib import aclosing
+from datetime import timedelta
 
 import discord
 from asgiref.sync import sync_to_async
@@ -9,8 +11,9 @@ from django.conf import settings
 
 from bot.competition_actions import deliver_team_broadcast, run_competition_cleanup
 from bot.permissions import permission_check
-from bot.utils import ConfirmView, log_to_ops_channel, split_message
+from bot.utils import BlockingSteps, ConfirmView, log_to_ops_channel, split_message
 from core.authentik_utils import (
+    BulkPasswordResetResult,
     credentials_csv,
     parse_team_range,
     reset_teams_credentials,
@@ -19,9 +22,14 @@ from core.authentik_utils import (
 from core.forms import AppSlugForm
 from core.models import AuditLog, CompetitionConfig
 from core.utils import UnknownTimezoneError, parse_datetime_to_utc, shorten
-from team.models import active_team_numbers
+from team.models import active_team_numbers, team_username
 
 logger = logging.getLogger(__name__)
+
+# Discord takes followups to a command for 15 minutes from the command, confirmation wait included
+FOLLOWUP_WINDOW = timedelta(minutes=15)
+# Room left for the messages that close the command
+SEND_ALLOWANCE = timedelta(seconds=30)
 
 
 class AdminCompetitionCog(commands.Cog):
@@ -83,32 +91,62 @@ class AdminCompetitionCog(commands.Cog):
         else:
             teams = active
 
-        # Only successful resets go in the CSV: a failed one leaves the old password in place.
-        result = await sync_to_async(reset_teams_credentials)(teams, actor=str(interaction.user))
-        password_list = result.password_list
-        failed_resets = result.failed_resets
-        sessions_failed = result.sessions_failed
-        total = len(teams)
+        # Each batch's passwords go out before the next batch starts, so an interruption loses at most one batch
+        closes = interaction.created_at + FOLLOWUP_WINDOW
+        started, longest = discord.utils.utcnow(), timedelta(0)
 
-        summary = f"Password reset complete\n• Success: {len(password_list)}/{total}\n"
-        details = "".join(f"• Failed {username}: {error}\n" for username, error in failed_resets)
-        if sessions_failed:
-            details += f"• Sessions: {sessions_failure_summary(sessions_failed)}\n"
+        def room_for_another() -> bool:
+            # The slowest batch so far, sending included, estimates the next one
+            return discord.utils.utcnow() + longest + SEND_ALLOWANCE <= closes
+
+        batches = reset_teams_credentials(teams, str(interaction.user), room_for_another)
+        async with aclosing(BlockingSteps(batches)) as steps:
+            async for result in steps:
+                await self._send_reset_result(interaction, result)
+                now = discord.utils.utcnow()
+                longest, started = max(longest, now - started), now
+            reached = len(steps.result.team_numbers)
+        await self._send_not_reset(teams[reached:], interaction)
+
+        logger.info(f"Password reset performed by {interaction.user}: {reached} of {len(teams)} teams attempted")
+
+    @staticmethod
+    async def _send_reset_result(interaction: discord.Interaction, result: BulkPasswordResetResult) -> None:
+        """One batch's outcome; only successful resets go in the CSV, a failed one leaves the old password."""
+        first, last = team_username(result.team_numbers[0]), team_username(result.team_numbers[-1])
+        summary = (
+            f"Password reset, {first} to {last}\n• Success: {len(result.password_list)}/{len(result.team_numbers)}\n"
+        )
+        details = "".join(f"• Failed {username}: {error}\n" for username, error in result.failed_resets)
+        if result.sessions_failed:
+            details += f"• Sessions: {sessions_failure_summary(result.sessions_failed)}\n"
         if result.sessions_uncounted:
             details += f"• Could not count the sessions of {', '.join(result.sessions_uncounted)}\n"
-        if password_list:
+        if result.password_list:
             # The CSV rides on the short first message, so details past Discord's limit can't lose the passwords
-            csv_content = credentials_csv((username, password) for _num, username, password in password_list)
-            file = discord.File(fp=io.BytesIO(csv_content.encode("utf-8")), filename="blueteam_passwords.csv")
+            csv_content = credentials_csv((username, password) for _num, username, password in result.password_list)
+            file = discord.File(
+                fp=io.BytesIO(csv_content.encode("utf-8")), filename=f"blueteam_passwords_{first}-{last}.csv"
+            )
             await interaction.followup.send(
                 summary + "\nCSV attached with the new credentials.", file=file, ephemeral=True
             )
         else:
             details = summary + details
-        for part in split_message(details) if details else []:
-            await interaction.followup.send(part, ephemeral=True)
+        for chunk in split_message(details) if details else []:
+            await interaction.followup.send(chunk, ephemeral=True)
 
-        logger.info(f"Password reset performed by {interaction.user}. Failed: {len(failed_resets)}")
+    @staticmethod
+    async def _send_not_reset(team_numbers: list[int], interaction: discord.Interaction) -> None:
+        if not team_numbers:
+            return
+        names = ", ".join(team_username(n) for n in team_numbers)
+        message = (
+            f"Stopped: Discord closes this command's replies before another batch could finish, so these "
+            f"{len(team_numbers)} teams were not reset; run the command again for them: {names}"
+        )
+        for chunk in split_message(message):
+            await interaction.followup.send(chunk, ephemeral=True)
 
     @competition_group.command(name="set-max-members", description="[ADMIN] Set maximum team members globally")
     @app_commands.describe(max_members="Maximum members per team (1-20)")

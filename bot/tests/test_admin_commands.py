@@ -91,7 +91,7 @@ class TestAdminCommands:
             patch("core.authentik_utils.AuthentikManager"),
             patch(
                 "core.authentik_utils._reset_credentials",
-                side_effect=lambda _m, n: CredentialReset(
+                side_effect=lambda _m, n, _on_set=None: CredentialReset(
                     password=f"pw-{n}",
                     sessions_error="HTTP 403" if n == 2 else None,
                     sessions_found=None if n == 3 else 0,
@@ -129,7 +129,7 @@ class TestAdminCommands:
         callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
         with (
             patch("core.authentik_utils.AuthentikManager"),
-            patch("core.authentik_utils._reset_credentials", side_effect=lambda _m, n: results[n]),
+            patch("core.authentik_utils._reset_credentials", side_effect=lambda _m, n, _on_set=None: results[n]),
             patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
         ):
             cog = AdminCompetitionCog(mock_bot)
@@ -154,7 +154,7 @@ class TestAdminCommands:
             patch("core.authentik_utils.AuthentikManager"),
             patch(
                 "core.authentik_utils._reset_credentials",
-                side_effect=lambda _m, n: CredentialReset(
+                side_effect=lambda _m, n, _on_set=None: CredentialReset(
                     password=None if n % 2 else f"pw-{n}", error=f"failure {n} " + "x" * 80
                 ),
             ),
@@ -167,6 +167,104 @@ class TestAdminCommands:
         assert "file" in sends[0].kwargs
         assert all(len(c.args[0]) <= 2000 for c in sends)
         assert sum(c.args[0].count("failure ") for c in sends) == 25
+
+    async def test_reset_blueteam_passwords_sends_each_batch_before_resetting_more(
+        self,
+        mock_interaction: Any,
+        mock_admin_user: Any,
+        mock_bot: Any,
+    ) -> None:
+        """A bulk reset cut short (a crash, a restart) has handed over every password it changed but one batch's."""
+        mock_interaction.user.id = mock_admin_user._discord_id
+
+        def reset(_manager: Any, number: int, _on_set: Any) -> CredentialReset:
+            if number == 11:
+                raise RuntimeError("bot stopped")
+            return CredentialReset(password=f"pw-{number}", sessions_found=0)
+
+        callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
+        with (
+            patch("core.authentik_utils.AuthentikManager"),
+            patch("core.authentik_utils._reset_credentials", side_effect=reset),
+            patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
+            pytest.raises(RuntimeError, match="bot stopped"),
+        ):
+            cog = AdminCompetitionCog(mock_bot)
+            await cog.admin_reset_blueteam_passwords.callback(cog, mock_interaction, team_numbers="1-12")
+
+        files = [c.kwargs["file"] for c in mock_interaction.followup.send.call_args_list if "file" in c.kwargs]
+        assert [f.fp.getvalue().decode().splitlines()[1:] for f in files] == [
+            [f"team{n:02d},pw-{n}" for n in range(1, 11)]
+        ]
+
+    @pytest.mark.parametrize(
+        ("started_minutes_ago", "reset", "not_reset"),
+        [(5, range(1, 21), range(21, 26))],
+        ids=["window-closes-midway"],
+    )
+    async def test_reset_blueteam_passwords_stops_before_a_batch_could_outlive_the_reply_window(
+        self, mock_interaction: Any, mock_admin_user: Any, mock_bot: Any, started_minutes_ago, reset, not_reset
+    ) -> None:
+        """Discord takes followups for 15 minutes; a batch reset after that would change passwords nobody gets."""
+        from datetime import timedelta
+
+        mock_interaction.user.id = mock_admin_user._discord_id
+        clock = [discord.utils.utcnow()]
+        mock_interaction.created_at = clock[0] - timedelta(minutes=started_minutes_ago)
+
+        def reset_one(_manager: Any, number: int, _on_set: Any) -> CredentialReset:
+            clock[0] += timedelta(seconds=20)
+            return CredentialReset(password=f"pw-{number}", sessions_found=0)
+
+        callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
+        with (
+            patch("core.authentik_utils.AuthentikManager"),
+            patch("core.authentik_utils._reset_credentials", side_effect=reset_one) as resets,
+            patch.object(discord.utils, "utcnow", lambda: clock[0]),
+            patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
+        ):
+            cog = AdminCompetitionCog(mock_bot)
+            await callback(cog, mock_interaction, team_numbers="1-25")
+
+        assert [c.args[1] for c in resets.call_args_list] == list(reset)
+        sends = mock_interaction.followup.send.call_args_list
+        assert len([c for c in sends if "file" in c.kwargs]) == len(reset) // 10
+        last = sends[-1].args[0]
+        assert "not reset" in last
+        assert all(f"team{n:02d}" in last for n in not_reset)
+        assert not any(f"team{n:02d}" in last for n in reset)
+        notes = [t.payload["message"] async for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+        unreached = ", ".join(f"team{n:02d}" for n in not_reset)
+        assert notes == [
+            f"Credentials reset by {mock_interaction.user}: not reached: {unreached}; Reset 20/20 passwords"
+        ]
+
+    async def test_reset_blueteam_passwords_tells_ops_whose_passwords_were_never_handed_over(
+        self, mock_interaction: Any, mock_admin_user: Any, mock_bot: Any
+    ) -> None:
+        """The passwords changed in Authentik, and the CSV holding them never reached Discord."""
+        mock_interaction.user.id = mock_admin_user._discord_id
+        mock_interaction.followup.send.side_effect = discord.HTTPException(MagicMock(status=500, reason="x"), "x")
+
+        callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
+        with (
+            patch("core.authentik_utils.AuthentikManager"),
+            patch(
+                "core.authentik_utils._reset_credentials",
+                side_effect=lambda _m, n, _on_set=None: CredentialReset(password=f"pw-{n}", sessions_found=0),
+            ),
+            patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
+            pytest.raises(discord.HTTPException),
+        ):
+            cog = AdminCompetitionCog(mock_bot)
+            await callback(cog, mock_interaction, team_numbers="1-12")
+
+        notes = [t.payload["message"] async for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+        lost = ", ".join(f"team{n:02d}" for n in range(1, 11))
+        assert notes == [
+            f"Credentials reset by {mock_interaction.user}: the new passwords of {lost} were never handed over: "
+            "reset them again; not reached: team11, team12; Reset 10/10 passwords"
+        ]
 
     async def test_admin_ticket_create_defers_first_and_queues_the_thread_even_if_the_reply_fails(
         self, mock_interaction: Any, mock_admin_user: Any, mock_bot: Any, box_reset_category: Any

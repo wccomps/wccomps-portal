@@ -559,6 +559,7 @@ class Discord:
         response.component = component
         interaction.response = response
         interaction.followup = FakeFollowup(self, response)
+        interaction.created_at = discord.utils.utcnow()
 
         async def edit_original_response(**kwargs: Any) -> Any:
             if not response.is_done():

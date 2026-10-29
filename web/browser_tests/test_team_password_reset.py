@@ -161,7 +161,7 @@ def test_competition_reset_passwords_partial_failure_keeps_the_error_and_the_csv
     try:
         with (
             patch("core.authentik_utils.AuthentikManager"),
-            patch("core.authentik_utils._reset_credentials", side_effect=lambda _m, n: results[n]),
+            patch("core.authentik_utils._reset_credentials", side_effect=lambda _m, n, _on_set=None: results[n]),
         ):
             page.goto(live_server.url + reverse("admin_competition"))
             page.get_by_role("button", name="Advanced: reset team passwords").click()

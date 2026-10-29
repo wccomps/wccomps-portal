@@ -56,7 +56,7 @@ from core.forms import (
 )
 from core.models import AuditLog, CompetitionConfig, DiscordTask
 from core.services.competition import CompetitionRunResult, last_start_accounts, run_competition
-from core.utils import ndjson_done, run_detached
+from core.utils import drain, ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
 from team.models import active_team_numbers
 
@@ -291,7 +291,8 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
         raise BadRequest(error_msg)
 
     team_numbers = form.cleaned_data["team_numbers"] or active_team_numbers()
-    result = reset_teams_credentials(team_numbers, actor=authentik_username)
+    # Every batch reaches the browser in this one response, or none does
+    result = drain(reset_teams_credentials(team_numbers, authentik_username, hand_over_each=False))
     password_list = result.password_list
     csv_content = (
         credentials_csv((username, password) for _num, username, password in password_list) if password_list else ""
