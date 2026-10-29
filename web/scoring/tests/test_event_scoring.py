@@ -385,7 +385,7 @@ class TestScorecardRedTeamDetail:
         attack_type, _ = AttackType.objects.get_or_create(name="Privilege Escalation")
         finding = RedTeamScore.objects.create(
             attack_type=attack_type,
-            root_access=True,
+            access_level="root",
             credentials_recovered=True,
             points_per_team=Decimal("150"),
             is_approved=True,

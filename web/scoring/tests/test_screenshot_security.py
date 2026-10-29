@@ -183,6 +183,7 @@ def _submit_red(user, uploads: list[SimpleUploadedFile]):
             "source_ip_type": "single",
             "source_ip": "10.0.0.9",
             "attack_type": attack.id,
+            "access_level": "user",
             "affected_teams": [Team.objects.get().id],
             "screenshots": uploads,
         },

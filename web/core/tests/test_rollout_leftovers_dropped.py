@@ -16,7 +16,11 @@ from core.tests.guards import fail_with
 pytestmark = pytest.mark.django_db
 
 # "table" or "table.column": why the database keeps it without a model
-EXCEPTIONS: dict[str, str] = {}
+EXCEPTIONS: dict[str, str] = {
+    "red_team_finding.root_access": "scoring 0047 folded it into access_level; the drop must first rerun 0047's "
+    "_to_level for rows with access_level 'none' and an old boolean set (written by the old release mid-rollout)",
+    "red_team_finding.user_access": "scoring 0047 folded it into access_level; see root_access",
+}
 
 
 def _model_columns() -> dict[str, set[str]]:
