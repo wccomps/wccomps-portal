@@ -413,7 +413,7 @@ def _import_event_make(w: World, draw: st.DataObject) -> Factory:
     return lambda data, files: ImportEventForm(data, files, season=season)
 
 
-def TICKET_HINTS(w: World) -> dict[str, st.SearchStrategy[Any]]:  # noqa: N802
+def _ticket_hints(w: World) -> dict[str, st.SearchStrategy[Any]]:
     return {
         "category": st.sampled_from(
             [str(pk) for pk in TicketCategory.objects.filter(user_creatable=True).values_list("pk", flat=True)]
@@ -680,10 +680,9 @@ CASES = [
         examples=(lambda w: {"event": str(w.open_event.pk), "current_season": str(w.season.pk)},),
     ),
     FormCase(ImportConfirmForm),
-    FormCase(CreateTicketForm, hints=TICKET_HINTS, use=lambda w, f: _create_ticket(w, f)),
+    FormCase(CreateTicketForm, hints=_ticket_hints, use=lambda w, f: _create_ticket(w, f)),
     FormCase(
         CreateTicketPageForm,
-        # The page's pickers: Quotient's boxes and services
         make=lambda w, draw: (
             lambda data, files: CreateTicketPageForm(
                 data,
@@ -692,7 +691,7 @@ CASES = [
                 service_choices=[{"value": "web01-http", "box_name": "web01", "box_ip": "10.0.1.5"}],
             )
         ),
-        hints=TICKET_HINTS,
+        hints=_ticket_hints,
         use=lambda w, f: _create_ticket(w, f),
     ),
     FormCase(TicketCommentForm, use=posts_to(lambda w: reverse("ticket_comment", args=[w.claimed.ticket_number]))),

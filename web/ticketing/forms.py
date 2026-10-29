@@ -179,9 +179,9 @@ class CreateTicketForm(forms.Form):
         self.own_team = own_team
         self.box_ip_map = box_ip_map or {}
         self.service_choices = service_choices
-        # Staff file in any category; teams only in the ones teams may create
-        self.categories = TicketCategory.objects.all() if staff else TicketCategory.objects.filter(user_creatable=True)
-        cast(CategoryChoiceField, self.fields["category"]).queryset = self.categories
+        cast(CategoryChoiceField, self.fields["category"]).queryset = (
+            TicketCategory.objects.all() if staff else TicketCategory.objects.filter(user_creatable=True)
+        )
         if teams is not None:
             team_id = cast(forms.ModelChoiceField[Team], self.fields["team_id"])
             team_id.queryset = teams
@@ -190,10 +190,10 @@ class CreateTicketForm(forms.Form):
 
     def clean(self) -> dict[str, object]:
         cleaned = super().clean() or {}
-        # Before the early returns: the view titles an invalid form's page with this team too
+        # Before the category check: the view titles an invalid form's page with this team too
         cleaned["team"] = cleaned.get("team_id") or self.own_team
         category = cleaned.get("category")
-        if not isinstance(category, TicketCategory):
+        if category is None:
             return cleaned
 
         hostname = str(cleaned.get("hostname", ""))
@@ -218,8 +218,7 @@ class CreateTicketForm(forms.Form):
 
 
 class CreateTicketPageForm(CreateTicketForm):
-    """CreateTicketForm on the create ticket page: its fields bound to the page's ticketForm Alpine component, and
-    Quotient's boxes and services as pickers."""
+    """Binds the fields to the page's ticketForm Alpine component and shows Quotient's boxes and services as pickers."""
 
     ALPINE: ClassVar[dict[str, dict[str, str]]] = {
         "description": {":required": "descriptionRequired"},
@@ -266,6 +265,14 @@ class CreateTicketPageForm(CreateTicketForm):
                     ":required": "serviceRequired",
                 },
             )
+
+    def categories_json(self) -> dict[int, dict[str, list[str]]]:
+        """Each category's required and optional fields, which the page shows and requires as one is picked."""
+        categories = cast(QuerySet[TicketCategory], cast(CategoryChoiceField, self.fields["category"]).queryset)
+        return {
+            cat.pk: {"required_fields": cat.required_fields, "optional_fields": cat.optional_fields}
+            for cat in categories
+        }
 
 
 class TicketCommentForm(forms.Form):

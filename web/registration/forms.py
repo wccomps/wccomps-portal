@@ -303,9 +303,8 @@ class ShownSchoolForm(forms.Form):
 
 
 class NewEventFields(forms.Form):
-    """The fields of an event to create (the import's new event, Close Out's event for scores that ran without an
-    import) and the season the page showed as active. new_event() checks that they are all given and fit together,
-    as non-field errors."""
+    """An event to create and the season the page showed as active; new_event() raises their problems as non-field
+    errors."""
 
     MISSING = "Give the new event a name, a date and a type."
 

@@ -217,8 +217,8 @@ class ImportEventForm(NewEventFields):
         elif self.wants_new_season():
             raise ValidationError("A new season needs a new event: choose New event, or leave the new season empty.")
         elif choice:
-            self.event_to_import = self.open_events[str(choice)]
-        self.import_mode = str(data.get("mode") or "replace")
+            self.event_to_import = self.open_events[choice]
+        self.import_mode = data.get("mode") or "replace"
         return data
 
 

@@ -195,7 +195,7 @@ def check_create(request: HttpRequest) -> HttpResponse:
 
     user = cast(User, request.user)
     with transaction.atomic():
-        orange_check = OrangeCheck.objects.create(**form.check_fields(), created_by=user)
+        orange_check = OrangeCheck.objects.create(**form.model_fields(), created_by=user)
         for c in criteria:
             OrangeCheckCriterion.objects.create(
                 orange_check=orange_check, label=c["label"], points=c["points"], sort_order=c["sort_order"]
@@ -233,7 +233,7 @@ def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
         return _check_page(request, orange_check, form, criterion_rows(request.POST))
 
     with transaction.atomic():
-        for name, value in form.check_fields().items():
+        for name, value in form.model_fields().items():
             setattr(orange_check, name, value)
         orange_check.save()
         update_check_criteria(orange_check, criteria)

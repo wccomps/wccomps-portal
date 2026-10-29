@@ -738,8 +738,8 @@ legend.required::after {
 legend.required::after {
     content: " *" / " required";
 }
-/* Silent where the input's required attribute announces it; the :has rule stands alone, as a list it is in is
-   dropped whole where :has is unsupported */
+/* Silent where the input's required attribute announces it; the :has rule stands alone, since a browser without
+   :has drops any selector list holding it */
 label.required::after {
     content: " *" / "";
 }

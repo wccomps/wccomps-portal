@@ -60,16 +60,11 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
         auto_id="%s",
     )
 
-    categories_json = {
-        cat.pk: {"required_fields": cat.required_fields, "optional_fields": cat.optional_fields}
-        for cat in form.categories
-    }
-
     def form_page(status: int = 200) -> HttpResponse:
         context: dict[str, object] = {
             "team": team,
             "form": form,
-            "categories_json": categories_json,
+            "categories_json": form.categories_json(),
             "service_choices": service_choices,
             "box_names": box_names,
             "box_ip_map": box_ip_map,

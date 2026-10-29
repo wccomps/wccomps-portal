@@ -48,13 +48,13 @@ class OrangeCheckForm(forms.Form):
             }
         )
 
-    def check_fields(self) -> dict[str, object]:
+    def model_fields(self) -> dict[str, object]:
         """The check's model fields from a valid form: for_check() turned the other way."""
         minutes = self.cleaned_data.get("time_limit_minutes")
         return {
             "title": self.cleaned_data["title"],
             "description": self.cleaned_data["description"],
-            "scheduled_at": self.cleaned_data["scheduled_at"] or None,
+            "scheduled_at": self.cleaned_data["scheduled_at"],
             "max_points": self.cleaned_data.get("max_points") or 0,
             "time_limit": timedelta(minutes=minutes) if minutes else None,
         }
