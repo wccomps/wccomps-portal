@@ -57,19 +57,10 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
         teams=teams,
         own_team=team,
         box_names=box_names,
-        auto_id="%s",
     )
 
     def form_page(status: int = 200) -> HttpResponse:
-        context: dict[str, object] = {
-            "team": team,
-            "form": form,
-            "categories_json": form.categories_json(),
-            "service_choices": service_choices,
-            "box_names": box_names,
-            "box_ip_map": box_ip_map,
-        }
-        return render(request, "create_ticket.html", context, status=status)
+        return render(request, "create_ticket.html", {"team": team, "form": form}, status=status)
 
     if request.method == "POST":
         valid = form.is_valid()

@@ -210,7 +210,7 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
 
         for outcome in RedTeamScore.OUTCOMES:
             field = self.fields[outcome.field]
-            field.label = f"{outcome.label} (-{outcome.points})"
+            field.label = outcome.display
             field.widget.attrs["data-points"] = outcome.points
             if outcome.access_tier is not None:
                 field.widget.attrs["data-access-tier"] = outcome.access_tier

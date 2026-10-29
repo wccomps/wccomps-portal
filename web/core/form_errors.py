@@ -10,7 +10,7 @@ def top_errors(form: forms.BaseForm) -> list[str]:
 
 
 def fields_with_errors(form: forms.BaseForm) -> list[tuple[forms.BoundField, str, str]]:
-    """Each shown field with an error, its label and link target; a group with no label target links to option 0."""
+    """Each shown field with an error, its label (its name where labels repeat) and link target."""
     labels = [strip_tags(str(field.label)) for field in form.visible_fields()]
     found = []
     for field in form.visible_fields():

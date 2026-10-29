@@ -201,6 +201,10 @@ class Outcome(NamedTuple):
     # An access outcome's rank, 0 the highest: a finding scores only the highest one it reached
     access_tier: int | None = None
 
+    @property
+    def display(self) -> str:
+        return f"{self.label} (-{self.points})"
+
 
 class RedTeamScore(Approvable):
     """Red team vulnerability score affecting one or more teams."""
@@ -362,7 +366,7 @@ class RedTeamScore(Approvable):
 
     @property
     def outcomes_display(self) -> list[str]:
-        return [f"{outcome.label} (-{outcome.points})" for outcome in self.scored_outcomes()]
+        return [outcome.display for outcome in self.scored_outcomes()]
 
 
 class RedTeamScreenshot(models.Model):
