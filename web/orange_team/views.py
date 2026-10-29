@@ -359,11 +359,15 @@ def check_rebalance(request: HttpRequest, check_id: int) -> HttpResponse:
 
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
 @require_POST
+@transaction.atomic
 def reassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
     """Reassign one team's volunteer; scored teams are locked."""
-    assignment = get_object_or_404(OrangeAssignment.objects.select_related("orange_check", "team"), pk=assignment_id)
+    assignment = get_object_or_404(
+        OrangeAssignment.objects.select_related("orange_check", "team").select_for_update(of=("self",)),
+        pk=assignment_id,
+    )
     check_id = assignment.orange_check_id
-    if assignment.status in ("submitted", "approved"):
+    if assignment.status in OrangeAssignment.LOCKED_STATUSES:
         messages.error(request, "Scored teams can't be reassigned.")
         return redirect("orange_team:check_assign", check_id=check_id)
     form = ReassignForm(request.POST)
@@ -402,9 +406,6 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
     user = cast(User, request.user)
     assignment = get_object_or_404(OrangeAssignment, pk=assignment_id, user=user)
 
-    if assignment.status in ("submitted", "approved"):
-        raise BadRequest("Assignment already submitted")
-
     posted = _criterion_result(request.body)
     if posted is None:
         raise BadRequest("Invalid data")
@@ -413,7 +414,7 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
     with transaction.atomic():
         still_open = (
             OrangeAssignment.objects.filter(pk=assignment.pk, user=user)
-            .exclude(status__in=("submitted", "approved"))
+            .exclude(status__in=OrangeAssignment.LOCKED_STATUSES)
             .update(status=Case(When(status="pending", then=Value("in_progress")), default=F("status")))
         )
         if not still_open:
@@ -434,7 +435,7 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
     user = cast(User, request.user)
     assignment = get_object_or_404(OrangeAssignment.objects.select_for_update(), pk=assignment_id, user=user)
 
-    if assignment.status in ("submitted", "approved"):
+    if assignment.status in OrangeAssignment.LOCKED_STATUSES:
         messages.error(request, "Assignment already submitted.")
         return redirect("orange_team:dashboard")
 
@@ -562,7 +563,7 @@ def assignment_reject(request: HttpRequest, assignment_id: int) -> HttpResponse:
 @require_permission("orange_team_lead", error_message="Only leads can export scores")
 def export_scores(request: HttpRequest) -> HttpResponse:
     assignments = (
-        OrangeAssignment.objects.filter(status__in=["submitted", "approved"])
+        OrangeAssignment.objects.filter(status__in=OrangeAssignment.LOCKED_STATUSES)
         .select_related("orange_check", "team", "user", "reviewed_by")
         .order_by("orange_check__title", "team__team_number")
     )

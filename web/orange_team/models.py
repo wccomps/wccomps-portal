@@ -166,6 +166,7 @@ class OrangeAssignment(models.Model):
 
     objects = OrangeAssignmentQuerySet.as_manager()
     FINISHED_STATUSES = ("approved", "rejected")
+    LOCKED_STATUSES = ("submitted", "approved")
 
     STATUS_CHOICES = [
         ("pending", "Pending"),
