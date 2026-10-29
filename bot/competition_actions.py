@@ -1,7 +1,8 @@
 """Shared competition actions for commands and timer."""
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 
 import discord
 from asgiref.sync import sync_to_async
@@ -11,8 +12,14 @@ from django.utils import timezone
 from scoring.models import QuotientMetadataCache
 
 from bot.discord_manager import delete_team_infrastructure
-from bot.utils import announcement, log_to_ops_channel, send_announcement, send_parts, team_chat_channel
-from core.authentik_utils import parse_team_range
+from bot.utils import (
+    announcement,
+    log_to_ops_channel,
+    send_announcement,
+    send_parts,
+    team_chat_channel,
+)
+from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.services.competition import CompetitionRunResult, run_competition_to_completion
 from core.utils import shorten
@@ -263,57 +270,72 @@ async def run_competition_cleanup(
         await log_to_ops_channel(bot, f"Cleanup Error: {e}")
 
 
-async def deliver_team_broadcast(
-    guild: discord.Guild,
-    target: str,
-    message: str,
-    sender: str,
-) -> tuple[int, int, list[str]]:
-    """Send a broadcast to 'announcements', 'all-teams', or a team range, queuing if a channel is missing."""
-    target_lower = target.lower().strip()
-    if target_lower == "announcements":
-        announcement_channel_id = settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID
-        channel = guild.get_channel(announcement_channel_id)
-        if not channel or not isinstance(channel, discord.TextChannel):
-            return 0, 0, [f"Announcements channel not found (ID: {announcement_channel_id})"]
+@dataclass
+class BroadcastResult:
+    sent: int = 0
+    queued: int = 0
+    failed: list[str] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
+
+    def ops_summary(self, sender: str, target: str, message: str) -> str:
+        lines = [f"Broadcast by {sender}", f"• Target: {target}", f"• Sent: {self.sent} channels"]
+        if self.queued:
+            lines.append(f"• Queued: {self.queued} (pending channel creation)")
+        if self.failed:
+            lines.append(f"• Failed: {', '.join(self.failed)}")
+        if self.missing:
+            lines.append(f"• Not found: {', '.join(self.missing)}")
+        lines.append(f"Message: {shorten(message, 100)}")
+        return "\n".join(lines)
+
+
+type Recipient = tuple[str, Callable[[], Awaitable[None]]]
+
+
+async def deliver_broadcast(
+    guild: discord.Guild, target: BroadcastTarget, message: str, sender: str
+) -> BroadcastResult:
+    """Send a broadcast to each recipient: the announcements channel, or each target team's chat channel (queued for
+    a team without one). A recipient it fails for is listed in the result and the rest go on."""
+    result = BroadcastResult()
+    for label, deliver in await _recipients(guild, target, message, sender, result):
         try:
-            await send_announcement(guild, channel, message)
-            return 1, 0, []
+            await deliver()
         except Exception as e:
-            logger.exception(f"Failed to broadcast to announcements: {e}")
-            return 0, 0, [f"Announcements ({shorten(str(e), 50)})"]
+            logger.exception(f"Failed to broadcast to {label}: {e}")
+            result.failed.append(f"{label} ({shorten(str(e), 50)})")
+    return result
 
-    if target_lower == "all-teams":
-        teams = [t async for t in Team.objects.filter(is_active=True).order_by("team_number")]
-        team_numbers = [t.team_number for t in teams]
-        teams_by_number = {t.team_number: t for t in teams}
-    else:
-        team_numbers = parse_team_range(target)
-        teams_by_number = {t.team_number: t async for t in Team.objects.filter(team_number__in=team_numbers)}
 
-    sent_count = 0
-    queued_count = 0
-    failed_channels: list[str] = []
+async def _recipients(
+    guild: discord.Guild, target: BroadcastTarget, message: str, sender: str, result: BroadcastResult
+) -> list[Recipient]:
+    async def to_announcements() -> None:
+        channel = guild.get_channel(settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID)
+        if not isinstance(channel, discord.TextChannel):
+            raise RuntimeError(f"Announcements channel not found (ID: {settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID})")
+        await send_announcement(guild, channel, message)
+        result.sent += 1
 
-    for team_number in team_numbers:
-        team = teams_by_number.get(team_number)
-        if not team:
-            failed_channels.append(f"Team {team_number:02d} (not found)")
-            continue
-        try:
+    def to_team(team: Team) -> Callable[[], Awaitable[None]]:
+        async def deliver() -> None:
             chat_channel = team_chat_channel(guild, team)
             if chat_channel:
                 await send_parts(chat_channel, announcement(sender, message))
-                sent_count += 1
+                result.sent += 1
             else:
-                await QueuedAnnouncement.objects.acreate(
-                    team=team,
-                    message=message,
-                    sender_name=sender,
-                )
-                queued_count += 1
-        except Exception as e:
-            logger.exception(f"Failed to broadcast to team {team_number}: {e}")
-            failed_channels.append(f"Team {team_number:02d} ({shorten(str(e), 50)})")
+                await QueuedAnnouncement.objects.acreate(team=team, message=message, sender_name=sender)
+                result.queued += 1
 
-    return sent_count, queued_count, failed_channels
+        return deliver
+
+    match target:
+        case Announcements():
+            return [("Announcements", to_announcements)]
+        case AllTeams():
+            teams = [t async for t in Team.objects.filter(is_active=True).order_by("team_number")]
+        case Teams(numbers):
+            by_number = {t.team_number: t async for t in Team.objects.filter(team_number__in=numbers)}
+            result.missing = [f"Team {n:02d}" for n in numbers if n not in by_number]
+            teams = [by_number[n] for n in numbers if n in by_number]
+    return [(f"Team {team.team_number:02d}", to_team(team)) for team in teams]

@@ -31,7 +31,7 @@ def admin_broadcast_action(request: HttpRequest) -> HttpResponse:
 
     form = BroadcastForm(request.POST)
     if not form.is_valid():
-        raise BadRequest("Target and message required")
+        raise BadRequest(" ".join(str(error) for errors in form.errors.values() for error in errors))
 
     target = form.cleaned_data["target"]
     message = form.cleaned_data["message"]

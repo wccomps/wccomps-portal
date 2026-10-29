@@ -12,7 +12,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Model, Q, QuerySet
 from django.utils import timezone
 
-from bot.competition_actions import deliver_team_broadcast, run_competition_cleanup
+from bot.competition_actions import deliver_broadcast, run_competition_cleanup
 from bot.discord_manager import recreate_team_infrastructure, setup_team_infrastructure
 from bot.heartbeat import record as record_heartbeat
 from bot.role_sync import competition_guild, sync_member_roles, sync_roles
@@ -24,6 +24,7 @@ from bot.utils import (
     recycle_db_connection,
     send_parts,
 )
+from core.broadcast import parse_broadcast_target
 from core.discord_tasks import (
     AddUserToThread,
     BroadcastMessage,
@@ -354,27 +355,15 @@ class DiscordQueueProcessor:
         return stats
 
     async def _handle_broadcast_message(self, payload: BroadcastMessage) -> dict[str, object]:
-        target = payload.target
-        message = payload.message
-        sender = payload.sender
-
-        if not target or not message:
+        if not payload.target or not payload.message:
             raise PermanentTaskError("Missing target or message in payload")
-
-        guild = self._guild()
-
         try:
-            sent_count, queued_count, failed_channels = await deliver_team_broadcast(guild, target, message, sender)
+            target = parse_broadcast_target(payload.target)
         except ValueError as e:
             raise PermanentTaskError(f"Invalid team range: {e}") from e
 
-        if target.lower().strip() == "announcements" and failed_channels:
-            raise RuntimeError(failed_channels[0])
-
-        await log_to_ops_channel(
-            self.bot,
-            f"Broadcast by {sender}\n• Target: {target}\n• Sent: {sent_count}\n• Queued: {queued_count}",
-        )
-
-        logger.info(f"Broadcast complete: sent={sent_count}, queued={queued_count}, failed={len(failed_channels)}")
-        return {"sent_count": sent_count, "queued_count": queued_count, "failed_count": len(failed_channels)}
+        result = await deliver_broadcast(self._guild(), target, payload.message, payload.sender)
+        await log_to_ops_channel(self.bot, result.ops_summary(payload.sender, payload.target, payload.message))
+        if result.failed and not (result.sent or result.queued):
+            raise RuntimeError(f"Broadcast reached no one: {'; '.join(result.failed)}")
+        return {"sent_count": result.sent, "queued_count": result.queued, "failed_count": len(result.failed)}

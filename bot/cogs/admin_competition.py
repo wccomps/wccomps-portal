@@ -7,7 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 from django.conf import settings
 
-from bot.competition_actions import deliver_team_broadcast, run_competition_cleanup
+from bot.competition_actions import deliver_broadcast, run_competition_cleanup
 from bot.permissions import permission_check
 from bot.utils import ConfirmView, log_to_ops_channel, split_message
 from core.authentik_utils import (
@@ -16,6 +16,7 @@ from core.authentik_utils import (
     reset_teams_credentials,
     sessions_failure_summary,
 )
+from core.broadcast import parse_broadcast_target
 from core.forms import AppSlugForm
 from core.models import AuditLog, CompetitionConfig
 from core.utils import UnknownTimezoneError, parse_datetime_to_utc, shorten
@@ -413,9 +414,7 @@ class AdminCompetitionCog(commands.Cog):
             return
 
         try:
-            sent_count, queued_count, failed_channels = await deliver_team_broadcast(
-                guild, target, message, interaction.user.name
-            )
+            parsed = parse_broadcast_target(target)
         except ValueError as e:
             await interaction.followup.send(
                 f"Invalid team range format: {e}\n\n"
@@ -428,6 +427,9 @@ class AdminCompetitionCog(commands.Cog):
                 ephemeral=True,
             )
             return
+
+        result = await deliver_broadcast(guild, parsed, message, interaction.user.name)
+        sent_count, queued_count, failed_channels = result.sent, result.queued, result.failed + result.missing
 
         await AuditLog.objects.acreate(
             action="broadcast_message",
@@ -443,18 +445,7 @@ class AdminCompetitionCog(commands.Cog):
             },
         )
 
-        ops_msg_parts = [
-            f"Broadcast by {interaction.user.mention}",
-            f"• Target: {target}",
-            f"• Sent: {sent_count} channels",
-        ]
-        if queued_count > 0:
-            ops_msg_parts.append(f"• Queued: {queued_count} (pending channel creation)")
-        if failed_channels:
-            ops_msg_parts.append(f"• Failed: {len(failed_channels)}")
-        ops_msg_parts.append(f"Message: {shorten(message, 100)}")
-
-        await log_to_ops_channel(self.bot, "\n".join(ops_msg_parts))
+        await log_to_ops_channel(self.bot, result.ops_summary(interaction.user.mention, target, message))
 
         result_msg = f"Broadcast complete\n• Sent: {sent_count} channels"
         if queued_count > 0:
