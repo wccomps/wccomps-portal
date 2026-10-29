@@ -1,12 +1,10 @@
 import json
-from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 
 from core.models import UserGroups
-from orange_team import views
 from orange_team.models import (
     OrangeAssignment,
     OrangeAssignmentResult,
@@ -82,27 +80,21 @@ class TestAssignmentSave:
         )
         assert response.status_code == 400
 
-    def test_a_submit_landing_during_an_autosave_stays_submitted(self) -> None:
+    def test_the_old_volunteers_autosave_after_a_reassignment_is_refused(self) -> None:
         user, assignment, c1, c2, r1, r2 = self._setup()
+        new_volunteer = User.objects.create_user(username="orange2", password="test")
+        OrangeAssignment.objects.filter(pk=assignment.pk).update(user=new_volunteer)
         client = Client()
         client.force_login(user)
-        original = views._criterion_result
-
-        def submit_meanwhile(body: bytes) -> tuple[int, bool] | None:
-            OrangeAssignment.objects.filter(pk=assignment.pk).update(status="submitted", score=0)
-            return original(body)
-
-        with patch.object(views, "_criterion_result", submit_meanwhile):
-            response = client.post(
-                f"/orange-team/assignments/{assignment.pk}/save/",
-                data=json.dumps({"criterion_id": c1.pk, "met": True}),
-                content_type="application/json",
-            )
-        assert response.status_code == 400
+        response = client.post(
+            f"/orange-team/assignments/{assignment.pk}/save/",
+            data=json.dumps({"criterion_id": c1.pk, "met": True}),
+            content_type="application/json",
+        )
+        assert response.status_code == 404
         assignment.refresh_from_db()
         r1.refresh_from_db()
-        assert assignment.status == "submitted"
-        assert r1.met is False
+        assert (assignment.user, assignment.status, r1.met) == (new_volunteer, "pending", False)
 
     def test_other_user_cannot_save(self) -> None:
         user, assignment, c1, c2, r1, r2 = self._setup()

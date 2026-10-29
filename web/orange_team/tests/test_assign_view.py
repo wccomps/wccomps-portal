@@ -85,3 +85,39 @@ def test_reassign_locks_the_assignment_before_reading_its_status(
 def test_team_checkins_url_removed() -> None:
     with pytest.raises(NoReverseMatch):
         reverse("orange_team:team_checkins")
+
+
+def test_the_assign_page_counts_submitted_and_approved_teams_as_scored_and_names_who_can_be_reassigned(
+    lead_client: Client, create_user_with_groups: Callable[..., User]
+) -> None:
+    volunteer = create_user_with_groups("v1", ["WCComps_OrangeTeam"])
+    check = OrangeCheck.objects.create(title="C", description="d", max_points=10)
+    for number, status in enumerate(["pending", "submitted", "approved"], 1):
+        team = Team.objects.create(team_number=number, team_name=f"T{number}")
+        OrangeAssignment.objects.create(orange_check=check, user=volunteer, team=team, status=status, score=1)
+    page = lead_client.get(f"/orange-team/checks/{check.id}/assign/")
+    assert page.context["scored"] == 2
+    assert "pending, in progress and rejected" in page.content.decode()
+    listed = lead_client.get("/orange-team/checks/").context["checks"]
+    assert [c.scored_count for c in listed] == [2]
+
+
+def test_bulk_assignment_and_rebalancing_lock_a_checks_assignments_in_pk_order(
+    create_user_with_groups: Callable[..., User],
+) -> None:
+    from orange_team.services import auto_assign_check, rebalance_unstarted, update_check_criteria
+
+    volunteer = create_user_with_groups("v1", ["WCComps_OrangeTeam"])
+    check = OrangeCheck.objects.create(title="C", description="d", max_points=10)
+    teams = [Team.objects.create(team_number=n, team_name=f"T{n}") for n in (2, 1)]
+    for run in (
+        lambda: auto_assign_check(check, [volunteer], teams),
+        lambda: rebalance_unstarted(check, [volunteer]),
+        lambda: update_check_criteria(check, []),
+    ):
+        with CaptureQueriesContext(connection) as queries:
+            run()
+        locks = [
+            q["sql"] for q in queries.captured_queries if " FOR UPDATE" in q["sql"] and "orange_assignment" in q["sql"]
+        ]
+        assert locks and all('ORDER BY "orange_assignment"."id" ASC' in sql for sql in locks)

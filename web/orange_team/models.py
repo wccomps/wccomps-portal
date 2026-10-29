@@ -1,5 +1,7 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -156,7 +158,9 @@ def scores_total_problem(check_pk: int | None, max_score: int) -> str:
     others = OrangeCheck.objects.all() if check_pk is None else OrangeCheck.objects.exclude(pk=check_pk)
     total = max_score + others.total_max()
     if total > MAX_TOTAL_POINTS:
-        return f"All checks together would be worth {total} points; they can be worth at most {MAX_TOTAL_POINTS}."
+        return (
+            f"All checks together would be worth {total} points; together they can be worth at most {MAX_TOTAL_POINTS}."
+        )
     return ""
 
 
@@ -184,26 +188,77 @@ class OrangeCheckCriterion(models.Model):
         return f"{self.label} ({self.points} pts)"
 
 
+Action = Literal["save", "submit", "reassign", "approve", "reject"]
+
+
 class OrangeAssignmentQuerySet(models.QuerySet["OrangeAssignment"]):
     def unfinished(self) -> OrangeAssignmentQuerySet:
-        """Assignments still to score or review: approved and rejected ones are done."""
+        """Assignments still on the teamer's dashboard (OrangeAssignment.STATUSES)."""
         return self.exclude(status__in=OrangeAssignment.FINISHED_STATUSES)
+
+    def locked_for(self, action: Action, pk: int) -> tuple[OrangeAssignment, bool]:
+        """Lock the assignment (DoesNotExist when this queryset hasn't it) and move it by action, unsaved, when its
+        status allows action; whether it did. Call it in a transaction."""
+        assignment = self.select_for_update(of=("self",)).get(pk=pk)
+        moved_to = assignment.status_info.moves.get(action)
+        if moved_to is not None:
+            assignment.status = moved_to
+        return assignment, moved_to is not None
+
+
+@dataclass(frozen=True)
+class AssignmentStatus:
+    label: str
+    on_dashboard: bool
+    in_review_queue: bool
+    scored: bool  # its score stands: exported, counted as scored, kept in step with a rubric edit
+    unstarted: bool  # auto-assign and rebalance may hand it to another volunteer
+    returned: bool  # sent back to the volunteer by the lead, whose notes say why
+    moves: Mapping[Action, str]
 
 
 class OrangeAssignment(models.Model):
     """Assignment of an orange teamer to score a specific team on a check."""
 
     objects = OrangeAssignmentQuerySet.as_manager()
-    FINISHED_STATUSES = ("approved", "rejected")
-    LOCKED_STATUSES = ("submitted", "approved")
 
-    STATUS_CHOICES = [
-        ("pending", "Pending"),
-        ("in_progress", "In Progress"),
-        ("submitted", "Submitted"),
-        ("approved", "Approved"),
-        ("rejected", "Rejected"),
-    ]
+    STATUSES: Mapping[str, AssignmentStatus] = {
+        "pending": AssignmentStatus(
+            "Pending",
+            True,
+            False,
+            False,
+            True,
+            False,
+            {"save": "in_progress", "submit": "submitted", "reassign": "pending"},
+        ),
+        "in_progress": AssignmentStatus(
+            "In Progress",
+            True,
+            True,
+            False,
+            False,
+            False,
+            {"save": "in_progress", "submit": "submitted", "reassign": "in_progress"},
+        ),
+        "submitted": AssignmentStatus(
+            "Submitted", True, True, True, False, False, {"approve": "approved", "reject": "rejected"}
+        ),
+        "approved": AssignmentStatus("Approved", False, False, True, False, False, {}),
+        "rejected": AssignmentStatus(
+            "Rejected",
+            True,
+            False,
+            False,
+            False,
+            True,
+            {"save": "rejected", "submit": "submitted", "reassign": "rejected"},
+        ),
+    }
+    STATUS_CHOICES = [(status, row.label) for status, row in STATUSES.items()]
+    FINISHED_STATUSES = tuple(status for status, row in STATUSES.items() if not row.on_dashboard)
+    REVIEW_STATUSES = tuple(status for status, row in STATUSES.items() if row.in_review_queue)
+    SCORED_STATUSES = tuple(status for status, row in STATUSES.items() if row.scored)
 
     orange_check = models.ForeignKey(OrangeCheck, on_delete=models.CASCADE, related_name="assignments")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="orange_assignments")
@@ -227,6 +282,15 @@ class OrangeAssignment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.orange_check.title} for Team {self.team.team_number} ({self.user.username})"
+
+    @property
+    def status_info(self) -> AssignmentStatus:
+        return self.STATUSES[self.status]
+
+    @property
+    def actions(self) -> frozenset[str]:
+        """What its status allows, for templates."""
+        return frozenset(self.status_info.moves)
 
     def calculate_score(self) -> int:
         return self.results.filter(met=True).aggregate(total=models.Sum("criterion__points"))["total"] or 0

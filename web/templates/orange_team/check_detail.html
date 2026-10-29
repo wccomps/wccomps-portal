@@ -1,5 +1,5 @@
 {% extends "orange_team/base.html" %}
-{% load cotton %}
+{% load cotton status_variants %}
 {% block orange_title %}
     {{ orange_check.title }} - Orange Team
 {% endblock orange_title %}
@@ -115,27 +115,9 @@
                         <td>Team {{ assignment.team.team_number }}</td>
                         <td>{{ assignment.user.username }}</td>
                         <td>
-                            {% if assignment.status == "pending" %}
-                                <c-badge variant="warning">
-                                    Pending
-                                </c-badge>
-                            {% elif assignment.status == "in_progress" %}
-                                <c-badge variant="info">
-                                    In Progress
-                                </c-badge>
-                            {% elif assignment.status == "submitted" %}
-                                <c-badge variant="warning">
-                                    Submitted
-                                </c-badge>
-                            {% elif assignment.status == "approved" %}
-                                <c-badge variant="success">
-                                    Approved
-                                </c-badge>
-                            {% elif assignment.status == "rejected" %}
-                                <c-badge variant="danger">
-                                    Rejected
-                                </c-badge>
-                            {% endif %}
+                            <c-badge variant="{{ assignment.status|badge_variant:'orange_assignment' }}">
+                                {{ assignment.get_status_display }}
+                            </c-badge>
                         </td>
                         <td>{% if assignment.score is not None %}{{ assignment.score }} / {{ orange_check.max_score }}{% endif %}</td>
                     </tr>

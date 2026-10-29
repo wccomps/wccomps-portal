@@ -8,8 +8,8 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest, ValidationError
 from django.db import transaction
-from django.db.models import Case, Count, F, Prefetch, Q, Value, When
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.db.models import Count, Prefetch, Q
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -31,7 +31,9 @@ from orange_team.forms import (
 )
 from orange_team.models import (
     MAX_POINTS,
+    Action,
     OrangeAssignment,
+    OrangeAssignmentQuerySet,
     OrangeAssignmentResult,
     OrangeCheck,
     OrangeCheckCriterion,
@@ -119,7 +121,7 @@ def admin_toggle_checkin(request: HttpRequest, user_id: int) -> HttpResponse:
 def review_queue(request: HttpRequest) -> HttpResponse:
     """Lead view showing submitted assignments awaiting review."""
     review_assignments = (
-        OrangeAssignment.objects.filter(status__in=["submitted", "in_progress"])
+        OrangeAssignment.objects.filter(status__in=OrangeAssignment.REVIEW_STATUSES)
         .select_related("team", "user")
         .prefetch_related(_checks_with_max_score())
         .order_by("-submitted_at")
@@ -138,7 +140,11 @@ def check_list(request: HttpRequest) -> HttpResponse:
         OrangeCheck.objects.with_max_score()
         .annotate(
             team_total=Count("assignments", distinct=True),
-            scored_count=Count("assignments", filter=Q(assignments__status="approved"), distinct=True),
+            scored_count=Count(
+                "assignments",
+                filter=Q(assignments__status__in=OrangeAssignment.SCORED_STATUSES),
+                distinct=True,
+            ),
         )
         .select_related("created_by")
         .order_by("scheduled_at", "-created_at")
@@ -326,7 +332,8 @@ def check_assign(request: HttpRequest, check_id: int) -> HttpResponse:
     active_teams = Team.objects.filter(is_active=True).order_by("team_number")
     rows = [{"team": team, "assignment": existing.get(team.id)} for team in active_teams]
     on_shift = list(User.objects.filter(orange_checkins__is_active=True).distinct().order_by("username"))
-    scored = sum(1 for a in existing.values() if a.status == "approved")
+    scored = sum(1 for a in existing.values() if a.status_info.scored)
+    reassignable = [row.label.lower() for row in OrangeAssignment.STATUSES.values() if "reassign" in row.moves]
     return render(
         request,
         "orange_team/assign.html",
@@ -335,6 +342,7 @@ def check_assign(request: HttpRequest, check_id: int) -> HttpResponse:
             "rows": rows,
             "on_shift": on_shift,
             "scored": scored,
+            "reassignable": f"{', '.join(reassignable[:-1])} and {reassignable[-1]}",
             "team_total": len(rows),
             "is_lead": True,
         },
@@ -369,12 +377,11 @@ def check_rebalance(request: HttpRequest, check_id: int) -> HttpResponse:
 @transaction.atomic
 def reassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
     """Reassign one team's volunteer; scored teams are locked."""
-    assignment = get_object_or_404(
-        OrangeAssignment.objects.select_related("orange_check", "team").select_for_update(of=("self",)),
-        pk=assignment_id,
+    assignment, moved = _locked_for(
+        OrangeAssignment.objects.select_related("orange_check", "team"), "reassign", assignment_id
     )
     check_id = assignment.orange_check_id
-    if assignment.status in OrangeAssignment.LOCKED_STATUSES:
+    if not moved:
         messages.error(request, "Scored teams can't be reassigned.")
         return redirect("orange_team:check_assign", check_id=check_id)
     form = ReassignForm(request.POST)
@@ -389,6 +396,13 @@ def reassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
     assignment.save(update_fields=["user"])
     messages.success(request, f"Reassigned Team {assignment.team.team_number} to {new_user.username}.")
     return redirect("orange_team:check_assign", check_id=check_id)
+
+
+def _locked_for(assignments: OrangeAssignmentQuerySet, action: Action, pk: int) -> tuple[OrangeAssignment, bool]:
+    try:
+        return assignments.locked_for(action, pk)
+    except OrangeAssignment.DoesNotExist:
+        raise Http404 from None
 
 
 def _criterion_result(body: bytes) -> tuple[int, bool] | None:
@@ -411,21 +425,15 @@ def _criterion_result(body: bytes) -> tuple[int, bool] | None:
 def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
     """Autosave a criterion result for an assignment."""
     user = cast(User, request.user)
-    assignment = get_object_or_404(OrangeAssignment, pk=assignment_id, user=user)
-
-    posted = _criterion_result(request.body)
-    if posted is None:
-        raise BadRequest("Invalid data")
-    criterion_id, met = posted
-
     with transaction.atomic():
-        still_open = (
-            OrangeAssignment.objects.filter(pk=assignment.pk, user=user)
-            .exclude(status__in=OrangeAssignment.LOCKED_STATUSES)
-            .update(status=Case(When(status="pending", then=Value("in_progress")), default=F("status")))
-        )
-        if not still_open:
+        assignment, moved = _locked_for(OrangeAssignment.objects.filter(user=user), "save", assignment_id)
+        posted = _criterion_result(request.body)
+        if posted is None:
+            raise BadRequest("Invalid data")
+        criterion_id, met = posted
+        if not moved:
             raise BadRequest("Assignment already submitted")
+        assignment.save(update_fields=["status"])
         result = get_object_or_404(OrangeAssignmentResult, assignment=assignment, criterion_id=criterion_id)
         result.met = met
         result.save(update_fields=["met"])
@@ -440,9 +448,8 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
 @transaction.atomic
 def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
     user = cast(User, request.user)
-    assignment = get_object_or_404(OrangeAssignment.objects.select_for_update(), pk=assignment_id, user=user)
-
-    if assignment.status in OrangeAssignment.LOCKED_STATUSES:
+    assignment, moved = _locked_for(OrangeAssignment.objects.filter(user=user), "submit", assignment_id)
+    if not moved:
         messages.error(request, "Assignment already submitted.")
         return redirect("orange_team:dashboard")
 
@@ -462,9 +469,13 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
         elif assignment.score is None:
             messages.error(request, "Please enter a score before submitting.")
             return redirect("orange_team:dashboard")
-    assignment.status = "submitted"
+        else:
+            # A score kept from before a rejection can't outlast a lowered maximum
+            assignment.score = min(assignment.score, assignment.orange_check.max_score)
     assignment.submitted_at = timezone.now()
-    assignment.save(update_fields=["score", "status", "submitted_at"])
+    # A resubmit after a rejection waits for a new review
+    assignment.reviewed_by, assignment.reviewed_at, assignment.notes = None, None, ""
+    assignment.save(update_fields=["score", "status", "submitted_at", "reviewed_by", "reviewed_at", "notes"])
 
     messages.success(
         request,
@@ -514,16 +525,13 @@ def assignment_approve(request: HttpRequest, assignment_id: int) -> HttpResponse
     user = cast(User, request.user)
     # Locked so a double submit or a racing reject can't act on the same submission twice.
     with transaction.atomic():
-        assignment = get_object_or_404(
-            OrangeAssignment.objects.select_for_update(of=("self",)).select_related("orange_check", "team", "user"),
-            pk=assignment_id,
+        assignment, moved = _locked_for(
+            OrangeAssignment.objects.select_related("orange_check", "team", "user"), "approve", assignment_id
         )
-
-        if assignment.status != "submitted":
+        if not moved:
             messages.error(request, "Only submitted assignments can be approved.")
             return redirect("orange_team:review_queue")
 
-        assignment.status = "approved"
         assignment.reviewed_by = user
         assignment.reviewed_at = timezone.now()
         assignment.save()
@@ -545,16 +553,13 @@ def assignment_reject(request: HttpRequest, assignment_id: int) -> HttpResponse:
     form = AssignmentRejectForm(request.POST)
     form.is_valid()  # Always valid (optional field)
     with transaction.atomic():
-        assignment = get_object_or_404(
-            OrangeAssignment.objects.select_for_update(of=("self",)).select_related("orange_check", "team"),
-            pk=assignment_id,
+        assignment, moved = _locked_for(
+            OrangeAssignment.objects.select_related("orange_check", "team"), "reject", assignment_id
         )
-
-        if assignment.status != "submitted":
+        if not moved:
             messages.error(request, "Only submitted assignments can be rejected.")
             return redirect("orange_team:review_queue")
 
-        assignment.status = "rejected"
         assignment.reviewed_by = user
         assignment.reviewed_at = timezone.now()
         assignment.notes = form.cleaned_data.get("notes", "")
@@ -570,7 +575,7 @@ def assignment_reject(request: HttpRequest, assignment_id: int) -> HttpResponse:
 @require_permission("orange_team_lead", error_message="Only leads can export scores")
 def export_scores(request: HttpRequest) -> HttpResponse:
     assignments = (
-        OrangeAssignment.objects.filter(status__in=OrangeAssignment.LOCKED_STATUSES)
+        OrangeAssignment.objects.filter(status__in=OrangeAssignment.SCORED_STATUSES)
         .select_related("team", "user", "reviewed_by")
         .prefetch_related(_checks_with_max_score())
         .order_by("orange_check__title", "team__team_number")

@@ -38,6 +38,17 @@ BADGE_STATUSES: dict[str, tuple[str, str, dict[str, str]]] = {
         "email_status",
         {"pending": "neutral", "sent": "success", "failed": "danger"},
     ),
+    "orange_assignment": (
+        "orange_team.OrangeAssignment",
+        "status",
+        {
+            "pending": "neutral",
+            "in_progress": "info",
+            "submitted": "warning",
+            "approved": "success",
+            "rejected": "danger",
+        },
+    ),
 }
 
 # Django message level tag -> c-alert variant
