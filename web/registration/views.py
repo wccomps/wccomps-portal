@@ -104,18 +104,18 @@ def error_summary(form: RegistrationForm) -> list[tuple[str, str]]:
 def register(request: HttpRequest) -> HttpResponse:
     """Public registration form (no authentication required)."""
     if request.method == "POST":
-        # Rate limit: 10 submissions per hour per client IP
         ip = client_ip(request)
-        if RegistrationRateLimit.over_limit(ip):
-            messages.error(request, "Too many registration submissions. Please try again later.")
-            return render(request, "registration/register.html", {"form": public_registration_form()}, status=429)
+        with RegistrationRateLimit.held(ip) as over_limit:
+            if over_limit:
+                messages.error(request, "Too many registration submissions. Please try again later.")
+                return render(request, "registration/register.html", {"form": public_registration_form()}, status=429)
 
-        form = public_registration_form(request.POST)
-        if form.is_valid():
-            RegistrationRateLimit.record(ip)  # Only count successful submissions
-            form.save()
-            messages.success(request, "Registration submitted successfully!")
-            return redirect("registration_register")
+            form = public_registration_form(request.POST)
+            if form.is_valid():
+                RegistrationRateLimit.record(ip)  # Only count successful submissions
+                form.save()
+                messages.success(request, "Registration submitted successfully!")
+                return redirect("registration_register")
     else:
         form = public_registration_form()
 

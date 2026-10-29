@@ -28,28 +28,33 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def client_ip(request: HttpRequest) -> str:
-    """The client's address: CF-Connecting-IP when TRUST_CF_CONNECTING_IP is on, else REMOTE_ADDR."""
+type IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+
+
+def client_ip(request: HttpRequest) -> IPAddress:
+    """The client's address: CF-Connecting-IP when TRUST_CF_CONNECTING_IP is on and it parses, else REMOTE_ADDR, else
+    0.0.0.0."""
     header = request.META.get("HTTP_CF_CONNECTING_IP", "").strip()
     if settings.TRUST_CF_CONNECTING_IP:
-        if address := _header_address(header):
+        if (address := _parse_address(header)) is not None:
             return address
     elif header:
         _warn_untrusted_cf_header()
-    return request.META.get("REMOTE_ADDR") or "0.0.0.0"  # noqa: S104 - an address value, not a bind
+    peer = _parse_address(request.META.get("REMOTE_ADDR", "").partition("%")[0])
+    return ipaddress.IPv4Address(0) if peer is None else peer
 
 
-def _header_address(header: str) -> str | None:
-    """The header's address in canonical form; None for anything else, or for an IPv6 scope ID, which is free text."""
+def _parse_address(text: str) -> IPAddress | None:
+    """text as an address, an IPv4-mapped one as its IPv4; None for anything else, or an IPv6 scope ID (free text)."""
     try:
-        address = ipaddress.ip_address(header)
+        address = ipaddress.ip_address(text)
     except ValueError:
         return None
     if isinstance(address, ipaddress.IPv6Address):
         if address.scope_id is not None:
             return None
-        return str(address.ipv4_mapped or address)
-    return str(address)
+        return address.ipv4_mapped or address
+    return address
 
 
 @functools.cache
