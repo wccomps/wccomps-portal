@@ -21,7 +21,7 @@ from bot.utils import (
 )
 from core.authentik_utils import parse_team_range
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
-from core.services.competition import CompetitionRunResult
+from core.services.competition import Attempt, CompetitionRunResult, no_timer_series
 from core.services.competition import run_competition as competition_steps
 from core.utils import shorten
 from team.models import MAX_TEAMS, DiscordLink, Team
@@ -29,9 +29,9 @@ from team.models import MAX_TEAMS, DiscordLink, Team
 logger = logging.getLogger(__name__)
 
 
-async def run_competition(enable: bool, actor: str) -> CompetitionRunResult:
+async def run_competition(enable: bool, actor: str, timer: Attempt | None = None) -> CompetitionRunResult:
     """Start (enable=True) or stop the competition, a step at a time on a pool thread of its own, beating after each."""
-    async with aclosing(BlockingSteps(competition_steps(enable, actor))) as steps:
+    async with aclosing(BlockingSteps(competition_steps(enable, actor, timer))) as steps:
         async for _step in steps:
             beat()
         return steps.result
@@ -225,7 +225,7 @@ async def run_competition_cleanup(
         if not close_out:
             # The start message holds this event's credentials; the next event gets its own.
             await CompetitionConfig.objects.filter(pk=config.pk).aupdate(
-                competition_start_time=None, competition_end_time=None, start_message=""
+                competition_start_time=None, competition_end_time=None, start_message="", **no_timer_series()
             )
             await QuotientMetadataCache.objects.all().adelete()
 

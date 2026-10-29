@@ -9,6 +9,7 @@ from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeam
 
 from core.competition_utils import live_competition_data_exists
 from core.models import AuditLog, CompetitionConfig
+from core.services.competition import EVENT_CLOSED_OUT
 from team.models import Team
 from ticketing.models import Ticket
 
@@ -195,7 +196,7 @@ def _scorecards_emailed(event: Event | None) -> bool:
     if event is not None:
         return sends.filter(details__event=event.pk).exists()
     sends = sends.filter(details__event=None)
-    cleared = AuditLog.objects.filter(action__in=("event_closed_out", "leftover_data_cleared")).order_by("-created_at")
+    cleared = AuditLog.objects.filter(action__in=(EVENT_CLOSED_OUT, "leftover_data_cleared")).order_by("-created_at")
     if (last := cleared.first()) is not None:
         sends = sends.filter(created_at__gt=last.created_at)
     return sends.exists()

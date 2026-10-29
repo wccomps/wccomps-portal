@@ -1,5 +1,6 @@
 """run_competition: the one implementation behind the web page, the slash commands and the timer."""
 
+import threading
 from collections.abc import Iterator
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
@@ -9,7 +10,17 @@ from django.utils import timezone
 
 from core.discord_tasks import BroadcastMessage
 from core.models import AuditLog, CompetitionConfig, DiscordTask
-from core.services.competition import CompetitionRunResult, run_competition
+from core.services.competition import (
+    COMPETITION_RUN_LOCK_ID,
+    RUN_IN_PROGRESS,
+    RUN_SUPERSEDED,
+    STEPPED_ACROSS_THREADS,
+    Attempt,
+    CompetitionRunResult,
+    RunOutcome,
+    current_timer_plan,
+    run_competition,
+)
 from core.utils import drain
 from team.models import MAX_TEAMS, Team, team_username
 
@@ -75,7 +86,7 @@ def config() -> CompetitionConfig:
 def test_start_enables_apps_and_accounts_refreshes_groups_and_audits(authentik, config):
     result = run_competition_to_completion(True, "timer")
 
-    assert result.success
+    assert result.outcome is RunOutcome.COMPLETE
     assert result.apps_ok == ["scoring", "netbird"]
     assert result.accounts_ok == result.accounts_total == len(ACTIVE_TEAMS)
     authentik.refresh.assert_called_once()
@@ -139,7 +150,7 @@ def test_stop_records_failed_score_sync_without_aborting(authentik, config):
 
     assert steps[-1].message == "Quotient score sync failed: Failed to retrieve service scores from Quotient"
     assert steps[-1].ok is False
-    assert result.success and not result.has_failures
+    assert result.outcome is RunOutcome.COMPLETE
     assert result.quotient_synced is False
     assert "Quotient service scores: sync failed" in result.summary()
     config.refresh_from_db()
@@ -152,7 +163,7 @@ def test_stop_clears_only_the_end_time(authentik, config):
 
     result = run_competition_to_completion(False, "discord:admin")
 
-    assert result.success and authentik.disable_application.call_count == 2
+    assert result.outcome is not RunOutcome.ERRORED and authentik.disable_application.call_count == 2
     config.refresh_from_db()
     assert not config.applications_enabled
     assert config.competition_end_time is None
@@ -278,3 +289,303 @@ def test_a_failed_group_refresh_never_shows_authentiks_url_or_answer(authentik, 
         s.message == "Permission refresh failed (retried within 5 minutes): List /api/v3/core/groups/: Forbidden"
         for s in steps
     )
+
+
+def test_a_due_schedule_starts_a_new_series_over_one_in_the_other_direction(config):
+    now = timezone.now()
+    CompetitionConfig.objects.filter(pk=1).update(
+        timer_series_enable=False, timer_series_attempt=2, timer_series_started=now - timedelta(minutes=5)
+    )
+
+    assert current_timer_plan(now) == Attempt(True, 1, now, config.competition_start_time)
+
+
+def test_a_due_schedule_whose_attempt_errored_continues_its_series(config):
+    """An attempt that errors leaves the schedule set: it must count on, not start over every minute."""
+    now = timezone.now()
+    started = now - timedelta(minutes=1)
+    CompetitionConfig.objects.filter(pk=1).update(
+        timer_series_enable=True, timer_series_attempt=1, timer_series_started=started
+    )
+
+    assert current_timer_plan(now) == Attempt(True, 2, started, None)
+
+
+def _hold_run_lock(held: threading.Event, release: threading.Event) -> None:
+    """Hold the run lock on a connection of this thread's own, the way a run in another process holds it."""
+    from django.db import connection
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_lock(%s)", [COMPETITION_RUN_LOCK_ID])
+        held.set()
+        release.wait(10)
+    finally:
+        connection.close()
+
+
+@pytest.fixture
+def run_lock_held_elsewhere() -> Iterator[None]:
+    held, release = threading.Event(), threading.Event()
+    holder = threading.Thread(target=_hold_run_lock, args=(held, release))
+    holder.start()
+    held.wait(10)
+    yield
+    release.set()
+    holder.join(10)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_stop_pressed_while_a_timer_attempt_runs_is_refused_not_undone(authentik, config, run_lock_held_elsewhere):
+    result = run_competition_to_completion(False, "gold_admin")
+
+    assert (result.error, result.outcome) == (RUN_IN_PROGRESS, RunOutcome.REFUSED)
+    authentik.team_account.assert_not_called()
+    assert not AuditLog.objects.exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_stop_made_between_timer_attempts_ends_the_retries(authentik, config):
+    """The timer planned its next attempt before the stop; under the run lock it sees the stop and does nothing."""
+    authentik.team_account.return_value = (False, "timed out")
+    first = current_timer_plan(timezone.now())
+    assert isinstance(first, Attempt)
+    drain(run_competition(True, "timer", first))
+    retry = current_timer_plan(timezone.now())
+    assert retry == Attempt(True, 2, first.first_started, first.schedule)
+    authentik.team_account.return_value = (True, "")
+    run_competition_to_completion(False, "gold_admin")
+    authentik.team_account.reset_mock()
+
+    retried = drain(run_competition(True, "timer", retry))
+
+    assert (retried.error, retried.outcome) == (RUN_SUPERSEDED, RunOutcome.REFUSED)
+    authentik.team_account.assert_not_called()
+    assert not CompetitionConfig.get_config().applications_enabled
+    assert current_timer_plan(timezone.now()) is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_due_attempt_whose_schedule_was_cleared_since_it_was_planned_is_refused(authentik, config):
+    """A close out between the timer's plan and its run lock clears the schedule; the start must not go ahead."""
+    planned = current_timer_plan(timezone.now())
+    assert isinstance(planned, Attempt)
+    CompetitionConfig.objects.filter(pk=1).update(competition_start_time=None)
+
+    result = drain(run_competition(True, "timer", planned))
+
+    assert result.outcome is RunOutcome.REFUSED
+    authentik.enable_application.assert_not_called()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("fails", ["errors", "raises"])
+def test_a_timer_attempt_that_fails_advances_its_series_under_the_lock(authentik, config, fails):
+    planned = current_timer_plan(timezone.now())
+    if fails == "errors":
+        CompetitionConfig.objects.filter(pk=1).update(controlled_applications=[])
+        result = drain(run_competition(True, "timer", planned))
+        assert result.outcome is RunOutcome.ERRORED
+    else:
+        authentik.enable_application.side_effect = RuntimeError("Authentik went away")
+        with pytest.raises(RuntimeError):
+            drain(run_competition(True, "timer", planned))
+
+    config = CompetitionConfig.get_config()
+    assert (config.timer_series_enable, config.timer_series_attempt) == (True, 1)
+
+
+def _series() -> tuple[bool | None, int]:
+    config = CompetitionConfig.get_config()
+    return config.timer_series_enable, config.timer_series_attempt
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("fails", ["incomplete", "raises"])
+def test_a_series_an_admin_ends_during_a_timer_retry_stays_ended(authentik, config, fails):
+    """Setting a new start time ends the series first; the attempt finishing must not bring it back."""
+    from core.services.competition import end_timer_series
+
+    started = timezone.now() - timedelta(minutes=2)
+    CompetitionConfig.objects.filter(pk=1).update(
+        competition_start_time=None,
+        timer_series_enable=True,
+        timer_series_attempt=1,
+        timer_series_started=started,
+        timer_series_schedule=config.competition_start_time,
+    )
+    retry = current_timer_plan(timezone.now())
+    assert retry == Attempt(True, 2, started, config.competition_start_time)
+
+    def ended_meanwhile(*_args, **_kwargs):
+        end_timer_series(True)
+        if fails == "raises":
+            raise RuntimeError("Authentik went away")
+        return False, "timed out"
+
+    authentik.enable_application.side_effect = ended_meanwhile
+    if fails == "raises":
+        with pytest.raises(RuntimeError):
+            drain(run_competition(True, "timer", retry))
+    else:
+        assert drain(run_competition(True, "timer", retry)).outcome is RunOutcome.INCOMPLETE
+
+    assert _series() == (None, 0)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_first_attempt_rescheduled_while_it_runs_starts_no_series(authentik, config):
+    """No series exists yet to end; the new start time alone must stop the retries."""
+    planned = current_timer_plan(timezone.now())
+    later = timezone.now() + timedelta(hours=2)
+
+    def rescheduled_meanwhile(*_args, **_kwargs):
+        CompetitionConfig.objects.filter(pk=1).update(competition_start_time=later)
+        return False, "timed out"
+
+    authentik.enable_application.side_effect = rescheduled_meanwhile
+    assert drain(run_competition(True, "timer", planned)).outcome is RunOutcome.INCOMPLETE
+
+    assert _series() == (None, 0)
+    assert CompetitionConfig.get_config().competition_start_time == later
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_timer_retry_that_finishes_incomplete_counts_on(authentik, config):
+    started = timezone.now() - timedelta(minutes=2)
+    CompetitionConfig.objects.filter(pk=1).update(
+        competition_start_time=None, timer_series_enable=True, timer_series_attempt=1, timer_series_started=started
+    )
+    authentik.team_account.return_value = (False, "timed out")
+
+    drain(run_competition(True, "timer", current_timer_plan(timezone.now())))
+
+    assert _series() == (True, 2)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_timer_attempt_finishing_while_a_new_time_is_saved_starts_no_series(authentik, config):
+    """Its final write waits for the new time to commit, then finds the schedule it carried out replaced."""
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import suppress
+
+    from django.db import connection
+
+    from core.services import competition
+
+    planned = current_timer_plan(timezone.now())
+    authentik.team_account.return_value = (False, "timed out")
+    later = timezone.now() + timedelta(hours=2)
+    real_end = competition.end_timer_series
+    attempts = []
+
+    def attempt() -> RunOutcome:
+        try:
+            return drain(run_competition(True, "timer", planned)).outcome
+        finally:
+            connection.close()
+
+    def end_then_let_the_attempt_finish(enable: bool) -> None:
+        real_end(enable)
+        attempts.append(pool.submit(attempt))
+        with suppress(TimeoutError):
+            attempts[-1].result(timeout=3)
+
+    with (
+        ThreadPoolExecutor(1) as pool,
+        patch.object(competition, "end_timer_series", end_then_let_the_attempt_finish),
+    ):
+        competition.set_schedule(start=later)
+        assert attempts[0].result(timeout=30) is RunOutcome.INCOMPLETE
+
+    assert _series() == (None, 0)
+    assert CompetitionConfig.get_config().competition_start_time == later
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_first_attempt_whose_schedule_was_cleared_while_it_ran_starts_no_series(authentik, config):
+    """A cleanup clears the schedule without the run lock; the attempt must not leave the timer a series to retry."""
+    planned = current_timer_plan(timezone.now())
+
+    def cleared_meanwhile(*_args, **_kwargs):
+        CompetitionConfig.objects.filter(pk=1).update(competition_start_time=None)
+        return False, "timed out"
+
+    authentik.enable_application.side_effect = cleared_meanwhile
+    assert drain(run_competition(True, "timer", planned)).outcome is RunOutcome.INCOMPLETE
+
+    assert _series() == (None, 0)
+
+
+def _run_lock_is_free() -> bool:
+    from django.db import connection
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_try_advisory_lock(%s)", [COMPETITION_RUN_LOCK_ID])
+            return cursor.fetchone()[0]
+    finally:
+        connection.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_run_stepped_from_two_threads_is_stopped_and_lets_the_lock_go(authentik, config):
+    """The run lock is the stepping thread's connection's: a step on another thread would run without it."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    steps = run_competition(True, "gold_admin")
+    next(steps)
+    with ThreadPoolExecutor(1) as other, pytest.raises(RuntimeError, match=STEPPED_ACROSS_THREADS):
+        other.submit(next, steps).result()
+    with ThreadPoolExecutor(1) as elsewhere:
+        assert elsewhere.submit(_run_lock_is_free).result()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_timer_retry_keeps_a_schedule_an_admin_set_since_the_series_began(authentik, config):
+    """The retry clears only the scheduled time its series carries out."""
+    authentik.team_account.return_value = (False, "timed out")
+    first = current_timer_plan(timezone.now())
+    drain(run_competition(True, "timer", first))
+    retry = current_timer_plan(timezone.now())
+    later = timezone.now() + timedelta(hours=2)
+    CompetitionConfig.objects.filter(pk=1).update(competition_start_time=later)
+
+    drain(run_competition(True, "timer", retry))
+
+    assert CompetitionConfig.get_config().competition_start_time == later
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("rescheduled", [False, True], ids=["unchanged", "rescheduled"])
+def test_giving_up_drops_only_the_schedule_its_series_carried_out(config, rescheduled):
+    from core.services.competition import GiveUp, give_up_timer_series
+
+    original = config.competition_start_time
+    started = timezone.now() - timedelta(minutes=5)
+    CompetitionConfig.objects.filter(pk=1).update(
+        timer_series_enable=True, timer_series_attempt=4, timer_series_started=started, timer_series_schedule=original
+    )
+    later = timezone.now() + timedelta(hours=2)
+    if rescheduled:
+        CompetitionConfig.objects.filter(pk=1).update(competition_start_time=later)
+
+    assert give_up_timer_series(GiveUp(True, 4, started, original, "still incomplete after 4 attempts"))
+
+    config = CompetitionConfig.get_config()
+    assert config.timer_series_enable is None
+    assert config.competition_start_time == (later if rescheduled else None)
+
+
+def test_setting_a_schedule_ends_a_live_series_for_its_direction_only(config):
+    from core.services.competition import end_timer_series
+
+    started = timezone.now()
+    CompetitionConfig.objects.filter(pk=1).update(
+        timer_series_enable=False, timer_series_attempt=2, timer_series_started=started
+    )
+
+    end_timer_series(True)
+    assert CompetitionConfig.get_config().timer_series_enable is False
+    end_timer_series(False)
+    assert CompetitionConfig.get_config().timer_series_enable is None

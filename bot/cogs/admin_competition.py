@@ -21,6 +21,7 @@ from core.authentik_utils import (
 )
 from core.forms import AppSlugForm
 from core.models import AuditLog, CompetitionConfig
+from core.services.competition import RunOutcome, set_schedule
 from core.utils import UnknownTimezoneError, parse_datetime_to_utc, shorten
 from team.models import active_team_numbers, team_username
 
@@ -213,9 +214,8 @@ class AdminCompetitionCog(commands.Cog):
             await interaction.response.send_message(error, ephemeral=True)
             return
 
-        field_name = "competition_start_time" if is_start else "competition_end_time"
-        setattr(config, field_name, scheduled_time)
-        await config.asave(update_fields=[field_name])
+        times = {"start": scheduled_time} if is_start else {"end": scheduled_time}
+        await sync_to_async(set_schedule)(**times)
 
         audit_action = "competition_start_time_set" if is_start else "competition_end_time_set"
         audit_key = "start_time" if is_start else "end_time"
@@ -322,17 +322,21 @@ class AdminCompetitionCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
         result = await run_competition(enable, actor=f"discord:{interaction.user}")
-        if not result.success:
-            await interaction.followup.send(f"Error: {result.error}", ephemeral=True)
-            return
+        match result.outcome:
+            case RunOutcome.REFUSED | RunOutcome.ERRORED:
+                await interaction.followup.send(f"Error: {result.error}", ephemeral=True)
+                return
+            case RunOutcome.INCOMPLETE:
+                incomplete = " (incomplete)"
+                note = f"\n\nIncomplete: run {'start' if enable else 'stop'}-competition again."
+            case RunOutcome.COMPLETE:
+                incomplete = note = ""
 
         verb = "Started" if enable else "Stopped"
-        incomplete = " (incomplete)" if result.has_failures else ""
         await log_to_ops_channel(
             self.bot, f"**Competition {verb}{incomplete}** by {interaction.user.mention}\n{result.summary()}"
         )
         await update_status_channel(self.bot)
-        note = f"\n\nIncomplete: run {'start' if enable else 'stop'}-competition again." if result.has_failures else ""
         await interaction.followup.send(
             f"**Competition {verb}{incomplete}!**\n\n{result.summary()}{note}", ephemeral=True
         )
@@ -412,7 +416,7 @@ class AdminCompetitionCog(commands.Cog):
 
         config = await sync_to_async(CompetitionConfig.get_config)()
         config.controlled_applications = slugs
-        await config.asave()
+        await config.asave(update_fields=["controlled_applications", "updated_at"])
 
         await AuditLog.objects.acreate(
             action="competition_apps_configured",

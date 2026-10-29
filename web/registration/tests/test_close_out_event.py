@@ -171,6 +171,46 @@ def test_a_refusal_writes_nothing(event, setup, message):
     _assert_nothing_written(event, scores)
 
 
+def test_close_out_ends_the_timers_series(event):
+    """Otherwise the timer would carry on retrying a stop into the next event."""
+    CompetitionConfig.objects.update_or_create(
+        pk=1,
+        defaults={"timer_series_enable": False, "timer_series_attempt": 2, "timer_series_started": timezone.now()},
+    )
+
+    close_out_event(event, "gold")
+
+    config = CompetitionConfig.get_config()
+    assert (config.timer_series_enable, config.timer_series_attempt, config.timer_series_started) == (None, 0, None)
+
+
+def test_a_close_out_while_a_start_or_stop_runs_is_refused(event):
+    """A stop running alongside would sync service scores back into the data the close-out clears."""
+    from core.services.competition import COMPETITION_RUN_LOCK_ID
+
+    held, release = threading.Event(), threading.Event()
+
+    def run_in_progress() -> None:
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_lock(%s)", [COMPETITION_RUN_LOCK_ID])
+            held.set()
+            release.wait(10)
+        finally:
+            connection.close()
+
+    holder = threading.Thread(target=run_in_progress)
+    holder.start()
+    held.wait(10)
+    try:
+        with pytest.raises(CloseOutError, match="A competition start or stop is running"):
+            close_out_event(event, "gold")
+    finally:
+        release.set()
+        holder.join(10)
+    _assert_nothing_written(event)
+
+
 def test_a_red_finding_against_a_team_with_no_school_is_refused(event):
     unlisted = Team.objects.create(team_number=3, team_name="Team 03", is_active=True)
     finding = RedTeamScore.objects.create(points_per_team=Decimal(10), submitted_by=User.objects.create_user("red"))

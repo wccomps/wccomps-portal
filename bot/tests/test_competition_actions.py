@@ -83,3 +83,23 @@ async def test_schedule_commands_refuse_an_end_before_the_start(mock_interaction
     )
     config = await CompetitionConfig.objects.aget(pk=1)
     assert (config.competition_start_time, config.competition_end_time) == (start, end)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_setting_a_stop_time_ends_the_timers_live_stop_series(mock_interaction, mock_bot) -> None:
+    from django.utils import timezone
+
+    from bot.cogs.admin_competition import AdminCompetitionCog
+    from core.models import CompetitionConfig
+
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={"timer_series_enable": False, "timer_series_attempt": 1, "timer_series_started": timezone.now()},
+    )
+    cog = AdminCompetitionCog(mock_bot)
+
+    await cog.admin_set_end_time.callback(cog, mock_interaction, datetime_str="2030-10-03T17:00", timezone_name="UTC")
+
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert (config.timer_series_enable, config.timer_series_attempt) == (None, 0)

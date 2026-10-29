@@ -188,6 +188,13 @@ class CompetitionConfig(models.Model):
         null=True, blank=True, help_text="Discord message ID for status embed (updated in place)"
     )
 
+    # The timer's retries of a start (True) or stop it left incomplete or errored: last attempt, when the first
+    # attempt began, the schedule it carries out. None, 0, None, None with no series.
+    timer_series_enable = models.BooleanField(null=True, blank=True)
+    timer_series_attempt = models.PositiveSmallIntegerField(default=0)
+    timer_series_started = models.DateTimeField(null=True, blank=True)
+    timer_series_schedule = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         verbose_name = "Competition Configuration"
         verbose_name_plural = "Competition Configuration"

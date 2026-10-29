@@ -1,7 +1,8 @@
 """Tests for competition timer background task."""
 
 import asyncio
-from datetime import timedelta
+import contextlib
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import discord
@@ -9,8 +10,8 @@ import pytest
 from django.utils import timezone
 
 from bot.competition_timer import CompetitionTimer
-from core.models import CompetitionConfig
-from core.services.competition import CompetitionRunResult
+from core.models import AuditLog, CompetitionConfig
+from core.services.competition import Attempt, CompetitionRunResult
 
 
 @pytest.mark.asyncio
@@ -97,30 +98,6 @@ class TestCompetitionTimer:
 
 
 @pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-async def test_repeated_auto_start_failure_is_posted_once() -> None:
-    """The timer retries a failed start every minute; ops hears about it once."""
-    bot = AsyncMock(spec=discord.Client)
-    timer = CompetitionTimer(bot)
-    await CompetitionConfig.objects.aupdate_or_create(
-        pk=1,
-        defaults={"competition_start_time": timezone.now() - timedelta(minutes=1), "applications_enabled": False},
-    )
-    failure = CompetitionRunResult(enable=True, error="No controlled applications configured")
-
-    with (
-        patch("bot.competition_timer.run_competition", new=AsyncMock(return_value=failure)) as start,
-        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
-    ):
-        await timer._check_competition_times()
-        await timer._check_competition_times()
-
-    assert start.await_count == 2
-    ops.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("work_fails", [False, True])
 async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeypatch) -> None:
     """A pass never raises (tasks.loop would stop), and a failed one skips the liveness heartbeat."""
@@ -177,7 +154,9 @@ async def test_loop_waits_for_ready_and_stops_with_the_bot() -> None:
     assert not timer.check_loop.is_running()
 
 
-def _run(failed_accounts: int) -> CompetitionRunResult:
+def _run(failed_accounts: int | None) -> CompetitionRunResult:
+    if failed_accounts is None:
+        return CompetitionRunResult(enable=True, error="No controlled applications configured")
     result = CompetitionRunResult(enable=True, controlled_apps=["scoring"], apps_ok=["scoring"], accounts_total=3)
     result.accounts_ok, result.accounts_failed = 3 - failed_accounts, failed_accounts
     return result
@@ -190,87 +169,193 @@ async def _start_due() -> None:
     )
 
 
-def _fake_runs(failures: list[int], stop_by_hand_after: int | None = None):
-    """Stand-in for run_competition: records the state like the real run and beats once per attempt."""
-    calls = iter(failures)
-    attempt = 0
+async def _series(
+    enable: bool | None, attempt: int = 0, started: datetime | None = None, schedule: datetime | None = None
+) -> None:
+    await CompetitionConfig.objects.filter(pk=1).aupdate(
+        timer_series_enable=enable,
+        timer_series_attempt=attempt,
+        timer_series_started=started,
+        timer_series_schedule=schedule,
+    )
 
-    async def run(enable: bool, actor: str) -> CompetitionRunResult:
-        nonlocal attempt
-        attempt += 1
-        await CompetitionConfig.objects.filter(pk=1).aupdate(applications_enabled=enable)
-        if stop_by_hand_after == attempt:
-            await CompetitionConfig.objects.filter(pk=1).aupdate(applications_enabled=not enable)
-        return _run(next(calls))
+
+def _fake_runs(outcomes: list[int | None | str]):
+    """Stand-in for run_competition that leaves the config as the real one does: a count of accounts left unchanged,
+    None for a run that errors, "raise" for one that raises."""
+    calls = iter(outcomes)
+
+    async def run(enable: bool, actor: str, timer: Attempt | None = None) -> CompetitionRunResult:
+        outcome = next(calls)
+        if outcome is None or outcome == "raise":
+            await _series(enable, timer.number, timer.first_started, timer.schedule)
+            if outcome == "raise":
+                raise RuntimeError("Authentik timed out")
+            return _run(None)
+        assert not isinstance(outcome, str)
+        await CompetitionConfig.objects.filter(pk=1).aupdate(applications_enabled=enable, competition_start_time=None)
+        if outcome:
+            await _series(enable, timer.number, timer.first_started, timer.schedule)
+        else:
+            await _series(None)
+        return _run(outcome)
 
     return run
 
 
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize(
-    ("runs", "expected_note"),
-    [
-        ([1, 0], "Completed on attempt 2."),
-        ([2, 2, 1, 1], "Still incomplete after 4 attempts: run Start again from the competition page."),
-    ],
-)
-async def test_an_incomplete_auto_start_is_retried_up_to_three_times(runs, expected_note) -> None:
-    """A partial start (Authentik timing out at 16:00) is run again, a bounded number of times."""
-    await _start_due()
+async def _ticks(count: int, runs: list[int | None | str], *, restart_after: int | None = None, ops_raise=False):
+    """Tick a timer count times (a new timer after restart_after ticks); the run mock and the ops posts."""
     timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+    ops_side_effect = RuntimeError("Discord down") if ops_raise else None
     with (
         patch("bot.competition_timer.run_competition", new=AsyncMock(side_effect=_fake_runs(runs))) as start,
-        patch("bot.competition_timer.asyncio.sleep", new_callable=AsyncMock) as sleep,
-        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
+        patch("bot.competition_timer.log_to_ops_channel", new=AsyncMock(side_effect=ops_side_effect)) as ops,
+        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock) as status,
     ):
-        await timer._check_competition_times()
+        for tick in range(count):
+            if tick == restart_after:
+                timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+            with contextlib.suppress(RuntimeError):
+                await timer._check_competition_times()
+    return start, [call.args[1] for call in ops.await_args_list], status
 
-    assert start.await_count == len(runs)
-    assert sleep.await_count == len(runs) - 1
-    ops.assert_awaited_once()
-    assert ops.await_args.args[1].endswith(expected_note)
+
+GAVE_UP = (
+    "**Competition Auto-Start Incomplete:** the timer stopped retrying, as still incomplete after 4 attempts. "
+    "Run Start again from the competition page."
+)
 
 
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
-async def test_a_stop_by_hand_during_the_retry_wait_is_not_undone() -> None:
-    """The next attempt would re-enable everything an operator had just stopped."""
+async def test_an_incomplete_first_attempt_is_announced_and_a_later_one_completes() -> None:
     await _start_due()
-    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
-    with (
-        patch(
-            "bot.competition_timer.run_competition",
-            new=AsyncMock(side_effect=_fake_runs([2, 2, 2, 2], stop_by_hand_after=1)),
-        ) as start,
-        patch("bot.competition_timer.asyncio.sleep", new_callable=AsyncMock),
-        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
-    ):
-        await timer._check_competition_times()
+
+    start, posts, status = await _ticks(4, [1, 0])
+
+    assert start.await_count == 2
+    assert [p.split("**")[1] for p in posts] == ["Competition Auto-Started, Incomplete:", "Competition Auto-Started!"]
+    assert posts[1].endswith("Completed on attempt 2.")
+    assert status.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_giving_up_is_reported_once_with_a_status_update() -> None:
+    await _start_due()
+
+    start, posts, status = await _ticks(8, [2, 2, 1, 1], restart_after=6)
+
+    assert start.await_count == 4
+    assert posts[1:] == [GAVE_UP]
+    assert status.await_count == 2
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert (config.timer_series_enable, config.timer_series_attempt) == (None, 0)
+    assert await AuditLog.objects.filter(action="competition_timer_gave_up").acount() == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("failure", [None, "raise"], ids=["errors", "raises"])
+async def test_a_retry_that_errors_counts_as_an_attempt(failure) -> None:
+    await _start_due()
+
+    start, posts, _status = await _ticks(9, [2, failure, failure, failure, 0], restart_after=3)
+
+    assert start.await_count == 4
+    assert posts[1:] == [GAVE_UP]
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("failure", [None, "raise"], ids=["errors", "raises"])
+async def test_a_first_attempt_that_keeps_failing_is_reported_once_and_given_up_after_four(failure) -> None:
+    await _start_due()
+
+    start, posts, _status = await _ticks(9, [failure] * 4 + [0], restart_after=5)
+
+    assert start.await_count == 4
+    first = (
+        "**Competition Auto-Start Failed:** No controlled applications configured"
+        if failure is None
+        else "**Error in competition timer:** Authentik timed out"
+    )
+    assert posts == [first, GAVE_UP]
+    assert (await CompetitionConfig.objects.aget(pk=1)).competition_start_time is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_slow_series_past_a_quarter_hour_still_retries_and_reports() -> None:
+    """A stop of 50 slow team accounts can take a quarter of an hour by itself."""
+    await CompetitionConfig.objects.aupdate_or_create(pk=1, defaults={"applications_enabled": True})
+    await _series(False, 1, timezone.now() - timedelta(minutes=20))
+
+    start, posts, _status = await _ticks(2, [0])
 
     assert start.await_count == 1
-    assert not (await CompetitionConfig.objects.aget(pk=1)).applications_enabled
-    assert ops.await_args.args[1].endswith("retries stopped: the competition was stopped by hand.")
+    assert posts[-1].endswith("Completed on attempt 2.")
 
 
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
-async def test_a_complete_auto_start_runs_once() -> None:
+async def test_a_restart_past_the_window_reports_giving_up_once_and_runs_nothing() -> None:
+    await CompetitionConfig.objects.aupdate_or_create(pk=1, defaults={"applications_enabled": True})
+    await _series(True, 1, timezone.now() - timedelta(hours=2))
+
+    start, posts, _status = await _ticks(3, [0])
+
+    start.assert_not_awaited()
+    assert len(posts) == 1
+    assert "its first attempt was over 60 minutes ago" in posts[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_giving_up_on_a_series_ended_meanwhile_reports_nothing() -> None:
+    """A run by hand or a new time ended the series between the timer's plan and its give-up; nothing stopped."""
+    from core.services.competition import end_timer_series, give_up_timer_series
+
+    await CompetitionConfig.objects.aupdate_or_create(pk=1, defaults={"applications_enabled": False})
+    await _series(True, 4, timezone.now() - timedelta(minutes=10))
+
+    def ended_first(plan):
+        end_timer_series(True)
+        return give_up_timer_series(plan)
+
+    with patch("bot.competition_timer.give_up_timer_series", ended_first):
+        start, posts, status = await _ticks(1, [])
+
+    start.assert_not_awaited()
+    assert posts == []
+    status.assert_not_awaited()
+    assert not await AuditLog.objects.filter(action="competition_timer_gave_up").aexists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_run_by_hand_after_an_incomplete_auto_start_ends_the_retries() -> None:
+    """A run by hand that finishes clears the timer's series, whatever it changed."""
     await _start_due()
-    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
-    with (
-        patch("bot.competition_timer.run_competition", new=AsyncMock(side_effect=_fake_runs([0]))) as start,
-        patch("bot.competition_timer.asyncio.sleep", new_callable=AsyncMock) as sleep,
-        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
-    ):
-        await timer._check_competition_times()
+    await _ticks(1, [2])
+    await _series(None)
+
+    start, posts, _status = await _ticks(3, [2])
+
+    start.assert_not_awaited()
+    assert posts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_complete_auto_start_runs_once_even_when_reporting_it_fails() -> None:
+    await _start_due()
+
+    start, _posts, _status = await _ticks(3, [0], ops_raise=True)
 
     start.assert_awaited_once()
-    sleep.assert_not_awaited()
-    assert "attempt" not in ops.await_args.args[1]
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert (config.timer_series_enable, config.timer_series_attempt) == (None, 0)
 
 
 @pytest.mark.asyncio
@@ -283,7 +368,7 @@ async def test_a_run_of_many_quick_steps_keeps_the_timer_alive(monkeypatch) -> N
     monkeypatch.setattr(competition_timer, "recycle_db_connection", AsyncMock())
     during: list[int] = []
 
-    def steps(enable: bool, actor: str):
+    def steps(enable: bool, actor: str, timer: object = None):
         for n in range(5):
             during.append(len(beats))
             yield n
@@ -315,7 +400,7 @@ async def test_a_wedged_step_stops_the_timer_heartbeat(monkeypatch) -> None:
     monkeypatch.setattr(competition_timer, "recycle_db_connection", AsyncMock())
     release = threading.Event()
 
-    def steps(enable: bool, actor: str):
+    def steps(enable: bool, actor: str, timer: object = None):
         yield 1
         release.wait(5)
         return CompetitionRunResult(enable=enable)
