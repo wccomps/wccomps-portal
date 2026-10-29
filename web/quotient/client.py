@@ -2,6 +2,7 @@
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -273,187 +274,56 @@ class QuotientClient:
 
         return response
 
-    def get_infrastructure(self, force_refresh: bool = False) -> QuotientInfrastructure | None:
-        """Fetch infrastructure from Quotient API, or None if unavailable."""
-        cache_key = "quotient_infrastructure"
+    def _cached[T](
+        self, cache_key: str, ttl: int, force_refresh: bool, endpoint: str, parse: Callable[[object], T], what: str
+    ) -> T | None:
+        """What parse makes of the endpoint's answer, from the cache unless asked to refresh; None if unavailable.
 
+        A cached empty answer is a hit: None is never cached, so only a missing key fetches.
+        """
         if not force_refresh:
-            cached: QuotientInfrastructure | None = cache.get(cache_key)
-            if cached:
-                logger.debug("Returning cached infrastructure")
-                return cached
-
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cast(T, cached)
         try:
-            response = self._request("get", "/api/metadata")
+            response = self._request("get", endpoint)
             response.raise_for_status()
-
-            data = _json(response)
-
-            # /api/metadata returns: {"boxes": [{"name": str, "ip": str, "services": [str]}]}
-            boxes = []
-            box_list = _object(data, "the metadata").get("boxes", [])
-            for box_data in _objects(box_list, "boxes"):
-                svc_names = box_data.get("services", [])
-                if not isinstance(svc_names, list):
-                    raise ValueError(f"a box's services aren't a list: {svc_names!r:.80}")
-                # Services are just strings (display names) in metadata endpoint
-                services = [
-                    QuotientService(
-                        name=_text(svc_name, "a service"),
-                        display_name=_text(svc_name, "a service"),
-                    )
-                    for svc_name in svc_names
-                ]
-
-                boxes.append(
-                    QuotientBox(
-                        name=_text(_field(box_data, "name", "a box"), "a box's name"),
-                        ip=_text(_field(box_data, "ip", "a box"), "a box's IP"),
-                        services=services,
-                    )
-                )
-
-            infrastructure = QuotientInfrastructure(boxes=boxes)
-
-            cache.set(cache_key, infrastructure, self.cache_ttl)
-            logger.info(f"Fetched {len(boxes)} boxes from Quotient API")
-
-            return infrastructure
-
+            value = parse(_json(response))
         except (httpx.HTTPError, QuotientAPIError) as e:
-            _log_failure("Failed to fetch infrastructure from Quotient", e)
+            _log_failure(f"Failed to fetch {what} from Quotient", e)
             return None
         except ValueError as e:
-            logger.exception(f"Failed to parse infrastructure response: {e}")
+            logger.exception(f"Failed to parse {what} from Quotient: {e}")
             return None
+        cache.set(cache_key, value, ttl)
+        return value
+
+    def get_infrastructure(self, force_refresh: bool = False) -> QuotientInfrastructure | None:
+        """Fetch infrastructure from Quotient API, or None if unavailable."""
+        return self._cached(
+            "quotient_infrastructure", self.cache_ttl, force_refresh, "/api/metadata", _infrastructure, "infrastructure"
+        )
 
     def get_injects(self, force_refresh: bool = False) -> list[Inject] | None:
         """Fetch injects from Quotient API, or None if unavailable."""
-        cache_key = "quotient_injects"
-
-        if not force_refresh:
-            cached: list[Inject] | None = cache.get(cache_key)
-            if cached:
-                return cached
-
-        try:
-            response = self._request("get", "/api/injects")
-            response.raise_for_status()
-
-            data = _json(response)
-            # API returns a list directly
-            inject_list = data if isinstance(data, list) else _field(data, "injects", "the injects")
-
-            injects = [
-                Inject(
-                    inject_id=_whole(_field(i, "ID", "an inject"), "an inject's ID"),
-                    title=_text(_field(i, "Title", "an inject"), "an inject's title"),
-                    description=_text(_field(i, "Description", "an inject"), "an inject's description"),
-                )
-                for i in _objects(inject_list, "injects")
-            ]
-
-            cache.set(cache_key, injects, 60)
-            logger.info(f"Fetched {len(injects)} injects")
-            return injects
-
-        except (httpx.HTTPError, QuotientAPIError) as e:
-            _log_failure("Failed to fetch injects from Quotient", e)
-            return None
-        except ValueError as e:
-            logger.exception(f"Failed to parse injects response: {e}")
-            return None
+        return self._cached("quotient_injects", 60, force_refresh, "/api/injects", _injects, "injects")
 
     def get_service_export(self, force_refresh: bool = False) -> list[TeamServiceExport] | None:
         """Fetch per-service score breakdown from Quotient, or None if unavailable."""
-        cache_key = "quotient_service_export"
-
-        if not force_refresh:
-            cached: list[TeamServiceExport] | None = cache.get(cache_key)
-            if cached:
-                return cached
-
-        try:
-            response = self._request("get", "/api/engine/export/scores")
-            response.raise_for_status()
-
-            data = _json(response)
-            exports = []
-            for team_data in _objects(data, "the export"):
-                services = [
-                    ServiceExportEntry(
-                        service_name=_text(_field(s, "service_name", "a service"), "a service's name"),
-                        service_points=_whole(_field(s, "service_points", "a service"), "a service's points"),
-                        sla_violations=_whole(s.get("sla_violations", 0), "a service's SLA violations"),
-                        sla_penalty=_whole(s.get("sla_penalty", 0), "a service's SLA penalty"),
-                    )
-                    for s in _objects(team_data.get("services", []), "a team's services")
-                ]
-                team_name = _text(_field(team_data, "team_name", "a team"), "a team's name")
-                exports.append(
-                    TeamServiceExport(
-                        team_name=team_name,
-                        team_number=_team_number(team_name),
-                        services=services,
-                        gross_points=_whole(team_data.get("gross_points", 0), "a team's points"),
-                        total_sla_penalty=_whole(team_data.get("total_sla_penalty", 0), "a team's SLA penalty"),
-                        total_points=_whole(team_data.get("total_points", 0), "a team's total"),
-                    )
-                )
-
-            cache.set(cache_key, exports, self.cache_ttl)
-            logger.info(f"Fetched service export for {len(exports)} teams")
-            return exports
-
-        except (httpx.HTTPError, QuotientAPIError) as e:
-            _log_failure("Failed to fetch service export", e)
-            return None
-        except ValueError as e:
-            logger.exception(f"Failed to parse service export: {e}")
-            return None
+        return self._cached(
+            "quotient_service_export",
+            self.cache_ttl,
+            force_refresh,
+            "/api/engine/export/scores",
+            _service_export,
+            "the service export",
+        )
 
     def get_uptimes(self, force_refresh: bool = False) -> list[TeamUptime] | None:
         """Fetch per-service uptime percentages from Quotient, or None if unavailable."""
-        cache_key = "quotient_uptimes"
-
-        if not force_refresh:
-            cached: list[TeamUptime] | None = cache.get(cache_key)
-            if cached:
-                return cached
-
-        try:
-            response = self._request("get", "/api/graphs/uptimes")
-            response.raise_for_status()
-
-            data = _json(response)
-            result = []
-            series = _object(data, "the uptimes").get("series", [])
-            for team_data in _objects(series, "the uptimes"):
-                team_name = _text(_field(team_data, "Name", "a team"), "a team's name")
-                uptimes = {
-                    _text(_field(entry, "Service", "an uptime"), "a service"): _fraction(
-                        _field(entry, "Uptime", "an uptime"), "an uptime"
-                    )
-                    for entry in _objects(team_data.get("Data", []), "a team's uptimes")
-                }
-                result.append(
-                    TeamUptime(
-                        team_name=team_name,
-                        team_number=_team_number(team_name),
-                        uptimes=uptimes,
-                    )
-                )
-
-            cache.set(cache_key, result, self.cache_ttl)
-            logger.info(f"Fetched uptimes for {len(result)} teams")
-            return result
-
-        except (httpx.HTTPError, QuotientAPIError) as e:
-            _log_failure("Failed to fetch uptimes", e)
-            return None
-        except ValueError as e:
-            logger.exception(f"Failed to parse uptimes: {e}")
-            return None
+        return self._cached(
+            "quotient_uptimes", self.cache_ttl, force_refresh, "/api/graphs/uptimes", _uptimes, "uptimes"
+        )
 
     def get_service_choices(self) -> list[dict[str, str]]:
         """Service choices for the ticket dropdown (keys: value, label, box_ip, box_name, service_name)."""
@@ -494,44 +364,113 @@ class QuotientClient:
         if not target or team_number <= 0:
             return []
 
-        cache_key = f"quotient_service_checks_{team_number}_{target}"
-        if not force_refresh:
-            cached: list[ServiceCheck] | None = cache.get(cache_key)
-            if cached is not None:
-                return cached
+        return self._cached(
+            f"quotient_service_checks_{team_number}_{target}",
+            30,
+            force_refresh,
+            f"/api/services/{team_number}/{quote(target, safe='')}",
+            _service_checks,
+            "service checks",
+        )
 
-        try:
-            encoded_service = quote(target, safe="")
-            response = self._request("get", f"/api/services/{team_number}/{encoded_service}")
-            response.raise_for_status()
 
-            data = _json(response)
-            checks: list[ServiceCheck] = []
-            for entry in [] if data is None else _objects(data, "the service checks"):
-                round_obj = _object(_field(entry, "Round", "a service check"), "a service check's round")
-                checks.append(
-                    ServiceCheck(
-                        round_number=_whole(_field(round_obj, "ID", "a service check's round"), "a round number"),
-                        timestamp=_timestamp(round_obj.get("StartTime", ""), "a round's start time"),
-                        passed=_boolean(_field(entry, "Result", "a service check"), "a service check's result"),
-                        debug=_clean_output(entry.get("Debug", ""), "a service check's debug output"),
-                        error=_clean_output(entry.get("Error", ""), "a service check's error"),
-                    )
-                )
-            checks.sort(key=lambda c: c.round_number, reverse=True)
-            for old_check in checks[10:]:
-                old_check.debug = ""
-                old_check.error = ""
+def _infrastructure(data: object) -> QuotientInfrastructure:
+    # /api/metadata returns: {"boxes": [{"name": str, "ip": str, "services": [str]}]}
+    boxes = []
+    for box_data in _objects(_object(data, "the metadata").get("boxes", []), "boxes"):
+        svc_names = box_data.get("services", [])
+        if not isinstance(svc_names, list):
+            raise ValueError(f"a box's services aren't a list: {svc_names!r:.80}")
+        services = [
+            QuotientService(name=_text(svc_name, "a service"), display_name=_text(svc_name, "a service"))
+            for svc_name in svc_names
+        ]
+        boxes.append(
+            QuotientBox(
+                name=_text(_field(box_data, "name", "a box"), "a box's name"),
+                ip=_text(_field(box_data, "ip", "a box"), "a box's IP"),
+                services=services,
+            )
+        )
+    logger.info(f"Fetched {len(boxes)} boxes from Quotient API")
+    return QuotientInfrastructure(boxes=boxes)
 
-            cache.set(cache_key, checks, 30)
-            return checks
 
-        except (httpx.HTTPError, QuotientAPIError) as e:
-            _log_failure("Failed to fetch service checks from Quotient", e)
-            return None
-        except ValueError:
-            logger.warning("Failed to parse service checks response from Quotient")
-            return None
+def _injects(data: object) -> list[Inject]:
+    inject_list = data if isinstance(data, list) else _field(data, "injects", "the injects")
+    injects = [
+        Inject(
+            inject_id=_whole(_field(i, "ID", "an inject"), "an inject's ID"),
+            title=_text(_field(i, "Title", "an inject"), "an inject's title"),
+            description=_text(_field(i, "Description", "an inject"), "an inject's description"),
+        )
+        for i in _objects(inject_list, "injects")
+    ]
+    logger.info(f"Fetched {len(injects)} injects")
+    return injects
+
+
+def _service_export(data: object) -> list[TeamServiceExport]:
+    exports = []
+    for team_data in _objects(data, "the export"):
+        services = [
+            ServiceExportEntry(
+                service_name=_text(_field(s, "service_name", "a service"), "a service's name"),
+                service_points=_whole(_field(s, "service_points", "a service"), "a service's points"),
+                sla_violations=_whole(s.get("sla_violations", 0), "a service's SLA violations"),
+                sla_penalty=_whole(s.get("sla_penalty", 0), "a service's SLA penalty"),
+            )
+            for s in _objects(team_data.get("services", []), "a team's services")
+        ]
+        team_name = _text(_field(team_data, "team_name", "a team"), "a team's name")
+        exports.append(
+            TeamServiceExport(
+                team_name=team_name,
+                team_number=_team_number(team_name),
+                services=services,
+                gross_points=_whole(team_data.get("gross_points", 0), "a team's points"),
+                total_sla_penalty=_whole(team_data.get("total_sla_penalty", 0), "a team's SLA penalty"),
+                total_points=_whole(team_data.get("total_points", 0), "a team's total"),
+            )
+        )
+    logger.info(f"Fetched service export for {len(exports)} teams")
+    return exports
+
+
+def _uptimes(data: object) -> list[TeamUptime]:
+    result = []
+    for team_data in _objects(_object(data, "the uptimes").get("series", []), "the uptimes"):
+        team_name = _text(_field(team_data, "Name", "a team"), "a team's name")
+        uptimes = {
+            _text(_field(entry, "Service", "an uptime"), "a service"): _fraction(
+                _field(entry, "Uptime", "an uptime"), "an uptime"
+            )
+            for entry in _objects(team_data.get("Data", []), "a team's uptimes")
+        }
+        result.append(TeamUptime(team_name=team_name, team_number=_team_number(team_name), uptimes=uptimes))
+    logger.info(f"Fetched uptimes for {len(result)} teams")
+    return result
+
+
+def _service_checks(data: object) -> list[ServiceCheck]:
+    """A service's checks, newest first, with the debug output and error of only the latest ten kept."""
+    checks: list[ServiceCheck] = []
+    for entry in [] if data is None else _objects(data, "the service checks"):
+        round_obj = _object(_field(entry, "Round", "a service check"), "a service check's round")
+        checks.append(
+            ServiceCheck(
+                round_number=_whole(_field(round_obj, "ID", "a service check's round"), "a round number"),
+                timestamp=_timestamp(round_obj.get("StartTime", ""), "a round's start time"),
+                passed=_boolean(_field(entry, "Result", "a service check"), "a service check's result"),
+                debug=_clean_output(entry.get("Debug", ""), "a service check's debug output"),
+                error=_clean_output(entry.get("Error", ""), "a service check's error"),
+            )
+        )
+    checks.sort(key=lambda c: c.round_number, reverse=True)
+    for old_check in checks[10:]:
+        old_check.debug = ""
+        old_check.error = ""
+    return checks
 
 
 @lru_cache(maxsize=1)
