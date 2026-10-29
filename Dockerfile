@@ -4,13 +4,13 @@
 # The Python .python-version pins (local uv and CI read it too): a test that passes on one patch can fail on another.
 # uv sync below reads the file and, with downloads off, refuses an image whose Python differs; test_python_pin checks
 # this tag against it.
-# Each image is a FROM with a version tag, which Dependabot's docker entry bumps (test_python_pin), all but Python's:
-# its tag changes with .python-version.
+# Each image is a FROM with a version tag and its digest, which Dependabot's docker entry bumps together
+# (test_python_pin). Python's tag changes only with .python-version; Dependabot refreshes just its digest.
 
 # uv only installs, so it's mounted for that step instead of shipped
-FROM ghcr.io/astral-sh/uv:0.13.5 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
 
-FROM python:3.14.8-slim
+FROM python:3.14.8-slim@sha256:fbecd461fc72d21b2143c6eaba25143738079154a6d0ea3da3aec724f50eed4a
 
 WORKDIR /app
 
