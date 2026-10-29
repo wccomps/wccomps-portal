@@ -212,13 +212,7 @@ def delete_red_score(request: HttpRequest, finding_id: int) -> HttpResponse:
 
 @require_permission("red_team", "gold_team", error_message="Only Red Team or Gold Team can view this")
 def red_screenshot_download(request: HttpRequest, screenshot_id: int) -> HttpResponse:
-    from django.http import Http404
-
     screenshot = get_object_or_404(RedTeamScreenshot, id=screenshot_id)
-
-    if not screenshot.file_data:
-        raise Http404("File data not available (file was lost)")
-
     return screenshot.serve(inline=True)
 
 

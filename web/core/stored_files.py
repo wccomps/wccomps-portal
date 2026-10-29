@@ -15,7 +15,7 @@ from typing import ClassVar, Self
 
 from django.core.files.uploadedfile import UploadedFile
 from django.db import models
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.utils.http import content_disposition_header
 
 MAX_NAME_LENGTH = 255
@@ -112,4 +112,7 @@ class StoredFile(models.Model):
         return cls(file_data=data, filename=filename, mime_type=stored_type(data, filename), **fields)
 
     def serve(self, *, inline: bool) -> HttpResponse:
+        """The file as file_response serves it (an empty file too); Http404 when its bytes were lost."""
+        if self.file_data is None:
+            raise Http404("The file was lost")
         return file_response(bytes(self.file_data), self.filename, inline=inline)

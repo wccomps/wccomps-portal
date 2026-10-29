@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
@@ -137,9 +137,6 @@ def incident_screenshot_download(request: HttpRequest, screenshot_id: int) -> Ht
         team_field="incident__team",
         id=screenshot_id,
     )
-    if not screenshot.file_data:
-        raise Http404  # the file was lost
-
     return screenshot.serve(inline=True)
 
 

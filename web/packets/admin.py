@@ -45,17 +45,22 @@ class PacketAdmin(PortalModelAdmin[Packet]):
     ]
     list_filter = ["status", "send_via_email", "web_access_enabled", "created_at"]
     search_fields = ["title", "filename", "uploaded_by", "notes"]
-    # Sending a packet sets its event and status; set here, they'd skip the open event's checks
+    # Sending sets event and status (set here, they would skip the open event checks); StoredFile sets the file columns
     readonly_fields = [
         "event",
         "status",
         "actual_distribution_time",
         "created_at",
         "updated_at",
+        "filename",
         "file_size",
         "mime_type",
         "distribution_stats_display",
     ]
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False  # a packet comes in through the upload page, which stores its file as StoredFile says
+
     fieldsets = [
         (
             "Packet Information",

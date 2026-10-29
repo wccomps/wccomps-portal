@@ -384,7 +384,6 @@ class RedTeamScreenshot(StoredFile):
         related_name="screenshots",
     )
     file_data = models.BinaryField(null=True, blank=True)  # type: ignore[assignment]  # older rows lost their bytes
-    mime_type = models.CharField(max_length=100, default="image/png")
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -477,7 +476,6 @@ class IncidentScreenshot(StoredFile):
         related_name="screenshots",
     )
     file_data = models.BinaryField(null=True, blank=True)  # type: ignore[assignment]  # older rows lost their bytes
-    mime_type = models.CharField(max_length=100, default="image/png")
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
