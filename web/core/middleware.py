@@ -11,6 +11,7 @@ from django.shortcuts import redirect
 from django.utils import timezone
 
 from .errors import sign_in_answer, wants_json_error
+from .utils import client_ip
 
 logger = logging.getLogger("wccomps.access")
 error_logger = logging.getLogger("wccomps.errors")
@@ -230,7 +231,7 @@ class AccessLoggingMiddleware:
             username = request.user.username if request.user.is_authenticated else "-"
             error_logger.error(
                 '%s %s %s "%s %s" 500 %.0fms (unhandled exception)',
-                request.META.get("REMOTE_ADDR", "-"),
+                client_ip(request),
                 username,
                 request.META.get("HTTP_HOST", "-"),
                 request.method,
@@ -246,7 +247,7 @@ class AccessLoggingMiddleware:
         # Log with query stats: [query_count, total_db_time_ms]
         log_msg = '%s %s %s "%s %s" %d %.0fms [%dq %.0fms]'
         log_args = (
-            request.META.get("REMOTE_ADDR", "-"),
+            client_ip(request),
             username,
             request.META.get("HTTP_HOST", "-"),
             request.method,

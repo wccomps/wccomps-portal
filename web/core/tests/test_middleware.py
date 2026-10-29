@@ -559,3 +559,31 @@ class TestSecurityHeadersMiddleware:
         csp = response["Content-Security-Policy"]
         assert "unpkg.com" not in csp
         assert "https://static.cloudflareinsights.com" in csp
+
+
+class TestAccessLogAddress:
+    """The access log names the address core.utils.client_ip returns."""
+
+    def test_logs_the_trusted_client_address(self, settings, caplog):
+        settings.TRUST_CF_CONNECTING_IP = True
+        with caplog.at_level("INFO", logger="wccomps.access"):
+            Client().get("/livez/", REMOTE_ADDR="10.42.3.17", HTTP_CF_CONNECTING_IP="203.0.113.7")
+
+        messages = [r.getMessage() for r in caplog.records if r.name == "wccomps.access"]
+        assert messages
+        assert messages[-1].startswith("203.0.113.7 ")
+
+    def test_logs_the_client_address_of_an_unhandled_exception(self, settings, caplog):
+        from core.middleware import AccessLoggingMiddleware
+
+        def boom(request):
+            raise RuntimeError("boom")
+
+        settings.TRUST_CF_CONNECTING_IP = True
+        request = RequestFactory().get("/x/", REMOTE_ADDR="10.42.3.17", HTTP_CF_CONNECTING_IP="203.0.113.7")
+        request.user = AnonymousUser()
+        with caplog.at_level("ERROR", logger="wccomps.errors"), pytest.raises(RuntimeError):
+            AccessLoggingMiddleware(boom)(request)
+
+        messages = [r.getMessage() for r in caplog.records if r.name == "wccomps.errors"]
+        assert messages[-1].startswith("203.0.113.7 ")

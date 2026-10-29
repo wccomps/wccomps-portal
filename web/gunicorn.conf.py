@@ -18,4 +18,6 @@ loglevel = "info"
 
 # Default format minus the query string and referer: /auth/link?token=... and
 # /auth/callback/?code=... would otherwise put link tokens and OAuth codes in the logs.
+# %(h)s is the connecting peer (the proxy in production); the app's own access log names the client when
+# TRUST_CF_CONNECTING_IP is on
 access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(m)s %(U)s %(H)s" %(s)s %(b)s "%(a)s"'

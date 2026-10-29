@@ -1,3 +1,4 @@
+import functools
 import ipaddress
 import json
 import logging
@@ -10,6 +11,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Page, Paginator
 from django.db import DatabaseError, InterfaceError, connection, transaction
@@ -27,16 +29,35 @@ logger = logging.getLogger(__name__)
 
 
 def client_ip(request: HttpRequest) -> str:
-    """The real client address: Cloudflare's CF-Connecting-IP, else the connecting peer.
-
-    Behind the tunnel REMOTE_ADDR is always the proxy. The header is trustworthy only because every
-    production request comes through Cloudflare, which overwrites it; served directly, clients can set it.
-    """
+    """The client's address: CF-Connecting-IP when TRUST_CF_CONNECTING_IP is on, else REMOTE_ADDR."""
     header = request.META.get("HTTP_CF_CONNECTING_IP", "").strip()
+    if settings.TRUST_CF_CONNECTING_IP:
+        if address := _header_address(header):
+            return address
+    elif header:
+        _warn_untrusted_cf_header()
+    return request.META.get("REMOTE_ADDR") or "0.0.0.0"  # noqa: S104 - an address value, not a bind
+
+
+def _header_address(header: str) -> str | None:
+    """The header's address in canonical form; None for anything else, or for an IPv6 scope ID, which is free text."""
     try:
-        return str(ipaddress.ip_address(header))
+        address = ipaddress.ip_address(header)
     except ValueError:
-        return request.META.get("REMOTE_ADDR") or "0.0.0.0"  # noqa: S104 - an address value, not a bind
+        return None
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.scope_id is not None:
+            return None
+        return str(address.ipv4_mapped or address)
+    return str(address)
+
+
+@functools.cache
+def _warn_untrusted_cf_header() -> None:
+    logger.warning(
+        "A request carried CF-Connecting-IP, which is ignored because TRUST_CF_CONNECTING_IP is off: behind "
+        "Cloudflare, set it to true, or every client shares the proxy's address in rate limits and logs"
+    )
 
 
 class UnknownTimezoneError(ValueError):
@@ -312,6 +333,4 @@ REQUIRED_DISCORD_SETTINGS: dict[str, str] = {
 
 def missing_discord_settings() -> list[str]:
     """Environment variable names of required Discord IDs that are unset (0)."""
-    from django.conf import settings
-
     return [env for name, env in REQUIRED_DISCORD_SETTINGS.items() if not getattr(settings, name, 0)]
