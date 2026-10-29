@@ -9,7 +9,12 @@ from discord import app_commands
 from discord.ext import commands
 from django.utils import timezone
 
-from bot.discord_manager import delete_team_infrastructure, unlink_team_members
+from bot.discord_manager import (
+    TeamInfrastructureError,
+    delete_team_infrastructure,
+    recreate_team_infrastructure,
+    unlink_team_members,
+)
 from bot.permissions import permission_check
 from bot.role_sync import sync_member_roles
 from bot.utils import (
@@ -301,24 +306,16 @@ class AdminTeamsCog(commands.Cog):
             results.append(f"Failed to reset the password: {reset.error}")
 
         if recreate_channels:
-            deleted_items = await delete_team_infrastructure(
-                guild, team, reason=f"Team {team_number} reset by {interaction.user}"
-            )
-
-            if deleted_items:
-                results.append(f"Deleted {', '.join(deleted_items)}")
-
-            from bot.discord_manager import DiscordManager
-
-            discord_manager = DiscordManager(guild, self.bot)
-            role, category = await discord_manager.setup_team_infrastructure(team_number)
-
-            if role and category:
-                results.append(f"Recreated the role and category with {len(category.channels)} channels")
-            elif role:
-                results.append("Recreated the role (creating the category failed)")
+            try:
+                deleted_items, category = await recreate_team_infrastructure(
+                    guild, team, f"Team {team_number} reset by {interaction.user}", bot=self.bot
+                )
+            except TeamInfrastructureError as e:
+                results.append(f"Failed to recreate the role and category: {e}")
             else:
-                results.append("Failed to recreate the role and category")
+                if deleted_items:
+                    results.append(f"Deleted {', '.join(deleted_items)}")
+                results.append(f"Recreated the role and category with {len(category.channels)} channels")
         else:
             results.append("Skipped recreating channels (recreate_channels=False)")
 
@@ -456,9 +453,6 @@ class AdminTeamsCog(commands.Cog):
             await interaction.followup.send("No teams specified", ephemeral=True)
             return
 
-        from bot.discord_manager import DiscordManager
-
-        discord_manager = DiscordManager(interaction.guild, self.bot)
         guild = interaction.guild
 
         results = []
@@ -472,19 +466,16 @@ class AdminTeamsCog(commands.Cog):
                 failed_count += 1
                 continue
 
-            await delete_team_infrastructure(guild, team, reason=f"Bulk recreate by {interaction.user}")
-
-            role, category = await discord_manager.setup_team_infrastructure(team_number)
-
-            if role and category:
-                results.append(f"Team {team_number:02d}: recreated (role and {len(category.channels)} channels)")
-                success_count += 1
-            elif role or category:
-                results.append(f"Team {team_number:02d}: partly recreated")
+            try:
+                _deleted, category = await recreate_team_infrastructure(
+                    guild, team, f"Bulk recreate by {interaction.user}", bot=self.bot
+                )
+            except TeamInfrastructureError as e:
+                results.append(f"Team {team_number:02d}: failed to recreate: {e}")
                 failed_count += 1
             else:
-                results.append(f"Team {team_number:02d}: failed to recreate")
-                failed_count += 1
+                results.append(f"Team {team_number:02d}: recreated (role and {len(category.channels)} channels)")
+                success_count += 1
 
         await AuditLog.objects.acreate(
             action="teams_recreated",

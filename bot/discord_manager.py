@@ -2,37 +2,50 @@
 
 import logging
 import re
+from collections.abc import Awaitable, Collection, Sequence
 
 import discord
+from discord.ext import commands
 from django.conf import settings
 from django.utils import timezone
 
+from bot.cogs.help_panels import HelpPanelsCog, TicketButton, _has_button
+from bot.role_sync import sync_member_roles
 from bot.utils import announcement as announcement_text
-from bot.utils import send_parts
-from core.models import AuditLog
+from bot.utils import (
+    category_chat_channel,
+    find_team_category,
+    find_team_role,
+    send_parts,
+    team_category_name,
+    team_chat_channel,
+    team_role_name,
+)
+from core.models import AuditLog, QueuedAnnouncement
 from team.models import Team
+from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
 
 
 async def delete_team_infrastructure(guild: discord.Guild, team: Team, reason: str) -> list[str]:
-    """Delete a team's Discord category, channels, and role. Clears DB IDs.
-
-    Returns list of deleted item types (e.g. ["category", "role"]).
-    """
+    """Delete a team's Discord category, channels and role and clear their IDs; returns which of the category and
+    role it deleted. Deleting the chat channel deletes its ticket threads, so their IDs are cleared too."""
     deleted_items: list[str] = []
 
-    category = guild.get_channel(team.discord_category_id) if team.discord_category_id else None
-    if not category:
-        category = discord.utils.get(guild.categories, name=f"team {team.team_number:02d}") or discord.utils.get(
-            guild.categories, name=f"team {team.team_number}"
-        )
-    if category and isinstance(category, discord.CategoryChannel):
+    category = find_team_category(guild, team)
+    if category:
+        chat_channel = team_chat_channel(guild, team)
+        chat_deleted = False
         for channel in category.channels:
             try:
                 await channel.delete(reason=reason)
             except Exception as e:
                 logger.exception(f"Failed to delete channel {channel.name}: {e}")
+            else:
+                chat_deleted = chat_deleted or channel == chat_channel
+        if chat_deleted:
+            await Ticket.objects.filter(team=team, discord_thread_id__isnull=False).aupdate(discord_thread_id=None)
 
         try:
             await category.delete(reason=reason)
@@ -40,11 +53,7 @@ async def delete_team_infrastructure(guild: discord.Guild, team: Team, reason: s
         except Exception as e:
             logger.exception(f"Failed to delete category: {e}")
 
-    role = guild.get_role(team.discord_role_id) if team.discord_role_id else None
-    if not role:
-        role = discord.utils.get(guild.roles, name=f"Team {team.team_number:02d}") or discord.utils.get(
-            guild.roles, name=f"Team {team.team_number}"
-        )
+    role = find_team_role(guild, team)
     if role:
         try:
             await role.delete(reason=reason)
@@ -102,277 +111,194 @@ async def unlink_team_members(
     return unlinked_count
 
 
-class DiscordManager:
-    """Manages Discord roles and channels for teams."""
+class TeamInfrastructureError(Exception):
+    """A step of setting up a team's Discord role, category or channels failed; the message names the step."""
 
-    def __init__(
-        self,
-        guild: discord.Guild,
-        bot: discord.Client | discord.ext.commands.Bot | None = None,
-    ):
-        self.guild = guild
-        self.bot = bot
 
-    async def setup_team_infrastructure(
-        self, team_number: int
-    ) -> tuple[discord.Role | None, discord.CategoryChannel | None]:
-        """Set up a team's Discord role and category, and record their IDs on Team.
+_TEAM_ROLE_NAME_PATTERN = re.compile(r"^Team (\d+)$")
+_TEAM_CATEGORY_NAME_PATTERN = re.compile(r"^team (\d+)$", re.IGNORECASE)
 
-        Safe to run again: an existing role or category is reused as-is (its channels and
-        permissions aren't repaired).
-        """
-        team = await Team.objects.filter(team_number=team_number).afirst()
-        if not team:
-            logger.error(f"Team {team_number} not found in database")
-            return None, None
+_TALKS = {"read_messages": True, "send_messages": True, "connect": True, "speak": True}
+# Roles found by name that see every team category, and what they may do there
+GUEST_ROLE_PERMISSIONS: dict[str, dict[str, bool]] = {
+    "WCComps Observers": {"read_messages": True, "send_messages": False, "connect": False},
+    "Orange Team Guest": _TALKS,
+    "Black Team Guest": _TALKS,
+    "WCComps Room Judge": {"read_messages": True},
+    "WCComps Operations Team": _TALKS,
+    "WRCCDC Server Owners": _TALKS,
+}
 
-        role = await self._create_or_get_role(team_number)
-        if not role:
-            return None, None
+type Overwrites = dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]
 
-        category = await self._create_team_category(team_number, role)
 
-        if category:
-            team.discord_role_id = role.id
-            team.discord_category_id = category.id
-            await team.asave(update_fields=["discord_role_id", "discord_category_id"])
-            logger.info(f"Set up infrastructure for {team.team_name}")
-        else:
-            team.discord_role_id = role.id
-            await team.asave(update_fields=["discord_role_id"])
-            logger.warning(f"Only role created for {team.team_name}, category failed")
+async def recreate_team_infrastructure(
+    guild: discord.Guild, team: Team, reason: str, bot: discord.Client | None = None
+) -> tuple[list[str], discord.CategoryChannel]:
+    """Delete what the team has in Discord and set it up again; returns what was deleted and the new category."""
+    old = {"role": find_team_role(guild, team), "category": find_team_category(guild, team)}
+    deleted = await delete_team_infrastructure(guild, team, reason=reason)
+    gone = {item.id for kind, item in old.items() if item and kind in deleted}
+    return deleted, await setup_team_infrastructure(guild, team, bot=bot, gone=gone)
 
-        if team.is_active:
-            from bot.role_sync import sync_member_roles
 
-            async for link in team.members.filter(is_active=True):
-                member = self.guild.get_member(link.discord_id)
-                if member:
-                    await sync_member_roles(self.guild, member)
+async def setup_team_infrastructure(
+    guild: discord.Guild, team: Team, bot: discord.Client | None = None, *, gone: Collection[int] = ()
+) -> discord.CategoryChannel:
+    """Give a team its role and its category with chat and voice channels, reusing what exists (never the IDs in
+    gone) and recording each ID once created; then deliver its queued announcements and sync its members' roles.
 
-        return role, category
+    When a reused category had no team role entry, it and each of its channels without one get one; no other entry
+    is touched. Raises TeamInfrastructureError naming the step that failed."""
+    team_number = team.team_number
 
-    async def _create_or_get_role(self, team_number: int) -> discord.Role | None:
-        """Create or get existing team role with format 'Team XX'."""
-        role_name = f"Team {team_number:02d}"
-
-        # Check if role already exists (check both with and without zero-padding)
-        role = discord.utils.get(self.guild.roles, name=role_name)
-        if not role:
-            alt_role_name = f"Team {team_number}"
-            role = discord.utils.get(self.guild.roles, name=alt_role_name)
-
-        if role:
-            logger.info(f"Role {role.name} already exists")
-            return role
-
-        # Get Team 01 role to copy color
-        template_role = discord.utils.get(self.guild.roles, name="Team 01")
-        role_color = template_role.color if template_role else discord.Color.default()
-
-        # Find position: insert after the closest existing team number
-        team_roles = []
-        for r in self.guild.roles:
-            match = re.match(r"^Team (\d+)$", r.name)
-            if match:
-                team_roles.append((int(match.group(1)), r))
-
-        team_roles.sort(key=lambda x: x[0], reverse=True)
-
-        position = None
-        for num, r in team_roles:
-            if num < team_number:
-                position = r.position
-                break
-
+    async def step[T](what: str, work: Awaitable[T]) -> T:
         try:
-            role = await self.guild.create_role(
-                name=role_name,
-                color=role_color,
-                mentionable=True,
-                reason="WCComps team role",
-            )
+            return await work
+        except discord.HTTPException as e:
+            raise TeamInfrastructureError(f"Could not {what} for team {team_number}: {e}") from e
 
-            if position is not None:
-                await role.edit(position=position + 1)
-                logger.info(f"Created role {role_name} at position {position + 1}")
-            elif team_roles:
-                # No lower-numbered role found, but other team roles exist
-                lowest_role = team_roles[-1][1]
-                await role.edit(position=lowest_role.position)
-                logger.info(f"Created role {role_name} before {lowest_role.name}")
-            else:
-                logger.info(f"Created role {role_name}")
+    role = find_team_role(guild, team, gone)
+    if role is None:
+        role = await step("create the role", _create_role(guild, team_number))
+    await _record(team, discord_role_id=role.id)
+    await step("position the role", _place(role, guild.roles, _TEAM_ROLE_NAME_PATTERN, team_number))
 
-            return role
-        except discord.errors.Forbidden:
-            logger.exception(f"No permission to create role {role_name}")
-            return None
+    overwrites = _category_overwrites(guild, role)
+    category = find_team_category(guild, team, gone)
+    if category is None:
+        category = await step(
+            "create the category",
+            guild.create_category(
+                name=team_category_name(team_number), overwrites=overwrites, reason="WCComps team category"
+            ),
+        )
+    elif role not in category.overwrites and role != guild.default_role:
+        # Channels first (Discord doesn't sync them from the category), so a retry redoes a failed one
+        for channel in category.channels:
+            if isinstance(channel, discord.TextChannel | discord.VoiceChannel) and role not in channel.overwrites:
+                await step(
+                    f"set {channel.name}'s permissions", channel.set_permissions(role, overwrite=overwrites[role])
+                )
+        await step("set the category's permissions", category.set_permissions(role, overwrite=overwrites[role]))
+    await _record(team, discord_category_id=category.id)
+    await step("position the category", _place(category, guild.categories, _TEAM_CATEGORY_NAME_PATTERN, team_number))
 
-    async def _create_team_category(self, team_number: int, role: discord.Role) -> discord.CategoryChannel | None:
-        """Create code-defined team category with channels (idempotent)."""
-        category_name = f"team {team_number:02d}"
+    chat_channel = category_chat_channel(category)
+    if not chat_channel:
+        chat_channel = await step(
+            "create the chat channel",
+            category.create_text_channel(f"team{team_number:02d}-chat", reason="WCComps team text channel"),
+        )
+    await step("post the ticket panel", _post_ticket_panel(bot, team_number, chat_channel))
+    if not any(isinstance(c, discord.VoiceChannel) for c in category.channels):
+        await step(
+            "create the voice channel",
+            category.create_voice_channel(f"team{team_number:02d}-voice", reason="WCComps team voice channel"),
+        )
+    logger.info(f"Set up infrastructure for {team.team_name}")
 
-        # Reuse an existing category (either name style) rather than creating a duplicate
-        existing_category = discord.utils.get(self.guild.categories, name=category_name)
-        if not existing_category:
-            alt_category_name = f"team {team_number}"
-            existing_category = discord.utils.get(self.guild.categories, name=alt_category_name)
+    await _deliver_queued_announcements(team, chat_channel)
 
-        if existing_category:
-            logger.info(f"Category {existing_category.name} already exists")
-            return existing_category
+    if team.is_active:
+        async for link in team.members.filter(is_active=True):
+            member = guild.get_member(link.discord_id)
+            if member:
+                await sync_member_roles(guild, member)
 
+    return category
+
+
+async def _record(team: Team, **ids: int) -> None:
+    changed = [name for name, value in ids.items() if getattr(team, name) != value]
+    for name in changed:
+        setattr(team, name, ids[name])
+    if changed:
+        await team.asave(update_fields=changed)
+
+
+async def _create_role(guild: discord.Guild, team_number: int) -> discord.Role:
+    template_role = discord.utils.get(guild.roles, name=team_role_name(1))
+    role = await guild.create_role(
+        name=team_role_name(team_number),
+        color=template_role.color if template_role else discord.Color.default(),
+        mentionable=True,
+        reason="WCComps team role",
+    )
+    logger.info(f"Created role {role.name}")
+    return role
+
+
+async def _place(
+    item: discord.Role | discord.CategoryChannel,
+    siblings: Sequence[discord.Role] | Sequence[discord.CategoryChannel],
+    pattern: re.Pattern[str],
+    team_number: int,
+) -> None:
+    """Move a team role or category after the closest lower numbered team's, else before the lowest one, unless it is
+    there already."""
+    numbered = sorted(
+        [(int(match.group(1)), s) for s in siblings if s.id != item.id and (match := pattern.match(s.name))],
+        key=lambda pair: pair[0],
+    )
+    lower = [s for number, s in numbered if number < team_number]
+    if lower:
+        if item.position != lower[-1].position + 1:
+            await item.edit(position=lower[-1].position + 1)
+    elif numbered and item.position != numbered[0][1].position - 1:
+        await item.edit(position=numbered[0][1].position)
+
+
+def _category_overwrites(guild: discord.Guild, role: discord.Role) -> Overwrites:
+    overwrites: Overwrites = {
+        guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False, connect=False),
+        role: discord.PermissionOverwrite(
+            read_messages=True,
+            send_messages=True,
+            connect=True,
+            speak=True,
+            embed_links=True,
+            attach_files=True,
+        ),
+    }
+    by_id = [
+        (settings.WHITETEAM_ROLE_ID, {"read_messages": True, "connect": True}),
+        (settings.ORANGETEAM_ROLE_ID, _TALKS),
+    ]
+    for role_id, permissions in by_id:
+        staff_role = guild.get_role(role_id)
+        if staff_role and staff_role not in (guild.default_role, role):
+            overwrites[staff_role] = discord.PermissionOverwrite(**permissions)
+    for name, permissions in GUEST_ROLE_PERMISSIONS.items():
+        if guest_role := discord.utils.get(guild.roles, name=name):
+            overwrites[guest_role] = discord.PermissionOverwrite(**permissions)
+    return overwrites
+
+
+async def _post_ticket_panel(bot: discord.Client | None, team_number: int, chat_channel: discord.TextChannel) -> None:
+    """Post the team's ticket panel unless the bot's is among the chat channel's first messages."""
+    help_panels_cog = bot.get_cog("HelpPanelsCog") if isinstance(bot, commands.Bot) else None
+    if not isinstance(help_panels_cog, HelpPanelsCog):
+        return
+    async for message in chat_channel.history(limit=50, oldest_first=True):
+        if bot and message.author == bot.user and _has_button(message, TicketButton.CUSTOM_ID):
+            return
+    await help_panels_cog.post_team_ticket_panel(chat_channel.id)
+    logger.info(f"Posted ticket panel to team {team_number} channel")
+
+
+async def _deliver_queued_announcements(team: Team, channel: discord.TextChannel) -> None:
+    announcements = [
+        a async for a in QueuedAnnouncement.objects.filter(team=team, delivered_at__isnull=True).order_by("created_at")
+    ]
+    delivered = 0
+    for queued in announcements:
         try:
-            overwrites: dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite] = {}
-
-            white_team = self.guild.get_role(settings.WHITETEAM_ROLE_ID)
-            observers = discord.utils.get(self.guild.roles, name="WCComps Observers")
-            orange_team = self.guild.get_role(settings.ORANGETEAM_ROLE_ID)
-            orange_team_guest = discord.utils.get(self.guild.roles, name="Orange Team Guest")
-            black_team_guest = discord.utils.get(self.guild.roles, name="Black Team Guest")
-            room_judge = discord.utils.get(self.guild.roles, name="WCComps Room Judge")
-            operations_team = discord.utils.get(self.guild.roles, name="WCComps Operations Team")
-            server_owners = discord.utils.get(self.guild.roles, name="WRCCDC Server Owners")
-
-            overwrites[self.guild.default_role] = discord.PermissionOverwrite(
-                read_messages=False, send_messages=False, connect=False
-            )
-
-            overwrites[role] = discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True,
-                connect=True,
-                speak=True,
-                embed_links=True,
-                attach_files=True,
-            )
-
-            if white_team:
-                overwrites[white_team] = discord.PermissionOverwrite(read_messages=True, connect=True)
-
-            if observers:
-                overwrites[observers] = discord.PermissionOverwrite(
-                    read_messages=True, send_messages=False, connect=False
-                )
-
-            if orange_team:
-                overwrites[orange_team] = discord.PermissionOverwrite(
-                    read_messages=True, send_messages=True, connect=True, speak=True
-                )
-
-            if orange_team_guest:
-                overwrites[orange_team_guest] = discord.PermissionOverwrite(
-                    read_messages=True, send_messages=True, connect=True, speak=True
-                )
-
-            if black_team_guest:
-                overwrites[black_team_guest] = discord.PermissionOverwrite(
-                    read_messages=True, send_messages=True, connect=True, speak=True
-                )
-
-            if room_judge:
-                overwrites[room_judge] = discord.PermissionOverwrite(read_messages=True)
-
-            if operations_team:
-                overwrites[operations_team] = discord.PermissionOverwrite(
-                    read_messages=True, send_messages=True, connect=True, speak=True
-                )
-
-            if server_owners:
-                overwrites[server_owners] = discord.PermissionOverwrite(
-                    read_messages=True, send_messages=True, connect=True, speak=True
-                )
-
-            category = await self.guild.create_category(
-                name=category_name,
-                overwrites=overwrites,
-                reason="WCComps team category",
-            )
-
-            text_channel = await category.create_text_channel(
-                f"team{team_number:02d}-chat", reason="WCComps team text channel"
-            )
-            await category.create_voice_channel(f"team{team_number:02d}-voice", reason="WCComps team voice channel")
-
-            # Position category relative to other team categories (excluding the one we just created)
-            other_team_categories = []
-            for cat in self.guild.categories:
-                if cat.id == category.id:
-                    continue
-                match = re.match(r"^team (\d+)$", cat.name, re.IGNORECASE)
-                if match:
-                    other_team_categories.append((int(match.group(1)), cat))
-
-            if other_team_categories:
-                other_team_categories.sort(key=lambda x: x[0])
-
-                # Find position: after the closest lower-numbered team, or before the first higher-numbered team
-                positioned = False
-                for num, cat in reversed(other_team_categories):
-                    if num < team_number:
-                        await category.edit(position=cat.position + 1)
-                        logger.info(f"Positioned after team {num}")
-                        positioned = True
-                        break
-
-                if not positioned:
-                    # No lower-numbered team exists, position before the lowest-numbered team
-                    first_team_cat = other_team_categories[0][1]
-                    await category.edit(position=first_team_cat.position)
-                    logger.info(f"Positioned before team {other_team_categories[0][0]} (no lower-numbered team)")
-
-            logger.info(f"Created code-defined category for Team {team_number}")
-
-            if self.bot and hasattr(self.bot, "get_cog"):
-                try:
-                    from bot.cogs.help_panels import HelpPanelsCog
-
-                    help_panels_cog = self.bot.get_cog("HelpPanelsCog")
-                    if isinstance(help_panels_cog, HelpPanelsCog):
-                        await help_panels_cog.post_team_ticket_panel(text_channel.id)
-                        logger.info(f"Posted ticket panel to team {team_number} channel")
-                except Exception as e:
-                    logger.warning(f"Could not post ticket panel to team channel: {e}")
-
-            await self._deliver_queued_announcements(team_number, text_channel)
-
-            return category
-
-        except discord.errors.Forbidden:
-            logger.exception(f"No permission to create category for Team {team_number}")
-            return None
+            await send_parts(channel, announcement_text(queued.sender_name, queued.message))
+            queued.delivered_at = timezone.now()
+            await queued.asave()
+            delivered += 1
         except Exception as e:
-            logger.exception(f"Error creating category: {e}")
-            return None
-
-    async def _deliver_queued_announcements(self, team_number: int, channel: discord.TextChannel) -> int:
-        from django.utils import timezone
-
-        from core.models import QueuedAnnouncement
-
-        team = await Team.objects.filter(team_number=team_number).afirst()
-        if not team:
-            return 0
-
-        announcements = [
-            a
-            async for a in QueuedAnnouncement.objects.filter(team=team, delivered_at__isnull=True).order_by(
-                "created_at"
-            )
-        ]
-
-        delivered_count = 0
-        for announcement in announcements:
-            try:
-                await send_parts(channel, announcement_text(announcement.sender_name, announcement.message))
-                announcement.delivered_at = timezone.now()
-                await announcement.asave()
-                delivered_count += 1
-            except Exception as e:
-                logger.warning(f"Failed to deliver queued announcement {announcement.id}: {e}")
-
-        if delivered_count > 0:
-            logger.info(f"Delivered {delivered_count} queued announcement(s) to team {team_number}")
-
-        return delivered_count
+            logger.warning(f"Failed to deliver queued announcement {queued.id}: {e}")
+    if delivered:
+        logger.info(f"Delivered {delivered} queued announcement(s) to team {team.team_number}")

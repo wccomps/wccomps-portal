@@ -717,28 +717,20 @@ class TestAdminCommands:
             category20 if cid == 3001 else (category21 if cid == 3002 else None)
         )
 
-        # Mock DiscordManager
-        mock_manager = MagicMock()
-        new_role = MagicMock(spec=discord.Role)
         new_category = MagicMock(spec=discord.CategoryChannel)
         new_category.channels = [MagicMock(), MagicMock()]  # Mock 2 channels
-        mock_manager.setup_team_infrastructure = AsyncMock(return_value=(new_role, new_category))
+        setup = AsyncMock(return_value=new_category)
 
         mock_log_ops = AsyncMock()
         callback = AdminTeamsCog.admin_recreate_teams.callback
-        # DiscordManager is imported locally inside the method, so patch at the source module
-        import bot.discord_manager
+        with (
+            patch("bot.discord_manager.setup_team_infrastructure", setup),
+            patch_globals(callback, {"log_to_ops_channel": mock_log_ops}),
+        ):
+            cog = AdminTeamsCog(mock_bot)
+            await cog.admin_recreate_teams.callback(cog, mock_interaction, teams="20,21")
 
-        orig_dm = bot.discord_manager.DiscordManager
-        bot.discord_manager.DiscordManager = MagicMock(return_value=mock_manager)
-        try:
-            with patch_globals(callback, {"log_to_ops_channel": mock_log_ops}):
-                cog = AdminTeamsCog(mock_bot)
-                await cog.admin_recreate_teams.callback(cog, mock_interaction, teams="20,21")
-
-                mock_log_ops.assert_called_once()
-        finally:
-            bot.discord_manager.DiscordManager = orig_dm
+            mock_log_ops.assert_called_once()
 
         # Verify old infrastructure was deleted
         role20.delete.assert_called_once()
@@ -747,7 +739,7 @@ class TestAdminCommands:
         category21.delete.assert_called_once()
 
         # Verify new infrastructure was created
-        assert mock_manager.setup_team_infrastructure.call_count == 2
+        assert setup.call_count == 2
 
         # Verify response was sent
         mock_interaction.response.defer.assert_called_once_with(ephemeral=True)

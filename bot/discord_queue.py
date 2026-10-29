@@ -13,7 +13,7 @@ from django.db.models import Model, Q, QuerySet
 from django.utils import timezone
 
 from bot.competition_actions import deliver_team_broadcast, run_competition_cleanup
-from bot.discord_manager import DiscordManager, delete_team_infrastructure
+from bot.discord_manager import recreate_team_infrastructure, setup_team_infrastructure
 from bot.heartbeat import record as record_heartbeat
 from bot.role_sync import competition_guild, sync_member_roles, sync_roles
 from bot.thread_creator import publish_new_ticket
@@ -79,9 +79,6 @@ class DiscordQueueProcessor:
         if not guild:
             raise RuntimeError("Competition guild not found")
         return guild
-
-    def _manager(self) -> DiscordManager:
-        return DiscordManager(self._guild(), self.bot)
 
     def stop(self) -> None:
         self.running = False
@@ -241,19 +238,12 @@ class DiscordQueueProcessor:
         )
 
     async def _handle_setup_team_infrastructure(self, payload: SetupTeamInfrastructure) -> None:
-        team_number = payload.team_number
+        team = await _target(Team.objects.all(), team_number=payload.team_number)
         if payload.recreate:
-            team = await Team.objects.filter(team_number=team_number).afirst()
-            if team:
-                await delete_team_infrastructure(
-                    self._guild(), team, reason=f"Team {team_number} infrastructure recreate"
-                )
-
-        role, category = await self._manager().setup_team_infrastructure(team_number)
-        if not role or not category:
-            raise RuntimeError(f"Failed to setup infrastructure for team {team_number}")
-
-        logger.info(f"Set up infrastructure for team {team_number}")
+            reason = f"Team {team.team_number} infrastructure recreate"
+            await recreate_team_infrastructure(self._guild(), team, reason, bot=self.bot)
+        else:
+            await setup_team_infrastructure(self._guild(), team, bot=self.bot)
 
     async def _handle_log_to_channel(self, payload: LogToChannel) -> None:
         if not payload.message:
