@@ -285,18 +285,23 @@ class QuotientClient:
             cached = cache.get(cache_key)
             if cached is not None:
                 return cast(T, cached)
+        value = self._fetch(endpoint, parse, what)
+        if value is not None:
+            cache.set(cache_key, value, ttl)
+        return value
+
+    def _fetch[T](self, endpoint: str, parse: Callable[[object], T], what: str) -> T | None:
+        """What parse makes of the endpoint's answer, or None if Quotient is unavailable or answers nonsense."""
         try:
             response = self._request("get", endpoint)
             response.raise_for_status()
-            value = parse(_json(response))
+            return parse(_json(response))
         except (httpx.HTTPError, QuotientAPIError) as e:
             _log_failure(f"Failed to fetch {what} from Quotient", e)
             return None
         except ValueError as e:
             logger.exception(f"Failed to parse {what} from Quotient: {e}")
             return None
-        cache.set(cache_key, value, ttl)
-        return value
 
     def get_infrastructure(self, force_refresh: bool = False) -> QuotientInfrastructure | None:
         """Fetch infrastructure from Quotient API, or None if unavailable."""
@@ -308,22 +313,13 @@ class QuotientClient:
         """Fetch injects from Quotient API, or None if unavailable."""
         return self._cached("quotient_injects", 60, force_refresh, "/api/injects", _injects, "injects")
 
-    def get_service_export(self, force_refresh: bool = False) -> list[TeamServiceExport] | None:
+    def get_service_export(self) -> list[TeamServiceExport] | None:
         """Fetch per-service score breakdown from Quotient, or None if unavailable."""
-        return self._cached(
-            "quotient_service_export",
-            self.cache_ttl,
-            force_refresh,
-            "/api/engine/export/scores",
-            _service_export,
-            "the service export",
-        )
+        return self._fetch("/api/engine/export/scores", _service_export, "the service export")
 
-    def get_uptimes(self, force_refresh: bool = False) -> list[TeamUptime] | None:
+    def get_uptimes(self) -> list[TeamUptime] | None:
         """Fetch per-service uptime percentages from Quotient, or None if unavailable."""
-        return self._cached(
-            "quotient_uptimes", self.cache_ttl, force_refresh, "/api/graphs/uptimes", _uptimes, "uptimes"
-        )
+        return self._fetch("/api/graphs/uptimes", _uptimes, "uptimes")
 
     def get_service_choices(self) -> list[dict[str, str]]:
         """Service choices for the ticket dropdown (keys: value, label, box_ip, box_name, service_name)."""

@@ -540,7 +540,7 @@ READERS = [
         lambda: quotient().get_infrastructure(force_refresh=True),
         (DONE, METADATA),
         check_infrastructure,
-        (f"{QC}.get_infrastructure", f"{QC}._cached", QJ),
+        (f"{QC}.get_infrastructure", f"{QC}._cached", f"{QC}._fetch", QJ),
     ),
     Reader(
         "get_service_choices",
@@ -565,17 +565,17 @@ READERS = [
     ),
     Reader(
         "get_service_export",
-        lambda: quotient().get_service_export(force_refresh=True),
+        lambda: quotient().get_service_export(),
         (DONE, EXPORT),
         check_export,
-        (f"{QC}.get_service_export", f"{QC}._cached", QJ),
+        (f"{QC}.get_service_export", f"{QC}._fetch", QJ),
     ),
     Reader(
         "get_uptimes",
-        lambda: quotient().get_uptimes(force_refresh=True),
+        lambda: quotient().get_uptimes(),
         (DONE, UPTIMES),
         check_uptimes,
-        (f"{QC}.get_uptimes", f"{QC}._cached", QJ),
+        (f"{QC}.get_uptimes", f"{QC}._fetch", QJ),
     ),
     Reader(
         "get_service_checks",

@@ -101,13 +101,13 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
     ValueError, writing nothing, when Quotient's scores or uptimes can't be read or don't fit the portal's columns."""
     client = QuotientClient()
 
-    export_data = client.get_service_export(force_refresh=True)
+    export_data = client.get_service_export()
     if export_data is None:
         raise ValueError("Failed to retrieve service scores from Quotient")
     if not export_data:
         return {"teams_created": 0, "teams_updated": 0, "total": 0, "details_synced": 0}
 
-    uptimes_data = client.get_uptimes(force_refresh=True)
+    uptimes_data = client.get_uptimes()
     if uptimes_data is None:
         raise ValueError("Failed to retrieve uptimes from Quotient")
     uptimes_by_team = {tu.team_number: tu.uptimes for tu in uptimes_data}

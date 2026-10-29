@@ -121,7 +121,7 @@ def test_infrastructure_of_another_shape_is_none(body: object) -> None:
 def test_scores_of_another_shape_are_none(body: object) -> None:
     """get_service_export passed any JSON value along as points, and the sync wrote it to a decimal column."""
     with override_settings(**QUOTIENT), serving([LOGIN, answer(body)]):
-        exports = quotient().get_service_export(force_refresh=True)
+        exports = quotient().get_service_export()
     assert exports is None or all(type(t.gross_points) is int for t in exports)
 
 
@@ -132,7 +132,7 @@ def test_an_uptime_that_is_no_fraction_is_refused(uptime: object) -> None:
     """get_uptimes passed NaN, numbers past 1 and text along as uptimes."""
     body = {"series": [{"Name": "team01", "Data": [{"Service": "web", "Uptime": uptime}]}]}
     with override_settings(**QUOTIENT), serving([LOGIN, Answer(200, json.dumps(body).encode())]):
-        uptimes = quotient().get_uptimes(force_refresh=True)
+        uptimes = quotient().get_uptimes()
     assert uptimes is None or all(0 <= u <= 1 for t in uptimes for u in t.uptimes.values())
 
 
