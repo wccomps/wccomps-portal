@@ -15,6 +15,7 @@ import discord
 from asgiref.sync import sync_to_async
 from django.conf import settings
 
+from bot.heartbeat import beat
 from core.discord_tasks import SyncRolesResult
 from core.utils import role_sync_summary
 
@@ -117,11 +118,13 @@ async def _reconcile(
             logger.warning(f"Could not update roles for {who}: {e}")
             stats["errors"] += 1
             stats["changes"].append(f"Could not update roles for {who}: {e}")
+            beat()
             continue
         stats["roles_added"] += len(add)
         stats["roles_removed"] += len(remove)
         stats["changes"] += [f"{prefix}Added {role.name} to {who}" for role in add]
         stats["changes"] += [f"{prefix}Removed {role.name} from {who} ({reason})" for role in remove]
+        beat()
     return stats
 
 

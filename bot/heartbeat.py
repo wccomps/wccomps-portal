@@ -1,8 +1,7 @@
 """Heartbeat files written by the bot's queue, dashboard and timer loops, read by `python -m bot.health`.
 
-A loop whose database connection dies keeps running and logging while doing nothing, and the
-process still looks alive. Each loop records a heartbeat after a *successful* pass; the health
-check (a k8s liveness probe) fails when one goes stale, so the pod gets restarted.
+A loop's heartbeat advances only when a unit of its work completes, so a loop stuck on a dead
+connection goes stale, and the health check (a k8s liveness probe) gets the pod restarted.
 
 Deliberately free of Django imports so the probe can never hang on the database it observes.
 """
@@ -10,6 +9,7 @@ Deliberately free of Django imports so the probe can never hang on the database 
 import logging
 import os
 import time
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Protocol
 
@@ -26,12 +26,15 @@ class _ClosableBot(Protocol):
     def is_closed(self) -> bool: ...
 
 
+_current_loop: ContextVar[tuple[str, _ClosableBot] | None] = ContextVar("heartbeat_loop", default=None)
+
+
 def heartbeat_dir() -> Path:
     return Path(os.environ.get("BOT_HEARTBEAT_DIR", DEFAULT_DIR))
 
 
 def record(name: str, bot: _ClosableBot) -> None:
-    """Record a successful loop pass. Never raises; a failed write must not break the loop.
+    """Record a completed unit of work. Never raises; a failed write must not break the loop.
 
     Gated on the client not being closed. Not on is_ready(): that flag isn't cleared by a
     transient websocket drop, so it says nothing useful about gateway health.
@@ -46,3 +49,14 @@ def record(name: str, bot: _ClosableBot) -> None:
         tmp.replace(directory / name)
     except OSError as e:
         logger.debug(f"Could not write {name} heartbeat: {e}")
+
+
+def beat_for(name: str, bot: _ClosableBot) -> None:
+    """Make beat() in this asyncio task, and code it awaits, advance name's heartbeat."""
+    _current_loop.set((name, bot))
+
+
+def beat() -> None:
+    """Advance the heartbeat of the loop running this code, after a unit of work completes; outside one, nothing."""
+    if current := _current_loop.get():
+        record(*current)

@@ -124,7 +124,7 @@ async def test_repeated_auto_start_failure_is_posted_once() -> None:
 @pytest.mark.parametrize("work_fails", [False, True])
 async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeypatch) -> None:
     """A pass never raises (tasks.loop would stop), and a failed one skips the liveness heartbeat."""
-    from bot import competition_timer
+    from bot import competition_timer, heartbeat
 
     timer = CompetitionTimer(AsyncMock(spec=discord.Client))
     calls: list[str] = []
@@ -138,7 +138,7 @@ async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeyp
         calls.append("recycle")
 
     monkeypatch.setattr(competition_timer, "recycle_db_connection", recycle)
-    monkeypatch.setattr(competition_timer, "record_heartbeat", lambda name, bot: calls.append(f"beat:{name}"))
+    monkeypatch.setattr(heartbeat, "record", lambda name, bot: calls.append(f"beat:{name}"))
     monkeypatch.setattr(timer, "_check_competition_times", work)
 
     await timer.check_loop()
@@ -149,12 +149,12 @@ async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeyp
 @pytest.mark.asyncio
 async def test_config_read_failing_on_the_db_skips_the_beat(monkeypatch) -> None:
     """The real work must let a DB error through, or the liveness probe never sees it."""
-    from bot import competition_timer
+    from bot import competition_timer, heartbeat
 
     timer = CompetitionTimer(AsyncMock(spec=discord.Client))
     beats: list[str] = []
     monkeypatch.setattr(competition_timer, "recycle_db_connection", AsyncMock())
-    monkeypatch.setattr(competition_timer, "record_heartbeat", lambda name, bot: beats.append(name))
+    monkeypatch.setattr(heartbeat, "record", lambda name, bot: beats.append(name))
 
     with patch("core.models.CompetitionConfig.get_config", side_effect=RuntimeError("db down")):
         await timer.check_loop()
@@ -195,12 +195,10 @@ def _fake_runs(failures: list[int], stop_by_hand_after: int | None = None):
     calls = iter(failures)
     attempt = 0
 
-    async def run(enable: bool, actor: str, on_step=None) -> CompetitionRunResult:
+    async def run(enable: bool, actor: str) -> CompetitionRunResult:
         nonlocal attempt
         attempt += 1
         await CompetitionConfig.objects.filter(pk=1).aupdate(applications_enabled=enable)
-        if on_step:
-            on_step()
         if stop_by_hand_after == attempt:
             await CompetitionConfig.objects.filter(pk=1).aupdate(applications_enabled=not enable)
         return _run(next(calls))
@@ -224,7 +222,6 @@ async def test_an_incomplete_auto_start_is_retried_up_to_three_times(runs, expec
     with (
         patch("bot.competition_timer.run_competition", new=AsyncMock(side_effect=_fake_runs(runs))) as start,
         patch("bot.competition_timer.asyncio.sleep", new_callable=AsyncMock) as sleep,
-        patch("bot.competition_timer.record_heartbeat") as beat,
         patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
         patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
     ):
@@ -232,8 +229,6 @@ async def test_an_incomplete_auto_start_is_retried_up_to_three_times(runs, expec
 
     assert start.await_count == len(runs)
     assert sleep.await_count == len(runs) - 1
-    # Every attempt passes a step callback that beats the timer's heartbeat
-    assert beat.call_count == len(runs)
     ops.assert_awaited_once()
     assert ops.await_args.args[1].endswith(expected_note)
 
@@ -250,7 +245,6 @@ async def test_a_stop_by_hand_during_the_retry_wait_is_not_undone() -> None:
             new=AsyncMock(side_effect=_fake_runs([2, 2, 2, 2], stop_by_hand_after=1)),
         ) as start,
         patch("bot.competition_timer.asyncio.sleep", new_callable=AsyncMock),
-        patch("bot.competition_timer.record_heartbeat"),
         patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
         patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
     ):
@@ -277,3 +271,66 @@ async def test_a_complete_auto_start_runs_once() -> None:
     start.assert_awaited_once()
     sleep.assert_not_awaited()
     assert "attempt" not in ops.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_a_run_of_many_quick_steps_keeps_the_timer_alive(monkeypatch) -> None:
+    """A start can take longer than the timer's budget when Authentik is slow; each finished step beats."""
+    from bot import competition_actions, competition_timer, heartbeat
+
+    beats: list[str] = []
+    monkeypatch.setattr(heartbeat, "record", lambda name, bot: beats.append(name))
+    monkeypatch.setattr(competition_timer, "recycle_db_connection", AsyncMock())
+    during: list[int] = []
+
+    def steps(enable: bool, actor: str):
+        for n in range(5):
+            during.append(len(beats))
+            yield n
+        return CompetitionRunResult(enable=enable)
+
+    monkeypatch.setattr(competition_actions, "competition_steps", steps)
+    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+
+    async def check() -> None:
+        await competition_actions.run_competition(True, "timer")
+
+    monkeypatch.setattr(timer, "_check_competition_times", check)
+
+    await timer.check_loop()
+
+    assert during == [0, 1, 2, 3, 4]
+    assert beats == ["timer"] * 6
+
+
+@pytest.mark.asyncio
+async def test_a_wedged_step_stops_the_timer_heartbeat(monkeypatch) -> None:
+    """A step stuck on a half-open socket must let the timer go stale, not keep it looking alive."""
+    import threading
+
+    from bot import competition_actions, competition_timer, heartbeat
+
+    beats: list[str] = []
+    monkeypatch.setattr(heartbeat, "record", lambda name, bot: beats.append(name))
+    monkeypatch.setattr(competition_timer, "recycle_db_connection", AsyncMock())
+    release = threading.Event()
+
+    def steps(enable: bool, actor: str):
+        yield 1
+        release.wait(5)
+        return CompetitionRunResult(enable=enable)
+
+    monkeypatch.setattr(competition_actions, "competition_steps", steps)
+    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+
+    async def check() -> None:
+        await competition_actions.run_competition(True, "timer")
+
+    monkeypatch.setattr(timer, "_check_competition_times", check)
+    loop = asyncio.ensure_future(timer.check_loop())
+    await asyncio.sleep(0.5)
+    wedged = list(beats)
+    release.set()
+    await loop
+
+    assert wedged == ["timer"]

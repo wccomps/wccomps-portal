@@ -9,10 +9,15 @@ from django.utils import timezone
 
 from core.discord_tasks import BroadcastMessage
 from core.models import AuditLog, CompetitionConfig, DiscordTask
-from core.services.competition import run_competition, run_competition_to_completion
+from core.services.competition import CompetitionRunResult, run_competition
+from core.utils import drain
 from team.models import MAX_TEAMS, Team, team_username
 
 pytestmark = pytest.mark.django_db
+
+
+def run_competition_to_completion(enable: bool, actor: str) -> CompetitionRunResult:
+    return drain(run_competition(enable, actor))
 
 
 @pytest.fixture(autouse=True)
@@ -185,15 +190,6 @@ def test_no_controlled_apps_changes_nothing(authentik, config):
     assert result.error == "No controlled applications configured"
     authentik.team_account.assert_not_called()
     assert not AuditLog.objects.exists()
-
-
-def test_on_step_runs_after_every_step(authentik, config):
-    """The bot beats its liveness heartbeat from here, so a slow Authentik run isn't restarted midway."""
-    beats = []
-
-    run_competition_to_completion(True, "timer", on_step=lambda: beats.append(1))
-
-    assert len(beats) == 2 + len(ACTIVE_TEAMS) + 2  # apps, accounts, group refresh, Quotient sync
 
 
 def _queued_broadcasts() -> list[BroadcastMessage]:

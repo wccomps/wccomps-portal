@@ -8,7 +8,7 @@ from asgiref.sync import sync_to_async
 from discord.ext import commands, tasks
 
 from bot.competition_actions import run_competition, update_status_channel
-from bot.heartbeat import record as record_heartbeat
+from bot.heartbeat import beat, beat_for
 from bot.utils import log_to_ops_channel, recycle_db_connection
 from core.models import CompetitionConfig
 
@@ -36,10 +36,11 @@ class CompetitionTimer(commands.Cog):
 
     @tasks.loop(seconds=60)
     async def check_loop(self) -> None:
+        beat_for("timer", self.bot)
         try:
             await recycle_db_connection()
             await self._check_competition_times()
-            record_heartbeat("timer", self.bot)
+            beat()
         except Exception as e:
             logger.exception(f"Error in competition timer check: {e}")
 
@@ -66,12 +67,7 @@ class CompetitionTimer(commands.Cog):
             action, done = ("Start", "Started") if enable else ("Stop", "Stopped")
             logger.info(f"Competition {action.lower()} time reached")
 
-            # A run can take minutes when Authentik is slow: beat after every step so liveness doesn't restart
-            # the bot mid-run (the timer's budget is 300 s)
-            def beat() -> None:
-                record_heartbeat("timer", self.bot)
-
-            result = await run_competition(enable, actor="timer", on_step=beat)
+            result = await run_competition(enable, actor="timer")
             attempts = 1
             superseded = False
             while result.success and result.has_failures and attempts <= RETRIES:
@@ -81,7 +77,7 @@ class CompetitionTimer(commands.Cog):
                 if await sync_to_async(lambda: CompetitionConfig.get_config().applications_enabled)() != enable:
                     superseded = True
                     break
-                result = await run_competition(enable, actor="timer", on_step=beat)
+                result = await run_competition(enable, actor="timer")
                 attempts += 1
             if result.success:
                 result_msg = f"**Competition Auto-{done}!**\n\n{result.summary()}"

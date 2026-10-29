@@ -1,7 +1,7 @@
 """Competition configuration services, and starting and stopping the competition."""
 
 import logging
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from dataclasses import dataclass, field
 
 from django.db import transaction
@@ -198,21 +198,6 @@ def last_start_accounts() -> tuple[int, int] | None:
     if not details or "accounts_ok" not in details or "accounts_failed" not in details:
         return None
     return details["accounts_ok"], details["accounts_ok"] + details["accounts_failed"]
-
-
-def run_competition_to_completion(
-    enable: bool, actor: str, on_step: Callable[[], None] | None = None
-) -> CompetitionRunResult:
-    """run_competition for callers that don't show progress; on_step runs after each step (a liveness beat)."""
-    steps = run_competition(enable, actor)
-    while True:
-        try:
-            next(steps)
-        except StopIteration as done:
-            result: CompetitionRunResult = done.value
-            return result
-        if on_step:
-            on_step()
 
 
 def incomplete_run() -> bool | None:

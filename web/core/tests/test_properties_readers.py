@@ -671,10 +671,10 @@ def _store_discord_id() -> object:
 
 def _start_competition() -> object:
     from core.models import CompetitionConfig
-    from core.services.competition import run_competition_to_completion
+    from core.services.competition import run_competition
 
     CompetitionConfig.objects.filter(pk=CompetitionConfig.get_config().pk).update(controlled_applications=["netbird"])
-    return run_competition_to_completion(True, "property")
+    return list(run_competition(True, "property"))
 
 
 def _readiness() -> object:
@@ -697,7 +697,7 @@ CALLERS = [
     Caller("refresh_user_groups", _refresh_groups, (GROUPS, USERS), (Exception,)),
     Caller("reset_team_credentials", _reset_credentials, (USERS, SESSIONS, DONE, SESSIONS, DONE)),
     Caller("store_discord_id_in_authentik", _store_discord_id, (USERS, DONE)),
-    Caller("run_competition_to_completion", _start_competition, (APPLICATION, BINDINGS, DONE, USERS, DONE, GROUPS)),
+    Caller("run_competition", _start_competition, (APPLICATION, BINDINGS, DONE, USERS, DONE, GROUPS)),
     Caller("stream_readiness_checks", _readiness, (USERS, USERS, SESSIONS, APPLICATION, BINDINGS, DONE, METADATA)),
     Caller("_fix_group_membership", _fix_groups, (USERS, GROUPS, DONE)),
 ]

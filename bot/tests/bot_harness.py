@@ -778,16 +778,6 @@ def _load_cogs(discord_: Discord) -> None:
         discord_.cogs[cls.__name__] = cls(discord_.bot)
 
 
-def _inline_competition_run(enable: bool, actor: str, on_step: Any = None) -> Any:
-    """bot.competition_actions.run_competition on the test's own connection (it runs on a pool thread with one of
-    its own in production, which would see none of the example's rows)."""
-    from asgiref.sync import sync_to_async
-
-    from core.services.competition import run_competition_to_completion
-
-    return sync_to_async(run_competition_to_completion)(enable, actor, on_step)
-
-
 async def _hop_inline(step: Callable[[], Any], thread: object, *, release: bool) -> Any:
     """bot.utils._hop on the example's own connection: in production a hop runs on a pool thread with one of its own,
     which would see none of the example's rows (and closing it would end the example's)."""
@@ -822,7 +812,6 @@ def discord_world(world: World, confirm: bool | None) -> Iterator[Discord]:
         )
         stack.enter_context(patch.object(tasks.Loop, "start"))
         stack.enter_context(patch.object(ConfirmView, "wait", answered_confirmation))
-        stack.enter_context(patch("bot.competition_actions.run_competition", _inline_competition_run))
         stack.enter_context(patch.object(bot_utils, "_hop", _hop_inline))
         stack.enter_context(patch("quotient.client.get_quotient_client.cache_clear"))
         yield discord_

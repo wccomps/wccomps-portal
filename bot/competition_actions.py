@@ -1,42 +1,40 @@
 """Shared competition actions for commands and timer."""
 
 import logging
-from collections.abc import Callable
+from contextlib import aclosing
 
 import discord
 from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.db import connection
 from django.utils import timezone
 from scoring.models import QuotientMetadataCache
 
 from bot.discord_manager import delete_team_infrastructure
-from bot.utils import announcement, log_to_ops_channel, send_announcement, send_parts, team_chat_channel
+from bot.heartbeat import beat
+from bot.utils import (
+    BlockingSteps,
+    announcement,
+    log_to_ops_channel,
+    send_announcement,
+    send_parts,
+    team_chat_channel,
+)
 from core.authentik_utils import parse_team_range
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
-from core.services.competition import CompetitionRunResult, run_competition_to_completion
+from core.services.competition import CompetitionRunResult
+from core.services.competition import run_competition as competition_steps
 from core.utils import shorten
 from team.models import MAX_TEAMS, DiscordLink, Team
 
 logger = logging.getLogger(__name__)
 
 
-async def run_competition(enable: bool, actor: str, on_step: Callable[[], None] | None = None) -> CompetitionRunResult:
-    """Start (enable=True) or stop the competition via the shared service, off the event loop.
-
-    Not thread_sensitive: the run makes dozens of Authentik calls and would otherwise hold the
-    single thread every other sync_to_async call in the bot waits on.
-    """
-    return await sync_to_async(_run_and_close, thread_sensitive=False)(enable, actor, on_step)
-
-
-def _run_and_close(enable: bool, actor: str, on_step: Callable[[], None] | None) -> CompetitionRunResult:
-    # A pool thread keeps its DB connection, and recycle_db_connection only reaches the bot's main ORM
-    # thread; close it so a connection broken between runs can't fail the next start or stop.
-    try:
-        return run_competition_to_completion(enable, actor, on_step)
-    finally:
-        connection.close()
+async def run_competition(enable: bool, actor: str) -> CompetitionRunResult:
+    """Start (enable=True) or stop the competition, a step at a time on a pool thread of its own, beating after each."""
+    async with aclosing(BlockingSteps(competition_steps(enable, actor))) as steps:
+        async for _step in steps:
+            beat()
+        return steps.result
 
 
 async def update_status_channel(bot: discord.Client) -> bool:
@@ -166,7 +164,8 @@ async def run_competition_cleanup(
     The one implementation behind /competition cleanup-competition (the full cleanup) and Close Out Event (queued as
     a cleanup_competition task with closed_out_event_id). The close-out already deleted the team links and reset the
     database in its transaction, so for it this does only the Discord side, and skips if an event was opened or the
-    competition started since. Never raises: failures are reported to ops.
+    competition started since. Once the teardown begins, failures are reported to ops rather than raised; a failed
+    read of the config or the open event before it raises, so the queue retries.
     """
     config = await sync_to_async(CompetitionConfig.get_config)()
     if config.applications_enabled:
@@ -204,6 +203,7 @@ async def run_competition_cleanup(
             removed = await delete_team_infrastructure(guild, team, reason="Competition cleanup")
             if any(item.startswith("category") for item in removed):
                 deleted_count += 1
+            beat()
 
         await log_to_ops_channel(bot, f"Deleted {deleted_count} team categories")
 
@@ -315,5 +315,6 @@ async def deliver_team_broadcast(
         except Exception as e:
             logger.exception(f"Failed to broadcast to team {team_number}: {e}")
             failed_channels.append(f"Team {team_number:02d} ({shorten(str(e), 50)})")
+        beat()
 
     return sent_count, queued_count, failed_channels

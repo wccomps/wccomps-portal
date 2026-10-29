@@ -1,5 +1,6 @@
 """Heartbeat files and the `python -m bot.health` liveness check (k8s prep, W1 detection half)."""
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -91,38 +92,115 @@ def test_health_module_exit_codes_and_no_django(hb_dir):
     assert fresh.returncode == 0, fresh.stdout + fresh.stderr
 
 
+@pytest.fixture
+def beats(monkeypatch) -> list[str]:
+    recorded: list[str] = []
+    monkeypatch.setattr(heartbeat, "record", lambda name, bot: recorded.append(name))
+    return recorded
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("module", "cls_name", "work_attr", "loop_attr", "beat"),
-    [
-        ("bot.discord_queue", "DiscordQueueProcessor", "_process_pending_tasks", "_process_loop", "queue"),
-        ("bot.unified_dashboard", "UnifiedDashboard", "_check_and_update", "_dashboard_loop", "dashboard"),
-    ],
-)
+async def test_beat_outside_a_loop_records_nothing(beats):
+    """sync_roles also runs from the group refresh, which has no heartbeat."""
+    heartbeat.beat()
+
+    assert beats == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("work_fails", [False, True])
-async def test_loops_beat_only_after_successful_pass(
-    module, cls_name, work_attr, loop_attr, beat, work_fails, monkeypatch
-):
-    import importlib
+async def test_the_dashboard_beats_only_after_a_successful_pass(work_fails, beats, monkeypatch):
+    from bot import unified_dashboard
 
-    mod = importlib.import_module(module)
-    obj = getattr(mod, cls_name).__new__(getattr(mod, cls_name))
-    obj.bot = _open_bot()
-    obj.bot.wait_until_ready = AsyncMock()
-    beats: list[str] = []
+    dashboard = unified_dashboard.UnifiedDashboard(_open_bot())
+    dashboard.bot.wait_until_ready = AsyncMock()
 
-    async def work(*_a: object) -> None:
-        obj.running = False
+    async def work() -> None:
+        dashboard.running = False
         if work_fails:
             raise RuntimeError("db down")
 
-    monkeypatch.setattr(mod, "recycle_db_connection", AsyncMock())
-    monkeypatch.setattr(mod, "record_heartbeat", lambda name, bot: beats.append(name))
-    monkeypatch.setattr(obj, work_attr, work)
-    monkeypatch.setattr(obj, "_initialize_dashboard", AsyncMock(), raising=False)
-    monkeypatch.setattr(mod.asyncio, "sleep", AsyncMock())
-    obj.running = True
+    monkeypatch.setattr(unified_dashboard, "recycle_db_connection", AsyncMock())
+    monkeypatch.setattr(dashboard, "_check_and_update", work)
+    monkeypatch.setattr(dashboard, "_initialize_dashboard", AsyncMock())
+    monkeypatch.setattr(unified_dashboard.asyncio, "sleep", AsyncMock())
+    dashboard.running = True
 
-    await getattr(obj, loop_attr)()
+    await dashboard._dashboard_loop()
 
-    assert beats == ([] if work_fails else [beat])
+    assert beats == ([] if work_fails else ["dashboard"])
+
+
+def _queue(monkeypatch, pending: list[object], handle) -> object:
+    from bot import discord_queue
+
+    processor = discord_queue.DiscordQueueProcessor(_open_bot())
+    monkeypatch.setattr(discord_queue, "recycle_db_connection", AsyncMock())
+    monkeypatch.setattr(processor, "_recover_stranded_tasks", AsyncMock())
+    monkeypatch.setattr(processor, "_process_task", handle)
+
+    batches = iter([pending])
+    monkeypatch.setattr(
+        discord_queue,
+        "sync_to_async",
+        lambda func: (lambda: _first(batches)) if func.__name__ == "get_pending_tasks" else func,
+    )
+    processor.QUEUE_POLL_INTERVAL_SECONDS = 0.01
+    return processor
+
+
+async def _first(batches) -> list[object]:
+    return next(batches, [])
+
+
+@pytest.mark.asyncio
+async def test_the_queue_beats_after_each_poll_and_each_task(beats, monkeypatch):
+    """A batch of tasks that together outlast the budget keeps the loop alive, one finished task at a time."""
+    during: list[int] = []
+
+    async def handle(task: object) -> None:
+        during.append(len(beats))
+
+    processor = _queue(monkeypatch, ["a", "b", "c"], handle)
+    processor.running = True
+    loop = asyncio.ensure_future(processor._process_loop())
+    await asyncio.sleep(0.2)
+    processor.running = False
+    await loop
+
+    assert during == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_a_wedged_task_stops_the_queue_heartbeat(beats, monkeypatch):
+    """A task stuck on the shared thread (a recv on a half-open DB socket) goes stale instead of looking alive."""
+    release = asyncio.Event()
+
+    async def handle(task: object) -> None:
+        await release.wait()
+
+    processor = _queue(monkeypatch, ["stuck"], handle)
+    processor.running = True
+    loop = asyncio.ensure_future(processor._process_loop())
+    await asyncio.sleep(0.3)
+    wedged = list(beats)
+    processor.running = False
+    release.set()
+    await loop
+
+    assert wedged == ["queue"]
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_loop_stops_beating(beats, monkeypatch):
+    processor = _queue(monkeypatch, [], AsyncMock())
+    processor.start()
+    await asyncio.sleep(0.1)
+    assert beats
+    processor.stop()
+    await asyncio.sleep(0.05)
+    after_stop = len(beats)
+
+    await asyncio.sleep(0.1)
+
+    assert len(beats) == after_stop

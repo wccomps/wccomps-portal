@@ -12,7 +12,7 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 from bot.discord_manager import DiscordManager
-from bot.heartbeat import record as record_heartbeat
+from bot.heartbeat import beat, beat_for
 from bot.role_sync import competition_guild
 from bot.thread_creator import add_team_members, create_ticket_thread, post_ticket_message
 from bot.ticket_dashboard import trigger_dashboard
@@ -80,6 +80,7 @@ class DiscordQueueProcessor:
         logger.info("Discord queue processor stopped")
 
     async def _process_loop(self) -> None:
+        beat_for("queue", self.bot)
         try:
             await self._recover_stranded_tasks()
         except Exception:
@@ -89,7 +90,6 @@ class DiscordQueueProcessor:
             try:
                 await recycle_db_connection()
                 await self._process_pending_tasks()
-                record_heartbeat("queue", self.bot)
             except Exception as e:
                 logger.exception(f"Error in queue processor: {e}")
 
@@ -127,9 +127,11 @@ class DiscordQueueProcessor:
             )
 
         tasks = await get_pending_tasks()
+        beat()
 
         for task in tasks:
             await self._process_task(task)
+            beat()
 
     async def _process_task(self, task: DiscordTask) -> None:
 
