@@ -13,8 +13,6 @@ from bot.permissions import check_blue_team, linked_team_member
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_input import read_ticket
 from bot.utils import add_field, choices, pinging
-from core.stored_files import clean_name
-from core.utils import shorten
 from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
 from ticketing.utils import TicketRateLimitError, acreate_ticket_atomic, get_user_for_ticket
 
@@ -251,30 +249,29 @@ class TicketingCog(commands.Cog):
 
         if message.attachments:
             for attachment in message.attachments:
-                # Stored as a web upload is: the name cleaned, the type from the bytes (or the name), never the type
-                # the client claimed (core.stored_files)
-                filename = clean_name(attachment.filename, "attachment")
-                if attachment.size > TicketAttachment.MAX_SIZE:
+                if problem := TicketAttachment.too_big(attachment.size):
                     await message.channel.send(
-                        f"{message.author.mention} File `{shorten(filename, 100)}` is too large (max 10MB). "
-                        "Please use a file sharing service.",
+                        f"{message.author.mention} {problem}. Please use a file sharing service.",
                         delete_after=30,
                         allowed_mentions=pinging(users=[message.author]),
                     )
                     continue
 
                 try:
-                    await TicketAttachment.astore(ticket, await attachment.read(), filename, str(message.author))
+                    # Typed from its bytes, as a web upload is
+                    stored = TicketAttachment.with_file(
+                        await attachment.read(), attachment.filename, ticket=ticket, uploaded_by=str(message.author)
+                    )
+                    await stored.asave()
 
-                    logger.info(f"Stored attachment {filename} for ticket #{ticket.id}")
+                    logger.info(f"Stored attachment {stored.filename} for ticket #{ticket.id}")
 
                     await message.add_reaction("📎")
 
                 except Exception as e:
-                    logger.exception(f"Failed to store attachment {filename}: {e}")
+                    logger.exception(f"Failed to store an attachment for ticket #{ticket.id}: {e}")
                     await message.channel.send(
-                        f"{message.author.mention} Failed to store attachment `{shorten(filename, 100)}`. "
-                        "Please try again.",
+                        f"{message.author.mention} Failed to store an attachment. Please try again.",
                         delete_after=30,
                         allowed_mentions=pinging(users=[message.author]),
                     )

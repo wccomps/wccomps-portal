@@ -7,6 +7,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from core.models import Approvable
+from core.stored_files import StoredFile
 from core.utils import shorten
 
 
@@ -19,12 +20,14 @@ def format_boxes_display(boxes: list[str] | str | None) -> str:
     return ", ".join(boxes)
 
 
+MAX_SCREENSHOT_SIZE = 50 * 1024 * 1024  # largest real upload so far was ~31MB (a .tar.gz)
+
+
 def validate_file_size(file: UploadedFile[bytes]) -> UploadedFile[bytes]:
-    max_size_mb = 50
-    if file.size and file.size > max_size_mb * 1024 * 1024:
+    if file.size and file.size > MAX_SCREENSHOT_SIZE:
         from django.core.exceptions import ValidationError
 
-        raise ValidationError(f"File size cannot exceed {max_size_mb}MB")
+        raise ValidationError(f"File size cannot exceed {MAX_SCREENSHOT_SIZE // (1024 * 1024)}MB")
     return file
 
 
@@ -368,16 +371,18 @@ class RedTeamScore(Approvable):
         return [outcome.display for outcome in self.scored_outcomes()]
 
 
-class RedTeamScreenshot(models.Model):
+class RedTeamScreenshot(StoredFile):
     """Screenshots for red team findings (stored in database)."""
+
+    DEFAULT_NAME = "screenshot.png"
+    MAX_SIZE = MAX_SCREENSHOT_SIZE
 
     finding = models.ForeignKey(
         RedTeamScore,
         on_delete=models.CASCADE,
         related_name="screenshots",
     )
-    file_data = models.BinaryField(null=True, blank=True)
-    filename = models.CharField(max_length=255)
+    file_data = models.BinaryField(null=True, blank=True)  # type: ignore[assignment]  # older rows lost their bytes
     mime_type = models.CharField(max_length=100, default="image/png")
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
@@ -459,16 +464,18 @@ class IncidentReport(Approvable):
         return format_boxes_display(self.affected_boxes)
 
 
-class IncidentScreenshot(models.Model):
+class IncidentScreenshot(StoredFile):
     """Screenshots for incident reports (stored in database)."""
+
+    DEFAULT_NAME = "screenshot.png"
+    MAX_SIZE = MAX_SCREENSHOT_SIZE
 
     incident = models.ForeignKey(
         IncidentReport,
         on_delete=models.CASCADE,
         related_name="screenshots",
     )
-    file_data = models.BinaryField(null=True, blank=True)
-    filename = models.CharField(max_length=255)
+    file_data = models.BinaryField(null=True, blank=True)  # type: ignore[assignment]  # older rows lost their bytes
     mime_type = models.CharField(max_length=100, default="image/png")
     uploaded_at = models.DateTimeField(auto_now_add=True)
 

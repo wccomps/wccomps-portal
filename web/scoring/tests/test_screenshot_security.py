@@ -12,8 +12,8 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
+from core.stored_files import UploadError
 from scoring.models import IncidentReport, IncidentScreenshot, RedTeamScore, RedTeamScreenshot
-from scoring.screenshots import MAX_SCREENSHOT_SIZE, ScreenshotError, read_screenshot
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
@@ -30,9 +30,6 @@ def _upload(data: bytes, name: str = "shot.png", content_type: str = "image/png"
     return SimpleUploadedFile(name, data, content_type=content_type)
 
 
-# --- read_screenshot (upload) ----------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("payload", "claimed", "stored"),
     [
@@ -45,23 +42,23 @@ def _upload(data: bytes, name: str = "shot.png", content_type: str = "image/png"
     ],
 )
 def test_stored_type_comes_from_bytes_not_client(payload, claimed, stored):
-    data, name, mime = read_screenshot(_upload(payload, "f.bin", claimed))
-    assert (data, name, mime) == (payload, "f.bin", stored)
+    row = RedTeamScreenshot.from_upload(_upload(payload, "f.bin", claimed))
+    assert (bytes(row.file_data), row.filename, row.mime_type) == (payload, "f.bin", stored)
 
 
 def test_rejects_oversize():
-    big = PNG + b"\x00" * MAX_SCREENSHOT_SIZE
-    with pytest.raises(ScreenshotError):
-        read_screenshot(SimpleUploadedFile("big.png", big, content_type="image/png"))
+    big = PNG + b"\x00" * RedTeamScreenshot.MAX_SIZE
+    with pytest.raises(UploadError):
+        RedTeamScreenshot.from_upload(SimpleUploadedFile("big.png", big, content_type="image/png"))
 
 
 def test_upload_reads_are_bounded():
     """Unknown-size uploads must not be read into memory without a limit."""
     upload = SimpleUploadedFile("s.png", b"", content_type="image/png")
-    upload.file = io.BytesIO(PNG + b"\x00" * (MAX_SCREENSHOT_SIZE * 2))
+    upload.file = io.BytesIO(PNG + b"\x00" * (RedTeamScreenshot.MAX_SIZE * 2))
     upload.size = None
-    with pytest.raises(ScreenshotError):
-        read_screenshot(upload)
+    with pytest.raises(UploadError):
+        RedTeamScreenshot.from_upload(upload)
 
 
 # --- download views (also cover rows stored before the fix) ----------------------------------------
@@ -194,7 +191,7 @@ def _submit_red(user, uploads: list[SimpleUploadedFile]):
 def test_rejected_incident_upload_shows_the_error(team, blue_team_user, mock_quotient_client, problem, monkeypatch):
     uploads = [_upload(PNG, f"s{n}.png") for n in range(21)] if problem == "too_many" else [_upload(PNG)]
     if problem == "too_big":
-        monkeypatch.setattr("scoring.screenshots.MAX_SCREENSHOT_SIZE", 10)
+        monkeypatch.setattr(IncidentScreenshot, "MAX_SIZE", 10)
     client = Client()
     client.force_login(blue_team_user)
 
@@ -217,7 +214,7 @@ def test_rejected_incident_upload_shows_the_error(team, blue_team_user, mock_quo
 def test_rejected_red_team_upload_shows_the_error(team, red_team_user, mock_quotient_client, problem, monkeypatch):
     uploads = [_upload(PNG, f"s{n}.png") for n in range(21)] if problem == "too_many" else [_upload(PNG)]
     if problem == "too_big":
-        monkeypatch.setattr("scoring.screenshots.MAX_SCREENSHOT_SIZE", 10)
+        monkeypatch.setattr(RedTeamScreenshot, "MAX_SIZE", 10)
 
     response = _submit_red(red_team_user, uploads)
 
@@ -231,3 +228,12 @@ def test_red_team_finding_with_screenshots_is_saved(team, red_team_user, mock_qu
 
     assert response.status_code == 302
     assert RedTeamScreenshot.objects.filter(finding=RedTeamScore.objects.get()).count() == 2
+
+
+def test_a_refused_screenshot_is_named_among_the_others(team, red_team_user, mock_quotient_client, monkeypatch):
+    monkeypatch.setattr(RedTeamScreenshot, "MAX_SIZE", len(PNG))
+    response = _submit_red(red_team_user, [_upload(PNG, "fits.png"), _upload(PNG + b"more", "too-big.png")])
+
+    assert response.status_code == 200
+    assert b"too-big.png: File too large" in response.content
+    assert not RedTeamScore.objects.exists()

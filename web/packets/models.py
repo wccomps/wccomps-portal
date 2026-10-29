@@ -1,10 +1,12 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 from django.db import models
 from django.db.models import Count, F, Q, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from registration.models import Event
+
+from core.stored_files import StoredFile
 
 if TYPE_CHECKING:
     from team.models import Team
@@ -39,10 +41,12 @@ def packets_sent(event: Event | None) -> bool:
     return event is not None and Packet.objects.sent().filter(event=event).exists()
 
 
-class Packet(models.Model):
+class Packet(StoredFile):
     """Pre-competition information packet to be distributed to all teams."""
 
     objects = PacketQuerySet.as_manager()
+    DEFAULT_NAME = "unnamed"
+    MAX_SIZE = 25 * 1024 * 1024
 
     STATUS_CHOICES = [
         ("draft", "Draft"),
@@ -60,9 +64,6 @@ class Packet(models.Model):
         help_text="Set to the open event when the packet is sent",
     )
     title = models.CharField(max_length=255, help_text="Packet title/description")
-    file_data = models.BinaryField(help_text="Packet file stored as binary data")
-    filename = models.CharField(max_length=255, help_text="Original filename")
-    mime_type = models.CharField(max_length=100, help_text="MIME type of the file")
     file_size = models.IntegerField(help_text="File size in bytes")
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft", db_index=True)
@@ -88,6 +89,10 @@ class Packet(models.Model):
         ordering = ["-created_at"]
         verbose_name = "Packet"
         verbose_name_plural = "Packets"
+
+    @classmethod
+    def with_file(cls, data: bytes, name: str | None, **fields: object) -> Self:
+        return super().with_file(data, name, file_size=len(data), **fields)
 
     def __str__(self) -> str:
         return f"{self.title} ({self.status})"
