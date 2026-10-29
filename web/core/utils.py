@@ -5,13 +5,15 @@ import queue
 import re
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping
+from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.contrib import messages
 from django.core.paginator import Page, Paginator
-from django.db import connection, transaction
+from django.db import DatabaseError, InterfaceError, connection, transaction
+from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import Model, QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
@@ -89,6 +91,32 @@ def ndjson_progress(step: str, current: int, total: int, ok: bool = True) -> str
 def ndjson_done(message: str, success: bool = True) -> str:
     """Encode the final line of a streamed operation, which the page shows as the outcome."""
     return json.dumps({"done": True, "success": success, "message": message}) + "\n"
+
+
+@contextmanager
+def advisory_lock(key: int | str, *, wait: bool = False, conn: BaseDatabaseWrapper | None = None) -> Iterator[bool]:
+    """Yields whether the lock was taken; re-entrant within one connection."""
+    db = conn or connection
+    lock_id = "%s" if isinstance(key, int) else "hashtextextended(%s, 0)"
+    with db.cursor() as cursor:
+        if wait:
+            cursor.execute(f"SELECT pg_advisory_lock({lock_id})", [key])  # noqa: S608 - fixed fragments
+            acquired = True
+        else:
+            cursor.execute(f"SELECT pg_try_advisory_lock({lock_id})", [key])  # noqa: S608 - fixed fragments
+            row = cursor.fetchone()
+            acquired = bool(row and row[0])
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                with db.cursor() as cursor:
+                    cursor.execute(f"SELECT pg_advisory_unlock({lock_id})", [key])  # noqa: S608 - fixed fragments
+            except DatabaseError, InterfaceError:
+                # Only a closed connection has released it; an aborted transaction still holds it
+                if db.connection is not None and not db.connection.closed:
+                    raise
 
 
 def _inline(lines: Iterator[str]) -> Iterator[str]:

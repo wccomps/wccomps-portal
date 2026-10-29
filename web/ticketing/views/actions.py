@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from core.auth_utils import require_permission, team_record_or_404
-from core.utils import ndjson_done, ndjson_progress, run_detached
+from core.utils import advisory_lock, ndjson_done, ndjson_progress, run_detached
 from ticketing.access import TICKET_STAFF
 from ticketing.forms import (
     TicketBoxResetForm,
@@ -278,21 +278,21 @@ def _record_box_reset_outcome(
     )
 
 
-def _stream_box_reset(ticket_id: int, user_id: int, authentik_username: str, snapshot: str) -> Iterator[str]:
-    from django.core.cache import cache
+def box_reset_lock_key(ticket_id: int) -> str:
+    return f"box_reset:{ticket_id}"
 
+
+def _stream_box_reset(ticket_id: int, user_id: int, authentik_username: str, snapshot: str) -> Iterator[str]:
     from core.discord_tasks import PostComment
     from core.models import DiscordTask
     from core.proxmox import ProxmoxAPIError, get_proxmox_client, match_team_vm, normalize_ticket_host
     from ticketing.models import TicketComment
 
     # Held across the state check and the reset, so a second submission sees the resolved ticket
-    lock_key = f"box_reset_lock_{ticket_id}"
-    if not cache.add(lock_key, user_id, timeout=300):
-        yield ndjson_done("A box reset is already running for this ticket.", success=False)
-        return
-
-    try:
+    with advisory_lock(box_reset_lock_key(ticket_id)) as acquired:
+        if not acquired:
+            yield ndjson_done("A box reset is already running for this ticket.", success=False)
+            return
         ticket = Ticket.objects.select_related("team", "assigned_to").filter(id=ticket_id).first()
         user = User.objects.filter(id=user_id).first()
         if not ticket or not user:
@@ -415,8 +415,6 @@ def _stream_box_reset(ticket_id: int, user_id: int, authentik_username: str, sna
                 error=str(e),
             )
             yield ndjson_done(f"Box reset error: {e}", success=False)
-    finally:
-        cache.delete(lock_key)
 
 
 @require_POST
