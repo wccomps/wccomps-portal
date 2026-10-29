@@ -20,6 +20,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.urls import reverse
+from orange_team.models import OrangeCheck
 from registration.models import School
 
 from core.models import UserGroups
@@ -51,13 +52,13 @@ class ScoringFormulaTests(TestCase):
 
         # Weights proportional to maxes → all modifiers = 1.0 for easy math
         # 1000/1600=62.5%, 500/1600=31.25%, 100/1600=6.25%
+        OrangeCheck.objects.create(title="Orange", max_points=100)
         self.template = ScoringTemplate.objects.create(
             service_weight=Decimal("62.50"),
             inject_weight=Decimal("31.25"),
             orange_weight=Decimal("6.25"),
             service_max=Decimal("1000"),
             inject_max=Decimal("500"),
-            orange_max=Decimal("100"),
         )
 
     def test_simple_score_calculation(self) -> None:
@@ -375,7 +376,8 @@ class TestLeaderboardAccess:
         """Orange team points should render as plain text, not green with +."""
         from scoring.models import OrangeTeamScore, ScoringTemplate
 
-        ScoringTemplate.objects.create(service_max=Decimal("40"), inject_max=Decimal("40"), orange_max=Decimal("20"))
+        OrangeCheck.objects.create(title="Orange", max_points=20)
+        ScoringTemplate.objects.create(service_max=Decimal("40"), inject_max=Decimal("40"))
         team = Team.objects.create(team_number=1, team_name="Team 1")
         OrangeTeamScore.objects.create(team=team, points_awarded=Decimal("25"), description="test", is_approved=True)
 
@@ -675,13 +677,13 @@ class TestIncidentFindingMatching:
         team = Team.objects.create(team_number=1, team_name="Test Team")
 
         # Create template with equal weights (modifier=1.0 when weight ∝ max)
+        OrangeCheck.objects.create(title="Orange", max_points=100)
         ScoringTemplate.objects.create(
             service_weight=Decimal("62.50"),
             inject_weight=Decimal("31.25"),
             orange_weight=Decimal("6.25"),
             service_max=Decimal("1000"),
             inject_max=Decimal("500"),
-            orange_max=Decimal("100"),
         )
 
         IncidentReport.objects.create(
@@ -824,13 +826,13 @@ class ScalingContextTests(TestCase):
     def setUp(self) -> None:
         self.user = User.objects.create_user(username="testuser", password="test123")
         self.team = Team.objects.create(team_number=1, team_name="Test Team")
+        OrangeCheck.objects.create(title="Orange", max_points=160)
         ScoringTemplate.objects.create(
             service_weight=Decimal("40"),
             inject_weight=Decimal("40"),
             orange_weight=Decimal("20"),
             service_max=Decimal("11454"),
             inject_max=Decimal("3060"),
-            orange_max=Decimal("160"),
         )
         ServiceScore.objects.create(
             team=self.team,

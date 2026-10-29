@@ -5,6 +5,7 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils.functional import cached_property
 
 from core.models import Approvable
 from core.stored_files import StoredFile
@@ -71,13 +72,13 @@ class ScoringTemplate(models.Model):
         validators=[MinValueValidator(Decimal("0"))],
         help_text="Maximum possible raw inject points",
     )
-    orange_max = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=Decimal("160"),
-        validators=[MinValueValidator(Decimal("0"))],
-        help_text="Maximum possible raw orange team check points",
-    )
+
+    @cached_property
+    def orange_max(self) -> Decimal:
+        """Maximum possible raw orange team check points: every orange check's maximum, summed."""
+        from orange_team.models import OrangeCheck
+
+        return Decimal(OrangeCheck.objects.total_max())
 
     def clean(self) -> None:
         """Validate that the category weights sum to 100."""

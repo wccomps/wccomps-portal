@@ -1,13 +1,17 @@
+from collections.abc import Sequence
 from datetime import datetime
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import IntegrityError, models, transaction
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 # The most a check, or one of its criteria, is worth
 MAX_POINTS = 10_000
+# The previous release writes the checks' sum to scoringtemplate.orange_max, numeric(10, 2), until that column goes
+MAX_TOTAL_POINTS = 99_999_999
 
 
 class OrangeCheckIn(models.Model):
@@ -50,8 +54,30 @@ class OrangeCheckIn(models.Model):
                 pass
 
 
+def _max_score() -> Coalesce:
+    """check_worth as an expression over a check."""
+    criteria_total = (
+        OrangeCheckCriterion.objects.filter(orange_check=models.OuterRef("pk"))
+        .values("orange_check")
+        .annotate(total=models.Sum("points"))
+        .values("total")
+    )
+    return Coalesce(models.Subquery(criteria_total), models.F("max_points"), output_field=models.IntegerField())
+
+
+class OrangeCheckQuerySet(models.QuerySet["OrangeCheck"]):
+    def with_max_score(self) -> OrangeCheckQuerySet:
+        """Each check with its maximum, which max_score then reads without a query."""
+        return self.annotate(annotated_max_score=_max_score())
+
+    def total_max(self) -> int:
+        return sum(check.max_score for check in self.with_max_score())
+
+
 class OrangeCheck(models.Model):
     """A check template with rubric criteria, created by a lead."""
+
+    objects = OrangeCheckQuerySet.as_manager()
 
     title = models.CharField(max_length=200)
     description = models.TextField(help_text="Steps/instructions for the orange teamer")
@@ -74,16 +100,18 @@ class OrangeCheck(models.Model):
 
     def clean(self) -> None:
         # Its criteria (when it has any) are what it's worth; their own clean checks a change to them
-        stored = self.criteria.aggregate(total=models.Sum("points"))["total"] if self.pk else None
-        if problem := scores_total_problem(self.pk, self.max_points if stored is None else int(stored)):
+        if problem := scores_total_problem(self.pk, check_worth(self._criteria_points(), self.max_points)):
             raise ValidationError(problem)
 
     @property
     def max_score(self) -> int:
-        criteria_total = self.criteria.aggregate(total=models.Sum("points"))["total"]
-        if criteria_total is not None:
-            return int(criteria_total)
-        return self.max_points
+        annotated = self.__dict__.get("annotated_max_score")
+        if annotated is not None:
+            return int(annotated)
+        return check_worth(self._criteria_points(), self.max_points)
+
+    def _criteria_points(self) -> list[int]:
+        return [] if self._state.adding else list(self.criteria.values_list("points", flat=True))
 
     @property
     def window_end(self) -> datetime | None:
@@ -115,20 +143,20 @@ class OrangeCheck(models.Model):
         return "unscheduled"
 
 
+def check_worth(criteria_points: Sequence[int], max_points: int) -> int:
+    """What a check is worth: its criteria's points summed, or max_points when it has no criteria."""
+    return sum(criteria_points) if criteria_points else max_points
+
+
 def scores_total_problem(check_pk: int | None, max_score: int) -> str:
     """Why the checks' scores, with this check (None: a new one) worth max_score, can't all be counted, or ''.
 
-    The scoring sums every check's maximum into ScoringTemplate.orange_max, a numeric column of limited size.
+    All checks together are limited to MAX_TOTAL_POINTS while the previous release can still store their sum.
     """
-    from scoring.models import ScoringTemplate
-
-    field = ScoringTemplate._meta.get_field("orange_max")
-    capacity = 10 ** (getattr(field, "max_digits", 0) - getattr(field, "decimal_places", 0)) - 1
     others = OrangeCheck.objects.all() if check_pk is None else OrangeCheck.objects.exclude(pk=check_pk)
-    others = others.annotate(criteria_total=models.Sum("criteria__points"))
-    total = max_score + sum(t if t is not None else m for m, t in others.values_list("max_points", "criteria_total"))
-    if total > capacity:
-        return f"All checks together would be worth {total} points; the scoring can count at most {capacity}."
+    total = max_score + others.total_max()
+    if total > MAX_TOTAL_POINTS:
+        return f"All checks together would be worth {total} points; they can be worth at most {MAX_TOTAL_POINTS}."
     return ""
 
 
@@ -147,8 +175,9 @@ class OrangeCheckCriterion(models.Model):
     def clean(self) -> None:
         if not self.orange_check_id:  # a rubric row the check form checks before the check exists
             return
-        others = self.orange_check.criteria.exclude(pk=self.pk).aggregate(total=models.Sum("points"))["total"] or 0
-        if problem := scores_total_problem(self.orange_check_id, int(others) + self.points):
+        others = list(self.orange_check.criteria.exclude(pk=self.pk).values_list("points", flat=True))
+        worth = check_worth([*others, self.points], self.orange_check.max_points)
+        if problem := scores_total_problem(self.orange_check_id, worth):
             raise ValidationError(problem)
 
     def __str__(self) -> str:

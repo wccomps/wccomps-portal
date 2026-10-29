@@ -8,7 +8,7 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest, ValidationError
 from django.db import transaction
-from django.db.models import Case, Count, F, Q, Value, When
+from django.db.models import Case, Count, F, Prefetch, Q, Value, When
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -37,6 +37,7 @@ from orange_team.models import (
     OrangeCheckCriterion,
     OrangeCheckIn,
     OrangeFollowUp,
+    check_worth,
     scores_total_problem,
 )
 from orange_team.services import (
@@ -59,6 +60,10 @@ def _form_errors(form: forms.Form) -> str:
     return " ".join(lines)
 
 
+def _checks_with_max_score() -> Prefetch[str]:
+    return Prefetch("orange_check", queryset=OrangeCheck.objects.with_max_score())
+
+
 @require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
 def dashboard(request: HttpRequest) -> HttpResponse:
     """Orange team dashboard showing check-in status and assignments."""
@@ -69,8 +74,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     my_assignments = list(
         OrangeAssignment.objects.filter(user=user)
         .unfinished()
-        .select_related("orange_check", "team")
-        .prefetch_related("results__criterion")
+        .select_related("team")
+        .prefetch_related(_checks_with_max_score(), "results__criterion")
         .order_by("orange_check__scheduled_at", "orange_check__title", "team__team_number")
     )
     for assignment in my_assignments:
@@ -115,7 +120,8 @@ def review_queue(request: HttpRequest) -> HttpResponse:
     """Lead view showing submitted assignments awaiting review."""
     review_assignments = (
         OrangeAssignment.objects.filter(status__in=["submitted", "in_progress"])
-        .select_related("orange_check", "team", "user")
+        .select_related("team", "user")
+        .prefetch_related(_checks_with_max_score())
         .order_by("-submitted_at")
     )
     return render(
@@ -129,7 +135,8 @@ def review_queue(request: HttpRequest) -> HttpResponse:
 def check_list(request: HttpRequest) -> HttpResponse:
     now = timezone.now()
     checks = list(
-        OrangeCheck.objects.annotate(
+        OrangeCheck.objects.with_max_score()
+        .annotate(
             team_total=Count("assignments", distinct=True),
             scored_count=Count("assignments", filter=Q(assignments__status="approved"), distinct=True),
         )
@@ -208,7 +215,7 @@ def check_create(request: HttpRequest) -> HttpResponse:
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
 def check_detail(request: HttpRequest, check_id: int) -> HttpResponse:
     orange_check = get_object_or_404(
-        OrangeCheck.objects.prefetch_related("criteria", "assignments__user", "assignments__team"),
+        OrangeCheck.objects.with_max_score().prefetch_related("criteria", "assignments__user", "assignments__team"),
         pk=check_id,
     )
     return render(
@@ -254,7 +261,7 @@ def _posted_check(
     except ValidationError as refused:
         form.add_error(None, refused)
         return form, None
-    worth = sum(c["points"] for c in criteria) if criteria else form.cleaned_data.get("max_points") or 0
+    worth = check_worth([c["points"] for c in criteria], form.cleaned_data.get("max_points") or 0)
     if valid and (problem := scores_total_problem(orange_check.pk if orange_check else None, worth)):
         form.add_error(None, problem)
     return form, criteria if form.is_valid() else None
@@ -283,7 +290,7 @@ def check_duplicate(request: HttpRequest, check_id: int) -> HttpResponse:
     """Duplicate a check and its criteria into a new draft."""
     original = get_object_or_404(OrangeCheck.objects.prefetch_related("criteria"), pk=check_id)
     criteria = list(original.criteria.all())
-    worth = sum(c.points for c in criteria) if criteria else original.max_points
+    worth = check_worth([c.points for c in criteria], original.max_points)
     if problem := scores_total_problem(None, worth):
         messages.error(request, problem)
         return redirect("orange_team:check_detail", check_id=check_id)
@@ -564,7 +571,8 @@ def assignment_reject(request: HttpRequest, assignment_id: int) -> HttpResponse:
 def export_scores(request: HttpRequest) -> HttpResponse:
     assignments = (
         OrangeAssignment.objects.filter(status__in=OrangeAssignment.LOCKED_STATUSES)
-        .select_related("orange_check", "team", "user", "reviewed_by")
+        .select_related("team", "user", "reviewed_by")
+        .prefetch_related(_checks_with_max_score())
         .order_by("orange_check__title", "team__team_number")
     )
 
