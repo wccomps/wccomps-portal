@@ -1,4 +1,4 @@
-"""Escaping for request text in log lines."""
+"""Escaping for request text in log lines. No Django imports: gunicorn.conf.py loads it before Django is set up."""
 
 import logging
 from collections.abc import Callable
