@@ -168,6 +168,19 @@ class TestAdminCommands:
         assert all(len(c.args[0]) <= 2000 for c in sends)
         assert sum(c.args[0].count("failure ") for c in sends) == 25
 
+    @pytest.mark.parametrize("command", ["admin_remove_team", "admin_reset_team"])
+    @pytest.mark.parametrize(("number", "answer"), [(51, "between 1 and 50"), (49, "Team 49 not found")])
+    async def test_team_commands_answer_a_bad_or_missing_team_first(
+        self, mock_interaction: Any, mock_admin_user: Any, mock_bot: Any, command: str, number: int, answer: str
+    ) -> None:
+        mock_interaction.user.id = mock_admin_user._discord_id
+        cog = AdminTeamsCog(mock_bot)
+
+        await getattr(AdminTeamsCog, command).callback(cog, mock_interaction, team_number=number)
+
+        mock_interaction.response.defer.assert_not_called()
+        assert answer in mock_interaction.response.send_message.call_args.args[0]
+
     async def test_admin_remove_team(
         self,
         mock_interaction: Any,

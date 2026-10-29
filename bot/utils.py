@@ -1,12 +1,16 @@
+import asyncio
+import functools
 import io
 import logging
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Final, Literal
 
 import discord
 from asgiref.sync import sync_to_async
 from discord import app_commands
 from django.conf import settings
-from django.db import close_old_connections
+from django.db import close_old_connections, connection
 
 from core.utils import missing_discord_settings
 from team.models import MAX_TEAMS, Team
@@ -149,9 +153,32 @@ async def recycle_db_connection() -> None:
     Django only does this on request_started/request_finished, and the bot serves no requests,
     so after a Postgres restart its single connection stayed dead and every loop failed forever.
     Must run via sync_to_async's default (thread_sensitive=True) executor: that one thread owns
-    the connection all bot ORM calls use.
+    the connection the bot's ordinary ORM calls use.
     """
     await sync_to_async(close_old_connections)()
+
+
+async def run_blocking[**P, R](func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:
+    """Run slow sync work (Authentik, Quotient) on a pool thread, not the one thread every other
+    sync_to_async call in the bot queues on, so interactions and loops keep answering meanwhile.
+    """
+    return await _hop(functools.partial(func, *args, **kwargs), None, release=True)
+
+
+async def _hop[T](step: Callable[[], T], thread: ThreadPoolExecutor | None, *, release: bool) -> T:
+    """Run step off the event loop for run_blocking: on thread, or a pool thread when None. release closes that
+    thread's connection after, which recycle_db_connection never reaches."""
+
+    def run() -> T:
+        try:
+            return step()
+        finally:
+            if release:
+                connection.close()
+
+    if thread is None:
+        return await sync_to_async(run, thread_sensitive=False)()
+    return await asyncio.get_running_loop().run_in_executor(thread, run)
 
 
 async def report_missing_discord_settings(bot: discord.Client) -> None:
@@ -168,6 +195,14 @@ async def report_missing_discord_settings(bot: discord.Client) -> None:
     )
     logger.error(message)
     await log_to_ops_channel(bot, message)
+
+
+async def find_team(team_number: int) -> Team | str:
+    """The team with this number, or why there is none."""
+    if team_number < 1 or team_number > MAX_TEAMS:
+        return f"Team number must be between 1 and {MAX_TEAMS}"
+    team = await Team.objects.filter(team_number=team_number).afirst()
+    return team or f"Team {team_number} not found"
 
 
 async def get_team_or_respond(interaction: discord.Interaction, team_number: int) -> Team | None:

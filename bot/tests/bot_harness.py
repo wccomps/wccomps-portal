@@ -787,10 +787,19 @@ def _inline_competition_run(enable: bool, actor: str, on_step: Any = None) -> An
     return sync_to_async(run_competition_to_completion)(enable, actor, on_step)
 
 
+async def _hop_inline(step: Callable[[], Any], thread: object, *, release: bool) -> Any:
+    """bot.utils._hop on the example's own connection: in production a hop runs on a pool thread with one of its own,
+    which would see none of the example's rows (and closing it would end the example's)."""
+    from asgiref.sync import sync_to_async
+
+    return await sync_to_async(step)()
+
+
 @contextmanager
 def discord_world(world: World, confirm: bool | None) -> Iterator[Discord]:
     """The fakes, every other service offline, the bot's Discord settings, and every confirmation answered with
     `confirm` (True, False, or None for a timeout)."""
+    from bot import utils as bot_utils
     from bot.utils import ConfirmView
 
     async def answered_confirmation(self: ConfirmView) -> bool:
@@ -813,6 +822,7 @@ def discord_world(world: World, confirm: bool | None) -> Iterator[Discord]:
         stack.enter_context(patch.object(tasks.Loop, "start"))
         stack.enter_context(patch.object(ConfirmView, "wait", answered_confirmation))
         stack.enter_context(patch("bot.competition_actions.run_competition", _inline_competition_run))
+        stack.enter_context(patch.object(bot_utils, "_hop", _hop_inline))
         stack.enter_context(patch("quotient.client.get_quotient_client.cache_clear"))
         yield discord_
 
