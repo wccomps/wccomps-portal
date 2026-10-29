@@ -30,7 +30,7 @@ def test_pages_do_not_render_messages_themselves() -> None:
 FIELD_USE = re.compile(r"{[{%][^}]*?\b\w*form\.(?!non_field_errors\b|errors\b|is_bound\b)\w+")
 
 FORM_ERRORS_ALLOWLIST = {
-    "registration/register.html": "the standalone public page, styled on its own: it renders form.non_field_errors",
+    "registration/register.html": "the standalone public page, styled on its own: its summary shows the form's errors",
 }
 
 
@@ -43,3 +43,24 @@ def test_forms_rendered_field_by_field_show_their_form_errors() -> None:
         if p not in component_templates() and FIELD_USE.search(text(p)) and "<c-form_errors" not in text(p)
     }
     fail_with("Forms whose own errors never render", found, FORM_ERRORS_ALLOWLIST)
+
+
+# A form's field as a bare widget, or looped over: {{ form.notes }}, {% for radio in form.source %}
+BARE_FIELD = re.compile(r"{{\s*\w*form\.(\w+)\s*}}|{%\s*for\s+\w+\s+in\s+\w*form\.(\w+)\s*%}")
+
+# "template:field" -> why the page renders that field's widget itself
+BARE_FIELD_EXCEPTIONS = {
+    "registration/edit.html:unoffered_events": "the events the form doesn't offer, a list on the form, not a field",
+    "scoring/submit_red_finding.html:destination_ip_template": "a hidden input the page's script fills: no row to show",
+}
+
+
+def test_a_form_field_renders_as_its_field_group() -> None:
+    """A widget rendered on its own has no label, help or errors from the form, and its aria-describedby names ids
+    that aren't on the page: {{ form.x.as_field_group }} renders all of them."""
+    found = {
+        f"{template_name(p)}:{m.group(1) or m.group(2)}": "render it with as_field_group"
+        for p in page_templates()
+        for m in BARE_FIELD.finditer(text(p))
+    }
+    fail_with("Form fields rendered as bare widgets", found, BARE_FIELD_EXCEPTIONS)

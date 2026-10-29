@@ -1,9 +1,8 @@
-import contextlib
 import logging
 from typing import cast
 
 from django.contrib.auth.models import User
-from django.core.exceptions import BadRequest, PermissionDenied
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
@@ -12,8 +11,7 @@ from core.auth_utils import get_user_team, has_permission
 from core.discord_tasks import TicketCreatedWeb
 from core.models import DiscordTask
 from team.models import Team
-from ticketing.forms import CreateTicketForm
-from ticketing.models import TicketCategory
+from ticketing.forms import CreateTicketPageForm
 
 logger = logging.getLogger(__name__)
 
@@ -51,47 +49,33 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
     except QuotientAPIError:
         logger.warning("Quotient API unavailable, ticket form will have limited functionality")
 
-    # Staff file tickets in any category; teams only in user-creatable ones.
-    categories = list(TicketCategory.objects.all() if is_admin else TicketCategory.objects.filter(user_creatable=True))
-    categories_json = {
-        cat.pk: {"required_fields": cat.required_fields, "optional_fields": cat.optional_fields} for cat in categories
-    }
+    form = CreateTicketPageForm(
+        request.POST if request.method == "POST" else None,
+        staff=is_admin,
+        box_ip_map=box_ip_map,
+        service_choices=service_choices,
+        teams=teams,
+        own_team=team,
+        box_names=box_names,
+        auto_id="%s",
+    )
 
-    def form_page(error: str | None = None, status: int = 200) -> HttpResponse:
+    def form_page(status: int = 200) -> HttpResponse:
         context: dict[str, object] = {
             "team": team,
-            "teams": teams,
-            "categories": categories,
-            "categories_json": categories_json,
+            "form": form,
+            "categories_json": form.categories_json(),
             "service_choices": service_choices,
             "box_names": box_names,
             "box_ip_map": box_ip_map,
         }
-        if error:
-            context["error"] = error
-            context["form_data"] = request.POST
         return render(request, "create_ticket.html", context, status=status)
 
     if request.method == "POST":
-        form = CreateTicketForm(
-            request.POST,
-            staff=is_admin,
-            categories=categories,
-            box_ip_map=box_ip_map,
-            service_choices=service_choices,
-        )
         valid = form.is_valid()
-        if is_admin and form.cleaned_data.get("team_id"):
-            with contextlib.suppress(Team.DoesNotExist):
-                team = Team.objects.get(id=form.cleaned_data["team_id"], is_active=True)
+        team = form.cleaned_data["team"]
         if not valid:
-            return form_page(" ".join(str(err) for errors in form.errors.values() for err in errors))
-
-        if is_admin and not team:
-            return form_page("Please select a team.")
-
-        if not team or not form.category_obj:
-            raise BadRequest("Team is required to create a ticket.")
+            return form_page()
 
         from ticketing.utils import TicketRateLimitError, create_ticket_atomic
 
@@ -101,7 +85,7 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
             with transaction.atomic():
                 ticket = create_ticket_atomic(
                     team=team,
-                    category=form.category_obj,
+                    category=form.cleaned_data["category"],
                     title=cd["title"],
                     description=cd["description"],
                     hostname=cd["hostname"],
@@ -118,10 +102,13 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
 
         except TicketRateLimitError as e:
             logger.warning(f"Ticket rate limit hit by {authentik_username} for {team.team_name}")
-            return form_page(str(e), status=429)
+            form.add_error(None, str(e))
+            return form_page(status=429)
         except Exception:
             logger.exception("Failed to create ticket")
-
-            return form_page("Failed to create ticket. Please try again or contact support if the problem persists.")
+            form.add_error(
+                None, "Failed to create ticket. Please try again or contact support if the problem persists."
+            )
+            return form_page()
 
     return form_page()

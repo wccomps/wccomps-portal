@@ -96,15 +96,9 @@
                 {% csrf_token %}
                 <c-form_errors :form="form" />
                 <c-fieldset aligned="true">
-                    <c-form_field :field="form.matched_to_red_score">
-                        {{ form.matched_to_red_score }}
-                    </c-form_field>
-                    <c-form_field :field="form.points_returned">
-                        {{ form.points_returned }}
-                    </c-form_field>
-                    <c-form_field :field="form.approval_notes">
-                        {{ form.approval_notes }}
-                    </c-form_field>
+                    {{ form.matched_to_red_score.as_field_group }}
+                    {{ form.points_returned.as_field_group }}
+                    {{ form.approval_notes.as_field_group }}
                 </c-fieldset>
                 <div class="text-muted text-sm">
                     <strong>Scoring rubric.</strong> Points = base (what was caught) x quality (how well it was handled).

@@ -52,7 +52,7 @@ def test_available_renders_pickers_without_notice(client):
         html = client.get(reverse("create_ticket")).content.decode()
 
     assert UNAVAILABLE_NOTICE not in html
-    assert 'data-hostname="web01"' in html
+    assert 'data-value="web01"' in html
     assert '<select name="service_name"' in html
 
 

@@ -229,6 +229,9 @@ CODE_EXCEPTIONS = {
     "*:on_*": "discord.py calls event listeners and modal callbacks by name",
     "*:transform": "discord.py calls an app command Transformer's transform",
     "*:interaction_check": "discord.py calls a command tree's interaction_check before every command",
+    "*:field_template_name": "Django's form renderer reads it for field.as_field_group",
+    "*:option_template_name": "Django's choice widgets read it for each option",
+    "*:use_required_attribute": "Django calls a widget's use_required_attribute as it renders the field",
     # Django
     "@admin.register": "Django admin registers the class through its decorator",
     "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",
@@ -258,8 +261,6 @@ CODE_EXCEPTIONS = {
     "*:fieldsets": DJANGO_ADMIN_OPTION,
     "*:inlines": DJANGO_ADMIN_OPTION,
     "*:extra": DJANGO_ADMIN_OPTION,
-    "*:widgets": DJANGO_FORM_OPTION,
-    "*:labels": DJANGO_FORM_OPTION,
     "*:help_texts": DJANGO_FORM_OPTION,
     "*:empty_label": DJANGO_FORM_OPTION,
     "*/urls*.py:urlpatterns": "Django reads urlpatterns from each URLconf",

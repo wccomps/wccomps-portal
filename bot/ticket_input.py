@@ -61,10 +61,10 @@ def read_ticket(
         box_ip_map=box_ip_map,
         service_choices=service_choices,
     )
-    if not form.is_valid() or not form.category_obj:
+    if not form.is_valid():
         return form_errors(form.errors)
     return TicketInput(
-        category=form.category_obj,
+        category=form.cleaned_data["category"],
         description=form.cleaned_data["description"],
         hostname=form.cleaned_data["hostname"],
         ip_address=form.cleaned_data["ip_address"],

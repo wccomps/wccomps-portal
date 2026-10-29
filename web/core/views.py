@@ -52,6 +52,7 @@ from .auth_utils import (
     team_for_groups,
 )
 from .errors import json_endpoint
+from .form_errors import ask_for_the_file_again
 from .forms import LinkConfirmForm, SchoolInfoEditForm
 
 logger = logging.getLogger(__name__)
@@ -404,7 +405,7 @@ def _apply_school_info_import(
         return _upload_again("The uploaded file is no longer available.")
     event_form = ImportEventForm(event_fields, season=Season.objects.active())
     if not event_form.is_valid():
-        return _upload_again(*(str(e) for e in event_form.non_field_errors()))
+        return _upload_again(*(str(e) for errors in event_form.errors.values() for e in errors))
     event = event_form.event_to_import
     mode = IMPORT_MODES[event_form.import_mode]
     try:
@@ -422,24 +423,23 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)
     authentik_username = user.username
 
+    season = Season.objects.active()
     form = CSVUploadForm()
+    event_form = ImportEventForm(season=season)
     preview_data: dict[str, object] | None = None
     import_results: dict[str, object] | None = None
     error = ""
-
-    season = Season.objects.active()
 
     if request.method == "POST":
         if "upload" in request.POST:
             form = CSVUploadForm(request.POST, request.FILES)
             event_form = ImportEventForm(request.POST, season=season)
-            if not event_form.is_valid():
-                error = " ".join(str(e) for e in event_form.non_field_errors())
-            elif form.is_valid():
+            event_valid = event_form.is_valid()
+            if form.is_valid() and event_valid:
                 event = event_form.event_to_import
                 mode = IMPORT_MODES[event_form.import_mode]
                 if problem := mode.problem(event):
-                    error = problem
+                    event_form.add_error(None, problem)
                 else:
                     csv_file = cast(UploadedFile[bytes], request.FILES["csv_file"])
                     preview_data, session_rows = _parse_school_info_csv(csv_file, event, mode)
@@ -453,6 +453,8 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
                         )
                         preview_data["event_label"] = str(event)
                         preview_data["mode_label"] = mode.label.format(event=event)
+            if preview_data is None:
+                ask_for_the_file_again(form, "csv_file")
 
         elif "confirm" in request.POST:
             stored = request.session.get(PREVIEWS_KEY)
@@ -470,15 +472,13 @@ def school_info_import(request: HttpRequest) -> HttpResponse:
         else:
             error = "The form was submitted without an action. Upload the file again."
 
-    open_event = Event.objects.open() or "the open event"
     return render(
         request,
         "school_info_import.html",
         {
             "form": form,
+            "event_form": event_form,
             "active_season": season,
-            "open_events": season.events.filter(is_finalized=False) if season else [],
-            "import_modes": [(key, mode.label.format(event=open_event)) for key, mode in IMPORT_MODES.items()],
             "preview_data": preview_data,
             "import_results": import_results,
             "page_error": error,

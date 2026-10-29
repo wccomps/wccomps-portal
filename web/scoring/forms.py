@@ -5,6 +5,7 @@ from django import forms
 from django.contrib.auth.models import User
 from django.db.models import QuerySet
 
+from core.widgets import ToggleButtonSelectMultiple
 from team.models import Team
 
 from .models import (
@@ -102,14 +103,10 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
         ],
         initial="single",
         widget=forms.RadioSelect(),
-        label="Source IP Type",
+        label="Source IP",
     )
-
-    # Multi-select for affected boxes (stored as JSON list, hidden — toggle buttons in template)
     affected_boxes = forms.MultipleChoiceField(
-        required=False,
-        widget=forms.SelectMultiple(attrs={"class": "d-none", "id": "id_affected_boxes"}),
-        label="Affected Boxes",
+        required=False, widget=ToggleButtonSelectMultiple(), label="Affected Boxes"
     )
 
     class Meta:
@@ -136,14 +133,13 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
         ]
         widgets = {
             "attack_type": forms.Select(),
-            "affected_teams": forms.CheckboxSelectMultiple(),
             "notes": forms.Textarea(
                 attrs={
                     "rows": 4,
                     "placeholder": "Full description of the attack and steps taken...",
                 }
             ),
-            "destination_ip_template": forms.TextInput(attrs={"readonly": "readonly"}),
+            "destination_ip_template": forms.HiddenInput,
             "source_ip": forms.TextInput(attrs={"placeholder": "e.g., 10.0.0.5"}),
             "source_ip_pool": forms.Select(),
         }
@@ -155,7 +151,7 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
             "destination_ip_template": "Target IP Template (auto-populated)",
             "universally_attempted": "Attempted against all teams",
             "persistence_established": "Persistence established",
-            "affected_teams": "Affected Teams (select all that apply)",
+            "affected_teams": "Affected Teams",
             "notes": "Description",
         }
         help_texts = {
@@ -188,8 +184,7 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
             pool_field.queryset = RedTeamIPPool.objects.none()
         pool_field.empty_label = "Select a pool..."
 
-        self.box_choices = get_box_choices()
-        cast(forms.MultipleChoiceField, self.fields["affected_boxes"]).choices = self.box_choices
+        cast(forms.MultipleChoiceField, self.fields["affected_boxes"]).choices = get_box_choices()
 
         if self.instance and self.instance.pk and self.instance.affected_boxes:
             boxes = self.instance.affected_boxes
@@ -208,10 +203,17 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
         queryset = Team.objects.filter(is_active=True).order_by("team_number")
         self.fields["affected_teams"] = TeamNumberChoiceField(
             queryset=queryset,
-            widget=forms.CheckboxSelectMultiple(),
-            label="Affected Teams (select all that apply)",
+            widget=ToggleButtonSelectMultiple(select_all=True),
+            label="Affected Teams",
             help_text="Select all teams that were successfully compromised.",
         )
+
+        for outcome in RedTeamScore.OUTCOMES:
+            field = self.fields[outcome.field]
+            field.label = f"{outcome.label} (-{outcome.points})"
+            field.widget.attrs["data-points"] = outcome.points
+            if outcome.access_tier is not None:
+                field.widget.attrs["data-access-tier"] = outcome.access_tier
 
     def clean(self) -> dict[str, object]:
         """Validate that either source_ip or source_ip_pool is provided."""
@@ -251,11 +253,8 @@ class IncidentReportForm(forms.ModelForm[IncidentReport]):
         label="Team",
     )
 
-    # Multi-select for affected boxes (stored as JSON list, hidden — toggle buttons in template)
     affected_boxes = forms.MultipleChoiceField(
-        required=False,
-        widget=forms.SelectMultiple(attrs={"class": "d-none", "id": "id_affected_boxes"}),
-        label="Affected Boxes",
+        required=False, widget=ToggleButtonSelectMultiple(), label="Affected Boxes"
     )
 
     class Meta:
@@ -314,8 +313,7 @@ class IncidentReportForm(forms.ModelForm[IncidentReport]):
         else:
             del self.fields["team"]
 
-        self.box_choices = get_box_choices()
-        cast(forms.MultipleChoiceField, self.fields["affected_boxes"]).choices = self.box_choices
+        cast(forms.MultipleChoiceField, self.fields["affected_boxes"]).choices = get_box_choices()
 
         # Service dropdown - all services initially, JS filters by selected boxes
         service_choices = [("", "Select a service...")] + get_service_choices()

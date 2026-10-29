@@ -258,8 +258,8 @@ class TestRegistrationFormRegionValidation:
         base_form_data["events"] = [qualifier.id]
         form = RegistrationForm(data=base_form_data)
         assert not form.is_valid()
-        assert "__all__" in form.errors
-        assert "Only Western Regional (WRCCDC) teams" in str(form.errors["__all__"])
+        assert "events" in form.errors
+        assert "Only Western Regional (WRCCDC) teams" in str(form.errors["events"])
 
     def test_non_wrccdc_blocked_from_regional(self, base_form_data, season_with_events):
         """Non-WRCCDC teams cannot register for regionals."""
@@ -268,8 +268,8 @@ class TestRegistrationFormRegionValidation:
         base_form_data["events"] = [regional.id]
         form = RegistrationForm(data=base_form_data)
         assert not form.is_valid()
-        assert "__all__" in form.errors
-        assert "Only Western Regional (WRCCDC) teams" in str(form.errors["__all__"])
+        assert "events" in form.errors
+        assert "Only Western Regional (WRCCDC) teams" in str(form.errors["events"])
 
     def test_non_wrccdc_blocked_mixed_events(self, base_form_data, season_with_events):
         """Non-WRCCDC teams cannot register for mix of invitational and qualifier."""
@@ -278,8 +278,8 @@ class TestRegistrationFormRegionValidation:
         base_form_data["events"] = [invitational.id, qualifier.id]
         form = RegistrationForm(data=base_form_data)
         assert not form.is_valid()
-        assert "__all__" in form.errors
-        assert "Qualifier 1" in str(form.errors["__all__"])
+        assert "events" in form.errors
+        assert "Qualifier 1" in str(form.errors["events"])
 
     def test_at_large_blocked_from_qualifier(self, base_form_data, season_with_events):
         """At-large teams cannot register for qualifiers."""
@@ -288,4 +288,54 @@ class TestRegistrationFormRegionValidation:
         base_form_data["events"] = [qualifier.id]
         form = RegistrationForm(data=base_form_data)
         assert not form.is_valid()
-        assert "__all__" in form.errors
+        assert "events" in form.errors
+
+
+def test_the_region_rule_names_the_ticked_events_on_the_events_field(active_season_with_event):
+    season, _ = active_season_with_event
+    qualifier = Event.objects.create(
+        season=season, name="Qualifier", event_type="qualifier", date="2026-02-15", registration_open=True
+    )
+    form = RegistrationForm(data={"region": "mwccdc", "events": [qualifier.pk]})
+
+    assert not form.is_valid()
+    assert form.errors["events"] == [
+        "Only Western Regional (WRCCDC) teams can register for Qualifiers and Regionals. Please remove: Qualifier"
+    ]
+    assert "__all__" not in form.errors
+
+
+def test_a_kept_closed_enrollment_against_the_region_is_the_forms_own_error(active_season_with_event):
+    from ..models import RegistrationEventEnrollment, TeamRegistration
+
+    season, event = active_season_with_event
+    closed = Event.objects.create(
+        season=season, name="Closed Qualifier", event_type="qualifier", date="2026-02-01", registration_open=False
+    )
+    registration = TeamRegistration.objects.create(school_name="Example School", region="wrccdc")
+    RegistrationEventEnrollment.objects.create(registration=registration, event=closed)
+    form = RegistrationForm(data={"region": "mwccdc", "events": [event.pk]}, instance=registration)
+
+    assert not form.is_valid()
+    assert "Closed Qualifier" in str(form.errors["__all__"])
+    assert "events" not in form.errors
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [("events", "Select at least one event."), ("agree_to_rules", "Agree to the competition rules to register.")],
+)
+def test_an_unticked_required_choice_says_what_to_do(active_season_with_event, field, message):
+    form = RegistrationForm(data={})
+
+    assert form.errors[field] == [message]
+
+
+def test_name_placeholders_are_not_sample_names():
+    """A placeholder that reads as an entered value hides that the field is empty."""
+    form = RegistrationForm()
+
+    for name in ("captain_name", "coach_name"):
+        assert "placeholder" not in form.fields[name].widget.attrs
+    for name in ("captain_email", "coach_email"):
+        assert form.fields[name].widget.attrs["placeholder"] == "name@school.edu"

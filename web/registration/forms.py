@@ -6,12 +6,16 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import QuerySet
 from django.http import QueryDict
+from django.utils.html import format_html
 
 from .models import Event, RegistrationContact, Season, TeamRegistration
 from .services import NewEvent, NewSeason, new_event_problem
 
 CONTACT_EMAIL_MAX_LENGTH = RegistrationContact._meta.get_field("email").max_length
 RESTRICTED_EVENT_TYPES = ("qualifier", "regional")
+RULES_URL = "https://wrccdc.org/about/rules/"
+PHONE = "(555) 123-4567"
+EMAIL = "name@school.edu"
 # The registration edit page always posts this beside the open events it offered (shown_events)
 LISTED = "events_listed"
 
@@ -41,45 +45,70 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
 
     captain_name = forms.CharField(max_length=255, label="Full Name")
     # The column's length: a form EmailField alone accepts 320 characters
-    captain_email = forms.EmailField(max_length=CONTACT_EMAIL_MAX_LENGTH, label="Email Address")
-    captain_phone = forms.CharField(max_length=50, label="Phone Number")
+    captain_email = forms.EmailField(
+        max_length=CONTACT_EMAIL_MAX_LENGTH,
+        label="Email Address",
+        widget=forms.EmailInput(attrs={"placeholder": EMAIL}),
+    )
+    captain_phone = forms.CharField(
+        max_length=50, label="Phone Number", widget=forms.TextInput(attrs={"type": "tel", "placeholder": PHONE})
+    )
 
     coach_name = forms.CharField(max_length=255, label="Full Name")
-    coach_email = forms.EmailField(max_length=CONTACT_EMAIL_MAX_LENGTH, label="Email Address")
-    coach_phone = forms.CharField(max_length=50, label="Phone Number", required=False)
+    coach_email = forms.EmailField(
+        max_length=CONTACT_EMAIL_MAX_LENGTH,
+        label="Email Address",
+        widget=forms.EmailInput(attrs={"placeholder": EMAIL}),
+    )
+    coach_phone = forms.CharField(
+        max_length=50,
+        label="Phone Number",
+        required=False,
+        widget=forms.TextInput(attrs={"type": "tel", "placeholder": PHONE}),
+    )
 
     events = OpenEventsField(
         queryset=Event.objects.none(),
         widget=forms.CheckboxSelectMultiple,
         required=True,
-        label="Select Events",
+        label="Select all events your team plans to participate in",
+        error_messages={"required": "Select at least one event."},
     )
 
     agree_to_rules = forms.BooleanField(
         required=True,
-        label="I agree to the competition rules",
+        label=format_html(
+            'I have read and agree to the <a href="{}" target="_blank">competition rules and guidelines</a>',
+            RULES_URL,
+        ),
+        error_messages={"required": "Agree to the competition rules to register."},
     )
 
     class Meta:
         model = TeamRegistration
         fields = ["school_name", "region"]
         labels = {
-            "school_name": "School Name",
+            "school_name": "School / University Name",
             "region": "CCDC Region",
         }
         help_texts = {
+            "school_name": "Enter the full official name of your institution.",
             "region": "Select your school's CCDC region. Only WRCCDC teams can register for Qualifiers and Regionals.",
         }
+        widgets = {"school_name": forms.TextInput(attrs={"placeholder": "e.g. Riverdale State University"})}
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         events_field = cast(OpenEventsField, self.fields["events"])
         offered = open_events()
         events_field.queryset = offered
+        offered_pks = set(offered.values_list("pk", flat=True))
+        self.events_open = bool(offered_pks)
+        if not offered_pks:
+            events_field.help_text = "No events are open for registration right now. Check back later."
         self.unoffered_events: list[Event] = []
         self.untickable: set[int] = set()
         if self.instance.pk:
-            offered_pks = set(offered.values_list("pk", flat=True))
             enrolled = set(self.instance.event_enrollments.values_list("event_id", flat=True))
             self.untickable = offered_pks
             if self.is_bound and LISTED in self.data:
@@ -92,7 +121,7 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
             self.unoffered_events = [
                 enrollment.event
                 for enrollment in self.instance.event_enrollments.select_related("event")
-                .exclude(event__in=offered)
+                .exclude(event_id__in=offered_pks)
                 .order_by("event__date")
             ]
             # An enrollment a save can't untick already registers the team for something
@@ -123,19 +152,19 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
         if region and region != "wrccdc":
             restricted = [e.name for e in events if e.event_type in RESTRICTED_EVENT_TYPES]
             closed = [e.name for e in kept if e.event_type in RESTRICTED_EVENT_TYPES]
-            problems = []
             if restricted:
-                problems.append(
+                self.add_error(
+                    "events",
                     "Only Western Regional (WRCCDC) teams can register for Qualifiers and Regionals. "
-                    f"Please remove: {', '.join(restricted)}"
+                    f"Please remove: {', '.join(restricted)}",
                 )
             if closed:
-                problems.append(
+                # Unticking can't fix it, so it belongs to no field
+                self.add_error(
+                    None,
                     f"This team is registered for {', '.join(closed)}, which only WRCCDC teams can enter and which "
-                    "can't be changed here: contact the organizers to change the region."
+                    "can't be changed here: contact the organizers to change the region.",
                 )
-            if problems:
-                raise forms.ValidationError(problems)
 
         return cleaned_data
 
@@ -274,10 +303,9 @@ class ShownSchoolForm(forms.Form):
 
 
 class NewEventFields(forms.Form):
-    """The fields of an event to create (the import's new event, Close Out's event for scores that ran without an
-    import) and the season the page showed as active. new_event() checks them together, as non-field errors."""
+    """An event to create and the season the page showed as active; new_event() raises their problems as non-field
+    errors."""
 
-    NEW_FIELDS = ("new_name", "new_date", "new_type", "current_season")
     MISSING = "Give the new event a name, a date and a type."
 
     new_name = forms.CharField(
@@ -290,17 +318,14 @@ class NewEventFields(forms.Form):
         error_messages={"invalid_choice": "Choose a valid event type."},
     )
     # The id of the season the page showed as active, empty when none was
-    current_season = forms.IntegerField(required=False)
+    current_season = forms.IntegerField(required=False, widget=forms.HiddenInput)
 
     def new_season(self) -> NewSeason | None:
         """The new season for the event; only the import starts one."""
         return None
 
     def new_event(self) -> NewEvent:
-        """The event to create, from the cleaned fields. Call from clean(); ValidationError says what is wrong."""
-        for name in self.NEW_FIELDS:
-            if name in self.errors:
-                raise forms.ValidationError(self.errors[name][0])
+        """The event to create; call from clean() once the fields it reads have no errors of their own."""
         data = self.cleaned_data
         if not (data.get("new_name") and data.get("new_date") and data.get("new_type")):
             raise forms.ValidationError(self.MISSING)

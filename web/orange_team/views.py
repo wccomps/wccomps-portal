@@ -19,7 +19,6 @@ from core.csv_export import csv_writer
 from core.errors import json_endpoint
 from orange_team.forms import (
     MAX_FOLLOW_UP_MINUTES,
-    MAX_MINUTES,
     AssignmentRejectForm,
     CriterionInput,
     CriterionRow,
@@ -189,14 +188,14 @@ def auto_assign_all(request: HttpRequest) -> HttpResponse:
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
 def check_create(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
-        return _check_page(request, None, _EMPTY_CHECK, [])
+        return _check_page(request, None, OrangeCheckForm(), [])
     form, criteria = _posted_check(request, None)
-    if form is None or criteria is None:
-        return _check_page(request, None, _posted_values(request), criterion_rows(request.POST))
+    if criteria is None:
+        return _check_page(request, None, form, criterion_rows(request.POST))
 
     user = cast(User, request.user)
     with transaction.atomic():
-        orange_check = OrangeCheck.objects.create(**_check_fields(form), created_by=user)
+        orange_check = OrangeCheck.objects.create(**form.model_fields(), created_by=user)
         for c in criteria:
             OrangeCheckCriterion.objects.create(
                 orange_check=orange_check, label=c["label"], points=c["points"], sort_order=c["sort_order"]
@@ -227,14 +226,14 @@ def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
     orange_check = get_object_or_404(OrangeCheck, pk=check_id)
     if request.method != "POST":
         shown = [CriterionRow(id=str(c.pk), label=c.label, points=str(c.points)) for c in orange_check.criteria.all()]
-        return _check_page(request, orange_check, _check_values(orange_check), shown)
+        return _check_page(request, orange_check, OrangeCheckForm.for_check(orange_check), shown)
     form, criteria = _posted_check(request, orange_check)
-    if form is None or criteria is None:
+    if criteria is None:
         # Show what was posted, rubric included: a page without the rows would save an empty rubric next time
-        return _check_page(request, orange_check, _posted_values(request), criterion_rows(request.POST))
+        return _check_page(request, orange_check, form, criterion_rows(request.POST))
 
     with transaction.atomic():
-        for name, value in _check_fields(form).items():
+        for name, value in form.model_fields().items():
             setattr(orange_check, name, value)
         orange_check.save()
         update_check_criteria(orange_check, criteria)
@@ -243,61 +242,26 @@ def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
     return redirect("orange_team:check_detail", check_id=orange_check.pk)
 
 
-_EMPTY_CHECK = {"title": "", "description": "", "scheduled_at": "", "time_limit_minutes": "", "max_points": "0"}
-
-
 def _posted_check(
     request: HttpRequest, orange_check: OrangeCheck | None
-) -> tuple[OrangeCheckForm | None, list[CriterionInput] | None]:
-    """The check form and its rubric when both are valid; otherwise (None, None), with the problems as a message."""
+) -> tuple[OrangeCheckForm, list[CriterionInput] | None]:
+    """The bound form and its rubric, or None when either is invalid; rubric and point-total problems become the
+    form's errors."""
     form = OrangeCheckForm(request.POST)
-    problems = [] if form.is_valid() else [_form_errors(form)]
+    valid = form.is_valid()
     try:
         criteria = extract_criteria(request.POST)
     except ValidationError as refused:
-        problems += refused.messages
-    else:
-        worth = sum(c["points"] for c in criteria) if criteria else form.cleaned_data.get("max_points") or 0
-        if not problems and (problem := scores_total_problem(orange_check.pk if orange_check else None, worth)):
-            problems.append(problem)
-    if problems:
-        messages.error(request, " ".join(problems))
-        return None, None
-    return form, criteria
-
-
-def _check_fields(form: OrangeCheckForm) -> dict[str, object]:
-    minutes = form.cleaned_data.get("time_limit_minutes")
-    return {
-        "title": form.cleaned_data["title"],
-        "description": form.cleaned_data["description"],
-        "scheduled_at": form.cleaned_data["scheduled_at"] or None,
-        "max_points": form.cleaned_data.get("max_points") or 0,
-        "time_limit": timedelta(minutes=minutes) if minutes else None,
-    }
-
-
-def _check_values(check: OrangeCheck) -> dict[str, str]:
-    """The check form's field values for a stored check."""
-    scheduled = timezone.localtime(check.scheduled_at).strftime("%Y-%m-%dT%H:%M") if check.scheduled_at else ""
-    minutes = str(int(check.time_limit.total_seconds() // 60)) if check.time_limit else ""
-    return {
-        "title": check.title,
-        "description": check.description,
-        "scheduled_at": scheduled,
-        "time_limit_minutes": minutes,
-        "max_points": str(check.max_points),
-    }
-
-
-def _posted_values(request: HttpRequest) -> dict[str, str]:
-    """The check form's fields as posted, to show again with its errors."""
-    form = OrangeCheckForm(request.POST)
-    return {name: str(form[name].value() or "") for name in _EMPTY_CHECK}
+        form.add_error(None, refused)
+        return form, None
+    worth = sum(c["points"] for c in criteria) if criteria else form.cleaned_data.get("max_points") or 0
+    if valid and (problem := scores_total_problem(orange_check.pk if orange_check else None, worth)):
+        form.add_error(None, problem)
+    return form, criteria if form.is_valid() else None
 
 
 def _check_page(
-    request: HttpRequest, orange_check: OrangeCheck | None, values: dict[str, str], criteria: list[CriterionRow]
+    request: HttpRequest, orange_check: OrangeCheck | None, form: OrangeCheckForm, criteria: list[CriterionRow]
 ) -> HttpResponse:
     return render(
         request,
@@ -305,10 +269,9 @@ def _check_page(
         {
             "mode": "create" if orange_check is None else "edit",
             "orange_check": orange_check,
-            "values": values,
+            "form": form,
             "criteria": criteria,
             "max_points": MAX_POINTS,
-            "max_minutes": MAX_MINUTES,
             "is_lead": True,
         },
     )

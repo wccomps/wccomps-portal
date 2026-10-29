@@ -13,15 +13,9 @@
                 {% csrf_token %}
                 <c-form_errors :form="form" />
                 <c-fieldset heading="Season Details" aligned="true">
-                    <c-form_field :field="form.name">
-                        {{ form.name }}
-                    </c-form_field>
-                    <c-form_field :field="form.year">
-                        {{ form.year }}
-                    </c-form_field>
-                    <c-form_field :field="form.is_active">
-                        {{ form.is_active }}
-                    </c-form_field>
+                    {{ form.name.as_field_group }}
+                    {{ form.year.as_field_group }}
+                    {{ form.is_active.as_field_group }}
                 </c-fieldset>
                 <c-button_row class="mt-20 justify-end">
                     <c-link href="{% url 'registration_season_list' %}" variant="cancel">Cancel</c-link>
