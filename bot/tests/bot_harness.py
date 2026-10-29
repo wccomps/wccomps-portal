@@ -1017,8 +1017,7 @@ def dashboard_view(run: Run, data: Draws) -> discord.ui.View:
     from bot.unified_dashboard import DashboardControlView, UnifiedDashboard
 
     dashboard = UnifiedDashboard(run.discord.bot)
-    dashboard.dashboard_message_id = 1
-    dashboard.dashboard_channel_id = QUEUE_CHANNEL_ID
+    dashboard.message = run.discord.message_object(run.discord.channel(QUEUE_CHANNEL_ID))
     return DashboardControlView(dashboard)
 
 

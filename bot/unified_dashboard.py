@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+from contextlib import suppress
 from datetime import datetime, timedelta
 
+import aiohttp
 import discord
 from asgiref.sync import sync_to_async
 from django.conf import settings
@@ -11,7 +13,14 @@ from django.utils import timezone
 
 from bot.heartbeat import record as record_heartbeat
 from bot.permissions import has_permission
-from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, add_field, fit_lines, recycle_db_connection
+from bot.utils import (
+    DISCORD_EMBED_FIELD_CHAR_LIMIT,
+    add_field,
+    fit,
+    fit_lines,
+    log_to_ops_channel,
+    recycle_db_connection,
+)
 from core.models import BotState
 from core.utils import shorten
 from ticketing.models import Ticket
@@ -20,6 +29,11 @@ logger = logging.getLogger(__name__)
 
 DASHBOARD_DEBOUNCE_SECONDS = 10
 DASHBOARD_FOOTER_ROOM = 100  # kept for the footer counting the categories that don't fit
+DASHBOARD_MESSAGE_KEY = "unified_dashboard_message_id"
+# Discord being unreachable or refusing; restarting the bot fixes none of these
+# Discord's code for a request it rejects as malformed: the embed is at fault, not the message
+INVALID_FORM_BODY = 50035
+DISCORD_TROUBLE = (discord.HTTPException, aiohttp.ClientError, TimeoutError)
 
 
 class UnifiedDashboard:
@@ -29,8 +43,8 @@ class UnifiedDashboard:
         self.bot = bot
         self.running = False
         self.task: asyncio.Task[None] | None = None
-        self.dashboard_message_id: int | None = None
-        self.dashboard_channel_id: int | None = None
+        self.message: discord.PartialMessage | None = None
+        self._reported_problems: set[tuple[str, int | None, int | None]] = set()
         self.sort_by = "created"  # Options: created, stale, team
         self.filter_status = "all"  # Options: all, open, claimed
         self._needs_update = False
@@ -50,82 +64,70 @@ class UnifiedDashboard:
         """Main dashboard loop - checks for updates every 10 seconds."""
         await self.bot.wait_until_ready()
 
-        await self._initialize_dashboard()
-
         while self.running:
             try:
                 await recycle_db_connection()
-                await self._check_and_update()
+                await self._pass()
                 record_heartbeat("dashboard", self.bot)
             except Exception as e:
                 logger.exception(f"Error in dashboard loop: {e}")
 
             await asyncio.sleep(DASHBOARD_DEBOUNCE_SECONDS)
 
-    async def _initialize_dashboard(self) -> None:
-        """Initialize or reconnect to existing dashboard message."""
-        queue_channel_id = settings.DISCORD_TICKET_QUEUE_CHANNEL_ID
-        if not queue_channel_id:
-            logger.warning("DISCORD_TICKET_QUEUE_CHANNEL_ID not configured")
+    async def _pass(self) -> None:
+        """Post the dashboard if the bot has none, then refresh it if asked. A Discord failure is reported to the ops
+        channel once per cause until a pass succeeds, and the pass still counts; database errors propagate."""
+        channel_id = settings.DISCORD_TICKET_QUEUE_CHANNEL_ID
+        if not channel_id:
             return
+        try:
+            if self.message is None:
+                await self._initialize_dashboard(channel_id)
+            await self._check_and_update()
+        except DISCORD_TROUBLE as e:
+            await self._report_problem(e, channel_id)
+        else:
+            self._reported_problems.clear()
 
-        @sync_to_async
-        def get_dashboard_state() -> tuple[int | None, int | None]:
-            try:
-                msg_state = BotState.objects.get(key="unified_dashboard_message_id")
-                chan_state = BotState.objects.get(key="unified_dashboard_channel_id")
-                return int(msg_state.value), int(chan_state.value)
-            except BotState.DoesNotExist:
-                return None, None
-
-        msg_id, chan_id = await get_dashboard_state()
-
-        if msg_id and chan_id:
-            try:
-                channel = self.bot.get_channel(chan_id)
-                if channel and isinstance(channel, discord.TextChannel):
-                    message = await channel.fetch_message(msg_id)
-                    self.dashboard_message_id = msg_id
-                    self.dashboard_channel_id = chan_id
-                    logger.info(f"Reconnected to existing dashboard message {msg_id}")
-
-                    await self._update_dashboard()
-                    return
-            except Exception as e:
-                logger.warning(f"Could not reconnect to existing dashboard: {e}")
-
-        channel = self.bot.get_channel(queue_channel_id)
-        if not channel or not isinstance(channel, discord.TextChannel):
-            logger.error(f"Could not find text channel {queue_channel_id}")
+    async def _report_problem(self, error: Exception, channel_id: int) -> None:
+        logger.warning(f"Ticket queue dashboard in channel {channel_id}: {type(error).__name__}: {error}")
+        # Not str(error): a 5xx body differs on every response (Cloudflare puts a Ray ID in it)
+        cause = (type(error).__name__, getattr(error, "status", None), getattr(error, "code", None))
+        if cause in self._reported_problems:
             return
-
-        embed = discord.Embed(
-            title="Ticket Queue Dashboard",
-            description="Loading tickets...",
-            color=discord.Color.blue(),
+        self._reported_problems.add(cause)
+        await log_to_ops_channel(
+            self.bot,
+            f"The ticket queue dashboard in <#{channel_id}> can't be posted or updated: "
+            f"{fit(f'{type(error).__name__}: {error}', 300)}",
         )
 
-        view = DashboardControlView(self)
-        message = await channel.send(embed=embed, view=view)
+    async def _initialize_dashboard(self, channel_id: int) -> None:
+        """Point self.message at the stored dashboard if it can still be edited, else post and store a new one; on
+        other Discord trouble it keeps it and raises."""
+        channel = self.bot.get_partial_messageable(channel_id, guild_id=settings.COMPETITION_GUILD_ID)
 
-        self.dashboard_message_id = message.id
-        self.dashboard_channel_id = channel.id
+        stored = await BotState.objects.filter(key=DASHBOARD_MESSAGE_KEY).values_list("value", flat=True).afirst()
+        if stored and stored.isdigit():
+            self.message = channel.get_partial_message(int(stored))
+            try:
+                await self._update_dashboard()
+            except DISCORD_TROUBLE:
+                self._needs_update = True
+                raise
+            if self.message:
+                logger.info(f"Reconnected to existing dashboard message {stored}")
+                return
 
-        @sync_to_async
-        def save_dashboard_state() -> None:
-            BotState.objects.update_or_create(key="unified_dashboard_message_id", defaults={"value": str(message.id)})
-            BotState.objects.update_or_create(key="unified_dashboard_channel_id", defaults={"value": str(channel.id)})
-
-        await save_dashboard_state()
-        logger.info(f"Created new dashboard message {message.id}")
-
-        await self._update_dashboard()
+        sent = await channel.send(embed=await self._render(), view=DashboardControlView(self))
+        self.message = channel.get_partial_message(sent.id)
+        await BotState.objects.aupdate_or_create(key=DASHBOARD_MESSAGE_KEY, defaults={"value": str(sent.id)})
+        logger.info(f"Created new dashboard message {sent.id}")
 
     async def _check_and_update(self) -> None:
         if not self._needs_update:
             return
-        # Cleared first so a trigger during the refresh isn't lost; a refresh that fails on the DB is
-        # retried next pass, and the error propagates so the loop skips its heartbeat.
+        # Cleared first so a trigger during the refresh isn't lost; a refresh that fails is retried next pass.
         self._needs_update = False
         try:
             await self._update_dashboard()
@@ -217,97 +219,99 @@ class UnifiedDashboard:
         return f"{category_name} ({len(tickets)})", fit_lines(lines, DISCORD_EMBED_FIELD_CHAR_LIMIT) or "No tickets"
 
     async def _update_dashboard(self) -> None:
-        if not self.dashboard_message_id or not self.dashboard_channel_id:
+        """Show the tickets now. A deleted message is dropped, and one the bot can't edit (403, or a 400 other than
+        our own invalid embed) is deleted first, so a new one is posted; a failed delete raises, so no second
+        dashboard with live buttons appears."""
+        message = self.message
+        if message is None:
             return
-
+        embed = await self._render()
         try:
-            channel = self.bot.get_channel(self.dashboard_channel_id)
-            if not channel or not isinstance(channel, discord.TextChannel):
-                logger.error(f"Dashboard channel {self.dashboard_channel_id} not found")
-                return
-
-            message = await channel.fetch_message(self.dashboard_message_id)
-
-            @sync_to_async
-            def get_tickets() -> list[Ticket]:
-                if self.filter_status == "all":
-                    query = Ticket.objects.filter(status__in=["open", "claimed"])
-                else:
-                    query = Ticket.objects.filter(status=self.filter_status)
-                return list(query.select_related("team", "assigned_to", "category").order_by("created_at"))
-
-            @sync_to_async
-            def get_stats() -> tuple[int, int]:
-                today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                resolved_today = Ticket.objects.filter(resolved_at__gte=today_start).count()
-
-                resolved_with_times = Ticket.objects.filter(
-                    status="resolved",
-                    resolved_at__isnull=False,
-                    created_at__isnull=False,
-                )
-                total_seconds: float = 0
-                count = 0
-                for ticket in resolved_with_times[:100]:
-                    if ticket.resolved_at and ticket.created_at:
-                        delta = ticket.resolved_at - ticket.created_at
-                        total_seconds += delta.total_seconds()
-                        count += 1
-                avg_minutes = int(total_seconds / count / 60) if count > 0 else 0
-                return resolved_today, avg_minutes
-
-            tickets = await get_tickets()
-
-            if self.sort_by == "stale":
-                tickets.sort(key=lambda t: t.assigned_at or timezone.now())
-            elif self.sort_by == "team":
-                tickets.sort(key=lambda t: t.team.team_name)
-            else:
-                tickets.sort(key=lambda t: t.created_at)
-
-            embed = discord.Embed(
-                title="Ticket Queue Dashboard",
-                description=(
-                    f"**{len(tickets)} active tickets** "
-                    f"(Sort: {self.sort_by.title()} | Filter: {self.filter_status.replace('_', ' ').title()})"
-                ),
-                color=discord.Color.blue(),
-                timestamp=timezone.now(),
-            )
-
-            if not tickets:
-                resolved_today, avg_time = await get_stats()
-                embed.description = "**No active tickets!**"
-                embed.add_field(
-                    name="Today's Stats",
-                    value=f"**{resolved_today}** tickets resolved\n**{avg_time}** min avg resolution time",
-                    inline=False,
-                )
-            else:
-                categorized = list(self._categorize_tickets(tickets).items())
-                guild_id = channel.guild.id
-                for n, (category_id, cat_tickets) in enumerate(categorized):
-                    cat = cat_tickets[0].category
-                    cat_name = cat.display_name if cat else f"Category {category_id}"
-                    field_name, field_value = self._build_category_field(
-                        cat_name, cat_tickets, guild_id, cat.steps if cat else []
-                    )
-                    # The embed holds 25 fields and 6000 characters: the categories past that are counted instead
-                    if not add_field(embed, field_name, field_value, room=DASHBOARD_FOOTER_ROOM):
-                        left = sum(len(rest) for _, rest in categorized[n:])
-                        embed.set_footer(text=f"{left} more tickets in other categories: see the portal's ticket list")
-                        break
-
-            view = DashboardControlView(self)
-            await message.edit(embed=embed, view=view)
-            logger.info("Updated unified dashboard")
-
+            await message.edit(embed=embed, view=DashboardControlView(self))
         except discord.NotFound:
-            self.dashboard_message_id = None
-            self.dashboard_channel_id = None
+            self.message = None
+            return
         except discord.HTTPException as e:
-            # Discord trouble is not ours to fix by restarting; anything else (the DB) propagates.
-            logger.exception(f"Error updating dashboard: {e}")
+            if e.status not in (400, 403) or e.code == INVALID_FORM_BODY:
+                raise
+            logger.warning(f"Dashboard message {message.id} can't be edited ({e.status}); replacing it")
+            with suppress(discord.NotFound):
+                await message.delete()
+            self.message = None
+            return
+        logger.info("Updated unified dashboard")
+
+    async def _render(self) -> discord.Embed:
+        @sync_to_async
+        def get_tickets() -> list[Ticket]:
+            if self.filter_status == "all":
+                query = Ticket.objects.filter(status__in=["open", "claimed"])
+            else:
+                query = Ticket.objects.filter(status=self.filter_status)
+            return list(query.select_related("team", "assigned_to", "category").order_by("created_at"))
+
+        @sync_to_async
+        def get_stats() -> tuple[int, int]:
+            today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            resolved_today = Ticket.objects.filter(resolved_at__gte=today_start).count()
+
+            resolved_with_times = Ticket.objects.filter(
+                status="resolved",
+                resolved_at__isnull=False,
+                created_at__isnull=False,
+            )
+            total_seconds: float = 0
+            count = 0
+            for ticket in resolved_with_times[:100]:
+                if ticket.resolved_at and ticket.created_at:
+                    delta = ticket.resolved_at - ticket.created_at
+                    total_seconds += delta.total_seconds()
+                    count += 1
+            avg_minutes = int(total_seconds / count / 60) if count > 0 else 0
+            return resolved_today, avg_minutes
+
+        tickets = await get_tickets()
+
+        if self.sort_by == "stale":
+            tickets.sort(key=lambda t: t.assigned_at or timezone.now())
+        elif self.sort_by == "team":
+            tickets.sort(key=lambda t: t.team.team_name)
+        else:
+            tickets.sort(key=lambda t: t.created_at)
+
+        embed = discord.Embed(
+            title="Ticket Queue Dashboard",
+            description=(
+                f"**{len(tickets)} active tickets** "
+                f"(Sort: {self.sort_by.title()} | Filter: {self.filter_status.replace('_', ' ').title()})"
+            ),
+            color=discord.Color.blue(),
+            timestamp=timezone.now(),
+        )
+
+        if not tickets:
+            resolved_today, avg_time = await get_stats()
+            embed.description = "**No active tickets!**"
+            embed.add_field(
+                name="Today's Stats",
+                value=f"**{resolved_today}** tickets resolved\n**{avg_time}** min avg resolution time",
+                inline=False,
+            )
+        else:
+            categorized = list(self._categorize_tickets(tickets).items())
+            guild_id = settings.COMPETITION_GUILD_ID
+            for n, (category_id, cat_tickets) in enumerate(categorized):
+                cat = cat_tickets[0].category
+                cat_name = cat.display_name if cat else f"Category {category_id}"
+                field_name, field_value = self._build_category_field(
+                    cat_name, cat_tickets, guild_id, cat.steps if cat else []
+                )
+                # The embed holds 25 fields and 6000 characters: the categories past that are counted instead
+                if not add_field(embed, field_name, field_value, room=DASHBOARD_FOOTER_ROOM):
+                    left = sum(len(rest) for _, rest in categorized[n:])
+                    embed.set_footer(text=f"{left} more tickets in other categories: see the portal's ticket list")
+                    break
+        return embed
 
     def trigger_update(self) -> None:
         """Refresh the dashboard on the loop's next pass, so a burst of ticket changes costs one edit."""
@@ -340,7 +344,12 @@ class DashboardControlView(discord.ui.View):
         if filter_status is not None:
             self.dashboard.filter_status = filter_status
         await interaction.response.defer(ephemeral=True)
-        await self.dashboard._update_dashboard()
+        try:
+            await self.dashboard._update_dashboard()
+        except DISCORD_TROUBLE as e:
+            logger.warning(f"Could not update the dashboard from its buttons: {e}")
+            message = "Discord didn't take the dashboard update; it is retried shortly."
+            self.dashboard.trigger_update()
         await interaction.followup.send(message, ephemeral=True)
 
     @discord.ui.button(

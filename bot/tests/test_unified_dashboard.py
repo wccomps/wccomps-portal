@@ -3,6 +3,7 @@
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+import aiohttp
 import discord
 import pytest
 from django.utils import timezone
@@ -56,92 +57,6 @@ class TestUnifiedDashboard:
         assert dashboard.running is False
         mock_task.cancel.assert_called_once()
 
-    async def test_initialize_dashboard_creates_new_message(self) -> None:
-        """Test _initialize_dashboard creates new message when none exists."""
-        bot = AsyncMock(spec=discord.Client)
-        dashboard = UnifiedDashboard(bot)
-
-        mock_channel = MagicMock(spec=discord.TextChannel)
-        mock_channel.id = 9999
-        mock_message = AsyncMock()
-        mock_message.id = 8888
-        mock_channel.send = AsyncMock(return_value=mock_message)
-
-        bot.get_channel.return_value = mock_channel
-
-        with (
-            patch.object(dashboard, "_update_dashboard", new_callable=AsyncMock) as mock_update,
-            patch("bot.unified_dashboard.settings") as mock_settings,
-        ):
-            mock_settings.DISCORD_TICKET_QUEUE_CHANNEL_ID = 9999
-
-            await dashboard._initialize_dashboard()
-
-            assert dashboard.dashboard_message_id == 8888
-            assert dashboard.dashboard_channel_id == 9999
-            mock_channel.send.assert_called_once()
-            mock_update.assert_called_once()
-
-            # Verify state saved
-            msg_state = await BotState.objects.aget(key="unified_dashboard_message_id")
-            assert msg_state.value == "8888"
-
-    async def test_initialize_dashboard_reconnects_existing(self) -> None:
-        """Test _initialize_dashboard reconnects to existing message."""
-        bot = AsyncMock(spec=discord.Client)
-        dashboard = UnifiedDashboard(bot)
-
-        await BotState.objects.acreate(key="unified_dashboard_message_id", value="7777")
-        await BotState.objects.acreate(key="unified_dashboard_channel_id", value="6666")
-
-        mock_channel = MagicMock(spec=discord.TextChannel)
-        mock_channel.id = 6666
-        mock_message = AsyncMock()
-        mock_message.id = 7777
-        mock_channel.fetch_message = AsyncMock(return_value=mock_message)
-
-        bot.get_channel.return_value = mock_channel
-
-        with patch.object(dashboard, "_update_dashboard", new_callable=AsyncMock) as mock_update:
-            await dashboard._initialize_dashboard()
-
-            assert dashboard.dashboard_message_id == 7777
-            assert dashboard.dashboard_channel_id == 6666
-            mock_channel.fetch_message.assert_called_once_with(7777)
-            mock_update.assert_called_once()
-
-    async def test_initialize_dashboard_fallback_on_reconnect_failure(self) -> None:
-        """Test _initialize_dashboard creates new message if reconnect fails."""
-        bot = AsyncMock(spec=discord.Client)
-        dashboard = UnifiedDashboard(bot)
-
-        await BotState.objects.acreate(key="unified_dashboard_message_id", value="5555")
-        await BotState.objects.acreate(key="unified_dashboard_channel_id", value="4444")
-
-        mock_channel = MagicMock(spec=discord.TextChannel)
-        mock_channel.id = 9999
-        mock_message = AsyncMock()
-        mock_message.id = 3333
-        mock_channel.send = AsyncMock(return_value=mock_message)
-
-        mock_response = Mock()
-        mock_response.status = 404
-        mock_channel.fetch_message = AsyncMock(side_effect=discord.NotFound(mock_response, "message"))
-
-        # First call returns None (old channel), second returns new channel
-        bot.get_channel.side_effect = [mock_channel, mock_channel]
-
-        with (
-            patch.object(dashboard, "_update_dashboard", new_callable=AsyncMock),
-            patch("bot.unified_dashboard.settings") as mock_settings,
-        ):
-            mock_settings.DISCORD_TICKET_QUEUE_CHANNEL_ID = 9999
-
-            await dashboard._initialize_dashboard()
-
-            assert dashboard.dashboard_message_id == 3333
-            mock_channel.send.assert_called_once()
-
     async def test_triggers_between_passes_cost_one_update(self) -> None:
         dashboard = UnifiedDashboard(AsyncMock(spec=discord.Client))
 
@@ -176,13 +91,8 @@ class TestUnifiedDashboard:
 
     async def test_db_error_while_updating_propagates(self) -> None:
         """A pass with a pending refresh lets DB errors through, so the loop skips its heartbeat."""
-        channel = MagicMock(spec=discord.TextChannel)
-        channel.fetch_message = AsyncMock()
-        bot = MagicMock(spec=discord.Client)
-        bot.get_channel.return_value = channel
-        dashboard = UnifiedDashboard(bot)
-        dashboard.dashboard_message_id = 1
-        dashboard.dashboard_channel_id = 2
+        dashboard = UnifiedDashboard(MagicMock(spec=discord.Client))
+        dashboard.message = AsyncMock()
         dashboard.trigger_update()
 
         with (
@@ -348,8 +258,6 @@ class TestUnifiedDashboard:
         """Test _update_dashboard with no active tickets."""
         bot = AsyncMock(spec=discord.Client)
         dashboard = UnifiedDashboard(bot)
-        dashboard.dashboard_message_id = 1111
-        dashboard.dashboard_channel_id = 2222
 
         mock_channel = MagicMock(spec=discord.TextChannel)
         mock_channel.id = 2222
@@ -357,7 +265,7 @@ class TestUnifiedDashboard:
         mock_channel.guild.id = 3333
         mock_message = AsyncMock()
         mock_message.edit = AsyncMock()
-        mock_channel.fetch_message = AsyncMock(return_value=mock_message)
+        dashboard.message = mock_message
 
         bot.get_channel.return_value = mock_channel
 
@@ -372,8 +280,6 @@ class TestUnifiedDashboard:
         """Test _update_dashboard displays tickets correctly."""
         bot = AsyncMock(spec=discord.Client)
         dashboard = UnifiedDashboard(bot)
-        dashboard.dashboard_message_id = 1111
-        dashboard.dashboard_channel_id = 2222
 
         team = await Team.objects.acreate(team_number=10, team_name="Test Team")
 
@@ -393,7 +299,7 @@ class TestUnifiedDashboard:
         mock_channel.guild.id = 3333
         mock_message = AsyncMock()
         mock_message.edit = AsyncMock()
-        mock_channel.fetch_message = AsyncMock(return_value=mock_message)
+        dashboard.message = mock_message
 
         bot.get_channel.return_value = mock_channel
 
@@ -417,8 +323,6 @@ class TestUnifiedDashboard:
 
         bot = AsyncMock(spec=discord.Client)
         dashboard = UnifiedDashboard(bot)
-        dashboard.dashboard_message_id = 1111
-        dashboard.dashboard_channel_id = 2222
 
         team = await Team.objects.acreate(team_number=10, team_name="Test Team")
         await Ticket.objects.acreate(
@@ -436,7 +340,7 @@ class TestUnifiedDashboard:
         mock_channel.guild.id = 3333
         mock_message = AsyncMock()
         mock_message.edit = AsyncMock()
-        mock_channel.fetch_message = AsyncMock(return_value=mock_message)
+        dashboard.message = mock_message
         bot.get_channel.return_value = mock_channel
 
         await dashboard._update_dashboard()
@@ -455,8 +359,6 @@ class TestUnifiedDashboard:
 
         bot = AsyncMock(spec=discord.Client)
         dashboard = UnifiedDashboard(bot)
-        dashboard.dashboard_message_id = 1111
-        dashboard.dashboard_channel_id = 2222
 
         team = await Team.objects.acreate(team_number=10, team_name="Test Team")
         await Ticket.objects.acreate(
@@ -474,7 +376,7 @@ class TestUnifiedDashboard:
         mock_channel.guild.id = 3333
         mock_message = AsyncMock()
         mock_message.edit = AsyncMock()
-        mock_channel.fetch_message = AsyncMock(return_value=mock_message)
+        dashboard.message = mock_message
         bot.get_channel.return_value = mock_channel
 
         await dashboard._update_dashboard()
@@ -488,8 +390,6 @@ class TestUnifiedDashboard:
         """Test _update_dashboard sorting by stale."""
         bot = AsyncMock(spec=discord.Client)
         dashboard = UnifiedDashboard(bot)
-        dashboard.dashboard_message_id = 1111
-        dashboard.dashboard_channel_id = 2222
         dashboard.sort_by = "stale"
 
         team = await Team.objects.acreate(team_number=11, team_name="Test Team")
@@ -520,7 +420,7 @@ class TestUnifiedDashboard:
         mock_channel.guild.id = 3333
         mock_message = AsyncMock()
         mock_message.edit = AsyncMock()
-        mock_channel.fetch_message = AsyncMock(return_value=mock_message)
+        dashboard.message = mock_message
 
         bot.get_channel.return_value = mock_channel
 
@@ -540,8 +440,6 @@ class TestUnifiedDashboard:
         """Test _update_dashboard sorting by team name."""
         bot = AsyncMock(spec=discord.Client)
         dashboard = UnifiedDashboard(bot)
-        dashboard.dashboard_message_id = 1111
-        dashboard.dashboard_channel_id = 2222
         dashboard.sort_by = "team"
 
         team_a = await Team.objects.acreate(team_number=20, team_name="Alpha Team")
@@ -572,7 +470,7 @@ class TestUnifiedDashboard:
         mock_channel.guild.id = 3333
         mock_message = AsyncMock()
         mock_message.edit = AsyncMock()
-        mock_channel.fetch_message = AsyncMock(return_value=mock_message)
+        dashboard.message = mock_message
 
         bot.get_channel.return_value = mock_channel
 
@@ -592,8 +490,6 @@ class TestUnifiedDashboard:
         """Test _update_dashboard filtering to only open tickets."""
         bot = AsyncMock(spec=discord.Client)
         dashboard = UnifiedDashboard(bot)
-        dashboard.dashboard_message_id = 1111
-        dashboard.dashboard_channel_id = 2222
         dashboard.filter_status = "open"
 
         team = await Team.objects.acreate(team_number=30, team_name="Test Team")
@@ -622,7 +518,7 @@ class TestUnifiedDashboard:
         mock_channel.guild.id = 3333
         mock_message = AsyncMock()
         mock_message.edit = AsyncMock()
-        mock_channel.fetch_message = AsyncMock(return_value=mock_message)
+        dashboard.message = mock_message
 
         bot.get_channel.return_value = mock_channel
 
@@ -637,8 +533,6 @@ class TestUnifiedDashboard:
         """Test _update_dashboard filtering to only claimed tickets."""
         bot = AsyncMock(spec=discord.Client)
         dashboard = UnifiedDashboard(bot)
-        dashboard.dashboard_message_id = 1111
-        dashboard.dashboard_channel_id = 2222
         dashboard.filter_status = "claimed"
 
         team = await Team.objects.acreate(team_number=31, team_name="Test Team")
@@ -667,7 +561,7 @@ class TestUnifiedDashboard:
         mock_channel.guild.id = 3333
         mock_message = AsyncMock()
         mock_message.edit = AsyncMock()
-        mock_channel.fetch_message = AsyncMock(return_value=mock_message)
+        dashboard.message = mock_message
 
         bot.get_channel.return_value = mock_channel
 
@@ -678,21 +572,314 @@ class TestUnifiedDashboard:
         embed = call_kwargs["embed"]
         assert "Filter: Claimed" in embed.description
 
-    async def test_update_dashboard_handles_not_found(self) -> None:
-        """Test _update_dashboard handles message not found."""
-        bot = AsyncMock(spec=discord.Client)
-        dashboard = UnifiedDashboard(bot)
-        dashboard.dashboard_message_id = 1111
-        dashboard.dashboard_channel_id = 2222
-
-        mock_channel = MagicMock(spec=discord.TextChannel)
-        mock_response = Mock()
-        mock_response.status = 404
-        mock_channel.fetch_message = AsyncMock(side_effect=discord.NotFound(mock_response, "message"))
-
-        bot.get_channel.return_value = mock_channel
+    async def test_update_dashboard_forgets_a_deleted_message(self) -> None:
+        message = MagicMock(spec=discord.PartialMessage)
+        message.edit = AsyncMock(side_effect=discord.NotFound(Mock(status=404), "Unknown Message"))
+        dashboard = UnifiedDashboard(MagicMock(spec=discord.Client))
+        dashboard.message = message
 
         await dashboard._update_dashboard()
 
-        assert dashboard.dashboard_message_id is None
-        assert dashboard.dashboard_channel_id is None
+        assert dashboard.message is None
+
+
+class FakeQueueChannel:
+    """The ticket queue channel as a partial messageable: messages it holds can be edited, others are NotFound."""
+
+    def __init__(self, channel_id: int = 2222, *, send_error: Exception | None = None) -> None:
+        self.id = channel_id
+        self.messages: dict[int, MagicMock] = {}
+        self.sent = 0
+        self.send_error = send_error
+        self.edit_error: Exception | None = None
+        self.delete_error: Exception | None = None
+        self._next_id = 4444
+
+    def holding(self, message_id: int) -> FakeQueueChannel:
+        self.messages[message_id] = self._message(message_id)
+        return self
+
+    def _message(self, message_id: int) -> MagicMock:
+        message = MagicMock(spec=discord.PartialMessage)
+        message.id = message_id
+        message.channel = self
+
+        async def edit(**_kwargs: object) -> None:
+            if self.edit_error:
+                raise self.edit_error
+            if message_id not in self.messages:
+                raise discord.NotFound(Mock(status=404), "Unknown Message")
+
+        async def delete() -> None:
+            if self.delete_error:
+                raise self.delete_error
+            self.messages.pop(message_id, None)
+
+        message.edit = AsyncMock(side_effect=edit)
+        message.delete = AsyncMock(side_effect=delete)
+        return message
+
+    def get_partial_message(self, message_id: int) -> MagicMock:
+        return self.messages.get(message_id) or self._message(message_id)
+
+    async def send(self, **_kwargs: object) -> MagicMock:
+        if self.send_error:
+            raise self.send_error
+        self.sent += 1
+        self._next_id += 1
+        return self.holding(self._next_id).messages[self._next_id]
+
+
+def _dashboard(*channels: FakeQueueChannel) -> UnifiedDashboard:
+    bot = MagicMock(spec=discord.Client)
+    by_id = {c.id: c for c in channels}
+    bot.get_partial_messageable.side_effect = lambda channel_id, **_kwargs: by_id[channel_id]
+    return UnifiedDashboard(bot)
+
+
+async def _stored_message_id() -> str | None:
+    return await BotState.objects.filter(key="unified_dashboard_message_id").values_list("value", flat=True).afirst()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+class TestDashboardMessage:
+    """The dashboard keeps one message in the configured queue channel, whatever happens to it."""
+
+    @pytest.fixture(autouse=True)
+    def queue_channel(self, settings) -> None:
+        settings.DISCORD_TICKET_QUEUE_CHANNEL_ID = 2222
+
+    async def test_the_first_pass_posts_and_stores_a_message(self) -> None:
+        channel = FakeQueueChannel()
+        dashboard = _dashboard(channel)
+
+        await dashboard._pass()
+
+        assert channel.sent == 1
+        assert await _stored_message_id() == str(dashboard.message.id)
+
+    async def test_a_stored_message_still_there_is_reused_without_a_fetch(self) -> None:
+        await BotState.objects.acreate(key="unified_dashboard_message_id", value="7777")
+        channel = FakeQueueChannel().holding(7777)
+        dashboard = _dashboard(channel)
+
+        await dashboard._pass()
+
+        assert channel.sent == 0
+        assert dashboard.message.id == 7777
+        channel.messages[7777].edit.assert_awaited_once()
+
+    async def test_a_deleted_message_is_replaced_on_the_next_pass(self) -> None:
+        channel = FakeQueueChannel().holding(7777)
+        dashboard = _dashboard(channel)
+        await BotState.objects.acreate(key="unified_dashboard_message_id", value="7777")
+        await dashboard._pass()
+        del channel.messages[7777]
+
+        dashboard.trigger_update()
+        await dashboard._pass()
+        await dashboard._pass()
+
+        assert channel.sent == 1
+        assert await _stored_message_id() == str(dashboard.message.id) != "7777"
+
+    @pytest.mark.parametrize(
+        "error",
+        [discord.HTTPException(Mock(status=503), "Service Unavailable"), TimeoutError()],
+    )
+    async def test_a_stored_message_that_cant_be_edited_is_reported_not_reposted(self, error: Exception) -> None:
+        await BotState.objects.acreate(key="unified_dashboard_message_id", value="7777")
+        channel = FakeQueueChannel().holding(7777)
+        channel.edit_error = error
+        dashboard = _dashboard(channel)
+
+        with patch("bot.unified_dashboard.log_to_ops_channel", new_callable=AsyncMock) as ops:
+            await dashboard._pass()
+
+        assert channel.sent == 0
+        ops.assert_awaited_once()
+        assert type(error).__name__ in ops.await_args.args[1]
+
+    async def test_a_5xx_with_a_different_body_each_time_is_reported_once(self) -> None:
+        channel = FakeQueueChannel().holding(7777)
+        dashboard = _dashboard(channel)
+        await BotState.objects.acreate(key="unified_dashboard_message_id", value="7777")
+        await dashboard._pass()
+
+        with patch("bot.unified_dashboard.log_to_ops_channel", new_callable=AsyncMock) as ops:
+            for ray in ("8a1b", "8a1c", "8a1d"):
+                channel.edit_error = discord.HTTPException(Mock(status=502), f"<html>Bad gateway, Ray ID {ray}</html>")
+                dashboard.trigger_update()
+                await dashboard._pass()
+
+        ops.assert_awaited_once()
+
+    async def test_a_stored_message_whose_edit_failed_is_edited_next_pass(self) -> None:
+        await BotState.objects.acreate(key="unified_dashboard_message_id", value="7777")
+        channel = FakeQueueChannel().holding(7777)
+        dashboard = _dashboard(channel)
+        channel.edit_error = discord.HTTPException(Mock(status=503), "Service Unavailable")
+        with patch("bot.unified_dashboard.log_to_ops_channel", new_callable=AsyncMock):
+            await dashboard._pass()
+        channel.edit_error = None
+        message = channel.messages[7777]
+        message.edit.reset_mock()
+
+        await dashboard._pass()
+
+        message.edit.assert_awaited_once()
+        assert channel.sent == 0
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            discord.Forbidden(Mock(status=403), {"code": 50001, "message": "Missing Access"}),
+            discord.HTTPException(Mock(status=400), {"code": 50005, "message": "Cannot edit another user's message"}),
+        ],
+    )
+    async def test_a_stored_message_the_bot_cant_edit_is_replaced(self, error: Exception) -> None:
+        await BotState.objects.acreate(key="unified_dashboard_message_id", value="7777")
+        channel = FakeQueueChannel().holding(7777)
+        channel.messages[7777].edit.side_effect = error
+        dashboard = _dashboard(channel)
+
+        await dashboard._pass()
+
+        assert channel.sent == 1
+        assert await _stored_message_id() == str(dashboard.message.id) != "7777"
+        assert 7777 not in channel.messages
+
+    async def test_an_embed_discord_rejects_keeps_the_message_and_is_reported_once(self) -> None:
+        await BotState.objects.acreate(key="unified_dashboard_message_id", value="7777")
+        channel = FakeQueueChannel().holding(7777)
+        message = channel.messages[7777]
+        message.edit.side_effect = discord.HTTPException(
+            Mock(status=400), {"code": 50035, "message": "Invalid Form Body"}
+        )
+        dashboard = _dashboard(channel)
+
+        with patch("bot.unified_dashboard.log_to_ops_channel", new_callable=AsyncMock) as ops:
+            await dashboard._pass()
+            await dashboard._pass()
+
+        assert channel.sent == 0
+        message.delete.assert_not_awaited()
+        assert dashboard.message is message
+        ops.assert_awaited_once()
+
+    async def test_a_dashboard_that_cant_be_edited_or_deleted_is_reported_once_and_not_reposted(self) -> None:
+        await BotState.objects.acreate(key="unified_dashboard_message_id", value="7777")
+        channel = FakeQueueChannel().holding(7777)
+        channel.messages[7777].edit.side_effect = discord.Forbidden(Mock(status=403), "Missing Access")
+        channel.delete_error = discord.Forbidden(Mock(status=403), "Missing Permissions")
+        dashboard = _dashboard(channel)
+
+        with patch("bot.unified_dashboard.log_to_ops_channel", new_callable=AsyncMock) as ops:
+            await dashboard._pass()
+            await dashboard._pass()
+
+        assert channel.sent == 0
+        ops.assert_awaited_once()
+
+    async def test_a_dashboard_that_stops_being_editable_is_replaced(self) -> None:
+        channel = FakeQueueChannel().holding(7777)
+        dashboard = _dashboard(channel)
+        await BotState.objects.acreate(key="unified_dashboard_message_id", value="7777")
+        await dashboard._pass()
+        channel.messages[7777].edit.side_effect = discord.Forbidden(Mock(status=403), "Missing Access")
+
+        with patch("bot.unified_dashboard.log_to_ops_channel", new_callable=AsyncMock) as ops:
+            dashboard.trigger_update()
+            await dashboard._pass()
+            await dashboard._pass()
+
+        assert channel.sent == 1
+        assert await _stored_message_id() == str(dashboard.message.id) != "7777"
+        ops.assert_not_awaited()
+
+    async def test_a_new_dashboard_is_posted_with_its_tickets_in_one_send(self) -> None:
+        channel = FakeQueueChannel()
+        dashboard = _dashboard(channel)
+
+        await dashboard._pass()
+
+        assert channel.sent == 1
+        dashboard.message.edit.assert_not_awaited()
+
+    async def test_a_corrupt_stored_id_counts_as_no_dashboard(self) -> None:
+        await BotState.objects.acreate(key="unified_dashboard_message_id", value="not a number")
+        channel = FakeQueueChannel()
+        dashboard = _dashboard(channel)
+
+        await dashboard._pass()
+
+        assert channel.sent == 1
+        assert await _stored_message_id() == str(dashboard.message.id)
+
+    async def test_alternating_failures_are_each_reported_once_until_a_pass_succeeds(self) -> None:
+        channel = FakeQueueChannel().holding(7777)
+        dashboard = _dashboard(channel)
+        await BotState.objects.acreate(key="unified_dashboard_message_id", value="7777")
+        await dashboard._pass()
+        outage, refused = (
+            discord.HTTPException(Mock(status=503), "Service Unavailable"),
+            discord.Forbidden(Mock(status=403), "Missing Access"),
+        )
+
+        with patch("bot.unified_dashboard.log_to_ops_channel", new_callable=AsyncMock) as ops:
+            for error in (outage, refused, outage, refused, None, outage):
+                channel.edit_error = error
+                dashboard.trigger_update()
+                await dashboard._pass()
+
+        assert ops.await_count == 3
+
+    async def test_no_queue_channel_configured_is_fine(self, settings) -> None:
+        settings.DISCORD_TICKET_QUEUE_CHANNEL_ID = 0
+        dashboard = _dashboard()
+
+        await dashboard._pass()
+
+        assert dashboard.message is None
+
+    async def test_a_dashboard_that_cannot_be_posted_is_reported_once_per_cause(self) -> None:
+        """Restarting the bot can't fix a missing channel or permission, so the pass still counts."""
+        channel = FakeQueueChannel(send_error=discord.Forbidden(Mock(status=403), "Missing Access"))
+        dashboard = _dashboard(channel)
+
+        with patch("bot.unified_dashboard.log_to_ops_channel", new_callable=AsyncMock) as ops:
+            await dashboard._pass()
+            await dashboard._pass()
+            channel.send_error = discord.NotFound(Mock(status=404), "Unknown Channel")
+            await dashboard._pass()
+
+        reports = [call.args[1] for call in ops.await_args_list]
+        assert len(reports) == 2
+        assert reports[0].startswith("The ticket queue dashboard in <#2222> can't be posted or updated: Forbidden")
+        assert "Missing Access" in reports[0]
+        assert "Unknown Channel" in reports[1]
+
+    @pytest.mark.parametrize(
+        "error", [discord.Forbidden(Mock(status=403), "Missing Access"), TimeoutError(), aiohttp.ClientError()]
+    )
+    async def test_the_loop_beats_when_no_dashboard_can_be_posted(self, monkeypatch, error: Exception) -> None:
+        import bot.unified_dashboard as module
+
+        channel = FakeQueueChannel(send_error=error)
+        dashboard = _dashboard(channel)
+        dashboard.bot.wait_until_ready = AsyncMock()
+        beats: list[str] = []
+
+        async def one_pass(_seconds: float) -> None:
+            dashboard.running = False
+
+        monkeypatch.setattr(module, "recycle_db_connection", AsyncMock())
+        monkeypatch.setattr(module, "record_heartbeat", lambda name, _bot: beats.append(name))
+        monkeypatch.setattr(module, "log_to_ops_channel", AsyncMock())
+        monkeypatch.setattr(module.asyncio, "sleep", one_pass)
+        dashboard.running = True
+
+        await dashboard._dashboard_loop()
+
+        assert beats == ["dashboard"]

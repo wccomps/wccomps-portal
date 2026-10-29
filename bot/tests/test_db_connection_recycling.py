@@ -71,7 +71,7 @@ async def test_recycling_is_harmless_on_healthy_connection():
     ("module", "loop_attr", "work_attr"),
     [
         ("bot.discord_queue", "DiscordQueueProcessor", "_process_pending_tasks"),
-        ("bot.unified_dashboard", "UnifiedDashboard", "_check_and_update"),
+        ("bot.unified_dashboard", "UnifiedDashboard", "_pass"),
     ],
 )
 async def test_each_loop_recycles_before_its_work(module, loop_attr, work_attr, monkeypatch):
@@ -95,7 +95,6 @@ async def test_each_loop_recycles_before_its_work(module, loop_attr, work_attr, 
 
     monkeypatch.setattr(mod, "recycle_db_connection", fake_recycle)
     monkeypatch.setattr(obj, work_attr, fake_work)
-    monkeypatch.setattr(obj, "_initialize_dashboard", AsyncMock(), raising=False)
     monkeypatch.setattr(mod.asyncio, "sleep", AsyncMock())
     obj.running = True
 

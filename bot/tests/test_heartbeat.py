@@ -96,7 +96,7 @@ def test_health_module_exit_codes_and_no_django(hb_dir):
     ("module", "cls_name", "work_attr", "loop_attr", "beat"),
     [
         ("bot.discord_queue", "DiscordQueueProcessor", "_process_pending_tasks", "_process_loop", "queue"),
-        ("bot.unified_dashboard", "UnifiedDashboard", "_check_and_update", "_dashboard_loop", "dashboard"),
+        ("bot.unified_dashboard", "UnifiedDashboard", "_pass", "_dashboard_loop", "dashboard"),
     ],
 )
 @pytest.mark.parametrize("work_fails", [False, True])
@@ -119,7 +119,6 @@ async def test_loops_beat_only_after_successful_pass(
     monkeypatch.setattr(mod, "recycle_db_connection", AsyncMock())
     monkeypatch.setattr(mod, "record_heartbeat", lambda name, bot: beats.append(name))
     monkeypatch.setattr(obj, work_attr, work)
-    monkeypatch.setattr(obj, "_initialize_dashboard", AsyncMock(), raising=False)
     monkeypatch.setattr(mod.asyncio, "sleep", AsyncMock())
     obj.running = True
 
