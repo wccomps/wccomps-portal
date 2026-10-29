@@ -8,7 +8,7 @@ import pytest
 from django.db import transaction
 
 from core.tests.detached import join_detached_runs
-from core.utils import run_detached
+from core.utils import run_detached, start_detached
 
 
 def test_relays_every_line_in_order():
@@ -88,3 +88,21 @@ def test_a_failing_inline_operation_ends_the_stream_with_an_error():
 def test_outside_a_transaction_it_runs_in_its_own_thread():
     assert _threads_of(run_detached(_which_thread())) == ["run-detached"]
 
+
+@pytest.mark.django_db(transaction=True)
+def test_start_detached_starts_once_the_transaction_commits():
+    """Its thread has a connection of its own, which can't see rows the caller hasn't committed yet."""
+    from team.models import Team
+
+    seen = []
+
+    def operation() -> Iterator[str]:
+        seen.append(Team.objects.filter(team_number=7).exists())
+        yield "done\n"
+
+    with transaction.atomic():
+        Team.objects.create(team_number=7, team_name="Committed after the call")
+        start_detached(operation())
+        assert seen == []
+    join_detached_runs()
+    assert seen == [True]

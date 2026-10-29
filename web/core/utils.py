@@ -177,6 +177,19 @@ def run_detached(lines: Iterator[str]) -> Iterator[str]:
         yield line
 
 
+def start_detached(lines: Iterator[str]) -> None:
+    """Run a streamed operation to the end in its own thread, with nobody reading its lines.
+
+    The thread starts once the caller's transaction commits (at once outside one), so it sees what the caller wrote.
+    """
+
+    def run() -> None:
+        for _line in _inline(lines):
+            pass
+
+    transaction.on_commit(lambda: _start(run))
+
+
 def _start(run: Callable[[], None]) -> None:
     """Run it in a thread of its own, which closes its DB connection when done: nothing else closes that thread's."""
 
