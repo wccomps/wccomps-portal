@@ -202,7 +202,7 @@ def main() -> None:
     bot = PortalBot()
 
     try:
-        bot.run(token)
+        bot.run(token, log_handler=None)  # its logs propagate to the Django console handler
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt")
     except Exception as e:

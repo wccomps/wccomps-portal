@@ -151,7 +151,7 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
                 "core/oauth_error.html",
                 {"error_title": "Login Cancelled", "error_message": "You cancelled the login."},
             )
-        logger.warning(f"OAuth error: {error} - {error_description}")
+        logger.warning("OAuth error: %s - %s", error, error_description)
         return render(
             request,
             "core/oauth_error.html",

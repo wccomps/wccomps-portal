@@ -265,6 +265,7 @@ LOGGING = {
     "disable_existing_loggers": False,
     "formatters": {
         "verbose": {
+            "class": "core.log_safety.LineSafeFormatter",
             "format": "{levelname} {asctime} {module} {message}",
             "style": "{",
         },
