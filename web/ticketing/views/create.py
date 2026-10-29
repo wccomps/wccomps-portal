@@ -81,10 +81,9 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
 
     if request.method == "POST":
         valid = form.is_valid()
-        team = form.cleaned_data.get("team_id") or team
+        team = form.cleaned_data["team"]
         if not valid:
             return form_page()
-        team = form.cleaned_data["team"]
 
         from ticketing.utils import TicketRateLimitError, create_ticket_atomic
 

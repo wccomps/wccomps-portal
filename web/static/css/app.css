@@ -420,7 +420,7 @@ a.btn-secondary:focus-visible {
     text-decoration: none;
 }
 
-/* Toggle button: pressed reads without colour (filled, bold, ringed); text stays 4.5:1 or more in both themes */
+/* Toggle button: pressed reads without colour; text stays 4.5:1 or more in both themes */
 .toggle-button.button {
     background: var(--body-bg, #fff);
     color: var(--body-fg, #333);
@@ -735,8 +735,9 @@ legend.required::after {
     content: " *";
     color: var(--error-fg, #ba2121);
 }
-/* A label's input carries the required attribute assistive tech announces; a choice group carries none */
-label.required::after {
+/* Silent where an input's required attribute already says it; a checkbox or toggle group's inputs carry none */
+label.required::after,
+fieldset:has([required]) > legend.required::after {
     content: " *" / "";
 }
 legend.required::after {

@@ -101,11 +101,6 @@ async function wcStream(url, data, onProgress, onDone) {
     }
 }
 
-/** Shows a c-toggle_button as pressed or not: aria-pressed, which its pressed look follows. */
-function setTogglePressed(button, pressed) {
-    button.setAttribute('aria-pressed', String(pressed));
-}
-
 /** Keeps a ToggleButtonSelect(Multiple)'s buttons and hidden select in step; each click fires the select's change. */
 function togglePicker() {
     return {
@@ -114,7 +109,7 @@ function togglePicker() {
             const buttons = this.$el.querySelectorAll('[data-value]');
             const show = () => {
                 const picked = new Set(Array.from(select.selectedOptions, option => option.value));
-                buttons.forEach(button => setTogglePressed(button, picked.has(button.dataset.value)));
+                buttons.forEach(button => button.setAttribute('aria-pressed', String(picked.has(button.dataset.value))));
             };
             this.$el.addEventListener('click', event => {
                 const button = event.target.closest('button');

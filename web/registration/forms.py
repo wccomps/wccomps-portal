@@ -326,7 +326,7 @@ class NewEventFields(forms.Form):
         return None
 
     def new_event(self) -> NewEvent:
-        """The event to create; call from clean() once NEW_FIELDS have no errors. ValidationError names the problem."""
+        """The event to create; call from clean() once the fields it reads have no errors of their own."""
         data = self.cleaned_data
         if not (data.get("new_name") and data.get("new_date") and data.get("new_type")):
             raise forms.ValidationError(self.MISSING)

@@ -244,6 +244,8 @@ class CreateTicketForm(forms.Form):
 
     def clean(self) -> dict[str, object]:
         cleaned = super().clean() or {}
+        # The team filed for: the picked one, else own_team (None when the caller gives neither)
+        cleaned["team"] = cleaned.get("team_id") or self.own_team
         category_id = cleaned.get("category")
         if category_id is None:
             return cleaned
@@ -261,9 +263,7 @@ class CreateTicketForm(forms.Form):
             self.add_error("category", "Invalid ticket category selected.")
             return cleaned
 
-        # A valid form hands back the ticket's category and team (the picked one, else the poster's own)
         category = cleaned["category"] = allowed[category_id]
-        cleaned["team"] = cleaned.get("team_id") or self.own_team
 
         hostname = str(cleaned.get("hostname", ""))
         ip_address = str(cleaned.get("ip_address", ""))
