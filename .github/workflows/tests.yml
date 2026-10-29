@@ -97,6 +97,11 @@ jobs:
         run: |
           uv run ruff check .
 
+      - name: Lint templates
+        if: inputs.lint
+        run: |
+          uv run djlint web/templates --lint
+
       - name: Run type checking
         if: inputs.lint
         run: |
