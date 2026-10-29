@@ -1,6 +1,7 @@
 """Tests for registration forms."""
 
 import pytest
+from django.utils import timezone
 
 from ..forms import (
     RegistrationForm,
@@ -159,6 +160,62 @@ class TestRegistrationFormAtomicSave:
         with pytest.raises(ValueError, match="commit"):
             form.save(commit=False)
         assert not TeamRegistration.objects.exists()
+
+
+class TestRegistrationFormOpenEvents:
+    """The events offered are the ones open for registration when a form reads its queryset, by the database's
+    clock."""
+
+    def test_an_event_opened_later_is_offered_and_accepted(self, active_season_with_event, form_data):
+        season, _ = active_season_with_event
+        assert list(RegistrationForm().fields["events"].queryset)
+        later = Event.objects.create(
+            season=season,
+            name="Invitational 2",
+            event_type="invitational",
+            event_number=2,
+            date="2026-02-15",
+            registration_open=True,
+        )
+        assert later in RegistrationForm().fields["events"].queryset
+        form = RegistrationForm(data={**form_data, "events": [later.pk]})
+        assert form.is_valid(), form.errors
+
+    def test_a_deadline_passed_since_the_form_class_was_made_closes_the_event(
+        self, active_season_with_event, form_data
+    ):
+        """RegistrationForm's queryset is built once, when the module loads (the server's start). A deadline that
+        passes after that, here one set to this moment, closes the event for every form made later."""
+        _, event = active_season_with_event
+        Event.objects.filter(pk=event.pk).update(registration_deadline=timezone.now())
+        assert event not in RegistrationForm().fields["events"].queryset
+        form = RegistrationForm(data={**form_data, "events": [event.pk]})
+        assert not form.is_valid()
+        assert form.errors["events"] == ["Invitational 1 is no longer open for registration."]
+
+    def test_a_ticked_event_that_closed_meanwhile_is_named(self, active_season_with_event, form_data):
+        _, event = active_season_with_event
+        Event.objects.filter(pk=event.pk).update(registration_open=False)
+        form = RegistrationForm(data={**form_data, "events": [event.pk]})
+        assert not form.is_valid()
+        assert form.errors["events"] == ["Invitational 1 is no longer open for registration."]
+
+    @pytest.mark.parametrize(
+        ("posted", "code"), [("0{pk}", "invalid_choice"), ("999999", "invalid_choice"), ("x", "invalid_pk_value")]
+    )
+    def test_a_value_naming_no_closed_event_gets_djangos_own_error(
+        self, active_season_with_event, form_data, posted, code
+    ):
+        _, event = active_season_with_event
+        form = RegistrationForm(data={**form_data, "events": [posted.format(pk=event.pk)]})
+        assert not form.is_valid()
+        assert form.has_error("events", code)
+        assert not any("no longer open" in message for message in form.errors["events"])
+
+    def test_an_event_in_an_inactive_season_is_not_offered(self, active_season_with_event, form_data):
+        _, event = active_season_with_event
+        Season.objects.filter(pk=event.season_id).update(is_active=False)
+        assert event not in RegistrationForm().fields["events"].queryset
 
 
 class TestRegistrationFormRegionValidation:

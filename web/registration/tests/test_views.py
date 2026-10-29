@@ -1,7 +1,10 @@
 """Tests for registration views."""
 
+from datetime import timedelta
+
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.tests.roles import role_user
 
@@ -332,6 +335,43 @@ class EventViewTestCase(TestCase):
         """Test event list requires Gold Team permission."""
         response = self.client.get(reverse("registration_event_list", args=[self.season.id]))
         self.assertEqual(response.status_code, 302)
+
+    def _badges_for(self, season_active, **event_fields):
+        from ..models import Event, Season
+
+        season = Season.objects.create(name="Other Season", year=2027)
+        if season_active:
+            season.activate()
+        event = Event.objects.create(
+            season=season,
+            name="Invitational 9",
+            event_type="invitational",
+            event_number=9,
+            date="2027-01-15",
+            **event_fields,
+        )
+        self.client.force_login(self.gold_user)
+        listed = self.client.get(reverse("registration_event_list", args=[season.id])).content.decode()
+        detail = self.client.get(reverse("registration_event_detail", args=[event.id])).content.decode()
+        return listed, detail
+
+    def test_an_event_in_an_inactive_season_shows_registration_closed(self):
+        """The public form never offers it, so its pages don't call it open."""
+        listed, detail = self._badges_for(season_active=False)
+        self.assertRegex(listed, r">\s*Closed\s*<")
+        self.assertNotRegex(listed, r">\s*Open\s*<")
+        self.assertIn("Registration Closed", detail)
+        self.assertNotIn("Registration Open", detail)
+
+    def test_an_event_past_its_deadline_shows_registration_closed(self):
+        listed, detail = self._badges_for(season_active=True, registration_deadline=timezone.now() - timedelta(hours=1))
+        self.assertRegex(listed, r">\s*Closed\s*<")
+        self.assertIn("Registration Closed", detail)
+
+    def test_an_open_event_in_the_active_season_shows_registration_open(self):
+        listed, detail = self._badges_for(season_active=True)
+        self.assertRegex(listed, r">\s*Open\s*<")
+        self.assertIn("Registration Open", detail)
 
     def test_event_list_loads(self):
         """Test event list loads for Gold Team users."""

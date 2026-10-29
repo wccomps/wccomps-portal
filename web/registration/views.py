@@ -179,7 +179,7 @@ def event_list(request: HttpRequest, season_id: int) -> HttpResponse:
     from django.db.models import Count
 
     season = get_object_or_404(Season, id=season_id)
-    events = season.events.annotate(enrollment_count=Count("enrollments"))
+    events = season.events.with_registration_open().annotate(enrollment_count=Count("enrollments"))
 
     return render(request, "registration/events/list.html", {"season": season, "events": events})
 
@@ -250,7 +250,7 @@ def event_delete(request: HttpRequest, event_id: int) -> HttpResponse:
 @require_permission("gold_team")
 def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
     """View event details with enrolled registrations and team assignments (Gold Team only)."""
-    event = get_object_or_404(Event, id=event_id)
+    event = get_object_or_404(Event.objects.with_registration_open(), id=event_id)
     enrollments = (
         RegistrationEventEnrollment.objects.filter(event=event)
         .select_related("registration")

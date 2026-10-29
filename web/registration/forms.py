@@ -13,10 +13,6 @@ CONTACT_EMAIL_MAX_LENGTH = RegistrationContact._meta.get_field("email").max_leng
 RESTRICTED_EVENT_TYPES = ("qualifier", "regional")
 
 
-def open_events() -> QuerySet[Event]:
-    return Event.objects.filter(season__is_active=True, registration_open=True).order_by("date")
-
-
 class OpenEventsField(forms.ModelMultipleChoiceField[Event]):
     """Names a ticked event that isn't open, where Django's invalid choice error gives only the posted id."""
 
@@ -45,8 +41,9 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
     coach_email = forms.EmailField(max_length=CONTACT_EMAIL_MAX_LENGTH, label="Email Address")
     coach_phone = forms.CharField(max_length=50, label="Phone Number", required=False)
 
+    # Built once, at import; each form runs its own copy, and the deadline is checked when that runs
     events = OpenEventsField(
-        queryset=Event.objects.none(),
+        queryset=Event.objects.open_for_registration().order_by("date"),
         widget=forms.CheckboxSelectMultiple,
         required=True,
         label="Select Events",
@@ -67,10 +64,6 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
         help_texts = {
             "region": "Select your school's CCDC region. Only WRCCDC teams can register for Qualifiers and Regionals.",
         }
-
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
-        cast(OpenEventsField, self.fields["events"]).queryset = open_events()
 
     def clean(self) -> dict[str, object]:
         """No Qualifier or Regional for a non-WRCCDC team."""
@@ -167,9 +160,13 @@ class EventForm(forms.ModelForm[Event]):
             "date": "Event Date",
             "start_time": "Start Time",
             "end_time": "End Time",
-            "registration_open": "Registration Open",
+            "registration_open": "Accept registrations",
             "registration_deadline": "Registration Deadline",
             "max_teams": "Maximum Teams",
+        }
+        help_texts = {
+            "registration_open": "Registration also closes when the deadline passes, when the event is closed out, "
+            "or while its season isn't the active one.",
         }
         widgets = {
             "date": forms.DateInput(attrs={"type": "date"}),
