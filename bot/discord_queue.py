@@ -8,7 +8,8 @@ from typing import assert_never
 
 import discord
 from asgiref.sync import sync_to_async
-from django.db.models import F, Q
+from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from bot.discord_manager import DiscordManager
@@ -44,6 +45,11 @@ from team.models import Team
 from ticketing.models import Ticket, TicketComment
 
 logger = logging.getLogger(__name__)
+
+
+def delivered(task: DiscordTask) -> bool:
+    """Whether the task's delivery finished, so running it again must not send its messages."""
+    return bool(task.result and task.result.get("delivered"))
 
 
 class DiscordQueueProcessor:
@@ -101,19 +107,33 @@ class DiscordQueueProcessor:
         """Requeue tasks a previous bot process left in "processing" when it died.
 
         Runs before the first poll. The bot Deployment is one replica with the Recreate
-        strategy, so no other processor can be working on these rows.
+        strategy, so no other processor can be working on these rows. A task whose type
+        may not rerun after a restart is failed instead, and ops is told, unless it
+        recorded its delivery.
         """
         cutoff = timezone.now() - DiscordQueueProcessor.STRANDED_TASK_MAX_AGE
-        stranded = DiscordTask.objects.filter(status="processing")
-        # A rerun counts as a retry: its handler may find what the cut-short run did
-        requeued = stranded.filter(created_at__gte=cutoff).update(
-            status="pending", next_retry_at=None, retry_count=F("retry_count") + 1
-        )
-        failed = stranded.filter(created_at__lt=cutoff).update(
-            status="failed", error_message="Left in processing by a bot restart; too old to retry"
-        )
-        if requeued or failed:
-            logger.warning(f"Recovered stranded queue tasks: {requeued} requeued, {failed} failed as too old")
+        counts = {"requeued": 0, "failed as too old": 0, "failed as unsafe to rerun": 0}
+        with transaction.atomic():
+            for task in DiscordTask.objects.select_for_update().filter(status="processing"):
+                payload_type = PAYLOAD_TYPES.get(task.task_type)
+                if task.created_at < cutoff:
+                    task.status, task.error_message = "failed", "Left in processing by a bot restart; too old to retry"
+                    counts["failed as too old"] += 1
+                elif payload_type is not None and not payload_type.rerun_after_restart and not delivered(task):
+                    task.status, task.error_message = "failed", "Cut short by a bot restart; not safe to run again"
+                    counts["failed as unsafe to rerun"] += 1
+                    note = (
+                        f"{payload_type.label} task {task.pk} was cut short by a bot restart and not run again: "
+                        "check what went out first"
+                    )
+                    DiscordTask.enqueue(LogToChannel(message=note))
+                else:
+                    # A rerun counts as a retry: its handler may find what the cut-short run did
+                    task.status, task.next_retry_at, task.retry_count = "pending", None, task.retry_count + 1
+                    counts["requeued"] += 1
+                task.save(update_fields=["status", "error_message", "next_retry_at", "retry_count"])
+        if any(counts.values()):
+            logger.warning("Recovered stranded queue tasks: " + ", ".join(f"{n} {what}" for what, n in counts.items()))
 
     async def _process_pending_tasks(self) -> None:
 
@@ -230,7 +250,7 @@ class DiscordQueueProcessor:
             case SyncRoles():
                 return await self._handle_sync_roles(payload)
             case BroadcastMessage():
-                return await self._handle_broadcast_message(payload)
+                return await self._handle_broadcast_message(payload, task)
             case _:
                 assert_never(payload)
         return None
@@ -484,7 +504,9 @@ class DiscordQueueProcessor:
         logger.info(f"Role sync completed: {summary}")
         return stats
 
-    async def _handle_broadcast_message(self, payload: BroadcastMessage) -> dict[str, object]:
+    async def _handle_broadcast_message(
+        self, payload: BroadcastMessage, task: DiscordTask | None = None
+    ) -> dict[str, object]:
         from bot.competition_actions import deliver_team_broadcast
         from bot.utils import log_to_ops_channel
 
@@ -495,20 +517,31 @@ class DiscordQueueProcessor:
         if not target or not message:
             raise ValueError("Missing target or message in payload")
 
-        guild = self._guild()
+        if task is not None and delivered(task):
+            # A rerun after it went out: posting again would reach every team twice
+            stats = dict(task.result or {})
+        else:
+            try:
+                sent, queued, failed_channels = await deliver_team_broadcast(self._guild(), target, message, sender)
+            except ValueError as e:
+                raise ValueError(f"Invalid team range: {e}") from e
+            if target.lower().strip() == "announcements" and failed_channels:
+                raise RuntimeError(failed_channels[0])
+            failed = len(failed_channels)
+            stats = {"sent_count": sent, "queued_count": queued, "failed_count": failed, "delivered": True}
+            await self._record(task, stats)
+            logger.info(f"Broadcast complete: sent={sent}, queued={queued}, failed={failed}")
 
-        try:
-            sent_count, queued_count, failed_channels = await deliver_team_broadcast(guild, target, message, sender)
-        except ValueError as e:
-            raise ValueError(f"Invalid team range: {e}") from e
+        sent, queued = stats["sent_count"], stats["queued_count"]
+        summary = f"Broadcast by {sender}\n• Target: {target}\n• Sent: {sent}\n• Queued: {queued}"
+        if not stats.get("reported") and await log_to_ops_channel(self.bot, summary):
+            stats["reported"] = True
+            await self._record(task, stats)
+        return stats
 
-        if target.lower().strip() == "announcements" and failed_channels:
-            raise RuntimeError(failed_channels[0])
-
-        await log_to_ops_channel(
-            self.bot,
-            f"Broadcast by {sender}\n• Target: {target}\n• Sent: {sent_count}\n• Queued: {queued_count}",
-        )
-
-        logger.info(f"Broadcast complete: sent={sent_count}, queued={queued_count}, failed={len(failed_channels)}")
-        return {"sent_count": sent_count, "queued_count": queued_count, "failed_count": len(failed_channels)}
+    @staticmethod
+    async def _record(task: DiscordTask | None, result: dict[str, object]) -> None:
+        """Save a handler's progress as the task's result now, and on the instance the retry path saves."""
+        if task is not None:
+            task.result = dict(result)
+            await DiscordTask.objects.filter(pk=task.pk).aupdate(result=task.result)

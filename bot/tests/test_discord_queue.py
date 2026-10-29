@@ -610,6 +610,68 @@ class TestStrandedTasks:
         assert recent.status == "pending"
         assert old.status == "failed"
 
+    async def test_a_broadcast_cut_short_is_failed_not_sent_again(self) -> None:
+        """Some teams may already have it; a rerun would post it to them twice."""
+        broadcast = await DiscordTask.objects.acreate(
+            task_type="broadcast_message",
+            payload={"target": "all-teams", "message": "hi", "sender": "ops"},
+            status="processing",
+        )
+
+        with patch("bot.discord_queue.DiscordTask.enqueue") as enqueue:
+            await DiscordQueueProcessor._recover_stranded_tasks()
+
+        await broadcast.arefresh_from_db()
+        assert broadcast.status == "failed"
+        assert "not safe to run again" in broadcast.error_message
+        assert "Broadcast Message task" in enqueue.call_args.args[0].message
+
+    async def test_a_broadcast_is_failed_only_with_its_ops_note(self) -> None:
+        """Failing it without telling ops would lose it silently; the two commit together or not at all."""
+        broadcast = await DiscordTask.objects.acreate(
+            task_type="broadcast_message",
+            payload={"target": "all-teams", "message": "hi", "sender": "ops"},
+            status="processing",
+        )
+
+        with (
+            patch("bot.discord_queue.DiscordTask.enqueue", side_effect=RuntimeError("db down")),
+            pytest.raises(RuntimeError),
+        ):
+            await DiscordQueueProcessor._recover_stranded_tasks()
+
+        await broadcast.arefresh_from_db()
+        assert broadcast.status == "processing"
+
+    async def test_a_broadcast_cut_short_after_it_went_out_is_finished_not_failed(self) -> None:
+        """Every team has it already; only the ops summary and marking it done are left."""
+        delivered = {"sent_count": 3, "queued_count": 0, "failed_count": 0, "delivered": True}
+        broadcast = await DiscordTask.objects.acreate(
+            task_type="broadcast_message",
+            payload={"target": "all-teams", "message": "hi", "sender": "ops"},
+            status="processing",
+            result=delivered,
+        )
+
+        with patch("bot.discord_queue.DiscordTask.enqueue") as enqueue:
+            await DiscordQueueProcessor._recover_stranded_tasks()
+
+        await broadcast.arefresh_from_db()
+        assert broadcast.status == "pending"
+        enqueue.assert_not_called()
+
+    async def test_a_malformed_stranded_broadcast_does_not_hold_up_the_others(self) -> None:
+        malformed = await DiscordTask.objects.acreate(task_type="broadcast_message", payload={}, status="processing")
+        other = await DiscordTask.objects.acreate(
+            task_type="log_to_channel", payload={"message": "hi"}, status="processing"
+        )
+
+        await DiscordQueueProcessor._recover_stranded_tasks()
+
+        await malformed.arefresh_from_db()
+        await other.arefresh_from_db()
+        assert (malformed.status, other.status) == ("failed", "pending")
+
     async def test_task_claimed_elsewhere_is_not_handled(self) -> None:
         task = await DiscordTask.objects.acreate(task_type="log_to_channel", payload={"message": "hi"})
         await DiscordTask.objects.filter(pk=task.pk).aupdate(status="processing")  # another processor won
@@ -838,3 +900,74 @@ async def test_a_first_run_makes_its_own_thread(test_team: Team) -> None:
     make_thread, _post = await _run_thread_task(bot, task, [look_alike])
 
     make_thread.assert_awaited_once()
+
+
+def _ops_channel(settings: Any, bot: MagicMock, send: AsyncMock) -> None:
+    settings.DISCORD_LOG_CHANNEL_ID = 77
+    bot.get_channel.return_value = MagicMock(spec=discord.TextChannel, send=send)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_broadcast_rerun_after_it_went_out_posts_only_the_missing_ops_summary(settings: Any) -> None:
+    """A restart, or a database error recording the outcome, came after delivery: no team gets it twice."""
+    from core.discord_tasks import BroadcastMessage
+
+    task = await sync_to_async(DiscordTask.enqueue)(BroadcastMessage(target="all-teams", message="hi", sender="ops"))
+    delivered = {"sent_count": 3, "queued_count": 0, "failed_count": 0, "delivered": True}
+    await DiscordTask.objects.filter(pk=task.pk).aupdate(result=delivered, retry_count=1)
+    bot, send = MagicMock(), AsyncMock()
+    _ops_channel(settings, bot, send)
+
+    with patch("bot.competition_actions.deliver_team_broadcast", new_callable=AsyncMock) as deliver:
+        await DiscordQueueProcessor(bot)._process_task(await DiscordTask.objects.aget(pk=task.pk))
+
+    await task.arefresh_from_db()
+    assert task.status == "completed"
+    deliver.assert_not_called()
+    send.assert_awaited_once()
+    assert "Sent: 3" in send.await_args.args[0]
+    assert task.result["reported"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_broadcast_whose_ops_summary_failed_does_not_record_it_as_posted(settings: Any) -> None:
+    from core.discord_tasks import BroadcastMessage
+
+    task = await sync_to_async(DiscordTask.enqueue)(BroadcastMessage(target="all-teams", message="hi", sender="ops"))
+    bot = MagicMock()
+    _ops_channel(settings, bot, AsyncMock(side_effect=discord.HTTPException(MagicMock(status=503, reason="x"), "x")))
+
+    with (
+        patch("bot.competition_actions.deliver_team_broadcast", AsyncMock(return_value=(3, 0, []))),
+        patch.object(DiscordQueueProcessor, "_guild", return_value=MagicMock()),
+    ):
+        await DiscordQueueProcessor(bot)._process_task(task)
+
+    await task.arefresh_from_db()
+    assert task.status == "completed"
+    assert task.result["delivered"] is True
+    assert "reported" not in task.result
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_a_broadcast_retried_after_its_ops_summary_went_out_does_not_post_it_again() -> None:
+    """Marking it done failed after the summary; the retry only completes it."""
+    from core.discord_tasks import BroadcastMessage
+
+    task = await sync_to_async(DiscordTask.enqueue)(BroadcastMessage(target="all-teams", message="hi", sender="ops"))
+    result = {"sent_count": 3, "queued_count": 0, "failed_count": 0, "delivered": True, "reported": True}
+    await DiscordTask.objects.filter(pk=task.pk).aupdate(result=result, retry_count=1)
+
+    with (
+        patch("bot.competition_actions.deliver_team_broadcast", new_callable=AsyncMock) as deliver,
+        patch("bot.utils.log_to_ops_channel", new_callable=AsyncMock) as ops,
+    ):
+        await DiscordQueueProcessor(MagicMock())._process_task(await DiscordTask.objects.aget(pk=task.pk))
+
+    await task.arefresh_from_db()
+    assert task.status == "completed"
+    deliver.assert_not_called()
+    ops.assert_not_called()

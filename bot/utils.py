@@ -125,26 +125,29 @@ async def send_announcement(guild: discord.Guild, channel: discord.abc.Messageab
     )
 
 
-async def log_to_ops_channel(bot: discord.Client, message: str) -> None:
+async def log_to_ops_channel(bot: discord.Client, message: str) -> bool:
+    """Post to the ops channel; whether it was posted. Never raises: a failure is logged."""
     try:
         channel_id = settings.DISCORD_LOG_CHANNEL_ID
         if not channel_id:
             logger.warning("DISCORD_LOG_CHANNEL_ID not configured")
-            return
+            return False
 
         channel = bot.get_channel(channel_id)
         if not channel:
             logger.error(f"Operations channel {channel_id} not found")
-            return
+            return False
 
         message = fit(message, DISCORD_MESSAGE_CHAR_LIMIT)
-        if isinstance(channel, (discord.TextChannel, discord.Thread)):
-            await channel.send(message)
-            logger.info(f"Logged to ops channel: {message}")
-        else:
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
             logger.error(f"Channel {channel_id} is not a text channel or thread")
+            return False
+        await channel.send(message)
+        logger.info(f"Logged to ops channel: {message}")
+        return True
     except Exception as e:
         logger.exception(f"Failed to log to ops channel: {e}")
+        return False
 
 
 async def recycle_db_connection() -> None:
