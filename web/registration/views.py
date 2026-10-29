@@ -50,7 +50,6 @@ class PublicPageRenderer(PortalFormRenderer):
 
 
 def public_registration_form(data: QueryDict | None = None) -> RegistrationForm:
-    """RegistrationForm with the register page's field rows and its open events as cards."""
     form = RegistrationForm(data, renderer=PublicPageRenderer())
     events = cast(CheckboxSelectMultiple, form.fields["events"].widget)
     events.template_name = "registration/public/event_cards.html"

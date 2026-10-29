@@ -303,8 +303,8 @@ class ShownSchoolForm(forms.Form):
 
 
 class NewEventFields(forms.Form):
-    """An event to create and the season the page showed as active; new_event() raises their problems as non-field
-    errors."""
+    """An event to create and the season the page showed as active; new_event() raises the problems no single field
+    holds."""
 
     MISSING = "Give the new event a name, a date and a type."
 

@@ -458,7 +458,7 @@ a.btn-secondary:focus-visible {
 .form-row fieldset > legend {
     float: none;
 }
-/* A choice group's fieldset (forms/field.html) is part of its row, not a section of the form */
+/* A choice group's fieldset is part of its row, not a section of the form */
 .form-row fieldset {
     border-top: none;
 }

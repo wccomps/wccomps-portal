@@ -100,3 +100,13 @@ def test_a_refused_ticket_keeps_the_picked_box_pressed(blue_team_user, blue_team
 
     assert re.search(r'data-value="web01"\s+aria-pressed="true"', html)
     assert re.search(r'data-value="db01"\s+aria-pressed="false"', html)
+
+
+def test_a_category_option_reads_its_points_as_the_bot_does(blue_team_user, box_reset_category):
+    box_reset_category.points = 0
+    box_reset_category.save()
+
+    html = _client(blue_team_user).get(reverse("create_ticket")).content.decode()
+
+    assert f"{box_reset_category.display_name} ({box_reset_category.points_label})</option>" in html
+    assert box_reset_category.points_label == "0pt"

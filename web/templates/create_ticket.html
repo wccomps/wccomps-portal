@@ -13,7 +13,7 @@
             {% csrf_token %}
             <c-module>
                 <c-form_errors :form="form" />
-                {% if not box_names %}
+                {% if not form.box_names %}
                     <c-alert variant="warning">
                         Scoring engine is unavailable, so hostnames and services can't be listed. Type them in instead.
                     </c-alert>
@@ -36,9 +36,9 @@
             </c-module>
         </c-form>
     </div>
-    {{ categories_json|json_script:"categories-data" }}
-    {{ box_ip_map|json_script:"box-ip-map-data" }}
-    {{ service_choices|json_script:"service-choices-data" }}
+    {{ form.categories_json|json_script:"categories-data" }}
+    {{ form.box_ip_map|json_script:"box-ip-map-data" }}
+    {{ form.service_choices|json_script:"service-choices-data" }}
     <script>
     document.addEventListener('alpine:init', () => {
         Alpine.data('ticketForm', () => {

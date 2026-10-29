@@ -116,8 +116,7 @@ IP_MAX: int = Ticket._meta.get_field("ip_address").max_length  # type: ignore[as
 
 class CategoryChoiceField(forms.ModelChoiceField[TicketCategory]):
     def label_from_instance(self, obj: TicketCategory) -> str:
-        worth = "Variable" if obj.variable_points else f"{obj.points}pt" if obj.points else "Free"
-        return f"{obj.display_name} ({worth})"
+        return f"{obj.display_name} ({obj.points_label})"
 
 
 class CreateTicketForm(forms.Form):
@@ -178,7 +177,7 @@ class CreateTicketForm(forms.Form):
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         self.own_team = own_team
         self.box_ip_map = box_ip_map or {}
-        self.service_choices = service_choices
+        self.service_choices = list(service_choices)
         cast(CategoryChoiceField, self.fields["category"]).queryset = (
             TicketCategory.objects.all() if staff else TicketCategory.objects.filter(user_creatable=True)
         )
@@ -245,12 +244,15 @@ class CreateTicketPageForm(CreateTicketForm):
     }
 
     def __init__(self, *args: object, box_names: Iterable[str] = (), **kwargs: object) -> None:
+        # The page's script finds each field by an id that is its name
+        kwargs.setdefault("auto_id", "%s")
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        self.box_names = list(box_names)
         for name, attrs in self.ALPINE.items():
             self.fields[name].widget.attrs.update(attrs)
-        if box_names := list(box_names):
+        if self.box_names:
             self.fields["hostname"].widget = ToggleButtonSelect(
-                attrs={"x-on:change": "pickHostname"}, choices=[("", ""), *((box, box) for box in box_names)]
+                attrs={"x-on:change": "pickHostname"}, choices=[("", ""), *((box, box) for box in self.box_names)]
             )
             ip_address = self.fields["ip_address"]
             ip_address.help_text = "Auto-filled from hostname selection"
