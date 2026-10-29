@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+import pytest
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -9,6 +10,7 @@ from django.utils import timezone
 from core.tests.roles import role_user
 
 from ..models import Event, RegistrationContact, Season, TeamRegistration
+from ..views import RegistrationPageStatus, registration_page_status
 
 
 class RegistrationViewTestCase(TestCase):
@@ -400,3 +402,32 @@ class EventViewTestCase(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(Event.objects.filter(name="Invitational #1").exists())
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("finalized", "active", "registration_open", "status"),
+    [
+        (True, True, True, RegistrationPageStatus.FINALIZED),
+        (True, False, False, RegistrationPageStatus.FINALIZED),
+        (False, True, True, RegistrationPageStatus.ACTIVE),
+        (False, True, False, RegistrationPageStatus.ACTIVE),
+        (False, False, True, RegistrationPageStatus.REGISTRATION_OPEN),
+        (False, False, False, RegistrationPageStatus.REGISTRATION_CLOSED),
+    ],
+)
+def test_event_status_takes_the_first_that_holds(finalized, active, registration_open, status):
+    """Finalized, then active, then open or closed for registration."""
+    season = Season.objects.create(name="2026 Season", year=2026)
+    season.activate()
+    saved = Event.objects.create(
+        season=season,
+        name="Invitational 1",
+        event_type="invitational",
+        event_number=1,
+        date="2026-01-15",
+        registration_open=registration_open,
+        is_finalized=finalized,
+        is_active=active,
+    )
+    assert registration_page_status(Event.objects.with_registration_open().get(pk=saved.pk)) is status

@@ -39,7 +39,7 @@
                         </c-table_header>
                     </tr>
                 </c-slot>
-                {% for event in events %}
+                {% for event, status_word, status_badge in events %}
                     <tr>
                         <td>
                             <a href="{% url 'registration_event_detail' event_id=event.id %}">{{ event.name }}</a>
@@ -49,23 +49,9 @@
                         <td>{{ event.start_time|time:"g:i A" }} to {{ event.end_time|time:"g:i A" }}</td>
                         <td>{{ event.enrollment_count|default:0 }} / {{ event.max_teams }}</td>
                         <td>
-                            {% if event.is_finalized %}
-                                <c-badge variant="neutral">
-                                    Finalized
-                                </c-badge>
-                            {% elif event.is_active %}
-                                <c-badge variant="success">
-                                    Active
-                                </c-badge>
-                            {% elif event.registration_is_open %}
-                                <c-badge variant="info">
-                                    Open
-                                </c-badge>
-                            {% else %}
-                                <c-badge variant="warning">
-                                    Closed
-                                </c-badge>
-                            {% endif %}
+                            <c-badge variant="{{ status_badge }}">
+                                {{ status_word }}
+                            </c-badge>
                         </td>
                         <td class="field-actions">
                             <c-link href="{% url 'registration_event_detail' event_id=event.id %}"

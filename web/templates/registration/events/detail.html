@@ -25,23 +25,9 @@
                     {{ event.get_event_type_display }}
                 </c-detail_row>
                 <c-detail_row label="Status">
-                    {% if event.is_finalized %}
-                        <c-badge variant="neutral">
-                            Finalized
-                        </c-badge>
-                    {% elif event.is_active %}
-                        <c-badge variant="success">
-                            Active
-                        </c-badge>
-                    {% elif event.registration_is_open %}
-                        <c-badge variant="info">
-                            Registration Open
-                        </c-badge>
-                    {% else %}
-                        <c-badge variant="warning">
-                            Registration Closed
-                        </c-badge>
-                    {% endif %}
+                    <c-badge variant="{{ status_badge }}">
+                        {{ status_word }}
+                    </c-badge>
                 </c-detail_row>
             </c-detail_grid>
         </c-module>
