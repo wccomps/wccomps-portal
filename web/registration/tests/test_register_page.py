@@ -132,7 +132,6 @@ def test_a_failed_submit_lists_its_errors_at_the_top_linking_to_each_field(event
     assert html.index('role="alert"') < html.index('name="school_name"')
     assert re.search(r'<a href="#id_captain_email">[^<]*Enter a valid email address.</a>', summary)
     assert 'href="#id_school_name"' in summary
-    # The events are a group of checkboxes: the link goes to the first one
     assert 'href="#id_events_0"' in summary
     assert '<a href="#id_events_0">Select at least one event.</a>' in summary
     assert '<a href="#id_agree_to_rules">Agree to the competition rules to register.</a>' in summary
@@ -141,8 +140,8 @@ def test_a_failed_submit_lists_its_errors_at_the_top_linking_to_each_field(event
 def test_the_summary_tells_apart_fields_that_share_a_label(event):
     summary = _summary(_page({}))
 
-    assert "Captain email address: This field is required." in summary
-    assert "Coach email address: This field is required." in summary
+    assert "Captain email: This field is required." in summary
+    assert "Coach email: This field is required." in summary
 
 
 def test_the_summary_holds_the_forms_own_errors(event, monkeypatch):
@@ -163,11 +162,14 @@ def test_a_failed_submit_starts_the_title_with_error(event):
 
 
 def test_required_marks_are_hidden_from_screen_readers_and_explained(event):
+    """An input's required attribute announces it; the events group has none, so its legend says it in words."""
     html = _page()
 
     marks = re.findall(r'<span class="required"[^>]*>\*</span>', html)
     assert marks
     assert all('aria-hidden="true"' in mark for mark in marks)
+    legend = _tag(html, r"(?s)<legend>.*?</legend>")
+    assert '<span class="visually-hidden">required</span>' in legend
     assert re.search(r'<p class="required-note">\s*<span class="required"[^>]*>\*</span>\s*required\s*</p>', html)
 
 

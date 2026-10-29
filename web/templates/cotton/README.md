@@ -56,9 +56,9 @@ Grouped form fields with heading.
 ### Forms
 
 #### `<c-form_errors>`
-The errors no field row shows: the form's non-field errors, and its hidden fields' named by label. A page that uses a form's fields
-one by one puts one at the top of its form (`core/tests/test_form_conventions.py` fails on a page without; it finds
-forms by a variable name ending in `form`).
+What a failed save says at the top: the form's non-field errors, its hidden fields' (named by label), and a link to
+each field with an error. A page that uses a form's fields one by one puts one at the top of its form
+(`core/tests/test_form_conventions.py` fails on a page without; it finds forms by a variable name ending in `form`).
 ```django
 <c-form_errors :form="form" />
 ```

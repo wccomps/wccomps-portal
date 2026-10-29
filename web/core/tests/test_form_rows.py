@@ -3,6 +3,9 @@
 import re
 
 from django import forms
+from django.utils.html import format_html
+
+from core.widgets import ToggleButtonSelectMultiple
 
 
 class ExampleForm(forms.Form):
@@ -73,7 +76,6 @@ def test_a_hidden_field_s_error_shows_with_the_form_s_own_named_by_label() -> No
 
 
 def test_the_form_errors_box_links_each_field_with_an_error() -> None:
-    """A long form's first error can be screens down: the box at the top names each field that needs attention."""
     from django.template import Context, Template
     from django_cotton.compiler_regex import CottonCompiler
 
@@ -83,3 +85,39 @@ def test_the_form_errors_box_links_each_field_with_an_error() -> None:
     assert '<a href="#id_agree">I agree</a>' in html
     assert '<a href="#id_events_0">Events</a>' in html
     assert "#id_phone" not in html
+
+
+class TogglePickerForm(forms.Form):
+    teams = forms.MultipleChoiceField(
+        label="Teams", choices=[("1", "Team 1"), ("2", "Team 2")], widget=ToggleButtonSelectMultiple()
+    )
+    rules = forms.BooleanField(label=format_html('I agree to the <a href="{}">rules</a>', "https://example.com/r"))
+    captain_email = forms.EmailField(label="Email")
+    coach_email = forms.EmailField(label="Email")
+
+
+def test_every_error_link_reaches_an_element_that_takes_focus() -> None:
+    from django.template import Context, Template
+    from django_cotton.compiler_regex import CottonCompiler
+
+    form = TogglePickerForm({})
+    errors = Template(CottonCompiler().process('{% load cotton %}<c-form_errors :form="form" />')).render(
+        Context({"form": form})
+    )
+    page = errors + "".join(str(form[name].as_field_group()) for name in form.fields)
+    for anchor in re.findall(r'href="#([^"]+)"', errors):
+        assert re.search(
+            rf'id="{anchor}"[^>]*tabindex|tabindex[^>]*id="{anchor}"|<(input|select|textarea)[^>]*id="{anchor}"', page
+        ), anchor
+
+
+def test_error_links_hold_no_link_and_tell_repeated_labels_apart() -> None:
+    from django.template import Context, Template
+    from django_cotton.compiler_regex import CottonCompiler
+
+    html = Template(CottonCompiler().process('{% load cotton %}<c-form_errors :form="form" />')).render(
+        Context({"form": TogglePickerForm({})})
+    )
+    assert "example.com/r" not in html
+    assert ">I agree to the rules<" in html
+    assert ">Captain email<" in html and ">Coach email<" in html

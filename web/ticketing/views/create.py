@@ -63,6 +63,7 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
         box_ip_map=box_ip_map,
         service_choices=service_choices,
         teams=teams,
+        own_team=team,
         box_names=box_names,
         auto_id="%s",
     )
@@ -83,7 +84,7 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
         team = form.cleaned_data.get("team_id") or team
         if not valid:
             return form_page()
-        team = form.team_to_file(team)
+        team = form.cleaned_data["team"]
 
         from ticketing.utils import TicketRateLimitError, create_ticket_atomic
 
@@ -93,7 +94,7 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
             with transaction.atomic():
                 ticket = create_ticket_atomic(
                     team=team,
-                    category=form.category_to_file,
+                    category=form.cleaned_data["category"],
                     title=cd["title"],
                     description=cd["description"],
                     hostname=cd["hostname"],

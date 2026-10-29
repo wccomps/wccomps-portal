@@ -101,9 +101,8 @@ async function wcStream(url, data, onProgress, onDone) {
     }
 }
 
-/** Shows a c-toggle_button as pressed or not: its pressed look and, for screen readers, aria-pressed. */
+/** Shows a c-toggle_button as pressed or not: aria-pressed, which its pressed look follows. */
 function setTogglePressed(button, pressed) {
-    button.classList.toggle('button--pressed', pressed);
     button.setAttribute('aria-pressed', String(pressed));
 }
 

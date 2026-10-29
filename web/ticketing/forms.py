@@ -196,8 +196,6 @@ class CreateTicketForm(forms.Form):
         error_messages={"required": "Please select a team.", "invalid_choice": "Please select a team."},
     )
 
-    category_obj: TicketCategory | None = None
-
     def __init__(
         self,
         *args: object,
@@ -206,11 +204,13 @@ class CreateTicketForm(forms.Form):
         box_ip_map: Mapping[str, str] | None = None,
         service_choices: Iterable[Mapping[str, str]] = (),
         teams: QuerySet[Team] | None = None,
+        own_team: Team | None = None,
         box_names: Iterable[str] = (),
         **kwargs: object,
     ) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         self.staff = staff
+        self.own_team = own_team
         self._categories = categories
         self.box_ip_map = box_ip_map or {}
         self.service_choices = service_choices
@@ -242,20 +242,6 @@ class CreateTicketForm(forms.Form):
                 },
             )
 
-    @property
-    def category_to_file(self) -> TicketCategory:
-        """The ticket's category; read only once is_valid() is True."""
-        if self.category_obj is None:
-            raise ValueError("category_to_file read before the form was valid")
-        return self.category_obj
-
-    def team_to_file(self, own_team: Team | None) -> Team:
-        """The ticket's team: the picked one, else the poster's own; call only once is_valid() is True."""
-        team = self.cleaned_data.get("team_id") or own_team
-        if team is None:
-            raise ValueError("team_to_file read before the form was valid")
-        return team
-
     def clean(self) -> dict[str, object]:
         cleaned = super().clean() or {}
         category_id = cleaned.get("category")
@@ -275,8 +261,9 @@ class CreateTicketForm(forms.Form):
             self.add_error("category", "Invalid ticket category selected.")
             return cleaned
 
-        category = allowed[category_id]
-        self.category_obj = category
+        # A valid form hands back the ticket's category and team (the picked one, else the poster's own)
+        category = cleaned["category"] = allowed[category_id]
+        cleaned["team"] = cleaned.get("team_id") or self.own_team
 
         hostname = str(cleaned.get("hostname", ""))
         ip_address = str(cleaned.get("ip_address", ""))

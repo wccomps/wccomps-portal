@@ -420,8 +420,7 @@ a.btn-secondary:focus-visible {
     text-decoration: none;
 }
 
-/* Toggle button (c-toggle_button): outlined until its choice is picked, then filled, bold and ringed, so the state
-   reads without colour and keeps 4.5:1 text in both themes */
+/* Toggle button: pressed reads without colour (filled, bold, ringed); text stays 4.5:1 or more in both themes */
 .toggle-button.button {
     background: var(--body-bg, #fff);
     color: var(--body-fg, #333);
@@ -431,14 +430,14 @@ a.btn-secondary:focus-visible {
 .toggle-button.button:focus-visible {
     background: var(--darkened-bg, #f8f8f8);
 }
-.toggle-button.button.button--pressed {
+.toggle-button.button[aria-pressed="true"] {
     background: var(--button-bg, #417690);
     color: var(--button-fg, #fff);
     border-color: var(--button-bg, #417690);
     font-weight: bold;
     box-shadow: 0 0 0 2px var(--body-bg, #fff), 0 0 0 4px var(--button-bg, #417690);
 }
-.toggle-button.button.button--pressed:hover {
+.toggle-button.button[aria-pressed="true"]:hover {
     background: var(--button-hover-bg, #205067);
 }
 
@@ -463,11 +462,11 @@ a.btn-secondary:focus-visible {
 .form-row fieldset {
     border-top: none;
 }
-/* Django's choice list (a div of option divs) sits under its legend, each option a 24px target */
-.form-row fieldset > div {
+/* Django's choice list (a div of option divs, not the toggle picker) sits under its legend in 24px rows */
+.form-row fieldset > div:not([x-data]) {
     margin-top: 0;
 }
-.form-row fieldset > div > div {
+.form-row fieldset > div:not([x-data]) > div {
     min-height: 24px;
     display: flex;
     align-items: center;
@@ -731,11 +730,17 @@ p.help {
     display: block;
 }
 
-/* The mark only: the input's required attribute is what assistive tech announces */
 label.required::after,
 legend.required::after {
-    content: " *" / "";
+    content: " *";
     color: var(--error-fg, #ba2121);
+}
+/* A label's input carries the required attribute assistive tech announces; a choice group carries none */
+label.required::after {
+    content: " *" / "";
+}
+legend.required::after {
+    content: " *" / " required";
 }
 
 /* ============================================

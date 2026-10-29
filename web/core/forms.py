@@ -1,12 +1,28 @@
 import re
 
 from django import forms
+from django.forms.utils import pretty_name
+from django.utils.html import strip_tags
 from registration.forms import NewEventFields
 from registration.models import SCHOOL_NAME_MAX_LENGTH, Event
 from registration.services import NewEvent
 
 from core.authentik_utils import parse_team_range
 from team.models import SchoolInfo
+
+
+def fields_with_errors(form: forms.BaseForm) -> list[tuple[forms.BoundField, str, str]]:
+    """Each shown field with an error, its label as text (a repeated one told apart by the field's name), and the id
+    a link to it targets: its input, or for a group its first option or the picker that takes focus."""
+    labels = [strip_tags(str(field.label)) for field in form.visible_fields()]
+    found = []
+    for field in form.visible_fields():
+        if field.errors:
+            label = strip_tags(str(field.label))
+            if labels.count(label) > 1:
+                label = pretty_name(field.name)
+            found.append((field, label, field.id_for_label or f"{field.auto_id}_0"))
+    return found
 
 
 def ask_for_the_file_again(form: forms.BaseForm, field: str) -> None:

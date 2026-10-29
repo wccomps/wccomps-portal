@@ -10,6 +10,10 @@ class ToggleButtonSelect(forms.Select):
     template_name = "forms/widgets/toggle_buttons.html"
     use_fieldset = True
 
+    def id_for_label(self, id_: str, index: str | None = None) -> str:
+        # The hidden select can't take focus: a link to the field goes to the picker around it
+        return f"{id_}_0" if id_ else id_
+
     def use_required_attribute(self, initial: object) -> bool:
         # A hidden required select blocks the submit with nothing the user can see
         return False

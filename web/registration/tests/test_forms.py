@@ -306,7 +306,6 @@ def test_the_region_rule_names_the_ticked_events_on_the_events_field(active_seas
 
 
 def test_a_kept_closed_enrollment_against_the_region_is_the_forms_own_error(active_season_with_event):
-    """Unticking can't fix it, so it belongs to no field."""
     from ..models import RegistrationEventEnrollment, TeamRegistration
 
     season, event = active_season_with_event

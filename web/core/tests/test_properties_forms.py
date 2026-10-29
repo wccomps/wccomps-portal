@@ -415,11 +415,10 @@ def _import_event_make(w: World, draw: st.DataObject) -> Factory:
 def _create_ticket(w: World, form: CreateTicketForm) -> None:
     from ticketing.utils import create_ticket_atomic
 
-    assert form.category_obj is not None
     cd = form.cleaned_data
     create_ticket_atomic(
         team=w.teams[0],
-        category=form.category_obj,
+        category=cd["category"],
         title=cd["title"],
         description=cd["description"],
         hostname=cd["hostname"],

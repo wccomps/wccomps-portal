@@ -6,12 +6,12 @@ from django.db import IntegrityError, transaction
 from django.forms import CheckboxSelectMultiple
 from django.http import HttpRequest, HttpResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils.html import strip_tags
 from django.views.decorators.http import require_POST
 from packets.models import packets_sent
 
 from core.auth_utils import require_permission
 from core.form_renderer import PortalFormRenderer
+from core.forms import fields_with_errors
 from core.utils import client_ip, list_filters
 from team.models import SchoolInfo
 
@@ -60,17 +60,11 @@ def public_registration_form(data: QueryDict | None = None) -> RegistrationForm:
 
 def error_summary(form: RegistrationForm) -> list[tuple[str, str]]:
     """The register page's failed-submit summary: (link to the field, or "" for the form's own error, line)."""
-    labels = [strip_tags(str(field.label)) for field in form.fields.values()]
     lines = [("", str(error)) for error in form.non_field_errors()]
-    for field in form.visible_fields():
-        label = strip_tags(str(field.label))
-        if labels.count(label) > 1:
-            # Captain and coach rows share their labels
-            label = f"{field.name.split('_')[0].title()} {label.lower()}"
-        target = f"{field.auto_id}_0" if field.use_fieldset else field.auto_id
+    for field, label, anchor in fields_with_errors(form):
         # The events' and rules' own messages name what to do; their labels are whole sentences
         named = not (field.use_fieldset or field.widget_type == "checkbox")
-        lines += [(f"#{target}", f"{label}: {error}" if named else str(error)) for error in field.errors]
+        lines += [(f"#{anchor}", f"{label}: {error}" if named else str(error)) for error in field.errors]
     return lines
 
 

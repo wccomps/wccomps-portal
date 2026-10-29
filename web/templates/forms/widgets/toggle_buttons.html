@@ -1,6 +1,6 @@
 {% load cotton %}
 {# ToggleButtonSelect and ToggleButtonSelectMultiple (core/widgets.py): the select posts the choice; togglePicker (static/js/utils.js) keeps its buttons in step #}
-<div x-data="togglePicker">
+<div x-data="togglePicker" id="{{ widget.attrs.id }}_0" tabindex="-1">
     <select name="{{ widget.name }}" hidden{% include "django/forms/widgets/attrs.html" %}>
         {% for group_name, group_choices, group_index in widget.optgroups %}
             {% for option in group_choices %}

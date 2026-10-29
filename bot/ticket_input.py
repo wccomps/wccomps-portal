@@ -64,7 +64,7 @@ def read_ticket(
     if not form.is_valid():
         return form_errors(form.errors)
     return TicketInput(
-        category=form.category_to_file,
+        category=form.cleaned_data["category"],
         description=form.cleaned_data["description"],
         hostname=form.cleaned_data["hostname"],
         ip_address=form.cleaned_data["ip_address"],
