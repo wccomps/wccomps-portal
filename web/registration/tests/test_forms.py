@@ -5,7 +5,7 @@ import pytest
 from ..forms import (
     RegistrationForm,
 )
-from ..models import Event, Season
+from ..models import Event, RegistrationContact, RegistrationEventEnrollment, Season, TeamRegistration
 
 pytestmark = pytest.mark.django_db
 
@@ -25,25 +25,31 @@ def active_season_with_event(db):
     return season, event
 
 
+@pytest.fixture
+def form_data():
+    """A filled-in registration form with no events ticked."""
+    return {
+        "school_name": "Test High School",
+        "region": "wrccdc",
+        "captain_name": "John Doe",
+        "captain_email": "captain@example.com",
+        "captain_phone": "555-1234",
+        "coach_name": "Dr. Smith",
+        "coach_email": "coach@example.com",
+        "coach_phone": "555-5678",
+        "agree_to_rules": True,
+    }
+
+
+@pytest.fixture
+def valid_form_data(form_data, active_season_with_event):
+    """The form with the open event ticked."""
+    _, event = active_season_with_event
+    return {**form_data, "events": [event.id]}
+
+
 class TestRegistrationFormValidation:
     """Test RegistrationForm validation behavior."""
-
-    @pytest.fixture
-    def valid_form_data(self, active_season_with_event):
-        """Valid form data for testing."""
-        _, event = active_season_with_event
-        return {
-            "school_name": "Test High School",
-            "region": "wrccdc",
-            "captain_name": "John Doe",
-            "captain_email": "captain@example.com",
-            "captain_phone": "555-1234",
-            "coach_name": "Dr. Smith",
-            "coach_email": "coach@example.com",
-            "coach_phone": "",
-            "events": [event.id],
-            "agree_to_rules": True,
-        }
 
     def test_form_accepts_valid_data(self, valid_form_data):
         """Form should accept valid data."""
@@ -85,23 +91,6 @@ class TestRegistrationFormValidation:
 
 class TestRegistrationFormSave:
     """Test RegistrationForm save behavior."""
-
-    @pytest.fixture
-    def valid_form_data(self, active_season_with_event):
-        """Valid form data for testing."""
-        _, event = active_season_with_event
-        return {
-            "school_name": "Test High School",
-            "region": "wrccdc",
-            "captain_name": "John Doe",
-            "captain_email": "captain@example.com",
-            "captain_phone": "555-1234",
-            "coach_name": "Dr. Smith",
-            "coach_email": "coach@example.com",
-            "coach_phone": "555-5678",
-            "events": [event.id],
-            "agree_to_rules": True,
-        }
 
     def test_form_creates_registration_with_pending_status(self, valid_form_data):
         """Saved form should create registration with pending status."""
@@ -145,6 +134,33 @@ class TestRegistrationFormSave:
         assert enrollments.first().event == event
 
 
+class TestRegistrationFormAtomicSave:
+    """A registration is saved whole or not at all."""
+
+    @pytest.mark.parametrize("failing", ["contact", "enrollment"])
+    def test_a_failed_write_leaves_no_registration(self, valid_form_data, monkeypatch, failing):
+        def fail(*args, **kwargs):
+            raise RuntimeError("write failed")
+
+        if failing == "contact":
+            monkeypatch.setattr(RegistrationContact.objects, "create", fail)
+        else:
+            monkeypatch.setattr(RegistrationEventEnrollment.objects, "bulk_create", fail)
+        form = RegistrationForm(data=valid_form_data)
+        assert form.is_valid(), form.errors
+        with pytest.raises(RuntimeError):
+            form.save()
+        assert not TeamRegistration.objects.exists()
+
+    def test_saving_without_commit_is_refused(self, valid_form_data):
+        """A registration without its contacts and enrollments is never handed out."""
+        form = RegistrationForm(data=valid_form_data)
+        assert form.is_valid(), form.errors
+        with pytest.raises(ValueError, match="commit"):
+            form.save(commit=False)
+        assert not TeamRegistration.objects.exists()
+
+
 class TestRegistrationFormRegionValidation:
     """Test RegistrationForm region validation behavior."""
 
@@ -180,79 +196,65 @@ class TestRegistrationFormRegionValidation:
         )
         return season, invitational, qualifier, regional
 
-    @pytest.fixture
-    def base_form_data(self):
-        """Base form data without events."""
-        return {
-            "school_name": "Test High School",
-            "captain_name": "John Doe",
-            "captain_email": "captain@example.com",
-            "captain_phone": "555-1234",
-            "coach_name": "Dr. Smith",
-            "coach_email": "coach@example.com",
-            "coach_phone": "",
-            "agree_to_rules": True,
-        }
-
-    def test_wrccdc_can_register_for_qualifier(self, base_form_data, season_with_events):
+    def test_wrccdc_can_register_for_qualifier(self, form_data, season_with_events):
         """WRCCDC teams can register for qualifiers."""
         _, _, qualifier, _ = season_with_events
-        base_form_data["region"] = "wrccdc"
-        base_form_data["events"] = [qualifier.id]
-        form = RegistrationForm(data=base_form_data)
+        form_data["region"] = "wrccdc"
+        form_data["events"] = [qualifier.id]
+        form = RegistrationForm(data=form_data)
         assert form.is_valid(), form.errors
 
-    def test_wrccdc_can_register_for_regional(self, base_form_data, season_with_events):
+    def test_wrccdc_can_register_for_regional(self, form_data, season_with_events):
         """WRCCDC teams can register for regionals."""
         _, _, _, regional = season_with_events
-        base_form_data["region"] = "wrccdc"
-        base_form_data["events"] = [regional.id]
-        form = RegistrationForm(data=base_form_data)
+        form_data["region"] = "wrccdc"
+        form_data["events"] = [regional.id]
+        form = RegistrationForm(data=form_data)
         assert form.is_valid(), form.errors
 
-    def test_non_wrccdc_can_register_for_invitational(self, base_form_data, season_with_events):
+    def test_non_wrccdc_can_register_for_invitational(self, form_data, season_with_events):
         """Non-WRCCDC teams can register for invitationals."""
         _, invitational, _, _ = season_with_events
-        base_form_data["region"] = "mwccdc"
-        base_form_data["events"] = [invitational.id]
-        form = RegistrationForm(data=base_form_data)
+        form_data["region"] = "mwccdc"
+        form_data["events"] = [invitational.id]
+        form = RegistrationForm(data=form_data)
         assert form.is_valid(), form.errors
 
-    def test_non_wrccdc_blocked_from_qualifier(self, base_form_data, season_with_events):
+    def test_non_wrccdc_blocked_from_qualifier(self, form_data, season_with_events):
         """Non-WRCCDC teams cannot register for qualifiers."""
         _, _, qualifier, _ = season_with_events
-        base_form_data["region"] = "mwccdc"
-        base_form_data["events"] = [qualifier.id]
-        form = RegistrationForm(data=base_form_data)
+        form_data["region"] = "mwccdc"
+        form_data["events"] = [qualifier.id]
+        form = RegistrationForm(data=form_data)
         assert not form.is_valid()
         assert "__all__" in form.errors
         assert "Only Western Regional (WRCCDC) teams" in str(form.errors["__all__"])
 
-    def test_non_wrccdc_blocked_from_regional(self, base_form_data, season_with_events):
+    def test_non_wrccdc_blocked_from_regional(self, form_data, season_with_events):
         """Non-WRCCDC teams cannot register for regionals."""
         _, _, _, regional = season_with_events
-        base_form_data["region"] = "neccdc"
-        base_form_data["events"] = [regional.id]
-        form = RegistrationForm(data=base_form_data)
+        form_data["region"] = "neccdc"
+        form_data["events"] = [regional.id]
+        form = RegistrationForm(data=form_data)
         assert not form.is_valid()
         assert "__all__" in form.errors
         assert "Only Western Regional (WRCCDC) teams" in str(form.errors["__all__"])
 
-    def test_non_wrccdc_blocked_mixed_events(self, base_form_data, season_with_events):
+    def test_non_wrccdc_blocked_mixed_events(self, form_data, season_with_events):
         """Non-WRCCDC teams cannot register for mix of invitational and qualifier."""
         _, invitational, qualifier, _ = season_with_events
-        base_form_data["region"] = "seccdc"
-        base_form_data["events"] = [invitational.id, qualifier.id]
-        form = RegistrationForm(data=base_form_data)
+        form_data["region"] = "seccdc"
+        form_data["events"] = [invitational.id, qualifier.id]
+        form = RegistrationForm(data=form_data)
         assert not form.is_valid()
         assert "__all__" in form.errors
         assert "Qualifier 1" in str(form.errors["__all__"])
 
-    def test_at_large_blocked_from_qualifier(self, base_form_data, season_with_events):
+    def test_at_large_blocked_from_qualifier(self, form_data, season_with_events):
         """At-large teams cannot register for qualifiers."""
         _, _, qualifier, _ = season_with_events
-        base_form_data["region"] = "at_large"
-        base_form_data["events"] = [qualifier.id]
-        form = RegistrationForm(data=base_form_data)
+        form_data["region"] = "at_large"
+        form_data["events"] = [qualifier.id]
+        form = RegistrationForm(data=form_data)
         assert not form.is_valid()
         assert "__all__" in form.errors

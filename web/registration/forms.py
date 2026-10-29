@@ -88,28 +88,28 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
 
         return cleaned_data
 
+    @transaction.atomic
     def save(self, commit: bool = True) -> TeamRegistration:
-        """Save a new registration with its contacts and event enrollments."""
-        registration = super().save(commit=commit)
-        if commit:
-            RegistrationContact.objects.create(
-                registration=registration,
-                role="captain",
-                name=self.cleaned_data["captain_name"],
-                email=self.cleaned_data["captain_email"],
-                phone=self.cleaned_data["captain_phone"],
-            )
-            RegistrationContact.objects.create(
-                registration=registration,
-                role="coach",
-                name=self.cleaned_data["coach_name"],
-                email=self.cleaned_data["coach_email"],
-                phone=self.cleaned_data.get("coach_phone", ""),
-            )
-            RegistrationEventEnrollment.objects.bulk_create(
-                RegistrationEventEnrollment(registration=registration, event=event)
-                for event in self.cleaned_data["events"]
-            )
+        if not commit:
+            raise ValueError("RegistrationForm can't save without commit: its contacts and enrollments need the row")
+        registration = super().save()
+        RegistrationContact.objects.create(
+            registration=registration,
+            role="captain",
+            name=self.cleaned_data["captain_name"],
+            email=self.cleaned_data["captain_email"],
+            phone=self.cleaned_data["captain_phone"],
+        )
+        RegistrationContact.objects.create(
+            registration=registration,
+            role="coach",
+            name=self.cleaned_data["coach_name"],
+            email=self.cleaned_data["coach_email"],
+            phone=self.cleaned_data.get("coach_phone", ""),
+        )
+        RegistrationEventEnrollment.objects.bulk_create(
+            RegistrationEventEnrollment(registration=registration, event=event) for event in self.cleaned_data["events"]
+        )
         return registration
 
 
