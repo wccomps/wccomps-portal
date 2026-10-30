@@ -109,6 +109,7 @@ CASES = [
     ViewCase("school_info_export", GOLD),
     ViewCase("school_info_clear", GOLD),
     ViewCase("school_info_import", GOLD, post=_school_import),
+    ViewCase("school_info_add", GOLD, post=lambda w: _fields(SchoolInfoEditForm())),
     ViewCase(
         "school_info_edit",
         GOLD,
