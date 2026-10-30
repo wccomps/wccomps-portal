@@ -106,7 +106,10 @@
                 Competition Controls
             </c-slot>
             <p class="help">
-                {% if panel.stage.running and panel.start_offered %}
+                {% if panel.facts.timer_retrying %}
+                    The schedule's last {% if panel.facts.timer_retrying.enable %}start{% else %}stop{% endif %} didn't finish:
+                    the timer runs it again within a minute (attempt {{ panel.facts.timer_retrying.number }} of {{ panel.timer_attempts }}).
+                {% elif panel.stage.running and panel.start_offered %}
                     The last start didn't turn everything on: press Start again. It retries the apps and accounts and
                     doesn't post the start message twice.
                 {% elif panel.stage.running %}

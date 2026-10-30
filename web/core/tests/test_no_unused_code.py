@@ -239,6 +239,7 @@ CODE_EXCEPTIONS = {
     "*:lookup_name": "Django reads a lookup's lookup_name to match field__name in a filter",
     "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",
     "web/core/cotton.py:__str__": "str() calls it when a component writes {{ attrs }}",
+    "bot/utils.py:aclose": "contextlib.aclosing calls it",
     "*/management/commands/*:Command": "manage.py runs a command by its file name",
     "*/management/commands/*:handle": "manage.py calls Command.handle",
     "*/management/commands/*:help": "manage.py help prints a command's help text",

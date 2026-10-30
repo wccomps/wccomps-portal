@@ -182,6 +182,29 @@ def get_box_metadata() -> dict[str, dict[str, object]]:
     }
 
 
+def ticket_infrastructure() -> tuple[list[str], dict[str, str], list[dict[str, str]]]:
+    """Box names, box IPs and service choices (keys: value, label, box_ip, box_name, service_name) for filing a
+    ticket, from cached metadata."""
+    metadata = QuotientMetadataCache.objects.first()
+    boxes = metadata.boxes if metadata else []
+    services = [
+        {
+            "value": f"{box['name']}:{svc['name']}",
+            "label": f"{box['name']}: {svc['display_name']}",
+            "box_ip": box["ip"],
+            "box_name": box["name"],
+            "service_name": svc["name"],
+        }
+        for box in boxes
+        for svc in box.get("services", [])
+    ]
+    return (
+        sorted(box["name"] for box in boxes),
+        {box["name"]: box["ip"] for box in boxes},
+        sorted(services, key=lambda s: s["label"]),
+    )
+
+
 def get_box_choices() -> list[tuple[str, str]]:
     """Box dropdown choices from cached metadata; labels lead with the last IP octet to tell boxes apart."""
     metadata = QuotientMetadataCache.objects.first()

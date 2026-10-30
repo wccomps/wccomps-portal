@@ -611,3 +611,17 @@ def test_while_stopped_stop_is_offered_again_only_after_a_stop_that_left_somethi
     assert ('@click="stopCompetition"' in page) == bool(accounts_failed)
     assert ("The last stop didn't turn everything off" in page) == bool(accounts_failed)
     assert page.count('@click="startCompetition"') == 1
+
+
+def test_while_the_timer_retries_its_start_the_controls_say_so(client):
+    """Without it the admin wouldn't know a retry is pending, and pressing Start would race it."""
+    from django.utils import timezone
+
+    _arrange("running")
+    CompetitionConfig.objects.filter(pk=1).update(
+        timer_series_enable=True, timer_series_attempt=1, timer_series_started=timezone.now()
+    )
+
+    page = " ".join(_page(client).split())
+
+    assert "The schedule's last start didn't finish: the timer runs it again within a minute (attempt 2 of 4)." in page

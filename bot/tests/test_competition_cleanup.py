@@ -90,6 +90,28 @@ async def test_tears_down_discord_and_database(competition: Team) -> None:
     assert (await AuditLog.objects.aget(action="competition_cleanup")).admin_user == "web:admin"
 
 
+@pytest.mark.parametrize("enable", [True, False], ids=["start-series", "stop-series"])
+async def test_ends_the_timers_series_so_it_starts_or_stops_nothing_after(competition: Team, enable: bool) -> None:
+    """With the schedule gone, a live series would still have the timer retry a failed start or stop."""
+    await CompetitionConfig.objects.filter(pk=1).aupdate(
+        timer_series_enable=enable, timer_series_attempt=2, timer_series_started=timezone.now()
+    )
+
+    with (
+        patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock),
+        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
+        patch(
+            "bot.role_sync.sync_roles",
+            new_callable=AsyncMock,
+            return_value={"roles_added": 0, "roles_removed": 0, "errors": 0, "changes": []},
+        ),
+    ):
+        await run_competition_cleanup(MagicMock(), _guild("Team 03", "Staff"), "web:admin")
+
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert (config.timer_series_enable, config.timer_series_attempt, config.timer_series_started) == (None, 0, None)
+
+
 async def test_tears_down_discord_by_name_when_db_ids_are_null(competition: Team) -> None:
     await Team.objects.filter(pk=competition.pk).aupdate(discord_role_id=None, discord_category_id=None)
     guild = _guild("team 03", "Staff")

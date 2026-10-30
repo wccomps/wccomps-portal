@@ -8,13 +8,14 @@ from datetime import datetime
 from enum import StrEnum
 
 from django.urls import reverse
+from django.utils import timezone
 from packets.models import Packet
 from packets.services import teams_without_delivered_copy
 from registration.stage import ACTIONS, Action, EventStage
 
 from core.admin_views.places import PLACES, STEPS, Section, action_url
 from core.models import CompetitionConfig
-from core.services.competition import incomplete_run
+from core.services.competition import TIMER_ATTEMPTS, Attempt, GiveUp, current_timer_plan, incomplete_run
 from team.models import DiscordLink, SchoolInfo
 
 
@@ -70,6 +71,7 @@ class EventFacts:
     starts_at: datetime | None  # The scheduled start, while the schedule will still start it
     ends_at: datetime | None  # The scheduled stop
     incomplete_run: bool | None  # A last start (True) or stop (False) that needs running again
+    timer_retrying: Attempt | None = None  # The timer's next attempt at a start or stop left incomplete or errored
 
 
 def _plural(count: int, one: str, many: str) -> str:
@@ -167,6 +169,10 @@ class EventPanel:
         return reverse("registration_season_list")
 
     @property
+    def timer_attempts(self) -> int:
+        return TIMER_ATTEMPTS
+
+    @property
     def start_offered(self) -> bool:
         """Start while stopped, or again while running after a start that left something off."""
         return not self.stage.running or self.facts.incomplete_run is True
@@ -217,6 +223,12 @@ def event_facts(stage: EventStage) -> EventFacts:
     if stage.packets_sent:
         teams_without_copy = teams_without_delivered_copy(Packet.objects.sent().filter(event=stage.event)).count()
     config = CompetitionConfig.get_config()
+    retrying = None
+    match current_timer_plan(timezone.now()):
+        case Attempt(number=number) as attempt if number > 1:
+            retrying = attempt
+        case Attempt() | GiveUp() | None:
+            pass
     return EventFacts(
         stage=stage,
         schools=SchoolInfo.objects.count(),
@@ -226,4 +238,5 @@ def event_facts(stage: EventStage) -> EventFacts:
         starts_at=config.competition_start_time if config.schedule_will_start() else None,
         ends_at=config.competition_end_time,
         incomplete_run=incomplete_run(),
+        timer_retrying=retrying,
     )

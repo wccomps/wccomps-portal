@@ -1,22 +1,21 @@
 import logging
 
 import discord
-from asgiref.sync import sync_to_async
 from discord import app_commands
 from discord.ext import commands
 
 from bot.permissions import permission_check
-from bot.thread_creator import publish_new_ticket
 from bot.ticket_dashboard import trigger_dashboard
-from bot.ticket_input import read_resolution, read_ticket
+from bot.ticket_input import file_ticket, read_resolution
 from bot.utils import (
     DISCORD_EMBED_FIELD_COUNT_LIMIT,
     ConfirmView,
     add_field,
     choices,
+    find_team,
     fit,
-    get_team_or_respond,
     log_to_ops_channel,
+    run_blocking,
 )
 from ticketing.access import TICKET_STAFF
 from ticketing.models import Ticket, TicketCategory, TicketHistory
@@ -86,50 +85,40 @@ class AdminTicketsCog(commands.Cog):
         if not interaction.guild:
             await interaction.response.send_message("This command must be used in a guild", ephemeral=True)
             return
+        # Discord rejects a first answer after 3 seconds
+        await interaction.response.defer(ephemeral=True)
 
-        team = await get_team_or_respond(interaction, team_number)
-        if not team:
+        team = await find_team(team_number)
+        if isinstance(team, str):
+            await interaction.followup.send(team, ephemeral=True)
             return
 
-        ticket_input = await sync_to_async(read_ticket)(
+        filed = await run_blocking(
+            file_ticket,
+            team,
             category,
             staff=True,
+            actor=f"admin:{interaction.user}",
             description=description,
             hostname=hostname or "",
             ip_address=ip_address or "",
             service_name=service or "",
         )
-        if isinstance(ticket_input, str):
-            await interaction.response.send_message(ticket_input, ephemeral=True)
+        if isinstance(filed, str):
+            await interaction.followup.send(filed, ephemeral=True)
             return
-        cat = ticket_input.category
+        ticket, cat = filed
 
-        from ticketing.utils import acreate_ticket_atomic
-
-        ticket = await acreate_ticket_atomic(
-            team=team,
-            category=cat,
-            title=cat.display_name,
-            description=ticket_input.description,
-            hostname=ticket_input.hostname,
-            ip_address=ticket_input.ip_address,
-            service_name=ticket_input.service_name,
-            actor_username=f"admin:{interaction.user}",
-            enforce_team_limit=False,
-        )
-
-        await interaction.response.send_message(
-            f"Created ticket **{ticket.ticket_number}** for **{team.team_name}**\n"
-            f"Category: {cat.display_name}\n"
-            f"Point cost: {cat.points_display}",
-            ephemeral=True,
-        )
-
-        await publish_new_ticket(self.bot, interaction.guild, ticket)
         await log_to_ops_channel(
             self.bot,
             f"Admin Ticket Created: {ticket.ticket_number} ({cat.display_name}) "
             f"for **{team.team_name}** by {interaction.user.mention}",
+        )
+        await interaction.followup.send(
+            f"Created ticket **{ticket.ticket_number}** for **{team.team_name}**\n"
+            f"Category: {cat.display_name}\n"
+            f"Point cost: {cat.points_display}",
+            ephemeral=True,
         )
 
     @tickets_group.command(name="list", description="[ADMIN] List open tickets")

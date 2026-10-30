@@ -1,10 +1,11 @@
 """Tests for shared ticket creation utilities."""
 
 import pytest
+from asgiref.sync import sync_to_async
 
 from team.models import Team
 from ticketing.models import TicketCategory, TicketHistory
-from ticketing.utils import acreate_ticket_atomic, create_ticket_atomic
+from ticketing.utils import create_ticket_atomic
 
 
 @pytest.mark.django_db
@@ -123,7 +124,7 @@ class TestTicketCreationAtomic:
 class TestAsyncTicketCreationAtomic:
     """Test async ticket creation utility functions."""
 
-    async def test_acreate_ticket_atomic_generates_sequential_numbers(self, other_category):
+    async def test_create_ticket_atomic_from_async_generates_sequential_numbers(self, other_category):
         """Test async ticket number generation."""
         team = await Team.objects.acreate(
             team_name="Test Team",
@@ -132,7 +133,7 @@ class TestAsyncTicketCreationAtomic:
         )
 
         # Create first ticket
-        ticket1 = await acreate_ticket_atomic(
+        ticket1 = await sync_to_async(create_ticket_atomic)(
             team=team,
             category=other_category,
             title="First Ticket",
@@ -143,7 +144,7 @@ class TestAsyncTicketCreationAtomic:
         assert ticket1.ticket_number == "T002-001"
 
         # Create second ticket
-        ticket2 = await acreate_ticket_atomic(
+        ticket2 = await sync_to_async(create_ticket_atomic)(
             team=team,
             category=other_category,
             title="Second Ticket",
@@ -157,7 +158,7 @@ class TestAsyncTicketCreationAtomic:
         await team.arefresh_from_db()
         assert team.ticket_counter == 2
 
-    async def test_acreate_ticket_atomic_creates_history(self, other_category):
+    async def test_create_ticket_atomic_from_async_creates_history(self, other_category):
         """Test async ticket history creation."""
         team = await Team.objects.acreate(
             team_name="Test Team",
@@ -165,7 +166,7 @@ class TestAsyncTicketCreationAtomic:
             ticket_counter=0,
         )
 
-        ticket = await acreate_ticket_atomic(
+        ticket = await sync_to_async(create_ticket_atomic)(
             team=team,
             category=other_category,
             title="Test",
@@ -179,7 +180,7 @@ class TestAsyncTicketCreationAtomic:
         assert history.action == "created"
         assert history.details["created_by"] == "discord:user#1234"
 
-    async def test_acreate_ticket_atomic_concurrent_safety(self, other_category):
+    async def test_create_ticket_atomic_from_async_concurrent_safety(self, other_category):
         """Test that concurrent ticket creation doesn't create duplicate numbers."""
         import asyncio
 
@@ -191,7 +192,7 @@ class TestAsyncTicketCreationAtomic:
 
         # Create multiple tickets concurrently
         tasks = [
-            acreate_ticket_atomic(
+            sync_to_async(create_ticket_atomic)(
                 team=team,
                 category=other_category,
                 title=f"Ticket {i}",
@@ -215,3 +216,21 @@ class TestAsyncTicketCreationAtomic:
         # Verify final counter
         await team.arefresh_from_db()
         assert team.ticket_counter == 5
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(("staff", "filed"), [(False, False), (True, True)], ids=["team", "staff"])
+def test_file_ticket_answers_the_rate_limit_and_staff_file_past_it(staff: bool, filed: bool) -> None:
+    from bot.ticket_input import file_ticket
+    from ticketing.utils import TEAM_TICKET_LIMIT
+
+    team = Team.objects.create(team_number=44, team_name="Team 44")
+    category = TicketCategory.objects.create(pk=95, display_name="Other", sort_order=95, user_creatable=True)
+    for n in range(TEAM_TICKET_LIMIT):
+        create_ticket_atomic(team=team, category=category, title=f"t{n}")
+
+    result = file_ticket(team, "95", staff=staff, actor="discord:someone", description="help")
+
+    assert isinstance(result, str) is not filed
+    if not filed:
+        assert "too many tickets" in result

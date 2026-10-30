@@ -12,13 +12,15 @@ from registration.models import School
 from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager
 from core.authentik_utils import (
     CredentialReset,
+    _reset_credentials,
     reset_team_credentials,
     reset_teams_credentials,
     sessions_failure_summary,
     set_team_account_active,
 )
 from core.models import DiscordTask
-from team.models import DiscordLink, SchoolInfo, Team
+from core.utils import drain
+from team.models import DiscordLink, SchoolInfo, Team, team_username
 
 pytestmark = pytest.mark.django_db
 
@@ -239,7 +241,7 @@ def test_bulk_reset_uses_one_manager(manager):
 
     with patch("core.authentik_utils.AuthentikManager") as cls:
         cls.return_value.__enter__.return_value = manager
-        result = reset_teams_credentials([1, 2, 3], actor="gold-admin")
+        result = drain(reset_teams_credentials([1, 2, 3], "gold-admin"))
 
     assert cls.call_count == 1
     assert [username for _num, username, _pw in result.password_list] == ["team01", "team02", "team03"]
@@ -264,7 +266,7 @@ def test_web_bulk_reset_defaults_to_the_active_teams(admin_user):
         patch("core.authentik_utils.AuthentikManager"),
         patch(
             "core.authentik_utils._reset_credentials",
-            side_effect=lambda _m, n: CredentialReset(
+            side_effect=lambda _m, n, _on_set=None: CredentialReset(
                 password=f"pw-{n}", sessions_error="HTTP 403" if n == 2 else None, sessions_found=0
             ),
         ) as reset,
@@ -324,7 +326,7 @@ def test_bulk_reset_writes_its_own_audit_row(manager):
     manager.find_user.side_effect = lambda username: {"pk": 9, "username": username} if username != "team02" else None
     with patch("core.authentik_utils.AuthentikManager") as cls:
         cls.return_value.__enter__.return_value = manager
-        reset_teams_credentials([1, 2], actor="gold-admin")
+        drain(reset_teams_credentials([1, 2], "gold-admin"))
 
     row = AuditLog.objects.get(action="blueteam_passwords_reset")
     assert row.admin_user == "gold-admin"
@@ -341,7 +343,7 @@ def test_bulk_audit_names_the_teams_it_could_not_count(manager):
     manager.user_sessions.side_effect = [AuthentikAPIError("List sessions: Server error", 500), [uuid.UUID(int=1)]]
     with patch("core.authentik_utils.AuthentikManager") as cls:
         cls.return_value.__enter__.return_value = manager
-        reset_teams_credentials([1], actor="gold-admin")
+        drain(reset_teams_credentials([1], "gold-admin"))
 
     row = AuditLog.objects.get(action="blueteam_passwords_reset")
     assert (row.details["sessions_found"], row.details["sessions_uncounted"]) == (0, ["team01"])
@@ -372,7 +374,7 @@ def _bulk_reset(admin_user, results):
     client.force_login(admin_user)
     with (
         patch("core.authentik_utils.AuthentikManager"),
-        patch("core.authentik_utils._reset_credentials", side_effect=lambda _m, n: results[n]),
+        patch("core.authentik_utils._reset_credentials", side_effect=lambda _m, n, _on_set=None: results[n]),
     ):
         return client.post(reverse("admin_competition_action"), {"action": "reset_passwords", "team_numbers": ""})
 
@@ -410,7 +412,193 @@ def test_bulk_reset_tells_ops_once(manager):
     manager.find_user.side_effect = lambda username: {"pk": 9, "username": username} if username != "team02" else None
     with patch("core.authentik_utils.AuthentikManager") as cls:
         cls.return_value.__enter__.return_value = manager
-        reset_teams_credentials([1, 2], actor="gold-admin")
+        drain(reset_teams_credentials([1, 2], "gold-admin"))
 
     notes = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
     assert notes == ["Credentials reset by gold-admin: Reset 1/2 passwords; failed: team02: User team02 not found"]
+
+
+def test_a_bulk_reset_yields_and_audits_each_batch_before_starting_the_next_and_tells_ops_at_the_end(manager):
+    """A caller that stops (a crash, a closing reply window) has each batch handed to it; ops hears of the rest."""
+    from core.models import AuditLog
+
+    for number in range(1, 26):
+        Team.objects.create(team_number=number, team_name=f"Team {number}")
+    manager.find_user.side_effect = lambda username: {"pk": 9, "username": username}
+    with patch("core.authentik_utils.AuthentikManager") as cls:
+        cls.return_value.__enter__.return_value = manager
+        batches = reset_teams_credentials(list(range(1, 26)), "gold-admin")
+        first = next(batches)
+
+        assert first.team_numbers == list(range(1, 11))
+        assert [n for n, _u, _p in first.password_list] == list(range(1, 11))
+        assert AuditLog.objects.filter(action="blueteam_passwords_reset").count() == 1
+        assert manager.set_password.call_count == 10
+        assert not DiscordTask.objects.filter(task_type="log_to_channel").exists()
+
+        rest = list(batches)
+
+    assert [b.team_numbers for b in rest] == [list(range(11, 21)), list(range(21, 26))]
+    rows = AuditLog.objects.filter(action="blueteam_passwords_reset").order_by("id")
+    assert [r.details["team_numbers"] for r in rows] == [list(range(1, 11)), list(range(11, 21)), list(range(21, 26))]
+    notes = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    assert notes == ["Credentials reset by gold-admin: Reset 25/25 passwords"]
+
+
+def test_draining_a_bulk_reset_gives_every_batch_and_tells_ops_once(manager):
+    for number in range(1, 13):
+        Team.objects.create(team_number=number, team_name=f"Team {number}")
+    manager.find_user.side_effect = lambda username: {"pk": 9, "username": username} if username != "team12" else None
+    with patch("core.authentik_utils.AuthentikManager") as cls:
+        cls.return_value.__enter__.return_value = manager
+        result = drain(reset_teams_credentials(list(range(1, 13)), "gold-admin"))
+
+    assert result.team_numbers == list(range(1, 13))
+    assert len(result.password_list) == 11
+    assert result.failed_resets == [("team12", "User team12 not found")]
+    notes = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    assert notes == ["Credentials reset by gold-admin: Reset 11/12 passwords; failed: team12: User team12 not found"]
+
+
+def test_a_drained_bulk_reset_that_raises_still_tells_ops_of_the_batches_done(manager):
+    for number in range(1, 13):
+        Team.objects.create(team_number=number, team_name=f"Team {number}")
+    manager.find_user.side_effect = lambda username: {"pk": 9, "username": username}
+    real = _reset_credentials
+
+    def reset(manager_, number, on_set):
+        if number == 11:
+            raise RuntimeError("Authentik went away")
+        return real(manager_, number, on_set)
+
+    with (
+        patch("core.authentik_utils.AuthentikManager") as cls,
+        patch("core.authentik_utils._reset_credentials", side_effect=reset),
+        pytest.raises(RuntimeError),
+    ):
+        cls.return_value.__enter__.return_value = manager
+        drain(reset_teams_credentials(list(range(1, 13)), "gold-admin"))
+
+    notes = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    assert notes == ["Credentials reset by gold-admin: not reached: team11, team12; Reset 10/10 passwords"]
+
+
+@pytest.mark.parametrize(
+    ("teams", "lost"), [(12, ["team11"]), (3, ["team01", "team02"])], ids=["later-batch", "first-batch"]
+)
+def test_a_batch_that_raises_partway_reports_the_teams_it_reset_as_lost(manager, teams, lost):
+    """Their passwords changed in Authentik, and no batch ever carried them out."""
+    for number in range(1, teams + 1):
+        Team.objects.create(team_number=number, team_name=f"Team {number}")
+    manager.find_user.side_effect = lambda username: {"pk": 9, "username": username}
+    real = _reset_credentials
+    fails_at = teams
+
+    def reset(manager_, number, on_set):
+        if number == fails_at:
+            raise RuntimeError("Authentik went away")
+        return real(manager_, number, on_set)
+
+    with (
+        patch("core.authentik_utils.AuthentikManager") as cls,
+        patch("core.authentik_utils._reset_credentials", side_effect=reset),
+        pytest.raises(RuntimeError),
+    ):
+        cls.return_value.__enter__.return_value = manager
+        steps = reset_teams_credentials(list(range(1, teams + 1)), "gold-admin")
+        for _batch in steps:
+            pass
+
+    (note,) = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    assert note.startswith(f"Credentials reset by gold-admin: the new passwords of {', '.join(lost)} were never")
+    assert f"not reached: {team_username(fails_at)};" in note
+
+
+@pytest.mark.parametrize("fails_at", ["school info", "ending sessions"])
+def test_a_reset_that_raises_after_the_password_changed_reports_it_lost(manager, fails_at):
+    """The new password is in Authentik whatever raised after it was set, and nobody was handed it."""
+    from django.db import DatabaseError
+
+    for number in (1, 2):
+        Team.objects.create(team_number=number, team_name=f"Team {number}")
+    manager.find_user.side_effect = lambda username: {"pk": 9, "username": username}
+    fault = (
+        patch("core.authentik_utils.SchoolInfo.objects.filter", side_effect=DatabaseError("db went away"))
+        if fails_at == "school info"
+        else patch("core.authentik_utils._end_sessions", side_effect=RuntimeError("Authentik went away"))
+    )
+
+    with fault, pytest.raises(Exception, match="went away"):
+        drain(reset_teams_credentials([1, 2], "gold-admin"))
+
+    (note,) = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    assert note.startswith("Credentials reset by gold-admin: the new passwords of team01 were never handed over")
+
+
+def test_a_batch_that_raises_partway_audits_the_resets_it_made(manager):
+    from core.models import AuditLog
+
+    for number in range(1, 4):
+        Team.objects.create(team_number=number, team_name=f"Team {number}")
+    manager.find_user.side_effect = lambda username: {"pk": 9, "username": username}
+    real = _reset_credentials
+
+    def reset(manager_, number, on_set):
+        if number == 3:
+            raise RuntimeError("Authentik went away")
+        return real(manager_, number, on_set)
+
+    with (
+        patch("core.authentik_utils.AuthentikManager") as cls,
+        patch("core.authentik_utils._reset_credentials", side_effect=reset),
+        pytest.raises(RuntimeError),
+    ):
+        cls.return_value.__enter__.return_value = manager
+        drain(reset_teams_credentials([1, 2, 3], "gold-admin"))
+
+    row = AuditLog.objects.get(action="blueteam_passwords_reset")
+    assert (row.details["team_numbers"], row.details["interrupted"]) == ([1, 2], True)
+
+
+@pytest.mark.parametrize("teams", [[], [1]], ids=["no-teams", "raises-first"])
+def test_a_reset_that_changes_nothing_still_tells_ops(manager, teams):
+    for number in teams:
+        Team.objects.create(team_number=number, team_name=f"Team {number}")
+    manager.find_user.side_effect = RuntimeError("Authentik went away")
+
+    with patch("core.authentik_utils.AuthentikManager") as cls:
+        cls.return_value.__enter__.return_value = manager
+        if teams:
+            with pytest.raises(RuntimeError):
+                drain(reset_teams_credentials(teams, "gold-admin"))
+        else:
+            drain(reset_teams_credentials(teams, "gold-admin"))
+
+    (note,) = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    assert "nothing was changed" in note
+
+
+def test_a_web_reset_that_raises_lists_every_earlier_batch_as_never_handed_over(admin_user):
+    """The browser gets the CSV only in the one response the raise never lets the view build."""
+    from django.urls import reverse
+
+    for number in range(1, 13):
+        Team.objects.create(team_number=number, team_name=f"Team {number}", is_active=True)
+    client = Client()
+    client.force_login(admin_user)
+
+    def reset(_manager, number, _on_set):
+        if number == 11:
+            raise RuntimeError("Authentik went away")
+        return CredentialReset(password=f"pw-{number}", sessions_found=0)
+
+    with (
+        patch("core.authentik_utils.AuthentikManager"),
+        patch("core.authentik_utils._reset_credentials", side_effect=reset),
+        pytest.raises(RuntimeError),
+    ):
+        client.post(reverse("admin_competition_action"), {"action": "reset_passwords", "team_numbers": ""})
+
+    (note,) = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    lost = ", ".join(f"team{n:02d}" for n in range(1, 11))
+    assert note.startswith(f"Credentials reset by {admin_user.username}: the new passwords of {lost} were never")

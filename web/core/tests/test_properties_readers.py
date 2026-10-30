@@ -373,14 +373,6 @@ def check_toggle(result: object) -> None:
     )
 
 
-def check_choices(result: object) -> None:
-    outcome(
-        result,
-        lambda r: isinstance(r, list) and all(isinstance(c, dict) and all(is_str(v) for v in c.values()) for c in r),
-        "choices of text",
-    )
-
-
 AM = "web/core/authentik_manager.py:AuthentikManager"
 QC = "web/quotient/client.py:QuotientClient"
 QJ = "web/quotient/client.py:_json"
@@ -543,20 +535,6 @@ READERS = [
         (f"{QC}.get_infrastructure", QJ),
     ),
     Reader(
-        "get_service_choices",
-        lambda: quotient().get_service_choices(),
-        (DONE, METADATA),
-        check_choices,
-        (f"{QC}.get_service_choices",),
-    ),
-    Reader(
-        "get_box_names",
-        lambda: quotient().get_box_names(),
-        (DONE, METADATA),
-        lambda r: outcome(r, _strs, "box names"),
-        (f"{QC}.get_box_names",),
-    ),
-    Reader(
         "get_injects",
         lambda: quotient().get_injects(force_refresh=True),
         (DONE, INJECTS),
@@ -693,10 +671,10 @@ def _store_discord_id() -> object:
 
 def _start_competition() -> object:
     from core.models import CompetitionConfig
-    from core.services.competition import run_competition_to_completion
+    from core.services.competition import run_competition
 
     CompetitionConfig.objects.filter(pk=CompetitionConfig.get_config().pk).update(controlled_applications=["netbird"])
-    return run_competition_to_completion(True, "property")
+    return list(run_competition(True, "property"))
 
 
 def _readiness() -> object:
@@ -719,7 +697,7 @@ CALLERS = [
     Caller("refresh_user_groups", _refresh_groups, (GROUPS, USERS), (Exception,)),
     Caller("reset_team_credentials", _reset_credentials, (USERS, SESSIONS, DONE, SESSIONS, DONE)),
     Caller("store_discord_id_in_authentik", _store_discord_id, (USERS, DONE)),
-    Caller("run_competition_to_completion", _start_competition, (APPLICATION, BINDINGS, DONE, USERS, DONE, GROUPS)),
+    Caller("run_competition", _start_competition, (APPLICATION, BINDINGS, DONE, USERS, DONE, GROUPS)),
     Caller("stream_readiness_checks", _readiness, (USERS, USERS, SESSIONS, APPLICATION, BINDINGS, DONE, METADATA)),
     Caller("_fix_group_membership", _fix_groups, (USERS, GROUPS, DONE)),
 ]

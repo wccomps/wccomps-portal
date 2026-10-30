@@ -55,8 +55,8 @@ from core.forms import (
     TypedConfirmForm,
 )
 from core.models import AuditLog, CompetitionConfig, DiscordTask
-from core.services.competition import CompetitionRunResult, last_start_accounts, run_competition
-from core.utils import ndjson_done, run_detached
+from core.services.competition import RunOutcome, last_start_accounts, run_competition, set_schedule
+from core.utils import Stepped, drain, ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
 from team.models import active_team_numbers
 
@@ -82,7 +82,7 @@ def _action_set_max_members(request: HttpRequest, config: CompetitionConfig, aut
     max_members = form.cleaned_data["max_members"]
     old_max = config.max_team_members
     config.max_team_members = max_members
-    config.save()
+    config.save(update_fields=["max_team_members", "updated_at"])
 
     AuditLog.objects.create(
         action="max_team_members_updated",
@@ -184,12 +184,10 @@ def _action_set_schedule(request: HttpRequest, config: CompetitionConfig, authen
 
     details: dict[str, str] = {}
     if start_time:
-        config.competition_start_time = start_time
         details["start_time"] = start_time.isoformat()
     if end_time:
-        config.competition_end_time = end_time
         details["end_time"] = end_time.isoformat()
-    config.save()
+    set_schedule(start=start_time, end=end_time)
 
     AuditLog.objects.create(
         action="competition_schedule_set",
@@ -209,28 +207,24 @@ def _action_set_schedule(request: HttpRequest, config: CompetitionConfig, authen
 
 def _stream_competition_run(enable: bool, authentik_username: str) -> Iterator[str]:
     """Stream run_competition's progress as NDJSON, then tell the ops channel how it went."""
-    steps = run_competition(enable, authentik_username)
-    while True:
-        try:
-            step = next(steps)
-        except StopIteration as done:
-            result: CompetitionRunResult = done.value
-            break
+    steps = Stepped(run_competition(enable, authentik_username))
+    for step in steps:
         yield _progress(step.message, step.current, step.total, ok=step.ok)
+    result = steps.result
 
-    if result.success:
-        verb = "Started" if enable else "Stopped"
-        incomplete = " (incomplete)" if result.has_failures else ""
-        DiscordTask.enqueue(
-            LogToChannel(
-                message=f"**Competition {verb}{incomplete}** by {authentik_username} (web)\n{result.summary()}"
-            )
-        )
+    verb = "Started" if enable else "Stopped"
     # A partial run is not a success: report it as a failure so the page keeps the ✗ lines up instead of reloading
-    message = result.summary()
-    if result.success and result.has_failures:
-        message = f"Incomplete: run {'Start' if enable else 'Stop'} again.\n{message}"
-    complete = result.success and not result.has_failures
+    match result.outcome:
+        case RunOutcome.REFUSED | RunOutcome.ERRORED:
+            message, complete = result.summary(), False
+        case RunOutcome.INCOMPLETE:
+            ops = f"**Competition {verb} (incomplete)** by {authentik_username} (web)\n{result.summary()}"
+            DiscordTask.enqueue(LogToChannel(message=ops))
+            message, complete = f"Incomplete: run {'Start' if enable else 'Stop'} again.\n{result.summary()}", False
+        case RunOutcome.COMPLETE:
+            ops = f"**Competition {verb}** by {authentik_username} (web)\n{result.summary()}"
+            DiscordTask.enqueue(LogToChannel(message=ops))
+            message, complete = result.summary(), True
     yield ndjson_done(message, success=complete)
 
 
@@ -291,7 +285,8 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
         raise BadRequest(error_msg)
 
     team_numbers = form.cleaned_data["team_numbers"] or active_team_numbers()
-    result = reset_teams_credentials(team_numbers, actor=authentik_username)
+    # Every batch reaches the browser in this one response, or none does
+    result = drain(reset_teams_credentials(team_numbers, authentik_username, hand_over_each=False))
     password_list = result.password_list
     csv_content = (
         credentials_csv((username, password) for _num, username, password in password_list) if password_list else ""

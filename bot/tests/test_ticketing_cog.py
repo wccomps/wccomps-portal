@@ -1,7 +1,7 @@
 """Tests for ticketing cog commands and listeners."""
 
 from datetime import timedelta
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 import discord
 import pytest
@@ -10,7 +10,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 from bot.cogs.ticketing import TicketingCog
-from core.models import UserGroups
+from core.models import DiscordTask, UserGroups
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory, TicketComment, TicketHistory
 
@@ -521,9 +521,8 @@ class TestTicketCommand:
         # Pass a non-existent category PK (string, since cog does int(category))
         await cog.create_ticket.callback(cog, interaction, category="9999", description="test")
 
-        # Should send error message
-        interaction.response.send_message.assert_called_once()
-        args = interaction.response.send_message.call_args
+        interaction.followup.send.assert_called_once()
+        args = interaction.followup.send.call_args
         assert "invalid" in args[0][0].lower()
 
     async def test_create_ticket_box_reset_requires_hostname(
@@ -539,9 +538,8 @@ class TestTicketCommand:
             cog, interaction, category="2", description="need reset", hostname=None, ip_address=None
         )
 
-        # Should send error message about missing fields
-        interaction.response.send_message.assert_called_once()
-        args = interaction.response.send_message.call_args
+        interaction.followup.send.assert_called_once()
+        args = interaction.followup.send.call_args
         assert "hostname" in args[0][0].lower()
 
     async def test_create_ticket_scoring_check_requires_service(
@@ -555,9 +553,8 @@ class TestTicketCommand:
         """Test /ticket scoring-service-check requires service parameter."""
         await cog.create_ticket.callback(cog, interaction, category="3", description="check this", service=None)
 
-        # Should send error message about missing service
-        interaction.response.send_message.assert_called_once()
-        args = interaction.response.send_message.call_args
+        interaction.followup.send.assert_called_once()
+        args = interaction.followup.send.call_args
         assert "service" in args[0][0].lower()
 
     async def test_create_ticket_with_required_fields_succeeds(
@@ -569,39 +566,18 @@ class TestTicketCommand:
         box_reset_category: TicketCategory,
     ) -> None:
         """Test /ticket with all required fields creates ticket."""
-        from unittest.mock import patch
+        await cog.create_ticket.callback(
+            cog,
+            interaction,
+            category="2",
+            description="please reset my web server",
+            hostname="webserver01",
+            ip_address="10.0.0.5",
+            service=None,
+        )
 
-        # Mock thread creation
-        mock_thread = AsyncMock()
-        mock_thread.id = 9999888877776666
-        mock_thread.send = AsyncMock()
-        mock_thread.add_user = AsyncMock()
-
-        # Create proper mock for TextChannel with correct isinstance check
-        mock_channel = Mock(spec=discord.TextChannel)
-        mock_channel.name = "general-chat"
-        mock_channel.create_thread = AsyncMock(return_value=mock_thread)
-
-        mock_category = Mock(spec=discord.CategoryChannel)
-        mock_category.id = team.discord_category_id
-        mock_category.channels = [mock_channel]
-
-        interaction.guild.get_channel = Mock(return_value=mock_category)
-
-        with patch("bot.ticket_dashboard.trigger_dashboard"):
-            await cog.create_ticket.callback(
-                cog,
-                interaction,
-                category="2",
-                description="please reset my web server",
-                hostname="webserver01",
-                ip_address="10.0.0.5",
-                service=None,
-            )
-
-        # Should send success message
-        interaction.response.send_message.assert_called_once()
-        args, kwargs = interaction.response.send_message.call_args
+        interaction.followup.send.assert_called_once()
+        args, kwargs = interaction.followup.send.call_args
         embed = kwargs.get("embed") or args[0]
         assert "Ticket Created" in embed.title
 
@@ -611,11 +587,32 @@ class TestTicketCommand:
         assert ticket.hostname == "webserver01"
         assert ticket.ip_address == "10.0.0.5"
 
-        # The thread gets the ticket embed with its action buttons.
-        assert ticket.discord_thread_id == mock_thread.id
-        sent = mock_thread.send.await_args
-        assert ticket.ticket_number in sent.kwargs["embed"].title
-        assert sent.kwargs["view"] is not None
+        # The queue gives it its thread
+        thread_tasks = DiscordTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
+        assert await thread_tasks.acount() == 1
+
+    async def test_create_ticket_defers_first_and_queues_the_thread_even_if_the_reply_fails(
+        self,
+        cog: TicketingCog,
+        team: Team,
+        discord_link: DiscordLink,
+        interaction: AsyncMock,
+        box_reset_category: TicketCategory,
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        interaction.followup.send.side_effect = discord.NotFound(MagicMock(status=404, reason="Not Found"), "gone")
+
+        with pytest.raises(discord.NotFound):
+            await cog.create_ticket.callback(
+                cog, interaction, category="2", description="reset please", hostname="web01", ip_address="10.0.0.5"
+            )
+
+        assert interaction.mock_calls[0] == call.response.defer(ephemeral=True)
+        interaction.response.send_message.assert_not_called()
+        ticket = await Ticket.objects.aget(team=team)
+        thread_tasks = DiscordTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
+        assert await thread_tasks.acount() == 1
 
     async def test_create_ticket_auto_populates_ip_from_hostname(
         self,
@@ -625,50 +622,19 @@ class TestTicketCommand:
         interaction: AsyncMock,
         box_reset_category: TicketCategory,
     ) -> None:
-        """Test /ticket auto-populates IP address from hostname."""
-        from unittest.mock import MagicMock, patch
+        from scoring.models import QuotientMetadataCache
 
-        # Mock infrastructure data
-        mock_infrastructure = MagicMock()
-        mock_box = MagicMock()
-        mock_box.name = "webserver01"
-        mock_box.ip = "10.0.0.99"
-        mock_box.services = []
-        mock_infrastructure.boxes = [mock_box]
+        await QuotientMetadataCache.objects.acreate(boxes=[{"name": "webserver01", "ip": "10.0.0.99", "services": []}])
 
-        mock_client = MagicMock()
-        mock_client.get_infrastructure.return_value = mock_infrastructure
-        mock_client.get_service_choices.return_value = []
-
-        # Mock thread creation
-        mock_thread = AsyncMock()
-        mock_thread.id = 9999888877776667
-        mock_thread.send = AsyncMock()
-        mock_thread.add_user = AsyncMock()
-
-        mock_channel = Mock(spec=discord.TextChannel)
-        mock_channel.name = "general-chat"
-        mock_channel.create_thread = AsyncMock(return_value=mock_thread)
-
-        mock_category = Mock(spec=discord.CategoryChannel)
-        mock_category.id = team.discord_category_id
-        mock_category.channels = [mock_channel]
-
-        interaction.guild.get_channel = Mock(return_value=mock_category)
-
-        with (
-            patch("bot.ticket_dashboard.trigger_dashboard"),
-            patch("bot.cogs.ticketing.get_quotient_client", return_value=mock_client),
-        ):
-            await cog.create_ticket.callback(
-                cog,
-                interaction,
-                category="2",
-                description="please reset",
-                hostname="webserver01",
-                ip_address=None,  # Not provided - should be auto-populated
-                service=None,
-            )
+        await cog.create_ticket.callback(
+            cog,
+            interaction,
+            category="2",
+            description="please reset",
+            hostname="webserver01",
+            ip_address=None,  # Not provided - should be auto-populated
+            service=None,
+        )
 
         # Verify ticket was created with auto-populated IP
         ticket = await Ticket.objects.filter(team=team).order_by("-created_at").afirst()
@@ -891,25 +857,17 @@ class TestAttachmentHandling:
 
 
 @pytest.mark.asyncio
-async def test_hostname_autocomplete_calls_quotient_off_the_event_loop() -> None:
-    """A Quotient cache miss is a blocking HTTP call; it must not run on the bot's loop."""
-    import asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_hostname_autocomplete_reads_the_stored_metadata_without_asking_quotient() -> None:
+    """Autocomplete runs on every keystroke; a Quotient call each would hang them all while Quotient is down."""
     from unittest.mock import MagicMock, patch
 
-    def get_infrastructure() -> MagicMock:
-        with pytest.raises(RuntimeError):
-            asyncio.get_running_loop()  # raises only off the loop's thread
-        box = MagicMock()
-        box.name, box.ip = "web01", "10.0.0.5"
-        return MagicMock(boxes=[box])
+    from scoring.models import QuotientMetadataCache
 
-    client = MagicMock()
-    client.get_infrastructure.side_effect = get_infrastructure
-    client.get_service_choices.return_value = []
+    await QuotientMetadataCache.objects.acreate(boxes=[{"name": "web01", "ip": "10.0.0.5", "services": []}])
 
-    # Patch the globals the code resolves through: under xdist a module-path patch can miss them.
     with (
-        patch.dict(TicketingCog._load_infrastructure_data.__globals__, {"get_quotient_client": lambda: client}),
+        patch("quotient.client.QuotientClient._request", side_effect=AssertionError("asked Quotient")),
         patch.object(TicketingCog.archive_threads_task, "start"),
     ):
         cog = TicketingCog(MagicMock())

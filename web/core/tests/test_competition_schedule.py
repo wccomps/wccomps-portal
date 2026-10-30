@@ -91,3 +91,20 @@ def test_parse_raises_a_value_error_for_an_unknown_timezone():
     with pytest.raises(UnknownTimezoneError):
         parse_datetime_to_utc("2026-10-03T09:00", "Mars/Olympus")
     assert issubclass(UnknownTimezoneError, ValueError)
+
+
+def test_setting_a_start_time_ends_the_timers_live_start_series(admin_client):
+    """The timer's retries carry out the old start; the admin's new one replaces it."""
+    from django.utils import timezone
+
+    CompetitionConfig.objects.update_or_create(
+        pk=1,
+        defaults={"timer_series_enable": True, "timer_series_attempt": 2, "timer_series_started": timezone.now()},
+    )
+
+    response = _post(admin_client, "set_schedule", start_datetime="2030-10-03T09:00", start_timezone="UTC")
+
+    assert response.status_code == 200
+    config = CompetitionConfig.get_config()
+    assert (config.timer_series_enable, config.timer_series_attempt) == (None, 0)
+    assert config.competition_start_time == datetime(2030, 10, 3, 9, tzinfo=UTC)

@@ -13,6 +13,7 @@ from typing import ClassVar, TypedDict, get_args
 class PostComment:
     task_type: ClassVar = "post_comment"
     label: ClassVar = "Post Comment to Thread"
+    rerun_after_restart: ClassVar = True
     ticket_id: int
     comment_id: int
 
@@ -21,6 +22,8 @@ class PostComment:
 class BroadcastMessage:
     task_type: ClassVar = "broadcast_message"
     label: ClassVar = "Broadcast Message"
+    # Some teams may already have it: a rerun from the start would post it to them twice
+    rerun_after_restart: ClassVar = False
     target: str
     message: str
     sender: str
@@ -32,6 +35,7 @@ class SyncMemberRoles:
 
     task_type: ClassVar = "sync_member_roles"
     label: ClassVar = "Sync a Member's Roles"
+    rerun_after_restart: ClassVar = True
     discord_id: int
 
 
@@ -39,6 +43,7 @@ class SyncMemberRoles:
 class SetupTeamInfrastructure:
     task_type: ClassVar = "setup_team_infrastructure"
     label: ClassVar = "Setup Team Infrastructure"
+    rerun_after_restart: ClassVar = True
     team_number: int
     recreate: bool = False
 
@@ -47,6 +52,7 @@ class SetupTeamInfrastructure:
 class LogToChannel:
     task_type: ClassVar = "log_to_channel"
     label: ClassVar = "Log to Ops Channel"
+    rerun_after_restart: ClassVar = True
     message: str
 
 
@@ -56,6 +62,7 @@ class PostTicketUpdate:
 
     task_type: ClassVar = "post_ticket_update"
     label: ClassVar = "Post Ticket Update to Thread"
+    rerun_after_restart: ClassVar = True
     ticket_id: int
     action: str
     actor: str
@@ -69,6 +76,7 @@ class PostTicketUpdate:
 class TicketCreatedWeb:
     task_type: ClassVar = "ticket_created_web"
     label: ClassVar = "Ticket Created via Web"
+    rerun_after_restart: ClassVar = True
     ticket_id: int
 
 
@@ -87,6 +95,7 @@ class SyncRoles:
 
     task_type: ClassVar = "sync_roles"
     label: ClassVar = "Sync Roles from Authentik Groups"
+    rerun_after_restart: ClassVar = True
     requested_by: str
     dry_run: bool
 
@@ -95,6 +104,7 @@ class SyncRoles:
 class AddUserToThread:
     task_type: ClassVar = "add_user_to_thread"
     label: ClassVar = "Add User to Thread"
+    rerun_after_restart: ClassVar = True
     ticket_id: int
     discord_id: int
     thread_id: int
@@ -110,6 +120,7 @@ class CleanupCompetition:
 
     task_type: ClassVar = "cleanup_competition"
     label: ClassVar = "Clean Up Competition"
+    rerun_after_restart: ClassVar = True
     requested_by: str
     closed_out_event_id: int | None = None
 

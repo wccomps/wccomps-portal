@@ -274,3 +274,17 @@ async def test_role_sync_failure_is_logged_not_raised(caplog: pytest.LogCaptureF
         await authentik_groups.sync_roles_now(MagicMock())
 
     assert "Role sync failed: discord down" in caplog.text
+
+
+async def test_a_long_sync_beats_the_calling_loop_per_member_it_changes(teams, monkeypatch) -> None:
+    """A role sync queued as a task can outlast the queue's budget; each member updated is progress."""
+    from bot import heartbeat
+
+    beats: list[str] = []
+    monkeypatch.setattr(heartbeat, "record", lambda name, bot: beats.append(name))
+    members = [_member(member_id, OPS) for member_id in range(10, 15)]
+    heartbeat.beat_for("queue", MagicMock())
+
+    await _sync(_guild(_member(20), *members))
+
+    assert beats == ["queue"] * 5
