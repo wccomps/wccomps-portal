@@ -82,6 +82,16 @@ def test_claim_view(ticketing_support_user, team):
     assert _effects(ticket) == (["claimed"], ["claimed"], [_discord_id(ticketing_support_user)])
 
 
+def test_claiming_a_ticket_without_a_thread_queues_no_invite(ticketing_support_user, team):
+    """The bot adds the assignee when it makes the thread; a bot on the previous release can't take the invite."""
+    ticket = _ticket(team, "open")
+    Ticket.objects.filter(pk=ticket.pk).update(discord_thread_id=None)
+
+    _post(ticketing_support_user, "ticket_claim", ticket)
+
+    assert _effects(ticket)[2] == []
+
+
 def test_unclaim_view(ticketing_support_user, team):
     ticket = _ticket(team, "claimed", assigned_to=ticketing_support_user)
     _post(ticketing_support_user, "ticket_unclaim", ticket)
@@ -162,3 +172,39 @@ def test_bulk_resolve_matches_single_resolve(ticketing_admin_user, team):
 
     for ticket in tickets:
         assert _effects(ticket) == (["resolved"], ["resolved"], [])
+
+
+@pytest.mark.parametrize("status", ["open", "claimed"])
+def test_a_ticket_cant_be_given_to_someone_without_ticketing_permission(
+    ticketing_admin_user, blue_team_user, team, status
+):
+    """A team account given another team's ticket would be pulled into that team's thread."""
+    ticket = _ticket(team, status, assigned_to=ticketing_admin_user if status == "claimed" else None)
+
+    response = _post(
+        ticketing_admin_user, "ticket_reassign", ticket, {"new_assignee_username": blue_team_user.username}
+    )
+    by_discord, error = lifecycle.assign_ticket(
+        ticket.id, "admin", discord_id=_discord_id(blue_team_user), actor=ticketing_admin_user
+    )
+
+    assert response.status_code in (200, 302)
+    assert by_discord is None and "aren't ticketing staff" in error
+    assert _effects(ticket) == ([], [], [])
+    ticket.refresh_from_db()
+    assert ticket.assigned_to != blue_team_user
+
+
+@pytest.mark.parametrize("action", ["resolve", "cancel"])
+def test_closing_a_ticket_schedules_its_thread_archive_even_before_it_has_one(ticketing_admin_user, team, action):
+    """A thread made afterwards (by a task already running) still gets archived."""
+    ticket = _ticket(team, "open")
+    Ticket.objects.filter(pk=ticket.pk).update(discord_thread_id=None)
+
+    if action == "resolve":
+        lifecycle.resolve_ticket(ticket.id, "x", user=ticketing_admin_user)
+    else:
+        lifecycle.cancel_ticket(ticket.id, "x", user=ticketing_admin_user, staff=True)
+
+    ticket.refresh_from_db()
+    assert ticket.thread_archive_scheduled_at is not None

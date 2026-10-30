@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from typing import ClassVar, TypedDict, get_args
 
 
+class PermanentTaskError(Exception):
+    """Queued work that retrying can't fix: a queue that honours it fails the task at once."""
+
+
 @dataclass(frozen=True, kw_only=True)
 class PostComment:
     task_type: ClassVar = "post_comment"
@@ -93,11 +97,13 @@ class SyncRoles:
 
 @dataclass(frozen=True, kw_only=True)
 class AddUserToThread:
+    """thread_id is unused; it stays one release so a bot on the previous release can decode new rows."""
+
     task_type: ClassVar = "add_user_to_thread"
     label: ClassVar = "Add User to Thread"
     ticket_id: int
     discord_id: int
-    thread_id: int
+    thread_id: int | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

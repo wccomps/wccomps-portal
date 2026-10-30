@@ -1,5 +1,7 @@
-from dataclasses import asdict, fields
+from dataclasses import MISSING, asdict, fields
 from datetime import datetime
+from types import NoneType, UnionType
+from typing import get_args
 
 from django.contrib.auth.models import User
 from django.db import models
@@ -67,6 +69,21 @@ class AuditLog(models.Model):
         return f"{self.action} by {self.admin_user}"
 
 
+class InvalidPayloadError(discord_tasks.PermanentTaskError):
+    """A DiscordTask row no payload type can be built from."""
+
+
+def _matches(value: object, annotation: object) -> bool:
+    """Whether a stored value fits a payload field's type: a class, or a class or None."""
+    options = get_args(annotation) if isinstance(annotation, UnionType) else (annotation,)
+    return any(
+        value is None
+        if option is NoneType
+        else isinstance(value, option) and not (option is int and isinstance(value, bool))
+        for option in options
+    )
+
+
 class DiscordTask(models.Model):
     """Work queued for the bot (bot/discord_queue.py); the task types are core/discord_tasks.py's payloads."""
 
@@ -87,6 +104,7 @@ class DiscordTask(models.Model):
     retry_count = models.IntegerField(default=0)
     max_retries = models.IntegerField(default=5)
     next_retry_at = models.DateTimeField(null=True, blank=True)
+    progress = models.JSONField(default=dict, db_default={}, help_text="What the task already did, which a retry skips")
     error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -108,18 +126,33 @@ class DiscordTask(models.Model):
             return  # task_type's choices report it
         try:
             self.typed_payload()
-        except TypeError as e:
+        except InvalidPayloadError as e:
             raise ValidationError(f"Payload for {self.task_type} is invalid: {e}") from e
 
     def typed_payload(self) -> discord_tasks.TaskPayload:
-        """Raises KeyError for an unknown task type, TypeError for a missing field.
+        """The payload built from the stored row; raises InvalidPayloadError when it can't be.
 
-        Keys the type doesn't declare are dropped: rows outlive the code that wrote them. A missing
-        ticket_id comes from the ticket FK, where the previous release's web put it.
+        Keys the type doesn't declare are dropped: rows outlive the code that wrote them. A missing ticket_id comes
+        from the ticket FK, where the previous release's web put it.
         """
-        cls = discord_tasks.PAYLOAD_TYPES[self.task_type]
-        values = {"ticket_id": self.ticket_id, **self.payload} if self.ticket_id is not None else self.payload
-        return cls(**{f.name: values[f.name] for f in fields(cls) if f.name in values})
+        cls = discord_tasks.PAYLOAD_TYPES.get(self.task_type)
+        if cls is None:
+            raise InvalidPayloadError(f"Unknown task type: {self.task_type}")
+        values = self.payload
+        if not isinstance(values, dict):
+            raise InvalidPayloadError(f"{self.task_type} payload is not a JSON object")
+        if self.ticket_id is not None:
+            values = {"ticket_id": self.ticket_id, **values}
+        kwargs = {}
+        for f in fields(cls):
+            if f.name not in values:
+                if f.default is MISSING and f.default_factory is MISSING:
+                    raise InvalidPayloadError(f"{self.task_type} payload has no {f.name}")
+            elif _matches(values[f.name], f.type):
+                kwargs[f.name] = values[f.name]
+            else:
+                raise InvalidPayloadError(f"{self.task_type} field {f.name} should be {f.type}, not {values[f.name]!r}")
+        return cls(**kwargs)
 
     @classmethod
     def enqueue(cls, payload: discord_tasks.TaskPayload) -> DiscordTask:

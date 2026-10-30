@@ -154,6 +154,9 @@ class TicketAdmin(PortalModelAdmin[Ticket]):
             team.save(update_fields=["ticket_counter"])
             team.refresh_from_db()
             obj.ticket_number = f"T{team.team_number:03d}-{team.ticket_counter:03d}"
+        if change and "discord_thread_id" in getattr(form, "changed_data", ()):
+            # The recorded ticket message was in the old thread
+            obj.discord_ticket_message_id = None
         super().save_model(request, obj, form, change)
 
     @admin.action(description="Export selected tickets as CSV")

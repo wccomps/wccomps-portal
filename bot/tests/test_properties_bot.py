@@ -46,6 +46,7 @@ from bot.tests.bot_harness import (
     let_in,
     may,
     mentions_of,
+    on_member_join,
     on_message,
     on_message_delete,
     on_message_edit,
@@ -220,6 +221,7 @@ CASES: list[BotCase] = [
     Listener(TicketingCog, TicketingCog.on_message, on_message),
     Listener(TicketingCog, TicketingCog.on_message_edit, on_message_edit),
     Listener(TicketingCog, TicketingCog.on_message_delete, on_message_delete),
+    Listener(TicketingCog, TicketingCog.on_member_join, on_member_join),
 ]
 
 

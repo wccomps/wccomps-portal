@@ -74,6 +74,9 @@ the unparenthesized form is used intentionally throughout.
   migration, since `DiscordTask.task_type`'s choices come from the union
 - A payload's `ticket_id` also sets the task's ticket FK, so deleting a ticket drops its pending tasks
 - A handler's return value is stored in `DiscordTask.result`; the payload is input only
+- A handler raises `PermanentTaskError` (`core.discord_tasks`) to fail without retrying, and looks up the record it
+  is about with `_target`, which raises it; a handler whose retry would repeat a send or a destructive step takes a
+  `TaskProgress`, so a retry resumes from what `DiscordTask.progress` records; the rest are written to be rerun
 
 ### UI Components
 - Pages extend `admin/base_site.html`, directly or through a section base (`admin/ops_base.html`,

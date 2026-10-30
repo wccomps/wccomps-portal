@@ -7,6 +7,7 @@ import discord
 import pytest
 
 from bot.discord_queue import DiscordQueueProcessor
+from bot.tests.discord_fakes import BOT_USER, recording_thread, ticket_message
 from core.models import DiscordTask
 from team.models import Team
 from ticketing.models import Ticket
@@ -67,7 +68,7 @@ class TestTicketCreationWorkflow:
         thread = MagicMock(spec=discord.Thread)
         thread.id = 9001
         thread.add_user = AsyncMock()
-        thread.send = AsyncMock(return_value=MagicMock())
+        thread.send = AsyncMock(return_value=MagicMock(id=900101, pin=AsyncMock()))
         text_channel.create_thread.return_value = thread
 
         category.channels = [text_channel]
@@ -100,7 +101,7 @@ class TestTicketCreationWorkflow:
         assert "T035-001" in sent.kwargs["embed"].title
 
     async def test_queue_processor_idempotent_thread_creation(self, db: Any, box_reset_category: Any) -> None:
-        """Test that queue processor doesn't recreate thread if already exists."""
+        """Run again once the thread has its pinned ticket message, the task posts nothing and adds no one."""
         team = await Team.objects.acreate(
             team_number=37,
             team_name="Test Team 3",
@@ -130,15 +131,23 @@ class TestTicketCreationWorkflow:
             status="pending",
         )
 
-        bot = AsyncMock(spec=discord.Client)
+        thread = recording_thread(9999, pinned_text=ticket_message(ticket.ticket_number))
+        bot = MagicMock(spec=discord.Client)
+        bot.user = BOT_USER
+        bot.get_channel.return_value = thread
+        guild = MagicMock(spec=discord.Guild)
 
-        with patch("bot.discord_queue.trigger_dashboard") as mock_dashboard:
+        with (
+            patch("bot.discord_queue.trigger_dashboard") as mock_dashboard,
+            patch("bot.discord_queue.competition_guild", return_value=guild),
+        ):
             processor = DiscordQueueProcessor(bot)
             await processor._handle_ticket_created_web(task.typed_payload())
 
             mock_dashboard.assert_called_once()
-
-        bot.get_channel.assert_not_called()
+        thread.send.assert_not_called()
+        thread.add_user.assert_not_called()
+        guild.get_channel.assert_not_called()
 
 
 @pytest.mark.asyncio

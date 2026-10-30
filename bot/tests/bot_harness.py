@@ -409,6 +409,7 @@ class Discord:
     def thread(self, thread_id: int, *, parent: Any = None) -> Any:
         thread = MagicMock(spec=discord.Thread)
         thread.id = thread_id
+        thread.guild.id = GUILD_ID
         thread.name = f"thread-{thread_id}"
         thread.mention = f"<#{thread_id}>"
         thread.parent = parent
@@ -1016,8 +1017,7 @@ def dashboard_view(run: Run, data: Draws) -> discord.ui.View:
     from bot.unified_dashboard import DashboardControlView, UnifiedDashboard
 
     dashboard = UnifiedDashboard(run.discord.bot)
-    dashboard.dashboard_message_id = 1
-    dashboard.dashboard_channel_id = QUEUE_CHANNEL_ID
+    dashboard.message = run.discord.message_object(run.discord.channel(QUEUE_CHANNEL_ID))
     return DashboardControlView(dashboard)
 
 
@@ -1073,6 +1073,17 @@ def on_message_edit(run: Run, data: Draws, cog: Any) -> Go:
 
     async def go() -> None:
         await cog.on_message_edit(before, after)
+
+    return go
+
+
+def on_member_join(run: Run, data: Draws, cog: Any) -> Go:
+    """The role's player joining the competition server, or (drawn) another server."""
+    member = run.discord.member_for(run.role)
+    member.guild = run.discord.guild if data.draw(st.booleans(), label="competition server") else MagicMock()
+
+    async def go() -> None:
+        await cog.on_member_join(member)
 
     return go
 

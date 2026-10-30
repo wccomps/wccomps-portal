@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from bot.cogs.admin_tickets import AdminTicketsCog
 from bot.cogs.ticketing import TicketingCog
+from bot.tests.discord_fakes import competition_thread
 from bot.ticket_dashboard import ResolveTicketModal, TicketActionView
 from core.models import DiscordTask
 from team.models import Team
@@ -61,7 +62,7 @@ async def test_archive_loop_does_not_undo_a_reopen(team: Team, box_reset_categor
     async def reopen_while_archiving(**_: Any) -> None:
         await Ticket.objects.filter(pk=ticket.pk).aupdate(status="open")
 
-    thread = MagicMock(spec=discord.Thread)
+    thread = competition_thread()
     thread.edit = AsyncMock(side_effect=reopen_while_archiving)
     bot = MagicMock()
     bot.get_channel.return_value = thread
@@ -75,7 +76,7 @@ async def test_archive_loop_does_not_undo_a_reopen(team: Team, box_reset_categor
 
 
 def _bot_client() -> tuple[MagicMock, MagicMock]:
-    thread = MagicMock(spec=discord.Thread)
+    thread = competition_thread()
     thread.add_user = AsyncMock()
     client = MagicMock()
     client.unified_dashboard = None
@@ -165,7 +166,7 @@ async def test_reassign_command_leaves_thread_join_to_the_queue(
     ticket = await _ticket(team, box_reset_category, "open", discord_thread_id=778)
     volunteer = MagicMock(spec=discord.User)
     volunteer.id = mock_admin_user._discord_id
-    thread = MagicMock(spec=discord.Thread)
+    thread = competition_thread()
     thread.add_user = AsyncMock()
     mock_interaction.guild.get_thread.return_value = thread
 

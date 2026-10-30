@@ -6,15 +6,19 @@ import discord
 from asgiref.sync import sync_to_async
 from discord import app_commands
 from discord.ext import commands, tasks
+from django.conf import settings
 from django.utils import timezone
 from quotient.client import get_quotient_client
 
 from bot.permissions import check_blue_team, linked_team_member
-from bot.thread_creator import publish_new_ticket
+from bot.thread_creator import publish_new_ticket, ticket_thread
 from bot.ticket_input import read_ticket
 from bot.utils import add_field, choices, pinging
+from core.discord_tasks import SyncMemberRoles
+from core.models import DiscordTask
 from core.stored_files import clean_name
 from core.utils import shorten
+from team.models import DiscordLink
 from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
 from ticketing.utils import TicketRateLimitError, acreate_ticket_atomic, get_user_for_ticket
 
@@ -55,8 +59,8 @@ class TicketingCog(commands.Cog):
                 if not await Ticket.objects.filter(pk=ticket.pk, status__in=["resolved", "cancelled"]).aexists():
                     continue
                 try:
-                    thread = self.bot.get_channel(ticket.discord_thread_id) if ticket.discord_thread_id else None
-                    if isinstance(thread, discord.Thread):
+                    thread = await ticket_thread(self.bot, ticket)
+                    if thread:
                         await thread.edit(archived=True, locked=True)
                         await TicketHistory.objects.acreate(
                             ticket=ticket,
@@ -204,6 +208,14 @@ class TicketingCog(commands.Cog):
         logger.info(f"Ticket {ticket.ticket_number} created by {interaction.user} for {team.team_name}")
 
         await publish_new_ticket(self.bot, interaction.guild, ticket)
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member) -> None:
+        """A member who linked before joining gets their roles and team ticket threads, by a sync in the queue."""
+        if member.guild.id != settings.COMPETITION_GUILD_ID:
+            return
+        if await DiscordLink.objects.filter(discord_id=member.id, is_active=True).aexists():
+            await sync_to_async(DiscordTask.enqueue)(SyncMemberRoles(discord_id=member.id))
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:

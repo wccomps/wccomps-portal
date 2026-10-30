@@ -10,8 +10,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from core.auth_utils import get_authentik_groups, get_authentik_id, team_for_groups
-from core.discord_tasks import PostTicketUpdate, SyncRoles
-from core.models import AuditLog, CompetitionConfig, DiscordTask
+from core.discord_tasks import CleanupCompetition, PostTicketUpdate, SyncRoles
+from core.models import AuditLog, CompetitionConfig, DiscordTask, InvalidPayloadError
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
@@ -138,6 +138,60 @@ class TestDiscordTaskModel:
         task = DiscordTask(task_type="sync_roles", payload={"requested_by": "ops", "dry_run": True, "progress": {}})
 
         assert task.typed_payload() == SyncRoles(requested_by="ops", dry_run=True)
+
+    @pytest.mark.parametrize("payload", [[], "team_number", None, 5])
+    def test_typed_payload_rejects_a_payload_that_is_not_an_object(self, payload):
+        with pytest.raises(InvalidPayloadError, match="not a JSON object"):
+            DiscordTask(task_type="setup_team_infrastructure", payload=payload).typed_payload()
+
+    @pytest.mark.parametrize(
+        ("task_type", "payload"),
+        [
+            ("setup_team_infrastructure", {"team_number": "five"}),
+            ("setup_team_infrastructure", {"team_number": True}),
+            ("setup_team_infrastructure", {"team_number": 5, "recreate": "yes"}),
+            ("log_to_channel", {"message": 5}),
+            ("cleanup_competition", {"requested_by": "ops", "closed_out_event_id": "7"}),
+        ],
+    )
+    def test_typed_payload_rejects_a_field_of_the_wrong_type(self, task_type, payload):
+        with pytest.raises(InvalidPayloadError, match="should be"):
+            DiscordTask(task_type=task_type, payload=payload).typed_payload()
+
+    def test_every_payload_type_survives_a_round_trip_through_its_row(self):
+        """A field type typed_payload can't check would fail every row of that type as invalid."""
+        from dataclasses import MISSING, asdict, fields
+
+        from core.discord_tasks import PAYLOAD_TYPES
+
+        samples = {int: 7, str: "x", bool: True, int | None: None}
+        for task_type, cls in PAYLOAD_TYPES.items():
+            unsupported = [f"{f.name}: {f.type}" for f in fields(cls) if f.type not in samples]
+            assert not unsupported, f"{task_type} has fields typed_payload can't check: {unsupported}"
+            payload = cls(**{f.name: samples[f.type] for f in fields(cls) if f.default is MISSING})
+            assert DiscordTask(task_type=task_type, payload=asdict(payload)).typed_payload() == payload
+
+    def test_typed_payload_leaves_out_a_field_with_a_default_factory(self, monkeypatch):
+        from dataclasses import dataclass, field
+        from typing import ClassVar
+
+        from core import discord_tasks
+
+        @dataclass(frozen=True, kw_only=True)
+        class Tagged:
+            task_type: ClassVar = "tagged"
+            note: str = field(default_factory=str)
+
+        monkeypatch.setitem(discord_tasks.PAYLOAD_TYPES, "tagged", Tagged)
+
+        assert DiscordTask(task_type="tagged", payload={}).typed_payload() == Tagged()
+
+    def test_typed_payload_accepts_none_for_an_optional_field(self):
+        task = DiscordTask(
+            task_type="cleanup_competition", payload={"requested_by": "ops", "closed_out_event_id": None}
+        )
+
+        assert task.typed_payload() == CleanupCompetition(requested_by="ops")
 
     def test_clean_rejects_a_payload_missing_a_field(self):
         from django.core.exceptions import ValidationError
@@ -357,3 +411,18 @@ class TestAdvisoryLock:
         finally:
             holder.close()
             other.close()
+
+
+@pytest.mark.django_db
+def test_a_task_row_written_by_the_previous_release_starts_with_no_progress():
+    """During a rolling deploy the old web pods insert tasks without progress; the column's default fills it."""
+    from django.db import connection
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO core_discordtask (task_type, payload, status, retry_count, max_retries, error_message, "
+            "created_at) VALUES ('log_to_channel', '{}', 'pending', 0, 5, '', now()) RETURNING id"
+        )
+        task_id = cursor.fetchone()[0]
+
+    assert DiscordTask.objects.get(pk=task_id).progress == {}
