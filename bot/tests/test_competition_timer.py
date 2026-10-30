@@ -277,3 +277,101 @@ async def test_a_complete_auto_start_runs_once() -> None:
     start.assert_awaited_once()
     sleep.assert_not_awaited()
     assert "attempt" not in ops.await_args.args[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_the_timer_clears_a_missed_window_and_says_so() -> None:
+    """The bot was down through the whole window: the start can never fire, so the timer drops the schedule."""
+    now = timezone.now()
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={
+            "applications_enabled": False,
+            "competition_start_time": now - timedelta(hours=9),
+            "competition_end_time": now - timedelta(hours=1),
+        },
+    )
+    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+    with (
+        patch("bot.competition_timer.run_competition", new_callable=AsyncMock) as run,
+        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
+        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
+    ):
+        await timer._check_competition_times()
+        await timer._check_competition_times()
+
+    run.assert_not_awaited()
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert (config.competition_start_time, config.competition_end_time) == (None, None)
+    ops.assert_awaited_once()
+    assert "Schedule cleared" in ops.await_args.args[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_the_timer_clears_a_missed_window_that_ends_before_it_starts() -> None:
+    """A pair that ended before it started is a missed window too; clearing it must not fail at every tick."""
+    now = timezone.now()
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={
+            "applications_enabled": False,
+            "competition_start_time": now - timedelta(hours=1),
+            "competition_end_time": now - timedelta(hours=2),
+        },
+    )
+    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+    with (
+        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock),
+        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
+    ):
+        await timer._check_competition_times()
+
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert (config.competition_start_time, config.competition_end_time) == (None, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_an_end_passing_after_a_manual_stop_is_not_called_a_missed_window() -> None:
+    now = timezone.now()
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={
+            "applications_enabled": False,
+            "competition_start_time": None,
+            "competition_end_time": now - timedelta(hours=1),
+            "started_this_window": True,
+        },
+    )
+    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+    with (
+        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
+        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock) as status,
+    ):
+        await timer._check_competition_times()
+
+    assert ops.await_args.args[1] == "**Schedule cleared:** the scheduled end passed after a manual stop."
+    status.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_an_end_with_no_start_that_passed_is_a_missed_window() -> None:
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={
+            "applications_enabled": False,
+            "competition_start_time": None,
+            "competition_end_time": timezone.now() - timedelta(hours=1),
+        },
+    )
+    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+    with (
+        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
+        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
+    ):
+        await timer._check_competition_times()
+
+    assert "would have refused a new start time" in ops.await_args.args[1]

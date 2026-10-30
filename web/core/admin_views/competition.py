@@ -6,7 +6,6 @@ from typing import cast
 
 from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest
-from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
 from django.urls import reverse
@@ -27,7 +26,6 @@ from registration.services import (
 )
 from registration.stage import EventStage, event_stage
 from scoring.models import QuotientMetadataCache
-from scoring.quotient_sync import sync_quotient_metadata
 
 from core.admin_views.event_panel import event_facts, event_panel
 from core.admin_views.places import (
@@ -38,7 +36,7 @@ from core.admin_views.places import (
     section_partial,
     setup_url,
 )
-from core.admin_views.readiness import action_readiness_check, action_readiness_fix
+from core.admin_views.readiness import READINESS_FIXES, action_readiness_check, fix_group_membership, sync_quotient
 from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
 from core.authentik_utils import credentials_csv, reset_teams_credentials
 from core.competition_utils import WipedData, competition_data_counts
@@ -54,72 +52,50 @@ from core.forms import (
     StartMessageForm,
     TypedConfirmForm,
 )
-from core.models import AuditLog, CompetitionConfig, DiscordTask
-from core.services.competition import CompetitionRunResult, last_start_accounts, run_competition
+from core.models import MAX_TEAM_MEMBERS_LIMIT, CompetitionConfig, DiscordTask
+from core.services.competition import (
+    KEEP,
+    CompetitionRunResult,
+    ConfigEditError,
+    run_competition,
+    set_controlled_apps,
+    set_max_members,
+    set_schedule,
+    set_start_message,
+)
 from core.utils import ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
 from team.models import active_team_numbers
 
 from ..auth_utils import require_permission
-from ..utils import UnknownTimezoneError, parse_datetime_to_utc
+from ..utils import DEFAULT_TIMEZONE, TIMEZONE_CHOICES, UnknownTimezoneError, parse_datetime_to_utc
 
 logger = logging.getLogger(__name__)
 
-TIMEZONE_CHOICES = [
-    ("America/Los_Angeles", "Pacific Time (PT)"),
-    ("America/Denver", "Mountain Time (MT)"),
-    ("America/Chicago", "Central Time (CT)"),
-    ("America/New_York", "Eastern Time (ET)"),
-    ("UTC", "UTC"),
-]
 
-
-def _action_set_max_members(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
+def _action_set_max_members(request: HttpRequest, authentik_username: str) -> JsonResponse:
     form = SetMaxMembersForm(request.POST)
     if not form.is_valid():
-        raise BadRequest("Max members must be 1-20")
+        raise BadRequest(f"Max members must be 1-{MAX_TEAM_MEMBERS_LIMIT}")
 
     max_members = form.cleaned_data["max_members"]
-    old_max = config.max_team_members
-    config.max_team_members = max_members
-    config.save()
-
-    AuditLog.objects.create(
-        action="max_team_members_updated",
-        admin_user=authentik_username,
-        target_entity="competition_config",
-        target_id=config.pk,
-        details={"old_max": old_max, "new_max": max_members},
-    )
-
+    set_max_members(max_members, authentik_username)
     return JsonResponse({"success": True, "message": f"Max members set to {max_members}"})
 
 
-def _action_set_start_message(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
+def _action_set_start_message(request: HttpRequest, authentik_username: str) -> JsonResponse:
     form = StartMessageForm(request.POST)
     if not form.is_valid():
         raise BadRequest(form.errors["start_message"][0])
 
     message = form.cleaned_data["start_message"]
-    CompetitionConfig.objects.filter(pk=config.pk).update(start_message=message)
-
-    # The message usually carries credentials, so the audit entry records only its length.
-    AuditLog.objects.create(
-        action="competition_start_message_updated",
-        admin_user=authentik_username,
-        target_entity="competition_config",
-        target_id=config.pk,
-        details={"length": len(message)},
-    )
-
+    set_start_message(message, authentik_username)
     return JsonResponse(
         {"success": True, "message": "Start message saved" if message.strip() else "Start message cleared"}
     )
 
 
-def _edit_controlled_app(
-    request: HttpRequest, config: CompetitionConfig, authentik_username: str, *, add: bool
-) -> JsonResponse:
+def _edit_controlled_app(request: HttpRequest, authentik_username: str, *, add: bool) -> JsonResponse:
     """Add or remove one controlled app against the CURRENT stored list, so a stale page can't drop others."""
     form = AppSlugForm(request.POST)
     if not form.is_valid():
@@ -136,30 +112,17 @@ def _edit_controlled_app(
         if app is None:
             raise BadRequest(f"No Authentik application with the slug '{slug}'")
 
-    with transaction.atomic():
-        config = CompetitionConfig.objects.select_for_update().get(pk=config.pk)
-        apps = list(config.controlled_applications or [])
-        if add and slug not in apps:
-            apps.append(slug)
-        elif not add and slug in apps:
-            apps.remove(slug)
-        config.controlled_applications = apps
-        config.save(update_fields=["controlled_applications", "updated_at"])
+    def change(apps: list[str]) -> list[str]:
+        if add:
+            return apps if slug in apps else [*apps, slug]
+        return [app for app in apps if app != slug]
 
-        AuditLog.objects.create(
-            action="competition_apps_configured",
-            admin_user=authentik_username,
-            target_entity="competition_config",
-            target_id=config.pk,
-            details={"controlled_apps": apps, "added" if add else "removed": slug},
-        )
-
+    apps = set_controlled_apps(change, authentik_username, **{"added" if add else "removed": slug})
     verb = "Added" if add else "Removed"
     return JsonResponse({"success": True, "message": f"{verb} {slug}", "apps": apps})
 
 
-def _action_set_schedule(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
-    """Handle set_schedule action — set start and/or end time in one request."""
+def _action_set_schedule(request: HttpRequest, authentik_username: str) -> JsonResponse:
     from core.forms import SetScheduleForm
 
     form = SetScheduleForm(request.POST)
@@ -168,9 +131,9 @@ def _action_set_schedule(request: HttpRequest, config: CompetitionConfig, authen
         raise BadRequest(str(first_error[0]))
 
     start_dt = form.cleaned_data["start_datetime"]
-    start_tz = form.cleaned_data.get("start_timezone") or "America/Los_Angeles"
+    start_tz = form.cleaned_data.get("start_timezone") or DEFAULT_TIMEZONE
     end_dt = form.cleaned_data["end_datetime"]
-    end_tz = form.cleaned_data.get("end_timezone") or "America/Los_Angeles"
+    end_tz = form.cleaned_data.get("end_timezone") or DEFAULT_TIMEZONE
 
     try:
         start_time = parse_datetime_to_utc(start_dt, start_tz) if start_dt else None
@@ -179,32 +142,21 @@ def _action_set_schedule(request: HttpRequest, config: CompetitionConfig, authen
         raise BadRequest(str(e)) from e
     except ValueError:
         raise BadRequest("Invalid datetime format") from None
-    if error := config.schedule_error(start_time, end_time):
-        raise BadRequest(error)
+    try:
+        set_schedule(authentik_username, start=start_time or KEEP, end=end_time or KEEP)
+    except ConfigEditError as e:
+        raise BadRequest(str(e)) from e
 
-    details: dict[str, str] = {}
-    if start_time:
-        config.competition_start_time = start_time
-        details["start_time"] = start_time.isoformat()
-    if end_time:
-        config.competition_end_time = end_time
-        details["end_time"] = end_time.isoformat()
-    config.save()
+    parts = [f"start={start_time.isoformat()}" if start_time else "", f"end={end_time.isoformat()}" if end_time else ""]
+    return JsonResponse({"success": True, "message": "Schedule updated: " + ", ".join(p for p in parts if p)})
 
-    AuditLog.objects.create(
-        action="competition_schedule_set",
-        admin_user=authentik_username,
-        target_entity="competition_config",
-        target_id=config.pk,
-        details={**details, "controlled_apps": config.controlled_applications},
-    )
 
-    parts = [
-        f"start={details['start_time']}" if "start_time" in details else "",
-        f"end={details['end_time']}" if "end_time" in details else "",
-    ]
-    msg = "Schedule updated: " + ", ".join(p for p in parts if p)
-    return JsonResponse({"success": True, "message": msg})
+def _clear_schedule_time(request: HttpRequest, authentik_username: str, *, start: bool) -> JsonResponse:
+    if start:
+        set_schedule(authentik_username, start=None)
+    else:
+        set_schedule(authentik_username, end=None)
+    return JsonResponse({"success": True, "message": f"Scheduled {'start' if start else 'stop'} cleared"})
 
 
 def _stream_competition_run(enable: bool, authentik_username: str) -> Iterator[str]:
@@ -234,17 +186,13 @@ def _stream_competition_run(enable: bool, authentik_username: str) -> Iterator[s
     yield ndjson_done(message, success=complete)
 
 
-def _toggle_competition(
-    request: HttpRequest, config: CompetitionConfig, authentik_username: str, *, enable: bool
-) -> StreamingHttpResponse:
+def _toggle_competition(request: HttpRequest, authentik_username: str, *, enable: bool) -> StreamingHttpResponse:
     return StreamingHttpResponse(
         run_detached(_stream_competition_run(enable, authentik_username)), content_type="application/x-ndjson"
     )
 
 
-def _action_clear_leftover_data(
-    request: HttpRequest, config: CompetitionConfig, authentik_username: str
-) -> JsonResponse:
+def _action_clear_leftover_data(request: HttpRequest, authentik_username: str) -> JsonResponse:
     _require_typed_confirmation(request)
     try:
         wiped = clear_leftover_data(authentik_username)
@@ -258,7 +206,7 @@ def _action_clear_leftover_data(
     )
 
 
-def _action_cancel_event(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
+def _action_cancel_event(request: HttpRequest, authentik_username: str) -> JsonResponse:
     form = CancelEventForm(request.POST)
     if not form.is_valid():
         raise BadRequest(form.first_error())
@@ -284,7 +232,7 @@ def _wiped_summary(wiped: WipedData) -> str:
     return summary
 
 
-def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
+def _action_reset_passwords(request: HttpRequest, authentik_username: str) -> JsonResponse:
     form = ResetPasswordsForm(request.POST)
     if not form.is_valid():
         error_msg = "; ".join(str(e) for errors in form.errors.values() for e in errors)
@@ -298,22 +246,6 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
     )
 
     return JsonResponse({"success": not result.failed_resets, "message": result.summary(), "csv": csv_content})
-
-
-def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
-    try:
-        sync_quotient_metadata(cast(User, request.user))
-        AuditLog.objects.create(
-            action="quotient_metadata_synced",
-            admin_user=authentik_username,
-            target_entity="quotient",
-            target_id=0,
-            details={},
-        )
-        return JsonResponse({"success": True, "message": "Quotient metadata synced"})
-    except Exception as e:
-        logger.error(f"Failed to sync Quotient metadata: {e}")
-        return JsonResponse({"error": f"Sync failed: {e}"}, status=500)
 
 
 def _stream_close_out(target: Event | NewEvent, authentik_username: str) -> Iterator[str]:
@@ -330,7 +262,7 @@ def _stream_close_out(target: Event | NewEvent, authentik_username: str) -> Iter
     )
 
 
-def _action_close_out_check(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
+def _action_close_out_check(request: HttpRequest, authentik_username: str) -> JsonResponse:
     """What would make Close Out refuse, and the unfinished work it would freeze, fetched once the page shows the
     section: the scorecard check builds every school's scorecard, too slow for the page load, and a failure here
     must not break the page that holds Start and Stop."""
@@ -365,9 +297,7 @@ def _fix_links(fix: TeamFix) -> list[dict[str, str]]:
     ]
 
 
-def _action_close_out_event(
-    request: HttpRequest, config: CompetitionConfig, authentik_username: str
-) -> StreamingHttpResponse:
+def _action_close_out_event(request: HttpRequest, authentik_username: str) -> StreamingHttpResponse:
     form = CloseOutForm(request.POST)
     if not form.is_valid():
         return StreamingHttpResponse(
@@ -378,7 +308,7 @@ def _action_close_out_event(
     )
 
 
-_COMPETITION_ACTION_HANDLERS: dict[str, Callable[[HttpRequest, CompetitionConfig, str], HttpResponseBase]] = {
+_COMPETITION_ACTION_HANDLERS: dict[str, Callable[[HttpRequest, str], HttpResponseBase]] = {
     "close_out_event": _action_close_out_event,
     "close_out_check": _action_close_out_check,
     "set_max_members": _action_set_max_members,
@@ -386,14 +316,16 @@ _COMPETITION_ACTION_HANDLERS: dict[str, Callable[[HttpRequest, CompetitionConfig
     "add_app": partial(_edit_controlled_app, add=True),
     "remove_app": partial(_edit_controlled_app, add=False),
     "set_schedule": _action_set_schedule,
+    "clear_start_time": partial(_clear_schedule_time, start=True),
+    "clear_end_time": partial(_clear_schedule_time, start=False),
     "start_competition": partial(_toggle_competition, enable=True),
     "stop_competition": partial(_toggle_competition, enable=False),
     "clear_leftover_data": _action_clear_leftover_data,
     "cancel_event": _action_cancel_event,
     "reset_passwords": _action_reset_passwords,
-    "sync_quotient": _action_sync_quotient,
+    "sync_quotient": sync_quotient,
+    "fix_group_membership": fix_group_membership,
     "readiness_check": action_readiness_check,
-    "readiness_fix": action_readiness_fix,
 }
 
 
@@ -410,7 +342,7 @@ def _live_numbers() -> LiveNumbers:
     from ticketing.models import Ticket
 
     unresolved = Ticket.objects.filter(status__in=(Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED)).count()
-    return LiveNumbers(unresolved, last_start_accounts())
+    return LiveNumbers(unresolved, CompetitionConfig.get_config().last_start_accounts)
 
 
 def _live_context(stage: EventStage) -> dict[str, object]:
@@ -471,6 +403,7 @@ def admin_competition_setup(request: HttpRequest) -> HttpResponse:
         {
             "config": CompetitionConfig.get_config(),
             "timezone_choices": TIMEZONE_CHOICES,
+            "default_timezone": DEFAULT_TIMEZONE,
             "quotient_metadata": QuotientMetadataCache.objects.first(),
             "start_message_max_length": StartMessageForm.MAX_LENGTH,
             "sections": ids(SetupSection),
@@ -505,6 +438,7 @@ def admin_competition_action(request: HttpRequest) -> HttpResponseBase:
     handler = _COMPETITION_ACTION_HANDLERS.get(action)
     if not handler:
         raise BadRequest("Unknown action")
+    if form.cleaned_data["readiness_fix"] and action not in READINESS_FIXES:
+        raise BadRequest("Not a readiness fix")
 
-    config = CompetitionConfig.get_config()
-    return handler(request, config, user.username)
+    return handler(request, user.username)

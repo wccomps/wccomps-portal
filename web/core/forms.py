@@ -6,17 +6,53 @@ from registration.models import SCHOOL_NAME_MAX_LENGTH, Event
 from registration.services import NewEvent
 
 from core.authentik_utils import parse_team_range
+from core.models import MAX_TEAM_MEMBERS_LIMIT
+from core.utils import DEFAULT_TIMEZONE
 from team.models import SchoolInfo
 
 
 class SchoolInfoEditForm(forms.Form):
-    school_name = forms.CharField(max_length=SCHOOL_NAME_MAX_LENGTH)
-    # The columns' lengths: a form EmailField alone accepts 320 characters
-    contact_email = forms.EmailField(max_length=SchoolInfo._meta.get_field("contact_email").max_length)
-    secondary_email = forms.EmailField(
-        max_length=SchoolInfo._meta.get_field("secondary_email").max_length, required=False
+    RENAME = "rename"
+    NEW_SCHOOL = "new_school"
+
+    # The school the page showed, so an edit made from a stale page is refused
+    shown_school = forms.IntegerField(required=False, widget=forms.HiddenInput)
+    shown_key = forms.CharField(required=False, widget=forms.HiddenInput)
+    school_name = forms.CharField(
+        label="School Name",
+        max_length=SCHOOL_NAME_MAX_LENGTH,
+        widget=forms.TextInput(attrs={"class": "vTextField", "placeholder": "e.g., University of Example"}),
     )
-    notes = forms.CharField(required=False)
+    change = forms.ChoiceField(
+        label="If the name changed",
+        choices=[(RENAME, "A rename of the same school"), (NEW_SCHOOL, "A different school")],
+        required=False,
+        widget=forms.RadioSelect,
+        help_text="A rename keeps the team's members, Discord channels and password. A different school "
+        "unlinks the team's Discord members, removes its Discord role and channels, and resets its Authentik password "
+        "and sessions, so it starts clean.",
+    )
+    # The columns' lengths: a form EmailField alone accepts 320 characters
+    contact_email = forms.EmailField(
+        label="Contact Email",
+        max_length=SchoolInfo._meta.get_field("contact_email").max_length,
+        help_text="Primary contact for this team",
+        widget=forms.EmailInput(attrs={"class": "vTextField", "placeholder": "e.g., coach@example.edu"}),
+    )
+    secondary_email = forms.EmailField(
+        label="Secondary Email",
+        max_length=SchoolInfo._meta.get_field("secondary_email").max_length,
+        required=False,
+        help_text="Optional secondary contact",
+        widget=forms.EmailInput(attrs={"class": "vTextField", "placeholder": "e.g., alternate@example.edu"}),
+    )
+    notes = forms.CharField(
+        required=False,
+        help_text="Optional internal notes",
+        widget=forms.Textarea(
+            attrs={"class": "vLargeTextField", "rows": 4, "placeholder": "Additional notes about this team..."}
+        ),
+    )
 
 
 class BroadcastForm(forms.Form):
@@ -25,7 +61,7 @@ class BroadcastForm(forms.Form):
 
 
 class SetMaxMembersForm(forms.Form):
-    max_members = forms.IntegerField(min_value=1, max_value=20)
+    max_members = forms.IntegerField(min_value=1, max_value=MAX_TEAM_MEMBERS_LIMIT)
 
 
 class TypedConfirmForm(forms.Form):
@@ -101,9 +137,9 @@ class AppSlugForm(forms.Form):
 
 class SetScheduleForm(forms.Form):
     start_datetime = forms.CharField(required=False)
-    start_timezone = forms.CharField(required=False, initial="America/Los_Angeles")
+    start_timezone = forms.CharField(required=False, initial=DEFAULT_TIMEZONE)
     end_datetime = forms.CharField(required=False)
-    end_timezone = forms.CharField(required=False, initial="America/Los_Angeles")
+    end_timezone = forms.CharField(required=False, initial=DEFAULT_TIMEZONE)
 
     def clean(self) -> dict[str, str]:
         cleaned = super().clean()
@@ -133,10 +169,7 @@ class ResetPasswordsForm(forms.Form):
 
 class ActionForm(forms.Form):
     action = forms.CharField()
-
-
-class ReadinessFixForm(forms.Form):
-    fix = forms.CharField()
+    readiness_fix = forms.BooleanField(required=False)
 
 
 class TeamActionForm(forms.Form):

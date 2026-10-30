@@ -1,42 +1,30 @@
 """Shared competition actions for commands and timer."""
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 
 import discord
 from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.db import connection
-from django.utils import timezone
-from scoring.models import QuotientMetadataCache
+from registration.models import Event
+from registration.services import teardown_problem
+from registration.stage import event_stage
 
-from bot.discord_manager import delete_team_infrastructure
-from bot.utils import announcement, log_to_ops_channel, send_announcement, send_parts, team_chat_channel
+from bot.discord_manager import DiscordManager, delete_team_infrastructure
+from bot.utils import announcement, log_to_ops_channel, run_blocking, send_announcement, send_parts, team_chat_channel
 from core.authentik_utils import parse_team_range
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.services.competition import CompetitionRunResult, run_competition_to_completion
 from core.utils import shorten
-from team.models import MAX_TEAMS, DiscordLink, Team
+from team.models import MAX_TEAMS, Team
 
 logger = logging.getLogger(__name__)
 
 
 async def run_competition(enable: bool, actor: str, on_step: Callable[[], None] | None = None) -> CompetitionRunResult:
-    """Start (enable=True) or stop the competition via the shared service, off the event loop.
-
-    Not thread_sensitive: the run makes dozens of Authentik calls and would otherwise hold the
-    single thread every other sync_to_async call in the bot waits on.
-    """
-    return await sync_to_async(_run_and_close, thread_sensitive=False)(enable, actor, on_step)
-
-
-def _run_and_close(enable: bool, actor: str, on_step: Callable[[], None] | None) -> CompetitionRunResult:
-    # A pool thread keeps its DB connection, and recycle_db_connection only reaches the bot's main ORM
-    # thread; close it so a connection broken between runs can't fail the next start or stop.
-    try:
-        return run_competition_to_completion(enable, actor, on_step)
-    finally:
-        connection.close()
+    """Start (enable=True) or stop the competition via the shared service, off the shared thread."""
+    return await run_blocking(run_competition_to_completion, enable, actor, on_step)
 
 
 async def update_status_channel(bot: discord.Client) -> bool:
@@ -129,138 +117,134 @@ def _build_status_embed(config: CompetitionConfig) -> discord.Embed:
     return embed
 
 
-async def _deactivate_team_links(actor: str) -> int:
-    """Deactivate team member links only (admin and support links stay), auditing each."""
-    links_to_deactivate = [
-        link
-        async for link in DiscordLink.objects.filter(is_active=True, team__isnull=False).select_related("team", "user")
-    ]
+@dataclass
+class Teardown:
+    """What tearing the team channels and roles down did, kept up to date as it goes; stopped says why it stopped
+    early, or ''."""
 
-    deactivated = 0
-    for link in links_to_deactivate:
-        link.is_active = False
-        link.unlinked_at = timezone.now()
-        await link.asave()
-        deactivated += 1
+    member_roles_removed: int = 0
+    categories: int = 0
+    team_roles: int = 0
+    judges: int = 0
+    left: list[int] = field(default_factory=list)
+    stopped: str = ""
 
-        await AuditLog.objects.acreate(
-            action="user_unlinked",
-            admin_user=actor,
-            target_entity="discord_link",
-            target_id=link.discord_id,
-            details={
-                "discord_id": link.discord_id,
-                "team_name": link.team.team_name if link.team else "Unknown",
-                "authentik_username": link.user.username,
-                "reason": "competition_cleanup",
-            },
-        )
-    return deactivated
+    @property
+    def changed(self) -> bool:
+        return bool(self.member_roles_removed or self.categories or self.team_roles or self.judges)
 
 
-async def run_competition_cleanup(
-    bot: discord.Client, guild: discord.Guild, actor: str, closed_out_event_id: int | None = None
+async def _tear_down_teams(
+    guild: discord.Guild, problem: Callable[[], str], beat: Callable[[], None], done: Teardown
 ) -> None:
-    """Tear down the competition in Discord and the database; progress goes to the ops channel.
+    """Delete every team's category, channels and role, then take the Room Judge role away; problem, asked before each
+    team, stops it early. Counts go into done as they happen."""
+    from bot.role_sync import sync_roles
 
-    The one implementation behind /competition cleanup-competition (the full cleanup) and Close Out Event (queued as
-    a cleanup_competition task with closed_out_event_id). The close-out already deleted the team links and reset the
-    database in its transaction, so for it this does only the Discord side, and skips if an event was opened or the
-    competition started since. Never raises: failures are reported to ops.
-    """
-    config = await sync_to_async(CompetitionConfig.get_config)()
-    if config.applications_enabled:
-        await log_to_ops_channel(bot, "Cleanup refused: the competition is still running")
-        return
-    close_out = closed_out_event_id is not None
-    if close_out:
-        from registration.models import Event
-
-        opened = await Event.objects.select_related("season").filter(is_active=True).afirst()
-        if opened is not None:
-            await log_to_ops_channel(
-                bot,
-                f"Discord cleanup after the close-out skipped: {opened} was opened since. Run "
-                "/competition cleanup-competition if the old team channels and roles still need removing.",
-            )
+    # While the role IDs are recorded, so the sync still counts team roles as its own
+    done.member_roles_removed = (await sync_roles(guild, beat=beat))["roles_removed"]
+    async for team in Team.objects.all().order_by("team_number"):
+        if why := await sync_to_async(problem)():
+            done.stopped = why
             return
+        removed = await delete_team_infrastructure(guild, team, reason="Competition cleanup")
+        done.categories += removed.count("category")
+        done.team_roles += removed.count("role")
+        if team.channels_need_clearing:
+            done.left.append(team.team_number)
+        beat()
+    done.judges = await _remove_room_judges(guild)
+
+
+async def _remove_room_judges(guild: discord.Guild) -> int:
+    room_judge_role = discord.utils.get(guild.roles, name="WCComps Room Judge")
+    if room_judge_role is None:
+        return 0
+    judges = 0
+    for member in room_judge_role.members:
+        try:
+            await member.remove_roles(room_judge_role, reason="Competition cleanup")
+            judges += 1
+        except Exception as e:
+            logger.warning(f"Could not remove Room Judge from {member}: {e}")
+    return judges
+
+
+async def reconcile_teams(
+    bot: discord.Client, guild: discord.Guild, actor: str, open_event_id: int | None, beat: Callable[[], None]
+) -> None:
+    """Tear the team channels and roles down unless teardown_problem refuses, then set the linked teams up again,
+    even after a teardown that failed; a failure raises once both have run."""
+
+    def problem() -> str:
+        return teardown_problem(event_stage(), open_event_id)
+
+    skipped = await sync_to_async(problem)()
+    if skipped:
+        await log_to_ops_channel(bot, f"Discord cleanup skipped: {skipped}")
+    event = await Event.objects.select_related("season").filter(pk=open_event_id).afirst() if open_event_id else None
+    done = Teardown()
+    failure: Exception | None = None
+    if not skipped:
+        try:
+            await _tear_down_teams(guild, problem, beat, done)
+        except Exception as e:
+            failure = e
+
+    from bot.role_sync import sync_roles
 
     try:
-        await log_to_ops_channel(bot, f"Competition Cleanup Started by {actor}")
-
-        deactivated = 0
-        if not close_out:
-            deactivated = await _deactivate_team_links(actor)
-            await log_to_ops_channel(bot, f"Deactivated {deactivated} team member links")
-
-        from bot.role_sync import sync_roles
-
-        # Before the role IDs are cleared: afterwards the sync no longer counts team roles as its own
-        stats = await sync_roles(guild)
-        await log_to_ops_channel(bot, f"Removed {stats['roles_removed']} roles from members who are no longer linked")
-
-        deleted_count = 0
-        async for team in Team.objects.all().order_by("team_number"):
-            removed = await delete_team_infrastructure(guild, team, reason="Competition cleanup")
-            if any(item.startswith("category") for item in removed):
-                deleted_count += 1
-
-        await log_to_ops_channel(bot, f"Deleted {deleted_count} team categories")
-
-        await Team.objects.all().aupdate(discord_category_id=None, discord_role_id=None)
-
-        judges_removed = 0
-        room_judge_role = discord.utils.get(guild.roles, name="WCComps Room Judge")
-        if room_judge_role:
-            for member in room_judge_role.members:
-                try:
-                    await member.remove_roles(room_judge_role, reason="Competition cleanup")
-                    judges_removed += 1
-                except Exception as e:
-                    logger.warning(f"Could not remove Room Judge from {member}: {e}")
-
-        if judges_removed > 0:
-            await log_to_ops_channel(bot, f"Removed the Room Judge role from {judges_removed} members")
-
-        if not close_out:
-            # The start message holds this event's credentials; the next event gets its own.
-            await CompetitionConfig.objects.filter(pk=config.pk).aupdate(
-                competition_start_time=None, competition_end_time=None, start_message=""
-            )
-            await QuotientMetadataCache.objects.all().adelete()
-
-            deleted_announcements = await QueuedAnnouncement.objects.all().adelete()
-            if deleted_announcements[0] > 0:
-                await log_to_ops_channel(bot, f"Cleared {deleted_announcements[0]} queued announcements")
-
+        manager = DiscordManager(guild, bot)
+        async for team in Team.objects.filter(members__is_active=True).distinct().order_by("team_number"):
+            await manager.setup_team_infrastructure(team.team_number)
+            beat()
+        await sync_roles(guild, beat=beat)
+    except Exception as e:
+        failure = failure or e
+    quiet = event is not None and failure is None and not (done.changed or done.stopped or done.left)
+    if not skipped and not quiet:
         await AuditLog.objects.acreate(
             action="competition_cleanup",
             admin_user=actor,
             target_entity="competition",
-            target_id=0,
+            target_id=open_event_id or 0,
             details={
-                "deactivated_links": deactivated,
-                "deleted_categories": deleted_count,
-                "removed_roles": stats["roles_removed"],
-                "closed_out_event": closed_out_event_id,
+                "event": open_event_id,
+                "deleted_categories": done.categories,
+                "deleted_team_roles": done.team_roles,
+                "member_roles_removed": done.member_roles_removed,
+                "room_judges_removed": done.judges,
+                "stopped": done.stopped,
+                "left": done.left,
+                "finished": failure is None,
             },
         )
+        await _report_teardown(bot, event, done, failure)
+    if failure:
+        raise failure
 
-        # After a close-out the links were deleted with the event's live data, so there is no count to report
-        links_line = "" if close_out else f"• Deactivated {deactivated} team links\n"
-        await log_to_ops_channel(
-            bot,
-            f"Competition Cleanup Complete\n"
-            f"{links_line}"
-            f"• Deleted {deleted_count} team categories\n"
-            f"• Removed {stats['roles_removed']} roles",
+
+async def _report_teardown(bot: discord.Client, event: Event | None, done: Teardown, failure: Exception | None) -> None:
+    title = f"{event} opened: earlier events' team channels removed" if event else "Discord Cleanup Complete"
+    if failure is not None:
+        title = f"Discord cleanup failed partway: {shorten(str(failure), 200)}"
+    lines = [
+        title,
+        f"• Deleted {done.categories} team categories and {done.team_roles} team roles",
+        f"• Removed {done.member_roles_removed} roles from members who are no longer linked",
+    ]
+    if done.judges:
+        lines.append(f"• Removed the Room Judge role from {done.judges} members")
+    if done.left:
+        teams = ", ".join(f"{number:02d}" for number in done.left)
+        lines.append(
+            f"• Could not delete the role or category of teams {teams}: delete them in Discord, then run "
+            "/teams recreate for those teams"
         )
-
-        await update_status_channel(bot)
-
-    except Exception as e:
-        logger.exception(f"Cleanup error: {e}")
-        await log_to_ops_channel(bot, f"Cleanup Error: {e}")
+    if done.stopped:
+        lines.append(f"Stopped before the end: {done.stopped}")
+    await log_to_ops_channel(bot, "\n".join(lines))
+    await update_status_channel(bot)
 
 
 async def deliver_team_broadcast(
@@ -268,8 +252,12 @@ async def deliver_team_broadcast(
     target: str,
     message: str,
     sender: str,
+    wanted: Callable[[], Awaitable[bool]] | None = None,
+    queue_copy: Callable[[Team, str, str], Awaitable[bool]] | None = None,
 ) -> tuple[int, int, list[str]]:
-    """Send a broadcast to 'announcements', 'all-teams', or a team range, queuing if a channel is missing."""
+    """Send a broadcast to 'announcements', 'all-teams', or a team range, queuing if a channel is missing. wanted,
+    asked before each team, stops it: the teams not reached are listed as failed. queue_copy, when given, queues a
+    team's copy and returns False instead when the broadcast was stopped."""
     target_lower = target.lower().strip()
     if target_lower == "announcements":
         announcement_channel_id = settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID
@@ -295,7 +283,12 @@ async def deliver_team_broadcast(
     queued_count = 0
     failed_channels: list[str] = []
 
-    for team_number in team_numbers:
+    for i, team_number in enumerate(team_numbers):
+        if wanted is not None and not await wanted():
+            failed_channels += [
+                f"Team {number:02d} (not sent: the broadcast was stopped)" for number in team_numbers[i:]
+            ]
+            break
         team = teams_by_number.get(team_number)
         if not team:
             failed_channels.append(f"Team {team_number:02d} (not found)")
@@ -305,12 +298,14 @@ async def deliver_team_broadcast(
             if chat_channel:
                 await send_parts(chat_channel, announcement(sender, message))
                 sent_count += 1
+            elif queue_copy is not None and not await queue_copy(team, message, sender):
+                failed_channels += [
+                    f"Team {number:02d} (not sent: the broadcast was stopped)" for number in team_numbers[i:]
+                ]
+                break
             else:
-                await QueuedAnnouncement.objects.acreate(
-                    team=team,
-                    message=message,
-                    sender_name=sender,
-                )
+                if queue_copy is None:
+                    await QueuedAnnouncement.objects.acreate(team=team, message=message, sender_name=sender)
                 queued_count += 1
         except Exception as e:
             logger.exception(f"Failed to broadcast to team {team_number}: {e}")

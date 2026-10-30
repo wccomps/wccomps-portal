@@ -15,11 +15,14 @@ from scoring.models import (
     ServiceScore,
 )
 
+from core.models import QueuedAnnouncement
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
-# What the wipe deletes, in order: (count label, the rows). While any of it remains, or a team's ticket counter has
-# been used, a school list import is blocked (registration.services.import_problem).
+TEAM_LINKS = "BlueTeamDiscordLink"
+QUEUED_ANNOUNCEMENTS = "QueuedAnnouncement"
+
+# What the wipe deletes, in order: (count label, the rows)
 COMPETITION_DATA: tuple[tuple[str, Callable[[], QuerySet[Model]]], ...] = (
     ("TicketAttachment", TicketAttachment.objects.all),
     ("TicketComment", TicketComment.objects.all),
@@ -37,7 +40,8 @@ COMPETITION_DATA: tuple[tuple[str, Callable[[], QuerySet[Model]]], ...] = (
     ("OrangeAssignment", OrangeAssignment.objects.all),
     ("OrangeCheckIn", OrangeCheckIn.objects.all),
     # Blue team Discord links only (staff/volunteer links preserved)
-    ("BlueTeamDiscordLink", lambda: DiscordLink.objects.filter(team__isnull=False)),
+    (TEAM_LINKS, lambda: DiscordLink.objects.filter(team__isnull=False)),
+    (QUEUED_ANNOUNCEMENTS, QueuedAnnouncement.objects.all),
 )
 
 
@@ -72,5 +76,11 @@ def competition_data_counts() -> WipedData:
 
 
 def live_competition_data_exists() -> bool:
-    """Whether any row the competition wipe deletes still exists, or a ticket counter it resets is in use."""
-    return _used_ticket_counters().exists() or any(rows().exists() for _, rows in COMPETITION_DATA)
+    """Whether teams still use their numbers: a row the wipe deletes, an active team link (inactive ones are history
+    until the next wipe) or a used ticket counter. Queued announcements don't count: the import that opens an event
+    deletes them all, and a hand-over its team's."""
+    return (
+        _used_ticket_counters().exists()
+        or any(rows().exists() for label, rows in COMPETITION_DATA if label not in (TEAM_LINKS, QUEUED_ANNOUNCEMENTS))
+        or DiscordLink.objects.filter(team__isnull=False, is_active=True).exists()
+    )

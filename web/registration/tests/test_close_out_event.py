@@ -54,7 +54,7 @@ def event():
 
 
 def _cleanups():
-    return list(DiscordTask.objects.filter(task_type="cleanup_competition"))
+    return list(DiscordTask.objects.filter(task_type="reconcile_teams"))
 
 
 def _assert_nothing_written(event=None, scores=2):
@@ -93,7 +93,7 @@ def test_close_out_freezes_wipes_closes_and_queues_the_cleanup(event):
     assert event.team_assignments.count() == 2
     [cleanup] = _cleanups()
     # The bot does only the Discord side for a close-out: every database reset is in this transaction
-    assert cleanup.payload == {"requested_by": "gold", "closed_out_event_id": event.pk}
+    assert cleanup.payload == {"requested_by": "gold", "open_event_id": None}
     config = CompetitionConfig.get_config()
     assert (config.competition_start_time, config.competition_end_time, config.start_message) == (None, None, "")
     assert not QuotientMetadataCache.objects.exists()
@@ -101,8 +101,7 @@ def test_close_out_freezes_wipes_closes_and_queues_the_cleanup(event):
     log = AuditLog.objects.get(action="event_closed_out")
     assert log.target_id == event.pk
     assert log.details["results"] == 2
-    assert log.details["deleted_counts"] == {"ServiceScore": 2, "BlueTeamDiscordLink": 1}
-    assert log.details["queued_announcements_deleted"] == 1
+    assert log.details["deleted_counts"] == {"ServiceScore": 2, "BlueTeamDiscordLink": 1, "QueuedAnnouncement": 1}
     assert not AuditLog.objects.filter(action__in=["event_finalized", "event_cleared"]).exists()
 
 

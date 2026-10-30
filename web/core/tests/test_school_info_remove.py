@@ -113,3 +113,20 @@ def test_removing_is_refused_when_the_school_changed_since_the_page_was_opened(c
     assert "Team 4&#x27;s school changed since you opened this page; reload." in response.content.decode()
     assert SchoolInfo.objects.get().school_name == "Other College"
     assert EventTeamAssignment.objects.get().school.name == "Other College"
+
+
+def test_removing_is_refused_while_members_are_linked(client):
+    """Removing, then adding a school, would skip the unlink and the password reset a different school gets."""
+    from django.contrib.auth.models import User
+    from registration.services import LINKED_TEAM_REMOVE
+
+    from team.models import DiscordLink
+
+    team = _team_with_school()
+    user = User.objects.create(username="member04")
+    DiscordLink.objects.create(discord_id=44, discord_username="m", user=user, team=team, is_active=True)
+
+    response = client.post(reverse("school_info_remove", args=[4]), _shown())
+
+    assert html.escape(LINKED_TEAM_REMOVE) in response.content.decode()
+    assert SchoolInfo.objects.filter(team=team).exists()

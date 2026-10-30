@@ -274,3 +274,25 @@ async def test_role_sync_failure_is_logged_not_raised(caplog: pytest.LogCaptureF
         await authentik_groups.sync_roles_now(MagicMock())
 
     assert "Role sync failed: discord down" in caplog.text
+
+
+async def test_the_sync_beats_after_each_member_it_changes(teams) -> None:
+    """A teardown's pass over hundreds of former members is that many Discord calls: it keeps the queue alive."""
+    members = [_member(n, OPS) for n in (2, 3, 4)]
+    beat = MagicMock()
+
+    await role_sync.sync_roles(_guild(*members, _member(5)), beat=beat)
+
+    assert beat.call_count == 1 + len(members)
+
+
+async def test_a_team_whose_old_channels_await_removal_grants_no_team_role(teams) -> None:
+    """The role is the last school's until its removal: a new member would read the old channels."""
+    await Team.objects.filter(pk=teams[0].pk).aupdate(channels_need_clearing=True)
+    await _link(1, [], team=teams[0])
+    member = _member(1, TEAM_A)
+
+    await _sync(_guild(member))
+
+    assert _ids(member.add_roles) == {BLUETEAM}
+    assert _ids(member.remove_roles) == {TEAM_A}

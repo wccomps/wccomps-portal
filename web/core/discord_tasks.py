@@ -101,17 +101,24 @@ class AddUserToThread:
 
 
 @dataclass(frozen=True, kw_only=True)
-class CleanupCompetition:
-    """Tear down the competition (see bot.competition_actions.run_competition_cleanup).
+class ReconcileTeams:
+    """Tear every team's channels and role down while the open event is still open_event_id (None, none open), and
+    set the teams with linked members up again, whatever became of the teardown."""
 
-    closed_out_event_id: set by Close Out Event, the event it closed. Its transaction already reset the database,
-    so the bot does only the Discord side, and skips if an event was opened or the competition started since.
-    Without it (rows queued before the field existed) the bot runs the full cleanup."""
-
-    task_type: ClassVar = "cleanup_competition"
-    label: ClassVar = "Clean Up Competition"
+    task_type: ClassVar = "reconcile_teams"
+    label: ClassVar = "Reconcile Team Channels"
     requested_by: str
-    closed_out_event_id: int | None = None
+    open_event_id: int | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class ClearTeamChannels:
+    """Delete the Discord role and category of a team marked channels_need_clearing, which unsets the mark only when
+    nothing is left and then queues the team's setup if members linked meanwhile."""
+
+    task_type: ClassVar = "clear_team_channels"
+    label: ClassVar = "Clear a Team's Old Channels"
+    team_number: int
 
 
 type TaskPayload = (
@@ -124,7 +131,8 @@ type TaskPayload = (
     | TicketCreatedWeb
     | SyncRoles
     | AddUserToThread
-    | CleanupCompetition
+    | ReconcileTeams
+    | ClearTeamChannels
 )
 
 PAYLOAD_TYPES: dict[str, type[TaskPayload]] = {cls.task_type: cls for cls in get_args(TaskPayload.__value__)}

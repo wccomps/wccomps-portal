@@ -22,8 +22,9 @@
             </c-slot>
             <p class="help">
                 Optional: the bot starts and stops the competition at these times. You can also start or stop by
-                hand on the Competition page: starting by hand clears the scheduled start, and stopping by hand
-                clears the scheduled stop.
+                hand on the Competition page. Starting by hand clears the scheduled start. Stopping by hand keeps a
+                scheduled stop that is still to come, so a competition stopped and started again still stops on
+                schedule, and cancels a start time that has passed. To cancel either, clear it.
             </p>
             <c-detail_grid>
                 <c-detail_row label="Starts">
@@ -31,6 +32,12 @@
                         <span x-data="formatTime"
                               data-iso="{{ config.competition_start_time|date:'c' }}"
                               x-text="formatted"></span>
+                        <c-button variant="danger"
+                                  @click="clearStartTime"
+                                  ::disabled="loading"
+                                  data-confirm="Clear the start time? The bot will no longer start the competition on schedule.">
+                            Clear start time
+                        </c-button>
                     {% else %}
                         Not set
                     {% endif %}
@@ -40,6 +47,12 @@
                         <span x-data="formatTime"
                               data-iso="{{ config.competition_end_time|date:'c' }}"
                               x-text="formatted"></span>
+                        <c-button variant="danger"
+                                  @click="clearEndTime"
+                                  ::disabled="loading"
+                                  data-confirm="Clear the end time? The bot will no longer stop the competition on schedule.">
+                            Clear end time
+                        </c-button>
                     {% else %}
                         Not set
                     {% endif %}
@@ -251,9 +264,9 @@ document.addEventListener('alpine:init', () => {
         newApp: '',
         availableApps: [],
         startDatetime: '',
-        startTimezone: 'America/Los_Angeles',
+        startTimezone: '{{ default_timezone|escapejs }}',
         endDatetime: '',
-        endTimezone: 'America/Los_Angeles',
+        endTimezone: '{{ default_timezone|escapejs }}',
 
         async init() {
             try {
@@ -301,6 +314,14 @@ document.addEventListener('alpine:init', () => {
         // The stored list as the server returned it, until the reload
         showApps(result) {
             if (result && result.apps) this.apps = result.apps;
+        },
+
+        clearStartTime() {
+            this.doAction('clear_start_time');
+        },
+
+        clearEndTime() {
+            this.doAction('clear_end_time');
         },
 
         setSchedule() {

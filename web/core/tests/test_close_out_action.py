@@ -84,7 +84,7 @@ def test_close_out_streams_each_step_and_closes_the_open_event(client):
     }
     event.refresh_from_db()
     assert not event.is_active and event.is_finalized
-    assert DiscordTask.objects.filter(task_type="cleanup_competition").count() == 1
+    assert DiscordTask.objects.filter(task_type="reconcile_teams").count() == 1
 
 
 @pytest.mark.parametrize("typed", [None, "", "no"])

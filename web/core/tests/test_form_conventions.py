@@ -61,6 +61,8 @@ BARE_FIELD = re.compile(r"{{\s*\w*form\.(\w+)\s*}}|{%\s*for\s+\w+\s+in\s+\w*form
 # "template:field" -> why the page renders that field's widget itself
 BARE_FIELD_EXCEPTIONS = {
     "scoring/submit_red_finding.html:destination_ip_template": "a hidden input the page's script fills: no row to show",
+    "school_info_edit.html:shown_school": "a hidden input carrying the school the page showed: no row to show",
+    "school_info_edit.html:shown_key": "a hidden input carrying the name the page showed: no row to show",
 }
 
 

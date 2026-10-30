@@ -16,7 +16,6 @@ from core.forms import (
     BroadcastForm,
     CloseOutForm,
     LinkConfirmForm,
-    ReadinessFixForm,
     ResetPasswordsForm,
     SchoolInfoEditForm,
     SetMaxMembersForm,
@@ -68,7 +67,6 @@ def _competition_action(w: World) -> Fields:
         AppSlugForm(),
         SetScheduleForm(),
         ResetPasswordsForm(),
-        ReadinessFixForm(),
         CloseOutForm(),
         action=st.sampled_from(sorted(_COMPETITION_ACTION_HANDLERS)),
     )

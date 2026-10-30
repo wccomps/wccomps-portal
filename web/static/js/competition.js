@@ -68,7 +68,7 @@ function readinessMixin(url) {
 
         async doReadinessFix(e) {
             this.readinessFixing = true;
-            await this.doAction('readiness_fix', { fix: e.currentTarget.dataset.fix }, { reload: false });
+            await this.doAction(e.currentTarget.dataset.fix, { readiness_fix: '1' }, { reload: false });
             this.readinessFixing = false;
         },
     };

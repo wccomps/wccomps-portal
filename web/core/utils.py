@@ -69,7 +69,19 @@ class UnknownTimezoneError(ValueError):
     """A schedule time named a timezone that zoneinfo doesn't know."""
 
 
-def parse_datetime_to_utc(datetime_str: str, tz_name: str = "America/Los_Angeles") -> datetime:
+DEFAULT_TIMEZONE = "America/Los_Angeles"
+DEFAULT_TIMEZONE_NAME = "Pacific Time"
+# The time zones a schedule time is entered in: (zone, label)
+TIMEZONE_CHOICES = [
+    (DEFAULT_TIMEZONE, f"{DEFAULT_TIMEZONE_NAME} (PT)"),
+    ("America/Denver", "Mountain Time (MT)"),
+    ("America/Chicago", "Central Time (CT)"),
+    ("America/New_York", "Eastern Time (ET)"),
+    ("UTC", "UTC"),
+]
+
+
+def parse_datetime_to_utc(datetime_str: str, tz_name: str = DEFAULT_TIMEZONE) -> datetime:
     """Parse a YYYY-MM-DDTHH:MM string in timezone tz_name and convert to UTC; raises ValueError."""
     dt = datetime.strptime(datetime_str, "%Y-%m-%dT%H:%M")
     try:

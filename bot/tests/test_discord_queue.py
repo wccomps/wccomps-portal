@@ -445,6 +445,60 @@ class TestDiscordQueueOrdering:
         completed = await DiscordTask.objects.filter(status="completed").acount()
         assert completed == 10
 
+    async def test_a_row_a_reset_scrubbed_while_processing_stays_scrubbed(self, mock_bot_with_guild: Any) -> None:
+        """The event ended while the bot was sending the start broadcast: its outcome must not write the credentials
+        back, nor set the row pending again for a retry."""
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        task = await DiscordTask.objects.acreate(
+            task_type="broadcast_message", payload={"target": "all-teams", "message": "Default login", "sender": "gold"}
+        )
+
+        async def reset_meanwhile(payload: Any) -> None:
+            await DiscordTask.objects.filter(pk=task.pk).aupdate(
+                status="failed", payload={"target": "all-teams", "message": "(removed)", "sender": "gold"}
+            )
+            raise RuntimeError("Discord hiccup")
+
+        with patch.object(processor, "_dispatch", side_effect=reset_meanwhile):
+            await processor._process_task(task)
+
+        rows = [row async for row in DiscordTask.objects.all()]
+        assert [(row.status, row.payload["message"]) for row in rows] == [("failed", "(removed)")]
+
+    async def test_an_unknown_task_type_is_failed_and_reported(self, mock_bot_with_guild: Any) -> None:
+        """A web from another release can queue a type this bot doesn't run: ops hear which, to rerun the action."""
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        task = await DiscordTask.objects.acreate(task_type="cleanup_competition", payload={"requested_by": "gold"})
+
+        with patch("bot.utils.log_to_ops_channel", new_callable=AsyncMock) as ops:
+            await processor._process_task(task)
+
+        await task.arefresh_from_db()
+        assert task.status == "failed"
+        assert "cleanup_competition" in ops.await_args.args[1]
+        assert "/competition cleanup-competition while no event is open" in ops.await_args.args[1]
+
+    async def test_slow_tasks_keep_the_queue_heartbeat_fresh(self, mock_bot_with_guild: Any) -> None:
+        """A batch of slow tasks (a teardown takes minutes) must not let the liveness probe restart the bot mid-batch:
+        the heartbeat is recorded after each task, not after the batch."""
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        await DiscordTask.objects.all().adelete()
+        for i in range(3):
+            await DiscordTask.objects.acreate(task_type="log_to_channel", payload={"message": f"Slow {i}"})
+        beats: list[int] = []
+        handled: list[str] = []
+
+        async def slow(bot: Any, message: str) -> None:
+            handled.append(message)
+
+        with (
+            patch("bot.utils.log_to_ops_channel", side_effect=slow),
+            patch("bot.discord_queue.record_heartbeat", side_effect=lambda name, bot: beats.append(len(handled))),
+        ):
+            await processor._process_pending_tasks()
+
+        assert beats == [1, 2, 3]
+
 
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
@@ -667,3 +721,196 @@ class TestCompetitionGuildLookup:
 
         with pytest.raises(RuntimeError, match="Competition guild not found"):
             DiscordQueueProcessor(bot)._guild()
+
+
+def _empty_guild(processor: DiscordQueueProcessor) -> None:
+    guild = processor._guild()
+    guild.get_channel = MagicMock(return_value=None)
+    guild.get_role = MagicMock(return_value=None)
+    guild.categories = []
+    guild.roles = []
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+class TestClearTeamChannels:
+    """A team handed to a new school with its old role and category: they go before any setup reuses them by name."""
+
+    async def test_a_setup_waits_while_the_old_channels_are_marked(
+        self, test_team: Team, mock_bot_with_guild: Any
+    ) -> None:
+        await Team.objects.filter(pk=test_team.pk).aupdate(channels_need_clearing=True)
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        processor._manager = MagicMock(return_value=AsyncMock())
+        setup = await DiscordTask.objects.acreate(task_type="setup_team_infrastructure", payload={"team_number": 30})
+
+        await processor._process_task(setup)
+
+        processor._manager.return_value.setup_team_infrastructure.assert_not_awaited()
+        await setup.arefresh_from_db()
+        assert setup.status == "completed"
+
+    async def test_the_removal_queues_the_setup_of_a_team_linked_meanwhile(
+        self, test_team: Team, mock_bot_with_guild: Any
+    ) -> None:
+        from django.contrib.auth.models import User
+
+        from team.models import DiscordLink
+
+        await Team.objects.filter(pk=test_team.pk).aupdate(channels_need_clearing=True)
+        user = await User.objects.acreate(username="member")
+        await DiscordLink.objects.acreate(discord_id=5, discord_username="m", user=user, team=test_team, is_active=True)
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        _empty_guild(processor)
+        processor._manager = MagicMock(return_value=AsyncMock())
+        processor._manager.return_value.setup_team_infrastructure = AsyncMock(return_value=(MagicMock(), MagicMock()))
+        task = await DiscordTask.objects.acreate(task_type="clear_team_channels", payload={"team_number": 30})
+
+        await processor._process_task(task)
+
+        processor._manager.return_value.setup_team_infrastructure.assert_not_awaited()
+        await task.arefresh_from_db()
+        await test_team.arefresh_from_db()
+        assert (task.status, test_team.channels_need_clearing) == ("completed", False)
+        setup = await DiscordTask.objects.aget(task_type="setup_team_infrastructure")
+        assert (setup.status, setup.payload["team_number"]) == ("pending", 30)
+
+    async def test_a_removal_that_fails_for_good_keeps_the_mark_and_says_what_to_do(
+        self, test_team: Team, mock_bot_with_guild: Any
+    ) -> None:
+        from bot.discord_manager import DiscordManager
+
+        await Team.objects.filter(pk=test_team.pk).aupdate(channels_need_clearing=True)
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        processor._manager = MagicMock(return_value=AsyncMock())
+        task = await DiscordTask.objects.acreate(
+            task_type="clear_team_channels", payload={"team_number": 30}, retry_count=2, max_retries=3
+        )
+
+        async def failed(guild: Any, team: Team, reason: str, **kwargs: Any) -> list[str]:
+            team.channels_need_clearing = True
+            return []
+
+        with (
+            patch("bot.discord_manager.delete_team_infrastructure", side_effect=failed),
+            patch("bot.utils.log_to_ops_channel", new_callable=AsyncMock) as ops,
+        ):
+            await processor._process_task(task)
+
+        await task.arefresh_from_db()
+        assert task.status == "failed"
+        assert "Delete them in Discord, then run /teams recreate" in ops.await_args.args[1]
+        await test_team.arefresh_from_db()
+        assert test_team.channels_need_clearing
+        guild = MagicMock(spec=discord.Guild)
+        assert await DiscordManager(guild).setup_team_infrastructure(30) == (None, None)
+        guild.create_role.assert_not_called()
+
+    async def test_an_admin_recreate_clears_the_mark_and_sets_up(
+        self, test_team: Team, mock_bot_with_guild: Any
+    ) -> None:
+        await Team.objects.filter(pk=test_team.pk).aupdate(channels_need_clearing=True)
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        _empty_guild(processor)
+        processor._manager = MagicMock(return_value=AsyncMock())
+        processor._manager.return_value.setup_team_infrastructure = AsyncMock(return_value=(MagicMock(), MagicMock()))
+        task = await DiscordTask.objects.acreate(
+            task_type="setup_team_infrastructure", payload={"team_number": 30, "recreate": True}
+        )
+
+        await processor._process_task(task)
+
+        await test_team.arefresh_from_db()
+        assert not test_team.channels_need_clearing
+        processor._manager.return_value.setup_team_infrastructure.assert_awaited_once_with(30)
+
+    async def test_a_removal_after_a_recreate_leaves_the_new_channels(
+        self, test_team: Team, mock_bot_with_guild: Any
+    ) -> None:
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        task = await DiscordTask.objects.acreate(task_type="clear_team_channels", payload={"team_number": 30})
+
+        with patch("bot.discord_manager.delete_team_infrastructure", new_callable=AsyncMock) as delete:
+            await processor._process_task(task)
+
+        delete.assert_not_awaited()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+async def test_a_start_broadcast_the_reset_failed_stops_before_the_next_team(mock_bot_with_guild: Any) -> None:
+    for number in (41, 42):
+        await Team.objects.acreate(team_number=number, team_name=f"Team {number}")
+    processor = DiscordQueueProcessor(mock_bot_with_guild)
+    task = await DiscordTask.objects.acreate(
+        task_type="broadcast_message", payload={"target": "all-teams", "message": "Default login", "sender": "gold"}
+    )
+
+    async def sent_then_reset(channel: Any, text: str) -> None:
+        await DiscordTask.objects.filter(pk=task.pk).aupdate(status="failed")
+
+    with (
+        patch("bot.competition_actions.team_chat_channel", return_value=MagicMock()),
+        patch("bot.competition_actions.send_parts", side_effect=sent_then_reset) as send,
+        patch("bot.utils.log_to_ops_channel", new_callable=AsyncMock),
+    ):
+        await processor._process_task(task)
+
+    assert send.await_count == 1
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+async def test_a_removal_whose_re_setup_fails_is_retried(test_team: Team, mock_bot_with_guild: Any) -> None:
+    """The setup is its own task: the removal completes once its delete succeeds; the setup retries."""
+    from django.contrib.auth.models import User
+
+    from team.models import DiscordLink
+
+    await Team.objects.filter(pk=test_team.pk).aupdate(channels_need_clearing=True)
+    user = await User.objects.acreate(username="member")
+    await DiscordLink.objects.acreate(discord_id=5, discord_username="m", user=user, team=test_team, is_active=True)
+    processor = DiscordQueueProcessor(mock_bot_with_guild)
+    _empty_guild(processor)
+    processor._manager = MagicMock(return_value=AsyncMock())
+    setup = processor._manager.return_value.setup_team_infrastructure = AsyncMock(return_value=(None, None))
+    clear = await DiscordTask.objects.acreate(task_type="clear_team_channels", payload={"team_number": 30})
+
+    await processor._process_task(clear)
+    task = await DiscordTask.objects.aget(task_type="setup_team_infrastructure")
+    await processor._process_task(task)
+
+    await task.arefresh_from_db()
+    assert (task.status, task.retry_count) == ("pending", 1)
+    setup.return_value = (MagicMock(), MagicMock())
+    await processor._process_task(task)
+
+    await clear.arefresh_from_db()
+    await task.arefresh_from_db()
+    assert (clear.status, task.status, setup.await_count) == ("completed", "completed", 2)
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("status", "copies"), [("processing", 1), ("failed", 0)])
+async def test_a_copy_is_queued_only_while_the_broadcast_is_processing(
+    mock_bot_with_guild: Any, status: str, copies: int
+) -> None:
+    from bot.competition_actions import deliver_team_broadcast
+    from core.models import QueuedAnnouncement
+
+    await Team.objects.acreate(team_number=41, team_name="Team 41")
+    task = await DiscordTask.objects.acreate(
+        task_type="broadcast_message", payload={"target": "41", "message": "Default login", "sender": "gold"}
+    )
+    processor = DiscordQueueProcessor(mock_bot_with_guild)
+    processor._current_task = task.pk
+    await DiscordTask.objects.filter(pk=task.pk).aupdate(status=status)
+
+    with patch("bot.competition_actions.team_chat_channel", return_value=None):
+        sent, queued, failed = await deliver_team_broadcast(
+            mock_bot_with_guild.guilds[0], "41", "Default login", "gold", queue_copy=processor._queue_copy
+        )
+
+    assert (sent, queued, await QueuedAnnouncement.objects.acount()) == (0, copies, copies)
+    assert failed == ([] if copies else ["Team 41 (not sent: the broadcast was stopped)"])

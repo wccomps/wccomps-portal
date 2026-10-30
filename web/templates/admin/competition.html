@@ -207,8 +207,10 @@
                     <p class="help">
                         {{ panel.stage.event }} is open and no team has scores yet. Cancelling calls it off: it closes
                         the event and removes its team assignments, so it can be deleted unless packets were sent for
-                        it. Nothing is recorded for it. The school list and sent packets stay; Discord links and tickets
-                        are left over for Clear leftover data.
+                        it. It clears the schedule, the start message and the synced Quotient box list (re-synced
+                        automatically), deletes every queued announcement, and scrubs the start broadcasts, failing any
+                        not yet sent. No results are kept for it. The school list and sent packets stay; Discord links
+                        and tickets are left over for Clear leftover data.
                     </p>
                     <c-button_row class="mt-10">
                         <c-button variant="danger" @click="cancelEvent" ::disabled="loading">
@@ -318,7 +320,9 @@ document.addEventListener('alpine:init', () => {
 
         cancelEvent() {
             const typed = typedConfirm('CANCEL THE OPEN EVENT?\n\n' +
-                'It closes the event and removes its team assignments. Nothing is recorded for it.\n' +
+                'It closes the event and removes its team assignments. No results are kept for it.\n' +
+                'It clears the schedule, the start message and the synced Quotient box list (re-synced automatically),\n' +
+                'deletes every queued announcement, and scrubs the start broadcasts, failing any not yet sent.\n' +
                 'The school list and sent packets stay.');
             if (typed) this.doAction('cancel_event', { confirm: typed, open_event: this.openEvent });
         },

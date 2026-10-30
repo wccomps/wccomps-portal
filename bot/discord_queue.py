@@ -8,6 +8,7 @@ from typing import assert_never
 
 import discord
 from asgiref.sync import sync_to_async
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -26,10 +27,11 @@ from core.discord_tasks import (
     PAYLOAD_TYPES,
     AddUserToThread,
     BroadcastMessage,
-    CleanupCompetition,
+    ClearTeamChannels,
     LogToChannel,
     PostComment,
     PostTicketUpdate,
+    ReconcileTeams,
     SetupTeamInfrastructure,
     SyncMemberRoles,
     SyncRoles,
@@ -37,7 +39,7 @@ from core.discord_tasks import (
     TaskPayload,
     TicketCreatedWeb,
 )
-from core.models import DiscordTask
+from core.models import DiscordTask, QueuedAnnouncement
 from core.utils import role_sync_summary
 from team.models import Team
 from ticketing.models import Ticket, TicketComment
@@ -56,6 +58,7 @@ class DiscordQueueProcessor:
         self.bot = bot
         self.running = False
         self.task: asyncio.Task[None] | None = None
+        self._current_task: int | None = None
 
     def start(self) -> None:
         self.running = True
@@ -88,7 +91,7 @@ class DiscordQueueProcessor:
             try:
                 await recycle_db_connection()
                 await self._process_pending_tasks()
-                record_heartbeat("queue", self.bot)
+                self._beat()
             except Exception as e:
                 logger.exception(f"Error in queue processor: {e}")
 
@@ -126,6 +129,38 @@ class DiscordQueueProcessor:
 
         for task in tasks:
             await self._process_task(task)
+            # Per task, not per batch: a batch of teardowns can outlast the liveness budget
+            self._beat()
+
+    def _beat(self) -> None:
+        record_heartbeat("queue", self.bot)
+
+    @staticmethod
+    def _record(task: DiscordTask, *fields: str) -> None:
+        """Write the task's outcome only while the row is still this bot's to finish: a row a reset failed, scrubbed or
+        deleted meanwhile stays as the reset left it (a plain save would rewrite it, or insert it again)."""
+        DiscordTask.objects.filter(pk=task.pk, status="processing").update(**{f: getattr(task, f) for f in fields})
+
+    async def _still_processing(self) -> bool:
+        current = self._current_task
+        return current is not None and await DiscordTask.objects.filter(pk=current, status="processing").aexists()
+
+    async def _queue_copy(self, team: Team, message: str, sender: str) -> bool:
+        """Queue the broadcast's copy for a team with no channel, only while the running task is still processing: its
+        row is locked meanwhile, so a reset failing it waits, and the reset's on_commit delete catches the copy."""
+
+        current = self._current_task
+
+        @sync_to_async
+        def queue() -> bool:
+            with transaction.atomic():
+                running = DiscordTask.objects.select_for_update(no_key=True)
+                if current is None or not running.filter(pk=current, status="processing").exists():
+                    return False
+                QueuedAnnouncement.objects.create(team=team, message=message, sender_name=sender)
+                return True
+
+        return await queue()
 
     async def _process_task(self, task: DiscordTask) -> None:
 
@@ -134,13 +169,27 @@ class DiscordQueueProcessor:
         if not claimed:
             return
         task.status = "processing"
+        self._current_task = task.pk
 
         try:
             if task.task_type not in PAYLOAD_TYPES:
                 logger.warning(f"Unknown task type: {task.task_type}")
                 task.status = "failed"
                 task.error_message = f"Unknown task type: {task.task_type}"
-                await task.asave()
+                await sync_to_async(self._record)(task, "status", "error_message")
+                from bot.utils import log_to_ops_channel
+
+                remedy = (
+                    "The next event's import tears the team channels down, or run /competition cleanup-competition "
+                    "while no event is open."
+                    if task.task_type == "cleanup_competition"
+                    else "Run the action that queued it again."
+                )
+                await log_to_ops_channel(
+                    self.bot,
+                    f"Queued task {task.id} has the type {task.task_type}, which this bot doesn't run (a web from "
+                    f"another release queued it), so it was failed. {remedy}",
+                )
                 return
             task_result = await self._dispatch(task.typed_payload())
 
@@ -149,7 +198,7 @@ class DiscordQueueProcessor:
                 task.status = "completed"
                 task.completed_at = timezone.now()
                 task.result = dict(task_result) if task_result is not None else None
-                task.save()
+                self._record(task, "status", "completed_at", "result")
 
             await mark_completed()
             logger.info(f"Completed task {task.id}: {task.task_type}")
@@ -163,7 +212,7 @@ class DiscordQueueProcessor:
                 task.next_retry_at = timezone.now() + timedelta(seconds=retry_after)
                 task.status = "pending"
                 task.error_message = f"Rate limited, retry after {retry_after}s"
-                task.save()
+                self._record(task, "retry_count", "next_retry_at", "status", "error_message")
                 return retry_after
 
             retry_after = await handle_rate_limit(rate_limit_error)
@@ -178,12 +227,12 @@ class DiscordQueueProcessor:
 
                 if task.retry_count >= task.max_retries:
                     task.status = "failed"
-                    task.save()
+                    self._record(task, "retry_count", "error_message", "status")
                     return "failed", task.max_retries
                 backoff_seconds = min(2**task.retry_count, DiscordQueueProcessor.MAX_BACKOFF_SECONDS)
                 task.next_retry_at = timezone.now() + timedelta(seconds=backoff_seconds)
                 task.status = "pending"
-                task.save()
+                self._record(task, "retry_count", "error_message", "next_retry_at", "status")
                 return "retry", backoff_seconds
 
             result, value = await handle_error(error)
@@ -213,8 +262,10 @@ class DiscordQueueProcessor:
                 await self._handle_log_to_channel(payload)
             case TicketCreatedWeb():
                 await self._handle_ticket_created_web(payload)
-            case CleanupCompetition():
-                await self._handle_cleanup_competition(payload)
+            case ReconcileTeams():
+                await self._handle_reconcile_teams(payload)
+            case ClearTeamChannels():
+                await self._handle_clear_team_channels(payload)
             case PostComment():
                 await self._handle_post_comment(payload)
             case PostTicketUpdate():
@@ -251,13 +302,26 @@ class DiscordQueueProcessor:
             + (f"; problems: {'; '.join(c for c in stats['changes'] if c.startswith('⚠'))}" if stats["errors"] else "")
         )
 
-    async def _handle_cleanup_competition(self, payload: CleanupCompetition) -> None:
-        """Run the competition cleanup Close Out Event queued: only the Discord side for a close-out."""
-        from bot.competition_actions import run_competition_cleanup
+    async def _handle_reconcile_teams(self, payload: ReconcileTeams) -> None:
+        from bot.competition_actions import reconcile_teams
 
-        await run_competition_cleanup(
-            self.bot, self._guild(), payload.requested_by, closed_out_event_id=payload.closed_out_event_id
+        await reconcile_teams(self.bot, self._guild(), payload.requested_by, payload.open_event_id, self._beat)
+
+    async def _handle_clear_team_channels(self, payload: ClearTeamChannels) -> None:
+        from bot.discord_manager import delete_team_infrastructure
+
+        number = payload.team_number
+        team = await Team.objects.filter(team_number=number).afirst()
+        if team is None or not team.channels_need_clearing:
+            return
+        await delete_team_infrastructure(
+            self._guild(), team, reason=f"Team {number} handed to a new school", then_setup=True
         )
+        if await Team.objects.filter(pk=team.pk, channels_need_clearing=True).aexists():
+            raise RuntimeError(
+                f"Team {number}'s old Discord role or category could not be deleted. Delete them in Discord, then run "
+                f"/teams recreate for team {number}."
+            )
 
     async def _handle_setup_team_infrastructure(self, payload: SetupTeamInfrastructure) -> None:
         team_number = payload.team_number
@@ -269,6 +333,9 @@ class DiscordQueueProcessor:
                 await delete_team_infrastructure(
                     self._guild(), team, reason=f"Team {team_number} infrastructure recreate"
                 )
+        elif await Team.objects.filter(team_number=team_number, channels_need_clearing=True).aexists():
+            logger.info(f"Team {team_number} is set up once its old role and category are removed")
+            return
 
         role, category = await self._manager().setup_team_infrastructure(team_number)
         if not role or not category:
@@ -420,7 +487,7 @@ class DiscordQueueProcessor:
         guild = self._guild()
 
         try:
-            stats = await asyncio.wait_for(sync_roles(guild, dry_run=dry_run), timeout=300.0)
+            stats = await asyncio.wait_for(sync_roles(guild, dry_run=dry_run, beat=self._beat), timeout=300.0)
         except TimeoutError:
             logger.error("Role sync timed out after 5 minutes")
             raise RuntimeError("Role sync timed out after 5 minutes") from None
@@ -445,7 +512,9 @@ class DiscordQueueProcessor:
         guild = self._guild()
 
         try:
-            sent_count, queued_count, failed_channels = await deliver_team_broadcast(guild, target, message, sender)
+            sent_count, queued_count, failed_channels = await deliver_team_broadcast(
+                guild, target, message, sender, wanted=self._still_processing, queue_copy=self._queue_copy
+            )
         except ValueError as e:
             raise ValueError(f"Invalid team range: {e}") from e
 

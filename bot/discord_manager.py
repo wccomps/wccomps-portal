@@ -4,23 +4,28 @@ import logging
 import re
 
 import discord
+from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from bot.utils import announcement as announcement_text
 from bot.utils import send_parts
-from core.models import AuditLog
+from core.discord_tasks import SetupTeamInfrastructure
+from core.models import AuditLog, DiscordTask
 from team.models import Team
 
 logger = logging.getLogger(__name__)
 
 
-async def delete_team_infrastructure(guild: discord.Guild, team: Team, reason: str) -> list[str]:
-    """Delete a team's Discord category, channels, and role. Clears DB IDs.
-
-    Returns list of deleted item types (e.g. ["category", "role"]).
-    """
+async def delete_team_infrastructure(
+    guild: discord.Guild, team: Team, reason: str, *, then_setup: bool = False
+) -> list[str]:
+    """Delete a team's category, channels and role (by ID or name); return the kinds deleted. An ID is cleared once
+    its object is gone; channels_need_clearing is set while one is left (a failed channel delete is only logged).
+    then_setup queues the setup in the same transaction when nothing is left and members are linked."""
     deleted_items: list[str] = []
+    category_gone = role_gone = True
 
     category = guild.get_channel(team.discord_category_id) if team.discord_category_id else None
     if not category:
@@ -37,7 +42,10 @@ async def delete_team_infrastructure(guild: discord.Guild, team: Team, reason: s
         try:
             await category.delete(reason=reason)
             deleted_items.append("category")
+        except discord.NotFound:
+            pass
         except Exception as e:
+            category_gone = False
             logger.exception(f"Failed to delete category: {e}")
 
     role = guild.get_role(team.discord_role_id) if team.discord_role_id else None
@@ -49,14 +57,29 @@ async def delete_team_infrastructure(guild: discord.Guild, team: Team, reason: s
         try:
             await role.delete(reason=reason)
             deleted_items.append("role")
+        except discord.NotFound:
+            pass
         except Exception as e:
+            role_gone = False
             logger.exception(f"Failed to delete role: {e}")
 
-    team.discord_role_id = None
-    team.discord_category_id = None
-    await team.asave(update_fields=["discord_role_id", "discord_category_id"])
+    cleared = [
+        field for field, gone in (("discord_role_id", role_gone), ("discord_category_id", category_gone)) if gone
+    ]
+    for field in cleared:
+        setattr(team, field, None)
+    team.channels_need_clearing = not (role_gone and category_gone)
+    await _record_teardown(team, cleared, then_setup)
 
     return deleted_items
+
+
+@sync_to_async
+def _record_teardown(team: Team, cleared: list[str], then_setup: bool) -> None:
+    with transaction.atomic():
+        team.save(update_fields=[*cleared, "channels_need_clearing"])
+        if then_setup and not team.channels_need_clearing and team.members.filter(is_active=True).exists():
+            DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team.team_number))
 
 
 async def unlink_team_members(
@@ -119,11 +142,14 @@ class DiscordManager:
         """Set up a team's Discord role and category, and record their IDs on Team.
 
         Safe to run again: an existing role or category is reused as-is (its channels and
-        permissions aren't repaired).
+        permissions aren't repaired). Refused while channels_need_clearing: the old ones would be reused.
         """
         team = await Team.objects.filter(team_number=team_number).afirst()
         if not team:
             logger.error(f"Team {team_number} not found in database")
+            return None, None
+        if team.channels_need_clearing:
+            logger.info(f"Team {team_number} is set up once its old role and category are removed")
             return None, None
 
         role = await self._create_or_get_role(team_number)

@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import cast
 
-from django.core.exceptions import BadRequest
 from django.db import models
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.urls import reverse
@@ -17,8 +16,7 @@ from scoring.models import IncidentReport, InjectScore, RedTeamScore
 
 from core.admin_views.places import SetupSection, setup_url
 from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, reason_for
-from core.forms import ReadinessFixForm
-from core.models import CompetitionConfig
+from core.models import AuditLog, CompetitionConfig
 from core.utils import ndjson_done
 from team.models import Team, team_username
 from ticketing.models import Ticket
@@ -216,7 +214,7 @@ def _check_quotient_synced() -> CheckResult:
         return (
             "warn",
             "Quotient metadata not synced yet",
-            {"type": "fix", "key": "fix_sync_quotient", "label": "Sync Now"},
+            {"type": "fix", "key": "sync_quotient", "label": "Sync Now"},
         )
 
     age = timezone.now() - cache.last_synced
@@ -225,7 +223,7 @@ def _check_quotient_synced() -> CheckResult:
         return (
             "warn",
             f"Last synced {days} days ago",
-            {"type": "fix", "key": "fix_sync_quotient", "label": "Sync Now"},
+            {"type": "fix", "key": "sync_quotient", "label": "Sync Now"},
         )
     return ("pass", f"Synced {cache.last_synced.strftime('%b %d %H:%M')}", None)
 
@@ -383,12 +381,12 @@ def stream_readiness_checks() -> Iterator[str]:
     yield ndjson_done(msg, success=success)
 
 
-def _fix_group_membership(request: HttpRequest) -> JsonResponse:
-    """Add team accounts to their correct Authentik groups."""
+def fix_group_membership(request: HttpRequest, authentik_username: str) -> JsonResponse:
+    """Add team accounts to their correct Authentik groups, auditing the ones it changed."""
     active_teams = Team.objects.filter(is_active=True)
     mgr = AuthentikManager()
 
-    fixed = 0
+    fixed: list[str] = []
     failed: list[str] = []
     for team in active_teams:
         username = team_username(team.team_number)
@@ -405,54 +403,50 @@ def _fix_group_membership(request: HttpRequest) -> JsonResponse:
         except AuthentikAPIError as e:
             failed.append(f"{username}: {reason_for(e)}")
             continue
-        fixed += 1
+        fixed.append(username)
 
-    msg = f"Fixed {fixed} account(s)"
+    if fixed:
+        AuditLog.objects.create(
+            action="team_groups_fixed",
+            admin_user=authentik_username,
+            target_entity="team",
+            target_id=0,
+            details={"fixed": fixed, "failed": failed},
+        )
+    msg = f"Fixed {len(fixed)} account(s)"
     if failed:
         msg += "; failed: " + "; ".join(failed)
     return JsonResponse({"success": not failed, "message": msg})
 
 
-def _fix_sync_quotient(request: HttpRequest) -> JsonResponse:
+READINESS_FIXES = frozenset({"fix_group_membership", "sync_quotient"})
+
+
+def sync_quotient(request: HttpRequest, authentik_username: str) -> JsonResponse:
+    """Sync Quotient's metadata; an unreachable Quotient is a 200 whose message says why."""
     from django.contrib.auth.models import User
     from scoring.quotient_sync import sync_quotient_metadata
 
     try:
         sync_quotient_metadata(cast(User, request.user))
-        return JsonResponse({"success": True, "message": "Quotient metadata synced"})
-    except Exception as e:
-        logger.exception(f"Failed to sync Quotient metadata: {e}")
-        return JsonResponse({"error": f"Sync failed: {e}"}, status=500)
+    except ValueError as e:
+        logger.warning(f"Failed to sync Quotient metadata: {e}")
+        return JsonResponse({"success": False, "message": f"Sync failed: {e}"})
+    AuditLog.objects.create(
+        action="quotient_metadata_synced",
+        admin_user=authentik_username,
+        target_entity="quotient",
+        target_id=0,
+        details={},
+    )
+    return JsonResponse({"success": True, "message": "Quotient metadata synced"})
 
 
-_FIX_HANDLERS: dict[str, Callable[[HttpRequest], JsonResponse]] = {
-    "fix_group_membership": _fix_group_membership,
-    "fix_sync_quotient": _fix_sync_quotient,
-}
-
-
-# Called from the competition.py action dispatcher.
 def action_readiness_check(
     request: HttpRequest,
-    config: CompetitionConfig,
     authentik_username: str,
 ) -> StreamingHttpResponse:
     return StreamingHttpResponse(
         stream_readiness_checks(),
         content_type="application/x-ndjson",
     )
-
-
-def action_readiness_fix(
-    request: HttpRequest,
-    config: CompetitionConfig,
-    authentik_username: str,
-) -> JsonResponse:
-    form = ReadinessFixForm(request.POST)
-    if not form.is_valid():
-        raise BadRequest("Missing fix parameter")
-    fix_key = form.cleaned_data["fix"]
-    handler = _FIX_HANDLERS.get(fix_key)
-    if not handler:
-        raise BadRequest(f"Unknown fix: {fix_key}")
-    return handler(request)
