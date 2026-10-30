@@ -32,8 +32,7 @@ LAYOUT = """() => {
 
 @pytest.mark.parametrize("width", [1280, 1100, 800])
 def test_an_admins_nav_stays_on_the_page_at_desktop_widths(live_server, pw_browser, width):
-    """An admin sees every section link, the most any role does; from 1025px the nav sits beside the name, and below
-    that under it."""
+    """An admin sees every section link, the most any role does; at 1280 and 1100 the nav sits beside the name."""
     context = create_session_context(pw_browser, live_server, role_user("admin"))
     page = context.new_page()
     try:
@@ -58,11 +57,15 @@ def test_on_a_phone_a_long_name_leaves_log_out_whole_and_on_the_screen(live_serv
         page.goto(f"{live_server.url}/ops/school-info/")
         page.locator(".nav-toggle").click()
 
-        log_out = page.get_by_role("link", name="Log out").bounding_box()
-        tickets = page.get_by_role("link", name="Tickets").bounding_box()
-        assert log_out and tickets
-        assert log_out["x"] + log_out["width"] <= 375
-        assert log_out["height"] < 1.5 * tickets["height"]
+        log_out = page.get_by_role("link", name="Log out")
+        box = log_out.bounding_box()
+        assert box
+        assert box["x"] + box["width"] <= 375
+        lines = log_out.evaluate(
+            "a => { const r = document.createRange(); r.selectNodeContents(a);"
+            " return new Set(Array.from(r.getClientRects(), rect => Math.round(rect.top))).size; }"
+        )
+        assert lines == 1
         assert page.evaluate("document.documentElement.scrollWidth") <= 375
     finally:
         context.close()
