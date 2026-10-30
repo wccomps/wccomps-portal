@@ -91,7 +91,7 @@ def _packets_detail(facts: EventFacts) -> str:
     if facts.teams_without_copy:
         teams = _plural(facts.teams_without_copy, "team on the list has", "teams on the list have")
         lines.append(
-            f"{teams} no delivered copy of a sent packet: on the packet's page, use Send to Teams Without It for "
+            f"{teams} no delivered copy of a sent packet: on the packet's page, use Send to New Teams for "
             "new teams, or Resend Failed and Retry Pending."
         )
     return " ".join(lines)
