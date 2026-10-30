@@ -93,6 +93,9 @@ PAGES: list[PageDef] = [
     PageDef(
         url_name="school_info",
     ),
+    PageDef(
+        url_name="school_info_add",
+    ),
     # =========================================================================
     # Scoring — Leaderboard & Config
     # =========================================================================
