@@ -847,16 +847,19 @@ fieldset:has([required]) > legend.required::after,
     margin: 0 auto;
 }
 
+/* Beside the nav, the site name keeps its width: the nav takes more rows instead */
+#branding {
+    flex: none;
+}
+
 .primary-navigation {
     background: var(--primary, #417690);
     padding: 10px 20px;
     border-bottom: 1px solid var(--primary-dark, #2e5266);
     display: flex;
+    flex-wrap: wrap;
+    row-gap: 6px;
     align-items: center;
-}
-
-.nav-spacer {
-    flex: 1;
 }
 
 .nav-user {
@@ -914,7 +917,7 @@ fieldset:has([required]) > legend.required::after,
     background: var(--primary-dark, #2e5266);
 }
 
-/* Nav menu container - flex row on desktop */
+/* No box on desktop: each link is an item of .primary-navigation's wrapping row */
 .nav-menu {
     display: contents;
 }
@@ -923,8 +926,15 @@ fieldset:has([required]) > legend.required::after,
     display: contents;
 }
 
+/* The tools wrap as one group, at the right of their row */
 .nav-utils {
-    display: contents;
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+}
+
+.nav-utils a {
+    flex: none;
 }
 
 /* Mobile layout */
@@ -980,16 +990,17 @@ fieldset:has([required]) > legend.required::after,
         border-radius: 4px;
     }
 
-    .nav-spacer {
-        display: none;
-    }
-
     .nav-utils {
-        display: flex;
-        align-items: center;
+        margin-left: 0;
         padding-top: 10px;
         margin-top: 10px;
         border-top: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    /* A long name breaks anywhere rather than pushing Log out off the screen */
+    .nav-user {
+        min-width: 0;
+        overflow-wrap: anywhere;
     }
 }
 
