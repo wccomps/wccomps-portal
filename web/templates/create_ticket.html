@@ -64,7 +64,7 @@
                 get descriptionRequired() { return this.requiredFields.includes('description'); },
                 // The form leaves these fields optional, so the server marks none; the picked category's required ones get it
                 get marks() {
-                    const mark = field => (this.requiredFields.includes(field) ? 'field-required' : '');
+                    const mark = field => (this.requiredFields.includes(field) ? 'required' : '');
                     return {
                         hostname: mark('hostname'),
                         ip_address: mark('ip_address'),

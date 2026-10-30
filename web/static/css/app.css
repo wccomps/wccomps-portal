@@ -732,23 +732,23 @@ p.help {
 
 label.required::after,
 legend.required::after,
-.field-required label::after,
-.field-required legend::after {
+.required > .form-row label::after,
+.required > .form-row legend::after {
     content: " *";
     color: var(--error-fg, #ba2121);
 }
 legend.required::after,
-.field-required legend::after {
+.required > .form-row legend::after {
     content: " *" / " required";
 }
 /* Silent where the input's required attribute announces it; the :has rule stands alone, since a browser without
    :has drops any selector list holding it */
 label.required::after,
-.field-required label::after {
+.required > .form-row label::after {
     content: " *" / "";
 }
 fieldset:has([required]) > legend.required::after,
-.field-required fieldset:has([required]) > legend::after {
+.required > .form-row fieldset:has([required]) > legend::after {
     content: " *" / "";
 }
 
