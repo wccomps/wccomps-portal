@@ -7,6 +7,8 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
+from team.models import Team
+
 pytestmark = pytest.mark.django_db
 
 
@@ -110,8 +112,6 @@ class TestAdminTeamDetailView:
     @pytest.fixture
     def test_team(self, db):
         """Create a test team for detail view tests."""
-        from team.models import Team
-
         team, _ = Team.objects.get_or_create(
             team_number=1,
             defaults={"team_name": "Team 01", "is_active": True},
@@ -127,6 +127,14 @@ class TestAdminTeamDetailView:
         response = client.get(reverse("admin_team_detail", kwargs={"team_number": test_team.team_number}))
         assert response.status_code == 200
         assert not _check_access_denied(response)
+
+    def test_team_detail_shows_the_group_the_portal_reads(self, admin_user):
+        Team.objects.create(team_number=12, team_name="Team 12", authentik_group="Renamed_Group")
+        client = Client()
+        client.force_login(admin_user)
+        response = client.get(reverse("admin_team_detail", kwargs={"team_number": 12}))
+        assert b"Renamed_Group" in response.content
+        assert b"WCComps_BlueTeam12" not in response.content
 
     def test_nonexistent_team_returns_error(self, admin_user):
         """Requesting nonexistent team should return error page."""

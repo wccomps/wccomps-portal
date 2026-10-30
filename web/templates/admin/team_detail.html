@@ -41,7 +41,7 @@
                         {{ team.discord_role_id|default:"Not set" }}
                     </c-detail_row>
                     <c-detail_row label="Authentik Group">
-                        WCComps_BlueTeam{{ team.team_number|stringformat:"02d" }}
+                        {{ team.authentik_group }}
                     </c-detail_row>
                 </c-detail_grid>
             </c-module>

@@ -13,7 +13,7 @@ from team.models import Team
 
 from .models import UserGroups
 from .permission_constants import PERMISSION_MAP as PERMISSION_MAP
-from .permission_constants import check_groups_for_permission as check_groups_for_permission
+from .permission_constants import TEAM_HELD
 
 P = ParamSpec("P")
 type ViewFunc[**P] = Callable[Concatenate[HttpRequest, P], HttpResponseBase]
@@ -42,9 +42,26 @@ def get_permissions_context(user: User) -> dict[str, bool]:
     return {f"is_{perm}": has_permission(user, perm) for perm in PERMISSION_MAP}
 
 
+def groups_grant(groups: list[str], permission_name: str) -> bool:
+    """Whether these Authentik groups grant the permission: a group PERMISSION_MAP names, or for a TEAM_HELD one an
+    active team's group. ValueError for a name that isn't a permission."""
+    if permission_name not in PERMISSION_MAP:
+        raise ValueError(f"No permission named {permission_name!r}")
+    if any(group in groups for group in PERMISSION_MAP[permission_name]):
+        return True
+    return permission_name in TEAM_HELD and team_for_groups(groups) is not None
+
+
+def users_granted(permission_name: str) -> QuerySet[User]:
+    """The users groups_grant passes, as one query: an enabled account holding one of the permission's groups.
+    ValueError for a TEAM_HELD permission, which a team's group grants as well."""
+    if permission_name in TEAM_HELD:
+        raise ValueError(f"{permission_name} is team-held; users_granted lists only group-granted permissions")
+    return User.objects.filter(usergroups__in=UserGroups.objects.granting(PERMISSION_MAP[permission_name]))
+
+
 def has_permission(user: User | AnonymousUser, permission_name: str) -> bool:
-    groups = permission_groups_of(user)
-    return check_groups_for_permission(groups, permission_name)
+    return groups_grant(permission_groups_of(user), permission_name)
 
 
 def uses_django_admin(user: User | AnonymousUser) -> bool:
@@ -53,8 +70,8 @@ def uses_django_admin(user: User | AnonymousUser) -> bool:
 
 
 def team_for_groups(groups: list[str]) -> Team | None:
-    """The active team whose Authentik group (Team.authentik_group) is among these groups, or None."""
-    return Team.objects.filter(authentik_group__in=groups, is_active=True).first()
+    """The team these groups put the account on (TeamQuerySet.held_by), or None."""
+    return Team.objects.held_by(groups).first()
 
 
 def get_user_team(user: User | AnonymousUser) -> Team | None:
@@ -65,15 +82,15 @@ def get_role_based_landing_url(groups: list[str]) -> str:
     """Determine the landing page URL based on a user's Authentik groups, checking roles in priority order."""
     from django.urls import reverse
 
-    if check_groups_for_permission(groups, "ticketing_support"):
+    if groups_grant(groups, "ticketing_support"):
         return reverse("ticket_list")
-    if check_groups_for_permission(groups, "white_team"):
+    if groups_grant(groups, "white_team"):
         return reverse("leaderboard_page")
-    if check_groups_for_permission(groups, "red_team"):
+    if groups_grant(groups, "red_team"):
         return reverse("scoring:submit_red_score")
-    if check_groups_for_permission(groups, "orange_team"):
+    if groups_grant(groups, "orange_team"):
         return reverse("orange_team:dashboard")
-    if check_groups_for_permission(groups, "blue_team"):
+    if groups_grant(groups, "blue_team"):
         return reverse("ticket_list")
 
     return "/"

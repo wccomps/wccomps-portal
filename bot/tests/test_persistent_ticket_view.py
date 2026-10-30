@@ -68,10 +68,7 @@ async def test_ops_can_cancel_a_claimed_ticket_from_the_thread(db: Any) -> None:
     interaction.response = AsyncMock()
     view = TicketActionView(ticket_id=0)
 
-    with (
-        patch("bot.permissions.has_permission", AsyncMock(return_value=True)),
-        patch("bot.permissions.linked_team_member", AsyncMock(return_value=None)),
-    ):
+    with patch("bot.permissions.ticket_access", AsyncMock(return_value=(True, None))):
         await view.cancel_button.callback(interaction)
 
     await ticket.arefresh_from_db()

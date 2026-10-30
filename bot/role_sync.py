@@ -29,11 +29,13 @@ class RoleGrants:
 
     managed: frozenset[int]
     by_member: dict[int, frozenset[int]]
+    held: frozenset[int] = frozenset()
 
 
 def role_grants(discord_ids: set[int] | None = None) -> RoleGrants:
-    """What active DiscordLinks grant: the role mapped from each of the account's Authentik groups, and
-    for a seat on an active team, that team's role and Blueteam. Limited to discord_ids when given."""
+    """What active DiscordLinks grant: the staff roles mapped from the account's permission groups, and for any seat
+    (DiscordLink.seat, enabled or not) that team's role and Blueteam. Limited to discord_ids when given.
+    held: links whose account Authentik hasn't been asked about yet (account_active null), their roles left alone."""
     from team.models import DiscordLink, Team
 
     mapped = settings.GROUP_ROLE_MAPPING
@@ -44,14 +46,18 @@ def role_grants(discord_ids: set[int] | None = None) -> RoleGrants:
     if discord_ids is not None:
         links = links.filter(discord_id__in=discord_ids)
     by_member: dict[int, frozenset[int]] = {}
+    held: set[int] = set()
     for link in links:
         user_groups = getattr(link.user, "usergroups", None)
+        if user_groups is not None and user_groups.account_active is None:
+            held.add(link.discord_id)
         groups = set(user_groups.permission_groups) if user_groups else set()
         roles = [role_id for group, role_id in mapped.items() if group in groups]
-        if link.team and link.team.is_active:
-            roles += [link.team.discord_role_id or 0, settings.BLUETEAM_ROLE_ID]
+        # Any seat, enabled or not: a team account disabled when the competition stops keeps its team's roles
+        if seat := link.seat():
+            roles += [seat.team.discord_role_id or 0, settings.BLUETEAM_ROLE_ID]
         by_member[link.discord_id] = frozenset(role_id for role_id in roles if role_id)
-    return RoleGrants(managed, by_member)
+    return RoleGrants(managed, by_member, frozenset(held))
 
 
 def competition_guild(bot: discord.Client) -> discord.Guild | None:
@@ -91,11 +97,16 @@ async def _reconcile(
 ) -> SyncRolesResult:
     stats: SyncRolesResult = {"roles_added": 0, "roles_removed": 0, "errors": 0, "changes": []}
     grants = await sync_to_async(role_grants)(None if recheck else {m.id for m in members})
+    if held := {m.id for m in members} & grants.held:
+        _report(
+            stats,
+            f"Left the roles of {len(held)} linked member(s) alone until a refresh or a sign-in reads the account",
+        )
     roles = _manageable_roles(guild, grants.managed, stats)
     prefix = "[DRY RUN] " if dry_run else ""
 
     for member in members:
-        if member.bot:
+        if member.bot or member.id in grants.held:
             continue
         granted = grants.by_member.get(member.id)
         add, remove = _changes(member, roles, granted or frozenset())
@@ -104,7 +115,10 @@ async def _reconcile(
         if recheck:
             # A whole-guild pass works from a snapshot; re-read this member's grant so a link made or
             # ended since the pass began isn't undone
-            granted = (await sync_to_async(role_grants)({member.id})).by_member.get(member.id)
+            regrant = await sync_to_async(role_grants)({member.id})
+            if member.id in regrant.held:
+                continue
+            granted = regrant.by_member.get(member.id)
             add, remove = _changes(member, roles, granted or frozenset())
         who = f"{member.name} ({member.display_name})"
         reason = "not granted by their Authentik groups or team seat" if granted is not None else "not linked"

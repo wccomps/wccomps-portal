@@ -11,14 +11,17 @@ from hypothesis import strategies as st
 
 from core.auth_utils import (
     PERMISSION_MAP,
-    check_groups_for_permission,
     get_authentik_id,
     get_permissions_context,
+    get_role_based_landing_url,
     get_user_team,
+    groups_grant,
     has_permission,
     permission_groups_of,
     require_permission,
+    users_granted,
 )
+from core.models import UserGroups
 from core.tests.guards import REPO_DIR, fail_with, tracked_files
 from team.models import Team
 
@@ -111,17 +114,36 @@ class TestHasPermission:
         """User with OrangeTeam group should have orange_team permission."""
         assert has_permission(orange_team_user, "orange_team")
 
+    def test_an_inactive_teams_member_lacks_blue_team(self, blue_team_user):
+        """blue_team opens pages that then need the member's active team; an inactive team's member has none."""
+        Team.objects.filter(team_number=1).update(is_active=False)
+        assert not has_permission(blue_team_user, "blue_team")
+        assert get_role_based_landing_url(permission_groups_of(blue_team_user)) == "/"
+
+    def test_a_team_group_with_no_team_grants_nothing(self):
+        user = User.objects.create(username="team-without-row")
+        UserGroups.objects.create(user=user, authentik_id="sub-x", groups=["WCComps_BlueTeam49"])
+        assert not has_permission(user, "blue_team")
+
+    def test_a_team_is_known_by_its_own_group_name(self):
+        Team.objects.create(team_number=9, team_name="Team 09", authentik_group="Renamed_Group")
+        user = User.objects.create(username="renamed-member")
+        UserGroups.objects.create(user=user, authentik_id="sub-r", groups=["Renamed_Group"])
+        assert has_permission(user, "blue_team")
+
+    def test_gold_team_holds_blue_team_without_a_team(self, gold_team_user, admin_user):
+        assert has_permission(gold_team_user, "blue_team")
+        assert has_permission(admin_user, "blue_team")
+
     def test_red_team_user_lacks_blue_team_permission(self, red_team_user):
         """Red team user should not have blue_team permission."""
         assert not has_permission(red_team_user, "blue_team")
 
-    def test_direct_group_check(self, admin_user):
-        """Can check for specific group name directly."""
-        assert has_permission(admin_user, "WCComps_Discord_Admin")
-
-    def test_nonexistent_permission(self, blue_team_user):
-        """Checking for non-existent permission returns False."""
-        assert not has_permission(blue_team_user, "nonexistent_permission")
+    @pytest.mark.parametrize("name", ["WCComps_Discord_Admin", "nonexistent_permission", ""])
+    def test_a_name_that_isnt_a_permission_raises(self, admin_user, name):
+        """A typo must not quietly read as a group name or as a refusal."""
+        with pytest.raises(ValueError, match="No permission named"):
+            has_permission(admin_user, name)
 
 
 class TestGetPermissionsContext:
@@ -147,18 +169,10 @@ class TestGetPermissionsContext:
         assert ctx["is_ticketing_admin"] is False
 
     def test_all_permission_flags_present(self, blue_team_user):
-        """Context should contain all standard permission flags."""
+        """Every permission has its flag, blue_team included, from the one map."""
         ctx = get_permissions_context(blue_team_user)
-        expected_keys = [
-            "is_admin",
-            "is_ticketing_admin",
-            "is_ticketing_support",
-            "is_gold_team",
-            "is_white_team",
-            "is_orange_team",
-        ]
-        for key in expected_keys:
-            assert key in ctx
+        assert set(ctx) == {f"is_{perm}" for perm in PERMISSION_MAP}
+        assert ctx["is_blue_team"] is True
 
 
 class TestGetUserTeam:
@@ -224,75 +238,19 @@ class TestRequirePermissionDecorator:
         assert response.url == "/auth/login/?next=%2Ftest%2F"
 
 
-class TestCheckGroupsForPermissionProperties:
-    """Property-based tests for check_groups_for_permission."""
-
-    @given(groups=st.lists(st.text(min_size=1, max_size=50), max_size=10))
-    def test_empty_permission_never_granted_by_random_groups(self, groups: list[str]):
-        """Empty permission name should not be granted by random groups."""
-        result = check_groups_for_permission(groups, "")
-        assert result is False
+class TestGroupsGrantProperties:
+    """Property-based tests for groups_grant, the one evaluator."""
 
     @given(permission=st.sampled_from(list(PERMISSION_MAP.keys())))
-    def test_empty_groups_denies_mapped_permissions(self, permission: str):
-        """Empty groups list should deny all mapped permissions."""
-        result = check_groups_for_permission([], permission)
-        assert result is False
+    def test_empty_groups_deny_every_permission(self, permission: str):
+        assert groups_grant([], permission) is False
 
     @given(
         permission=st.sampled_from(list(PERMISSION_MAP.keys())),
         extra_groups=st.lists(st.text(min_size=1, max_size=30), max_size=5),
     )
-    def test_permission_granted_when_required_group_present(self, permission: str, extra_groups: list[str]):
-        """Permission should be granted when any required group is present."""
-        required_groups = PERMISSION_MAP[permission]
-        # Add a required group to the list
-        groups = extra_groups + [required_groups[0]]
-        result = check_groups_for_permission(groups, permission)
-        assert result is True
-
-    @given(team_number=st.integers(min_value=1, max_value=50))
-    def test_blue_team_permission_with_valid_team_numbers(self, team_number: int):
-        """BlueTeam permission should be granted for valid team group patterns."""
-        group = f"WCComps_BlueTeam{team_number:02d}"
-        result = check_groups_for_permission([group], "blue_team")
-        assert result is True
-
-    @given(team_number=st.integers(min_value=51, max_value=99))
-    def test_blue_team_permission_with_high_team_numbers(self, team_number: int):
-        """BlueTeam permission should still match high team numbers (pattern-based)."""
-        group = f"WCComps_BlueTeam{team_number}"
-        result = check_groups_for_permission([group], "blue_team")
-        # The pattern just checks startswith, so this should still match
-        assert result is True
-
-    @given(groups=st.lists(st.text(min_size=1, max_size=50), max_size=10))
-    def test_direct_group_check_works(self, groups: list[str]):
-        """Direct group name check should work for any group not in PERMISSION_MAP."""
-        from core.auth_utils import PERMISSION_MAP
-
-        for group in groups:
-            # Skip names that collide with PERMISSION_MAP keys or blue_team (special-cased)
-            if group in PERMISSION_MAP or group == "blue_team":
-                continue
-            result = check_groups_for_permission(groups, group)
-            assert result is True
-
-    @given(
-        groups=st.lists(
-            st.text(
-                alphabet=st.characters(blacklist_categories=("Cs",), min_codepoint=32, max_codepoint=126),
-                min_size=1,
-                max_size=30,
-            ),
-            max_size=5,
-        )
-    )
-    def test_no_exception_on_arbitrary_input(self, groups: list[str]):
-        """Function should not raise exceptions on arbitrary input."""
-        for perm in ["admin", "blue_team", "gold_team", "nonexistent", ""]:
-            # Should not raise
-            check_groups_for_permission(groups, perm)
+    def test_any_group_the_map_names_grants_it(self, permission: str, extra_groups: list[str]):
+        assert groups_grant([*extra_groups, PERMISSION_MAP[permission][0]], permission) is True
 
 
 # A patch of the permission functions where they're defined is seen by a module that looks them up at each call,
@@ -311,3 +269,28 @@ def test_no_test_patches_the_permission_functions_where_they_are_defined() -> No
         for match in PERMISSION_SOURCE_PATCH.finditer(text)
     }
     fail_with("Tests patching a permission function where it's defined", found, PERMISSION_SOURCE_PATCH_EXCEPTIONS)
+
+
+class TestUsersGranted:
+    """users_granted is groups_grant as one query, for lists of who holds a permission."""
+
+    def _account(self, name: str, groups: list[str], *, active: bool = True) -> User:
+        user = User.objects.create(username=name)
+        UserGroups.objects.create(user=user, authentik_id=f"sub-{name}", groups=groups, account_active=active)
+        return user
+
+    def test_it_lists_whoever_groups_grant_passes(self):
+        accounts = [
+            self._account("support", ["WCComps_Ticketing_Support"]),
+            self._account("admin", ["WCComps_Discord_Admin"]),
+            self._account("disabled", ["WCComps_Ticketing_Admin"], active=False),
+            self._account("red", ["WCComps_RedTeam"]),
+        ]
+
+        assert sorted(u.username for u in users_granted("ticketing_support")) == ["admin", "support"]
+        assert sorted(u.username for u in accounts if has_permission(u, "ticketing_support")) == ["admin", "support"]
+
+    def test_a_team_held_permission_is_refused(self):
+        """A team's group grants it too, which a group filter can't see."""
+        with pytest.raises(ValueError, match="team-held"):
+            users_granted("blue_team")

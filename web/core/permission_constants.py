@@ -1,9 +1,4 @@
-"""Permission constants and group-checking logic shared by web and bot."""
-
-import re
-
-BLUETEAM_GROUP_PATTERN = re.compile(r"^WCComps_BlueTeam(\d+)$")
-
+"""Which Authentik groups grant each permission."""
 
 PERMISSION_MAP: dict[str, list[str]] = {
     "admin": ["WCComps_Discord_Admin"],
@@ -15,17 +10,8 @@ PERMISSION_MAP: dict[str, list[str]] = {
     "white_team_lead": ["WCComps_WhiteTeam_Lead", "WCComps_GoldTeam", "WCComps_Discord_Admin"],
     "orange_team_lead": ["WCComps_OrangeTeam_Lead", "WCComps_GoldTeam", "WCComps_Discord_Admin"],
     "red_team": ["WCComps_RedTeam", "WCComps_Discord_Admin"],
+    "blue_team": ["WCComps_GoldTeam", "WCComps_Discord_Admin"],
 }
 
-
-def check_groups_for_permission(groups: list[str], permission_name: str) -> bool:
-    """Check if Authentik groups grant a permission; a name not in PERMISSION_MAP must match a group exactly."""
-    if permission_name == "blue_team":
-        return any(
-            BLUETEAM_GROUP_PATTERN.match(g) or g in ("WCComps_GoldTeam", "WCComps_Discord_Admin") for g in groups
-        )
-
-    if permission_name in PERMISSION_MAP:
-        return any(g in groups for g in PERMISSION_MAP[permission_name])
-
-    return permission_name in groups
+# Permissions an active team's group grants as well (TeamQuerySet.held_by), which only the database knows
+TEAM_HELD = frozenset({"blue_team"})

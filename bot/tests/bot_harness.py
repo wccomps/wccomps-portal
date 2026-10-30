@@ -38,8 +38,7 @@ from django.utils import timezone
 from hypothesis import strategies as st
 
 from core.models import CompetitionConfig
-from core.permission_constants import check_groups_for_permission
-from core.tests.roles import ROLE_GROUPS, make_user
+from core.tests.roles import ROLE_GROUPS, grants, make_user
 from core.tests.strategies import file_bytes, file_names, request_text, rolled_back
 from core.tests.views_harness import offline, table_writes
 from team.models import DiscordLink, Team
@@ -84,12 +83,8 @@ TEAM_MEMBERS = frozenset({"blue_team", "other_team"})
 
 
 def may(permission: str) -> frozenset[str]:
-    """The roles whose groups grant the permission (core.permission_constants)."""
-    return frozenset(
-        role
-        for role, groups in BOT_ROLES.items()
-        if groups is not None and check_groups_for_permission(groups, permission)
-    )
+    """The roles whose groups grant the permission (core.auth_utils.groups_grant)."""
+    return frozenset(role for role, groups in BOT_ROLES.items() if groups is not None and grants(groups, permission))
 
 
 # ---------------------------------------------------------------------------------------------------------------
