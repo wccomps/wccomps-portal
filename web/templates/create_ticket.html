@@ -62,7 +62,7 @@
                 get ipRequired() { return this.requiredFields.includes('ip_address'); },
                 get serviceRequired() { return this.requiredFields.includes('service_name'); },
                 get descriptionRequired() { return this.requiredFields.includes('description'); },
-                // The form leaves these fields optional, so the server marks none; the picked category's required ones get it
+                // The form leaves these fields optional, so the server marks none of them
                 get marks() {
                     const mark = field => (this.requiredFields.includes(field) ? 'required' : '');
                     return {
