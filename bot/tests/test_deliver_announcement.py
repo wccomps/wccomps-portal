@@ -1,4 +1,5 @@
-"""A broadcast lists each recipient it couldn't reach, and the queue retries one that reached no one."""
+"""A broadcast lists each recipient it couldn't reach; the queue retries a failure that may pass, and a refusal
+fails the task at once."""
 
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,8 +10,9 @@ from django.test import override_settings
 
 from bot.competition_actions import deliver_broadcast
 from bot.discord_queue import DiscordQueueProcessor
+from bot.utils import TaskProgress
 from core.broadcast import Announcements
-from core.discord_tasks import BroadcastMessage
+from core.discord_tasks import BroadcastMessage, PermanentTaskError
 
 pytestmark = pytest.mark.asyncio
 
@@ -41,12 +43,14 @@ async def test_a_missing_announcements_channel_is_listed_as_failed() -> None:
 
 
 @override_settings(DISCORD_ANNOUNCEMENT_CHANNEL_ID=31)
-async def test_the_queue_retries_a_broadcast_that_reached_no_one() -> None:
+async def test_a_missing_announcements_channel_fails_the_task_at_once() -> None:
     processor = DiscordQueueProcessor(MagicMock(spec=discord.Client))
     processor._guild = MagicMock(return_value=_guild(None))
 
     with (
         patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock),
-        pytest.raises(RuntimeError, match="reached no one"),
+        pytest.raises(PermanentTaskError, match=r"Failed: Announcements \(Announcements channel not found"),
     ):
-        await processor._handle_broadcast_message(BroadcastMessage(target="announcements", message="hi", sender="ops"))
+        await processor._handle_broadcast_message(
+            BroadcastMessage(target="announcements", message="hi", sender="ops"), TaskProgress()
+        )

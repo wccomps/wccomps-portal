@@ -1,7 +1,8 @@
 import io
 import logging
-from collections.abc import Collection, Sequence
-from typing import Final, Literal
+from collections.abc import Awaitable, Callable, Collection, Sequence
+from dataclasses import dataclass, field
+from typing import Final, Literal, TypedDict
 
 import discord
 from asgiref.sync import sync_to_async
@@ -102,16 +103,57 @@ def announcement(sender: str, message: str) -> str:
     return f"**Announcement from {sender}:**\n\n{message}"
 
 
+class ProgressState(TypedDict, total=False):
+    done: int  # steps done, for a task that counts them
+    # A broadcast's: recipients reached, refused for good (with why), counts, and parts sent to each it failed on
+    reached: list[int]
+    refused: dict[str, str]
+    sent: int
+    queued: int
+    parts: dict[str, int]
+
+
+@dataclass
+class TaskProgress:
+    """What a queued task already did, saved with the task so a retry does only the rest."""
+
+    state: ProgressState = field(default_factory=ProgressState)
+    save: Callable[[ProgressState], Awaitable[None]] | None = None
+
+    @property
+    def done(self) -> int:
+        return self.state.get("done", 0)
+
+    async def advance(self) -> None:
+        self.state["done"] = self.done + 1
+        await self.saved()
+
+    async def saved(self) -> None:
+        if self.save:
+            await self.save(self.state)
+
+
 async def send_parts(
-    channel: discord.abc.Messageable, text: str, *, allowed_mentions: discord.AllowedMentions = ALLOWED_MENTIONS
+    channel: discord.abc.Messageable,
+    text: str,
+    *,
+    allowed_mentions: discord.AllowedMentions = ALLOWED_MENTIONS,
+    progress: TaskProgress | None = None,
 ) -> None:
     """Send text in as many messages as it takes (split_message), so none is past Discord's 2000 characters. Only
-    the first may ping what allowed_mentions allows: the rest is the sender's text."""
+    the first may ping what allowed_mentions allows: the rest is the sender's text. With progress, parts an earlier
+    attempt sent are skipped."""
+    progress = progress or TaskProgress()
     for n, part in enumerate(split_message(text)):
+        if n < progress.done:
+            continue
         await channel.send(part, allowed_mentions=allowed_mentions if n == 0 else ALLOWED_MENTIONS)
+        await progress.advance()
 
 
-async def send_announcement(guild: discord.Guild, channel: discord.abc.Messageable, message: str) -> None:
+async def send_announcement(
+    guild: discord.Guild, channel: discord.abc.Messageable, message: str, progress: TaskProgress | None = None
+) -> None:
     """Send a broadcast to the announcements channel, pinging only the blue team role."""
     blueteam_role = guild.get_role(settings.BLUETEAM_ROLE_ID)
     role_mention = blueteam_role.mention if blueteam_role else "@Blueteam"
@@ -119,6 +161,7 @@ async def send_announcement(guild: discord.Guild, channel: discord.abc.Messageab
         channel,
         f"{role_mention}\n\n{message}",
         allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
+        progress=progress,
     )
 
 

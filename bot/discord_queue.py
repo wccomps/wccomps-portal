@@ -19,6 +19,8 @@ from bot.role_sync import competition_guild, sync_member_roles, sync_roles
 from bot.thread_creator import add_to_team_threads, ensure_ticket_thread
 from bot.ticket_dashboard import trigger_dashboard
 from bot.utils import (
+    ProgressState,
+    TaskProgress,
     add_field,
     log_to_ops_channel,
     recycle_db_connection,
@@ -143,8 +145,11 @@ class DiscordQueueProcessor:
             return
         task.status = "processing"
 
+        async def save_progress(state: ProgressState) -> None:
+            await DiscordTask.objects.filter(pk=task.pk).aupdate(progress=state)
+
         try:
-            task_result = await self._dispatch(task.typed_payload())
+            task_result = await self._dispatch(task.typed_payload(), TaskProgress(task.progress, save_progress))
         except PermanentTaskError as error:
             if await self._record(task, status="failed", error_message=str(error)):
                 logger.error(f"Task {task.id} ({task.task_type}) can never succeed: {error}")
@@ -184,13 +189,14 @@ class DiscordQueueProcessor:
             setattr(task, name, value)
         return True
 
-    async def _dispatch(self, payload: TaskPayload) -> Mapping[str, object] | None:
-        """Run the handler for payload; what it returns is stored as the task's result."""
+    async def _dispatch(self, payload: TaskPayload, progress: TaskProgress) -> Mapping[str, object] | None:
+        """Run the handler for payload; what it returns is stored as the task's result. A handler given progress
+        records there what it did, so a retry skips it."""
         match payload:
             case SyncMemberRoles():
                 await self._handle_sync_member_roles(payload)
             case SetupTeamInfrastructure():
-                await self._handle_setup_team_infrastructure(payload)
+                await self._handle_setup_team_infrastructure(payload, progress)
             case LogToChannel():
                 await self._handle_log_to_channel(payload)
             case TicketCreatedWeb():
@@ -198,15 +204,15 @@ class DiscordQueueProcessor:
             case CleanupCompetition():
                 await self._handle_cleanup_competition(payload)
             case PostComment():
-                await self._handle_post_comment(payload)
+                await self._handle_post_comment(payload, progress)
             case PostTicketUpdate():
-                await self._handle_post_ticket_update(payload)
+                await self._handle_post_ticket_update(payload, progress)
             case AddUserToThread():
                 await self._handle_add_user_to_thread(payload)
             case SyncRoles():
                 return await self._handle_sync_roles(payload)
             case BroadcastMessage():
-                return await self._handle_broadcast_message(payload)
+                return await self._handle_broadcast_message(payload, progress)
             case _:
                 assert_never(payload)
         return None
@@ -238,11 +244,11 @@ class DiscordQueueProcessor:
             self.bot, self._guild(), payload.requested_by, closed_out_event_id=payload.closed_out_event_id
         )
 
-    async def _handle_setup_team_infrastructure(self, payload: SetupTeamInfrastructure) -> None:
+    async def _handle_setup_team_infrastructure(self, payload: SetupTeamInfrastructure, progress: TaskProgress) -> None:
         team = await _target(Team.objects.all(), team_number=payload.team_number)
         if payload.recreate:
             reason = f"Team {team.team_number} infrastructure recreate"
-            await recreate_team_infrastructure(self._guild(), team, reason, bot=self.bot)
+            await recreate_team_infrastructure(self._guild(), team, reason, bot=self.bot, progress=progress)
         else:
             await setup_team_infrastructure(self._guild(), team, bot=self.bot)
 
@@ -259,7 +265,7 @@ class DiscordQueueProcessor:
         finally:
             trigger_dashboard(self.bot)
 
-    async def _handle_post_comment(self, payload: PostComment) -> None:
+    async def _handle_post_comment(self, payload: PostComment, progress: TaskProgress) -> None:
         ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
         comment = await _target(TicketComment.objects.select_related("author"), id=payload.comment_id)
 
@@ -270,10 +276,10 @@ class DiscordQueueProcessor:
 
         author_display = (comment.author.username if comment.author else "") or "Unknown"
         # A web comment has no length limit; send all of it, in as many messages as it takes
-        await send_parts(thread, f"**{author_display}**\n{comment.comment_text}")
+        await send_parts(thread, f"**{author_display}**\n{comment.comment_text}", progress=progress)
         logger.info(f"Posted comment {comment.id} to thread {thread.id}")
 
-    async def _handle_post_ticket_update(self, payload: PostTicketUpdate) -> None:
+    async def _handle_post_ticket_update(self, payload: PostTicketUpdate, progress: TaskProgress) -> None:
         action = payload.action
         actor = payload.actor
 
@@ -311,7 +317,7 @@ class DiscordQueueProcessor:
             msg = f"Ticket reopened by **{actor}**"
             if payload.reason:
                 msg += f"\nReason: {payload.reason}"
-            await send_parts(thread, msg)
+            await send_parts(thread, msg, progress=progress)
         else:
             await thread.send(f"Ticket updated: {action} by **{actor}**")
 
@@ -354,7 +360,7 @@ class DiscordQueueProcessor:
         logger.info(f"Role sync completed: {summary}")
         return stats
 
-    async def _handle_broadcast_message(self, payload: BroadcastMessage) -> dict[str, object]:
+    async def _handle_broadcast_message(self, payload: BroadcastMessage, progress: TaskProgress) -> dict[str, object]:
         if not payload.target or not payload.message:
             raise PermanentTaskError("Missing target or message in payload")
         try:
@@ -362,8 +368,10 @@ class DiscordQueueProcessor:
         except ValueError as e:
             raise PermanentTaskError(f"Invalid team range: {e}") from e
 
-        result = await deliver_broadcast(self._guild(), target, payload.message, payload.sender)
-        await log_to_ops_channel(self.bot, result.ops_summary(payload.sender, payload.target, payload.message))
-        if result.failed and not (result.sent or result.queued):
-            raise RuntimeError(f"Broadcast reached no one: {'; '.join(result.failed)}")
+        result = await deliver_broadcast(self._guild(), target, payload.message, payload.sender, progress)
+        summary = result.ops_summary(payload.sender, payload.target, payload.message)
+        if result.failed:
+            # A retry tries only the recipients that may yet succeed; the last failure posts this summary
+            raise (RuntimeError if result.retryable else PermanentTaskError)(summary)
+        await log_to_ops_channel(self.bot, summary)
         return {"sent_count": result.sent, "queued_count": result.queued, "failed_count": len(result.failed)}

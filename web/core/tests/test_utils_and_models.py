@@ -411,3 +411,18 @@ class TestAdvisoryLock:
         finally:
             holder.close()
             other.close()
+
+
+@pytest.mark.django_db
+def test_a_task_row_written_by_the_previous_release_starts_with_no_progress():
+    """During a rolling deploy the old web pods insert tasks without progress; the column's default fills it."""
+    from django.db import connection
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO core_discordtask (task_type, payload, status, retry_count, max_retries, error_message, "
+            "created_at) VALUES ('log_to_channel', '{}', 'pending', 0, 5, '', now()) RETURNING id"
+        )
+        task_id = cursor.fetchone()[0]
+
+    assert DiscordTask.objects.get(pk=task_id).progress == {}

@@ -11,8 +11,8 @@ from django.utils import timezone
 
 from bot.cogs.help_panels import HelpPanelsCog, TicketButton, _has_button
 from bot.role_sync import sync_member_roles
-from bot.utils import announcement as announcement_text
 from bot.utils import (
+    TaskProgress,
     category_chat_channel,
     find_team_category,
     find_team_role,
@@ -21,6 +21,7 @@ from bot.utils import (
     team_chat_channel,
     team_role_name,
 )
+from bot.utils import announcement as announcement_text
 from core.models import AuditLog, QueuedAnnouncement
 from team.models import Team
 from ticketing.models import Ticket
@@ -135,12 +136,22 @@ type Overwrites = dict[discord.Role | discord.Member | discord.Object, discord.P
 
 
 async def recreate_team_infrastructure(
-    guild: discord.Guild, team: Team, reason: str, bot: discord.Client | None = None
+    guild: discord.Guild,
+    team: Team,
+    reason: str,
+    bot: discord.Client | None = None,
+    progress: TaskProgress | None = None,
 ) -> tuple[list[str], discord.CategoryChannel]:
-    """Delete what the team has in Discord and set it up again; returns what was deleted and the new category."""
-    old = {"role": find_team_role(guild, team), "category": find_team_category(guild, team)}
-    deleted = await delete_team_infrastructure(guild, team, reason=reason)
-    gone = {item.id for kind, item in old.items() if item and kind in deleted}
+    """Delete what the team has in Discord and set it up again; returns what was deleted and the new category. With
+    progress the delete counts as a step, so a retry keeps what the first attempt built."""
+    deleted: list[str] = []
+    gone: set[int] = set()
+    if not (progress and progress.done):
+        old = {"role": find_team_role(guild, team), "category": find_team_category(guild, team)}
+        deleted = await delete_team_infrastructure(guild, team, reason=reason)
+        gone = {item.id for kind, item in old.items() if item and kind in deleted}
+        if progress:
+            await progress.advance()
     return deleted, await setup_team_infrastructure(guild, team, bot=bot, gone=gone)
 
 

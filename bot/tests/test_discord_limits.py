@@ -11,7 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from bot.tests.discord_fakes import competition_thread
-from bot.utils import DISCORD_MESSAGE_CHAR_LIMIT, fit, split_message
+from bot.utils import DISCORD_MESSAGE_CHAR_LIMIT, TaskProgress, fit, split_message
 
 
 @given(st.text(alphabet=st.characters(codec="utf-8") | st.just("\n"), max_size=7000))
@@ -63,7 +63,9 @@ async def test_web_comment_over_the_message_limit_is_sent_in_parts() -> None:
     bot.get_channel.return_value = thread
 
     with patch("bot.discord_queue.ensure_ticket_thread", new=AsyncMock(return_value=thread)):
-        await DiscordQueueProcessor(bot)._handle_post_comment(PostComment(ticket_id=ticket.id, comment_id=comment.id))
+        await DiscordQueueProcessor(bot)._handle_post_comment(
+            PostComment(ticket_id=ticket.id, comment_id=comment.id), TaskProgress()
+        )
 
     sent = [call.args[0] for call in thread.send.call_args_list]
     assert len(sent) == 3

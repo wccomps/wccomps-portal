@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 import discord
 from asgiref.sync import sync_to_async
@@ -13,6 +14,8 @@ from scoring.models import QuotientMetadataCache
 
 from bot.discord_manager import delete_team_infrastructure
 from bot.utils import (
+    ProgressState,
+    TaskProgress,
     announcement,
     log_to_ops_channel,
     send_announcement,
@@ -20,6 +23,7 @@ from bot.utils import (
     team_chat_channel,
 )
 from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams
+from core.discord_tasks import PermanentTaskError
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.services.competition import CompetitionRunResult, run_competition_to_completion
 from core.utils import shorten
@@ -276,6 +280,8 @@ class BroadcastResult:
     queued: int = 0
     failed: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+    # Some failure may succeed on a retry (not Forbidden or a PermanentTaskError)
+    retryable: bool = False
 
     def ops_summary(self, sender: str, target: str, message: str) -> str:
         lines = [f"Broadcast by {sender}", f"• Target: {target}", f"• Sent: {self.sent} channels"]
@@ -289,53 +295,87 @@ class BroadcastResult:
         return "\n".join(lines)
 
 
-type Recipient = tuple[str, Callable[[], Awaitable[None]]]
+type Delivery = Literal["sent", "queued"]
+# (the recipient's key: 0, or a team's number; its label; its delivery, given its sent parts' progress)
+type Recipient = tuple[int, str, Callable[[TaskProgress], Awaitable[Delivery]]]
 
 
 async def deliver_broadcast(
-    guild: discord.Guild, target: BroadcastTarget, message: str, sender: str
+    guild: discord.Guild, target: BroadcastTarget, message: str, sender: str, progress: TaskProgress | None = None
 ) -> BroadcastResult:
-    """Send a broadcast to each recipient: the announcements channel, or each target team's chat channel (queued for
-    a team without one). A recipient it fails for is listed in the result and the rest go on."""
+    """Send a broadcast to each recipient, listing those it fails for; progress lets a retry try only the rest."""
+    progress = progress or TaskProgress()
+    state = progress.state
+    reached, refused, parts = (
+        state.setdefault("reached", []),
+        state.setdefault("refused", {}),
+        state.setdefault("parts", {}),
+    )
+
+    def parts_sent(key: str) -> TaskProgress:
+        async def save(part: ProgressState) -> None:
+            parts[key] = part.get("done", 0)
+            await progress.saved()
+
+        return TaskProgress(ProgressState(done=parts.get(key, 0)), save)
+
     result = BroadcastResult()
-    for label, deliver in await _recipients(guild, target, message, sender, result):
+    for key, label, deliver in await _recipients(guild, target, message, sender, result):
+        if key in reached or str(key) in refused:
+            continue
         try:
-            await deliver()
+            delivery = await deliver(parts_sent(str(key)))
         except Exception as e:
             logger.exception(f"Failed to broadcast to {label}: {e}")
-            result.failed.append(f"{label} ({shorten(str(e), 50)})")
+            reason = f"{label} ({shorten(str(e), 50)})"
+            # NotFound is retried: a recreate may be replacing the team's channel
+            if isinstance(e, discord.Forbidden | PermanentTaskError):
+                refused[str(key)] = reason
+                await progress.saved()
+            else:
+                result.failed.append(reason)
+                result.retryable = True
+        else:
+            parts.pop(str(key), None)
+            reached.append(key)
+            state[delivery] = state.get(delivery, 0) + 1
+            await progress.saved()
+    result.sent, result.queued = state.get("sent", 0), state.get("queued", 0)
+    result.failed += refused.values()
     return result
 
 
 async def _recipients(
     guild: discord.Guild, target: BroadcastTarget, message: str, sender: str, result: BroadcastResult
 ) -> list[Recipient]:
-    async def to_announcements() -> None:
+    async def to_announcements(parts: TaskProgress) -> Delivery:
         channel = guild.get_channel(settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID)
         if not isinstance(channel, discord.TextChannel):
-            raise RuntimeError(f"Announcements channel not found (ID: {settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID})")
-        await send_announcement(guild, channel, message)
-        result.sent += 1
+            raise PermanentTaskError(
+                f"Announcements channel not found (ID: {settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID})"
+            )
+        await send_announcement(guild, channel, message, progress=parts)
+        return "sent"
 
-    def to_team(team: Team) -> Callable[[], Awaitable[None]]:
-        async def deliver() -> None:
+    def to_team(team: Team) -> Callable[[TaskProgress], Awaitable[Delivery]]:
+        async def deliver(parts: TaskProgress) -> Delivery:
             chat_channel = team_chat_channel(guild, team)
             if chat_channel:
-                await send_parts(chat_channel, announcement(sender, message))
-                result.sent += 1
-            else:
-                await QueuedAnnouncement.objects.acreate(team=team, message=message, sender_name=sender)
-                result.queued += 1
+                await send_parts(chat_channel, announcement(sender, message), progress=parts)
+                return "sent"
+            await QueuedAnnouncement.objects.acreate(team=team, message=message, sender_name=sender)
+            return "queued"
 
         return deliver
 
     match target:
         case Announcements():
-            return [("Announcements", to_announcements)]
+            return [(0, "Announcements", to_announcements)]
         case AllTeams():
             teams = [t async for t in Team.objects.filter(is_active=True).order_by("team_number")]
         case Teams(numbers):
             by_number = {t.team_number: t async for t in Team.objects.filter(team_number__in=numbers)}
             result.missing = [f"Team {n:02d}" for n in numbers if n not in by_number]
             teams = [by_number[n] for n in numbers if n in by_number]
-    return [(f"Team {team.team_number:02d}", to_team(team)) for team in teams]
+    teams.sort(key=lambda team: team.team_number)
+    return [(team.team_number, f"Team {team.team_number:02d}", to_team(team)) for team in teams]

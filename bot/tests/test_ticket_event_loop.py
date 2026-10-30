@@ -11,6 +11,7 @@ from bot.cogs.admin_tickets import AdminTicketsCog
 from bot.discord_queue import DiscordQueueProcessor
 from bot.tests.discord_fakes import competition_thread
 from bot.ticket_dashboard import ResolveTicketModal, TicketActionView
+from bot.utils import TaskProgress
 from core.models import DiscordTask
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory
@@ -97,14 +98,14 @@ async def test_updates_for_threadless_ticket_complete_and_refresh_dashboard(clai
         ticket=claimed_ticket,
         payload={"ticket_id": claimed_ticket.id, "action": "claimed", "actor": "v"},
     )
-    await processor._handle_post_ticket_update(update.typed_payload())
+    await processor._handle_post_ticket_update(update.typed_payload(), TaskProgress())
     bot.unified_dashboard.trigger_update.assert_called_once()
 
     comment = await claimed_ticket.comments.acreate(comment_text="hi")
     task = await DiscordTask.objects.acreate(
         task_type="post_comment", payload={"ticket_id": claimed_ticket.id, "comment_id": comment.id}
     )
-    await processor._handle_post_comment(task.typed_payload())
+    await processor._handle_post_comment(task.typed_payload(), TaskProgress())
 
 
 @pytest.mark.parametrize(("action", "unlocks"), [("reopened", True), ("claimed", False)])
@@ -129,7 +130,7 @@ async def test_reopen_unlocks_the_archived_thread(claimed_ticket: Ticket, action
         payload={"ticket_id": claimed_ticket.id, "action": action, "actor": "v"},
     )
     with patch("bot.discord_queue.ensure_ticket_thread", new=AsyncMock(return_value=thread)):
-        await processor._handle_post_ticket_update(task.typed_payload())
+        await processor._handle_post_ticket_update(task.typed_payload(), TaskProgress())
 
     expected = ["edit {'archived': False, 'locked': False}", "send"] if unlocks else ["send"]
     assert calls == expected

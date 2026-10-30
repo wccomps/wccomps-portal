@@ -305,6 +305,29 @@ class TestTaskRetry:
         await task.arefresh_from_db()
         assert (task.status, task.retry_count) == ("pending", 1)
 
+    async def test_a_recreate_retry_keeps_what_the_first_attempt_built(
+        self, mock_bot_with_guild: Any, test_team: Team
+    ) -> None:
+        task = await DiscordTask.objects.acreate(
+            task_type="setup_team_infrastructure", payload={"team_number": test_team.team_number, "recreate": True}
+        )
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        processor._guild = MagicMock(return_value=MagicMock())
+        setup = AsyncMock(side_effect=[RuntimeError("Discord down"), MagicMock()])
+
+        with (
+            patch("bot.discord_manager.setup_team_infrastructure", setup),
+            patch("bot.discord_manager.delete_team_infrastructure", new_callable=AsyncMock) as delete,
+        ):
+            await processor._process_task(task)
+            await DiscordTask.objects.filter(pk=task.pk).aupdate(next_retry_at=None)
+            await task.arefresh_from_db()
+            await processor._process_task(task)
+
+        await task.arefresh_from_db()
+        assert task.status == "completed"
+        delete.assert_awaited_once()
+
     async def test_member_sync_for_someone_not_in_the_guild_completes_without_syncing(
         self, mock_bot_with_guild: Any
     ) -> None:

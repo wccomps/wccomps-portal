@@ -104,6 +104,7 @@ class DiscordTask(models.Model):
     retry_count = models.IntegerField(default=0)
     max_retries = models.IntegerField(default=5)
     next_retry_at = models.DateTimeField(null=True, blank=True)
+    progress = models.JSONField(default=dict, db_default={}, help_text="What the task already did, which a retry skips")
     error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
