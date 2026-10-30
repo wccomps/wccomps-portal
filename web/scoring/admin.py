@@ -52,8 +52,12 @@ class AttackTypeAdmin(PortalModelAdmin[AttackType]):
 
 class RedTeamScreenshotInline(admin.TabularInline[RedTeamScreenshot, RedTeamScore]):
     model = RedTeamScreenshot
-    extra = 1
+    extra = 0
     fields = ["filename"]
+    readonly_fields = ["filename"]
+
+    def has_add_permission(self, request: HttpRequest, obj: RedTeamScore | None = None) -> bool:
+        return False
 
 
 @admin.register(RedTeamScore)
@@ -109,8 +113,12 @@ class RedTeamScoreAdmin(PortalModelAdmin[RedTeamScore]):
 
 class IncidentScreenshotInline(admin.TabularInline[IncidentScreenshot, IncidentReport]):
     model = IncidentScreenshot
-    extra = 1
+    extra = 0
     fields = ["filename"]
+    readonly_fields = ["filename"]
+
+    def has_add_permission(self, request: HttpRequest, obj: IncidentReport | None = None) -> bool:
+        return False
 
 
 @admin.register(IncidentReport)

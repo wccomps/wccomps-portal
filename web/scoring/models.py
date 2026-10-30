@@ -5,8 +5,10 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils.functional import cached_property
 
 from core.models import Approvable
+from core.stored_files import StoredFile
 from core.utils import shorten
 
 
@@ -19,12 +21,14 @@ def format_boxes_display(boxes: list[str] | str | None) -> str:
     return ", ".join(boxes)
 
 
+MAX_SCREENSHOT_SIZE = 50 * 1024 * 1024  # largest real upload so far was ~31MB (a .tar.gz)
+
+
 def validate_file_size(file: UploadedFile[bytes]) -> UploadedFile[bytes]:
-    max_size_mb = 50
-    if file.size and file.size > max_size_mb * 1024 * 1024:
+    if file.size and file.size > MAX_SCREENSHOT_SIZE:
         from django.core.exceptions import ValidationError
 
-        raise ValidationError(f"File size cannot exceed {max_size_mb}MB")
+        raise ValidationError(f"File size cannot exceed {MAX_SCREENSHOT_SIZE // (1024 * 1024)}MB")
     return file
 
 
@@ -68,13 +72,13 @@ class ScoringTemplate(models.Model):
         validators=[MinValueValidator(Decimal("0"))],
         help_text="Maximum possible raw inject points",
     )
-    orange_max = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=Decimal("160"),
-        validators=[MinValueValidator(Decimal("0"))],
-        help_text="Maximum possible raw orange team check points",
-    )
+
+    @cached_property
+    def orange_max(self) -> Decimal:
+        """Maximum possible raw orange team check points: every orange check's maximum, summed."""
+        from orange_team.models import OrangeCheck
+
+        return Decimal(OrangeCheck.objects.total_max())
 
     def clean(self) -> None:
         """Validate that the category weights sum to 100."""
@@ -198,8 +202,6 @@ class Outcome(NamedTuple):
     points: int
     label: str
     description: str
-    # An access outcome's rank, 0 the highest: a finding scores only the highest one it reached
-    access_tier: int | None = None
 
     @property
     def display(self) -> str:
@@ -209,11 +211,16 @@ class Outcome(NamedTuple):
 class RedTeamScore(Approvable):
     """Red team vulnerability score affecting one or more teams."""
 
+    class AccessLevel(models.TextChoices):
+        NONE = "none", "No access"
+        USER = "user", "User access"
+        ROOT = "root", "Root access"
+
+    ACCESS_OUTCOMES: dict[str, Outcome] = {
+        AccessLevel.USER: Outcome("access_level", 25, "User Access", "User level access obtained"),
+        AccessLevel.ROOT: Outcome("access_level", 100, "Root Access", "Root/Administrator level access obtained"),
+    }
     OUTCOMES: tuple[Outcome, ...] = (
-        Outcome("root_access", 100, "Root Access", "Root/Administrator level access obtained", access_tier=0),
-        Outcome(
-            "user_access", 25, "User Access", "User level access obtained (not scored with root access)", access_tier=1
-        ),
         Outcome(
             "privilege_escalation", 100, "Privilege Escalation", "User escalated to Root/Admin (additional penalty)"
         ),
@@ -275,15 +282,12 @@ class RedTeamScore(Approvable):
         help_text="Persistence was established on target",
     )
 
-    # Outcome checkboxes - cumulative deductions per CCDC scoring guidelines
-    # Access levels (only highest scored per attack)
-    root_access = models.BooleanField(
-        default=False,
-        help_text=OUTCOME_HELP["root_access"],
-    )
-    user_access = models.BooleanField(
-        default=False,
-        help_text=OUTCOME_HELP["user_access"],
+    access_level = models.CharField(
+        max_length=4,
+        choices=AccessLevel.choices,
+        default=AccessLevel.NONE,
+        db_default=AccessLevel.NONE,
+        help_text="Highest access obtained",
     )
     privilege_escalation = models.BooleanField(
         default=False,
@@ -355,13 +359,12 @@ class RedTeamScore(Approvable):
         return format_boxes_display(self.affected_boxes)
 
     def scored_outcomes(self) -> list[Outcome]:
-        """The outcomes this finding scores, in table order."""
-        reached = [outcome for outcome in self.OUTCOMES if getattr(self, outcome.field)]
-        top = min((o.access_tier for o in reached if o.access_tier is not None), default=None)
-        return [outcome for outcome in reached if outcome.access_tier in (None, top)]
+        """The outcomes this finding scores: its access level's, then the others in table order."""
+        access = [self.ACCESS_OUTCOMES[self.access_level]] if self.access_level in self.ACCESS_OUTCOMES else []
+        return access + [outcome for outcome in self.OUTCOMES if getattr(self, outcome.field)]
 
     def calculate_points(self) -> Decimal:
-        """Points each affected team loses from the outcome checkboxes (stored positive; calculator subtracts it)."""
+        """Points each affected team loses for its access level and outcomes (positive; the calculator subtracts it)."""
         return sum((Decimal(outcome.points) for outcome in self.scored_outcomes()), Decimal("0"))
 
     @property
@@ -369,17 +372,18 @@ class RedTeamScore(Approvable):
         return [outcome.display for outcome in self.scored_outcomes()]
 
 
-class RedTeamScreenshot(models.Model):
+class RedTeamScreenshot(StoredFile):
     """Screenshots for red team findings (stored in database)."""
+
+    DEFAULT_NAME = "screenshot.png"
+    MAX_SIZE = MAX_SCREENSHOT_SIZE
 
     finding = models.ForeignKey(
         RedTeamScore,
         on_delete=models.CASCADE,
         related_name="screenshots",
     )
-    file_data = models.BinaryField(null=True, blank=True)
-    filename = models.CharField(max_length=255)
-    mime_type = models.CharField(max_length=100, default="image/png")
+    file_data = models.BinaryField(null=True, blank=True)  # type: ignore[assignment]  # older rows lost their bytes
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -460,17 +464,18 @@ class IncidentReport(Approvable):
         return format_boxes_display(self.affected_boxes)
 
 
-class IncidentScreenshot(models.Model):
+class IncidentScreenshot(StoredFile):
     """Screenshots for incident reports (stored in database)."""
+
+    DEFAULT_NAME = "screenshot.png"
+    MAX_SIZE = MAX_SCREENSHOT_SIZE
 
     incident = models.ForeignKey(
         IncidentReport,
         on_delete=models.CASCADE,
         related_name="screenshots",
     )
-    file_data = models.BinaryField(null=True, blank=True)
-    filename = models.CharField(max_length=255)
-    mime_type = models.CharField(max_length=100, default="image/png")
+    file_data = models.BinaryField(null=True, blank=True)  # type: ignore[assignment]  # older rows lost their bytes
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

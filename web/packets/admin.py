@@ -6,6 +6,7 @@ from django.http import HttpRequest, HttpResponse
 from django.utils.html import format_html
 
 from core.admin import PortalModelAdmin
+from core.utils import start_detached
 
 from .models import Packet, PacketDistribution, PacketQuerySet
 
@@ -44,17 +45,22 @@ class PacketAdmin(PortalModelAdmin[Packet]):
     ]
     list_filter = ["status", "send_via_email", "web_access_enabled", "created_at"]
     search_fields = ["title", "filename", "uploaded_by", "notes"]
-    # Sending a packet sets its event and status; set here, they'd skip the open event's checks
+    # Sending sets event and status (set here, they would skip the open event checks); StoredFile sets the file columns
     readonly_fields = [
         "event",
         "status",
         "actual_distribution_time",
         "created_at",
         "updated_at",
+        "filename",
         "file_size",
         "mime_type",
         "distribution_stats_display",
     ]
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False  # a packet comes in through the upload page, which stores its file as StoredFile says
+
     fieldsets = [
         (
             "Packet Information",
@@ -299,26 +305,21 @@ class PacketDistributionAdmin(PortalModelAdmin[PacketDistribution]):
 
     @admin.action(description="Retry sending failed emails")
     def retry_failed_emails(self, request: HttpRequest, queryset: QuerySet[PacketDistribution]) -> None:
-        import logging
-
+        """Resend the selected failed emails as the packet page's Resend failed does, in the background."""
         from .services import PacketDistributionService, check_resendable
 
-        logger = logging.getLogger(__name__)
-        service = PacketDistributionService()
-        failed_dists = queryset.filter(email_status="failed")
-        count = 0
-
-        for dist in failed_dists:
-            if refusal := check_resendable(dist.packet):
-                self.message_user(request, f"Team {dist.team.team_number}: {refusal}", level=messages.ERROR)
+        chosen: dict[Packet, list[int]] = {}
+        for dist in queryset.filter(email_status="failed").select_related("packet"):
+            chosen.setdefault(dist.packet, []).append(dist.pk)
+        if not chosen:
+            self.message_user(request, "None of the selected emails failed.", level=messages.WARNING)
+        for packet, dist_ids in chosen.items():
+            if refusal := check_resendable(packet):
+                self.message_user(request, f"{packet.title}: {refusal}", level=messages.ERROR)
                 continue
-            try:
-                service.send_packet_email(dist)
-                count += 1
-            except Exception as e:
-                logger.exception(f"Failed to retry email for distribution {dist.id}: {e}")
-
-        self.message_user(
-            request,
-            f"Retried {count} failed email(s).",
-        )
+            start_detached(PacketDistributionService().stream_resend_failed(packet, only=dist_ids))
+            self.message_user(
+                request,
+                f"{packet.title}: resending {len(dist_ids)} failed email(s) in the background. "
+                "The packet's page shows each team's result.",
+            )

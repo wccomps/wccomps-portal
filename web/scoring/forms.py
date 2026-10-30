@@ -93,6 +93,25 @@ class RedTeamIPPoolForm(forms.ModelForm[RedTeamIPPool]):
         return "\n".join(valid_ips)
 
 
+class AccessLevelSelect(forms.RadioSelect):
+    """The access level choices, each carrying the points it scores for the page's running total."""
+
+    def create_option(
+        self,
+        name: str,
+        value: object,
+        label: int | str,
+        selected: bool,
+        index: int,
+        subindex: int | None = None,
+        attrs: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        option = super().create_option(name, value, label, selected, index, subindex, attrs)
+        outcome = RedTeamScore.ACCESS_OUTCOMES.get(str(value))
+        cast(dict[str, object], option["attrs"])["data-points"] = outcome.points if outcome else 0
+        return option
+
+
 class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
     """Form for red team to submit vulnerability findings."""
 
@@ -119,8 +138,7 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
             "destination_ip_template",
             "universally_attempted",
             "persistence_established",
-            "root_access",
-            "user_access",
+            "access_level",
             "privilege_escalation",
             "credentials_recovered",
             "sensitive_files_recovered",
@@ -142,6 +160,7 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
             "destination_ip_template": forms.HiddenInput,
             "source_ip": forms.TextInput(attrs={"placeholder": "e.g., 10.0.0.5"}),
             "source_ip_pool": forms.Select(),
+            "access_level": AccessLevelSelect(),
         }
         labels = {
             "attack_type": "Attack Type",
@@ -212,8 +231,6 @@ class RedTeamScoreForm(forms.ModelForm[RedTeamScore]):
             field = self.fields[outcome.field]
             field.label = outcome.display
             field.widget.attrs["data-points"] = outcome.points
-            if outcome.access_tier is not None:
-                field.widget.attrs["data-access-tier"] = outcome.access_tier
 
     def clean(self) -> dict[str, object]:
         """Validate that either source_ip or source_ip_pool is provided."""

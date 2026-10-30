@@ -5,6 +5,7 @@ from django.db import models
 from django.utils import timezone
 
 from core.models import Approvable
+from core.stored_files import StoredFile
 
 
 def parse_playbook_steps(text: str) -> list[str]:
@@ -144,13 +145,11 @@ class Ticket(Approvable):
         return f"{self.ticket_number} (Team {self.team.team_number})"
 
 
-class TicketAttachment(models.Model):
+class TicketAttachment(StoredFile):
     MAX_SIZE = 10 * 1024 * 1024  # 10MB, from the web or a ticket's Discord thread
+    DEFAULT_NAME = "attachment"
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="attachments")
-    file_data = models.BinaryField()
-    filename = models.CharField(max_length=255)
-    mime_type = models.CharField(max_length=100)
     uploaded_by = models.CharField(max_length=100)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
@@ -159,27 +158,6 @@ class TicketAttachment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.filename} ({self.ticket.ticket_number})"
-
-    @classmethod
-    def store(cls, ticket: Ticket, data: bytes, filename: str, uploaded_by: str) -> TicketAttachment:
-        """Save an attachment with its filename cleaned and its MIME type derived from its bytes (or filename)."""
-        from core.stored_files import clean_name, stored_type
-
-        cleaned = clean_name(filename, "attachment")
-        return cls.objects.create(
-            ticket=ticket,
-            file_data=data,
-            filename=cleaned,
-            mime_type=stored_type(data, cleaned),
-            uploaded_by=uploaded_by,
-        )
-
-    @classmethod
-    async def astore(cls, ticket: Ticket, data: bytes, filename: str, uploaded_by: str) -> TicketAttachment:
-        """Async counterpart of store."""
-        from asgiref.sync import sync_to_async
-
-        return await sync_to_async(cls.store)(ticket, data, filename, uploaded_by)
 
 
 class TicketComment(models.Model):

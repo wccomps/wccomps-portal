@@ -10,7 +10,6 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from core.auth_utils import get_user_team, require_permission
-from core.stored_files import clean_name, file_response, stored_type
 from core.utils import ndjson_done, run_detached
 from team.models import Team
 
@@ -68,10 +67,7 @@ def download_packet(request: HttpRequest, packet_id: int) -> HttpResponse:
         distribution.record_download(user.username)
         packet = distribution.packet
 
-    response = file_response(bytes(packet.file_data), packet.filename, inline=False)
-    response["Content-Length"] = packet.file_size
-
-    return response
+    return packet.serve(inline=False)
 
 
 @require_GET
@@ -109,29 +105,15 @@ def upload_packet(request: HttpRequest) -> HttpResponse:
     form = PacketUploadForm(request.POST, request.FILES) if request.method == "POST" else PacketUploadForm()
     if form.is_valid():
         title = form.cleaned_data["title"]
-        notes = form.cleaned_data["notes"]
-        send_via_email = form.cleaned_data["send_via_email"]
-        web_access_enabled = form.cleaned_data["web_access_enabled"]
-        team_extras = form.cleaned_data["team_extras"]
-        uploaded_file = form.cleaned_data["packet_file"]
-
-        file_data = uploaded_file.read()
-        filename = clean_name(uploaded_file.name, "unnamed")
-        mime_type = stored_type(file_data, filename)
-
-        Packet.objects.create(
-            title=title,
-            file_data=file_data,
-            filename=filename,
-            mime_type=mime_type,
-            file_size=len(file_data),
-            status="draft",
-            send_via_email=send_via_email,
-            web_access_enabled=web_access_enabled,
-            uploaded_by=request.user.username,
-            notes=notes,
-            team_extras=team_extras,
-        )
+        packet = form.cleaned_data["packet_file"]
+        packet.title = title
+        packet.status = "draft"
+        packet.send_via_email = form.cleaned_data["send_via_email"]
+        packet.web_access_enabled = form.cleaned_data["web_access_enabled"]
+        packet.uploaded_by = request.user.username
+        packet.notes = form.cleaned_data["notes"]
+        packet.team_extras = form.cleaned_data["team_extras"]
+        packet.save()
 
         messages.success(
             request,

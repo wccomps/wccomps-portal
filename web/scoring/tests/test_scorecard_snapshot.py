@@ -58,7 +58,7 @@ def scored_teams():
         source_ip="10.0.0.5",
         affected_boxes=["web01", "db01"],
         affected_service="ssh",
-        root_access=True,
+        access_level="root",
         credentials_recovered=True,
         points_per_team=Decimal("150.00"),
         submitted_by=red_user,

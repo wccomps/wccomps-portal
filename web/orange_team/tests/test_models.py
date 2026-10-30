@@ -156,3 +156,22 @@ class TestOrangeCheckWindow:
             == "closed"
         )
         assert OrangeCheck.objects.create(title="dft", description="d").window_state == "unscheduled"
+
+
+def test_the_status_table_says_where_each_status_shows_and_leads() -> None:
+    """A rejected assignment goes back to the teamer's dashboard, to save and resubmit; the lead can reassign it."""
+    from orange_team.models import OrangeAssignment
+
+    assert set(OrangeAssignment.FINISHED_STATUSES) == {"approved"}
+    assert set(OrangeAssignment.REVIEW_STATUSES) == {"in_progress", "submitted"}
+    assert set(OrangeAssignment.SCORED_STATUSES) == {"submitted", "approved"}
+    assert {status for status, row in OrangeAssignment.STATUSES.items() if row.unstarted} == {"pending"}
+    moves = {status: dict(row.moves) for status, row in OrangeAssignment.STATUSES.items()}
+    assert moves == {
+        "pending": {"save": "in_progress", "submit": "submitted", "reassign": "pending"},
+        "in_progress": {"save": "in_progress", "submit": "submitted", "reassign": "in_progress"},
+        "submitted": {"approve": "approved", "reject": "rejected"},
+        "approved": {},
+        "rejected": {"save": "rejected", "submit": "submitted", "reassign": "rejected"},
+    }
+    assert [status for status, _label in OrangeAssignment.STATUS_CHOICES] == list(OrangeAssignment.STATUSES)

@@ -28,8 +28,7 @@ from registration.models import (
     normalize_school_name,
 )
 from registration.services import SchoolListRow, import_school_list
-from scoring.models import ScoringTemplate
-from scoring.screenshots import read_screenshot
+from scoring.models import RedTeamScreenshot, ScoringTemplate
 
 from core.admin_views.competition import TIMEZONE_CHOICES
 from core.forms import SchoolInfoEditForm
@@ -257,7 +256,7 @@ def test_an_upload_name_is_stored_without_control_or_bidi_characters(
         for attachment in TicketAttachment.objects.filter(ticket=ticket):
             assert attachment.filename and not _disguising(attachment.filename)
     upload.seek(0)
-    _, stored_name, _ = read_screenshot(upload)
+    stored_name = RedTeamScreenshot.from_upload(upload).filename
     assert stored_name and not _disguising(stored_name)
 
 

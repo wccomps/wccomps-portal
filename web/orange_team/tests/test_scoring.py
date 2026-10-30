@@ -80,6 +80,22 @@ class TestAssignmentSave:
         )
         assert response.status_code == 400
 
+    def test_the_old_volunteers_autosave_after_a_reassignment_is_refused(self) -> None:
+        user, assignment, c1, c2, r1, r2 = self._setup()
+        new_volunteer = User.objects.create_user(username="orange2", password="test")
+        OrangeAssignment.objects.filter(pk=assignment.pk).update(user=new_volunteer)
+        client = Client()
+        client.force_login(user)
+        response = client.post(
+            f"/orange-team/assignments/{assignment.pk}/save/",
+            data=json.dumps({"criterion_id": c1.pk, "met": True}),
+            content_type="application/json",
+        )
+        assert response.status_code == 404
+        assignment.refresh_from_db()
+        r1.refresh_from_db()
+        assert (assignment.user, assignment.status, r1.met) == (new_volunteer, "pending", False)
+
     def test_other_user_cannot_save(self) -> None:
         user, assignment, c1, c2, r1, r2 = self._setup()
         other = User.objects.create_user(username="orange2", password="test")

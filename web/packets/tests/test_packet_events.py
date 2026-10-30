@@ -5,10 +5,11 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django.test import Client
+from django.test import Client, TestCase
 from django.urls import reverse
 from registration.models import Event
 
+from core.tests.detached import join_detached_runs
 from packets.models import Packet, PacketDistribution
 from packets.services import NO_EVENT_OPEN, NO_OPEN_EVENT, PacketDistributionService
 
@@ -237,3 +238,87 @@ def test_resending_a_packet_sent_before_events_were_recorded_is_refused(current_
     assert refusal is not None
     assert "earlier event" not in refusal
     assert "before events were recorded" in refusal
+
+
+def _admin_retry(*dists):
+    from django.contrib import admin
+
+    from packets.admin import PacketDistributionAdmin
+
+    model_admin = PacketDistributionAdmin(PacketDistribution, admin.site)
+    with patch.object(model_admin, "message_user") as message_user, TestCase.captureOnCommitCallbacks(execute=True):
+        model_admin.retry_failed_emails(MagicMock(), PacketDistribution.objects.filter(pk__in=[d.pk for d in dists]))
+    return [call.args[1] for call in message_user.call_args_list]
+
+
+@pytest.mark.django_db(transaction=True)  # the resend runs in threads of its own, as in production
+def test_the_admin_retry_records_a_repeat_failure(current_event, team_1):
+    dist = PacketDistribution.objects.create(
+        packet=_packet(current_event), team=team_1, email_status="failed", email_error_message="Earlier failure"
+    )
+
+    with patch.object(PacketDistributionService, "send_packet_email", side_effect=RuntimeError("Mail server down")):
+        _admin_retry(dist)
+        join_detached_runs()
+
+    dist.refresh_from_db()
+    assert (dist.email_status, dist.email_error_message) == ("failed", "Mail server down")
+
+
+def test_the_admin_retry_resends_only_the_selected_failed_emails(current_event, team_1):
+    from team.models import Team
+
+    packet = _packet(current_event)
+    chosen = PacketDistribution.objects.create(packet=packet, team=team_1, email_status="failed")
+    other_team = Team.objects.create(team_number=2, team_name="Team 02")
+    PacketDistribution.objects.create(packet=packet, team=other_team, email_status="failed")
+
+    with patch.object(PacketDistributionService, "send_packet_email") as send:
+        said = _admin_retry(chosen)
+
+    assert [(call.args[0].pk, call.args[0].email_status) for call in send.call_args_list] == [(chosen.pk, "pending")]
+    assert "Rules" in said[0]
+
+
+def test_the_admin_retry_sends_in_the_background(current_event, team_1):
+    from packets import admin as packets_admin
+
+    dist = PacketDistribution.objects.create(packet=_packet(current_event), team=team_1, email_status="failed")
+
+    with (
+        patch.object(packets_admin, "start_detached") as start,
+        patch.object(PacketDistributionService, "send_packet_email") as send,
+    ):
+        _admin_retry(dist)
+
+    send.assert_not_called()
+    assert start.call_count == 1
+
+
+@pytest.mark.django_db(transaction=True)  # the sends run in threads of their own, as in production
+def test_two_overlapping_resends_send_each_email_once(current_event, team_1):
+    from django.db.models import QuerySet
+
+    from team.models import Team
+
+    packet = _packet(current_event)
+    team_2 = Team.objects.create(team_number=2, team_name="Team 02")
+    for team in (team_1, team_2):
+        PacketDistribution.objects.create(packet=packet, team=team, email_status="failed")
+    sent: list[int] = []
+    original_update = QuerySet.update
+    overlapped = []
+
+    def update(self, **kwargs):
+        if self.model is PacketDistribution and not overlapped:
+            overlapped.append(True)
+            list(PacketDistributionService().stream_resend_failed(packet))
+        return original_update(self, **kwargs)
+
+    with (
+        patch.object(QuerySet, "update", update),
+        patch.object(PacketDistributionService, "send_packet_email", side_effect=lambda dist: sent.append(dist.pk)),
+    ):
+        list(PacketDistributionService().stream_resend_failed(packet))
+
+    assert sorted(sent) == sorted(packet.distributions.values_list("pk", flat=True))

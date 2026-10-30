@@ -5,7 +5,10 @@ import re
 from django import forms
 
 from core.form_errors import ask_for_the_file_again
+from core.stored_files import UploadError
 from team.models import SchoolInfo
+
+from .models import Packet
 
 TEAM_EXTRAS_HELP = "Give a 'team' column and a row per team, with its number (like Team01 or 3)."
 
@@ -72,12 +75,11 @@ class PacketUploadForm(forms.Form):
         text: str = self.cleaned_data["team_extras"]
         return parse_team_extras(text) if text else {}
 
-    def clean_packet_file(self) -> object:
-        f = self.cleaned_data["packet_file"]
-        max_size = 25 * 1024 * 1024
-        if f.size and f.size > max_size:
-            raise forms.ValidationError("File size must not exceed 25 MB.")
-        return f
+    def clean_packet_file(self) -> Packet:
+        try:
+            return Packet.from_upload(self.cleaned_data["packet_file"])
+        except UploadError as refused:
+            raise forms.ValidationError(str(refused)) from None
 
     def clean(self) -> dict[str, object] | None:
         cleaned = super().clean()

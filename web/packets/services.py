@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Generator, Iterator
+from collections.abc import Collection, Generator, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.conf import settings
@@ -307,37 +307,36 @@ class PacketDistributionService:
         sent, failed = yield from self._stream_parallel_send(distributions)
         yield ndjson_done(f"Sent {sent}, failed {failed}" if failed else f"Distributed to {sent} teams", failed == 0)
 
-    def _stream_resend(self, packet: Packet, status_filter: str, label: str) -> Iterator[str]:
+    def _stream_resend(self, packet: Packet, status_filter: str, only: Collection[int] | None = None) -> Iterator[str]:
         """Resend distributions matching a status filter, with parallel streaming progress."""
         if refusal := check_resendable(packet):
             yield ndjson_done(refusal, success=False)
             return
-        dists = list(
-            PacketDistribution.objects.filter(packet=packet, email_status=status_filter).select_related("team")
-        )
-        total = len(dists)
-
-        if total == 0:
-            yield ndjson_done(f"No {label} distributions to resend")
+        matching = PacketDistribution.objects.filter(packet=packet, email_status=status_filter)
+        if only is not None:
+            matching = matching.filter(pk__in=only)
+        # Claimed by an update conditional on its status: this guards only a resend of failures, not of pending
+        claimed = [
+            pk
+            for pk in matching.values_list("pk", flat=True)
+            if matching.filter(pk=pk).update(email_status="pending", email_error_message="")
+        ]
+        dists = list(PacketDistribution.objects.filter(pk__in=claimed).select_related("team"))
+        if not dists:
+            yield ndjson_done(f"No {status_filter} distributions to resend")
             return
-
-        PacketDistribution.objects.filter(packet=packet, email_status=status_filter).update(
-            email_status="pending", email_error_message=""
-        )
-        for dist in dists:
-            dist.refresh_from_db()
 
         sent, still_failed = yield from self._stream_parallel_send(dists)
         yield ndjson_done(
             f"Resent {sent}, failed {still_failed}" if still_failed else f"Resent to {sent} teams", still_failed == 0
         )
 
-    def stream_resend_failed(self, packet: Packet) -> Iterator[str]:
-        yield from self._stream_resend(packet, "failed", "failed")
+    def stream_resend_failed(self, packet: Packet, only: Collection[int] | None = None) -> Iterator[str]:
+        yield from self._stream_resend(packet, "failed", only)
 
     def stream_retry_pending(self, packet: Packet) -> Iterator[str]:
         """Retry pending distributions (from interrupted sends) with streaming progress."""
-        yield from self._stream_resend(packet, "pending", "pending")
+        yield from self._stream_resend(packet, "pending")
 
     @transaction.atomic
     def _distributions_for_new_teams(self, packet: Packet) -> list[PacketDistribution]:

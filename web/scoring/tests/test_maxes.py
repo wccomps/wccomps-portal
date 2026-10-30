@@ -1,12 +1,11 @@
 from decimal import Decimal
 
 import pytest
-from orange_team.models import OrangeCheck
+from orange_team.models import OrangeCheck, OrangeCheckCriterion
 from quotient.client import Inject, inject_points
 
 from scoring.maxes import (
     inject_max_from_titles,
-    orange_max_from_checks,
     service_max_from_details,
     set_template_max,
 )
@@ -106,22 +105,25 @@ def test_set_template_max_skips_without_template() -> None:
 
 def test_orange_max_sums_check_max_scores() -> None:
     OrangeCheck.objects.create(title="A", max_points=50)
-    OrangeCheck.objects.create(title="B", max_points=120)
-    assert orange_max_from_checks() == Decimal("170")
+    check = OrangeCheck.objects.create(title="B", max_points=120)
+    OrangeCheckCriterion.objects.create(orange_check=check, label="Only", points=30)
+    assert OrangeCheck.objects.total_max() == 80
+    assert ScoringTemplate().orange_max == Decimal("80")
 
 
-def test_orange_max_none_without_checks() -> None:
-    assert orange_max_from_checks() is None
+def test_orange_max_is_zero_without_checks() -> None:
+    assert ScoringTemplate().orange_max == Decimal("0")
 
 
-def test_saving_a_check_refreshes_orange_max() -> None:
-    ScoringTemplate.objects.create(
-        service_weight=Decimal("40"), inject_weight=Decimal("40"), orange_weight=Decimal("20"), orange_max=Decimal("1")
-    )
-    OrangeCheck.objects.create(title="A", max_points=50)
-    assert ScoringTemplate.objects.first().orange_max == Decimal("50")  # post_save signal
-    OrangeCheck.objects.create(title="B", max_points=120)
-    assert ScoringTemplate.objects.first().orange_max == Decimal("170")
+def test_orange_max_follows_every_change_to_the_checks() -> None:
+    template = ScoringTemplate.objects.create()
+    check = OrangeCheck.objects.create(title="A", max_points=50)
+    assert ScoringTemplate.objects.get().orange_max == Decimal("50")
+    OrangeCheck.objects.filter(pk=check.pk).update(max_points=70)
+    OrangeCheck.objects.bulk_create([OrangeCheck(title="B", max_points=5)])
+    assert ScoringTemplate.objects.get(pk=template.pk).orange_max == Decimal("75")
+    OrangeCheck.objects.all().delete()
+    assert ScoringTemplate.objects.get(pk=template.pk).orange_max == Decimal("0")
 
 
 def test_config_form_shows_maxes_read_only() -> None:

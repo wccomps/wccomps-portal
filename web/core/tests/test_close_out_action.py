@@ -1,7 +1,6 @@
 """The competition page's Close Out Event: typed confirmation, streamed progress, and the module it shows."""
 
 import json
-import threading
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
@@ -15,6 +14,7 @@ from scoring.models import InjectScore, ServiceScore
 
 from core.admin_views.competition import CLOSE_OUT_CHECK_FAILED
 from core.models import CompetitionConfig, DiscordTask
+from core.tests.detached import join_detached_runs
 from team.models import Team
 
 # Outside a transaction, as production runs it: run_detached runs the close-out in its own thread, and close_out_event
@@ -34,9 +34,7 @@ def client(gold_team_user):
 def _close_out(client, **data):
     response = client.post(reverse("admin_competition_action"), {"action": "close_out_event", **data})
     lines = [json.loads(line) for line in b"".join(response.streaming_content).decode().splitlines()]
-    for thread in threading.enumerate():
-        if thread.name == "run-detached":
-            thread.join()
+    join_detached_runs()
     return lines
 
 

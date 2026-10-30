@@ -1,6 +1,6 @@
 """An orange check's points are limited on the models, so the admin, the lead's pages and the scoring sum agree.
 
-Every check's maximum is summed into ScoringTemplate.orange_max, a numeric(10, 2) column.
+Every check's maximum counts toward the orange maximum, which is limited to MAX_TOTAL_POINTS.
 """
 
 from collections.abc import Callable
@@ -9,9 +9,8 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.test import Client
-from scoring.models import ScoringTemplate
 
-from orange_team.models import MAX_POINTS, OrangeCheck, OrangeCheckCriterion
+from orange_team.models import MAX_POINTS, MAX_TOTAL_POINTS, OrangeCheck, OrangeCheckCriterion
 
 pytestmark = pytest.mark.django_db
 
@@ -27,11 +26,8 @@ def test_a_check_or_criterion_over_the_limit_is_refused_wherever_it_is_edited() 
 
 @pytest.fixture
 def checks_at_the_scoring_limit(db: object) -> None:
-    """Checks whose points together fill ScoringTemplate.orange_max (the signal isn't run by bulk_create)."""
-    ScoringTemplate.objects.first() or ScoringTemplate.objects.create()
-    field = ScoringTemplate._meta.get_field("orange_max")
-    capacity = 10 ** (field.max_digits - field.decimal_places) - 1
-    count, rest = divmod(capacity, MAX_POINTS)
+    """Checks whose points together reach MAX_TOTAL_POINTS."""
+    count, rest = divmod(MAX_TOTAL_POINTS, MAX_POINTS)
     OrangeCheck.objects.bulk_create(
         [OrangeCheck(title=f"C{n}", description="", max_points=MAX_POINTS) for n in range(count)]
         + [OrangeCheck(title="Rest", description="", max_points=rest)]

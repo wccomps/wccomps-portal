@@ -1,13 +1,19 @@
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import IntegrityError, models, transaction
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 # The most a check, or one of its criteria, is worth
 MAX_POINTS = 10_000
+# The previous release writes the checks' sum to scoringtemplate.orange_max, numeric(10, 2), until that column goes
+MAX_TOTAL_POINTS = 99_999_999
 
 
 class OrangeCheckIn(models.Model):
@@ -50,8 +56,30 @@ class OrangeCheckIn(models.Model):
                 pass
 
 
+def _max_score() -> Coalesce:
+    """check_worth as an expression over a check."""
+    criteria_total = (
+        OrangeCheckCriterion.objects.filter(orange_check=models.OuterRef("pk"))
+        .values("orange_check")
+        .annotate(total=models.Sum("points"))
+        .values("total")
+    )
+    return Coalesce(models.Subquery(criteria_total), models.F("max_points"), output_field=models.IntegerField())
+
+
+class OrangeCheckQuerySet(models.QuerySet["OrangeCheck"]):
+    def with_max_score(self) -> OrangeCheckQuerySet:
+        """Each check with its maximum, which max_score then reads without a query."""
+        return self.annotate(annotated_max_score=_max_score())
+
+    def total_max(self) -> int:
+        return sum(check.max_score for check in self.with_max_score())
+
+
 class OrangeCheck(models.Model):
     """A check template with rubric criteria, created by a lead."""
+
+    objects = OrangeCheckQuerySet.as_manager()
 
     title = models.CharField(max_length=200)
     description = models.TextField(help_text="Steps/instructions for the orange teamer")
@@ -74,16 +102,18 @@ class OrangeCheck(models.Model):
 
     def clean(self) -> None:
         # Its criteria (when it has any) are what it's worth; their own clean checks a change to them
-        stored = self.criteria.aggregate(total=models.Sum("points"))["total"] if self.pk else None
-        if problem := scores_total_problem(self.pk, self.max_points if stored is None else int(stored)):
+        if problem := scores_total_problem(self.pk, check_worth(self._criteria_points(), self.max_points)):
             raise ValidationError(problem)
 
     @property
     def max_score(self) -> int:
-        criteria_total = self.criteria.aggregate(total=models.Sum("points"))["total"]
-        if criteria_total is not None:
-            return int(criteria_total)
-        return self.max_points
+        annotated = self.__dict__.get("annotated_max_score")
+        if annotated is not None:
+            return int(annotated)
+        return check_worth(self._criteria_points(), self.max_points)
+
+    def _criteria_points(self) -> list[int]:
+        return [] if self._state.adding else list(self.criteria.values_list("points", flat=True))
 
     @property
     def window_end(self) -> datetime | None:
@@ -115,20 +145,22 @@ class OrangeCheck(models.Model):
         return "unscheduled"
 
 
+def check_worth(criteria_points: Sequence[int], max_points: int) -> int:
+    """What a check is worth: its criteria's points summed, or max_points when it has no criteria."""
+    return sum(criteria_points) if criteria_points else max_points
+
+
 def scores_total_problem(check_pk: int | None, max_score: int) -> str:
     """Why the checks' scores, with this check (None: a new one) worth max_score, can't all be counted, or ''.
 
-    The scoring sums every check's maximum into ScoringTemplate.orange_max, a numeric column of limited size.
+    All checks together are limited to MAX_TOTAL_POINTS while the previous release can still store their sum.
     """
-    from scoring.models import ScoringTemplate
-
-    field = ScoringTemplate._meta.get_field("orange_max")
-    capacity = 10 ** (getattr(field, "max_digits", 0) - getattr(field, "decimal_places", 0)) - 1
     others = OrangeCheck.objects.all() if check_pk is None else OrangeCheck.objects.exclude(pk=check_pk)
-    others = others.annotate(criteria_total=models.Sum("criteria__points"))
-    total = max_score + sum(t if t is not None else m for m, t in others.values_list("max_points", "criteria_total"))
-    if total > capacity:
-        return f"All checks together would be worth {total} points; the scoring can count at most {capacity}."
+    total = max_score + others.total_max()
+    if total > MAX_TOTAL_POINTS:
+        return (
+            f"All checks together would be worth {total} points; together they can be worth at most {MAX_TOTAL_POINTS}."
+        )
     return ""
 
 
@@ -147,33 +179,86 @@ class OrangeCheckCriterion(models.Model):
     def clean(self) -> None:
         if not self.orange_check_id:  # a rubric row the check form checks before the check exists
             return
-        others = self.orange_check.criteria.exclude(pk=self.pk).aggregate(total=models.Sum("points"))["total"] or 0
-        if problem := scores_total_problem(self.orange_check_id, int(others) + self.points):
+        others = list(self.orange_check.criteria.exclude(pk=self.pk).values_list("points", flat=True))
+        worth = check_worth([*others, self.points], self.orange_check.max_points)
+        if problem := scores_total_problem(self.orange_check_id, worth):
             raise ValidationError(problem)
 
     def __str__(self) -> str:
         return f"{self.label} ({self.points} pts)"
 
 
+Action = Literal["save", "submit", "reassign", "approve", "reject"]
+
+
 class OrangeAssignmentQuerySet(models.QuerySet["OrangeAssignment"]):
     def unfinished(self) -> OrangeAssignmentQuerySet:
-        """Assignments still to score or review: approved and rejected ones are done."""
+        """Assignments still on the teamer's dashboard (OrangeAssignment.STATUSES)."""
         return self.exclude(status__in=OrangeAssignment.FINISHED_STATUSES)
+
+    def locked_for(self, action: Action, pk: int) -> tuple[OrangeAssignment, bool]:
+        """Lock the assignment (DoesNotExist when this queryset hasn't it) and move it by action, unsaved, when its
+        status allows action; whether it did. Call it in a transaction."""
+        assignment = self.select_for_update(of=("self",)).get(pk=pk)
+        moved_to = assignment.status_info.moves.get(action)
+        if moved_to is not None:
+            assignment.status = moved_to
+        return assignment, moved_to is not None
+
+
+@dataclass(frozen=True)
+class AssignmentStatus:
+    label: str
+    on_dashboard: bool
+    in_review_queue: bool
+    scored: bool  # its score stands: exported, counted as scored, kept in step with a rubric edit
+    unstarted: bool  # auto-assign and rebalance may hand it to another volunteer
+    returned: bool  # sent back to the volunteer by the lead, whose notes say why
+    moves: Mapping[Action, str]
 
 
 class OrangeAssignment(models.Model):
     """Assignment of an orange teamer to score a specific team on a check."""
 
     objects = OrangeAssignmentQuerySet.as_manager()
-    FINISHED_STATUSES = ("approved", "rejected")
 
-    STATUS_CHOICES = [
-        ("pending", "Pending"),
-        ("in_progress", "In Progress"),
-        ("submitted", "Submitted"),
-        ("approved", "Approved"),
-        ("rejected", "Rejected"),
-    ]
+    STATUSES: Mapping[str, AssignmentStatus] = {
+        "pending": AssignmentStatus(
+            "Pending",
+            True,
+            False,
+            False,
+            True,
+            False,
+            {"save": "in_progress", "submit": "submitted", "reassign": "pending"},
+        ),
+        "in_progress": AssignmentStatus(
+            "In Progress",
+            True,
+            True,
+            False,
+            False,
+            False,
+            {"save": "in_progress", "submit": "submitted", "reassign": "in_progress"},
+        ),
+        "submitted": AssignmentStatus(
+            "Submitted", True, True, True, False, False, {"approve": "approved", "reject": "rejected"}
+        ),
+        "approved": AssignmentStatus("Approved", False, False, True, False, False, {}),
+        "rejected": AssignmentStatus(
+            "Rejected",
+            True,
+            False,
+            False,
+            False,
+            True,
+            {"save": "rejected", "submit": "submitted", "reassign": "rejected"},
+        ),
+    }
+    STATUS_CHOICES = [(status, row.label) for status, row in STATUSES.items()]
+    FINISHED_STATUSES = tuple(status for status, row in STATUSES.items() if not row.on_dashboard)
+    REVIEW_STATUSES = tuple(status for status, row in STATUSES.items() if row.in_review_queue)
+    SCORED_STATUSES = tuple(status for status, row in STATUSES.items() if row.scored)
 
     orange_check = models.ForeignKey(OrangeCheck, on_delete=models.CASCADE, related_name="assignments")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="orange_assignments")
@@ -197,6 +282,15 @@ class OrangeAssignment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.orange_check.title} for Team {self.team.team_number} ({self.user.username})"
+
+    @property
+    def status_info(self) -> AssignmentStatus:
+        return self.STATUSES[self.status]
+
+    @property
+    def actions(self) -> frozenset[str]:
+        """What its status allows, for templates."""
+        return frozenset(self.status_info.moves)
 
     def calculate_score(self) -> int:
         return self.results.filter(met=True).aggregate(total=models.Sum("criterion__points"))["total"] or 0

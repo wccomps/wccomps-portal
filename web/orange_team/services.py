@@ -13,6 +13,11 @@ from orange_team.models import (
 from team.models import Team
 
 
+def _lock_check(check: OrangeCheck) -> None:
+    """Hold the check row for the transaction: the one point auto-assign and a rubric edit order on."""
+    list(OrangeCheck.objects.select_for_update().filter(pk=check.pk).values_list("pk", flat=True))
+
+
 def auto_assign_check(
     check: OrangeCheck,
     checked_in_users: list[User],
@@ -28,13 +33,14 @@ def auto_assign_check(
     if not checked_in_users:
         return 0
     n = len(checked_in_users)
-    criteria = list(check.criteria.all())
     count = 0
     with transaction.atomic():
-        existing = {a.team_id: a for a in check.assignments.select_for_update()}
+        _lock_check(check)
+        criteria = list(check.criteria.all())
+        existing = {a.team_id: a for a in check.assignments.select_for_update().order_by("pk")}
         for j, team in enumerate(sorted(teams, key=lambda t: t.team_number)):
             current = existing.get(team.id)
-            if current is not None and current.status != "pending":
+            if current is not None and not current.status_info.unstarted:
                 continue
             assignee = checked_in_users[(j + rotation_offset) % n]
             if current is not None:
@@ -57,14 +63,15 @@ def auto_assign_check(
 
 
 def rebalance_unstarted(check: OrangeCheck, checked_in_users: list[User]) -> int:
-    """Redistribute only pending assignments evenly across the given volunteers."""
+    """Redistribute only unstarted assignments (OrangeAssignment.STATUSES) evenly across the given volunteers."""
     if not checked_in_users:
         return 0
     n = len(checked_in_users)
     count = 0
     with transaction.atomic():
-        pending = list(check.assignments.select_for_update().filter(status="pending").order_by("team__team_number"))
-        for i, assignment in enumerate(pending):
+        locked = check.assignments.select_for_update(of=("self",)).select_related("team").order_by("pk")
+        unstarted = sorted((a for a in locked if a.status_info.unstarted), key=lambda a: a.team.team_number)
+        for i, assignment in enumerate(unstarted):
             assignee = checked_in_users[i % n]
             if assignment.user_id != assignee.id:
                 assignment.user = assignee
@@ -92,11 +99,12 @@ def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) ->
     deleted along with their results.
     """
     with transaction.atomic():
+        # The check, then its assignments, then criteria and results: auto-assign and autosave lock in this order
+        _lock_check(check)
+        assignments = list(check.assignments.select_for_update().order_by("pk"))
         existing = {c.pk: c for c in check.criteria.select_for_update()}
         posted_ids = {c["id"] for c in criteria if c["id"] in existing}
         check.criteria.exclude(pk__in=posted_ids).delete()
-
-        assignments = list(check.assignments.select_for_update())
         for c in criteria:
             criterion = existing.get(c["id"]) if c["id"] is not None else None
             if criterion is not None:
@@ -114,7 +122,7 @@ def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) ->
 
         has_criteria = check.criteria.exists()
         for assignment in assignments:
-            if assignment.status in ("submitted", "approved"):
+            if assignment.status_info.scored:
                 if has_criteria:
                     assignment.score = assignment.calculate_score()
                     assignment.save(update_fields=["score"])

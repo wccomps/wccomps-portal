@@ -21,6 +21,9 @@ class TicketAttachmentInline(admin.TabularInline[TicketAttachment, Ticket]):
     readonly_fields = ["uploaded_at", "uploaded_by", "filename", "mime_type"]
     fields = ["filename", "mime_type", "uploaded_by", "uploaded_at"]
 
+    def has_add_permission(self, request: HttpRequest, obj: Ticket | None = None) -> bool:
+        return False
+
 
 class TicketCommentInline(admin.TabularInline[TicketComment, Ticket]):
     model = TicketComment
@@ -215,7 +218,10 @@ class TicketAttachmentAdmin(PortalModelAdmin[TicketAttachment]):
     list_filter = ["uploaded_at"]
     search_fields = ["filename", "ticket__ticket_number"]
     ordering = ["-uploaded_at"]
-    readonly_fields = ["uploaded_at"]
+    readonly_fields = ["filename", "mime_type", "uploaded_at"]
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
 
 
 @admin.register(TicketComment)
