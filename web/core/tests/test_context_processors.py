@@ -139,9 +139,7 @@ RENDER_RE = re.compile(r"""render\s*\(\s*request\s*,\s*["']([^"']+)["']""")
 HELPER_CALL_RE = re.compile(r"\b(_\w+)\s*\(")
 PRIMARY_NAV_ACTIVE_RE = re.compile(r"""nav_active\s*==\s*["']([^"']+)["']""")
 NAV_MAPPING_EXCEPTIONS: dict[str, str] = {}
-NAV_TARGET_EXCEPTIONS: dict[str, str] = {
-    "registration_edit": "Public token-authenticated school registration edit page outside the staff primary nav",
-}
+NAV_TARGET_EXCEPTIONS: dict[str, str] = {}
 
 
 def _view_renders(view: object) -> set[str]:

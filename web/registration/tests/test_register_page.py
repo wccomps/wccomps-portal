@@ -5,13 +5,11 @@ import re
 
 import pytest
 from django import forms
-from django.db import connection
 from django.test import Client
-from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from ..forms import RegistrationForm
-from ..models import Event, Season, TeamRegistration
+from ..models import Event, Season
 
 pytestmark = pytest.mark.django_db
 
@@ -107,19 +105,6 @@ def test_the_region_rule_shows_beside_the_events(season, event):
     assert "id_events_error" in _describedby(_tag(html, r"<fieldset[^>]*>"))
 
 
-def test_the_region_rule_shows_beside_the_events_on_the_edit_page(season, event):
-    qualifier = Event.objects.create(
-        season=season, name="Qualifier", event_type="qualifier", date="2026-02-15", registration_open=True
-    )
-    registration = TeamRegistration.objects.create(school_name="Example School", region="wrccdc")
-    url = reverse("registration_edit", args=[registration.edit_token])
-    html = Client().post(url, {"region": "mwccdc", "events": [str(qualifier.pk)]}).content.decode()
-
-    error = _tag(html, r'(?s)id="id_events_error"[^>]*>.*?</')
-    assert "Please remove: Qualifier" in error
-    assert html.count("Please remove: Qualifier") == 1
-
-
 def _summary(html: str) -> str:
     return _tag(html, r'(?s)<div[^>]*class="[^"]*error-summary[^"]*"[^>]*>.*?</div>')
 
@@ -180,21 +165,3 @@ def test_open_events_are_card_checkboxes_that_keep_a_tick(event):
     assert re.search(rf'<input type="checkbox" name="events" value="{event.pk}"[^>]*checked', card)
     assert ">Invitational 1<" in card
     assert "January 15, 2026" in card
-
-
-def test_the_edit_page_keeps_the_portal_rows(event):
-    registration = TeamRegistration.objects.create(school_name="Example School", region="wrccdc")
-    html = Client().get(reverse("registration_edit", args=[registration.edit_token])).content.decode()
-
-    assert 'class="form-row"' in html
-    assert "checkbox-item" not in html
-
-
-def test_an_edit_form_looks_up_the_open_events_once(event):
-    registration = TeamRegistration.objects.create(school_name="Example School", region="wrccdc")
-
-    with CaptureQueriesContext(connection) as queries:
-        RegistrationForm(instance=registration)
-
-    open_filter = '"registration_event"."registration_open" AND "registration_season"."is_active"'
-    assert sum(open_filter in q["sql"] for q in queries.captured_queries) == 1

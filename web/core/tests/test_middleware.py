@@ -348,16 +348,15 @@ class TestAuthentikRequiredMiddleware:
         assert response.status_code == 200
         assert response.content == b"OK"
 
-    def test_register_edit_whitelisted(self, middleware):
-        """Token-based registration edit paths should be accessible without login."""
+    def test_register_subpaths_require_auth(self, middleware):
+        """Only /register/ itself is public: a path below it asks a visitor to sign in."""
         factory = RequestFactory()
         request = factory.get("/register/edit/some-token/")
         request.user = AnonymousUser()
 
         response = middleware(request)
 
-        assert response.status_code == 200
-        assert response.content == b"OK"
+        assert response.status_code == 302
 
     def test_register_admin_paths_require_auth(self, middleware):
         """Admin paths under /register/ should require authentication."""
@@ -441,7 +440,6 @@ MIDDLEWARE_WHITELIST_EXACT = [
     "/auth/logout/",
     "/auth/link",
 ]
-MIDDLEWARE_WHITELIST_STARTSWITH = ["/register/edit/"]
 
 
 def _collect_url_paths(resolver: URLResolver | None = None, prefix: str = "/") -> list[str]:
@@ -488,9 +486,7 @@ class TestAllEndpointsRequireAuth:
 
         for path in all_paths:
             is_whitelisted = (
-                any(path.startswith(w) for w in MIDDLEWARE_WHITELIST_PREFIXES)
-                or path in MIDDLEWARE_WHITELIST_EXACT
-                or any(path.startswith(w) for w in MIDDLEWARE_WHITELIST_STARTSWITH)
+                any(path.startswith(w) for w in MIDDLEWARE_WHITELIST_PREFIXES) or path in MIDDLEWARE_WHITELIST_EXACT
             )
             if is_whitelisted:
                 continue

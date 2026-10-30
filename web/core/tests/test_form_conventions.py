@@ -50,7 +50,6 @@ BARE_FIELD = re.compile(r"{{\s*\w*form\.(\w+)\s*}}|{%\s*for\s+\w+\s+in\s+\w*form
 
 # "template:field" -> why the page renders that field's widget itself
 BARE_FIELD_EXCEPTIONS = {
-    "registration/edit.html:unoffered_events": "the events the form doesn't offer, a list on the form, not a field",
     "scoring/submit_red_finding.html:destination_ip_template": "a hidden input the page's script fills: no row to show",
 }
 

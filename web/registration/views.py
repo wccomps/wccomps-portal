@@ -1,4 +1,5 @@
 import random
+from enum import StrEnum
 from typing import cast
 
 from django.contrib import messages
@@ -7,6 +8,7 @@ from django.forms import CheckboxSelectMultiple
 from django.http import HttpRequest, HttpResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
+from django_stubs_ext import WithAnnotations
 from packets.models import packets_sent
 
 from core.auth_utils import require_permission
@@ -21,6 +23,7 @@ from .models import (
     Event,
     EventTeamAssignment,
     RegistrationEventEnrollment,
+    RegistrationOpen,
     RegistrationRateLimit,
     Season,
     TeamRegistration,
@@ -41,6 +44,37 @@ from .services import (
     season_delete_problem,
     set_team_school,
 )
+
+
+class RegistrationPageStatus(StrEnum):
+    FINALIZED = "finalized"
+    ACTIVE = "active"
+    REGISTRATION_OPEN = "registration_open"
+    REGISTRATION_CLOSED = "registration_closed"
+
+
+def registration_page_status(event: WithAnnotations[Event, RegistrationOpen]) -> RegistrationPageStatus:
+    """The event's status on the event list and the event's page: the first of these that holds."""
+    if event.is_finalized:
+        return RegistrationPageStatus.FINALIZED
+    if event.is_active:
+        return RegistrationPageStatus.ACTIVE
+    if event.registration_is_open:
+        return RegistrationPageStatus.REGISTRATION_OPEN
+    return RegistrationPageStatus.REGISTRATION_CLOSED
+
+
+EVENT_LIST_STATUS_SHOWN: dict[RegistrationPageStatus, tuple[str, str]] = {
+    RegistrationPageStatus.FINALIZED: ("Finalized", "neutral"),
+    RegistrationPageStatus.ACTIVE: ("Active", "success"),
+    RegistrationPageStatus.REGISTRATION_OPEN: ("Open", "info"),
+    RegistrationPageStatus.REGISTRATION_CLOSED: ("Closed", "warning"),
+}
+EVENT_DETAIL_STATUS_SHOWN: dict[RegistrationPageStatus, tuple[str, str]] = {
+    **EVENT_LIST_STATUS_SHOWN,
+    RegistrationPageStatus.REGISTRATION_OPEN: ("Registration Open", "info"),
+    RegistrationPageStatus.REGISTRATION_CLOSED: ("Registration Closed", "warning"),
+}
 
 
 class PublicPageRenderer(PortalFormRenderer):
@@ -86,52 +120,6 @@ def register(request: HttpRequest) -> HttpResponse:
         form = public_registration_form()
 
     return render(request, "registration/register.html", {"form": form, "error_summary": error_summary(form)})
-
-
-def registration_edit(request: HttpRequest, token: str) -> HttpResponse:
-    """Token-based self-service editing of registration."""
-    registration = get_object_or_404(TeamRegistration, edit_token=token)
-
-    # Lock after approval so school name, region (event restrictions) and contacts can't be changed or hijacked.
-    if registration.status not in ("pending", "rejected"):
-        messages.error(request, "This registration can no longer be edited after approval.")
-        return render(request, "registration/edit_locked.html", {"registration": registration})
-
-    if request.method == "POST":
-        with transaction.atomic():
-            registration = get_object_or_404(TeamRegistration.objects.select_for_update(), edit_token=token)
-            if registration.status not in ("pending", "rejected"):
-                messages.error(request, "This registration can no longer be edited after approval.")
-                return render(request, "registration/edit_locked.html", {"registration": registration})
-            form = RegistrationForm(request.POST, instance=registration)
-            if form.is_valid():
-                form.save()
-                messages.success(request, "Registration updated successfully!")
-                return redirect("registration_edit", token=token)
-    else:
-        captain = registration.contacts.filter(role="captain").first()
-        coach = registration.contacts.filter(role="coach").first()
-        enrolled_events = list(registration.event_enrollments.values_list("event_id", flat=True))
-        initial = {"events": enrolled_events, "agree_to_rules": True}
-        if captain:
-            initial.update(
-                {
-                    "captain_name": captain.name,
-                    "captain_email": captain.email,
-                    "captain_phone": captain.phone,
-                }
-            )
-        if coach:
-            initial.update(
-                {
-                    "coach_name": coach.name,
-                    "coach_email": coach.email,
-                    "coach_phone": coach.phone,
-                }
-            )
-        form = RegistrationForm(instance=registration, initial=initial)
-
-    return render(request, "registration/edit.html", {"form": form, "registration": registration})
 
 
 @require_permission("gold_team")
@@ -253,7 +241,10 @@ def event_list(request: HttpRequest, season_id: int) -> HttpResponse:
     from django.db.models import Count
 
     season = get_object_or_404(Season, id=season_id)
-    events = season.events.annotate(enrollment_count=Count("enrollments"))
+    events = [
+        (event, *EVENT_LIST_STATUS_SHOWN[registration_page_status(event)])
+        for event in season.events.with_registration_open().annotate(enrollment_count=Count("enrollments"))
+    ]
 
     return render(request, "registration/events/list.html", {"season": season, "events": events})
 
@@ -324,7 +315,7 @@ def event_delete(request: HttpRequest, event_id: int) -> HttpResponse:
 @require_permission("gold_team")
 def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
     """View event details with enrolled registrations and team assignments (Gold Team only)."""
-    event = get_object_or_404(Event, id=event_id)
+    event = get_object_or_404(Event.objects.with_registration_open(), id=event_id)
     enrollments = (
         RegistrationEventEnrollment.objects.filter(event=event)
         .select_related("registration")
@@ -351,8 +342,11 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         )
 
     sent = packets_sent(event)
+    status_word, status_badge = EVENT_DETAIL_STATUS_SHOWN[registration_page_status(event)]
     context = {
         "event": event,
+        "status_word": status_word,
+        "status_badge": status_badge,
         "enrollment_data": enrollment_data,
         "total_enrolled": enrollments.count(),
         "total_assigned": len(assignments),

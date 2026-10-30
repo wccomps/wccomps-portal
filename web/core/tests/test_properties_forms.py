@@ -561,7 +561,6 @@ CASES = [
         RegistrationForm,
         hints=lambda w: {"agree_to_rules": st.just("on"), "region": st.sampled_from(("wrccdc", "other"))},
         use=lambda w, f: f.save(),
-        not_idempotent="a saved registration's form posted back is an edit, which the edit view checks",
     ),
     FormCase(
         SeasonForm,

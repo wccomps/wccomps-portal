@@ -163,10 +163,7 @@ class AuthentikRequiredMiddleware:
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
 
-        self.whitelist_prefixes = (
-            "/static/",
-            "/register/edit/",  # Token-based registration editing
-        )
+        self.whitelist_prefixes = ("/static/",)
         self.whitelist_exact = {
             "/health/",  # Health check endpoint for monitoring
             "/livez/",  # Liveness probe (no database)

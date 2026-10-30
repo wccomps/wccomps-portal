@@ -1,9 +1,11 @@
 """Tests for registration models."""
 
-from datetime import date
+from datetime import date, timedelta
+from itertools import product
 
 import pytest
 from django.db import IntegrityError
+from django.utils import timezone
 
 from ..models import (
     Event,
@@ -49,7 +51,6 @@ class TestTeamRegistration:
         assert registration.school_name == "Test High School"
         assert registration.status == "pending"
         assert registration.submitted_at is not None
-        assert registration.edit_token is not None
 
     def test_registration_defaults(self):
         """Test registration default values."""
@@ -58,12 +59,6 @@ class TestTeamRegistration:
         assert registration.approved_at is None
         assert registration.rejection_reason == ""
         assert registration.approved_by is None
-
-    def test_edit_token_is_unique(self):
-        """Test each registration gets a unique edit token."""
-        reg1 = TeamRegistration.objects.create(school_name="School 1")
-        reg2 = TeamRegistration.objects.create(school_name="School 2")
-        assert reg1.edit_token != reg2.edit_token
 
     def test_status_choices(self):
         """Test valid status choices."""
@@ -350,3 +345,33 @@ def test_only_the_first_of_two_reviews_of_a_pending_registration_takes(admin_use
     decided = TeamRegistration.objects.filter(pk=registration.pk).values().get()
     assert review(two, second) is False
     assert TeamRegistration.objects.filter(pk=registration.pk).values().get() == decided
+
+
+DEADLINES = {"none": None, "past": timedelta(hours=-1), "future": timedelta(hours=1)}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("season_active", "registration_open", "finalized", "deadline"),
+    list(product([True, False], [True, False], [False, True], DEADLINES)),
+)
+def test_open_for_registration(season_active, registration_open, finalized, deadline):
+    """Open for registration: marked open, in the active season, not closed out, and its deadline (if any) still
+    ahead."""
+    season = Season.objects.create(name="2026 Season", year=2026)
+    if season_active:
+        season.activate()
+    offset = DEADLINES[deadline]
+    event = Event.objects.create(
+        season=season,
+        name="Invitational 1",
+        event_type="invitational",
+        event_number=1,
+        date="2026-01-15",
+        registration_open=registration_open,
+        is_finalized=finalized,
+        registration_deadline=None if offset is None else timezone.now() + offset,
+    )
+    expected = season_active and registration_open and not finalized and deadline != "past"
+    assert Event.objects.with_registration_open().get(pk=event.pk).registration_is_open is expected
+    assert Event.objects.open_for_registration().filter(pk=event.pk).exists() is expected

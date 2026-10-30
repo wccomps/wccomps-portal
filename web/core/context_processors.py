@@ -94,7 +94,6 @@ NAV_MAPPING: dict[str, tuple[str, str]] = {
     "packet_resend_team": ("ops_admin", "packets"),
     "team_packet": ("packets", ""),
     # Registration
-    "registration_edit": ("registration", ""),
     "registration_review_list": ("ops_admin", "registrations"),
     "registration_approve": ("ops_admin", "registrations"),
     "registration_reject": ("ops_admin", "registrations"),

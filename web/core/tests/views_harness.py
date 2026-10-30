@@ -349,7 +349,6 @@ def build_world() -> World:
         "orange_score_id": [orange_score.pk],
         "packet_id": [packet.pk, draft.pk],
         "registration_id": [r.pk for r in registrations],
-        "edit_token": [r.edit_token for r in registrations],
         "season_id": [season.pk],
         "event_id": [event.pk, later.pk],
         "event_assignment_id": list(EventTeamAssignment.objects.values_list("pk", flat=True)),

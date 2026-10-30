@@ -1,15 +1,13 @@
-import secrets
 from datetime import timedelta
+from typing import TypedDict
 
 from django.contrib.auth.models import User
 from django.db import models, transaction
+from django.db.models.functions import Now
 from django.utils import timezone
+from django_stubs_ext import WithAnnotations
 
 from .locks import school_list_lock
-
-
-def generate_edit_token() -> str:
-    return secrets.token_urlsafe(48)
 
 
 def collapse_whitespace(name: str) -> str:
@@ -71,9 +69,6 @@ class TeamRegistration(models.Model):
     school_name = models.CharField(max_length=SCHOOL_NAME_MAX_LENGTH)
     region = models.CharField(max_length=20, choices=REGION_CHOICES, default="wrccdc")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
-
-    # Token for self-service editing
-    edit_token = models.CharField(max_length=64, unique=True, default=generate_edit_token)
 
     submitted_at = models.DateTimeField(auto_now_add=True)
     approved_at = models.DateTimeField(null=True, blank=True)
@@ -143,10 +138,32 @@ class Season(models.Model):
         self.is_active = True
 
 
+class RegistrationOpen(TypedDict):
+    registration_is_open: bool
+
+
 class EventManager(models.Manager["Event"]):
     def open(self) -> Event | None:
         """The active event (the database allows one), with its season."""
         return self.filter(is_active=True).select_related("season").first()
+
+    @staticmethod
+    def _open_for_registration() -> models.Q:
+        """Open for registration: accepting registrations, in the active season, not closed out, and before its
+        deadline when it has one. The deadline is compared with the database clock when the query runs."""
+        return models.Q(registration_open=True, season__is_active=True, is_finalized=False) & (
+            models.Q(registration_deadline__isnull=True) | models.Q(registration_deadline__gt=Now())
+        )
+
+    def open_for_registration(self) -> models.QuerySet[Event]:
+        return self.filter(self._open_for_registration())
+
+    def with_registration_open(self) -> models.QuerySet[WithAnnotations[Event, RegistrationOpen]]:
+        return self.annotate(
+            registration_is_open=models.ExpressionWrapper(
+                self._open_for_registration(), output_field=models.BooleanField()
+            )
+        )
 
 
 class Event(models.Model):

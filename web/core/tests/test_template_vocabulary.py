@@ -23,6 +23,7 @@ from pathlib import Path
 import django
 from django.apps import apps
 from django.contrib.messages import constants as message_constants
+from registration import views as registration_views
 
 from core import status_variants
 from core.admin_views import event_panel
@@ -227,6 +228,14 @@ VARIANT_EXCEPTIONS: dict[str, str] = {
     'admin/competition.html:<c-badge variant="{{ panel.status_badge }}">': (
         "event_panel.STATUS_SHOWN maps each status to a variant; test_every_stored_status_maps_to_a_known_variant "
         "checks it"
+    ),
+    'registration/events/list.html:<c-badge variant="{{ status_badge }}">': (
+        "registration.views.EVENT_LIST_STATUS_SHOWN maps each event status to a variant; "
+        "test_every_stored_status_maps_to_a_known_variant checks it"
+    ),
+    'registration/events/detail.html:<c-badge variant="{{ status_badge }}">': (
+        "registration.views.EVENT_DETAIL_STATUS_SHOWN maps each event status to a variant; "
+        "test_every_stored_status_maps_to_a_known_variant checks it"
     ),
     'admin/competition.html:<c-badge variant="{{ row.badge }}">': (
         "event_panel.STATE_SHOWN maps each step state to a variant; test_every_stored_status_maps_to_a_known_variant "
@@ -541,8 +550,6 @@ STANDALONE_HEADER_EXCEPTIONS = {
     "link_confirm.html": "Discord link token flow page outside the section hierarchy",
     "link_error.html": "Discord link token flow page outside the section hierarchy",
     "link_success.html": "Discord link token flow page outside the section hierarchy",
-    "registration/edit.html": "Public token-authenticated school registration edit page",
-    "registration/edit_locked.html": "Public token-authenticated school registration locked page",
 }
 URL_TAG_NAME_RE = re.compile(r"""{%\s*url\s+["']([^"']+)["']""")
 VAR_PLACEHOLDER_RE = re.compile(r"{{.*?}}")
@@ -814,6 +821,13 @@ def test_every_stored_status_maps_to_a_known_variant() -> None:
     ]
     for table in (event_panel.STATE_SHOWN, event_panel.STATUS_SHOWN):
         problems += [f"event panel: {state} -> badge {v}" for state, (_, v) in table.items() if v not in known["badge"]]
+    for table in (registration_views.EVENT_LIST_STATUS_SHOWN, registration_views.EVENT_DETAIL_STATUS_SHOWN):
+        statuses = set(registration_views.RegistrationPageStatus)
+        if set(table) != statuses:
+            problems.append(f"event pages: shows {sorted(table)}, RegistrationPageStatus has {sorted(statuses)}")
+        problems += [
+            f"event pages: {status} -> badge {v}" for status, (_, v) in table.items() if v not in known["badge"]
+        ]
     assert not problems, "\n".join(problems)
 
 
