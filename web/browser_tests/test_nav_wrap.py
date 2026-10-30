@@ -10,26 +10,29 @@ pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 LAYOUT = """() => {
     const nav = document.querySelector('.primary-navigation');
-    const right = nav.getBoundingClientRect().right;
-    const items = Array.from(nav.querySelectorAll('.nav-links a, .nav-utils > *'));
+    const links = Array.from(nav.querySelectorAll('.nav-links a'));
+    const oneLine = Math.min(...links.map(a => a.getBoundingClientRect().height));
     const tools = Array.from(nav.querySelectorAll('.nav-utils > *'))
         .map(el => el.getBoundingClientRect())
-        .filter(r => r.width)
-        .map(r => Math.round((r.top + r.bottom) / 2));
+        .filter(r => r.width);
+    const name = document.createRange();
+    name.selectNodeContents(document.getElementById('site-name'));
+    const nameLines = new Set(Array.from(name.getClientRects(), r => Math.round(r.top)));
     return {
-        outside: items.filter(el => el.getBoundingClientRect().right > right + 1).map(el => el.textContent.trim()),
-        broken: Array.from(nav.querySelectorAll('.nav-links a'))
-            .filter(a => a.getClientRects().length > 1 || a.getBoundingClientRect().height > 40)
-            .map(a => a.textContent.trim()),
-        toolRows: new Set(tools).size,
-        scrolls: document.documentElement.scrollWidth > innerWidth,
+        offPage: [...links, ...nav.querySelectorAll('.nav-utils > *')]
+            .filter(el => el.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
+            .map(el => el.textContent.trim()),
+        broken: links.filter(a => a.getBoundingClientRect().height > 1.5 * oneLine).map(a => a.textContent.trim()),
+        tools: tools.length,
+        toolRows: new Set(tools.map(r => Math.round((r.top + r.bottom) / 2))).size,
+        nameLines: nameLines.size,
     };
 }"""
 
 
-@pytest.mark.parametrize("width", [1280, 800])
-def test_an_admins_nav_fits_its_row_at_any_desktop_width(live_server, pw_browser, width):
-    """An admin sees every section link, the most any role does."""
+@pytest.mark.parametrize("width", [1280, 1100, 800])
+def test_an_admins_nav_stays_on_the_page_at_desktop_widths(live_server, pw_browser, width):
+    """An admin sees every section link, the most any role does; at 1100 the nav is narrowest, beside the name."""
     context = create_session_context(pw_browser, live_server, role_user("admin"))
     page = context.new_page()
     try:
@@ -37,9 +40,10 @@ def test_an_admins_nav_fits_its_row_at_any_desktop_width(live_server, pw_browser
         page.goto(f"{live_server.url}/ops/school-info/")
 
         layout = page.evaluate(LAYOUT)
-        assert layout["outside"] == []
+        assert layout["offPage"] == []
         assert layout["broken"] == []
+        assert layout["tools"] == 4
         assert layout["toolRows"] == 1
-        assert not layout["scrolls"]
+        assert layout["nameLines"] == 1
     finally:
         context.close()

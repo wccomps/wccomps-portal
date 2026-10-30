@@ -847,6 +847,11 @@ fieldset:has([required]) > legend.required::after,
     margin: 0 auto;
 }
 
+/* Beside the nav, the site name keeps its width: the nav takes more rows instead */
+#branding {
+    flex: none;
+}
+
 .primary-navigation {
     background: var(--primary, #417690);
     padding: 10px 20px;
@@ -861,7 +866,6 @@ fieldset:has([required]) > legend.required::after,
     color: var(--header-link-color, #c4dde8);
     font-size: 13px;
     margin-right: 10px;
-    white-space: nowrap;
 }
 
 .primary-navigation a {
@@ -873,7 +877,6 @@ fieldset:has([required]) > legend.required::after,
     font-size: 13px;
     font-weight: 500;
     display: inline-block;
-    white-space: nowrap;
     transition: background-color 0.2s;
 }
 
@@ -914,7 +917,7 @@ fieldset:has([required]) > legend.required::after,
     background: var(--primary-dark, #2e5266);
 }
 
-/* Nav menu container - flex row on desktop */
+/* No box on desktop: each link is an item of .primary-navigation's wrapping row */
 .nav-menu {
     display: contents;
 }
@@ -923,7 +926,7 @@ fieldset:has([required]) > legend.required::after,
     display: contents;
 }
 
-/* The tools wrap as one group, at the right of their row */
+/* The tools wrap as one group */
 .nav-utils {
     display: flex;
     align-items: center;
