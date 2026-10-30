@@ -3,9 +3,19 @@
 Exceptions must be visible in this file, with a reason, so they get reviewed.
 """
 
+import ast
 import re
 
-from core.tests.guards import component_templates, fail_with, page_templates, template_name, text, tracked_templates
+from core.tests.guards import (
+    REPO_DIR,
+    component_templates,
+    fail_with,
+    page_templates,
+    template_name,
+    text,
+    tracked_files,
+    tracked_templates,
+)
 
 MESSAGE_LOOP = re.compile(r"{%\s*if\s+messages\s*%}|{%\s*for\s+\w+\s+in\s+messages\s*%}")
 
@@ -63,3 +73,22 @@ def test_a_form_field_renders_as_its_field_group() -> None:
         for m in BARE_FIELD.finditer(text(p))
     }
     fail_with("Form fields rendered as bare widgets", found, BARE_FIELD_EXCEPTIONS)
+
+
+def test_form_markup_formats_only_constants() -> None:
+    """A label or help text written as markup is shown as is: format_html escapes its values but can't stop a
+    javascript: link, so a form builds markup from literals and module constants only."""
+    found = {}
+    for path in tracked_files():
+        if not (path.startswith("web/") and path.endswith("forms.py") and "/tests/" not in path):
+            continue
+        for node in ast.walk(ast.parse((REPO_DIR / path).read_text())):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            if node.func.id not in ("format_html", "mark_safe"):
+                continue
+            values = [*node.args[node.func.id == "format_html" :], *(kw.value for kw in node.keywords)]
+            for value in values:
+                if not (isinstance(value, ast.Constant) or (isinstance(value, ast.Name) and value.id.isupper())):
+                    found[f"{path}:{node.lineno}"] = f"{node.func.id} formats {ast.unparse(value)}"
+    fail_with("Form markup built from values that aren't constants", found, {})
