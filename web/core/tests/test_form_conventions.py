@@ -75,20 +75,31 @@ def test_a_form_field_renders_as_its_field_group() -> None:
     fail_with("Form fields rendered as bare widgets", found, BARE_FIELD_EXCEPTIONS)
 
 
+MARKUP_CALLS = {"format_html", "format_html_join", "mark_safe", "SafeString"}
+
+
 def test_form_markup_formats_only_constants() -> None:
     """A label or help text written as markup is shown as is: format_html escapes its values but can't stop a
-    javascript: link, so a form builds markup from literals and module constants only."""
+    javascript: link, so a forms module builds markup from literals and its own module constants only."""
     found = {}
     for path in tracked_files():
         if not (path.startswith("web/") and path.endswith("forms.py") and "/tests/" not in path):
             continue
-        for node in ast.walk(ast.parse((REPO_DIR / path).read_text())):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+        tree = ast.parse((REPO_DIR / path).read_text())
+        constants = {
+            target.id
+            for node in tree.body
+            if isinstance(node, ast.Assign | ast.AnnAssign)
+            for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+            if isinstance(target, ast.Name)
+        }
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
                 continue
-            if node.func.id not in ("format_html", "mark_safe"):
+            called = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", None)
+            if called not in MARKUP_CALLS:
                 continue
-            values = [*node.args[node.func.id == "format_html" :], *(kw.value for kw in node.keywords)]
-            for value in values:
-                if not (isinstance(value, ast.Constant) or (isinstance(value, ast.Name) and value.id.isupper())):
-                    found[f"{path}:{node.lineno}"] = f"{node.func.id} formats {ast.unparse(value)}"
+            for value in [*node.args, *(kw.value for kw in node.keywords)]:
+                if not (isinstance(value, ast.Constant) or (isinstance(value, ast.Name) and value.id in constants)):
+                    found[f"{path}:{node.lineno}"] = f"{called} takes {ast.unparse(value)}"
     fail_with("Form markup built from values that aren't constants", found, {})
