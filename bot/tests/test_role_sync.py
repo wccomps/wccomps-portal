@@ -65,7 +65,10 @@ async def teams() -> tuple[Team, Team]:
     return a, b
 
 
-async def _link(discord_id: int, groups: list[str], team: Team | None = None) -> DiscordLink:
+async def _link(discord_id: int, groups: list[str], team: Team | None = None, *, in_group: bool = True) -> DiscordLink:
+    """A link holding a seat on team, its account in the team's group unless in_group is False."""
+    if team and in_group:
+        groups = [*groups, team.authentik_group]
     user = await User.objects.acreate(username=f"u{discord_id}")
     await UserGroups.objects.acreate(user=user, authentik_id=f"uid{discord_id}", groups=groups)
     return await DiscordLink.objects.acreate(
@@ -131,6 +134,17 @@ async def test_relinking_to_another_team_moves_the_team_role(teams) -> None:
     assert _ids(member.remove_roles) == {TEAM_A}
 
 
+async def test_an_account_removed_from_the_team_group_loses_the_team_roles(teams) -> None:
+    """The seat was taken while the account was in the team's group; the group, refreshed since, decides."""
+    await _link(1, ["WCComps_Ops"], team=teams[0], in_group=False)
+    member = _member(1, OPS, TEAM_A, BLUETEAM)
+
+    await _sync(_guild(member))
+
+    assert _ids(member.remove_roles) == {TEAM_A, BLUETEAM}
+    member.add_roles.assert_not_awaited()
+
+
 async def test_a_seat_on_a_deactivated_team_grants_nothing(teams) -> None:
     await Team.objects.filter(pk=teams[0].pk).aupdate(is_active=False)
     await _link(1, [], team=teams[0])
@@ -182,7 +196,9 @@ async def test_a_link_ended_during_the_pass_is_not_regranted(teams) -> None:
     member = _member(1)
 
     real = role_sync.role_grants
-    with patch.object(role_sync, "role_grants", side_effect=lambda ids=None: stale if ids is None else real(ids)):
+    with patch.object(
+        role_sync, "role_grants", side_effect=lambda ids=None, **kw: stale if ids is None else real(ids, **kw)
+    ):
         await _sync(_guild(member))
 
     member.add_roles.assert_not_awaited()
@@ -194,7 +210,9 @@ async def test_a_link_made_during_the_pass_keeps_its_role(teams) -> None:
     member = _member(1, OPS)
 
     real = role_sync.role_grants
-    with patch.object(role_sync, "role_grants", side_effect=lambda ids=None: stale if ids is None else real(ids)):
+    with patch.object(
+        role_sync, "role_grants", side_effect=lambda ids=None, **kw: stale if ids is None else real(ids, **kw)
+    ):
         await _sync(_guild(member))
 
     member.remove_roles.assert_not_awaited()
@@ -250,8 +268,9 @@ async def test_refresh_loop_syncs_roles_after_refreshing_groups() -> None:
     cog = authentik_groups.AuthentikGroupsCog.__new__(authentik_groups.AuthentikGroupsCog)
     cog.bot = MagicMock()
 
-    async def refresh() -> None:
+    async def refresh() -> bool:
         calls.append("refresh")
+        return True
 
     async def sync(bot: Any) -> None:
         calls.append("sync")
@@ -274,3 +293,48 @@ async def test_role_sync_failure_is_logged_not_raised(caplog: pytest.LogCaptureF
         await authentik_groups.sync_roles_now(MagicMock())
 
     assert "Role sync failed: discord down" in caplog.text
+
+
+async def test_a_member_authentik_has_not_been_asked_about_keeps_their_roles(teams) -> None:
+    """Rows stored before the portal kept a disabled account's groups hold them as []; until a refresh reads the
+    account (account_active null), syncing on them could strip a team's roles, so its roles are left alone."""
+    link = await _link(1, ["WCComps_Ops"], team=teams[0])
+    await UserGroups.objects.filter(user_id=link.user_id).aupdate(account_active=None)
+    member = _member(1, TEAM_B)
+
+    stats = await _sync(_guild(member))
+
+    member.add_roles.assert_not_awaited()
+    member.remove_roles.assert_not_awaited()
+    assert "until a refresh or a sign-in reads the account" in stats["changes"][0]
+
+
+async def test_a_member_who_signed_in_gets_their_roles_before_any_refresh(teams) -> None:
+    """A login reads the account's state, so a member who linked before the first refresh isn't held."""
+    await _link(1, ["WCComps_Ops"], team=teams[0])
+    member = _member(1)
+
+    await _sync(_guild(member))
+
+    assert _ids(member.add_roles) == {OPS, TEAM_A, BLUETEAM}
+
+
+async def test_an_unlinked_member_always_loses_their_roles(teams) -> None:
+    held = await _link(2, [], team=teams[1])
+    await UserGroups.objects.filter(user_id=held.user_id).aupdate(account_active=None)
+    unlinked = _member(1, TEAM_A, BLUETEAM)
+
+    await _sync(_guild(unlinked, _member(2)))
+
+    assert _ids(unlinked.remove_roles) == {TEAM_A, BLUETEAM}
+
+
+async def test_a_member_whose_account_has_no_stored_groups_loses_their_roles(teams) -> None:
+    """With no row there is nothing stored to distrust: no groups, so no grant."""
+    link = await _link(1, ["WCComps_Ops"], team=teams[0])
+    await UserGroups.objects.filter(user_id=link.user_id).adelete()
+    member = _member(1, OPS, TEAM_A, BLUETEAM)
+
+    await _sync(_guild(member))
+
+    assert _ids(member.remove_roles) == {OPS, TEAM_A, BLUETEAM}

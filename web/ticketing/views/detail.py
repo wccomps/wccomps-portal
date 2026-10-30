@@ -6,14 +6,15 @@ from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.models import User
-from django.http import HttpRequest, HttpResponse
+from django.core.exceptions import PermissionDenied
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from core.auth_utils import get_user_team, has_permission, require_permission, team_record_or_404
+from core.auth_utils import get_user_team, has_permission, require_permission
 from core.discord_tasks import PostComment
 from core.models import DiscordTask
-from ticketing.access import TICKET_STAFF, ticket_actions
+from ticketing.access import TICKET_STAFF, ticket_actions, ticket_open_to
 from ticketing.forms import TicketCommentForm
 from ticketing.models import (
     BOX_RESET_CATEGORY_ID,
@@ -35,26 +36,22 @@ def list_version(rows: Iterable[TicketComment | TicketHistory]) -> str:
 
 def _ticketing_staff_usernames() -> list[str]:
     """Usernames that can work tickets, for the assign box's suggestions."""
-    from functools import reduce
-    from operator import or_
+    from core.auth_utils import users_granted
 
-    from django.db.models import Q
-
-    from core.models import UserGroups
-    from core.permission_constants import PERMISSION_MAP
-
-    in_any_group = reduce(or_, (Q(groups__contains=[g]) for g in PERMISSION_MAP[TICKET_STAFF]))
-    return list(
-        UserGroups.objects.filter(in_any_group).order_by("user__username").values_list("user__username", flat=True)
-    )
+    return list(users_granted(TICKET_STAFF).order_by("username").values_list("username", flat=True))
 
 
 def _visible_ticket(user: User, ticket_number: str) -> Ticket:
-    """The ticket as the person may see it: ticketing staff see every ticket, a team its own (another team's is a
-    404, as a missing one is)."""
-    return team_record_or_404(
-        Ticket.objects.select_related("team", "category"), user, staff=(TICKET_STAFF,), ticket_number=ticket_number
-    )
+    """The ticket if ticket_open_to lets the person at it: another team's answers 404, as a missing one does, and
+    someone neither staff nor on a team gets the 403."""
+    staff = has_permission(user, TICKET_STAFF)
+    team = get_user_team(user)
+    if not staff and team is None:
+        raise PermissionDenied
+    ticket = get_object_or_404(Ticket.objects.select_related("team", "category"), ticket_number=ticket_number)
+    if not ticket_open_to(ticket, staff=staff, team=team):
+        raise Http404
+    return ticket
 
 
 def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:

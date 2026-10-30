@@ -9,7 +9,6 @@ from django.utils import timezone
 
 from bot.utils import announcement as announcement_text
 from bot.utils import send_parts
-from core.models import AuditLog
 from team.models import Team
 
 logger = logging.getLogger(__name__)
@@ -57,49 +56,6 @@ async def delete_team_infrastructure(guild: discord.Guild, team: Team, reason: s
     await team.asave(update_fields=["discord_role_id", "discord_category_id"])
 
     return deleted_items
-
-
-async def unlink_team_members(
-    guild: discord.Guild,
-    team: Team,
-    admin_user: str,
-    audit_reason: str,
-) -> int:
-    """Unlink all active Discord members from a team.
-
-    Deactivates the DiscordLinks, syncs each member's roles so they lose what the link granted, and
-    creates per-member audit log entries. Returns count of unlinked members.
-    """
-    from bot.role_sync import sync_member_roles
-
-    members = [m async for m in team.members.filter(is_active=True).select_related("user")]
-    unlinked_count = 0
-
-    for link in members:
-        member = guild.get_member(link.discord_id)
-
-        link.is_active = False
-        link.unlinked_at = timezone.now()
-        await link.asave()
-        unlinked_count += 1
-
-        if member:
-            await sync_member_roles(guild, member)
-
-        await AuditLog.objects.acreate(
-            action="user_unlinked",
-            admin_user=admin_user,
-            target_entity="discord_link",
-            target_id=link.discord_id,
-            details={
-                "discord_username": str(member) if member else f"ID:{link.discord_id}",
-                "team_name": team.team_name,
-                "authentik_username": link.user.username,
-                "reason": audit_reason,
-            },
-        )
-
-    return unlinked_count
 
 
 class DiscordManager:
@@ -347,8 +303,6 @@ class DiscordManager:
             return None
 
     async def _deliver_queued_announcements(self, team_number: int, channel: discord.TextChannel) -> int:
-        from django.utils import timezone
-
         from core.models import QueuedAnnouncement
 
         team = await Team.objects.filter(team_number=team_number).afirst()

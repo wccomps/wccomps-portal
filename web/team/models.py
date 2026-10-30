@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Iterable
+from typing import NamedTuple
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
@@ -18,6 +19,11 @@ def team_username(team_number: int) -> str:
     return f"team{team_number:02d}"
 
 
+def team_group_name(team_number: int) -> str:
+    """A new team's Authentik group; after that, Team.authentik_group is the one the portal and bot read."""
+    return f"WCComps_BlueTeam{team_number:02d}"
+
+
 def active_team_numbers() -> list[int]:
     """Numbers of the teams competing in the current event, in order."""
     return list(Team.objects.filter(is_active=True).order_by("team_number").values_list("team_number", flat=True))
@@ -29,6 +35,16 @@ def default_team_name(team_number: int) -> str:
 
 
 class TeamQuerySet(models.QuerySet["Team"]):
+    def held_by(self, groups: Iterable[str]) -> TeamQuerySet:
+        """The teams these Authentik groups put an account on (Team.is_held_by, as a query)."""
+        return self.filter(is_active=True, authentik_group__in=list(groups))
+
+    def lock(self) -> list[int]:
+        """Lock these team rows in pk order, FOR NO KEY UPDATE so rows referencing them stay writable, and return their
+        pks. Linking, unlinks and the Close Out wipe take it before their links, which keeps those three from
+        deadlocking each other."""
+        return list(self.select_for_update(no_key=True).order_by("pk").values_list("pk", flat=True))
+
     def with_active_member_count(self) -> TeamQuerySet:
         return self.annotate(
             active_member_count=models.Count("members", filter=models.Q(members__is_active=True)),
@@ -64,7 +80,7 @@ class Team(models.Model):
         super().clean()
 
         if not self.authentik_group and self.team_number:
-            self.authentik_group = f"WCComps_BlueTeam{self.team_number:02d}"
+            self.authentik_group = team_group_name(self.team_number)
 
         if self.team_number is not None and (self.team_number < 1 or self.team_number > MAX_TEAMS):
             msg = f"Team number must be between 1 and {MAX_TEAMS}, got {self.team_number}"
@@ -105,6 +121,9 @@ class Team(models.Model):
     def is_full(self) -> bool:
         return self.get_member_count() >= self.max_members
 
+    def is_held_by(self, groups: Iterable[str]) -> bool:
+        return self.is_active and self.authentik_group in groups
+
     @property
     def school_emails(self) -> list[str]:
         """Contact emails for this team from SchoolInfo, or empty list if none."""
@@ -112,6 +131,14 @@ class Team(models.Model):
             return self.school_info.emails
         except ObjectDoesNotExist:
             return []
+
+
+class Seat(NamedTuple):
+    """A link's place on its team; enabled is false while the team account is disabled (between competitions)."""
+
+    user: User
+    team: Team
+    enabled: bool
 
 
 class DiscordLink(models.Model):
@@ -150,6 +177,14 @@ class DiscordLink(models.Model):
         if self.team:
             return f"{self.discord_username} on Team {self.team.team_number}"
         return f"{self.discord_username} as {self.user.username}"
+
+    def seat(self) -> Seat | None:
+        """The seat while the account's stored groups hold its team, read from the loaded link without a query.
+        enabled: whether the account is (an account Authentik hasn't been asked about yet counts as enabled)."""
+        user_groups = getattr(self.user, "usergroups", None)
+        if self.team is None or user_groups is None or not self.team.is_held_by(user_groups.groups):
+            return None
+        return Seat(self.user, self.team, user_groups.account_active is not False)
 
     @classmethod
     def deactivate_previous_links(cls, discord_id: int) -> int:

@@ -129,6 +129,7 @@ def clear_all_tickets(actor: str) -> dict[str, int]:
     from ticketing.models import TicketAttachment, TicketComment
 
     with transaction.atomic():
+        Team.objects.all().lock()
         counts = {
             "tickets_deleted": Ticket.objects.count(),
             "attachments_deleted": TicketAttachment.objects.count(),

@@ -8,6 +8,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
+from core.authentik_manager import AuthentikAPIError
 from core.models import CompetitionConfig, DiscordTask
 from team.models import team_username
 
@@ -16,10 +17,12 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture(autouse=True)
 def _team_accounts_through_the_manager():
-    with patch(
-        "core.services.competition.set_team_account_active",
-        side_effect=lambda manager, number, is_active: manager.team_account(team_username(number), is_active=is_active),
-    ):
+    def switch(manager: MagicMock, number: int, is_active: bool) -> None:
+        ok, why = manager.team_account(team_username(number), is_active=is_active)
+        if not ok:
+            raise AuthentikAPIError(why)
+
+    with patch("core.services.competition.set_team_account_active", side_effect=switch):
         yield
 
 
@@ -37,7 +40,7 @@ def _post(client, action, **data):
 def test_start_streams_progress_and_posts_to_ops(admin_client):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"controlled_applications": ["scoring"]})
     manager = MagicMock()
-    manager.enable_application.return_value = (True, None)
+    manager.__enter__.return_value = manager
     manager.team_account.return_value = (True, "")
 
     with (
@@ -59,7 +62,7 @@ def test_stop_streams_progress_syncs_scores_and_posts_to_ops(admin_client, admin
         pk=1, defaults={"controlled_applications": ["scoring"], "applications_enabled": True}
     )
     manager = MagicMock()
-    manager.disable_application.return_value = (True, None)
+    manager.__enter__.return_value = manager
     manager.team_account.return_value = (True, "")
 
     with (
@@ -113,7 +116,7 @@ def test_start_finishes_after_the_browser_disconnects(admin_client):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"controlled_applications": ["scoring"]})
     browser_gone = threading.Event()
     manager = MagicMock()
-    manager.enable_application.return_value = (True, None)
+    manager.__enter__.return_value = manager
 
     def toggle_once_the_browser_is_gone(username: str, is_active: bool) -> tuple[bool, str]:
         browser_gone.wait(timeout=10)
@@ -178,7 +181,8 @@ def test_a_partial_start_is_reported_incomplete_not_success(admin_client):
     Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"controlled_applications": ["scoring"]})
     manager = MagicMock()
-    manager.enable_application.return_value = (False, "HTTP 502")
+    manager.__enter__.return_value = manager
+    manager.set_application_enabled.side_effect = AuthentikAPIError("HTTP 502")
     manager.team_account.return_value = (True, "")
 
     with (

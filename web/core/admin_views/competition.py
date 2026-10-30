@@ -128,7 +128,8 @@ def _edit_controlled_app(
     # Start and Stop's lookup: the picker's provider list misses apps without a provider
     if add:
         try:
-            app = AuthentikManager().get_application_by_slug(slug)
+            with AuthentikManager() as manager:
+                app = manager.get_application_by_slug(slug)
         except AuthentikAPIError as e:
             return JsonResponse(
                 {"success": False, "message": f"Could not ask Authentik about '{slug}': {reason_for(e)}"}
@@ -297,7 +298,7 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
         credentials_csv((username, password) for _num, username, password in password_list) if password_list else ""
     )
 
-    return JsonResponse({"success": not result.failed_resets, "message": result.summary(), "csv": csv_content})
+    return JsonResponse({"success": result.complete, "message": result.summary(), "csv": csv_content})
 
 
 def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:
@@ -488,7 +489,8 @@ def admin_competition_apps(request: HttpRequest) -> JsonResponse:
     Authentik's failure comes back as 200: the request was fine, and the page says why the list is empty.
     """
     try:
-        return JsonResponse({"apps": AuthentikManager().list_applications()})
+        with AuthentikManager() as manager:
+            return JsonResponse({"apps": manager.list_applications()})
     except AuthentikAPIError as e:
         return JsonResponse({"error": reason_for(e)})
 

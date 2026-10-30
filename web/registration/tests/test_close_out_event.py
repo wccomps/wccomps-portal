@@ -391,6 +391,26 @@ def test_live_data_with_no_scores_is_leftovers_to_clear(event):
     assert event_stage().stage == Stage.IDLE
 
 
+@pytest.mark.parametrize("pgcode", ["40001", "40P01"])
+def test_clearing_leftovers_refuses_a_conflict_like_close_out(event, pgcode):
+    _closed_out_with_a_late_score(event)
+
+    class CouldNotSerializeError(Exception):
+        pgcode = ""
+
+    cause = CouldNotSerializeError()
+    cause.pgcode = pgcode
+    failure = OperationalError("could not serialize access, or a deadlock")
+    failure.__cause__ = cause
+
+    with (
+        patch("registration.services.wipe_competition_data", side_effect=failure),
+        pytest.raises(CloseOutError, match="Something changed while closing out"),
+    ):
+        clear_leftover_data("gold")
+    assert ServiceScore.objects.exists()
+
+
 def test_clearing_leftovers_is_refused_while_the_competition_runs(event):
     _closed_out_with_a_late_score(event)
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
@@ -505,12 +525,15 @@ def test_a_row_created_while_closing_out_stays_as_live_data(event):
     assert event_stage().stage == Stage.UNRECORDED
 
 
-def test_a_serialization_failure_inside_a_callers_transaction_is_a_refusal(event):
+@pytest.mark.parametrize("pgcode", ["40001", "40P01"])
+def test_a_serialization_failure_or_deadlock_inside_a_callers_transaction_is_a_refusal(event, pgcode):
     class CouldNotSerializeError(Exception):
-        pgcode = "40001"
+        pgcode = ""
 
-    failure = OperationalError("could not serialize access due to concurrent update")
-    failure.__cause__ = CouldNotSerializeError()
+    cause = CouldNotSerializeError()
+    cause.pgcode = pgcode
+    failure = OperationalError("could not serialize access, or a deadlock")
+    failure.__cause__ = cause
 
     with (
         patch("registration.services.wipe_competition_data", side_effect=failure),

@@ -301,6 +301,11 @@ def review_inject_feedback(request: HttpRequest) -> HttpResponse:
     return render(request, "scoring/review_inject_feedback.html", context)
 
 
+def locked_score(score_id: int) -> InjectScore:
+    """The score, locked; its team is read, not locked, so the Close Out wipe (team rows first) can't deadlock it."""
+    return get_object_or_404(InjectScore.objects.select_for_update(of=("self",)).select_related("team"), pk=score_id)
+
+
 @require_permission("gold_team", "white_team", error_message="Only Gold/White Team members can edit inject feedback")
 @transaction.atomic
 @require_http_methods(["POST"])
@@ -313,7 +318,7 @@ def save_inject_feedback(request: HttpRequest) -> HttpResponse:
     score_id = form.cleaned_data["score_id"]
     feedback_text = form.cleaned_data.get("feedback", "")
 
-    score = get_object_or_404(InjectScore.objects.select_for_update().select_related("team"), pk=score_id)
+    score = locked_score(score_id)
     if score.feedback != feedback_text:
         user = cast(User, request.user)
         is_lead = has_permission(user, "white_team_lead")
@@ -340,7 +345,7 @@ def approve_inject_feedback(request: HttpRequest) -> HttpResponse:
         return redirect("scoring:review_inject_feedback")
 
     score_id = form.cleaned_data["score_id"]
-    score = get_object_or_404(InjectScore.objects.select_for_update().select_related("team"), pk=score_id)
+    score = locked_score(score_id)
     score.feedback_approved = True
     score.feedback_approved_by = user
     score.save(update_fields=["feedback_approved", "feedback_approved_by"])

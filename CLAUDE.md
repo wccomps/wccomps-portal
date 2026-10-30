@@ -52,10 +52,13 @@ the unparenthesized form is used intentionally throughout.
 ## Key Conventions
 
 ### Permissions
-- All authorization uses Authentik groups via `core.permission_constants.PERMISSION_MAP`
+- `core.auth_utils.groups_grant` decides every permission, web and bot, from the Authentik groups in
+  `core.permission_constants.PERMISSION_MAP`; a TEAM_HELD permission (blue_team) also holds for an active team's
+  group (`Team.is_held_by`, `TeamQuerySet.held_by`). A disabled account holds no permissions but keeps its team's Discord roles
 - A role check is `@require_permission("role_name")`, pages and JSON endpoints alike: signed out, it sends to
   sign in; signed in without the role, it raises `PermissionDenied` (the 403). A view open to staff or a team's
-  own members (tickets, incident reports) checks in `team_record_or_404` or raises `PermissionDenied` itself
+  own members (tickets, incident reports) checks in `team_record_or_404` (the ticket page in
+  `ticketing.access.ticket_open_to`, which the bot shares) or raises `PermissionDenied` itself
 - Views raise `PermissionDenied`, `Http404` and `BadRequest("why")`; the handlers in `core.errors` answer the
   error page, or `{"error": ...}` with the same status for a JSON endpoint (`@json_endpoint`), a script that asks
   for JSON (`Accept: application/json`) or a fetch. A wrong method is `require_POST`/`require_http_methods`.

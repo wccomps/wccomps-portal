@@ -365,14 +365,6 @@ def check_bool(result: object) -> None:
     outcome(result, lambda r: type(r) is bool, "a bool")
 
 
-def check_toggle(result: object) -> None:
-    outcome(
-        result,
-        lambda r: isinstance(r, tuple) and ((r[0] is True and r[1] is None) or (r[0] is False and is_str(r[1]))),
-        "(True, None) or (False, why)",
-    )
-
-
 def check_choices(result: object) -> None:
     outcome(
         result,
@@ -401,7 +393,7 @@ READERS = [
         lambda: authentik().list_applications(),
         (PROVIDERS,),
         lambda r: outcome(r, _strs, "slugs"),
-        (f"{AM}.list_applications", *READ),
+        (f"{AM}.list_applications", f"{AM}._list_all", *READ),
         raises=(AuthentikAPIError,),
     ),
     Reader(
@@ -429,18 +421,12 @@ READERS = [
         raises=(AuthentikAPIError,),
     ),
     Reader(
-        "enable_application",
-        lambda: authentik().enable_application("netbird"),
+        "set_application_enabled",
+        lambda: authentik().set_application_enabled("netbird", True),
         (APPLICATION, BINDINGS, DONE),
-        check_toggle,
-        (f"{AM}.enable_application", f"{AM}._toggle_application"),
-    ),
-    Reader(
-        "disable_application",
-        lambda: authentik().disable_application("netbird"),
-        (APPLICATION, BINDINGS, DONE),
-        check_toggle,
-        (f"{AM}.disable_application", f"{AM}._toggle_application"),
+        lambda r: outcome(r, lambda v: v is None, "None"),
+        (f"{AM}.set_application_enabled",),
+        raises=(AuthentikAPIError,),
     ),
     Reader(
         "update_user_discord_id",
@@ -461,7 +447,9 @@ READERS = [
         "find_user",
         lambda: authentik().find_user("team01"),
         (USERS,),
-        lambda r: outcome(r, lambda u: u is None or (isinstance(u, dict) and is_int(u["pk"])), "a user or None"),
+        lambda r: outcome(
+            r, lambda u: u is None or (isinstance(u, dict) and is_int(u["pk"]) and is_str(u["uid"])), "a user or None"
+        ),
         (f"{AM}.find_user", *USER),
         raises=(AuthentikAPIError,),
     ),

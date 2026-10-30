@@ -38,8 +38,7 @@ from django.utils import timezone
 from hypothesis import strategies as st
 
 from core.models import CompetitionConfig
-from core.permission_constants import check_groups_for_permission
-from core.tests.roles import ROLE_GROUPS, make_user
+from core.tests.roles import ROLE_GROUPS, grants, make_user
 from core.tests.strategies import file_bytes, file_names, request_text, rolled_back
 from core.tests.views_harness import offline, table_writes
 from team.models import DiscordLink, Team
@@ -84,12 +83,8 @@ TEAM_MEMBERS = frozenset({"blue_team", "other_team"})
 
 
 def may(permission: str) -> frozenset[str]:
-    """The roles whose groups grant the permission (core.permission_constants)."""
-    return frozenset(
-        role
-        for role, groups in BOT_ROLES.items()
-        if groups is not None and check_groups_for_permission(groups, permission)
-    )
+    """The roles whose groups grant the permission (core.auth_utils.groups_grant)."""
+    return frozenset(role for role, groups in BOT_ROLES.items() if groups is not None and grants(groups, permission))
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -787,6 +782,13 @@ def _inline_competition_run(enable: bool, actor: str, on_step: Any = None) -> An
     return sync_to_async(run_competition_to_completion)(enable, actor, on_step)
 
 
+async def _inline_off_orm_thread(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """bot.utils.off_orm_thread on the test's own connection, for the same reason as _inline_competition_run."""
+    from asgiref.sync import sync_to_async
+
+    return await sync_to_async(func)(*args, **kwargs)
+
+
 @contextmanager
 def discord_world(world: World, confirm: bool | None) -> Iterator[Discord]:
     """The fakes, every other service offline, the bot's Discord settings, and every confirmation answered with
@@ -813,6 +815,8 @@ def discord_world(world: World, confirm: bool | None) -> Iterator[Discord]:
         stack.enter_context(patch.object(tasks.Loop, "start"))
         stack.enter_context(patch.object(ConfirmView, "wait", answered_confirmation))
         stack.enter_context(patch("bot.competition_actions.run_competition", _inline_competition_run))
+        for module in ("bot.cogs.admin_competition", "bot.cogs.admin_teams", "bot.cogs.authentik_groups"):
+            stack.enter_context(patch(f"{module}.off_orm_thread", _inline_off_orm_thread))
         stack.enter_context(patch("quotient.client.get_quotient_client.cache_clear"))
         yield discord_
 

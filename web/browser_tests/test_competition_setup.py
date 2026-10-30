@@ -17,6 +17,7 @@ def test_a_save_returns_to_the_setup_page_with_no_console_errors(live_server, pw
     user = role_user("gold_team")
     context = create_session_context(pw_browser, live_server, user)
     manager = MagicMock()
+    manager.__enter__.return_value = manager
     manager.list_applications.return_value = ["scoring"]
     url = f"{live_server.url}/ops/admin/competition/setup/"
     try:
@@ -58,6 +59,7 @@ def test_the_readiness_results_are_a_standard_table_with_result_badges(live_serv
     user = role_user("gold_team")
     context = create_session_context(pw_browser, live_server, user)
     manager = MagicMock()
+    manager.__enter__.return_value = manager
     manager.list_applications.return_value = []
     try:
         with (

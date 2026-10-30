@@ -45,9 +45,9 @@ from team.forms import (
 from team.models import SchoolInfo, Team
 
 from .auth_utils import (
-    get_authentik_groups,
     get_authentik_id,
     get_role_based_landing_url,
+    permission_groups_of,
     require_permission,
     team_for_groups,
 )
@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 def home(request: HttpRequest) -> HttpResponse:
     """Home page - redirect to appropriate dashboard based on user role."""
     user = cast(User, request.user)
-    groups = get_authentik_groups(user)
+    groups = permission_groups_of(user)
 
     url = get_role_based_landing_url(groups)
     if url != "/":
@@ -105,7 +105,7 @@ def link_callback(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)
     try:
         authentik_username = user.username
-        groups = get_authentik_groups(user)
+        groups = permission_groups_of(user)
         authentik_user_id = get_authentik_id(user)
     except Exception as e:
         logger.error(f"link_callback: Error getting Authentik data: {e}", exc_info=True)
@@ -118,6 +118,18 @@ def link_callback(request: HttpRequest) -> HttpResponse:
             {
                 "error": "Authentication error",
                 "message": "Could not retrieve your Authentik account information.",
+            },
+        )
+
+    # A disabled account's session outlives it; linking would land as a team-less link and store the Discord ID
+    if user.usergroups.account_active is False:
+        return render(
+            request,
+            "link_error.html",
+            {
+                "error": "Account disabled",
+                "message": "This account is disabled right now, as team accounts are between competitions. Link "
+                "your Discord account once the competition starts.",
             },
         )
 

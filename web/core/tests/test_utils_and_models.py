@@ -9,7 +9,7 @@ from django.utils import timezone
 from hypothesis import given
 from hypothesis import strategies as st
 
-from core.auth_utils import get_authentik_groups, get_authentik_id, team_for_groups
+from core.auth_utils import get_authentik_id, permission_groups_of, team_for_groups
 from core.discord_tasks import PostTicketUpdate, SyncRoles
 from core.models import AuditLog, CompetitionConfig, DiscordTask
 from team.models import Team
@@ -18,17 +18,15 @@ pytestmark = pytest.mark.django_db
 
 
 class TestGetAuthentikGroups:
-    """Tests for get_authentik_groups function."""
-
     def test_returns_groups_from_usergroups(self, blue_team_user):
         """Should extract groups from UserGroups model."""
-        groups = get_authentik_groups(blue_team_user)
+        groups = permission_groups_of(blue_team_user)
         assert "WCComps_BlueTeam01" in groups
 
     def test_returns_empty_list_without_usergroups(self):
         """Should return empty list when no UserGroups exists."""
         user = User.objects.create_user(username="regular_user", password="test")
-        groups = get_authentik_groups(user)
+        groups = permission_groups_of(user)
         assert groups == []
 
 

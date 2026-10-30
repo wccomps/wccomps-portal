@@ -43,6 +43,7 @@ def test_with_no_event_the_event_section_sends_you_to_the_import(live_server, pw
     user = role_user("gold_team")
     context = create_session_context(pw_browser, live_server, user)
     manager = MagicMock()
+    manager.__enter__.return_value = manager
     manager.list_applications.return_value = []
     try:
         with patch("core.admin_views.competition.AuthentikManager", return_value=manager):
@@ -70,6 +71,7 @@ def test_played_and_stopped_the_page_checks_unfinished_work(live_server, pw_brow
     user = role_user("gold_team")
     context = create_session_context(pw_browser, live_server, user)
     manager = MagicMock()
+    manager.__enter__.return_value = manager
     manager.list_applications.return_value = []
     try:
         with patch("core.admin_views.competition.AuthentikManager", return_value=manager):

@@ -190,7 +190,8 @@ class TicketActionView(discord.ui.View):
     ) -> None:
         """Cancel a ticket: teams their own open ones, ticketing staff claimed ones too."""
 
-        from bot.permissions import has_permission, linked_team_member
+        from bot.permissions import ticket_access
+        from ticketing.access import ticket_open_to
 
         ticket_id = await self._get_ticket_id_from_interaction(interaction)
         if not ticket_id:
@@ -200,24 +201,16 @@ class TicketActionView(discord.ui.View):
             )
             return
 
-        is_ops = await has_permission(interaction.user.id, TICKET_STAFF)
-        member = await linked_team_member(interaction.user.id)
-
-        if not is_ops and not member:
-            await interaction.response.send_message(
-                "You must be a team member or ops to cancel tickets.",
-                ephemeral=True,
-            )
-            return
-
         ticket = await Ticket.objects.select_related("team").filter(id=ticket_id).afirst()
         if not ticket:
             await interaction.response.send_message("Ticket not found.", ephemeral=True)
             return
 
-        # If team member (not ops), verify ticket belongs to their team
-        if not is_ops and member and ticket.team_id != member.team.id:
-            await interaction.response.send_message("This ticket does not belong to your team.", ephemeral=True)
+        is_ops, team = await ticket_access(interaction.user.id)
+        if not ticket_open_to(ticket, staff=is_ops, team=team):
+            await interaction.response.send_message(
+                "You must be ticket staff or on this ticket's team to cancel it.", ephemeral=True
+            )
             return
 
         from ticketing.lifecycle import acancel_ticket
