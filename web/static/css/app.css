@@ -318,6 +318,7 @@ a.button.danger:active {
 .mb-20 { margin-bottom: 20px; }
 .ml-5 { margin-left: 5px; }
 .ml-20 { margin-left: 20px; }
+.ml-auto { margin-left: auto; }
 /* Padding */
 .p-10 { padding: 10px; }
 .p-15 { padding: 15px; }
@@ -462,14 +463,21 @@ a.btn-secondary:focus-visible {
 .form-row fieldset {
     border-top: none;
 }
-/* Django's choice list (a div of option divs, not the toggle picker) sits under its legend in 24px rows */
+/* Django's choice list (a div of option divs, not the toggle picker) sits under its legend in rows at least 24px tall */
 .form-row fieldset > div:not([x-data]) {
     margin-top: 0;
 }
 .form-row fieldset > div:not([x-data]) > div {
     min-height: 24px;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
+}
+/* An option's description (DescribedRadioSelect) sits under its label, in line with the label's text */
+.form-row fieldset > div:not([x-data]) > div > .help-text {
+    flex-basis: 100%;
+    margin: 0 0 6px 17px;
+    padding: 0;
 }
 .vTextField,
 .vLargeTextField {
