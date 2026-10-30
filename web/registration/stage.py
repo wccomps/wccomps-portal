@@ -1,7 +1,8 @@
 """Where the event lifecycle stands: one reading the import, Close Out, Clear leftover data and the pages share."""
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import StrEnum
+from typing import ClassVar
 
 from django.db.models import Exists, OuterRef, QuerySet
 from packets.models import packets_sent
@@ -14,8 +15,40 @@ from ticketing.models import Ticket
 
 from .models import Event
 
-# The audit action Email Scorecards records, with the open event's id (or None) and the scorecards' fingerprint
-SCORECARDS_EMAILED = "scorecards_emailed"
+# The audit actions Close Out Event and Clear leftover data record: no live data from before either is left
+EVENT_CLOSED_OUT = "event_closed_out"
+LEFTOVER_DATA_CLEARED = "leftover_data_cleared"
+
+
+@dataclass(frozen=True)
+class ScorecardsEmailed:
+    """An Email Scorecards send as its audit entry: the open event's id (None with none open), the teams emailed and
+    failed, and the standings fingerprint."""
+
+    ACTION: ClassVar = "scorecards_emailed"
+
+    event: int | None
+    teams: int
+    failed: int
+    scorecards_hash: str
+
+    def record(self, actor: str) -> None:
+        AuditLog.objects.create(
+            action=self.ACTION,
+            admin_user=actor,
+            target_entity="event",
+            target_id=self.event or 0,
+            details=asdict(self),
+        )
+
+    @classmethod
+    def sends(cls, event: Event | None) -> QuerySet[AuditLog]:
+        return AuditLog.objects.filter(action=cls.ACTION, details__event=event.pk if event else None)
+
+    @classmethod
+    def latest(cls, event: Event | None) -> ScorecardsEmailed | None:
+        entry = cls.sends(event).order_by("-created_at", "-pk").first()
+        return None if entry is None else cls(**entry.details)
 
 
 class Stage(StrEnum):
@@ -191,11 +224,10 @@ class EventStage:
 def _scorecards_emailed(event: Event | None) -> bool:
     """Whether Email Scorecards ran for the live scores: for the open event, or with none open, since the live data
     was last cleared."""
-    sends = AuditLog.objects.filter(action=SCORECARDS_EMAILED)
+    sends = ScorecardsEmailed.sends(event)
     if event is not None:
-        return sends.filter(details__event=event.pk).exists()
-    sends = sends.filter(details__event=None)
-    cleared = AuditLog.objects.filter(action__in=("event_closed_out", "leftover_data_cleared")).order_by("-created_at")
+        return sends.exists()
+    cleared = AuditLog.objects.filter(action__in=(EVENT_CLOSED_OUT, LEFTOVER_DATA_CLEARED)).order_by("-created_at")
     if (last := cleared.first()) is not None:
         sends = sends.filter(created_at__gt=last.created_at)
     return sends.exists()

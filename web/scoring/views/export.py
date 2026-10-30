@@ -12,8 +12,9 @@ from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.views.decorators.http import require_POST
-from registration.close_out_checks import record_scorecards_emailed, scorecards_fingerprint
+from registration.close_out_checks import scorecards_fingerprint
 from registration.models import Event
+from registration.stage import ScorecardsEmailed
 
 from core.auth_utils import require_permission
 from core.utils import ndjson_done, ndjson_progress, run_detached
@@ -162,7 +163,7 @@ def _stream_email_scorecards(request: HttpRequest, custom_message: str = "") -> 
             yield ndjson_progress(f"Failed Team {team.team_number}", i, total, ok=False)
 
     if sent:
-        record_scorecards_emailed(event, fingerprint, sent, failed, request.user.get_username())
+        ScorecardsEmailed(event.pk if event else None, sent, failed, fingerprint).record(request.user.get_username())
     message = f"Sent {sent}, failed {failed}" if failed else f"Emailed scorecards to {sent} teams"
     yield ndjson_done(message, success=failed == 0)
 

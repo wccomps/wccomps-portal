@@ -15,11 +15,11 @@ from scoring.scorecard import build_scorecard_context
 from registration.close_out_checks import (
     CloseOutWarning,
     close_out_warnings,
-    record_scorecards_emailed,
     scorecards_fingerprint,
 )
 from registration.models import Event, Season
 from registration.services import close_out_event, set_team_school
+from registration.stage import ScorecardsEmailed
 from team.models import Team
 from ticketing.models import Ticket
 
@@ -45,7 +45,7 @@ def event():
 
 
 def _emailed(event, sent=2, failed=0):
-    record_scorecards_emailed(event, scorecards_fingerprint(event), sent, failed, "gold")
+    ScorecardsEmailed(event.pk if event else None, sent, failed, scorecards_fingerprint(event)).record("gold")
 
 
 def _team(number=1):
@@ -123,7 +123,7 @@ def test_scores_changed_after_the_last_scorecard_email(event):
 def test_the_latest_scorecard_email_decides(event):
     stale = scorecards_fingerprint(event)
     ServiceScore.objects.filter(team__team_number=2).update(service_points=Decimal(400))
-    record_scorecards_emailed(event, stale, 2, 0, "gold")
+    ScorecardsEmailed(event.pk, 2, 0, stale).record("gold")
     _emailed(event)
 
     assert close_out_warnings(event) == []
@@ -158,6 +158,22 @@ def test_sends_with_no_event_open_never_count(event):
             "No event is open, so scorecard emails can't be checked: make sure the scorecards went out.", EMAIL
         )
     ]
+
+
+def test_a_malformed_send_record_is_an_error_not_a_changed_score(event):
+    """Every send records all four details; one missing its fingerprint is a bug to surface, not 'scores changed'."""
+    from core.models import AuditLog
+
+    AuditLog.objects.create(
+        action=ScorecardsEmailed.ACTION,
+        admin_user="gold",
+        target_entity="event",
+        target_id=event.pk,
+        details={"event": event.pk, "teams": 2, "failed": 0},
+    )
+
+    with pytest.raises(TypeError):
+        ScorecardsEmailed.latest(event)
 
 
 @pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction

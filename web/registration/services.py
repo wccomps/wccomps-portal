@@ -32,7 +32,7 @@ from .models import (
     collapse_whitespace,
     normalize_school_name,
 )
-from .stage import Action, EventStage, Stage, event_stage, scored_teams
+from .stage import EVENT_CLOSED_OUT, LEFTOVER_DATA_CLEARED, Action, EventStage, Stage, event_stage, scored_teams
 
 
 class PacketsSentError(Exception):
@@ -603,7 +603,7 @@ def _close_out(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
         # Committed with the close-out, so the bot never tears Discord down for a close-out that rolled back
         DiscordTask.enqueue(ReconcileTeams(requested_by=actor))
         AuditLog.objects.create(
-            action="event_closed_out",
+            action=EVENT_CLOSED_OUT,
             admin_user=actor,
             target_entity="event",
             target_id=event.pk,
@@ -756,7 +756,7 @@ def clear_leftover_data(actor: str) -> WipedData:
     with _locked_transition(clear_leftovers_problem) as (config, _):
         wiped = wipe_competition_data()
         AuditLog.objects.create(
-            action="leftover_data_cleared",
+            action=LEFTOVER_DATA_CLEARED,
             admin_user=actor,
             target_entity="competition_config",
             target_id=config.pk,
