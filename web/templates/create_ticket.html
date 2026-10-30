@@ -22,10 +22,10 @@
                     {% if not form.team_id.field.disabled %}{{ form.team_id.as_field_group }}{% endif %}
                     {{ form.category.as_field_group }}
                     {{ form.title.as_field_group }}
-                    <div x-show="showHostname" x-cloak id="field-hostname">{{ form.hostname.as_field_group }}</div>
-                    <div x-show="showIpAddress" x-cloak id="field-ip_address">{{ form.ip_address.as_field_group }}</div>
-                    <div x-show="showServiceName" x-cloak id="field-service_name">{{ form.service_name.as_field_group }}</div>
-                    <div x-show="showDescription" x-cloak id="field-description">{{ form.description.as_field_group }}</div>
+                    <div x-show="showHostname" x-cloak id="field-hostname" :class="marks.hostname">{{ form.hostname.as_field_group }}</div>
+                    <div x-show="showIpAddress" x-cloak id="field-ip_address" :class="marks.ip_address">{{ form.ip_address.as_field_group }}</div>
+                    <div x-show="showServiceName" x-cloak id="field-service_name" :class="marks.service_name">{{ form.service_name.as_field_group }}</div>
+                    <div x-show="showDescription" x-cloak id="field-description" :class="marks.description">{{ form.description.as_field_group }}</div>
                 </c-fieldset>
                 <c-button_row class="justify-end">
                     <c-link href="{% url 'ticket_list' %}" variant="cancel">Cancel</c-link>
@@ -62,6 +62,16 @@
                 get ipRequired() { return this.requiredFields.includes('ip_address'); },
                 get serviceRequired() { return this.requiredFields.includes('service_name'); },
                 get descriptionRequired() { return this.requiredFields.includes('description'); },
+                // The form leaves these fields optional, so the server marks none of them
+                get marks() {
+                    const mark = field => (this.requiredFields.includes(field) ? 'required' : '');
+                    return {
+                        hostname: mark('hostname'),
+                        ip_address: mark('ip_address'),
+                        service_name: mark('service_name'),
+                        description: mark('description'),
+                    };
+                },
 
                 setField(e) { this[e.target.dataset.field] = e.target.value; },
 
@@ -108,15 +118,9 @@
 
                 onCategoryChange(e) {
                     if (e && e.target) this.selectedCategory = e.target.value;
-                    const catData = categories[this.selectedCategory];
-                    if (!catData) {
-                        this.visibleFields = [];
-                        this.requiredFields = [];
-                        return;
-                    }
-
-                    this.requiredFields = catData.required_fields || [];
-                    this.visibleFields = [...this.requiredFields, ...(catData.optional_fields || [])];
+                    const catData = categories[this.selectedCategory] || { required_fields: [], optional_fields: [] };
+                    this.requiredFields = catData.required_fields;
+                    this.visibleFields = [...catData.required_fields, ...catData.optional_fields];
                 },
 
                 onHostnameChange() {

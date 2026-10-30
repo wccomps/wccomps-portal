@@ -90,7 +90,39 @@ def test_a_failed_save_keeps_the_box_pressed_and_the_picker_working(page):
         page.get_by_role("button", name="Create Ticket").click()  # no title or service: the form comes back
 
     assert page.locator("#title_error").is_visible()
+    assert marked(page) == ["service_name"]
     assert pressed(page) == ["web01"]
     box(page, "db01").click()
     assert pressed(page) == ["db01"]
     assert page.locator("#ip_address").input_value() == "10.0.1.6"
+
+
+def marked(page):
+    return page.evaluate(
+        "['hostname', 'ip_address', 'service_name', 'description'].filter(f => getComputedStyle("
+        "document.querySelector(`#field-${f} label, #field-${f} legend`), '::after').content.startsWith('\" *\"'))"
+    )
+
+
+def mark_alt_text(page, selector):
+    return page.locator(selector).evaluate("element => getComputedStyle(element, '::after').content")
+
+
+def test_the_required_mark_follows_the_picked_category(page, category):
+    from ticketing.models import TicketCategory
+
+    assert marked(page) == ["service_name"]
+    # The service select says required itself, so its label's mark is silent
+    assert mark_alt_text(page, "#field-service_name label").endswith('/ ""')
+    assert page.locator("#service_name").evaluate("select => select.required")
+    other = TicketCategory.objects.create(
+        pk=91, display_name="Host Trouble", required_fields=["hostname"], user_creatable=True, sort_order=91
+    )
+    page.reload()
+    page.select_option("#category", str(other.pk))
+    assert marked(page) == ["hostname"]
+    # Nothing in the picker's fieldset is [required], so the legend's mark says it
+    assert mark_alt_text(page, "#field-hostname legend").endswith('/ " required"')
+
+    page.select_option("#category", str(category.pk))
+    assert marked(page) == ["service_name"]
