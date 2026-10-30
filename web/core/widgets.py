@@ -25,9 +25,10 @@ class DescribedRadioSelect(forms.RadioSelect):
     ) -> dict[str, object]:
         option = super().create_option(name, value, label, selected, index, subindex, attrs)
         option_attrs = cast(dict[str, object], option["attrs"])
-        if (description := self.descriptions.get(str(value))) and option_attrs.get("id"):
+        if description := self.descriptions.get(str(value)):
             option["description"] = description
-            option_attrs["aria-describedby"] = f"{option_attrs['id']}_description"
+            if option_attrs.get("id"):
+                option["description_id"] = option_attrs["aria-describedby"] = f"{option_attrs['id']}_description"
         return option
 
 

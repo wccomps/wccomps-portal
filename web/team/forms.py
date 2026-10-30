@@ -158,7 +158,6 @@ class ImportEventForm(NewEventFields):
     mode = forms.ChoiceField(
         required=False,
         initial="replace",
-        widget=DescribedRadioSelect,
         help_text="Replace for an event's first school list; Add for schools that registered after it.",
         error_messages={"invalid_choice": "Pick Replace or Add."},
     )
@@ -190,8 +189,8 @@ class ImportEventForm(NewEventFields):
         ]
         open_event = Event.objects.open() or "the open event"
         mode = cast(forms.ChoiceField, self.fields["mode"])
+        mode.widget = DescribedRadioSelect(descriptions={key: m.description for key, m in IMPORT_MODES.items()})
         mode.choices = [(key, m.label.format(event=open_event)) for key, m in IMPORT_MODES.items()]
-        cast(DescribedRadioSelect, mode.widget).descriptions = {key: m.description for key, m in IMPORT_MODES.items()}
         self.fields["event"].widget.attrs["x-on:change"] = "onEventChange"
         self.fields["new_name"].label = "New event name"
         self.fields["new_name"].help_text = "Only for a new event."
@@ -409,7 +408,7 @@ class ImportMode:
     """One way to import a school list. Its services re-check the event and the teams under the school list lock."""
 
     label: str  # What the page calls it; {event} is the event imported into
-    description: str  # The line under its choice on the import page
+    description: str
     problem: Callable[[Event | NewEvent], str]  # Why the event can't take the import now, or ''
     validate: Callable[[list[CSVRowData], Event | NewEvent], CSVValidationResult]
     preview: Callable[[Event | NewEvent, list[CSVRowData]], str]  # A sentence on what the import keeps, or ''
@@ -436,7 +435,8 @@ IMPORT_MODES = {
     "add": ImportMode(
         label="Add schools to {event}",
         description=(
-            "Keeps the school list and gives the file's new schools the lowest free team numbers, in random order. "
+            "Keeps the school list and gives the file's new schools the lowest free team numbers, in random order, "
+            "activating those teams. "
             "Schools already on the list keep their numbers and are skipped, so it works after packets went out."
         ),
         problem=add_problem,
