@@ -24,6 +24,7 @@ class CoreConfig(AppConfig):
     name = "core"
 
     def ready(self) -> None:
+        import core.lookups  # noqa: F401 - registers the field lookups
         from core.cotton import escape_component_attrs
 
         escape_component_attrs()

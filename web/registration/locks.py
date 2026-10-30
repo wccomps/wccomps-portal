@@ -1,7 +1,9 @@
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 
-from django.db import DatabaseError, connection
+from django.db import connection
+
+from core.utils import advisory_lock
 
 # Arbitrary, but fixed (and not prepare_database's): every holder asks for the same lock.
 SCHOOL_LIST_LOCK_ID = 7_261_640_002
@@ -22,11 +24,5 @@ def school_list_held() -> Iterator[None]:
     come after the snapshot, and a wait for the lock would leave it reading what was there before the holder
     committed. Outside any transaction only. school_list_lock() inside it returns at once.
     """
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT pg_advisory_lock(%s)", [SCHOOL_LIST_LOCK_ID])
-    try:
+    with advisory_lock(SCHOOL_LIST_LOCK_ID, wait=True):
         yield
-    finally:
-        # A dropped connection released it already
-        with suppress(DatabaseError), connection.cursor() as cursor:
-            cursor.execute("SELECT pg_advisory_unlock(%s)", [SCHOOL_LIST_LOCK_ID])

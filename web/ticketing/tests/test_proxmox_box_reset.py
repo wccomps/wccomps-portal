@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from django.core.cache import cache
+from django.db import connection
 from django.test import Client, override_settings
 from django.urls import reverse
 
@@ -22,7 +22,9 @@ from core.proxmox import (
     match_team_vm,
     normalize_ticket_host,
 )
+from core.utils import advisory_lock
 from ticketing.models import BOX_RESET_CATEGORY_ID, Ticket, TicketCategory, TicketComment, TicketHistory
+from ticketing.views.actions import box_reset_lock_key
 
 
 def test_normalize_ticket_host() -> None:
@@ -328,25 +330,71 @@ class TestTicketBoxResetViews:
         assert "only available on Box Reset tickets" in lines[-1]["message"]
         assert not mock_client.method_calls
 
-    def test_box_reset_refuses_while_another_reset_holds_the_ticket(
+    @staticmethod
+    def _other_session():
+        other = connection.copy()
+        other.ensure_connection()
+        return other
+
+    @staticmethod
+    def _can_lock(session, ticket_id: int) -> bool:
+        with advisory_lock(box_reset_lock_key(ticket_id), conn=session) as taken:
+            return taken
+
+    def test_box_reset_refuses_while_another_process_runs_one(
         self,
         client: Client,
         box_ticket: Ticket,
         ticketing_support_user,
     ) -> None:
-        cache.clear()
-        cache.add(f"box_reset_lock_{box_ticket.id}", 0, timeout=60)
+        other = self._other_session()
         mock_client = MagicMock()
-
-        client.force_login(ticketing_support_user)
-        run_url = reverse("ticket_box_reset", kwargs={"ticket_number": box_ticket.ticket_number})
-        with patch("core.proxmox.get_proxmox_client", return_value=mock_client):
-            resp = client.post(run_url, {"snapshot": "clean"})
-            lines = [json.loads(line) for line in b"".join(resp.streaming_content).decode().splitlines()]
-        cache.clear()
+        try:
+            with advisory_lock(box_reset_lock_key(box_ticket.id), conn=other) as held:
+                assert held
+                client.force_login(ticketing_support_user)
+                run_url = reverse("ticket_box_reset", kwargs={"ticket_number": box_ticket.ticket_number})
+                with patch("core.proxmox.get_proxmox_client", return_value=mock_client):
+                    resp = client.post(run_url, {"snapshot": "clean"})
+                    lines = [json.loads(line) for line in b"".join(resp.streaming_content).decode().splitlines()]
+        finally:
+            other.close()
         assert lines[-1]["success"] is False
         assert "already running" in lines[-1]["message"]
         assert not mock_client.method_calls
+
+    def test_box_reset_holds_its_lock_against_other_processes_until_done(
+        self,
+        client: Client,
+        box_ticket: Ticket,
+        ticketing_support_user,
+    ) -> None:
+        other = self._other_session()
+        taken_during_reset: list[bool] = []
+
+        def rollback(*args):
+            taken_during_reset.append(self._can_lock(other, box_ticket.id))
+            return "UPID:pve01:rollback1"
+
+        mock_client = MagicMock()
+        mock_client.list_team_vms.return_value = [
+            ProxmoxVM(vmid=10105, name="team01-web", host="web", node="pve01", status="running"),
+        ]
+        mock_client.list_snapshots.return_value = [ProxmoxSnapshot(name="clean", description="Clean baseline")]
+        mock_client.rollback_snapshot.side_effect = rollback
+        mock_client.start_vm.return_value = "UPID:pve01:start1"
+        mock_client.wait_for_task.return_value = ProxmoxTaskStatus(status="stopped", exitstatus="OK")
+        try:
+            client.force_login(ticketing_support_user)
+            run_url = reverse("ticket_box_reset", kwargs={"ticket_number": box_ticket.ticket_number})
+            with patch("core.proxmox.get_proxmox_client", return_value=mock_client):
+                resp = client.post(run_url, {"snapshot": "clean"})
+                lines = [json.loads(line) for line in b"".join(resp.streaming_content).decode().splitlines()]
+            assert lines[-1]["success"] is True
+            assert taken_during_reset == [False]
+            assert self._can_lock(other, box_ticket.id)
+        finally:
+            other.close()
 
     def test_box_reset_stream_rolls_back_starts_comments_audits_and_resolves(
         self,
@@ -354,7 +402,6 @@ class TestTicketBoxResetViews:
         box_ticket: Ticket,
         ticketing_support_user,
     ) -> None:
-        cache.clear()
         mock_client = MagicMock()
         mock_client.list_team_vms.return_value = [
             ProxmoxVM(vmid=10105, name="team01-web", host="web", node="pve01", status="running"),
@@ -412,7 +459,6 @@ class TestTicketBoxResetViews:
         box_ticket: Ticket,
         ticketing_support_user,
     ) -> None:
-        cache.clear()
         mock_client = MagicMock()
         mock_client.list_team_vms.return_value = [
             ProxmoxVM(vmid=10105, name="team01-web", host="web", node="pve01", status="running"),

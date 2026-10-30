@@ -1,5 +1,6 @@
 """Tests for core utils and models."""
 
+from contextlib import suppress
 from datetime import timedelta
 
 import pytest
@@ -289,3 +290,70 @@ class TestTeamModelProperties:
             )
 
         assert "team_number" in str(exc_info.value)
+
+
+class TestAdvisoryLock:
+    @staticmethod
+    def _session():
+        from django.db import connection
+
+        other = connection.copy()
+        other.ensure_connection()
+        return other
+
+    @staticmethod
+    def _query(session, sql, params=()):
+        with session.cursor() as cursor:
+            cursor.execute(sql, params)
+            return cursor.fetchone()[0]
+
+    def test_a_dropped_connection_ends_the_block_with_its_own_error(self):
+        from django.db import OperationalError
+
+        from core.utils import advisory_lock
+
+        holder, other = self._session(), self._session()
+        try:
+            with pytest.raises(OperationalError), advisory_lock("test:dropped", conn=holder) as held:
+                assert held
+                pid = self._query(holder, "SELECT pg_backend_pid()")
+                assert self._query(other, "SELECT pg_terminate_backend(%s, 5000)", [pid])
+                self._query(holder, "SELECT 1")
+            assert self._query(other, "SELECT pg_try_advisory_lock(hashtextextended('test:dropped', 0))")
+        finally:
+            holder.close()
+            other.close()
+
+    def test_release_in_an_aborted_transaction_raises_rather_than_hiding_that_the_lock_is_still_held(self):
+        from django.db import DatabaseError, connection, transaction
+
+        from core.utils import advisory_lock
+
+        try:
+            with (
+                suppress(DatabaseError),
+                transaction.atomic(),
+                pytest.raises(DatabaseError, match="aborted"),
+                advisory_lock("test:aborted") as held,
+            ):
+                assert held
+                with suppress(DatabaseError), connection.cursor() as cursor:
+                    cursor.execute("SELECT * FROM no_such_table")
+        finally:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_unlock_all()")
+
+    def test_an_int_key_is_the_same_lock_as_the_transaction_lock_on_that_int(self):
+        from registration.locks import SCHOOL_LIST_LOCK_ID
+
+        from core.utils import advisory_lock
+
+        holder, other = self._session(), self._session()
+        try:
+            with advisory_lock(SCHOOL_LIST_LOCK_ID, wait=True, conn=holder) as held:
+                assert held
+                assert not self._query(other, "SELECT pg_try_advisory_xact_lock(%s)", [SCHOOL_LIST_LOCK_ID])
+            assert self._query(other, "SELECT pg_try_advisory_xact_lock(%s)", [SCHOOL_LIST_LOCK_ID])
+        finally:
+            holder.close()
+            other.close()
