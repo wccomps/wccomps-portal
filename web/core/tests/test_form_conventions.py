@@ -3,9 +3,19 @@
 Exceptions must be visible in this file, with a reason, so they get reviewed.
 """
 
+import ast
 import re
 
-from core.tests.guards import component_templates, fail_with, page_templates, template_name, text, tracked_templates
+from core.tests.guards import (
+    REPO_DIR,
+    component_templates,
+    fail_with,
+    page_templates,
+    template_name,
+    text,
+    tracked_files,
+    tracked_templates,
+)
 
 MESSAGE_LOOP = re.compile(r"{%\s*if\s+messages\s*%}|{%\s*for\s+\w+\s+in\s+messages\s*%}")
 
@@ -63,3 +73,37 @@ def test_a_form_field_renders_as_its_field_group() -> None:
         for m in BARE_FIELD.finditer(text(p))
     }
     fail_with("Form fields rendered as bare widgets", found, BARE_FIELD_EXCEPTIONS)
+
+
+MARKUP_CALLS = {"format_html", "format_html_join", "mark_safe", "SafeString"}
+# SafeString is also a type: only a call to it builds markup
+MARKUP_FUNCTIONS = MARKUP_CALLS - {"SafeString"}
+
+
+def markup_name(node: ast.AST) -> str | None:
+    name = node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else None
+    return name if name in MARKUP_CALLS else None
+
+
+def test_form_markup_formats_only_literals() -> None:
+    """A label or help text written as markup is shown as is: format_html escapes its values but can't stop a
+    javascript: link, so a forms module calls format_html, format_html_join, mark_safe and SafeString directly, with
+    literals only."""
+    found = {}
+    for path in tracked_files():
+        if not (path.startswith("web/") and path.endswith("forms.py") and "/tests/" not in path):
+            continue
+        tree = ast.parse((REPO_DIR / path).read_text())
+        called = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name in MARKUP_CALLS and alias.asname:
+                        found[f"{path}:{node.lineno}"] = f"imports {alias.name} under another name"
+            elif (name := markup_name(node)) in MARKUP_FUNCTIONS and id(node) not in called:
+                found[f"{path}:{node.lineno}"] = f"uses {name} other than by calling it"
+            elif isinstance(node, ast.Call) and (name := markup_name(node.func)):
+                for value in [*node.args, *(kw.value for kw in node.keywords)]:
+                    if not isinstance(value, ast.Constant):
+                        found[f"{path}:{node.lineno}"] = f"{name} takes {ast.unparse(value)}"
+    fail_with("Form markup built from values that aren't literals", found, {})

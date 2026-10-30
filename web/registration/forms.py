@@ -12,7 +12,6 @@ from .services import NewEvent, NewSeason, new_event_problem
 
 CONTACT_EMAIL_MAX_LENGTH = RegistrationContact._meta.get_field("email").max_length
 RESTRICTED_EVENT_TYPES = ("qualifier", "regional")
-RULES_URL = "https://wrccdc.org/about/rules/"
 PHONE = "(555) 123-4567"
 EMAIL = "name@school.edu"
 
@@ -73,7 +72,7 @@ class RegistrationForm(forms.ModelForm[TeamRegistration]):
         required=True,
         label=format_html(
             'I have read and agree to the <a href="{}" target="_blank">competition rules and guidelines</a>',
-            RULES_URL,
+            "https://wrccdc.org/about/rules/",
         ),
         error_messages={"required": "Agree to the competition rules to register."},
     )

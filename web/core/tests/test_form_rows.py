@@ -58,6 +58,17 @@ def test_help_text_is_escaped_once() -> None:
     assert "Tom &amp; Jerry&#x27;s &lt;notes&gt;" in row(ExampleForm(), "notes")
 
 
+def test_a_label_and_an_error_are_escaped_once() -> None:
+    class MarkupForm(forms.Form):
+        name = forms.CharField(label="<b>Name</b>", error_messages={"required": "<i>Needed</i>"})
+
+    html = row(MarkupForm({}), "name")
+    assert "&lt;b&gt;Name&lt;/b&gt;" in html
+    assert "&lt;i&gt;Needed&lt;/i&gt;" in html
+    assert "<b>" not in html
+    assert "<i>" not in html
+
+
 def test_a_field_without_a_label_has_no_bare_colon() -> None:
     assert "<label" not in row(ExampleForm(), "notes")
 
