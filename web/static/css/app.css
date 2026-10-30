@@ -926,11 +926,15 @@ fieldset:has([required]) > legend.required::after,
     display: contents;
 }
 
-/* The tools wrap as one group */
+/* The tools wrap as one group, at the right of their row */
 .nav-utils {
     display: flex;
     align-items: center;
     margin-left: auto;
+}
+
+.nav-utils a {
+    flex: none;
 }
 
 /* Mobile layout */
@@ -991,6 +995,12 @@ fieldset:has([required]) > legend.required::after,
         padding-top: 10px;
         margin-top: 10px;
         border-top: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    /* A long name breaks anywhere rather than pushing Log out off the screen */
+    .nav-user {
+        min-width: 0;
+        overflow-wrap: anywhere;
     }
 }
 
