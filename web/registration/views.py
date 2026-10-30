@@ -34,6 +34,7 @@ from .services import (
     PacketsSentError,
     SchoolChangedError,
     SchoolTakenError,
+    TeamLinkedError,
     TeamTakenError,
     activate_teams,
     delete_event,
@@ -471,7 +472,7 @@ def unassign_team(request: HttpRequest, assignment_id: int) -> HttpResponse:
     shown = ShownSchoolForm(request.POST)
     try:
         remove_team_school(assignment.team, expected_school_id=shown.expected_school_id())
-    except (PacketsSentError, SchoolChangedError) as refused:
+    except (PacketsSentError, SchoolChangedError, TeamLinkedError) as refused:
         messages.error(request, str(refused))
         return redirect("registration_event_detail", event_id=event_id)
     messages.success(request, f"Team assignment for {school_name} removed.")

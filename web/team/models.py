@@ -46,6 +46,10 @@ class Team(models.Model):
 
     discord_role_id = models.BigIntegerField(null=True, blank=True)
     discord_category_id = models.BigIntegerField(null=True, blank=True)
+    channels_need_clearing = models.BooleanField(
+        default=False,
+        help_text="Its Discord role and category are to be removed: none is reused or granted meanwhile",
+    )
 
     ticket_counter = models.IntegerField(default=0)
 

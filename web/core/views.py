@@ -12,7 +12,8 @@ from django.db import transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from registration.forms import ShownSchoolForm
-from registration.models import Event, Season
+from registration.locks import school_list_lock
+from registration.models import Event, Season, normalize_school_name
 from registration.services import (
     ImportBlockedError,
     NewEvent,
@@ -20,11 +21,14 @@ from registration.services import (
     SchoolChangedError,
     SchoolListRow,
     SchoolTakenError,
+    TeamLinkedError,
     clear_school_list,
     remove_team_school,
     set_team_school,
+    unlink_teams,
 )
 
+from core.authentik_utils import reset_team_credentials
 from core.services.linking import (
     LinkResult,
     enforce_account_link_policy,
@@ -56,6 +60,8 @@ from .form_errors import ask_for_the_file_again
 from .forms import LinkConfirmForm, SchoolInfoEditForm
 
 logger = logging.getLogger(__name__)
+
+SAY_RENAME_OR_NEW = "The school name changed: say whether it is a rename of the same school or a different school."
 
 
 def home(request: HttpRequest) -> HttpResponse:
@@ -231,8 +237,8 @@ def school_info_clear(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         try:
             deleted = clear_school_list()
-        except PacketsSentError as sent:
-            error = str(sent)
+        except (PacketsSentError, TeamLinkedError) as refused:
+            error = str(refused)
         else:
             logger.info(f"Cleared school info by {request.user.username}")
             messages.success(request, f"Cleared {deleted} school info record(s).")
@@ -253,7 +259,7 @@ def school_info_remove(request: HttpRequest, team_number: int) -> HttpResponse:
         shown = ShownSchoolForm(request.POST)
         try:
             remove_team_school(school_info.team, expected_school_id=shown.expected_school_id())
-        except (PacketsSentError, SchoolChangedError) as refused:
+        except (PacketsSentError, SchoolChangedError, TeamLinkedError) as refused:
             error = str(refused)
         else:
             logger.info(f"Removed Team {team_number}'s school info by {request.user.username}")
@@ -269,6 +275,8 @@ def school_info_remove(request: HttpRequest, team_number: int) -> HttpResponse:
 
 @require_permission("gold_team")
 def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
+    """A changed school name asks whether it is a rename, which keeps everything, or a different school, which
+    unlinks the team's members and has its Discord role and category removed so the new school starts clean."""
     user = cast(User, request.user)
     authentik_username = user.username
 
@@ -279,51 +287,94 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
     except SchoolInfo.DoesNotExist:
         school_info = None
 
+    def page(form: SchoolInfoEditForm) -> HttpResponse:
+        return render(request, "school_info_edit.html", {"team": team, "school_info": school_info, "form": form})
+
     if request.method == "POST":
         form = SchoolInfoEditForm(request.POST)
         if not form.is_valid():
-            error_msg = " ".join(str(e) for errors in form.errors.values() for e in errors)
-            return render(
-                request,
-                "school_info_edit.html",
-                {
-                    "team": team,
-                    "school_info": school_info,
-                    "page_error": error_msg,
-                },
-            )
+            return page(form)
 
         school_name = form.cleaned_data["school_name"]
         contact_email = form.cleaned_data["contact_email"]
         secondary_email = form.cleaned_data.get("secondary_email", "")
         notes = form.cleaned_data.get("notes", "")
-
+        change = form.cleaned_data["change"]
+        shown_id, shown_key = form.cleaned_data["shown_school"], form.cleaned_data["shown_key"]
+        new_school = False
+        unlinked = 0
         try:
-            school_info = set_team_school(
-                team,
-                school_name,
-                contact_email=contact_email,
-                secondary_email=secondary_email,
-                notes=notes,
-                updated_by=authentik_username,
-            )
+            with transaction.atomic():
+                # The school list lock before the team row's, in the order an import or Close Out takes them
+                school_list_lock()
+                current = SchoolInfo.objects.filter(team=team).select_related("school").first()
+                renamed = current is not None and normalize_school_name(school_name) != current.school.name_key
+                if renamed and not change:
+                    form.add_error("change", SAY_RENAME_OR_NEW)
+                    return page(form)
+                new_school = renamed and change == SchoolInfoEditForm.NEW_SCHOOL
+                # A team given its first school here may still have members linked from an earlier one
+                if new_school or current is None:
+                    unlinked = unlink_teams(authentik_username, "school_changed", team)
+                set_team_school(
+                    team,
+                    school_name,
+                    contact_email=contact_email,
+                    secondary_email=secondary_email,
+                    notes=notes,
+                    updated_by=authentik_username,
+                    rename=renamed and change == SchoolInfoEditForm.RENAME,
+                    shown_school=(shown_id, shown_key) if shown_id else None,
+                )
         except SchoolTakenError as taken:
-            return render(
-                request, "school_info_edit.html", {"team": team, "school_info": school_info, "page_error": str(taken)}
-            )
+            form.add_error("school_name", str(taken))
+            return page(form)
+        except SchoolChangedError as changed:
+            form.add_error(None, str(changed))
+            return page(form)
+        if new_school or unlinked:
+            _report_new_school(request, team_number, school_name, unlinked, authentik_username)
 
         logger.info(f"School info updated for Team {team_number} by {authentik_username}")
 
         return redirect("school_info")
 
-    return render(
-        request,
-        "school_info_edit.html",
-        {
-            "team": team,
-            "school_info": school_info,
-        },
+    if school_info is None:
+        return page(SchoolInfoEditForm())
+    return page(
+        SchoolInfoEditForm(
+            initial={
+                "shown_school": school_info.school_id,
+                "shown_key": school_info.school.name_key,
+                "school_name": school_info.school_name,
+                "contact_email": school_info.contact_email,
+                "secondary_email": school_info.secondary_email,
+                "notes": school_info.notes,
+            }
+        )
     )
+
+
+RESET_TEAM_INSTEAD = (
+    "Use Reset Team on the team page, which also unlinks any member who linked meanwhile (its Reset Password keeps "
+    "links)."
+)
+
+
+def _report_new_school(request: HttpRequest, team_number: int, school_name: str, unlinked: int, actor: str) -> None:
+    """Reset the team's credentials once the new school is saved, so the old school's members can't sign in or link
+    again, and say what the change did."""
+    reset = reset_team_credentials(team_number, actor=actor)
+    done = f"Team {team_number} now holds {school_name}: {unlinked} Discord member(s) unlinked"
+    if reset.password is None:
+        messages.error(request, f"{done}, but the password reset failed: {reset.error}. {RESET_TEAM_INSTEAD}")
+    elif reset.sessions_error:
+        messages.warning(
+            request,
+            f"{done}; new password stored for the packet email, but {reset.sessions_outcome}. {RESET_TEAM_INSTEAD}",
+        )
+    else:
+        messages.success(request, f"{done}; new password stored for the packet email; {reset.sessions_outcome}.")
 
 
 def _parse_school_info_csv(

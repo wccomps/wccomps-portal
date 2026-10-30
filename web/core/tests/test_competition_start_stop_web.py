@@ -429,3 +429,29 @@ def test_a_config_edit_keeps_a_start_the_timer_recorded_meanwhile(admin_client, 
     assert response.status_code == 200, response.content
     config = CompetitionConfig.objects.get(pk=1)
     assert (config.applications_enabled, config.competition_start_time) == (True, None)
+
+
+@pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
+def test_clearing_leftovers_keeps_the_start_message(admin_client):
+    """Like the schedule, it may already be set for the next event."""
+    _leftovers()
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"start_message": "Default VM login"})
+
+    assert _post(admin_client, "clear_leftover_data", confirm="yolo").json()["success"]
+
+    assert CompetitionConfig.get_config().start_message == "Default VM login"
+
+
+@pytest.mark.django_db(transaction=True)  # close_out_event must be the outermost transaction
+def test_clearing_leftovers_deletes_queued_announcements(admin_client):
+    """A queued copy of the last event's start message must not reach the next event's school."""
+    from core.models import QueuedAnnouncement
+    from team.models import Team
+
+    _leftovers()
+    team, _ = Team.objects.get_or_create(team_number=9, defaults={"team_name": "Team 09"})
+    QueuedAnnouncement.objects.create(team=team, message="Default login", sender_name="Black Team")
+
+    assert _post(admin_client, "clear_leftover_data", confirm="yolo").json()["success"]
+
+    assert not QueuedAnnouncement.objects.exists()

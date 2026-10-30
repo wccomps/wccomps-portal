@@ -1,9 +1,12 @@
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
+from enum import Enum
 
 from django.db import OperationalError, connection, transaction
-from django.db.models import Exists, OuterRef, QuerySet
+from django.db.models import Exists, OuterRef, Q, QuerySet
+from django.utils import timezone
 from packets.models import Packet, packets_sent
 from scoring.calculator import Standing, compute_standings
 from scoring.export import export_all_zip_bytes
@@ -12,7 +15,7 @@ from scoring.scorecard import build_peer_context, build_scorecard_context
 from scoring.snapshot import SNAPSHOT_VERSION, serialize_scorecard
 
 from core.competition_utils import WipedData, wipe_competition_data
-from core.discord_tasks import CleanupCompetition
+from core.discord_tasks import ClearTeamChannels, ReconcileTeams, SyncMemberRoles
 from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnouncement
 from team.models import DiscordLink, SchoolInfo, Team, default_team_name
 from ticketing.models import Ticket
@@ -26,6 +29,7 @@ from .models import (
     School,
     Season,
     TeamRegistration,
+    collapse_whitespace,
     normalize_school_name,
 )
 from .stage import Action, EventStage, Stage, event_stage, scored_teams
@@ -47,6 +51,33 @@ class SchoolChangedError(Exception):
     """The team's school is no longer the one the page showed."""
 
 
+LINKED_TEAM_REMOVE = (
+    'The team has linked Discord members. To give it to another school, edit it and choose "A different school", '
+    "which unlinks them and resets its password."
+)
+
+
+LINKED_TEAMS_CLEAR = (
+    "Teams have linked Discord members. Close Out Event or Clear leftover data unlinks them first; to change one "
+    'team\'s school, edit it and choose "A different school".'
+)
+
+
+class TeamLinkedError(Exception):
+    """The team has linked Discord members, so taking its school away would leave them on it."""
+
+
+class Held(Enum):
+    """set_team_school's default for the school a team held: the one on the school list now."""
+
+    ON_LIST = "on_list"
+
+
+def school_shown(info: SchoolInfo | None) -> tuple[int, str] | None:
+    """The team's school as an edit page shows it: its id and name key, so a rename since is a change too."""
+    return (info.school_id, info.school.name_key) if info is not None else None
+
+
 @transaction.atomic
 def set_team_school(
     team: Team,
@@ -58,16 +89,25 @@ def set_team_school(
     updated_by: str = "",
     registration: TeamRegistration | None = None,
     expect_free: bool = False,
+    previous_school: int | None | Held = Held.ON_LIST,
+    rename: bool = False,
+    shown_school: tuple[int, str] | None | Held = Held.ON_LIST,
 ) -> SchoolInfo:
     """Make the school the one holding this team in the school list, and at the open event if there is one.
 
     The only writer of a team's school: the open event's assignment follows the school list, linked to the
     registration given or, while the school stays the same, the one already linked. Raises SchoolTakenError when
     another team holds the school, and with expect_free, TeamTakenError when this team holds another school.
+    SchoolChangedError when shown_school (the school the page showed as school_shown gives it, None for none) is no
+    longer the team's, or has been renamed since.
     """
     school_list_lock()
-    school = School.for_name(school_name)
+    info = SchoolInfo.objects.filter(team=team).select_related("school").first()
+    if not isinstance(shown_school, Held) and school_shown(info) != shown_school:
+        raise SchoolChangedError(f"Team {team.team_number}'s school changed since you opened this page; reload.")
     event = Event.objects.open()
+    renaming = rename and info is not None
+    school = _rename(info.school, school_name, event) if rename and info else School.for_name(school_name)
     holder: SchoolInfo | EventTeamAssignment | None = (
         SchoolInfo.objects.filter(school=school).exclude(team=team).select_related("team").first()
     )
@@ -83,9 +123,13 @@ def set_team_school(
         "notes": notes,
         "updated_by": updated_by,
     }
-    info = SchoolInfo.objects.filter(team=team).select_related("school").first()
     if expect_free and info is not None and info.school_id != school.pk:
         raise TeamTakenError(f"Team {team.team_number} already has a school: {info.school_name}.")
+    held = (info.school_id if info else None) if isinstance(previous_school, Held) else previous_school
+    if not rename and held != school.pk:
+        # The last school's announcements and Discord channels aren't the new one's
+        QueuedAnnouncement.objects.filter(team=team).delete()
+        _clear_old_channels(team)
     if info is None:
         info = SchoolInfo.objects.create(team=team, **fields)
     else:
@@ -96,6 +140,8 @@ def set_team_school(
 
     if event is not None:
         assignment = event.team_assignments.filter(team=team).select_related("registration").first()
+        if renaming and registration is None and assignment is not None:
+            registration = assignment.registration
         if assignment is None:
             assignment = EventTeamAssignment.objects.create(
                 event=event, team=team, school=school, registration=registration
@@ -112,6 +158,43 @@ def set_team_school(
     return info
 
 
+def _rename(school: School, name: str, event: Event | None) -> School:
+    """The team's school under its new name: the record that already has that name (set_team_school refuses it when
+    another team holds it), or else the team's own record renamed. The open event's registrations under the old name
+    take the new one, so the old name doesn't read as a school with no team."""
+    name = collapse_whitespace(name)
+    key = normalize_school_name(name)
+    old_key = school.name_key
+    target = School.objects.filter(name_key=key).exclude(pk=school.pk).first()
+    if target is None:
+        school.name, school.name_key = name, key
+        school.save(update_fields=["name", "name_key"])
+        target = school
+    if event is not None and key != old_key:
+        for registration in TeamRegistration.objects.filter(event_enrollments__event=event).distinct():
+            if normalize_school_name(registration.school_name) == old_key:
+                registration.school_name = target.name
+                registration.save(update_fields=["school_name"])
+    return target
+
+
+def _clear_old_channels(team: Team) -> None:
+    """Unless members are still linked to it, mark a Discord role or category the team carries from its last school
+    for removal (channels_need_clearing) and queue that removal, once."""
+    if DiscordLink.objects.filter(team=team, is_active=True).exists():
+        return
+    left = Team.objects.filter(pk=team.pk).filter(
+        Q(discord_role_id__isnull=False) | Q(discord_category_id__isnull=False) | Q(channels_need_clearing=True)
+    )
+    if not left.update(channels_need_clearing=True):
+        return
+    pending = DiscordTask.objects.filter(
+        task_type=ClearTeamChannels.task_type, status="pending", payload__team_number=team.team_number
+    )
+    if not pending.exists():
+        DiscordTask.enqueue(ClearTeamChannels(team_number=team.team_number))
+
+
 def activate_teams(teams: list[Team]) -> int:
     """Activate the teams given a school: only active teams show on School Info, get packets and count in standings.
 
@@ -125,8 +208,12 @@ def remove_team_school(team: Team, expected_school_id: int | None = None) -> Non
 
     PacketsSentError when packets went out for the open event: they reached the team under this school.
     SchoolChangedError when expected_school_id (the school the page showed) is no longer the team's school.
+    TeamLinkedError while the team has linked Discord members, checked under the team row's lock as a link takes it.
     """
     school_list_lock()
+    Team.objects.select_for_update().filter(pk=team.pk).first()
+    if DiscordLink.objects.filter(team=team, is_active=True).exists():
+        raise TeamLinkedError(LINKED_TEAM_REMOVE)
     event = Event.objects.open()
     if expected_school_id is not None:
         current = SchoolInfo.objects.filter(team=team).values_list("school_id", flat=True).first()
@@ -147,7 +234,8 @@ def remove_team_school(team: Team, expected_school_id: int | None = None) -> Non
 def clear_school_list() -> int:
     """Empty the school list and the open event's assignments with it; earlier events keep theirs.
 
-    Returns how many school info records were deleted; PacketsSentError when packets went out for the open event.
+    Returns how many school info records were deleted; PacketsSentError when packets went out for the open event,
+    TeamLinkedError while any team has linked Discord members.
     """
     school_list_lock()
     event = Event.objects.open()
@@ -156,6 +244,8 @@ def clear_school_list() -> int:
             f"Packets have already been sent for {event}. Close it out instead (Close Out Event on the Competition "
             "page), or change single schools on their School Info pages."
         )
+    if DiscordLink.objects.filter(team__isnull=False, is_active=True).exists():
+        raise TeamLinkedError(LINKED_TEAMS_CLEAR)
     deleted, _ = SchoolInfo.objects.all().delete()
     if event is not None:
         event.team_assignments.all().delete()
@@ -275,7 +365,8 @@ class SchoolListRow:
 def import_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updated_by: str) -> dict[str, int]:
     """Replace the school list with the rows and open the event (creating it first when new, and its new season as
     the only active one), replacing its assignments: each row's school holds the row's team. Resets every team name
-    and activates the rows' teams.
+    and activates the rows' teams. Opening the event queues the removal of the team channels and roles earlier events
+    left in Discord.
 
     Under the school list lock; the event is re-checked under it, and ImportBlockedError says why the import can't
     go ahead.
@@ -292,7 +383,14 @@ def import_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
         event = _create_event(event)
 
     # Opened before the clear, so the clear also replaces assignments the event had while it wasn't open
+    opening = not event.is_active
     event.open()
+    if opening:
+        DiscordTask.enqueue(ReconcileTeams(requested_by=updated_by, open_event_id=event.pk))
+        # Queued for team numbers whose channels the teardown removed; a new school would get them on linking
+        QueuedAnnouncement.objects.all().delete()
+    # So a team keeping its school in an event already open keeps its Discord channels and announcements
+    held = dict(SchoolInfo.objects.values_list("team_id", "school_id"))
     clear_school_list()
     # Names like a school's shortname belong to the last event's assignment, not the team slot
     all_teams = list(Team.objects.all())
@@ -309,6 +407,7 @@ def import_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
             secondary_email=row.secondary_email,
             notes=row.notes,
             updated_by=updated_by,
+            previous_school=held.get(teams[row.team_number].pk),
         )
     return {"created": len(rows), "activated": activated}
 
@@ -323,11 +422,12 @@ def add_problem(event: Event | NewEvent) -> str:
 
 def free_teams(event: Event) -> QuerySet[Team]:
     """Teams no school holds and nobody used: not on the school list, not assigned at the event (the open one), and
-    carrying no per-team data a school left behind (blue team Discord links, tickets, a ticket counter)."""
+    carrying no per-team data a school left behind (active blue team Discord links, tickets, a ticket counter). A
+    Discord role or category left on one is removed when it is handed over (set_team_school)."""
     return Team.objects.filter(
         ~Exists(SchoolInfo.objects.filter(team=OuterRef("pk"))),
         ~Exists(event.team_assignments.filter(team=OuterRef("pk"))),
-        ~Exists(DiscordLink.objects.filter(team=OuterRef("pk"))),
+        ~Exists(DiscordLink.objects.filter(team=OuterRef("pk"), is_active=True)),
         ~Exists(Ticket.objects.filter(team=OuterRef("pk"))),
         ticket_counter=0,
     )
@@ -384,6 +484,11 @@ def add_to_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
     return {"created": len(rows), "activated": activated}
 
 
+START_MESSAGE_SCRUBBED = "(start message removed when the event ended)"
+START_BROADCAST_STOPPED = "Not sent: the event ended first"
+START_BROADCAST_CUT_OFF = "Stopped when the event ended, before the next team"
+
+
 class CloseOutError(Exception):
     """Close Out Event or Clear leftover data refused; the message says why."""
 
@@ -414,13 +519,23 @@ def close_out_fixes(stage: EventStage) -> list[TeamFix]:
     return _unfreezable(stage.event)[1] if stage.played else []
 
 
-def _refuse_a_stale_target(target: Event | NewEvent, stage: EventStage) -> None:
-    """CloseOutError when the open event is no longer what the page showed."""
+def _stale_target(target: Event | NewEvent, stage: EventStage) -> str:
+    """Why the open event is no longer what the page showed, or ''."""
     if isinstance(target, NewEvent):
-        if stage.event is not None:
-            raise CloseOutError(f"{stage.event} was opened since the page loaded. Reload the page.")
-    elif stage.event != target:
-        raise CloseOutError(f"{target} is no longer open. Reload the page.")
+        return f"{stage.event} was opened since the page loaded. Reload the page." if stage.event is not None else ""
+    return f"{target} is no longer open. Reload the page." if stage.event != target else ""
+
+
+@contextmanager
+def _locked_transition(problem: Callable[[EventStage], str]) -> Iterator[tuple[CompetitionConfig, EventStage]]:
+    """Take the school list lock, then the config row lock (always in that order), read the stage, and refuse with
+    CloseOutError, writing nothing, when problem says why. Call inside a transaction."""
+    school_list_lock()
+    config = CompetitionConfig.locked()
+    stage = event_stage()
+    if why := problem(stage):
+        raise CloseOutError(why)
+    yield config, stage
 
 
 def _locked_target(target: Event | NewEvent, stage: EventStage) -> Event:
@@ -476,46 +591,30 @@ def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
 @transaction.atomic
 def _close_out(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
     """Freeze the event's results and export archive, then delete the live data, close the event, reset the schedule,
-    start message, Quotient box list and queued announcements, and queue the Discord-only cleanup, all committed
-    together. target is what the page showed: the open event, or with
-    none open the new event to record the scores at. The school list stays until the next import replaces it.
-
-    Under the school list lock and the competition config lock; CloseOutError, writing nothing, says why it refused.
-    """
-    school_list_lock()
-    config = CompetitionConfig.locked()
-    stage = event_stage()
-    _refuse_a_stale_target(target, stage)
-    if problem := close_out_problem(stage):
-        raise CloseOutError(problem)
-    event = _locked_target(target, stage)
-    results = _freeze_results(event)
-    wiped = wipe_competition_data()
-    event.close()
-    # The start message holds this event's credentials; the next event gets its own schedule and message
-    config.competition_start_time = None
-    config.competition_end_time = None
-    config.start_message = ""
-    config.save(update_fields=["competition_start_time", "competition_end_time", "start_message", "updated_at"])
-    QuotientMetadataCache.objects.all().delete()
-    announcements, _ = QueuedAnnouncement.objects.all().delete()
-    # Committed with the close-out, so the bot never tears Discord down for a close-out that rolled back. The
-    # database is reset here, so the bot does only the Discord side.
-    DiscordTask.enqueue(CleanupCompetition(requested_by=actor, closed_out_event_id=event.pk))
-    AuditLog.objects.create(
-        action="event_closed_out",
-        admin_user=actor,
-        target_entity="event",
-        target_id=event.pk,
-        details={
-            "event": event.name,
-            "results": results,
-            "deleted_counts": {k: v for k, v in wiped.deleted.items() if v},
-            "total_deleted": sum(wiped.deleted.values()),
-            "ticket_counters_reset": wiped.ticket_counters_reset,
-            "queued_announcements_deleted": announcements,
-        },
-    )
+    start message, Quotient box list and queued announcements, and queue the Discord teardown, all committed together.
+    target is what the page showed: the open event, or with none open the new event to record the scores at. The
+    school list stays until the next import replaces it. Under _locked_transition."""
+    with _locked_transition(lambda stage: _stale_target(target, stage) or close_out_problem(stage)) as (config, stage):
+        event = _locked_target(target, stage)
+        results = _freeze_results(event)
+        wiped = wipe_competition_data()
+        event.close()
+        _reset_for_next_event(config)
+        # Committed with the close-out, so the bot never tears Discord down for a close-out that rolled back
+        DiscordTask.enqueue(ReconcileTeams(requested_by=actor))
+        AuditLog.objects.create(
+            action="event_closed_out",
+            admin_user=actor,
+            target_entity="event",
+            target_id=event.pk,
+            details={
+                "event": event.name,
+                "results": results,
+                "deleted_counts": {k: v for k, v in wiped.deleted.items() if v},
+                "total_deleted": sum(wiped.deleted.values()),
+                "ticket_counters_reset": wiped.ticket_counters_reset,
+            },
+        )
     return CloseOutOutcome(event, results, wiped)
 
 
@@ -652,26 +751,128 @@ def clear_leftovers_problem(stage: EventStage) -> str:
 
 @transaction.atomic
 def clear_leftover_data(actor: str) -> WipedData:
-    """Delete live data no open event holds, unarchived. The schedule stays: a start may already be set for the
-    next event. Under the school list lock and the competition config lock; CloseOutError when
-    clear_leftovers_problem says why not."""
-    school_list_lock()
-    config = CompetitionConfig.locked()
-    if problem := clear_leftovers_problem(event_stage()):
-        raise CloseOutError(problem)
-    wiped = wipe_competition_data()
-    AuditLog.objects.create(
-        action="leftover_data_cleared",
-        admin_user=actor,
-        target_entity="competition_config",
-        target_id=config.pk,
-        details={
-            "deleted_counts": {k: v for k, v in wiped.deleted.items() if v},
-            "total_deleted": sum(wiped.deleted.values()),
-            "ticket_counters_reset": wiped.ticket_counters_reset,
-        },
-    )
+    """Delete live data no open event holds, unarchived. The schedule and start message stay: they may already be
+    set for the next event. Under _locked_transition."""
+    with _locked_transition(clear_leftovers_problem) as (config, _):
+        wiped = wipe_competition_data()
+        AuditLog.objects.create(
+            action="leftover_data_cleared",
+            admin_user=actor,
+            target_entity="competition_config",
+            target_id=config.pk,
+            details={
+                "deleted_counts": {k: v for k, v in wiped.deleted.items() if v},
+                "total_deleted": sum(wiped.deleted.values()),
+                "ticket_counters_reset": wiped.ticket_counters_reset,
+            },
+        )
     return wiped
+
+
+def discord_cleanup_problem(stage: EventStage) -> str:
+    """Why /competition cleanup-competition can't run now, or ''."""
+    if stage.running:
+        return _running_refusal(stage)
+    if stage.event is not None:
+        return f"{stage.event} is open: its schedule, start message and team links stay. {stage.next_step}"
+    return ""
+
+
+def teardown_problem(stage: EventStage, open_event_id: int | None) -> str:
+    """Why a queued Discord teardown can't run now, or '': not while the competition runs, nor once the open event
+    is no longer the one it was queued for (open_event_id; None, none open)."""
+    if stage.running:
+        return _running_refusal(stage)
+    if (stage.event.pk if stage.event else None) == open_event_id:
+        return ""
+    if open_event_id is None:
+        return f"{stage.event} was opened since, and its opening tears them down."
+    return "The event it was queued for is no longer open."
+
+
+def _reset_for_next_event(config: CompetitionConfig) -> int:
+    """Clear the schedule, start message, Quotient box list and queued announcements (again after commit), and
+    scrub the start broadcasts, failing any not yet sent. Call with the config row locked; returns how many
+    announcements it deleted."""
+    broadcasts = DiscordTask.objects.filter(pk__in=config.start_broadcasts)
+    broadcasts.filter(status="pending").update(status="failed", error_message=START_BROADCAST_STOPPED)
+    broadcasts.filter(status="processing").update(status="failed", error_message=START_BROADCAST_CUT_OFF)
+    for task in broadcasts:
+        task.payload = {**task.payload, "message": START_MESSAGE_SCRUBBED}
+        task.save(update_fields=["payload"])
+    config.start_broadcasts = []
+    config.started_this_window = False
+    config.competition_start_time = None
+    config.competition_end_time = None
+    config.start_message = ""
+    config.save(
+        update_fields=[
+            "competition_start_time",
+            "competition_end_time",
+            "start_message",
+            "start_broadcasts",
+            "started_this_window",
+            "updated_at",
+        ]
+    )
+    QuotientMetadataCache.objects.all().delete()
+    announcements, _ = QueuedAnnouncement.objects.all().delete()
+    # Again once committed: the bot may queue one the transaction's snapshot didn't see
+    transaction.on_commit(lambda: QueuedAnnouncement.objects.all().delete())
+    return announcements
+
+
+def unlink_teams(actor: str, reason: str, team: Team | None = None) -> int:
+    """Deactivate the Discord links of every team's members, or one team's (admin and support links stay), auditing
+    each and queueing its role sync; returns how many."""
+    active = DiscordLink.objects.filter(is_active=True, team__isnull=False)
+    if team is not None:
+        # As a link does: one that took the lock first is unlinked here, one landing after stays
+        Team.objects.select_for_update().filter(pk=team.pk).first()
+        active = active.filter(team=team)
+    links = list(active.select_related("team", "user"))
+    DiscordLink.objects.filter(pk__in=[link.pk for link in links]).update(is_active=False, unlinked_at=timezone.now())
+    for link in links:
+        DiscordTask.enqueue(SyncMemberRoles(discord_id=link.discord_id))
+    AuditLog.objects.bulk_create(
+        AuditLog(
+            action="user_unlinked",
+            admin_user=actor,
+            target_entity="discord_link",
+            target_id=link.discord_id,
+            details={
+                "discord_id": link.discord_id,
+                "team_name": link.team.team_name if link.team else "Unknown",
+                "authentik_username": link.user.username,
+                "reason": reason,
+            },
+        )
+        for link in links
+    )
+    return len(links)
+
+
+@dataclass(frozen=True)
+class DiscordCleanupReset:
+    unlinked: int
+    announcements: int
+
+
+@transaction.atomic
+def reset_for_discord_cleanup(actor: str) -> DiscordCleanupReset:
+    """The database side of /competition cleanup-competition: unlink the team members, reset for the next event and
+    queue the Discord teardown, recorded in the audit log. Under _locked_transition."""
+    with _locked_transition(discord_cleanup_problem) as (config, _):
+        reset = DiscordCleanupReset(unlink_teams(actor, "competition_cleanup"), _reset_for_next_event(config))
+        AuditLog.objects.create(
+            action="competition_cleanup_reset",
+            admin_user=actor,
+            target_entity="competition_config",
+            target_id=config.pk,
+            details={"unlinked": reset.unlinked, "queued_announcements_deleted": reset.announcements},
+        )
+        DiscordTask.enqueue(ReconcileTeams(requested_by=actor))
+    return reset
 
 
 def cancel_event_problem(stage: EventStage) -> str:
@@ -687,27 +888,24 @@ def cancel_event_problem(stage: EventStage) -> str:
 
 @transaction.atomic
 def cancel_event(target: Event, actor: str) -> Event:
-    """Call off the open event before any team scored: close it and drop its assignments, so it can be deleted. The
-    school list stays (the next import replaces it), and packets keep their event. Live data with no scores (Discord
-    links, tickets) is then left over for Clear leftover data. Under the school list lock and the competition config
-    lock; CloseOutError, writing nothing, says why it refused."""
-    school_list_lock()
-    CompetitionConfig.locked()
-    stage = event_stage()
-    if stage.event != target:
-        raise CloseOutError(f"{target} is no longer open. Reload the page.")
-    if problem := cancel_event_problem(stage):
-        raise CloseOutError(problem)
-    event = Event.objects.select_for_update().get(pk=target.pk)
-    assignments, _ = event.team_assignments.all().delete()
-    event.close()
-    AuditLog.objects.create(
-        action="event_cancelled",
-        admin_user=actor,
-        target_entity="event",
-        target_id=event.pk,
-        details={"event": event.name, "assignments_deleted": assignments},
-    )
+    """Call off the open event before any team scored: close it, drop its assignments and reset for the next event,
+    since its schedule would otherwise start a competition with no event open. Under _locked_transition."""
+
+    def problem(stage: EventStage) -> str:
+        return _stale_target(target, stage) or cancel_event_problem(stage)
+
+    with _locked_transition(problem) as (config, _):
+        event = Event.objects.select_for_update().get(pk=target.pk)
+        assignments, _ = event.team_assignments.all().delete()
+        event.close()
+        _reset_for_next_event(config)
+        AuditLog.objects.create(
+            action="event_cancelled",
+            admin_user=actor,
+            target_entity="event",
+            target_id=event.pk,
+            details={"event": event.name, "assignments_deleted": assignments},
+        )
     return event
 
 

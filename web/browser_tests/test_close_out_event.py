@@ -68,7 +68,7 @@ def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_bro
 
         event.refresh_from_db()
         assert not event.is_active and event.is_finalized
-        assert DiscordTask.objects.filter(task_type="cleanup_competition").count() == 1
+        assert DiscordTask.objects.filter(task_type="reconcile_teams").count() == 1
     finally:
         context.close()
 

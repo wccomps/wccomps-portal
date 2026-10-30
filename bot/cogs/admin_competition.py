@@ -7,7 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 from django.conf import settings
 
-from bot.competition_actions import deliver_team_broadcast, run_competition_cleanup
+from bot.competition_actions import deliver_team_broadcast
 from bot.permissions import permission_check
 from bot.utils import ConfirmView, log_to_ops_channel, run_blocking, split_message
 from core.authentik_utils import (
@@ -17,7 +17,7 @@ from core.authentik_utils import (
     sessions_failure_summary,
 )
 from core.forms import AppSlugForm
-from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig
+from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog
 from core.services.competition import KEEP, ConfigEditError, set_controlled_apps, set_max_members, set_schedule
 from core.utils import (
     DEFAULT_TIMEZONE,
@@ -280,18 +280,17 @@ class AdminCompetitionCog(commands.Cog):
 
     @competition_group.command(
         name="cleanup-competition",
-        description="[ADMIN] Clean up Discord infrastructure (requires competition stopped)",
+        description="[ADMIN] Clean up Discord infrastructure (requires competition stopped and no event open)",
     )
     @app_commands.check(permission_check("admin"))
     async def admin_cleanup_competition(self, interaction: discord.Interaction) -> None:
         """Clean up Discord channels, roles, and links after competition."""
 
-        config = await sync_to_async(CompetitionConfig.get_config)()
-        if config.applications_enabled:
-            await interaction.response.send_message(
-                "Competition must be stopped before cleanup. Use `/competition stop-competition` first.",
-                ephemeral=True,
-            )
+        from registration.services import discord_cleanup_problem
+        from registration.stage import event_stage
+
+        if problem := await sync_to_async(lambda: discord_cleanup_problem(event_stage()))():
+            await interaction.response.send_message(problem, ephemeral=True)
             return
 
         view = ConfirmView(confirm_label="Confirm Cleanup")
@@ -301,7 +300,7 @@ class AdminCompetitionCog(commands.Cog):
             "• Remove team roles from all members\n"
             "• Deactivate all team member Discord links\n"
             "• Remove the Room Judge role\n"
-            "• Clear queued announcements\n\n"
+            "• Clear the schedule, the start message, the Quotient box list and queued announcements\n\n"
             "Are you sure you want to continue?",
             view=view,
             ephemeral=True,
@@ -312,15 +311,21 @@ class AdminCompetitionCog(commands.Cog):
             await interaction.followup.send("Cleanup cancelled.", ephemeral=True)
             return
 
-        guild = interaction.guild
-        if not guild:
-            await interaction.followup.send("This command must be used in a guild", ephemeral=True)
+        from registration.services import CloseOutError, reset_for_discord_cleanup
+
+        try:
+            reset = await run_blocking(reset_for_discord_cleanup, str(interaction.user))
+        except CloseOutError as e:
+            await interaction.followup.send(str(e), ephemeral=True)
             return
-        await interaction.followup.send(
-            "Starting cleanup... This runs in background. Check ops channel for progress.",
-            ephemeral=True,
+        done = (
+            f"Deactivated {reset.unlinked} team member links and cleared {reset.announcements} queued announcements, "
+            "the schedule and the start message."
         )
-        self.bot.loop.create_task(run_competition_cleanup(self.bot, guild, str(interaction.user)))
+        await log_to_ops_channel(self.bot, f"Competition Cleanup by {interaction.user.mention}: {done}")
+        await interaction.followup.send(
+            f"{done} The Discord teardown is queued; the ops channel reports when it is done.", ephemeral=True
+        )
 
     @competition_group.command(
         name="set-apps",

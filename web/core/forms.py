@@ -12,13 +12,47 @@ from team.models import SchoolInfo
 
 
 class SchoolInfoEditForm(forms.Form):
-    school_name = forms.CharField(max_length=SCHOOL_NAME_MAX_LENGTH)
-    # The columns' lengths: a form EmailField alone accepts 320 characters
-    contact_email = forms.EmailField(max_length=SchoolInfo._meta.get_field("contact_email").max_length)
-    secondary_email = forms.EmailField(
-        max_length=SchoolInfo._meta.get_field("secondary_email").max_length, required=False
+    RENAME = "rename"
+    NEW_SCHOOL = "new_school"
+
+    # The school the page showed, so an edit made from a stale page is refused
+    shown_school = forms.IntegerField(required=False, widget=forms.HiddenInput)
+    shown_key = forms.CharField(required=False, widget=forms.HiddenInput)
+    school_name = forms.CharField(
+        label="School Name",
+        max_length=SCHOOL_NAME_MAX_LENGTH,
+        widget=forms.TextInput(attrs={"class": "vTextField", "placeholder": "e.g., University of Example"}),
     )
-    notes = forms.CharField(required=False)
+    change = forms.ChoiceField(
+        label="If the name changed",
+        choices=[(RENAME, "A rename of the same school"), (NEW_SCHOOL, "A different school")],
+        required=False,
+        widget=forms.RadioSelect,
+        help_text="A rename keeps the team's members, Discord channels and password. A different school "
+        "unlinks the team's Discord members, removes its Discord role and channels, and resets its Authentik password "
+        "and sessions, so it starts clean.",
+    )
+    # The columns' lengths: a form EmailField alone accepts 320 characters
+    contact_email = forms.EmailField(
+        label="Contact Email",
+        max_length=SchoolInfo._meta.get_field("contact_email").max_length,
+        help_text="Primary contact for this team",
+        widget=forms.EmailInput(attrs={"class": "vTextField", "placeholder": "e.g., coach@example.edu"}),
+    )
+    secondary_email = forms.EmailField(
+        label="Secondary Email",
+        max_length=SchoolInfo._meta.get_field("secondary_email").max_length,
+        required=False,
+        help_text="Optional secondary contact",
+        widget=forms.EmailInput(attrs={"class": "vTextField", "placeholder": "e.g., alternate@example.edu"}),
+    )
+    notes = forms.CharField(
+        required=False,
+        help_text="Optional internal notes",
+        widget=forms.Textarea(
+            attrs={"class": "vLargeTextField", "rows": 4, "placeholder": "Additional notes about this team..."}
+        ),
+    )
 
 
 class BroadcastForm(forms.Form):

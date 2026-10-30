@@ -139,3 +139,102 @@ def test_an_event_with_sent_packets_is_kept_after_cancelling(event):
     event.refresh_from_db()
 
     assert event_delete_problem(event) == "Packets were sent for Inv (2026); they are kept with it."
+
+
+def test_cancelling_clears_the_start_message(event):
+    """It carries the event's credentials."""
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"start_message": "Default VM login"})
+
+    cancel_event(event, "gold")
+
+    assert CompetitionConfig.get_config().start_message == ""
+
+
+def test_cancelling_resets_for_the_next_event(event):
+    """A start scheduled for the cancelled event would start a competition with no event open, and a queued copy of
+    its start message would reach the next event's school."""
+    from datetime import UTC, datetime
+
+    from core.models import QueuedAnnouncement
+
+    CompetitionConfig.objects.update_or_create(
+        pk=1, defaults={"competition_start_time": datetime(2099, 10, 3, tzinfo=UTC), "start_message": "Default login"}
+    )
+    QueuedAnnouncement.objects.create(team=Team.objects.first(), message="Default login", sender_name="Black Team")
+
+    cancel_event(event, "gold")
+
+    config = CompetitionConfig.get_config()
+    assert (config.competition_start_time, config.start_message) == (None, "")
+    assert not QueuedAnnouncement.objects.exists()
+
+
+def test_cancelling_removes_the_start_broadcasts_copies(event):
+    """The broadcasts the starts recorded keep the credentials in their payloads (admin, backups, retries), whatever the
+    message says now: each is scrubbed, and an unsent one failed so it never goes out. Other broadcasts stay."""
+    from core.models import DiscordTask
+    from registration.services import START_MESSAGE_SCRUBBED
+
+    start = {"target": "all-teams", "message": "Default login", "sender": "Black Team"}
+    unsent = DiscordTask.objects.create(task_type="broadcast_message", payload=start, status="pending")
+    sent = DiscordTask.objects.create(task_type="broadcast_message", payload=start, status="completed")
+    other = DiscordTask.objects.create(
+        task_type="broadcast_message", payload={**start, "message": "Lunch at noon"}, status="pending"
+    )
+    CompetitionConfig.objects.update_or_create(
+        pk=1, defaults={"start_message": "Edited since", "start_broadcasts": [unsent.pk, sent.pk]}
+    )
+
+    cancel_event(event, "gold")
+
+    for task, status in ((unsent, "failed"), (sent, "completed")):
+        task.refresh_from_db()
+        assert (task.status, task.payload["message"]) == (status, START_MESSAGE_SCRUBBED)
+    other.refresh_from_db()
+    assert (other.status, other.payload["message"]) == ("pending", "Lunch at noon")
+    assert CompetitionConfig.get_config().start_broadcasts == []
+
+
+def test_start_broadcasts_queued_before_the_start_recorded_them_are_scrubbed_or_recorded():
+    """By the stored start message or the start's sender and target: sent ones are scrubbed now, an unsent one is left
+    for the next reset to scrub and fail. A broadcast someone else sent stays."""
+    import importlib
+
+    from django.apps import apps
+
+    from core.models import DiscordTask
+    from registration.services import START_MESSAGE_SCRUBBED
+
+    def broadcast(message, status, sender="Black Team", target="all-teams"):
+        payload = {"target": target, "message": message, "sender": sender}
+        return DiscordTask.objects.create(task_type="broadcast_message", payload=payload, status=status)
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"start_message": "Default login"})
+    edited_since = broadcast("Old login", "completed")
+    by_text = broadcast("Default login", "failed", sender="gold", target="1-5")
+    running = broadcast("Default login", "pending")
+    other = broadcast("Lunch at noon", "completed", sender="gold")
+
+    importlib.import_module("core.migrations.0021_scrub_start_broadcasts").scrub_start_broadcasts(apps, None)
+
+    messages = {task.pk: task.payload["message"] for task in DiscordTask.objects.all()}
+    assert messages == {
+        edited_since.pk: START_MESSAGE_SCRUBBED,
+        by_text.pk: START_MESSAGE_SCRUBBED,
+        running.pk: "Default login",
+        other.pk: "Lunch at noon",
+    }
+    assert CompetitionConfig.get_config().start_broadcasts == [running.pk]
+
+
+def test_a_copy_the_bot_queues_during_the_reset_is_deleted_once_it_commits(event, django_capture_on_commit_callbacks):
+    """The bot may commit one the reset's snapshot didn't see; the reset deletes again after its own commit."""
+    from core.models import QueuedAnnouncement
+
+    with django_capture_on_commit_callbacks(execute=False) as callbacks:
+        cancel_event(event, "gold")
+    QueuedAnnouncement.objects.create(team=Team.objects.first(), message="Default login", sender_name="Black Team")
+    for callback in callbacks:
+        callback()
+
+    assert not QueuedAnnouncement.objects.exists()

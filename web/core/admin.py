@@ -122,14 +122,19 @@ class DiscordTaskAdmin(PortalModelAdmin[DiscordTask]):
     @admin.action(description="Retry failed tasks")
     def retry_failed_tasks(self, request: HttpRequest, queryset: QuerySet[DiscordTask]) -> None:
         from django.utils import timezone
+        from registration.services import START_MESSAGE_SCRUBBED
 
-        updated = queryset.filter(status="failed").update(
+        failed = queryset.filter(status="failed")
+        scrubbed = failed.filter(task_type="broadcast_message", payload__message=START_MESSAGE_SCRUBBED)
+        skipped = scrubbed.count()
+        updated = failed.exclude(pk__in=scrubbed.values("pk")).update(
             status="pending",
             retry_count=0,
             next_retry_at=timezone.now(),
             error_message="",
         )
-        self.message_user(request, f"{updated} tasks reset for retry")
+        note = f"; {skipped} start broadcasts scrubbed when the event ended are not retried" if skipped else ""
+        self.message_user(request, f"{updated} tasks reset for retry{note}")
 
 
 @admin.register(BotState)

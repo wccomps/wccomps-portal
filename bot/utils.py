@@ -185,7 +185,10 @@ async def get_team_or_respond(interaction: discord.Interaction, team_number: int
 
 
 def team_chat_channel(guild: discord.Guild, team: Team) -> discord.TextChannel | None:
-    """The text channel with "chat" in its name in the team's category, which may predate the bot."""
+    """The text channel with "chat" in its name in the team's category, which may predate the bot; none while the
+    team is marked channels_need_clearing."""
+    if team.channels_need_clearing:
+        return None
     category = guild.get_channel(team.discord_category_id) if team.discord_category_id else None
     if not isinstance(category, discord.CategoryChannel):
         return None

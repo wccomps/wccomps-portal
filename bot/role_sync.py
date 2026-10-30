@@ -8,7 +8,7 @@ loses it, including members who haven't linked. Bots, and roles the bot can't ma
 import asyncio
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import discord
@@ -33,7 +33,8 @@ class RoleGrants:
 
 def role_grants(discord_ids: set[int] | None = None) -> RoleGrants:
     """What active DiscordLinks grant: the role mapped from each of the account's Authentik groups, and
-    for a seat on an active team, that team's role and Blueteam. Limited to discord_ids when given."""
+    for a seat on an active team, that team's role (not while channels_need_clearing) and Blueteam. Limited
+    to discord_ids when given."""
     from team.models import DiscordLink, Team
 
     mapped = settings.GROUP_ROLE_MAPPING
@@ -49,7 +50,8 @@ def role_grants(discord_ids: set[int] | None = None) -> RoleGrants:
         groups = set(user_groups.groups) if user_groups else set()
         roles = [role_id for group, role_id in mapped.items() if group in groups]
         if link.team and link.team.is_active:
-            roles += [link.team.discord_role_id or 0, settings.BLUETEAM_ROLE_ID]
+            team_role = 0 if link.team.channels_need_clearing else link.team.discord_role_id or 0
+            roles += [team_role, settings.BLUETEAM_ROLE_ID]
         by_member[link.discord_id] = frozenset(role_id for role_id in roles if role_id)
     return RoleGrants(managed, by_member)
 
@@ -61,8 +63,11 @@ def competition_guild(bot: discord.Client) -> discord.Guild | None:
     return guild
 
 
-async def sync_roles(guild: discord.Guild, *, dry_run: bool = False) -> SyncRolesResult:
-    """Give every member in the guild's cache the synced roles granted to them and take away the ones not."""
+async def sync_roles(
+    guild: discord.Guild, *, dry_run: bool = False, beat: Callable[[], None] = lambda: None
+) -> SyncRolesResult:
+    """Give every member in the guild's cache the synced roles granted to them and take away the ones not; beat runs
+    after the member chunk and each member it changes."""
     if not guild.chunked:
         chunk_start = time.time()
         try:
@@ -72,7 +77,8 @@ async def sync_roles(guild: discord.Guild, *, dry_run: bool = False) -> SyncRole
                 f"Guild chunk timed out after {time.time() - chunk_start:.2f}s, "
                 f"using cached members ({len(guild.members)} available)"
             )
-    stats = await _reconcile(guild, guild.members, dry_run=dry_run, recheck=True)
+    beat()
+    stats = await _reconcile(guild, guild.members, dry_run=dry_run, recheck=True, beat=beat)
     summary = role_sync_summary(stats, dry_run=dry_run)
     if dry_run or stats["roles_added"] or stats["roles_removed"] or stats["errors"]:
         logger.info(summary)
@@ -87,7 +93,12 @@ async def sync_member_roles(guild: discord.Guild, member: discord.Member, *, dry
 
 
 async def _reconcile(
-    guild: discord.Guild, members: Sequence[discord.Member], *, dry_run: bool, recheck: bool
+    guild: discord.Guild,
+    members: Sequence[discord.Member],
+    *,
+    dry_run: bool,
+    recheck: bool,
+    beat: Callable[[], None] = lambda: None,
 ) -> SyncRolesResult:
     stats: SyncRolesResult = {"roles_added": 0, "roles_removed": 0, "errors": 0, "changes": []}
     grants = await sync_to_async(role_grants)(None if recheck else {m.id for m in members})
@@ -118,6 +129,8 @@ async def _reconcile(
             stats["errors"] += 1
             stats["changes"].append(f"Could not update roles for {who}: {e}")
             continue
+        finally:
+            beat()
         stats["roles_added"] += len(add)
         stats["roles_removed"] += len(remove)
         stats["changes"] += [f"{prefix}Added {role.name} to {who}" for role in add]
