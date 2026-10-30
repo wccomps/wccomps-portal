@@ -94,3 +94,28 @@ def test_a_failed_save_keeps_the_box_pressed_and_the_picker_working(page):
     box(page, "db01").click()
     assert pressed(page) == ["db01"]
     assert page.locator("#ip_address").input_value() == "10.0.1.6"
+
+
+def marked(page):
+    return page.evaluate(
+        "['hostname', 'ip_address', 'service_name'].filter(f => document.querySelector("
+        "`#field-${f} label, #field-${f} legend`).classList.contains('required'))"
+    )
+
+
+def test_the_required_mark_follows_the_picked_category(page, category):
+    from ticketing.models import TicketCategory
+
+    assert marked(page) == ["service_name"]
+    other = TicketCategory.objects.create(
+        pk=91, display_name="Host Trouble", required_fields=["hostname"], user_creatable=True, sort_order=91
+    )
+    page.reload()
+    page.select_option("#category", str(other.pk))
+    assert marked(page) == ["hostname"]
+    legend = page.locator("#field-hostname legend")
+    # The picker's buttons carry no required attribute, so the legend's mark says it
+    assert legend.evaluate("legend => getComputedStyle(legend, '::after').content").endswith('/ " required"')
+
+    page.select_option("#category", str(category.pk))
+    assert marked(page) == ["service_name"]

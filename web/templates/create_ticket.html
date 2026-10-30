@@ -109,14 +109,17 @@
                 onCategoryChange(e) {
                     if (e && e.target) this.selectedCategory = e.target.value;
                     const catData = categories[this.selectedCategory];
-                    if (!catData) {
-                        this.visibleFields = [];
-                        this.requiredFields = [];
-                        return;
-                    }
+                    this.requiredFields = catData ? catData.required_fields || [] : [];
+                    this.visibleFields = catData ? [...this.requiredFields, ...(catData.optional_fields || [])] : [];
+                    this.markRequired();
+                },
 
-                    this.requiredFields = catData.required_fields || [];
-                    this.visibleFields = [...this.requiredFields, ...(catData.optional_fields || [])];
+                // The form leaves these optional: the picked category decides, so its required mark follows it
+                markRequired() {
+                    for (const field of ['hostname', 'ip_address', 'service_name', 'description']) {
+                        const mark = this.$root.querySelector(`#field-${field} label, #field-${field} legend`);
+                        if (mark) mark.classList.toggle('required', this.requiredFields.includes(field));
+                    }
                 },
 
                 onHostnameChange() {
