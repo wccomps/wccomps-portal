@@ -97,6 +97,18 @@ async def test_loading_the_cogs_leaves_their_modules_patchable() -> None:
     client.assert_called_once()
 
 
+async def test_every_registered_command_goes_into_the_sync_hash() -> None:
+    from bot.command_tree import command_hash, command_plan
+
+    async with bot_with_all_cogs() as bot:
+        plan = command_plan(bot.tree, 1, 2)
+        names = {command.name for command in bot.tree.get_commands()}
+        assert {command.name for command in plan[1]} == names
+        for name in names:
+            without = {guild: [c for c in commands if c.name != name] for guild, commands in plan.items()}
+            assert command_hash(bot.tree, without) != command_hash(bot.tree, plan), name
+
+
 class TestCommandRegistration:
     """Test that all commands are properly registered in the command tree.
 
