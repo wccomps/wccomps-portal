@@ -15,24 +15,20 @@ from .utils import shorten
 logger = logging.getLogger(__name__)
 
 
-def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser | str:
-    """The team's Authentik account, or why not."""
+def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser:
+    """The team's Authentik account; AuthentikAPIError saying why when there is none."""
     if team_number < 1 or team_number > MAX_TEAMS:
-        return f"Team number must be between 1 and {MAX_TEAMS}"
+        raise AuthentikAPIError(f"Team number must be between 1 and {MAX_TEAMS}")
     username = team_username(team_number)
-    return manager.find_user(username) or f"User {username} not found"
+    user = manager.find_user(username)
+    if user is None:
+        raise AuthentikAPIError(f"User {username} not found")
+    return user
 
 
-def set_team_account_active(manager: AuthentikManager, team_number: int, is_active: bool) -> tuple[bool, str]:
-    try:
-        user = _team_user(manager, team_number)
-        if isinstance(user, str):
-            return False, user
-        manager.set_user_active(user, is_active)
-    except AuthentikAPIError as e:
-        logger.warning(f"Failed to set team {team_number} active={is_active}: {e}")
-        return False, reason_for(e)
-    return True, ""
+def set_team_account_active(manager: AuthentikManager, team_number: int, is_active: bool) -> None:
+    """Enable or disable the team's Authentik account; AuthentikAPIError when it can't."""
+    manager.set_user_active(_team_user(manager, team_number), is_active)
 
 
 @dataclass(frozen=True)
@@ -100,10 +96,9 @@ def set_team_password(team_number: int, actor: str) -> tuple[str | None, str]:
     """A new random password for the team account, leaving its sessions alone; audited."""
     with AuthentikManager() as manager:
         try:
-            user = _team_user(manager, team_number)
+            password, error = _new_password(manager, _team_user(manager, team_number), team_number)
         except AuthentikAPIError as e:
-            user = reason_for(e)
-        password, error = (None, user) if isinstance(user, str) else _new_password(manager, user, team_number)
+            password, error = None, reason_for(e)
     AuditLog.objects.create(
         action="team_password_set",
         admin_user=actor,
@@ -119,8 +114,6 @@ def _reset_credentials(manager: AuthentikManager, team_number: int) -> Credentia
         user = _team_user(manager, team_number)
     except AuthentikAPIError as e:
         return CredentialReset(password=None, error=reason_for(e))
-    if isinstance(user, str):
-        return CredentialReset(password=None, error=user)
     # Before the password changes: Authentik may end sessions itself when it does, leaving nothing to count
     found, hidden = _count_sessions(manager, user)
     password, error = _new_password(manager, user, team_number)

@@ -103,37 +103,42 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
     result.accounts_total = len(numbers)
     total = len(result.controlled_apps) + len(numbers) + 2
     step = 0
-    manager = AuthentikManager()
+    with AuthentikManager() as manager:
+        for slug in result.controlled_apps:
+            step += 1
+            try:
+                manager.set_application_enabled(slug, enable)
+            except AuthentikAPIError as e:
+                logger.warning(f"Failed to {'enable' if enable else 'disable'} application '{slug}': {e}")
+                why = reason_for(e)
+                result.apps_failed.append((slug, why))
+                yield CompetitionStep(f"Failed {slug}: {why}", step, total, ok=False)
+            else:
+                result.apps_ok.append(slug)
+                yield CompetitionStep(f"{verb} {slug}", step, total)
 
-    for slug in result.controlled_apps:
-        ok, error = manager.enable_application(slug) if enable else manager.disable_application(slug)
+        for number in numbers:
+            username = team_username(number)
+            step += 1
+            try:
+                set_team_account_active(manager, number, enable)
+            except AuthentikAPIError as e:
+                logger.warning(f"Failed to set {username} active={enable}: {e}")
+                result.accounts_failed += 1
+                yield CompetitionStep(f"Failed {username}: {reason_for(e)}", step, total, ok=False)
+            else:
+                result.accounts_ok += 1
+                yield CompetitionStep(f"{verb} {username}", step, total)
+
+        # Team accounts' groups follow is_active; don't make teams wait for the periodic refresh.
         step += 1
-        if ok:
-            result.apps_ok.append(slug)
-            yield CompetitionStep(f"{verb} {slug}", step, total)
-        else:
-            result.apps_failed.append((slug, error))
-            yield CompetitionStep(f"Failed {slug}: {error}", step, total, ok=False)
-
-    for number in numbers:
-        username = team_username(number)
-        ok, why = set_team_account_active(manager, number, enable)
-        step += 1
-        if ok:
-            result.accounts_ok += 1
-        else:
-            result.accounts_failed += 1
-        yield CompetitionStep(f"{verb} {username}" if ok else f"Failed {username}: {why}", step, total, ok=ok)
-
-    # Team accounts' groups follow is_active; don't make teams wait for the periodic refresh.
-    step += 1
-    try:
-        refresh_user_groups(manager)
-        yield CompetitionStep("Refreshed team permissions", step, total)
-    except Exception as e:
-        logger.warning(f"Group refresh after competition {'start' if enable else 'stop'} failed: {e}")
-        why = reason_for(e) if isinstance(e, AuthentikAPIError) else str(e)
-        yield CompetitionStep(f"Permission refresh failed (retried within 5 minutes): {why}", step, total, ok=False)
+        try:
+            refresh_user_groups(manager)
+            yield CompetitionStep("Refreshed team permissions", step, total)
+        except Exception as e:
+            logger.warning(f"Group refresh after competition {'start' if enable else 'stop'} failed: {e}")
+            why = reason_for(e) if isinstance(e, AuthentikAPIError) else str(e)
+            yield CompetitionStep(f"Permission refresh failed (retried within 5 minutes): {why}", step, total, ok=False)
 
     step += 1
     actor_user = User.objects.filter(username=actor).first()

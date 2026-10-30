@@ -49,7 +49,7 @@ def test_authentik_reset_leaves_the_account_disabled():
     real.base_url = "https://auth.example"
     real.client = MagicMock()
     real.client.get.return_value.is_success = True
-    real.client.get.return_value.json.return_value = {"results": [{"pk": 5, "username": "team07"}]}
+    real.client.get.return_value.json.return_value = {"results": [{"pk": 5, "username": "team07", "uid": "sub-07"}]}
     real.client.post.return_value.is_success = True
 
     with patch("core.authentik_utils.AuthentikManager") as cls:
@@ -402,8 +402,17 @@ def test_web_bulk_reset_where_every_team_failed_is_an_error(admin_user):
 
 
 def test_set_team_account_active_switches_the_teams_account(manager):
-    assert set_team_account_active(manager, 7, True) == (True, "")
+    set_team_account_active(manager, 7, True)
     manager.set_user_active.assert_called_once_with({"pk": 5, "username": "team07"}, True)
+
+
+@pytest.mark.parametrize(("number", "why"), [(7, "User team07 not found"), (0, "Team number must be between 1 and 50")])
+def test_set_team_account_active_raises_why_it_could_not(manager, number, why):
+    manager.find_user.return_value = None
+
+    with pytest.raises(AuthentikAPIError, match=f"^{why}$"):
+        set_team_account_active(manager, number, True)
+    manager.set_user_active.assert_not_called()
 
 
 def test_bulk_reset_tells_ops_once(manager):

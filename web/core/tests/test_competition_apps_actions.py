@@ -133,6 +133,7 @@ def test_app_list_is_fetched_separately_from_the_page(admin_client):
     from unittest.mock import patch
 
     with patch("core.admin_views.competition.AuthentikManager") as manager:
+        manager.return_value.__enter__.return_value = manager.return_value
         manager.return_value.list_applications.return_value = ["netbird", "scoring"]
         page = admin_client.get(reverse("admin_competition_setup"))
         manager.return_value.list_applications.assert_not_called()
