@@ -76,6 +76,8 @@ def test_a_form_field_renders_as_its_field_group() -> None:
 
 
 MARKUP_CALLS = {"format_html", "format_html_join", "mark_safe", "SafeString"}
+# SafeString is also a type: only a call to it builds markup
+MARKUP_FUNCTIONS = MARKUP_CALLS - {"SafeString"}
 
 
 def markup_name(node: ast.AST) -> str | None:
@@ -85,7 +87,8 @@ def markup_name(node: ast.AST) -> str | None:
 
 def test_form_markup_formats_only_literals() -> None:
     """A label or help text written as markup is shown as is: format_html escapes its values but can't stop a
-    javascript: link, so a forms module calls the markup functions directly, with literals only."""
+    javascript: link, so a forms module calls format_html, format_html_join, mark_safe and SafeString directly, with
+    literals only."""
     found = {}
     for path in tracked_files():
         if not (path.startswith("web/") and path.endswith("forms.py") and "/tests/" not in path):
@@ -93,15 +96,14 @@ def test_form_markup_formats_only_literals() -> None:
         tree = ast.parse((REPO_DIR / path).read_text())
         called = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
         for node in ast.walk(tree):
-            where = f"{path}:{getattr(node, 'lineno', 0)}"
             if isinstance(node, ast.ImportFrom):
                 for alias in node.names:
                     if alias.name in MARKUP_CALLS and alias.asname:
-                        found[where] = f"imports {alias.name} under another name"
-            elif (name := markup_name(node)) and id(node) not in called:
-                found[where] = f"uses {name} other than by calling it"
+                        found[f"{path}:{node.lineno}"] = f"imports {alias.name} under another name"
+            elif (name := markup_name(node)) in MARKUP_FUNCTIONS and id(node) not in called:
+                found[f"{path}:{node.lineno}"] = f"uses {name} other than by calling it"
             elif isinstance(node, ast.Call) and (name := markup_name(node.func)):
                 for value in [*node.args, *(kw.value for kw in node.keywords)]:
                     if not isinstance(value, ast.Constant):
-                        found[where] = f"{name} takes {ast.unparse(value)}"
+                        found[f"{path}:{node.lineno}"] = f"{name} takes {ast.unparse(value)}"
     fail_with("Form markup built from values that aren't literals", found, {})

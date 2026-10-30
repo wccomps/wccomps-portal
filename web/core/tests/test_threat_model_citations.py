@@ -10,7 +10,7 @@ MODEL = (REPO_DIR / "THREAT_MODEL.md").read_text()
 SPAN = re.compile(r"`([^`\n]+)`")
 FILE = re.compile(r"(?:[\w.-]+/)*(?:Dockerfile|[\w.-]+\.(?:py|yml|yaml|toml|lock|md|html|js|css))")
 NAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
-# Between a citation's spans: spaces, and at most one line break
+# A citation may wrap once; a blank line ends it, so it can't take the next paragraph's names
 WRAP = r"(?:[ \t]+|[ \t]*\n[ \t]*)"
 
 
