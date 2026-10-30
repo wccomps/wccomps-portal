@@ -10,6 +10,8 @@ MODEL = (REPO_DIR / "THREAT_MODEL.md").read_text()
 SPAN = re.compile(r"`([^`\n]+)`")
 FILE = re.compile(r"(?:[\w.-]+/)*(?:Dockerfile|[\w.-]+\.(?:py|yml|yaml|toml|lock|md|html|js|css))")
 NAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
+# Between a citation's spans: spaces, and at most one line break
+WRAP = r"(?:[ \t]+|[ \t]*\n[ \t]*)"
 
 
 def read_citations() -> tuple[list[tuple[str, list[str]]], list[list[str]]]:
@@ -27,7 +29,7 @@ def read_citations() -> tuple[list[tuple[str, list[str]]], list[list[str]]]:
         while i < len(spans) and re.fullmatch(separator, MODEL[spans[i - 1].end() : spans[i].start()]) and is_name(i):
             names.append(spans[i].group(1))
             i += 1
-            separator = r",\s+"
+            separator = "," + WRAP
         return names
 
     cited: list[tuple[str, list[str]]] = []
@@ -36,11 +38,11 @@ def read_citations() -> tuple[list[tuple[str, list[str]]], list[list[str]]]:
     while i < len(spans):
         text = spans[i].group(1)
         if FILE.fullmatch(text):
-            names = names_from(i + 1, r"\s+")
+            names = names_from(i + 1, WRAP)
             cited.append((text, names))
             i += 1 + len(names)
         elif is_name(i):
-            names = [text, *names_from(i + 1, r",\s+")]
+            names = [text, *names_from(i + 1, "," + WRAP)]
             if len(names) > 1:
                 orphans.append(names)
             i += len(names)
