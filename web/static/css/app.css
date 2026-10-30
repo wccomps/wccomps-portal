@@ -852,17 +852,16 @@ fieldset:has([required]) > legend.required::after,
     padding: 10px 20px;
     border-bottom: 1px solid var(--primary-dark, #2e5266);
     display: flex;
+    flex-wrap: wrap;
+    row-gap: 6px;
     align-items: center;
-}
-
-.nav-spacer {
-    flex: 1;
 }
 
 .nav-user {
     color: var(--header-link-color, #c4dde8);
     font-size: 13px;
     margin-right: 10px;
+    white-space: nowrap;
 }
 
 .primary-navigation a {
@@ -874,6 +873,7 @@ fieldset:has([required]) > legend.required::after,
     font-size: 13px;
     font-weight: 500;
     display: inline-block;
+    white-space: nowrap;
     transition: background-color 0.2s;
 }
 
@@ -923,8 +923,11 @@ fieldset:has([required]) > legend.required::after,
     display: contents;
 }
 
+/* The tools wrap as one group, at the right of their row */
 .nav-utils {
-    display: contents;
+    display: flex;
+    align-items: center;
+    margin-left: auto;
 }
 
 /* Mobile layout */
@@ -980,13 +983,8 @@ fieldset:has([required]) > legend.required::after,
         border-radius: 4px;
     }
 
-    .nav-spacer {
-        display: none;
-    }
-
     .nav-utils {
-        display: flex;
-        align-items: center;
+        margin-left: 0;
         padding-top: 10px;
         margin-top: 10px;
         border-top: 1px solid rgba(255, 255, 255, 0.2);
