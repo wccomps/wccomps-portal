@@ -77,6 +77,14 @@ class UserGroups(models.Model):
         return list(self.groups) if self.account_active is not False else []
 
 
+class CredentialsReset(models.Model):
+    """When a credentials reset last changed an Authentik account's password, kept by its uid: the account may never
+    have signed in to the portal."""
+
+    authentik_id = models.CharField(max_length=64, primary_key=True, help_text="Authentik user UUID (sub claim)")
+    reset_at = models.DateTimeField()
+
+
 class AuditLog(models.Model):
     action = models.CharField(max_length=50)
     admin_user = models.CharField(max_length=255)

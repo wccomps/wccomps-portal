@@ -5,6 +5,7 @@ from typing import Concatenate, ParamSpec
 
 from django.contrib.auth.models import AnonymousUser, User
 from django.core.exceptions import PermissionDenied
+from django.db import connection
 from django.db.models import Model, QuerySet
 from django.http import HttpRequest, HttpResponseBase
 from django.shortcuts import get_object_or_404
@@ -58,6 +59,24 @@ def users_granted(permission_name: str) -> QuerySet[User]:
     if permission_name in TEAM_HELD:
         raise ValueError(f"{permission_name} is team-held; users_granted lists only group-granted permissions")
     return User.objects.filter(usergroups__in=UserGroups.objects.granting(PERMISSION_MAP[permission_name]))
+
+
+def lock_account(authentik_id: str) -> None:
+    """Hold the account's lock until the transaction ends, so a sign-in and a credentials reset's sign-out of the
+    same account run one after the other."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [f"authentik:{authentik_id}"])
+
+
+def sign_out_everywhere(user: User) -> None:
+    """End every portal session of the user: a new session auth hash fails each session's own (signed_out_since)."""
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
+
+
+def signed_out_since(user: User) -> bool:
+    """Whether sign_out_everywhere ran after this in-memory user was loaded, ending the session it came with."""
+    return User.objects.get(pk=user.pk).get_session_auth_hash() != user.get_session_auth_hash()
 
 
 def has_permission(user: User | AnonymousUser, permission_name: str) -> bool:

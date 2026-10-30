@@ -9,12 +9,11 @@ from django.conf import settings
 
 from bot.competition_actions import deliver_team_broadcast, run_competition_cleanup
 from bot.permissions import permission_check
-from bot.utils import ConfirmView, log_to_ops_channel, split_message
+from bot.utils import ConfirmView, log_to_ops_channel, off_orm_thread, split_message
 from core.authentik_utils import (
     credentials_csv,
     parse_team_range,
     reset_teams_credentials,
-    sessions_failure_summary,
 )
 from core.forms import AppSlugForm
 from core.models import AuditLog, CompetitionConfig
@@ -59,7 +58,8 @@ class AdminCompetitionCog(commands.Cog):
                 f"**WARNING: You are about to reset passwords for ALL {len(active)} active team accounts.**\n\n"
                 "This will:\n"
                 "• Generate new random passwords for them\n"
-                "• Invalidate all current passwords and end their Authentik sessions\n\n"
+                "• Invalidate all current passwords and end their Authentik and portal sessions\n"
+                "• Unlink their Discord members, who link again with the new password\n\n"
                 "Are you sure you want to continue?",
                 view=view,
                 ephemeral=True,
@@ -84,18 +84,11 @@ class AdminCompetitionCog(commands.Cog):
             teams = active
 
         # Only successful resets go in the CSV: a failed one leaves the old password in place.
-        result = await sync_to_async(reset_teams_credentials)(teams, actor=str(interaction.user))
+        result = await off_orm_thread(reset_teams_credentials, teams, actor=str(interaction.user))
         password_list = result.password_list
-        failed_resets = result.failed_resets
-        sessions_failed = result.sessions_failed
-        total = len(teams)
 
-        summary = f"Password reset complete\n• Success: {len(password_list)}/{total}\n"
-        details = "".join(f"• Failed {username}: {error}\n" for username, error in failed_resets)
-        if sessions_failed:
-            details += f"• Sessions: {sessions_failure_summary(sessions_failed)}\n"
-        if result.sessions_uncounted:
-            details += f"• Could not count the sessions of {', '.join(result.sessions_uncounted)}\n"
+        summary = f"Password reset {'complete' if result.complete else 'incomplete'}\n• {result.headline}\n"
+        details = "".join(f"• {line}\n" for line in result.details())
         if password_list:
             # The CSV rides on the short first message, so details past Discord's limit can't lose the passwords
             csv_content = credentials_csv((username, password) for _num, username, password in password_list)
@@ -108,7 +101,7 @@ class AdminCompetitionCog(commands.Cog):
         for part in split_message(details) if details else []:
             await interaction.followup.send(part, ephemeral=True)
 
-        logger.info(f"Password reset performed by {interaction.user}. Failed: {len(failed_resets)}")
+        logger.info(f"Password reset performed by {interaction.user}. Failed: {len(result.failed_resets)}")
 
     @competition_group.command(name="set-max-members", description="[ADMIN] Set maximum team members globally")
     @app_commands.describe(max_members="Maximum members per team (1-20)")

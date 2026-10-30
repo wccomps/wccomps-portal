@@ -24,7 +24,7 @@ during an event.
 2. **Proxmox API token** (`web/portal/settings.py` `PROXMOX_API_TOKEN`): rolls back and starts team VMs.
 3. **Discord bot token**: posts as the bot, manages roles and channels in the event server.
 4. **Team account passwords**: in Authentik, mirrored in `SchoolInfo.password` for packet emails
-   (`web/core/authentik_utils.py` `_new_password`), in the bulk reset CSV and in packet emails.
+   (`web/core/authentik_utils.py` `_store_password`), in the bulk reset CSV and in packet emails.
 5. **Scoring integrity**: point adjustments, inject grades, incident and red team scores that decide placings.
 6. **`SECRET_KEY` and sessions**: sign sessions, CSRF tokens and OAuth state.
 7. **Registrant contact details**: school contact names and email addresses.

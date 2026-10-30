@@ -31,4 +31,16 @@ class Migration(migrations.Migration):
                 blank=True, null=True, help_text="When Authentik was read for the stored groups and state"
             ),
         ),
+        migrations.CreateModel(
+            name="CredentialsReset",
+            fields=[
+                (
+                    "authentik_id",
+                    models.CharField(
+                        help_text="Authentik user UUID (sub claim)", max_length=64, primary_key=True, serialize=False
+                    ),
+                ),
+                ("reset_at", models.DateTimeField()),
+            ],
+        ),
     ]

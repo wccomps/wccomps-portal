@@ -298,7 +298,7 @@ def _action_reset_passwords(request: HttpRequest, config: CompetitionConfig, aut
         credentials_csv((username, password) for _num, username, password in password_list) if password_list else ""
     )
 
-    return JsonResponse({"success": not result.failed_resets, "message": result.summary(), "csv": csv_content})
+    return JsonResponse({"success": result.complete, "message": result.summary(), "csv": csv_content})
 
 
 def _action_sync_quotient(request: HttpRequest, config: CompetitionConfig, authentik_username: str) -> JsonResponse:

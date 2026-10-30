@@ -7,7 +7,6 @@ import discord
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db import connection
-from django.utils import timezone
 from scoring.models import QuotientMetadataCache
 
 from bot.discord_manager import delete_team_infrastructure
@@ -15,8 +14,9 @@ from bot.utils import announcement, log_to_ops_channel, send_announcement, send_
 from core.authentik_utils import parse_team_range
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.services.competition import CompetitionRunResult, run_competition_to_completion
+from core.services.linking import COMPETITION_CLEANUP, clear_team_discord_ids, unlink_teams
 from core.utils import shorten
-from team.models import MAX_TEAMS, DiscordLink, Team
+from team.models import MAX_TEAMS, Team
 
 logger = logging.getLogger(__name__)
 
@@ -130,32 +130,9 @@ def _build_status_embed(config: CompetitionConfig) -> discord.Embed:
 
 
 async def _deactivate_team_links(actor: str) -> int:
-    """Deactivate team member links only (admin and support links stay), auditing each."""
-    links_to_deactivate = [
-        link
-        async for link in DiscordLink.objects.filter(is_active=True, team__isnull=False).select_related("team", "user")
-    ]
-
-    deactivated = 0
-    for link in links_to_deactivate:
-        link.is_active = False
-        link.unlinked_at = timezone.now()
-        await link.asave()
-        deactivated += 1
-
-        await AuditLog.objects.acreate(
-            action="user_unlinked",
-            admin_user=actor,
-            target_entity="discord_link",
-            target_id=link.discord_id,
-            details={
-                "discord_id": link.discord_id,
-                "team_name": link.team.team_name if link.team else "Unknown",
-                "authentik_username": link.user.username,
-                "reason": "competition_cleanup",
-            },
-        )
-    return deactivated
+    """End team member links only (admin and support links stay); the caller syncs the whole guild after."""
+    ended = await sync_to_async(unlink_teams)(Team.objects.all(), actor, COMPETITION_CLEANUP, sync_roles=False)
+    return len(ended)
 
 
 async def run_competition_cleanup(
@@ -207,7 +184,7 @@ async def run_competition_cleanup(
 
         await log_to_ops_channel(bot, f"Deleted {deleted_count} team categories")
 
-        await Team.objects.all().aupdate(discord_category_id=None, discord_role_id=None)
+        await sync_to_async(clear_team_discord_ids)()
 
         judges_removed = 0
         room_judge_role = discord.utils.get(guild.roles, name="WCComps Room Judge")

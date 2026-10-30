@@ -39,6 +39,12 @@ class TeamQuerySet(models.QuerySet["Team"]):
         """The teams these Authentik groups put an account on (Team.is_held_by, as a query)."""
         return self.filter(is_active=True, authentik_group__in=list(groups))
 
+    def lock(self) -> list[int]:
+        """Lock these team rows in pk order, FOR NO KEY UPDATE so rows referencing them stay writable, and return their
+        pks. Linking, unlinks and the Close Out wipe take it before their links, which keeps those three from
+        deadlocking each other."""
+        return list(self.select_for_update(no_key=True).order_by("pk").values_list("pk", flat=True))
+
     def with_active_member_count(self) -> TeamQuerySet:
         return self.annotate(
             active_member_count=models.Count("members", filter=models.Q(members__is_active=True)),

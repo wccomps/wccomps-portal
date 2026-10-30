@@ -782,6 +782,13 @@ def _inline_competition_run(enable: bool, actor: str, on_step: Any = None) -> An
     return sync_to_async(run_competition_to_completion)(enable, actor, on_step)
 
 
+async def _inline_off_orm_thread(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """bot.utils.off_orm_thread on the test's own connection, for the same reason as _inline_competition_run."""
+    from asgiref.sync import sync_to_async
+
+    return await sync_to_async(func)(*args, **kwargs)
+
+
 @contextmanager
 def discord_world(world: World, confirm: bool | None) -> Iterator[Discord]:
     """The fakes, every other service offline, the bot's Discord settings, and every confirmation answered with
@@ -808,6 +815,8 @@ def discord_world(world: World, confirm: bool | None) -> Iterator[Discord]:
         stack.enter_context(patch.object(tasks.Loop, "start"))
         stack.enter_context(patch.object(ConfirmView, "wait", answered_confirmation))
         stack.enter_context(patch("bot.competition_actions.run_competition", _inline_competition_run))
+        for module in ("bot.cogs.admin_competition", "bot.cogs.admin_teams", "bot.cogs.authentik_groups"):
+            stack.enter_context(patch(f"{module}.off_orm_thread", _inline_off_orm_thread))
         stack.enter_context(patch("quotient.client.get_quotient_client.cache_clear"))
         yield discord_
 

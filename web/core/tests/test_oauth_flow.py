@@ -11,7 +11,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 
-from core.models import UserGroups
+from core.models import CredentialsReset, UserGroups
 
 
 @pytest.fixture
@@ -285,9 +285,11 @@ class TestOAuthCallback:
         assert user.username == "newusername"
 
     @staticmethod
-    def _login(client, state, userinfo):
+    def _login(client, state, userinfo, *, id_token=None):
         mock_token_response = MagicMock()
-        mock_token_response.json.return_value = {"access_token": "test-token"}
+        mock_token_response.json.return_value = {"access_token": "test-token"} | (
+            {"id_token": id_token} if id_token else {}
+        )
         mock_token_response.raise_for_status = MagicMock()
 
         mock_userinfo_response = MagicMock()
@@ -314,6 +316,69 @@ class TestOAuthCallback:
             mock_httpx.return_value = mock_client
 
             return client.get(f"/auth/callback/?code=test-code&state={state}")
+
+    @staticmethod
+    def _id_token(auth_time: float) -> str:
+        import base64
+        import json
+
+        payload = base64.urlsafe_b64encode(json.dumps({"auth_time": int(auth_time)}).encode()).decode().rstrip("=")
+        return f"header.{payload}.signature"
+
+    @pytest.mark.parametrize("before", [True, False])
+    def test_a_sign_in_from_before_a_credentials_reset_is_refused(self, oauth_state_session, before):
+        """An authorization code issued before the reset must not undo its portal sign-out."""
+        import time
+        from datetime import UTC, datetime
+
+        client, state = oauth_state_session
+        user = User.objects.create(username="team06")
+        reset_at = time.time() - 60
+        UserGroups.objects.create(user=user, authentik_id="sub-06", groups=[])
+        CredentialsReset.objects.create(authentik_id="sub-06", reset_at=datetime.fromtimestamp(reset_at, UTC))
+        auth_time = reset_at - 10 if before else reset_at + 10
+
+        response = self._login(
+            client, state, {"sub": "sub-06", "preferred_username": "team06"}, id_token=self._id_token(auth_time)
+        )
+
+        assert ("_auth_user_id" in client.session) is not before
+        if before:
+            assert b"password was reset" in response.content
+
+    def test_without_auth_time_the_sign_in_counts_from_when_it_began(self, oauth_state_session):
+        """The login page signed when it started; a reset after that is later than this sign-in."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        client, state = oauth_state_session
+        user = User.objects.create(username="team06")
+        reset_at = timezone.now() + timedelta(seconds=10)
+        UserGroups.objects.create(user=user, authentik_id="sub-06", groups=[])
+        CredentialsReset.objects.create(authentik_id="sub-06", reset_at=reset_at)
+
+        self._login(client, state, {"sub": "sub-06", "preferred_username": "team06"})
+
+        assert "_auth_user_id" not in client.session
+
+    @pytest.mark.parametrize("auth_time", ["1" + "0" * 400, "NaN", "Infinity", "-Infinity"])
+    def test_an_auth_time_that_is_no_moment_counts_from_when_the_sign_in_began(self, oauth_state_session, auth_time):
+        import base64
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        client, state = oauth_state_session
+        CredentialsReset.objects.create(authentik_id="sub-06", reset_at=timezone.now() + timedelta(seconds=10))
+        payload = base64.urlsafe_b64encode(f'{{"auth_time": {auth_time}}}'.encode()).decode().rstrip("=")
+
+        response = self._login(
+            client, state, {"sub": "sub-06", "preferred_username": "team06"}, id_token=f"header.{payload}.signature"
+        )
+
+        assert response.status_code == 200
+        assert "_auth_user_id" not in client.session
 
     def test_signing_in_marks_a_disabled_account_enabled(self, oauth_state_session):
         """Authentik signs in only an enabled account, so the next refresh needn't wait to restore permissions."""

@@ -2,17 +2,18 @@ from typing import cast
 
 from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest
+from django.db import transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
-from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from core.auth_utils import require_permission
-from core.authentik_utils import reset_team_credentials
+from core.authentik_utils import Changed, Refused, reset_team, reset_team_credentials
 from core.discord_tasks import SetupTeamInfrastructure, SyncMemberRoles
 from core.errors import json_endpoint
 from core.forms import TeamActionForm, TeamsBulkActionForm
 from core.models import AuditLog, DiscordTask
+from core.services.linking import ADMIN_UNLINK, unlink_discord_links
 from team.models import DiscordLink, Team
 
 
@@ -84,92 +85,47 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
         if not discord_id:
             raise BadRequest("Discord ID required")
 
-        try:
-            link = DiscordLink.objects.get(discord_id=discord_id, team=team, is_active=True)
-            link.is_active = False
-            link.unlinked_at = timezone.now()
-            link.save()
-            DiscordTask.enqueue(SyncMemberRoles(discord_id=link.discord_id))
-
-            AuditLog.objects.create(
-                action="user_unlinked",
-                admin_user=authentik_username,
-                target_entity="discord_link",
-                target_id=discord_id,
-                details={
-                    "discord_username": link.discord_username,
-                    "team_name": team.team_name,
-                    "authentik_username": link.user.username,
-                },
-            )
-
-            return JsonResponse({"success": True, "message": f"User {link.discord_username} unlinked"})
-        except DiscordLink.DoesNotExist:
-            raise BadRequest("User not found or not linked to this team") from None
+        links = DiscordLink.objects.filter(discord_id=discord_id, team=team)
+        ended = unlink_discord_links(links, actor=authentik_username, reason=ADMIN_UNLINK)
+        if not ended:
+            raise BadRequest("User not found or not linked to this team")
+        return JsonResponse({"success": True, "message": f"User {ended[0].discord_username} unlinked"})
 
     elif action == "reset":
-        links = DiscordLink.objects.filter(team=team, is_active=True).select_related("user")
-        unlinked = 0
-        for link in links:
-            link.is_active = False
-            link.unlinked_at = timezone.now()
-            link.save()
-            DiscordTask.enqueue(SyncMemberRoles(discord_id=link.discord_id))
-            AuditLog.objects.create(
-                action="user_unlinked",
-                admin_user=authentik_username,
-                target_entity="discord_link",
-                target_id=link.discord_id,
-                details={
-                    "discord_id": link.discord_id,
-                    "discord_username": link.discord_username,
-                    "team_name": team.team_name,
-                    "authentik_username": link.user.username,
-                    "reason": "team_reset",
-                },
-            )
-            unlinked += 1
-
-        DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
-
-        reset = reset_team_credentials(team_number, actor=authentik_username)
-
-        AuditLog.objects.create(
-            action="team_reset",
-            admin_user=authentik_username,
-            target_entity="team",
-            target_id=team_number,
-            details={
-                "team_name": team.team_name,
-                "unlinked_members": unlinked,
-                "password_reset": reset.password is not None,
-                "recreated_channels": True,
-            },
-        )
-
-        if reset.password is not None:
-            return JsonResponse(
-                {
-                    "success": True,
-                    "message": f"Team reset: {unlinked} unlinked, {reset.sessions_outcome}",
-                    "password": reset.password,
-                }
-            )
-        else:
-            return JsonResponse(
-                {
-                    "success": False,
-                    "message": f"Team partially reset: {unlinked} unlinked, but password reset failed: {reset.error}",
-                }
-            )
+        reset = reset_team(team_number, actor=authentik_username, recreate_channels=True).credentials
+        match reset:
+            case Changed(password=password):
+                return JsonResponse(
+                    {
+                        "success": reset.complete,
+                        "message": f"Team reset: {reset.describe()}",
+                        "password": password,
+                        "members_unlinked": reset.members_unlinked,
+                    }
+                )
+            case Refused():
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "message": f"Team partially reset: {reset.describe()}",
+                        "members_unlinked": reset.members_unlinked,
+                    }
+                )
 
     elif action == "reset_password":
-        # Discord links stay, unlike "reset"
         reset = reset_team_credentials(team_number, actor=authentik_username)
-        if reset.password is None:
-            return JsonResponse({"success": False, "message": f"Password reset failed: {reset.error}"})
-        message = f"New password set in Authentik; {reset.sessions_outcome}"
-        return JsonResponse({"success": True, "message": message, "password": reset.password})
+        match reset:
+            case Changed(password=password):
+                return JsonResponse(
+                    {
+                        "success": reset.complete,
+                        "message": f"New password set in Authentik; {reset.describe()}",
+                        "password": password,
+                        "members_unlinked": reset.members_unlinked,
+                    }
+                )
+            case Refused(error=error):
+                return JsonResponse({"success": False, "message": f"Password reset failed: {error}"})
 
     elif action == "recreate_channels":
         DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
@@ -204,7 +160,9 @@ def admin_teams_bulk_action(request: HttpRequest) -> HttpResponse:
 
     if action in ("activate", "deactivate"):
         target_active = action == "activate"
-        updated = Team.objects.filter(team_number__in=team_numbers).update(is_active=target_active)
+        with transaction.atomic():
+            locked = Team.objects.filter(team_number__in=team_numbers).lock()
+            updated = Team.objects.filter(pk__in=locked).update(is_active=target_active)
         for discord_id in DiscordLink.objects.filter(team__team_number__in=team_numbers, is_active=True).values_list(
             "discord_id", flat=True
         ):

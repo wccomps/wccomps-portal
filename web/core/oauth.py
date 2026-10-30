@@ -1,7 +1,12 @@
 """Custom OAuth views for Authentik OIDC authentication."""
 
+import base64
+import json
 import logging
+import math
 import secrets
+import time
+from datetime import datetime
 from urllib.parse import urlencode
 
 import httpx
@@ -12,10 +17,11 @@ from django.core import signing
 from django.db import connection, models, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from .auth_utils import get_role_based_landing_url
-from .models import UserGroups
+from .auth_utils import get_role_based_landing_url, lock_account
+from .models import CredentialsReset, UserGroups
 from .utils import database_clock
 
 logger = logging.getLogger(__name__)
@@ -68,7 +74,7 @@ def oauth_login(request: HttpRequest) -> HttpResponse:
     # code and state, logging the victim in as the attacker (login CSRF).
     nonce = secrets.token_urlsafe(16)
     request.session["oauth_nonce"] = nonce
-    state = signing.dumps({"n": nonce, "next": next_url})
+    state = signing.dumps({"n": nonce, "next": next_url, "t": int(time.time())})
 
     redirect_uri = request.build_absolute_uri("/auth/callback/")
     params = {
@@ -78,9 +84,22 @@ def oauth_login(request: HttpRequest) -> HttpResponse:
         "redirect_uri": redirect_uri,
         "state": state,
     }
+    # After a refused sign-in from before a reset: make Authentik ask again rather than reuse its session
+    if request.GET.get("prompt") == "login":
+        params |= {"prompt": "login"}
 
     auth_url = f"{config['authorization_endpoint']}?{urlencode(params)}"
     return redirect(auth_url)
+
+
+def _next_url(request: HttpRequest, state_data: dict[str, object]) -> str:
+    """Where the sign-in began, from the signed state (checked again, in depth)."""
+    next_url = state_data.get("next", "/")
+    if not isinstance(next_url, str) or not url_has_allowed_host_and_scheme(
+        next_url, allowed_hosts={request.get_host()}
+    ):
+        return "/"
+    return next_url
 
 
 def _free_username(username: str, keep_pk: int | None = None) -> None:
@@ -118,6 +137,29 @@ def _json_object(response: httpx.Response) -> dict[str, object]:
 def _fits(text: str, model: type[models.Model], name: str) -> bool:
     length: int | None = getattr(model._meta.get_field(name), "max_length", None)
     return length is None or len(text) <= length
+
+
+def _signed_in_at(tokens: dict[str, object], state_data: dict[str, object]) -> float:
+    """When the person signed in to Authentik: the ID token's auth_time, else when this sign-in began here. The ID
+    token comes straight from the token endpoint, so its claims are read without checking its signature."""
+    id_token = tokens.get("id_token")
+    try:
+        payload = str(id_token).split(".")[1]
+        auth_time = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))).get("auth_time")
+        if isinstance(auth_time, int | float) and not isinstance(auth_time, bool) and math.isfinite(auth_time):
+            return float(auth_time)
+    except IndexError, ValueError, AttributeError, RecursionError, OverflowError:
+        pass
+    started = state_data.get("t")
+    return float(started) if isinstance(started, int | float) and not isinstance(started, bool) else 0.0
+
+
+# auth_time is whole seconds and the two clocks differ a little; a sign-in this close before a reset counts as after
+RESET_CLOCK_MARGIN = 2.0
+
+
+def _before_reset(signed_in_at: float, reset_at: datetime) -> bool:
+    return signed_in_at < reset_at.timestamp() - RESET_CLOCK_MARGIN
 
 
 def _claims(userinfo: dict[str, object]) -> tuple[str, str, str, list[str]]:
@@ -263,15 +305,30 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
             {"error_title": "Authentication Failed", "error_message": "Invalid user data."},
         )
 
+    next_url = _next_url(request, state_data)
     # Accounts are keyed by the Authentik sub only: usernames get reused, and matching on
     # them would hand a new identity someone else's account
     with transaction.atomic():
         # A team account's members often log in at the same moment: without this, two first
         # logins both see no account and the second create fails on the unique username.
+        lock_account(authentik_id)
         with connection.cursor() as cursor:
-            cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [f"authentik:{authentik_id}"])
             cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [f"username:{username}"])
         user_groups = UserGroups.objects.select_related("user").filter(authentik_id=authentik_id).first()
+        # Read under the account's lock, which a reset's record takes too: a code issued before the reset, redeemed
+        # after, would undo it
+        reset = CredentialsReset.objects.filter(authentik_id=authentik_id).first()
+        if reset and _before_reset(_signed_in_at(tokens, state_data), reset.reset_at):
+            logger.warning("Sign-in from before a credentials reset refused")
+            return render(
+                request,
+                "core/oauth_error.html",
+                {
+                    "error_title": "Signed Out",
+                    "error_message": "This account's password was reset after you signed in. Sign in again with it.",
+                    "retry_url": reverse("oauth_login") + "?" + urlencode({"prompt": "login", "next": next_url}),
+                },
+            )
         if user_groups is None:
             _free_username(username)
             user = User.objects.create(username=username, email=email)
@@ -289,10 +346,6 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
 
     login(request, user)
 
-    # Get next URL from the signed state (re-validate to defend in depth)
-    next_url = state_data.get("next", "/")
-    if not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
-        next_url = "/"
     if next_url == "/":
         next_url = get_role_based_landing_url(groups)
 
