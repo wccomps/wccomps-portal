@@ -80,26 +80,40 @@ MARKUP_CALLS = {"format_html", "format_html_join", "mark_safe", "SafeString"}
 
 def test_form_markup_formats_only_constants() -> None:
     """A label or help text written as markup is shown as is: format_html escapes its values but can't stop a
-    javascript: link, so a forms module builds markup from literals and its own module constants only."""
+    javascript: link, so a forms module builds markup from literals and names it binds once, at its top, to one."""
     found = {}
     for path in tracked_files():
         if not (path.startswith("web/") and path.endswith("forms.py") and "/tests/" not in path):
             continue
         tree = ast.parse((REPO_DIR / path).read_text())
-        constants = {
-            target.id
+        bound = [n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)]
+        bound += [a.arg for a in ast.walk(tree) if isinstance(a, ast.arg)]
+        literals = {
+            node.targets[0].id
             for node in tree.body
-            if isinstance(node, ast.Assign | ast.AnnAssign)
-            for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
-            if isinstance(target, ast.Name)
+            if isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Constant)
+            and bound.count(node.targets[0].id) == 1
+        }
+        markup = MARKUP_CALLS | {
+            alias.asname
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            if alias.name in MARKUP_CALLS and alias.asname
         }
         for node in ast.walk(tree):
+            for decorator in getattr(node, "decorator_list", []):
+                if (decorator.id if isinstance(decorator, ast.Name) else getattr(decorator, "attr", None)) in markup:
+                    found[f"{path}:{decorator.lineno}"] = "marks a function's result safe"
             if not isinstance(node, ast.Call):
                 continue
             called = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", None)
-            if called not in MARKUP_CALLS:
+            if called not in markup:
                 continue
             for value in [*node.args, *(kw.value for kw in node.keywords)]:
-                if not (isinstance(value, ast.Constant) or (isinstance(value, ast.Name) and value.id in constants)):
+                if not (isinstance(value, ast.Constant) or (isinstance(value, ast.Name) and value.id in literals)):
                     found[f"{path}:{node.lineno}"] = f"{called} takes {ast.unparse(value)}"
     fail_with("Form markup built from values that aren't constants", found, {})

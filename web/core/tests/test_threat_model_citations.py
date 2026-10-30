@@ -8,12 +8,13 @@ from core.tests.guards import REPO_DIR, tracked_files
 
 MODEL = (REPO_DIR / "THREAT_MODEL.md").read_text()
 SPAN = re.compile(r"`([^`\n]+)`")
-FILE = re.compile(r"[\w.-]+(?:/[\w.-]+)*\.(?:py|yml|yaml|toml|lock|md|html|js|css)")
+FILE = re.compile(r"(?:[\w.-]+/)*(?:Dockerfile|[\w.-]+\.(?:py|yml|yaml|toml|lock|md|html|js|css))")
 NAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
 
 
 def read_citations() -> tuple[list[tuple[str, list[str]]], list[list[str]]]:
-    """Each cited file with the names after it, and each list of names with no file before it."""
+    """Each cited file with the names after it, and each run of two or more names with no file before it (a lone name
+    is prose: `SECRET_KEY`, `next`)."""
     spans = list(SPAN.finditer(MODEL))
 
     def is_name(i: int) -> bool:
@@ -23,10 +24,10 @@ def read_citations() -> tuple[list[tuple[str, list[str]]], list[list[str]]]:
     def names_from(i: int, first_separator: str) -> list[str]:
         names: list[str] = []
         separator = first_separator
-        while i < len(spans) and MODEL[spans[i - 1].end() : spans[i].start()] == separator and is_name(i):
+        while i < len(spans) and re.fullmatch(separator, MODEL[spans[i - 1].end() : spans[i].start()]) and is_name(i):
             names.append(spans[i].group(1))
             i += 1
-            separator = ", "
+            separator = r",\s+"
         return names
 
     cited: list[tuple[str, list[str]]] = []
@@ -35,11 +36,11 @@ def read_citations() -> tuple[list[tuple[str, list[str]]], list[list[str]]]:
     while i < len(spans):
         text = spans[i].group(1)
         if FILE.fullmatch(text):
-            names = names_from(i + 1, " ")
+            names = names_from(i + 1, r"\s+")
             cited.append((text, names))
             i += 1 + len(names)
         elif is_name(i):
-            names = [text, *names_from(i + 1, ", ")]
+            names = [text, *names_from(i + 1, r",\s+")]
             if len(names) > 1:
                 orphans.append(names)
             i += len(names)
