@@ -1,3 +1,4 @@
+import functools
 import ipaddress
 import json
 import logging
@@ -5,13 +6,16 @@ import queue
 import re
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping
+from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Page, Paginator
-from django.db import connection, transaction
+from django.db import DatabaseError, InterfaceError, connection, transaction
+from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import Model, QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
@@ -24,17 +28,41 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def client_ip(request: HttpRequest) -> str:
-    """The real client address: Cloudflare's CF-Connecting-IP, else the connecting peer.
+type IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
-    Behind the tunnel REMOTE_ADDR is always the proxy. The header is trustworthy only because every
-    production request comes through Cloudflare, which overwrites it; served directly, clients can set it.
-    """
+
+def client_ip(request: HttpRequest) -> IPAddress:
+    """The client's address: CF-Connecting-IP when TRUST_CF_CONNECTING_IP is on and it parses, else REMOTE_ADDR, else
+    0.0.0.0."""
     header = request.META.get("HTTP_CF_CONNECTING_IP", "").strip()
+    if settings.TRUST_CF_CONNECTING_IP:
+        if (address := _parse_address(header)) is not None:
+            return address
+    elif header:
+        _warn_untrusted_cf_header()
+    peer = _parse_address(request.META.get("REMOTE_ADDR", "").partition("%")[0])
+    return ipaddress.IPv4Address(0) if peer is None else peer
+
+
+def _parse_address(text: str) -> IPAddress | None:
+    """text as an address, an IPv4-mapped one as its IPv4; None for anything else, or an IPv6 scope ID (free text)."""
     try:
-        return str(ipaddress.ip_address(header))
+        address = ipaddress.ip_address(text)
     except ValueError:
-        return request.META.get("REMOTE_ADDR") or "0.0.0.0"  # noqa: S104 - an address value, not a bind
+        return None
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.scope_id is not None:
+            return None
+        return address.ipv4_mapped or address
+    return address
+
+
+@functools.cache
+def _warn_untrusted_cf_header() -> None:
+    logger.warning(
+        "A request carried CF-Connecting-IP, which is ignored because TRUST_CF_CONNECTING_IP is off: behind "
+        "Cloudflare, set it to true, or every client shares the proxy's address in rate limits and logs"
+    )
 
 
 class UnknownTimezoneError(ValueError):
@@ -89,6 +117,32 @@ def ndjson_progress(step: str, current: int, total: int, ok: bool = True) -> str
 def ndjson_done(message: str, success: bool = True) -> str:
     """Encode the final line of a streamed operation, which the page shows as the outcome."""
     return json.dumps({"done": True, "success": success, "message": message}) + "\n"
+
+
+@contextmanager
+def advisory_lock(key: int | str, *, wait: bool = False, conn: BaseDatabaseWrapper | None = None) -> Iterator[bool]:
+    """Yields whether the lock was taken; re-entrant within one connection."""
+    db = conn or connection
+    lock_id = "%s" if isinstance(key, int) else "hashtextextended(%s, 0)"
+    with db.cursor() as cursor:
+        if wait:
+            cursor.execute(f"SELECT pg_advisory_lock({lock_id})", [key])  # noqa: S608 - fixed fragments
+            acquired = True
+        else:
+            cursor.execute(f"SELECT pg_try_advisory_lock({lock_id})", [key])  # noqa: S608 - fixed fragments
+            row = cursor.fetchone()
+            acquired = bool(row and row[0])
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                with db.cursor() as cursor:
+                    cursor.execute(f"SELECT pg_advisory_unlock({lock_id})", [key])  # noqa: S608 - fixed fragments
+            except DatabaseError, InterfaceError:
+                # Only a closed connection has released it; an aborted transaction still holds it
+                if db.connection is not None and not db.connection.closed:
+                    raise
 
 
 def _inline(lines: Iterator[str]) -> Iterator[str]:
@@ -284,6 +338,4 @@ REQUIRED_DISCORD_SETTINGS: dict[str, str] = {
 
 def missing_discord_settings() -> list[str]:
     """Environment variable names of required Discord IDs that are unset (0)."""
-    from django.conf import settings
-
     return [env for name, env in REQUIRED_DISCORD_SETTINGS.items() if not getattr(settings, name, 0)]

@@ -234,6 +234,9 @@ CODE_EXCEPTIONS = {
     "*:use_required_attribute": "Django calls a widget's use_required_attribute as it renders the field",
     # Django
     "@admin.register": "Django admin registers the class through its decorator",
+    "@*.register_lookup": "Django registers a field lookup through its decorator",
+    "*:as_sql": "Django compiles a query expression or lookup by calling as_sql",
+    "*:lookup_name": "Django reads a lookup's lookup_name to match field__name in a filter",
     "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",
     "web/core/cotton.py:__str__": "str() calls it when a component writes {{ attrs }}",
     "*/management/commands/*:Command": "manage.py runs a command by its file name",

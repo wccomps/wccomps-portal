@@ -9,6 +9,7 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.db import connection
 
+from core.utils import advisory_lock
 from team.models import Team
 
 # Arbitrary, but fixed: every container must ask for the same lock.
@@ -24,10 +25,7 @@ class Command(BaseCommand):
             # The settings' 30s statement_timeout would cancel the wait for the lock while another
             # container migrates, and any slow migration; neither should be cut off.
             cursor.execute("SET statement_timeout = 0")
-            cursor.execute("SELECT pg_advisory_lock(%s)", [LOCK_ID])
-            try:
-                call_command("migrate", interactive=False, verbosity=verbosity)
-                if not Team.objects.exists():
-                    call_command("init_teams", verbosity=verbosity)
-            finally:
-                cursor.execute("SELECT pg_advisory_unlock(%s)", [LOCK_ID])
+        with advisory_lock(LOCK_ID, wait=True):
+            call_command("migrate", interactive=False, verbosity=verbosity)
+            if not Team.objects.exists():
+                call_command("init_teams", verbosity=verbosity)

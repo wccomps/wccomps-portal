@@ -19,6 +19,8 @@ STRICT_COMPONENT_ATTRS = DEBUG
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
+TRUST_CF_CONNECTING_IP = os.environ.get("TRUST_CF_CONNECTING_IP", "").strip().lower() in {"1", "true", "yes"}
+
 CSRF_TRUSTED_ORIGINS = [
     "https://bot.wccomps.org",
     "https://register.wccomps.org",
@@ -263,6 +265,7 @@ LOGGING = {
     "disable_existing_loggers": False,
     "formatters": {
         "verbose": {
+            "class": "core.log_safety.LineSafeFormatter",
             "format": "{levelname} {asctime} {module} {message}",
             "style": "{",
         },

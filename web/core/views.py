@@ -497,20 +497,12 @@ def health_check(request: HttpRequest) -> HttpResponse:
     from django.apps import apps
     from django.db import connection
 
-    errors = []
-
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
-    except Exception as e:
-        errors.append(f"Database connection: {e!s}")
-
-    for model_class in apps.get_app_config("core").get_models():
-        try:
+        for model_class in apps.get_app_config("core").get_models():
             model_class._default_manager.exists()
-        except Exception as e:
-            errors.append(f"{model_class.__name__}: {str(e)[:100]}")
-
-    if errors:
-        return JsonResponse({"status": "unhealthy", "errors": errors}, status=503)
+    except Exception:
+        logger.exception("Health check failed")
+        return JsonResponse({"status": "unhealthy"}, status=503)
     return JsonResponse({"status": "healthy"})

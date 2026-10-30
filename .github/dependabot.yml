@@ -18,11 +18,13 @@ updates:
       actions:
         patterns: ["*"]
 
-  # The Dockerfile's uv image (Python's tag moves with .python-version, below)
+  # The Dockerfile's images, tag and digest (Python's tag moves with .python-version, below)
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
     ignore:
-      # The Python version changes by a PR to .python-version, with the Dockerfile's tag (test_python_pin)
+      # The Python version changes by a PR to .python-version, with the Dockerfile's tag (test_python_pin); a new
+      # digest for the same tag (a rebuilt base image) still comes through
       - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]

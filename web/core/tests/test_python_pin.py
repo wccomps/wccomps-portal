@@ -53,35 +53,82 @@ def test_bare_python_is_told_from_uv_run() -> None:
     assert not BARE_PYTHON.search("uv run python manage.py check")
 
 
-FROM_RE = re.compile(r"^FROM\s+(\S+?)(?::(\S+))?(?:\s+AS\s+(\S+))?\s*$", re.MULTILINE | re.IGNORECASE)
+FROM_RE = re.compile(
+    r"^FROM\s+([^\s:@]+)(?::([^\s@]+))?(?:@(sha256:[0-9a-f]{64}))?(?:\s+AS\s+(\S+))?\s*$", re.MULTILINE | re.IGNORECASE
+)
 MOUNT_RE = re.compile(r"--(?:mount=from|from)=([^,\s]+)")
 VERSION_TAG = re.compile(r"\d+(\.\d+)+(-\S+)?")
 
 
 def image_problems(dockerfile: str) -> list[str]:
     """Each image the build uses that Dependabot's docker entry can't bump: a tag that isn't a version (latest), or
-    one named only in a --mount=from or COPY --from, which it doesn't read (name a FROM ... AS stage there)."""
-    stages = {m.group(3) for m in FROM_RE.finditer(dockerfile) if m.group(3)}
+    one named only in a --mount=from or COPY --from, which it doesn't read (name a FROM ... AS stage there); and
+    each FROM without a digest."""
+    stages = {m.group(4) for m in FROM_RE.finditer(dockerfile) if m.group(4)}
     problems = [
         f"FROM {m.group(1)}:{m.group(2) or ''} (not a version tag)"
         for m in FROM_RE.finditer(dockerfile)
         if not VERSION_TAG.fullmatch(m.group(2) or "")
     ]
+    problems += [
+        f"FROM {m.group(1)}:{m.group(2) or ''} (no digest)" for m in FROM_RE.finditer(dockerfile) if not m.group(3)
+    ]
     return problems + [f"{image} (not a FROM stage)" for image in MOUNT_RE.findall(dockerfile) if image not in stages]
 
 
-def test_every_image_the_build_uses_is_one_dependabot_bumps() -> None:
-    """The uv mount named ghcr.io/astral-sh/uv:latest: the build's refusals rested on whatever uv was newest, and
-    Dependabot's docker entry, with Python ignored, watched nothing."""
+def test_every_image_the_build_uses_is_pinned_and_one_dependabot_bumps() -> None:
     assert image_problems((REPO_DIR / "Dockerfile").read_text(encoding="utf-8")) == []
     updates = yaml.safe_load((REPO_DIR / ".github" / "dependabot.yml").read_text(encoding="utf-8"))["updates"]
     assert any(update["package-ecosystem"] == "docker" for update in updates)
 
 
+DIGEST = "@sha256:" + "0" * 64
+
+
 def test_an_unpinned_or_unstaged_image_is_found() -> None:
-    assert image_problems("FROM python:3.14.8-slim\nRUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv x") == [
-        "ghcr.io/astral-sh/uv:latest (not a FROM stage)"
-    ]
-    assert image_problems("FROM ghcr.io/astral-sh/uv:latest AS uv\nRUN --mount=from=uv,source=/uv x") == [
+    assert image_problems(
+        f"FROM python:3.14.8-slim{DIGEST}\nRUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv x"
+    ) == ["ghcr.io/astral-sh/uv:latest (not a FROM stage)"]
+    assert image_problems(f"FROM ghcr.io/astral-sh/uv:latest{DIGEST} AS uv\nRUN --mount=from=uv,source=/uv x") == [
         "FROM ghcr.io/astral-sh/uv:latest (not a version tag)"
     ]
+
+
+def test_an_image_without_a_digest_is_found() -> None:
+    assert image_problems("FROM ghcr.io/astral-sh/uv:0.13.5 AS uv\nRUN --mount=from=uv,source=/uv x") == [
+        "FROM ghcr.io/astral-sh/uv:0.13.5 (no digest)"
+    ]
+    assert image_problems(f"FROM ghcr.io/astral-sh/uv:0.13.5{DIGEST} AS uv\nRUN --mount=from=uv,source=/uv x") == []
+
+
+USES_RE = re.compile(r"^\s*(?:-\s+)?uses:\s*(\S+)(.*)$", re.MULTILINE)
+PINNED_ACTION = re.compile(r"[^@\s]+@[0-9a-f]{40}")
+VERSION_COMMENT = re.compile(r"\s+#\s*v\d+(\.\d+)*\s*")
+
+
+def action_problems(workflow: str) -> list[str]:
+    """Each third-party action not pinned to a commit with a version comment, which Dependabot keeps updating."""
+    return [
+        f"{action}{rest}"
+        for action, rest in USES_RE.findall(workflow)
+        if not action.startswith("./") and not (PINNED_ACTION.fullmatch(action) and VERSION_COMMENT.fullmatch(rest))
+    ]
+
+
+def test_every_action_is_pinned_to_a_commit() -> None:
+    problems = {
+        workflow.name: action_problems(workflow.read_text(encoding="utf-8"))
+        for workflow in sorted((REPO_DIR / ".github" / "workflows").glob("*.yml"))
+    }
+    assert {name: found for name, found in problems.items() if found} == {}
+
+
+def test_an_unpinned_action_is_found() -> None:
+    sha = "0" * 40
+    workflow = (
+        "      - uses: actions/checkout@v7\n"
+        f"      - uses: actions/checkout@{sha}\n"
+        f"        uses: docker/login-action@{sha} # v4.7.0\n"
+        "    uses: ./.github/workflows/tests.yml\n"
+    )
+    assert action_problems(workflow) == ["actions/checkout@v7", f"actions/checkout@{sha}"]

@@ -396,6 +396,47 @@ class TestHealthCheckView:
         # Should not redirect to login
         assert response.status_code == 200
 
+    def test_database_failure_is_503_without_its_detail(self, monkeypatch, caplog):
+        from django.db import connection
+
+        def broken_cursor(*args, **kwargs):
+            raise RuntimeError('connection to server at "db-host.internal", role "secret_role" failed')
+
+        monkeypatch.setattr(connection, "cursor", broken_cursor)
+        response = Client().get("/health/")
+
+        assert response.status_code == 503
+        assert response.json() == {"status": "unhealthy"}
+        assert "db-host.internal" in caplog.text
+
+    def test_model_query_failure_is_503_without_its_detail(self, monkeypatch, caplog):
+        from django.db.models import QuerySet
+
+        def broken_exists(self):
+            raise RuntimeError('relation "core_secret_table" does not exist')
+
+        monkeypatch.setattr(QuerySet, "exists", broken_exists)
+        response = Client().get("/health/")
+
+        assert response.status_code == 503
+        assert response.json() == {"status": "unhealthy"}
+        assert "core_secret_table" in caplog.text
+
+    def test_an_outage_logs_one_error_per_probe(self, monkeypatch, caplog):
+        from django.db.models import QuerySet
+
+        calls = []
+
+        def broken_exists(self):
+            calls.append(self.model)
+            raise RuntimeError("connection refused")
+
+        monkeypatch.setattr(QuerySet, "exists", broken_exists)
+        Client().get("/health/")
+
+        assert len(calls) == 1
+        assert len([r for r in caplog.records if r.name == "core.views"]) == 1
+
 
 class TestLinkInitiateView:
     """Tests for link_initiate view."""

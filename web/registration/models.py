@@ -1,11 +1,16 @@
+import ipaddress
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 from typing import TypedDict
 
 from django.contrib.auth.models import User
-from django.db import models, transaction
+from django.db import connection, models, transaction
 from django.db.models.functions import Now
 from django.utils import timezone
 from django_stubs_ext import WithAnnotations
+
+from core.utils import IPAddress
 
 from .locks import school_list_lock
 
@@ -324,8 +329,13 @@ class RegistrationRateLimit(models.Model):
     """
 
     LIMIT = 10
+    # Per IPv6 /48, a site's whole allocation: rotating through its 65,536 /64s mustn't multiply LIMIT by as many
+    NETWORK_LIMIT = 5 * LIMIT
+    # Per IP version, each (prefix length, limit): a client is over if any of its networks is
+    TIERS = {4: ((32, LIMIT),), 6: ((64, LIMIT), (48, NETWORK_LIMIT))}
     WINDOW = timedelta(hours=1)
 
+    # The client's longest-prefix network: an IPv4 address, or an IPv6 /64 base
     ip = models.GenericIPAddressField(unpack_ipv4=True)
     attempted_at = models.DateTimeField(auto_now_add=True)
 
@@ -338,13 +348,28 @@ class RegistrationRateLimit(models.Model):
         return f"Registration from {self.ip} at {self.attempted_at}"
 
     @classmethod
-    def over_limit(cls, ip: str) -> bool:
-        """Whether this client has used up its submissions for the current window."""
-        since = timezone.now() - cls.WINDOW
-        return cls.objects.filter(ip=ip, attempted_at__gte=since).count() >= cls.LIMIT
+    @contextmanager
+    def held(cls, ip: IPAddress) -> Iterator[bool]:
+        """Serializes this client's widest-network check and record; yields whether it is over its limit."""
+        widest = min(prefix for prefix, _ in cls.TIERS[ip.version])
+        key = f"registration_rate:{ipaddress.ip_network((ip, widest), strict=False)}"
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", [key])
+            yield cls.over_limit(ip)
 
     @classmethod
-    def record(cls, ip: str) -> None:
+    def over_limit(cls, ip: IPAddress) -> bool:
+        """Whether any of this client's networks has used up its submissions for the current window."""
+        recent = cls.objects.filter(attempted_at__gte=timezone.now() - cls.WINDOW)
+        return any(
+            recent.filter(ip__in_network=str(ipaddress.ip_network((ip, prefix), strict=False))).count() >= limit
+            for prefix, limit in cls.TIERS[ip.version]
+        )
+
+    @classmethod
+    def record(cls, ip: IPAddress) -> None:
         """Count a submission, pruning rows that have aged out of every window."""
         cls.objects.filter(attempted_at__lt=timezone.now() - cls.WINDOW).delete()
-        cls.objects.create(ip=ip)
+        longest = max(prefix for prefix, _ in cls.TIERS[ip.version])
+        cls.objects.create(ip=str(ipaddress.ip_network((ip, longest), strict=False).network_address))

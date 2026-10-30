@@ -11,9 +11,16 @@ from django.shortcuts import redirect
 from django.utils import timezone
 
 from .errors import sign_in_answer, wants_json_error
+from .log_safety import escape_log_text, escape_log_word
+from .utils import client_ip
 
 logger = logging.getLogger("wccomps.access")
 error_logger = logging.getLogger("wccomps.errors")
+
+
+def _field(text: str | None, *, quoted: bool = False) -> str:
+    """Request text for a log field, escaped so it can't end the line or its field (a quoted one may hold spaces)."""
+    return (escape_log_text if quoted else escape_log_word)(text or "-")
 
 
 class SecurityHeadersMiddleware:
@@ -154,7 +161,15 @@ class SubdomainRedirectMiddleware:
         Paths only: query strings on these URLs can carry link tokens and OAuth codes.
         """
         referer = request.META.get("HTTP_REFERER", "").split("?", 1)[0] or "-"
-        logger.info('%s %s "%s %s" %s %s', event, host, request.method, request.path, status, referer)
+        logger.info(
+            '%s %s "%s %s" %s %s',
+            event,
+            _field(host),
+            _field(request.method),
+            _field(request.path, quoted=True),
+            status,
+            _field(referer),
+        )
 
 
 class AuthentikRequiredMiddleware:
@@ -227,30 +242,30 @@ class AccessLoggingMiddleware:
                 response = self.get_response(request)
         except Exception:
             duration_ms = (time.time() - start_time) * 1000
-            username = request.user.username if request.user.is_authenticated else "-"
+            username = _field(request.user.username) if request.user.is_authenticated else "-"
             error_logger.error(
                 '%s %s %s "%s %s" 500 %.0fms (unhandled exception)',
-                request.META.get("REMOTE_ADDR", "-"),
+                client_ip(request),
                 username,
-                request.META.get("HTTP_HOST", "-"),
-                request.method,
-                request.path,
+                _field(request.META.get("HTTP_HOST")),
+                _field(request.method),
+                _field(request.path, quoted=True),
                 duration_ms,
                 exc_info=True,
             )
             raise
 
         duration_ms = (time.time() - start_time) * 1000
-        username = request.user.username if request.user.is_authenticated else "-"
+        username = _field(request.user.username) if request.user.is_authenticated else "-"
 
         # Log with query stats: [query_count, total_db_time_ms]
         log_msg = '%s %s %s "%s %s" %d %.0fms [%dq %.0fms]'
         log_args = (
-            request.META.get("REMOTE_ADDR", "-"),
+            client_ip(request),
             username,
-            request.META.get("HTTP_HOST", "-"),
-            request.method,
-            request.path,
+            _field(request.META.get("HTTP_HOST")),
+            _field(request.method),
+            _field(request.path, quoted=True),
             response.status_code,
             duration_ms,
             len(tracker.queries),
