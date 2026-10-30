@@ -85,7 +85,7 @@ def test_the_admin_cannot_write_back_a_start_time_the_timer_cleared(admin_user) 
     from django.urls import reverse
 
     CompetitionConfig.objects.update_or_create(
-        pk=1, defaults={"competition_start_time": None, "applications_enabled": False}
+        pk=1, defaults={"competition_start_time": None, "applications_enabled": False, "last_run_incomplete": True}
     )
     client = Client()
     client.force_login(admin_user)
@@ -106,4 +106,4 @@ def test_the_admin_cannot_write_back_a_start_time_the_timer_cleared(admin_user) 
     config = CompetitionConfig.objects.get(pk=1)
     assert (config.max_team_members, config.controlled_applications) == (10, [])
     assert (config.competition_start_time, config.competition_end_time) == (None, None)
-    assert not config.applications_enabled
+    assert (config.applications_enabled, config.last_run_incomplete) == (False, True)

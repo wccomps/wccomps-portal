@@ -207,13 +207,12 @@ class CompetitionConfigAdmin(PortalModelAdmin[CompetitionConfig]):
 
     @admin.display(description="Status")
     def competition_status(self, obj: CompetitionConfig) -> str:
-        from django.utils import timezone
 
         if obj.applications_enabled:
             return "Active"
         if obj.schedule_will_start():
             return "Scheduled"
-        if obj.competition_end_time and timezone.now() > obj.competition_end_time:
+        if obj.end_passed():
             return "Ended"
         return "Not Scheduled"
 

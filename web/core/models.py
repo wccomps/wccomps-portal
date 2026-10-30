@@ -184,6 +184,23 @@ class CompetitionConfig(models.Model):
         blank=True,
         help_text="Posted to every active team's chat channel when the competition starts, e.g. default VM credentials",
     )
+    last_run_incomplete = models.BooleanField(
+        default=False,
+        help_text="The last start or stop left an app or team account unchanged, so it needs running again",
+    )
+    last_start_accounts_ok = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Team accounts the last start turned on"
+    )
+    last_start_accounts_tried = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Team accounts the last start tried to turn on"
+    )
+    start_broadcasts = models.JSONField(
+        default=list, blank=True, help_text="The DiscordTasks a start queued to post the start message"
+    )
+    started_this_window = models.BooleanField(
+        default=False,
+        help_text="A start ran since the start time was last set, the end was last cleared or a stop came with no end",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -204,22 +221,32 @@ class CompetitionConfig(models.Model):
             return f"Competition starts at {self.competition_start_time} (enabled={self.applications_enabled})"
         return "Competition not scheduled"
 
+    @property
+    def last_start_accounts(self) -> tuple[int, int] | None:
+        """The team accounts the last start turned on, and how many it tried; None before a start recorded them."""
+        if self.last_start_accounts_ok is None or self.last_start_accounts_tried is None:
+            return None
+        return self.last_start_accounts_ok, self.last_start_accounts_tried
+
+    def start_passed(self) -> bool:
+        return self.competition_start_time is not None and self.competition_start_time <= timezone.now()
+
+    def end_passed(self) -> bool:
+        return self.competition_end_time is not None and self.competition_end_time <= timezone.now()
+
     def schedule_will_start(self) -> bool:
         """Whether a start time is set and the end time, if any, hasn't passed: the timer still starts it."""
-        if not self.competition_start_time:
-            return False
-        return self.competition_end_time is None or timezone.now() < self.competition_end_time
+        return self.competition_start_time is not None and not self.end_passed()
 
     def should_enable_applications(self) -> bool:
-        start = self.competition_start_time
-        if start is None or not self.schedule_will_start():
-            return False
-        return timezone.now() >= start and not self.applications_enabled
+        return self.start_passed() and not self.end_passed() and not self.applications_enabled
 
     def should_disable_applications(self) -> bool:
-        if not self.competition_end_time:
-            return False
-        return timezone.now() >= self.competition_end_time and self.applications_enabled
+        return self.end_passed() and self.applications_enabled
+
+    def stale_end(self) -> bool:
+        """An end that passed while the competition was stopped: it and any start before it can no longer fire."""
+        return self.end_passed() and not self.applications_enabled
 
     @classmethod
     def get_config(cls) -> CompetitionConfig:

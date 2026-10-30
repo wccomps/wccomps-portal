@@ -58,7 +58,6 @@ from core.services.competition import (
     KEEP,
     CompetitionRunResult,
     ConfigEditError,
-    last_start_accounts,
     run_competition,
     set_controlled_apps,
     set_max_members,
@@ -360,7 +359,7 @@ def _live_numbers() -> LiveNumbers:
     from ticketing.models import Ticket
 
     unresolved = Ticket.objects.filter(status__in=(Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED)).count()
-    return LiveNumbers(unresolved, last_start_accounts())
+    return LiveNumbers(unresolved, CompetitionConfig.get_config().last_start_accounts)
 
 
 def _live_context(stage: EventStage) -> dict[str, object]:

@@ -17,11 +17,6 @@ logger = logging.getLogger(__name__)
 
 START_MESSAGE_SENDER = "Black Team"
 
-# The audit action a start records, with the team accounts it turned on (accounts_ok) and could not (accounts_failed)
-COMPETITION_STARTED = "competition_started"
-# The audit action a stop records, with the same details
-COMPETITION_STOPPED = "competition_stopped"
-
 
 @dataclass(frozen=True)
 class CompetitionStep:
@@ -93,6 +88,7 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
     from core.services.user_groups import refresh_user_groups
 
     config = CompetitionConfig.get_config()
+    began_with = config.competition_start_time
     result = CompetitionRunResult(enable=enable, controlled_apps=list(config.controlled_applications))
     if not result.controlled_apps:
         result.error = "No controlled applications configured"
@@ -158,25 +154,36 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
             result.quotient_synced = False
             yield CompetitionStep(f"Quotient score sync failed: {e}", step, total, ok=False)
 
-    # Only the fields this run owns: a schedule or app-list edit made meanwhile must survive.
-    changes: dict[str, object] = {"applications_enabled": enable}
-    changes["competition_start_time" if enable else "competition_end_time"] = None
+    # Only the fields this run owns and the schedule times it consumes: other edits made meanwhile survive
+    changes: dict[str, object] = {
+        "applications_enabled": enable,
+        "last_run_incomplete": result.has_failures,
+    }
+    if enable:
+        changes["last_start_accounts_ok"] = result.accounts_ok
+        changes["last_start_accounts_tried"] = result.accounts_ok + result.accounts_failed
     with transaction.atomic():
         # Locked so the timer's retries and a concurrent manual start send the start message once.
-        was_enabled, start_message = (
-            CompetitionConfig.objects.select_for_update()
-            .values_list("applications_enabled", "start_message")
-            .get(pk=config.pk)
-        )
-        CompetitionConfig.objects.filter(pk=config.pk).update(**changes)
-        if enable and not was_enabled and start_message.strip():
-            DiscordTask.enqueue(
-                BroadcastMessage(target="all-teams", message=start_message, sender=START_MESSAGE_SENDER)
+        locked = CompetitionConfig.locked()
+        if (enable and locked.competition_start_time == began_with) or locked.start_passed():
+            changes["competition_start_time"] = None
+        if locked.end_passed():
+            changes["competition_end_time"] = None
+            changes["started_this_window"] = False
+        if enable:
+            changes["started_this_window"] = True
+        elif locked.competition_end_time is None:
+            changes["started_this_window"] = False
+        if enable and not locked.applications_enabled and locked.start_message.strip():
+            task = DiscordTask.enqueue(
+                BroadcastMessage(target="all-teams", message=locked.start_message, sender=START_MESSAGE_SENDER)
             )
+            changes["start_broadcasts"] = [*locked.start_broadcasts, task.pk]
             result.start_message_queued = True
+        CompetitionConfig.objects.filter(pk=locked.pk).update(**changes)
 
     AuditLog.objects.create(
-        action=COMPETITION_STARTED if enable else COMPETITION_STOPPED,
+        action="competition_started" if enable else "competition_stopped",
         admin_user=actor,
         target_entity="competition_config",
         target_id=config.pk,
@@ -192,16 +199,6 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
     return result
 
 
-def last_start_accounts() -> tuple[int, int] | None:
-    """The team accounts the last recorded start turned on, and how many it tried; None when none is recorded."""
-    details = (
-        AuditLog.objects.filter(action=COMPETITION_STARTED).order_by("-created_at").values_list("details", flat=True)
-    ).first()
-    if not details or "accounts_ok" not in details or "accounts_failed" not in details:
-        return None
-    return details["accounts_ok"], details["accounts_ok"] + details["accounts_failed"]
-
-
 def run_competition_to_completion(
     enable: bool, actor: str, on_step: Callable[[], None] | None = None
 ) -> CompetitionRunResult:
@@ -215,23 +212,6 @@ def run_competition_to_completion(
             return result
         if on_step:
             on_step()
-
-
-def incomplete_run() -> bool | None:
-    """Whether the last recorded run was a start (True) or a stop (False) that left an app or team account
-    unchanged, so it needs running again; None when it changed everything, or no run is recorded."""
-    last = (
-        AuditLog.objects.filter(action__in=(COMPETITION_STARTED, COMPETITION_STOPPED))
-        .order_by("-created_at")
-        .values_list("action", "details")
-        .first()
-    )
-    if last is None:
-        return None
-    action, details = last
-    if not details.get("apps_failed") and not details.get("accounts_failed"):
-        return None
-    return action == COMPETITION_STARTED
 
 
 class ConfigEditError(ValueError):
@@ -292,7 +272,10 @@ def set_schedule(
         changes["competition_end_time"] = new_end
     for name, value in changes.items():
         setattr(config, name, value)
-    config.save(update_fields=[*changes, "updated_at"])
+    window_reset = isinstance(start, datetime) or end is None
+    if window_reset:
+        config.started_this_window = False
+    config.save(update_fields=[*changes, *(["started_this_window"] if window_reset else []), "updated_at"])
     details = {
         name.removeprefix("competition_"): value.isoformat() if value else None for name, value in changes.items()
     }
@@ -300,6 +283,22 @@ def set_schedule(
         "competition_schedule_set", actor, config, {**details, "controlled_apps": config.controlled_applications}
     )
     return config
+
+
+@transaction.atomic
+def clear_missed_window(actor: str) -> str:
+    """Clear an end that passed while the competition was stopped, with any start before it. Returns "" when there was
+    none, END_AFTER_STOP when a start ran in this window (a manual stop came before the end), else MISSED_WINDOW."""
+    config = CompetitionConfig.locked()
+    if not config.stale_end():
+        return ""
+    kind = END_AFTER_STOP if config.started_this_window else MISSED_WINDOW
+    set_schedule(actor, start=None, end=None)
+    return kind
+
+
+MISSED_WINDOW = "missed_window"
+END_AFTER_STOP = "end_after_stop"
 
 
 @transaction.atomic

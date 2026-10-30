@@ -142,16 +142,109 @@ def test_stop_records_failed_score_sync_without_aborting(authentik, config):
     assert AuditLog.objects.get(action="competition_stopped").details["quotient_synced"] is False
 
 
-def test_stop_clears_only_the_end_time(authentik, config):
-    CompetitionConfig.objects.filter(pk=1).update(applications_enabled=True)
+def test_stop_after_the_scheduled_stop_clears_it(authentik, config):
+    CompetitionConfig.objects.filter(pk=1).update(
+        applications_enabled=True, competition_start_time=None, competition_end_time=timezone.now()
+    )
 
-    result = run_competition_to_completion(False, "discord:admin")
+    result = run_competition_to_completion(False, "timer")
 
     assert result.success and authentik.disable_application.call_count == 2
     config.refresh_from_db()
     assert not config.applications_enabled
     assert config.competition_end_time is None
-    assert config.competition_start_time is not None
+
+
+def test_a_paused_competition_started_again_still_stops_on_schedule(authentik, config):
+    end = timezone.now() + timedelta(hours=4)
+    CompetitionConfig.objects.filter(pk=1).update(
+        applications_enabled=True, competition_start_time=None, competition_end_time=end
+    )
+
+    run_competition_to_completion(False, "discord:admin")
+    config.refresh_from_db()
+    assert (config.applications_enabled, config.competition_end_time) == (False, end)
+
+    run_competition_to_completion(True, "discord:admin")
+    config.refresh_from_db()
+    assert (config.applications_enabled, config.competition_end_time) == (True, end)
+
+
+@pytest.mark.parametrize(
+    ("start_ago", "end_in"),
+    [(timedelta(hours=9), -timedelta(hours=1)), (timedelta(seconds=30), timedelta(hours=8))],
+    ids=["after-the-window", "just-after-the-start-time"],
+)
+def test_a_stop_cancels_a_start_time_that_has_passed(authentik, config, start_ago, end_in):
+    """A start time still set is one the timer hasn't run, even once it passed (the bot was down, or the stop came
+    before the next tick). The stop wins: the start is cancelled, so the timer can't start it after the stop, and an
+    end still to come stays for a restart."""
+    now = timezone.now()
+    CompetitionConfig.objects.filter(pk=1).update(
+        applications_enabled=False, competition_start_time=now - start_ago, competition_end_time=now + end_in
+    )
+
+    run_competition_to_completion(False, "discord:admin")
+
+    config.refresh_from_db()
+    assert config.competition_start_time is None
+    assert config.competition_end_time == (now + end_in if end_in > timedelta(0) else None)
+    assert not config.should_enable_applications()
+
+
+def test_a_missed_window_is_cleared():
+    from core.services.competition import clear_missed_window
+
+    now = timezone.now()
+    CompetitionConfig.objects.update_or_create(
+        pk=1,
+        defaults={
+            "applications_enabled": False,
+            "competition_start_time": now - timedelta(hours=9),
+            "competition_end_time": now - timedelta(hours=1),
+        },
+    )
+
+    assert clear_missed_window("timer")
+
+    config = CompetitionConfig.get_config()
+    assert (config.competition_start_time, config.competition_end_time) == (None, None)
+    assert AuditLog.objects.get(action="competition_schedule_set").admin_user == "timer"
+    assert not clear_missed_window("timer")
+
+
+@pytest.mark.parametrize(
+    ("enabled", "end_in"),
+    [(False, timedelta(hours=1)), (True, -timedelta(hours=1)), (False, None)],
+    ids=["window-still-open", "running", "no-end"],
+)
+def test_a_window_that_can_still_fire_or_is_running_is_kept(enabled, end_in):
+    from core.services.competition import clear_missed_window
+
+    now = timezone.now()
+    CompetitionConfig.objects.update_or_create(
+        pk=1,
+        defaults={
+            "applications_enabled": enabled,
+            "competition_start_time": now - timedelta(hours=2),
+            "competition_end_time": now + end_in if end_in is not None else None,
+        },
+    )
+
+    assert not clear_missed_window("timer")
+    assert CompetitionConfig.get_config().competition_start_time == now - timedelta(hours=2)
+
+
+def test_stop_before_a_scheduled_start_keeps_that_runs_stop(authentik, config):
+    start = timezone.now() + timedelta(hours=1)
+    CompetitionConfig.objects.filter(pk=1).update(
+        competition_start_time=start, competition_end_time=start + timedelta(hours=8)
+    )
+
+    run_competition_to_completion(False, "discord:admin")
+
+    config.refresh_from_db()
+    assert (config.competition_start_time, config.competition_end_time) == (start, start + timedelta(hours=8))
 
 
 def test_schedule_edited_during_a_run_survives(authentik, config):
@@ -242,23 +335,63 @@ def test_stop_never_sends_the_start_message(authentik, config):
     assert _queued_broadcasts() == []
 
 
-def test_the_last_start_reader_returns_the_accounts_or_none():
-    from core.models import AuditLog
-    from core.services.competition import COMPETITION_STARTED, last_start_accounts
+def _run_state() -> tuple[object, ...]:
+    config = CompetitionConfig.get_config()
+    return (
+        config.last_run_incomplete,
+        config.last_start_accounts_ok,
+        config.last_start_accounts_tried,
+    )
 
-    assert last_start_accounts() is None
+
+def test_a_run_records_on_the_config_what_it_left_undone(authentik, config):
+    authentik.team_account.side_effect = [(True, ""), (False, "timeout"), (True, "")]
+    run_competition_to_completion(True, "timer")
+
+    assert _run_state() == (True, 2, 3)
+
+    authentik.team_account.side_effect = None
+    run_competition_to_completion(False, "discord:admin")
+
+    assert _run_state() == (False, 2, 3)
+
+
+def _audit_run(action: str, details: dict[str, object]) -> None:
     AuditLog.objects.create(
-        action=COMPETITION_STARTED, admin_user="g", target_entity="competition_config", target_id=1, details={}
+        action=action, admin_user="g", target_entity="competition_config", target_id=1, details=details
     )
-    assert last_start_accounts() is None
-    AuditLog.objects.create(
-        action=COMPETITION_STARTED,
-        admin_user="g",
-        target_entity="competition_config",
-        target_id=1,
-        details={"accounts_ok": 2, "accounts_failed": 1},
-    )
-    assert last_start_accounts() == (2, 3)
+
+
+@pytest.mark.parametrize(
+    ("runs", "expected"),
+    [
+        ([], (False, None, None)),
+        ([("competition_started", {})], (False, None, None)),
+        (
+            [("competition_started", {"apps_failed": [], "accounts_ok": 33, "accounts_failed": 1})],
+            (True, 33, 34),
+        ),
+        (
+            [
+                ("competition_started", {"apps_failed": [], "accounts_ok": 3, "accounts_failed": 0}),
+                ("competition_stopped", {"apps_failed": ["scoring"], "accounts_ok": 50, "accounts_failed": 0}),
+            ],
+            (True, 3, 3),
+        ),
+    ],
+    ids=["no-run", "start-before-counts", "incomplete-start", "incomplete-stop"],
+)
+def test_the_migration_takes_the_last_runs_from_the_audit_log(runs, expected):
+    import importlib
+
+    from django.apps import apps
+
+    for action, details in runs:
+        _audit_run(action, details)
+
+    importlib.import_module("core.migrations.0019_competitionconfig_last_run").record_last_runs(apps, None)
+
+    assert _run_state() == expected
 
 
 def test_a_failed_account_step_says_why(authentik, config):
@@ -282,3 +415,80 @@ def test_a_failed_group_refresh_never_shows_authentiks_url_or_answer(authentik, 
         s.message == "Permission refresh failed (retried within 5 minutes): List /api/v3/core/groups/: Forbidden"
         for s in steps
     )
+
+
+def test_an_end_left_by_a_stop_is_cleared_once_it_passes(authentik, config):
+    """A stop keeps an end still to come. Once it passes with the competition stopped, it is cleared, so it doesn't
+    refuse a new start time (a start clears it too)."""
+    from core.services.competition import clear_missed_window, set_schedule
+
+    end = timezone.now() + timedelta(hours=1)
+    CompetitionConfig.objects.filter(pk=1).update(
+        applications_enabled=True, competition_start_time=None, competition_end_time=end
+    )
+    run_competition_to_completion(False, "discord:admin")
+    CompetitionConfig.objects.filter(pk=1).update(competition_end_time=timezone.now() - timedelta(minutes=1))
+
+    assert clear_missed_window("timer")
+    set_schedule("discord:admin", start=timezone.now() + timedelta(days=1))
+
+    config.refresh_from_db()
+    assert config.competition_end_time is None
+
+
+def test_a_start_clears_an_end_that_has_passed(authentik, config):
+    CompetitionConfig.objects.filter(pk=1).update(
+        applications_enabled=False, competition_start_time=None, competition_end_time=timezone.now()
+    )
+
+    run_competition_to_completion(True, "discord:admin")
+
+    config.refresh_from_db()
+    assert (config.applications_enabled, config.competition_end_time) == (True, None)
+    assert not config.should_disable_applications()
+
+
+def test_a_start_keeps_a_start_time_set_while_it_ran(authentik, config):
+    """The run does its Authentik work before taking the lock: a new start set meanwhile is not the one it used up."""
+    new_start = timezone.now() + timedelta(days=1)
+
+    def set_a_start_meanwhile(username: str, is_active: bool) -> tuple[bool, str]:
+        CompetitionConfig.objects.filter(pk=1).update(competition_start_time=new_start)
+        return True, ""
+
+    authentik.team_account.side_effect = set_a_start_meanwhile
+    run_competition_to_completion(True, "timer")
+
+    config.refresh_from_db()
+    assert (config.applications_enabled, config.competition_start_time) == (True, new_start)
+
+
+def test_a_start_records_the_broadcast_it_queued(authentik, config):
+    """So the reset for the next event can scrub that copy of the credentials, whatever the message says by then."""
+    CompetitionConfig.objects.filter(pk=1).update(start_message="Default login")
+
+    run_competition_to_completion(True, "timer")
+
+    config.refresh_from_db()
+    assert config.start_broadcasts == [DiscordTask.objects.get(task_type="broadcast_message").pk]
+
+
+def test_a_start_marks_its_window_until_a_new_start_time_is_set(authentik, config):
+    from core.services.competition import set_schedule
+
+    run_competition_to_completion(True, "timer")
+    assert CompetitionConfig.objects.get(pk=1).started_this_window
+    run_competition_to_completion(False, "timer")
+    assert CompetitionConfig.objects.get(pk=1).started_this_window
+
+    set_schedule("gold", start=timezone.now() + timedelta(hours=1))
+    assert not CompetitionConfig.objects.get(pk=1).started_this_window
+
+
+def test_a_stop_with_no_end_set_ends_the_window(authentik, config):
+    """So an end-only schedule set later reads as missed, not as after a manual stop."""
+    CompetitionConfig.objects.filter(pk=1).update(competition_end_time=None)
+    run_competition_to_completion(True, "timer")
+    run_competition_to_completion(False, "gold")
+
+    assert not CompetitionConfig.objects.get(pk=1).started_this_window

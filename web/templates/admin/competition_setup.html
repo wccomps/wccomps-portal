@@ -22,8 +22,9 @@
             </c-slot>
             <p class="help">
                 Optional: the bot starts and stops the competition at these times. You can also start or stop by
-                hand on the Competition page: starting by hand clears the scheduled start, and stopping by hand
-                clears the scheduled stop.
+                hand on the Competition page. Starting by hand clears the scheduled start. Stopping by hand keeps a
+                scheduled stop that is still to come, so a competition stopped and started again still stops on
+                schedule, and cancels a start time that has passed. To cancel either, clear it.
             </p>
             <c-detail_grid>
                 <c-detail_row label="Starts">

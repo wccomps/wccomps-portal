@@ -9,8 +9,9 @@ from discord.ext import commands, tasks
 
 from bot.competition_actions import run_competition, update_status_channel
 from bot.heartbeat import record as record_heartbeat
-from bot.utils import log_to_ops_channel, recycle_db_connection
+from bot.utils import log_to_ops_channel, recycle_db_connection, run_blocking
 from core.models import CompetitionConfig
+from core.services.competition import END_AFTER_STOP, clear_missed_window
 
 logger = logging.getLogger(__name__)
 
@@ -52,13 +53,33 @@ class CompetitionTimer(commands.Cog):
         # Errors here propagate so check_loop skips its heartbeat: a timer that can't read the
         # config is not alive in any useful sense.
         @sync_to_async
-        def check() -> tuple[bool, bool]:
+        def check() -> tuple[bool, bool, bool]:
             config = CompetitionConfig.get_config()
-            return config.should_enable_applications(), config.should_disable_applications()
+            return config.should_enable_applications(), config.should_disable_applications(), config.stale_end()
 
-        should_start, should_stop = await check()
+        should_start, should_stop, missed = await check()
         if not (should_start or should_stop):
             self._last_failure = None
+            if not missed:
+                return
+            # Off the shared thread (the lock waits out a Close Out), and caught so the heartbeat keeps beating
+            try:
+                cleared = await run_blocking(clear_missed_window, "timer")
+            except Exception:
+                logger.exception("Could not clear a missed competition window")
+                return
+            if cleared == END_AFTER_STOP:
+                await log_to_ops_channel(
+                    self.bot, "**Schedule cleared:** the scheduled end passed after a manual stop."
+                )
+                await update_status_channel(self.bot)
+            elif cleared:
+                await log_to_ops_channel(
+                    self.bot,
+                    "**Schedule cleared:** its end passed while the competition was stopped and would have refused "
+                    "a new start time. Set a new schedule on the Competition setup page.",
+                )
+                await update_status_channel(self.bot)
             return
 
         try:
