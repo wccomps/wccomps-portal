@@ -1,6 +1,34 @@
+from collections.abc import Mapping
 from typing import cast
 
 from django import forms
+
+
+class DescribedRadioSelect(forms.RadioSelect):
+    """Radio buttons with a line under each option saying what it does (descriptions, by the choice's value)."""
+
+    option_template_name = "forms/widgets/described_radio_option.html"
+
+    def __init__(self, attrs: dict[str, object] | None = None, descriptions: Mapping[str, str] | None = None) -> None:
+        super().__init__(attrs)
+        self.descriptions = dict(descriptions or {})
+
+    def create_option(
+        self,
+        name: str,
+        value: object,
+        label: int | str,
+        selected: bool,
+        index: int,
+        subindex: int | None = None,
+        attrs: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        option = super().create_option(name, value, label, selected, index, subindex, attrs)
+        option_attrs = cast(dict[str, object], option["attrs"])
+        if (description := self.descriptions.get(str(value))) and option_attrs.get("id"):
+            option["description"] = description
+            option_attrs["aria-describedby"] = f"{option_attrs['id']}_description"
+        return option
 
 
 class ToggleButtonSelect(forms.Select):

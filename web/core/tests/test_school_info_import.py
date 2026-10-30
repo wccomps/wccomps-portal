@@ -1,5 +1,7 @@
 """School info CSV import: upload previews, confirm imports, and failures say why."""
 
+import re
+
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
@@ -589,3 +591,15 @@ def test_a_new_event_with_a_bad_season_says_why(client):
         reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields, "current_season": "x"}
     )
     assert "Current season: Enter a whole number." in response.content.decode()
+
+
+def test_each_import_mode_says_what_it_does_under_its_choice(client):
+    html = client.get(reverse("school_info_import")).content.decode()
+
+    for value, line in [("replace", "Replaces all school information"), ("add", "Keeps the school list")]:
+        radio = re.search(rf'<input type="radio" name="mode" value="{value}"[^>]*>', html)
+        assert radio, value
+        described = re.search(r'aria-describedby="([^"]+)"', radio.group(0))
+        assert described, radio.group(0)
+        assert re.search(rf'<p class="help-text" id="{described.group(1)}">{line}', html)
+    assert "Replace the school list replaces" not in html
