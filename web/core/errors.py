@@ -81,12 +81,12 @@ MESSAGES = {
 def error_answer(request: HttpRequest, status: int, message: str = "") -> HttpResponse:
     """The error page, or JSON for wants_json_error, with this status. The page links to the person's landing page
     (core.auth_utils.get_role_based_landing_url), unless that is the page refusing them."""
-    from .auth_utils import get_authentik_groups, get_role_based_landing_url
+    from .auth_utils import get_role_based_landing_url, permission_groups_of
 
     message = message or MESSAGES[status]
     if wants_json_error(request):
         return JsonResponse({"error": message}, status=status)
-    home_url = get_role_based_landing_url(get_authentik_groups(getattr(request, "user", AnonymousUser())))
+    home_url = get_role_based_landing_url(permission_groups_of(getattr(request, "user", AnonymousUser())))
     context = {"error": TITLES[status], "message": message, "home_url": home_url if home_url != request.path else ""}
     return render(request, "error.html", context, status=status)
 

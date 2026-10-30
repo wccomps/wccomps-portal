@@ -130,7 +130,7 @@ def run_competition(enable: bool, actor: str) -> Generator[CompetitionStep, None
                 result.accounts_ok += 1
                 yield CompetitionStep(f"{verb} {username}", step, total)
 
-        # Team accounts' groups follow is_active; don't make teams wait for the periodic refresh.
+        # Permissions follow each account's enabled state; don't make teams wait for the periodic refresh.
         step += 1
         try:
             refresh_user_groups(manager)

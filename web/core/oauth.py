@@ -16,6 +16,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 from .auth_utils import get_role_based_landing_url
 from .models import UserGroups
+from .utils import database_clock
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +236,7 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
             {"error_title": "Authentication Failed", "error_message": "Please try again."},
         )
 
+    read_at = database_clock()
     try:
         with httpx.Client(timeout=settings.HTTPX_DEFAULT_TIMEOUT) as client:
             userinfo_response = client.get(
@@ -273,15 +275,17 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
         if user_groups is None:
             _free_username(username)
             user = User.objects.create(username=username, email=email)
-            user_groups = UserGroups.objects.create(user=user, authentik_id=authentik_id, groups=groups)
+            UserGroups.objects.create(user=user, authentik_id=authentik_id, groups=groups, groups_updated_at=read_at)
         else:
             user = user_groups.user
             if user.username != username:
                 _free_username(username, keep_pk=user.pk)
                 user.username = username
                 user.save(update_fields=["username"])
-        user_groups.groups = groups
-        user_groups.save(update_fields=["groups"])
+            # A refresh that read Authentik after this sign-in did keeps what it read, changed or not
+            UserGroups.objects.filter(pk=user_groups.pk).exclude(groups_updated_at__gt=read_at).update(
+                groups=groups, account_active=True, groups_updated_at=read_at
+            )
 
     login(request, user)
 

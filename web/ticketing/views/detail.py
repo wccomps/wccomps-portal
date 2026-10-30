@@ -35,18 +35,11 @@ def list_version(rows: Iterable[TicketComment | TicketHistory]) -> str:
 
 def _ticketing_staff_usernames() -> list[str]:
     """Usernames that can work tickets, for the assign box's suggestions."""
-    from functools import reduce
-    from operator import or_
-
-    from django.db.models import Q
-
     from core.models import UserGroups
     from core.permission_constants import PERMISSION_MAP
 
-    in_any_group = reduce(or_, (Q(groups__contains=[g]) for g in PERMISSION_MAP[TICKET_STAFF]))
-    return list(
-        UserGroups.objects.filter(in_any_group).order_by("user__username").values_list("user__username", flat=True)
-    )
+    staff = UserGroups.objects.granting(PERMISSION_MAP[TICKET_STAFF])
+    return list(staff.order_by("user__username").values_list("user__username", flat=True))
 
 
 def _visible_ticket(user: User, ticket_number: str) -> Ticket:

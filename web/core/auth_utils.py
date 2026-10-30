@@ -19,13 +19,14 @@ P = ParamSpec("P")
 type ViewFunc[**P] = Callable[Concatenate[HttpRequest, P], HttpResponseBase]
 
 
-def get_authentik_groups(user: User | AnonymousUser) -> list[str]:
-    """Get user's Authentik groups from UserGroups, the single source of truth for permissions."""
+def permission_groups_of(user: User | AnonymousUser) -> list[str]:
+    """The user's permission groups (UserGroups.permission_groups): none signed out, with no row, or while the account
+    is disabled."""
     if isinstance(user, AnonymousUser):
         return []
 
     try:
-        return list(user.usergroups.groups)
+        return user.usergroups.permission_groups
     except UserGroups.DoesNotExist:
         return []
 
@@ -42,7 +43,7 @@ def get_permissions_context(user: User) -> dict[str, bool]:
 
 
 def has_permission(user: User | AnonymousUser, permission_name: str) -> bool:
-    groups = get_authentik_groups(user)
+    groups = permission_groups_of(user)
     return check_groups_for_permission(groups, permission_name)
 
 
@@ -57,7 +58,7 @@ def team_for_groups(groups: list[str]) -> Team | None:
 
 
 def get_user_team(user: User | AnonymousUser) -> Team | None:
-    return team_for_groups(get_authentik_groups(user))
+    return team_for_groups(permission_groups_of(user))
 
 
 def get_role_based_landing_url(groups: list[str]) -> str:

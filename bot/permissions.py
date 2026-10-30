@@ -11,7 +11,7 @@ from asgiref.sync import sync_to_async
 from discord.app_commands.commands import Check
 from django.contrib.auth.models import User
 
-from core.auth_utils import get_authentik_groups, team_for_groups
+from core.auth_utils import permission_groups_of, team_for_groups
 from core.permission_constants import PERMISSION_MAP, check_groups_for_permission
 from team.models import DiscordLink, Team
 
@@ -29,7 +29,7 @@ def _linked_user(discord_id: int) -> User | None:
 @sync_to_async
 def _linked_groups(discord_id: int) -> list[str]:
     user = _linked_user(discord_id)
-    return get_authentik_groups(user) if user else []
+    return permission_groups_of(user) if user else []
 
 
 async def has_permission(discord_id: int, permission: str) -> bool:
@@ -40,7 +40,7 @@ async def has_permission(discord_id: int, permission: str) -> bool:
 def linked_team_member(discord_id: int) -> TeamMember | None:
     """The linked account and the team its Authentik groups put it on; None if unlinked or on no team."""
     user = _linked_user(discord_id)
-    team = team_for_groups(get_authentik_groups(user)) if user else None
+    team = team_for_groups(permission_groups_of(user)) if user else None
     return TeamMember(user, team) if user and team else None
 
 

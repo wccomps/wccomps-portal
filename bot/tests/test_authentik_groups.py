@@ -1,6 +1,6 @@
 """Stored Authentik groups are refreshed by the bot, not only at web login (security review, Medium)."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -11,8 +11,18 @@ from core.services.user_groups import GroupRefreshAbortedError
 
 
 async def _run_with(result=None, error=None):
-    with patch.object(authentik_groups, "refresh_user_groups", side_effect=error, return_value=result):
+    with patch.object(authentik_groups, "refresh_user_groups_unless_running", side_effect=error, return_value=result):
         await authentik_groups.refresh_groups_now()
+
+
+@pytest.mark.asyncio
+async def test_the_refresh_runs_off_the_shared_orm_thread():
+    """Waiting on the refresh lock must not hold the thread every other ORM call in the bot waits on."""
+    off_thread = AsyncMock(return_value=MagicMock(changed=0))
+    with patch.dict(authentik_groups.refresh_groups_now.__globals__, {"off_orm_thread": off_thread}):
+        await authentik_groups.refresh_groups_now()
+
+    off_thread.assert_awaited_once_with(authentik_groups._refresh)
 
 
 @pytest.mark.asyncio

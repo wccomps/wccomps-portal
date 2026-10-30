@@ -315,6 +315,16 @@ class TestOAuthCallback:
 
             return client.get(f"/auth/callback/?code=test-code&state={state}")
 
+    def test_signing_in_marks_a_disabled_account_enabled(self, oauth_state_session):
+        """Authentik signs in only an enabled account, so the next refresh needn't wait to restore permissions."""
+        client, state = oauth_state_session
+        user = User.objects.create(username="team05")
+        UserGroups.objects.create(user=user, authentik_id="sub-05", groups=[], account_active=False)
+
+        self._login(client, state, {"sub": "sub-05", "preferred_username": "team05", "groups": ["WCComps_GoldTeam"]})
+
+        assert UserGroups.objects.get(user=user).permission_groups == ["WCComps_GoldTeam"]
+
     def test_reused_username_gets_a_fresh_account_not_the_old_one(self, oauth_state_session):
         """Identity is the Authentik sub: a new identity with an old username inherits nothing."""
         from team.models import DiscordLink

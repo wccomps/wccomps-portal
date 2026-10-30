@@ -12,11 +12,11 @@ from hypothesis import strategies as st
 from core.auth_utils import (
     PERMISSION_MAP,
     check_groups_for_permission,
-    get_authentik_groups,
     get_authentik_id,
     get_permissions_context,
     get_user_team,
     has_permission,
+    permission_groups_of,
     require_permission,
 )
 from core.tests.guards import REPO_DIR, fail_with, tracked_files
@@ -26,28 +26,26 @@ pytestmark = pytest.mark.django_db
 
 
 class TestGetAuthentikGroups:
-    """Tests for get_authentik_groups function."""
-
     def test_anonymous_user_returns_empty_list(self):
         """Anonymous user should return empty groups list."""
         anon = AnonymousUser()
-        groups = get_authentik_groups(anon)
+        groups = permission_groups_of(anon)
         assert groups == []
 
     def test_user_without_social_account_returns_empty_list(self):
         """User without SocialAccount should return empty groups."""
         user = User.objects.create_user(username="no_social", password="test")
-        groups = get_authentik_groups(user)
+        groups = permission_groups_of(user)
         assert groups == []
 
     def test_user_with_social_account_returns_groups(self, blue_team_user):
         """User with SocialAccount should return their groups."""
-        groups = get_authentik_groups(blue_team_user)
+        groups = permission_groups_of(blue_team_user)
         assert "WCComps_BlueTeam01" in groups
 
     def test_groups_from_userinfo(self, admin_user):
         """Groups should be extracted from userinfo.groups."""
-        groups = get_authentik_groups(admin_user)
+        groups = permission_groups_of(admin_user)
         assert "WCComps_Discord_Admin" in groups
 
 

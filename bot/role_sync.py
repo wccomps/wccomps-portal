@@ -46,7 +46,7 @@ def role_grants(discord_ids: set[int] | None = None) -> RoleGrants:
     by_member: dict[int, frozenset[int]] = {}
     for link in links:
         user_groups = getattr(link.user, "usergroups", None)
-        groups = set(user_groups.groups) if user_groups else set()
+        groups = set(user_groups.permission_groups) if user_groups else set()
         roles = [role_id for group, role_id in mapped.items() if group in groups]
         if link.team and link.team.is_active:
             roles += [link.team.discord_role_id or 0, settings.BLUETEAM_ROLE_ID]

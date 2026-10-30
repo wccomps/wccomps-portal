@@ -4,12 +4,15 @@ import logging
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from django.db import transaction
+from django.db import connection, transaction
 
 from core.authentik_manager import AuthentikManager
 from core.models import UserGroups
+from core.utils import database_clock
 
 logger = logging.getLogger(__name__)
+
+REFRESH_LOCK = "user_groups_refresh"
 
 
 class GroupRefreshAbortedError(Exception):
@@ -46,14 +49,36 @@ def _expand(direct: list[str], groups: dict[str, _Group]) -> list[str]:
 
 
 def refresh_user_groups(manager: AuthentikManager) -> GroupRefreshResult:
-    """Re-read every stored user's groups from Authentik.
+    """Re-read every stored user's groups and enabled state from Authentik; a deleted user gets no groups. Waits for a
+    refresh holding the lock, so no refresh commits over another's newer snapshot. GroupRefreshAbortedError or
+    AuthentikAPIError, changing nothing, when Authentik's answer looks wrong."""
+    with transaction.atomic():
+        _take_lock(wait=True)
+        return _refresh(manager)
 
-    Logins only refresh the logging-in user, so removals, deactivations and deletions in
-    Authentik never reached permission checks (web or Discord). Inactive or deleted users
-    get no groups. Raises GroupRefreshAbortedError or AuthentikAPIError, changing nothing,
-    if Authentik's answer is invalid, doesn't recognise most users who currently hold groups,
-    or refers to groups missing from its group list.
-    """
+
+def refresh_user_groups_unless_running(manager: AuthentikManager) -> GroupRefreshResult | None:
+    """refresh_user_groups, or None at once when another refresh holds the lock."""
+    with transaction.atomic():
+        if not _take_lock(wait=False):
+            return None
+        return _refresh(manager)
+
+
+def _take_lock(*, wait: bool) -> bool:
+    with connection.cursor() as cursor:
+        if wait:
+            # Wait out a running refresh past the 30 s statement timeout, under the timer's 300 s heartbeat budget
+            cursor.execute("SET LOCAL statement_timeout = '2min'")
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [REFRESH_LOCK])
+            cursor.execute("SET LOCAL statement_timeout TO DEFAULT")
+            return True
+        cursor.execute("SELECT pg_try_advisory_xact_lock(hashtext(%s))", [REFRESH_LOCK])
+        return bool(cursor.fetchone()[0])
+
+
+def _refresh(manager: AuthentikManager) -> GroupRefreshResult:
+    read_at = database_clock()
     groups = {g["pk"]: _Group(g["name"], g["parents"]) for g in manager.list_all_groups()}
     users = {u["uid"]: _User(u["is_active"], u["groups"]) for u in manager.list_all_users()}
     if not users:
@@ -73,18 +98,24 @@ def refresh_user_groups(manager: AuthentikManager) -> GroupRefreshResult:
         raise GroupRefreshAbortedError(f"only {recognised} of {len(holding)} users with groups found in Authentik")
 
     changed = 0
-    with transaction.atomic():
-        for row in rows:
-            user = users.get(row.authentik_id)
-            current = _expand(user.groups, groups) if user and user.is_active else []
-            if current == sorted(row.groups):
-                continue
-            removed = sorted(set(row.groups) - set(current))
-            added = sorted(set(current) - set(row.groups))
-            reason = "deleted in Authentik" if not user else "inactive" if not user.is_active else "changed"
-            logger.info(f"Groups for {row.user.username} {reason}: removed {removed}, added {added}")
-            row.groups = current
-            row.save(update_fields=["groups"])
-            changed += 1
+    unchanged: list[int] = []
+    # A sign-in that read Authentik after this refresh did keeps what it read; an older one can't land over either write
+    not_newer = UserGroups.objects.exclude(groups_updated_at__gte=read_at)
+    for row in rows:
+        user = users.get(row.authentik_id)
+        current = _expand(user.groups, groups) if user else []
+        active = bool(user and user.is_active)
+        if current == sorted(row.groups) and active == row.account_active:
+            unchanged.append(row.pk)
+            continue
+        written = not_newer.filter(pk=row.pk).update(groups=current, account_active=active, groups_updated_at=read_at)
+        if not written:
+            continue
+        removed = sorted(set(row.groups) - set(current))
+        added = sorted(set(current) - set(row.groups))
+        state = "deleted in Authentik" if not user else "active" if active else "disabled"
+        logger.info(f"Groups for {row.user.username} ({state}): removed {removed}, added {added}")
+        changed += 1
+    not_newer.filter(pk__in=unchanged).update(groups_updated_at=read_at)
 
     return GroupRefreshResult(checked=len(rows), changed=changed)

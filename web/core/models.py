@@ -1,8 +1,12 @@
+from collections.abc import Iterable
 from dataclasses import asdict, fields
 from datetime import datetime
+from functools import reduce
+from operator import or_
 
 from django.contrib.auth.models import User
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 from core import discord_tasks
@@ -25,11 +29,19 @@ class Approvable(models.Model):
         self.save(update_fields=["is_approved", "approved_by", "approved_at"])
 
 
+class UserGroupsQuerySet(models.QuerySet["UserGroups"]):
+    def granting(self, groups: Iterable[str]) -> UserGroupsQuerySet:
+        """The rows whose permission groups (UserGroups.permission_groups) hold any of these."""
+        held = reduce(or_, (Q(groups__contains=[group]) for group in groups), Q(pk__in=[]))
+        return self.filter(held).exclude(account_active=False)
+
+
 class UserGroups(models.Model):
     """
     Stores Authentik groups for a user. Refreshed on every login and by the bot every 5 minutes.
 
-    This is the single source of truth for user permissions.
+    This is the single source of truth for user permissions. A disabled account keeps its groups (they decide its
+    team's Discord roles) but holds no permission_groups.
     """
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, primary_key=True)
@@ -43,6 +55,12 @@ class UserGroups(models.Model):
         default=list,
         help_text="List of Authentik group names",
     )
+    account_active = models.BooleanField(
+        null=True, default=True, help_text="Whether the Authentik account is enabled; null until Authentik is asked"
+    )
+    groups_updated_at = models.DateTimeField(
+        null=True, blank=True, help_text="When Authentik was read for the stored groups and state"
+    )
 
     class Meta:
         verbose_name = "User Groups"
@@ -50,6 +68,13 @@ class UserGroups(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user.username} ({len(self.groups)} groups)"
+
+    objects = UserGroupsQuerySet.as_manager()
+
+    @property
+    def permission_groups(self) -> list[str]:
+        """The groups that grant permissions: none while the account is disabled."""
+        return list(self.groups) if self.account_active is not False else []
 
 
 class AuditLog(models.Model):
