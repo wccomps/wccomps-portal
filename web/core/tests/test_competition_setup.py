@@ -238,17 +238,87 @@ def test_a_readiness_check_says_when_authentik_cant_be_asked():
     assert (line["severity"], line["detail"]) == ("fail", "Could not ask Authentik: Network error (ConnectError)")
 
 
+def test_each_readiness_fix_is_a_competition_action():
+    """The page posts a fix's key as the action, the way the setup page's own buttons post theirs."""
+    import ast
+    import inspect
+
+    from core.admin_views import readiness
+    from core.admin_views.competition import _COMPETITION_ACTION_HANDLERS
+
+    keys = {
+        value.value
+        for node in ast.walk(ast.parse(inspect.getsource(readiness)))
+        if isinstance(node, ast.Dict) and {getattr(k, "value", None) for k in node.keys} >= {"type", "key"}
+        for key, value in zip(node.keys, node.values, strict=True)
+        if getattr(key, "value", None) == "key" and isinstance(value, ast.Constant)
+    }
+
+    assert keys == readiness.READINESS_FIXES
+    assert keys <= set(_COMPETITION_ACTION_HANDLERS)
+
+
+def test_a_readiness_fix_names_only_an_allowed_action(admin_user):
+    """The page posts a result's key as the action: only the listed fixes go through that way."""
+    from django.test import Client
+    from django.urls import reverse
+
+    client = Client()
+    client.force_login(admin_user)
+
+    response = client.post(reverse("admin_competition_action"), {"action": "clear_end_time", "readiness_fix": "1"})
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "Not a readiness fix"}
+
+
 def test_fixing_group_membership_names_each_team_authentik_couldnt_answer_for(rf):
     from core.admin_views import readiness
 
     Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
     _authentik_down()
     try:
-        body = json.loads(readiness._fix_group_membership(rf.post("/")).content)
+        body = json.loads(readiness.fix_group_membership(rf.post("/"), "admin").content)
     finally:
         patch.stopall()
 
     assert body == {"success": False, "message": "Fixed 0 account(s); failed: team01: Network error (ConnectError)"}
+
+
+def test_a_group_fix_that_changed_nothing_writes_no_audit(rf):
+    from core.admin_views import readiness
+    from core.models import AuditLog
+
+    Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
+    manager = patch("core.admin_views.readiness.AuthentikManager").start().return_value
+    manager.get_user_with_groups.return_value = {"pk": 5, "username": "team01", "groups_obj": [{"name": "x"}]}
+    manager.get_group_by_name.return_value = None
+    try:
+        readiness.fix_group_membership(rf.post("/"), "admin")
+    finally:
+        patch.stopall()
+
+    assert not AuditLog.objects.filter(action="team_groups_fixed").exists()
+
+
+def test_the_group_fix_audits_what_it_changed(rf):
+    from core.admin_views import readiness
+    from core.models import AuditLog
+
+    for number in (1, 2):
+        Team.objects.create(team_number=number, team_name=f"Team {number}", is_active=True)
+    manager = patch("core.admin_views.readiness.AuthentikManager").start().return_value
+    manager.get_user_with_groups.side_effect = lambda name: {"pk": 5, "username": name, "groups_obj": []}
+    manager.get_group_by_name.side_effect = lambda name: {"pk": "g1", "name": name} if name.endswith("01") else None
+    try:
+        readiness.fix_group_membership(rf.post("/"), "admin")
+    finally:
+        patch.stopall()
+
+    audit = AuditLog.objects.get(action="team_groups_fixed")
+    assert audit.admin_user == "admin"
+    assert audit.details["fixed"] == ["team01"]
+    assert len(audit.details["failed"]) == 1
 
 
 def test_a_refused_group_add_never_shows_authentiks_url_or_answer(rf):
@@ -262,7 +332,8 @@ def test_a_refused_group_add_never_shows_authentiks_url_or_answer(rf):
         "Add user 5 to group g1: Forbidden", 403, response_text='{"detail": "secret"}', url="https://auth.internal/x"
     )
     try:
-        message = json.loads(readiness._fix_group_membership(rf.post("/")).content)["message"]
+        answer = readiness.fix_group_membership(rf.post("/"), "admin")
+        message = json.loads(answer.content)["message"]
     finally:
         patch.stopall()
 

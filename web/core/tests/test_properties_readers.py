@@ -708,9 +708,9 @@ def _readiness() -> object:
 def _fix_groups() -> object:
     from django.test import RequestFactory
 
-    from core.admin_views.readiness import _fix_group_membership
+    from core.admin_views.readiness import fix_group_membership
 
-    return _fix_group_membership(RequestFactory().post("/"))
+    return fix_group_membership(RequestFactory().post("/"), "admin")
 
 
 CALLERS = [
@@ -721,7 +721,7 @@ CALLERS = [
     Caller("store_discord_id_in_authentik", _store_discord_id, (USERS, DONE)),
     Caller("run_competition_to_completion", _start_competition, (APPLICATION, BINDINGS, DONE, USERS, DONE, GROUPS)),
     Caller("stream_readiness_checks", _readiness, (USERS, USERS, SESSIONS, APPLICATION, BINDINGS, DONE, METADATA)),
-    Caller("_fix_group_membership", _fix_groups, (USERS, GROUPS, DONE)),
+    Caller("fix_group_membership", _fix_groups, (USERS, GROUPS, DONE)),
 ]
 SERVICES = {
     "AUTHENTIK_URL": "https://auth.test",

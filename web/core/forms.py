@@ -169,10 +169,7 @@ class ResetPasswordsForm(forms.Form):
 
 class ActionForm(forms.Form):
     action = forms.CharField()
-
-
-class ReadinessFixForm(forms.Form):
-    fix = forms.CharField()
+    readiness_fix = forms.BooleanField(required=False)
 
 
 class TeamActionForm(forms.Form):

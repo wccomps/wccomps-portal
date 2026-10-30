@@ -26,7 +26,6 @@ from registration.services import (
 )
 from registration.stage import EventStage, event_stage
 from scoring.models import QuotientMetadataCache
-from scoring.quotient_sync import sync_quotient_metadata
 
 from core.admin_views.event_panel import event_facts, event_panel
 from core.admin_views.places import (
@@ -37,7 +36,7 @@ from core.admin_views.places import (
     section_partial,
     setup_url,
 )
-from core.admin_views.readiness import action_readiness_check, action_readiness_fix
+from core.admin_views.readiness import READINESS_FIXES, action_readiness_check, fix_group_membership, sync_quotient
 from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
 from core.authentik_utils import credentials_csv, reset_teams_credentials
 from core.competition_utils import WipedData, competition_data_counts
@@ -53,7 +52,7 @@ from core.forms import (
     StartMessageForm,
     TypedConfirmForm,
 )
-from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, DiscordTask
+from core.models import MAX_TEAM_MEMBERS_LIMIT, CompetitionConfig, DiscordTask
 from core.services.competition import (
     KEEP,
     CompetitionRunResult,
@@ -249,22 +248,6 @@ def _action_reset_passwords(request: HttpRequest, authentik_username: str) -> Js
     return JsonResponse({"success": not result.failed_resets, "message": result.summary(), "csv": csv_content})
 
 
-def _action_sync_quotient(request: HttpRequest, authentik_username: str) -> JsonResponse:
-    try:
-        sync_quotient_metadata(cast(User, request.user))
-        AuditLog.objects.create(
-            action="quotient_metadata_synced",
-            admin_user=authentik_username,
-            target_entity="quotient",
-            target_id=0,
-            details={},
-        )
-        return JsonResponse({"success": True, "message": "Quotient metadata synced"})
-    except Exception as e:
-        logger.error(f"Failed to sync Quotient metadata: {e}")
-        return JsonResponse({"error": f"Sync failed: {e}"}, status=500)
-
-
 def _stream_close_out(target: Event | NewEvent, authentik_username: str) -> Iterator[str]:
     yield _progress("Closing out: freezing the results, then clearing the live data", 1, 1)
     try:
@@ -340,9 +323,9 @@ _COMPETITION_ACTION_HANDLERS: dict[str, Callable[[HttpRequest, str], HttpRespons
     "clear_leftover_data": _action_clear_leftover_data,
     "cancel_event": _action_cancel_event,
     "reset_passwords": _action_reset_passwords,
-    "sync_quotient": _action_sync_quotient,
+    "sync_quotient": sync_quotient,
+    "fix_group_membership": fix_group_membership,
     "readiness_check": action_readiness_check,
-    "readiness_fix": action_readiness_fix,
 }
 
 
@@ -455,5 +438,7 @@ def admin_competition_action(request: HttpRequest) -> HttpResponseBase:
     handler = _COMPETITION_ACTION_HANDLERS.get(action)
     if not handler:
         raise BadRequest("Unknown action")
+    if form.cleaned_data["readiness_fix"] and action not in READINESS_FIXES:
+        raise BadRequest("Not a readiness fix")
 
     return handler(request, user.username)

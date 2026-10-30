@@ -79,7 +79,6 @@ from core.forms import (
     CancelEventForm,
     CloseOutForm,
     LinkConfirmForm,
-    ReadinessFixForm,
     ResetPasswordsForm,
     SchoolInfoEditForm,
     SetMaxMembersForm,
@@ -497,7 +496,6 @@ CASES = [
         resubmit=_resubmit_team_numbers,
     ),
     FormCase(ActionForm),
-    FormCase(ReadinessFixForm),
     FormCase(
         TeamActionForm,
         hints=lambda w: {"action": st.sampled_from(("activate", "deactivate", "unlink_user"))},
