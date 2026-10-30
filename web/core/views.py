@@ -14,13 +14,16 @@ from django.shortcuts import get_object_or_404, redirect, render
 from registration.forms import ShownSchoolForm
 from registration.models import Event, Season
 from registration.services import (
+    ADD_NEEDS_OPEN_EVENT,
     ImportBlockedError,
     NewEvent,
     PacketsSentError,
     SchoolChangedError,
     SchoolListRow,
     SchoolTakenError,
+    add_to_school_list,
     clear_school_list,
+    free_teams,
     remove_team_school,
     set_team_school,
 )
@@ -211,8 +214,48 @@ def school_info(request: HttpRequest) -> HttpResponse:
         "school_info.html",
         {
             "teams": teams_with_info,
+            "event_open": Event.objects.open() is not None,
         },
     )
+
+
+@require_permission("gold_team")
+def school_info_add(request: HttpRequest) -> HttpResponse:
+    """Add one school to the open event on the lowest free team, as the import's Add mode does for a file."""
+    values = {"school_name": "", "contact_email": "", "secondary_email": "", "notes": ""}
+    error = ""
+    if request.method == "POST":
+        form = SchoolInfoEditForm(request.POST)
+        values = {name: form.data.get(name, "") for name in values}
+        event = Event.objects.open()
+        if not form.is_valid():
+            error = " ".join(str(e) for errors in form.errors.values() for e in errors)
+        elif event is None:
+            error = ADD_NEEDS_OPEN_EVENT
+        elif (team := free_teams(event).order_by("team_number").first()) is None:
+            error = "No team is free to give this school."
+        else:
+            row = SchoolListRow(
+                team_number=team.team_number,
+                school_name=form.cleaned_data["school_name"],
+                contact_email=form.cleaned_data["contact_email"],
+                secondary_email=form.cleaned_data["secondary_email"],
+                notes=form.cleaned_data["notes"],
+            )
+            try:
+                add_to_school_list(event, [row], updated_by=cast(User, request.user).username)
+            except ImportBlockedError as blocked:
+                error = str(blocked).removesuffix(" Upload the file again.")
+            else:
+                logger.info(f"School added as Team {team.team_number} by {request.user.username}")
+                messages.success(
+                    request,
+                    f"Added {row.school_name} as Team {team.team_number}. Send it the packet from the packet's page; "
+                    "the first packet email sets the team's password.",
+                )
+                return redirect("school_info")
+
+    return render(request, "school_info_add.html", {"values": values, "page_error": error})
 
 
 @require_permission("gold_team")

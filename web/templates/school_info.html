@@ -9,6 +9,7 @@
         <c-module id="changelist">
             <c-slot name="toolbar">
                 <c-link href="{% url 'school_info_export' %}">Export CSV</c-link>
+                {% if event_open %}<c-link href="{% url 'school_info_add' %}" variant="add">Add school</c-link>{% endif %}
                 <c-link href="{% url 'school_info_import' %}" variant="add">Import from CSV</c-link>
             </c-slot>
             <c-table id="result_list"

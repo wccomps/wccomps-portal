@@ -1,0 +1,64 @@
+{% extends "admin/ops_base.html" %}
+{% load static cotton %}
+{% block title %}
+    Add School - WCComps Portal
+{% endblock title %}
+{% block admin_content %}
+    <div id="content-main">
+        <c-page_header title="Add School"
+                       parent_url="{% url 'school_info' %}"
+                       parent_label="Schools" />
+        <c-form>
+            {% csrf_token %}
+            <c-module>
+                {% if page_error %}<c-alert variant="error">{{ page_error }}</c-alert>{% endif %}
+                <c-fieldset aligned="true">
+                    <c-form_field label="School Name" required="true" id="school_name">
+                        <input type="text"
+                               name="school_name"
+                               id="school_name"
+                               class="vTextField"
+                               value="{{ values.school_name }}"
+                               required
+                               placeholder="e.g., University of Example">
+                    </c-form_field>
+                    <c-form_field label="Contact Email"
+                                  required="true"
+                                  id="contact_email"
+                                  help_text="Primary contact for this school">
+                        <input type="email"
+                               name="contact_email"
+                               id="contact_email"
+                               class="vTextField"
+                               value="{{ values.contact_email }}"
+                               required
+                               placeholder="e.g., coach@example.edu">
+                    </c-form_field>
+                    <c-form_field label="Secondary Email"
+                                  id="secondary_email"
+                                  help_text="Optional secondary contact">
+                        <input type="email"
+                               name="secondary_email"
+                               id="secondary_email"
+                               class="vTextField"
+                               value="{{ values.secondary_email }}"
+                               placeholder="e.g., alternate@example.edu">
+                    </c-form_field>
+                    <c-form_field label="Notes" id="notes" help_text="Optional internal notes">
+                        <textarea name="notes"
+                                  id="notes"
+                                  class="vLargeTextField"
+                                  rows="4"
+                                  placeholder="Additional notes about this school...">{{ values.notes }}</textarea>
+                    </c-form_field>
+                </c-fieldset>
+                <c-button_row class="justify-end">
+                    <c-link href="{% url 'school_info' %}" variant="cancel">Cancel</c-link>
+                    <c-button type="submit" variant="primary">
+                        Add School
+                    </c-button>
+                </c-button_row>
+            </c-module>
+        </c-form>
+    </div>
+{% endblock admin_content %}
