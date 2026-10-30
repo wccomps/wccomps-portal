@@ -9,7 +9,7 @@ from django.conf import settings
 
 from bot.competition_actions import deliver_team_broadcast, run_competition_cleanup
 from bot.permissions import permission_check
-from bot.utils import ConfirmView, log_to_ops_channel, split_message
+from bot.utils import ConfirmView, log_to_ops_channel, run_blocking, split_message
 from core.authentik_utils import (
     credentials_csv,
     parse_team_range,
@@ -17,11 +17,21 @@ from core.authentik_utils import (
     sessions_failure_summary,
 )
 from core.forms import AppSlugForm
-from core.models import AuditLog, CompetitionConfig
-from core.utils import UnknownTimezoneError, parse_datetime_to_utc, shorten
+from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig
+from core.services.competition import KEEP, ConfigEditError, set_controlled_apps, set_max_members, set_schedule
+from core.utils import (
+    DEFAULT_TIMEZONE,
+    DEFAULT_TIMEZONE_NAME,
+    TIMEZONE_CHOICES,
+    UnknownTimezoneError,
+    parse_datetime_to_utc,
+    shorten,
+)
 from team.models import active_team_numbers
 
 logger = logging.getLogger(__name__)
+
+TIMEZONE_OPTIONS = [app_commands.Choice(name=label, value=zone) for zone, label in TIMEZONE_CHOICES]
 
 
 class AdminCompetitionCog(commands.Cog):
@@ -111,36 +121,23 @@ class AdminCompetitionCog(commands.Cog):
         logger.info(f"Password reset performed by {interaction.user}. Failed: {len(failed_resets)}")
 
     @competition_group.command(name="set-max-members", description="[ADMIN] Set maximum team members globally")
-    @app_commands.describe(max_members="Maximum members per team (1-20)")
+    @app_commands.describe(max_members=f"Maximum members per team (1-{MAX_TEAM_MEMBERS_LIMIT})")
     @app_commands.check(permission_check("admin"))
     async def admin_set_max_members(self, interaction: discord.Interaction, max_members: int) -> None:
         """Set global maximum team members."""
-        if max_members < 1 or max_members > 20:
-            await interaction.response.send_message("Maximum members must be between 1 and 20.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        try:
+            old_max = await run_blocking(set_max_members, max_members, str(interaction.user))
+        except ConfigEditError as e:
+            await interaction.followup.send(f"{e}.", ephemeral=True)
             return
-
-        config = await sync_to_async(CompetitionConfig.get_config)()
-        old_max = config.max_team_members
-        config.max_team_members = max_members
-        await config.asave(update_fields=["max_team_members"])
-
-        await AuditLog.objects.acreate(
-            action="max_team_members_updated",
-            admin_user=str(interaction.user),
-            target_entity="competition_config",
-            target_id=config.pk,
-            details={
-                "old_max": old_max,
-                "new_max": max_members,
-            },
-        )
 
         await log_to_ops_channel(
             self.bot,
             f"Max Team Members Updated by {interaction.user.mention}\n• Old: {old_max}\n• New: {max_members}",
         )
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Maximum team members set to {max_members} (was {old_max}).",
             ephemeral=True,
         )
@@ -169,28 +166,13 @@ class AdminCompetitionCog(commands.Cog):
             )
             return
 
-        config = await sync_to_async(CompetitionConfig.get_config)()
-        error = config.schedule_error(start=scheduled_time) if is_start else config.schedule_error(end=scheduled_time)
-        if error:
-            await interaction.response.send_message(error, ephemeral=True)
+        start, end = (scheduled_time, KEEP) if is_start else (KEEP, scheduled_time)
+        await interaction.response.defer(ephemeral=True)
+        try:
+            config = await run_blocking(set_schedule, str(interaction.user), start=start, end=end)
+        except ConfigEditError as e:
+            await interaction.followup.send(str(e), ephemeral=True)
             return
-
-        field_name = "competition_start_time" if is_start else "competition_end_time"
-        setattr(config, field_name, scheduled_time)
-        await config.asave(update_fields=[field_name])
-
-        audit_action = "competition_start_time_set" if is_start else "competition_end_time_set"
-        audit_key = "start_time" if is_start else "end_time"
-        await AuditLog.objects.acreate(
-            action=audit_action,
-            admin_user=str(interaction.user),
-            target_entity="competition_config",
-            target_id=config.pk,
-            details={
-                audit_key: scheduled_time.isoformat(),
-                "controlled_apps": config.controlled_applications,
-            },
-        )
 
         await log_to_ops_channel(
             self.bot,
@@ -200,7 +182,7 @@ class AdminCompetitionCog(commands.Cog):
             f"• Applications will be {action_verb} automatically at {label_lower} time",
         )
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Competition {label_lower} time set to: {discord.utils.format_dt(scheduled_time, style='F')}\n"
             f"Controlled applications: {', '.join(config.controlled_applications)}\n\n"
             f"Applications will be automatically {action_verb} at {label_lower} time.",
@@ -213,23 +195,15 @@ class AdminCompetitionCog(commands.Cog):
     )
     @app_commands.describe(
         datetime_str="Start time in format: YYYY-MM-DDTHH:MM (e.g., 2025-01-15T09:00)",
-        timezone_name="Timezone (defaults to Pacific Time)",
+        timezone_name=f"Timezone (defaults to {DEFAULT_TIMEZONE_NAME})",
     )
-    @app_commands.choices(
-        timezone_name=[
-            app_commands.Choice(name="Pacific Time (PT)", value="America/Los_Angeles"),
-            app_commands.Choice(name="Mountain Time (MT)", value="America/Denver"),
-            app_commands.Choice(name="Central Time (CT)", value="America/Chicago"),
-            app_commands.Choice(name="Eastern Time (ET)", value="America/New_York"),
-            app_commands.Choice(name="UTC", value="UTC"),
-        ]
-    )
+    @app_commands.choices(timezone_name=TIMEZONE_OPTIONS)
     @app_commands.check(permission_check("admin"))
     async def admin_set_start_time(
         self,
         interaction: discord.Interaction,
         datetime_str: str,
-        timezone_name: str = "America/Los_Angeles",
+        timezone_name: str = DEFAULT_TIMEZONE,
     ) -> None:
         """Set competition start time for automatic application enabling."""
         await self._set_competition_time(interaction, datetime_str, timezone_name, is_start=True)
@@ -240,26 +214,31 @@ class AdminCompetitionCog(commands.Cog):
     )
     @app_commands.describe(
         datetime_str="End time in format: YYYY-MM-DDTHH:MM (e.g., 2025-01-15T17:00)",
-        timezone_name="Timezone (defaults to Pacific Time)",
+        timezone_name=f"Timezone (defaults to {DEFAULT_TIMEZONE_NAME})",
     )
-    @app_commands.choices(
-        timezone_name=[
-            app_commands.Choice(name="Pacific Time (PT)", value="America/Los_Angeles"),
-            app_commands.Choice(name="Mountain Time (MT)", value="America/Denver"),
-            app_commands.Choice(name="Central Time (CT)", value="America/Chicago"),
-            app_commands.Choice(name="Eastern Time (ET)", value="America/New_York"),
-            app_commands.Choice(name="UTC", value="UTC"),
-        ]
-    )
+    @app_commands.choices(timezone_name=TIMEZONE_OPTIONS)
     @app_commands.check(permission_check("admin"))
     async def admin_set_end_time(
         self,
         interaction: discord.Interaction,
         datetime_str: str,
-        timezone_name: str = "America/Los_Angeles",
+        timezone_name: str = DEFAULT_TIMEZONE,
     ) -> None:
         """Set competition end time for automatic application disabling."""
         await self._set_competition_time(interaction, datetime_str, timezone_name, is_start=False)
+
+    @competition_group.command(
+        name="clear-start-time",
+        description="[ADMIN] Cancel the scheduled start (the competition won't start on its own)",
+    )
+    @app_commands.check(permission_check("admin"))
+    async def admin_clear_start_time(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        await run_blocking(set_schedule, str(interaction.user), start=None)
+        await log_to_ops_channel(self.bot, f"Scheduled start cleared by {interaction.user.mention}")
+        await interaction.followup.send(
+            "Scheduled start cleared: the competition won't start on its own.", ephemeral=True
+        )
 
     @competition_group.command(
         name="start-competition",
@@ -372,26 +351,15 @@ class AdminCompetitionCog(commands.Cog):
             await interaction.response.send_message("Please provide at least one application slug.", ephemeral=True)
             return
 
-        config = await sync_to_async(CompetitionConfig.get_config)()
-        config.controlled_applications = slugs
-        await config.asave()
-
-        await AuditLog.objects.acreate(
-            action="competition_apps_configured",
-            admin_user=str(interaction.user),
-            target_entity="competition_config",
-            target_id=config.pk,
-            details={
-                "controlled_apps": slugs,
-            },
-        )
+        await interaction.response.defer(ephemeral=True)
+        await run_blocking(set_controlled_apps, lambda _: slugs, str(interaction.user))
 
         await log_to_ops_channel(
             self.bot,
             f"Competition Applications Configured by {interaction.user.mention}\n• Applications: {', '.join(slugs)}",
         )
 
-        await interaction.response.send_message(f"Controlled applications set to: {', '.join(slugs)}", ephemeral=True)
+        await interaction.followup.send(f"Controlled applications set to: {', '.join(slugs)}", ephemeral=True)
 
     @competition_group.command(
         name="broadcast",

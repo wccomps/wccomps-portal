@@ -133,6 +133,7 @@ CASES: list[BotCase] = [
     Command(AdminCog, AdminCog.admin_sync_roles.callback, ADMIN),
     Command(AdminCompetitionCog, AdminCompetitionCog.admin_broadcast.callback, ADMIN, {"target": broadcast_targets}),
     Command(AdminCompetitionCog, AdminCompetitionCog.admin_cleanup_competition.callback, ADMIN),
+    Command(AdminCompetitionCog, AdminCompetitionCog.admin_clear_start_time.callback, ADMIN),
     Command(AdminCompetitionCog, AdminCompetitionCog.admin_competition_set_apps.callback, ADMIN, {"app_slugs": slugs}),
     Command(
         AdminCompetitionCog,

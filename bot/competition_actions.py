@@ -6,12 +6,11 @@ from collections.abc import Callable
 import discord
 from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.db import connection
 from django.utils import timezone
 from scoring.models import QuotientMetadataCache
 
 from bot.discord_manager import delete_team_infrastructure
-from bot.utils import announcement, log_to_ops_channel, send_announcement, send_parts, team_chat_channel
+from bot.utils import announcement, log_to_ops_channel, run_blocking, send_announcement, send_parts, team_chat_channel
 from core.authentik_utils import parse_team_range
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.services.competition import CompetitionRunResult, run_competition_to_completion
@@ -22,21 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 async def run_competition(enable: bool, actor: str, on_step: Callable[[], None] | None = None) -> CompetitionRunResult:
-    """Start (enable=True) or stop the competition via the shared service, off the event loop.
-
-    Not thread_sensitive: the run makes dozens of Authentik calls and would otherwise hold the
-    single thread every other sync_to_async call in the bot waits on.
-    """
-    return await sync_to_async(_run_and_close, thread_sensitive=False)(enable, actor, on_step)
-
-
-def _run_and_close(enable: bool, actor: str, on_step: Callable[[], None] | None) -> CompetitionRunResult:
-    # A pool thread keeps its DB connection, and recycle_db_connection only reaches the bot's main ORM
-    # thread; close it so a connection broken between runs can't fail the next start or stop.
-    try:
-        return run_competition_to_completion(enable, actor, on_step)
-    finally:
-        connection.close()
+    """Start (enable=True) or stop the competition via the shared service, off the shared thread."""
+    return await run_blocking(run_competition_to_completion, enable, actor, on_step)
 
 
 async def update_status_channel(bot: discord.Client) -> bool:

@@ -155,7 +155,16 @@ class CompetitionConfigAdmin(PortalModelAdmin[CompetitionConfig]):
         "applications_enabled",
         "max_team_members",
     ]
-    readonly_fields = ["created_at", "updated_at", "applications_enabled"]
+    # Start and stop write the run state, the setup page and the bot the settings; a stale post would undo them
+    readonly_fields = [
+        "created_at",
+        "updated_at",
+        "controlled_applications",
+        "max_team_members",
+        "competition_start_time",
+        "competition_end_time",
+        "applications_enabled",
+    ]
 
     fieldsets = (
         (
@@ -166,8 +175,8 @@ class CompetitionConfigAdmin(PortalModelAdmin[CompetitionConfig]):
                     "competition_end_time",
                     "applications_enabled",
                 ),
-                "description": "Set start/end times for automatic application enable/disable. "
-                "Applications will be automatically enabled at start time and disabled at end time.",
+                "description": "Set the schedule on the Competition setup page: the bot enables the applications "
+                "at the start time and disables them at the end time.",
             },
         ),
         (
@@ -175,8 +184,8 @@ class CompetitionConfigAdmin(PortalModelAdmin[CompetitionConfig]):
             {
                 "fields": ("controlled_applications",),
                 "description": (
-                    "List of Authentik application slugs to control (e.g., ['scoring', 'quotient2', 'semaphore'])."
-                    " These applications will be enabled/disabled based on competition timing."
+                    "The Authentik applications Start and Stop turn on and off for the blue teams. Edit the list on the"
+                    " Competition setup page."
                 ),
             },
         ),
@@ -207,6 +216,15 @@ class CompetitionConfigAdmin(PortalModelAdmin[CompetitionConfig]):
         if obj.competition_end_time and timezone.now() > obj.competition_end_time:
             return "Ended"
         return "Not Scheduled"
+
+    def save_model(
+        self, request: HttpRequest, obj: CompetitionConfig, form: forms.ModelForm[CompetitionConfig], change: bool
+    ) -> None:
+        """Only the fields the form changed, so a start or stop written while this saves stays."""
+        if change:
+            obj.save(update_fields=[*form.changed_data, "updated_at"])
+        else:
+            super().save_model(request, obj, form, change)
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return not CompetitionConfig.objects.exists()

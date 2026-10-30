@@ -434,7 +434,6 @@ _FIX_HANDLERS: dict[str, Callable[[HttpRequest], JsonResponse]] = {
 # Called from the competition.py action dispatcher.
 def action_readiness_check(
     request: HttpRequest,
-    config: CompetitionConfig,
     authentik_username: str,
 ) -> StreamingHttpResponse:
     return StreamingHttpResponse(
@@ -445,7 +444,6 @@ def action_readiness_check(
 
 def action_readiness_fix(
     request: HttpRequest,
-    config: CompetitionConfig,
     authentik_username: str,
 ) -> JsonResponse:
     form = ReadinessFixForm(request.POST)

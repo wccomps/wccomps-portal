@@ -71,7 +71,6 @@ from scoring.models import (
 )
 from scoring.views.red_team import _create_red_score
 
-from core.admin_views.competition import TIMEZONE_CHOICES
 from core.authentik_utils import MAX_TEAMS
 from core.forms import (
     ActionForm,
@@ -102,6 +101,7 @@ from core.tests.strategies import (
     resubmission,
     rolled_back,
 )
+from core.utils import TIMEZONE_CHOICES
 from team.forms import CSVUploadForm, ImportConfirmForm, ImportEventForm, parse_csv_file
 from team.models import DiscordLink, LinkToken, Team
 from ticketing.forms import (

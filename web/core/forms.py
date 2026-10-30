@@ -6,6 +6,8 @@ from registration.models import SCHOOL_NAME_MAX_LENGTH, Event
 from registration.services import NewEvent
 
 from core.authentik_utils import parse_team_range
+from core.models import MAX_TEAM_MEMBERS_LIMIT
+from core.utils import DEFAULT_TIMEZONE
 from team.models import SchoolInfo
 
 
@@ -25,7 +27,7 @@ class BroadcastForm(forms.Form):
 
 
 class SetMaxMembersForm(forms.Form):
-    max_members = forms.IntegerField(min_value=1, max_value=20)
+    max_members = forms.IntegerField(min_value=1, max_value=MAX_TEAM_MEMBERS_LIMIT)
 
 
 class TypedConfirmForm(forms.Form):
@@ -101,9 +103,9 @@ class AppSlugForm(forms.Form):
 
 class SetScheduleForm(forms.Form):
     start_datetime = forms.CharField(required=False)
-    start_timezone = forms.CharField(required=False, initial="America/Los_Angeles")
+    start_timezone = forms.CharField(required=False, initial=DEFAULT_TIMEZONE)
     end_datetime = forms.CharField(required=False)
-    end_timezone = forms.CharField(required=False, initial="America/Los_Angeles")
+    end_timezone = forms.CharField(required=False, initial=DEFAULT_TIMEZONE)
 
     def clean(self) -> dict[str, str]:
         cleaned = super().clean()

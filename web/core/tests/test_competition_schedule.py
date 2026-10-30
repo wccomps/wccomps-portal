@@ -87,7 +87,88 @@ def test_unknown_timezone_is_a_400_not_a_500(admin_client):
     assert response.json()["error"] == "Unknown timezone: Mars/Olympus"
 
 
+def test_clearing_the_end_time_cancels_the_scheduled_stop(admin_client):
+    from core.models import AuditLog
+
+    start = datetime(2099, 10, 3, 16, tzinfo=UTC)
+    CompetitionConfig.objects.update_or_create(
+        pk=1, defaults={"competition_start_time": start, "competition_end_time": datetime(2099, 10, 4, tzinfo=UTC)}
+    )
+
+    response = _post(admin_client, "clear_end_time")
+
+    assert response.status_code == 200, response.content
+    config = CompetitionConfig.get_config()
+    assert (config.competition_start_time, config.competition_end_time) == (start, None)
+    assert AuditLog.objects.get(action="competition_schedule_set").details["end_time"] is None
+
+
+def test_clearing_the_start_time_cancels_the_scheduled_start(admin_client):
+    from core.models import AuditLog
+
+    end = datetime(2099, 10, 4, tzinfo=UTC)
+    CompetitionConfig.objects.update_or_create(
+        pk=1, defaults={"competition_start_time": datetime(2099, 10, 3, 16, tzinfo=UTC), "competition_end_time": end}
+    )
+
+    response = _post(admin_client, "clear_start_time")
+
+    assert response.status_code == 200, response.content
+    config = CompetitionConfig.get_config()
+    assert (config.competition_start_time, config.competition_end_time) == (None, end)
+    assert AuditLog.objects.get(action="competition_schedule_set").details["start_time"] is None
+
+
+def test_the_default_time_zone_is_written_once():
+    from core.tests.guards import REPO_DIR, fail_with, tracked_files
+
+    zone = "America/Los_Angeles"
+    found = {
+        path: "names it"
+        for path in tracked_files()
+        if "/tests/" not in path
+        and not path.startswith("web/browser_tests/")
+        and path.endswith((".py", ".html", ".js"))
+        and zone in (REPO_DIR / path).read_text(encoding="utf-8")
+    }
+    fail_with(
+        f"{zone} written outside core.utils (use DEFAULT_TIMEZONE)",
+        found,
+        {
+            "web/core/utils.py": "TIMEZONE_CHOICES and DEFAULT_TIMEZONE",
+            "web/static/js/competition.js": "formatTime shows each time in California's zone too",
+        },
+    )
+
+
+def test_the_setup_page_defaults_to_the_default_time_zone(admin_client):
+    from core.utils import DEFAULT_TIMEZONE
+
+    page = admin_client.get(reverse("admin_competition_setup")).content.decode()
+
+    assert f"startTimezone: '{DEFAULT_TIMEZONE}'" in page
+    assert f"endTimezone: '{DEFAULT_TIMEZONE}'" in page
+
+
 def test_parse_raises_a_value_error_for_an_unknown_timezone():
     with pytest.raises(UnknownTimezoneError):
         parse_datetime_to_utc("2026-10-03T09:00", "Mars/Olympus")
     assert issubclass(UnknownTimezoneError, ValueError)
+
+
+@pytest.mark.parametrize("action", ["clear_start_time", "clear_end_time"])
+def test_a_clear_works_on_a_stored_schedule_that_ends_before_it_starts(admin_client, action):
+    """A pair that ends before it starts is fixed by clearing a time, so a clear is never refused."""
+    CompetitionConfig.objects.update_or_create(
+        pk=1,
+        defaults={
+            "competition_start_time": datetime(2099, 10, 4, tzinfo=UTC),
+            "competition_end_time": datetime(2099, 10, 3, tzinfo=UTC),
+        },
+    )
+
+    response = _post(admin_client, action)
+
+    assert response.status_code == 200, response.content
+    config = CompetitionConfig.get_config()
+    assert (config.competition_start_time if action == "clear_start_time" else config.competition_end_time) is None

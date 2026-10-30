@@ -1,7 +1,7 @@
 from dataclasses import asdict, fields
-from datetime import datetime
 
 from django.contrib.auth.models import User
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -160,8 +160,15 @@ class QueuedAnnouncement(models.Model):
         return f"Announcement for Team {self.team.team_number} ({status})"
 
 
+MAX_TEAM_MEMBERS_LIMIT = 20
+
+
 class CompetitionConfig(models.Model):
-    max_team_members = models.IntegerField(default=10, help_text="Maximum members per team")
+    max_team_members = models.IntegerField(
+        default=10,
+        validators=[MinValueValidator(1), MaxValueValidator(MAX_TEAM_MEMBERS_LIMIT)],
+        help_text="Maximum members per team",
+    )
 
     competition_start_time = models.DateTimeField(
         null=True, blank=True, help_text="When applications should be enabled"
@@ -197,17 +204,6 @@ class CompetitionConfig(models.Model):
             return f"Competition starts at {self.competition_start_time} (enabled={self.applications_enabled})"
         return "Competition not scheduled"
 
-    def schedule_error(self, start: datetime | None = None, end: datetime | None = None) -> str | None:
-        """Why the schedule would be unusable after setting start and/or end (keeping the stored other), or None.
-
-        With the end at or before the start, should_enable_applications is never true: nothing starts.
-        """
-        start = start or self.competition_start_time
-        end = end or self.competition_end_time
-        if start and end and end <= start:
-            return "The end time must be after the start time"
-        return None
-
     def schedule_will_start(self) -> bool:
         """Whether a start time is set and the end time, if any, hasn't passed: the timer still starts it."""
         if not self.competition_start_time:
@@ -230,3 +226,8 @@ class CompetitionConfig(models.Model):
         """Get or create the singleton config instance (pk=1). Never create additional rows."""
         config, _ = cls.objects.get_or_create(pk=1)
         return config
+
+    @classmethod
+    def locked(cls) -> CompetitionConfig:
+        """The config with its row locked until commit; call inside a transaction."""
+        return cls.objects.select_for_update().get(pk=cls.get_config().pk)

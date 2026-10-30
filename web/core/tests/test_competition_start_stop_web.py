@@ -2,11 +2,13 @@
 
 import json
 import re
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from core.models import CompetitionConfig, DiscordTask
 from team.models import team_username
@@ -402,3 +404,28 @@ def test_cancelling_needs_admin_or_gold_access(client, create_user_with_groups):
     assert response.status_code == 403
     event.refresh_from_db()
     assert event.is_active
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"action": "set_max_members", "max_members": "7"},
+        {"action": "set_schedule", "end_datetime": "2099-10-03T17:00", "end_timezone": "UTC"},
+    ],
+    ids=["max-members", "schedule"],
+)
+def test_a_config_edit_keeps_a_start_the_timer_recorded_meanwhile(admin_client, data):
+    """The page's edit loads the config, then the timer records its start: the edit must not write back the stale
+    copy, which would mark the competition stopped and bring back the start time it consumed."""
+    CompetitionConfig.objects.update_or_create(
+        pk=1, defaults={"applications_enabled": False, "competition_start_time": timezone.now() - timedelta(minutes=1)}
+    )
+    stale = CompetitionConfig.get_config()
+    CompetitionConfig.objects.filter(pk=1).update(applications_enabled=True, competition_start_time=None)
+
+    with patch.object(CompetitionConfig, "get_config", return_value=stale):
+        response = admin_client.post(reverse("admin_competition_action"), data)
+
+    assert response.status_code == 200, response.content
+    config = CompetitionConfig.objects.get(pk=1)
+    assert (config.applications_enabled, config.competition_start_time) == (True, None)

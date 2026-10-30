@@ -1,12 +1,13 @@
 import io
 import logging
+from collections.abc import Callable
 from typing import Final, Literal
 
 import discord
 from asgiref.sync import sync_to_async
 from discord import app_commands
 from django.conf import settings
-from django.db import close_old_connections
+from django.db import close_old_connections, connection
 
 from core.utils import missing_discord_settings
 from team.models import MAX_TEAMS, Team
@@ -250,3 +251,16 @@ async def send_lines(
     text += f"... and {len(lines) - shown} more (full list attached)"
     full = discord.File(io.BytesIO("\n".join(lines).encode()), filename=filename)
     await interaction.followup.send(text, file=full, ephemeral=True)
+
+
+async def run_blocking[**P, T](func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    """Run blocking work on a pool thread, not the bot's shared ORM thread, closing the pool thread's connection after
+    (the bot's connection recycling reaches only the shared thread)."""
+
+    def call() -> T:
+        try:
+            return func(*args, **kwargs)
+        finally:
+            connection.close()
+
+    return await sync_to_async(call, thread_sensitive=False)()

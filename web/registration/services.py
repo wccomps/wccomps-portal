@@ -388,15 +388,6 @@ class CloseOutError(Exception):
     """Close Out Event or Clear leftover data refused; the message says why."""
 
 
-def _lock_config() -> CompetitionConfig:
-    """The competition config, its row locked until commit; the stage read after it sees whether the competition
-    runs. A start writes applications_enabled under the same row lock, so it can't mark the competition running
-    until this commits. A start already under way may have turned Authentik on before it waits, and the queued
-    Discord cleanup checks for a running competition only when the bot picks it up, so it can still run as such a
-    start lands."""
-    return CompetitionConfig.objects.select_for_update().get(pk=CompetitionConfig.get_config().pk)
-
-
 def _running_refusal(stage: EventStage) -> str:
     return f"The competition is running. {stage.next_step}"
 
@@ -492,7 +483,7 @@ def _close_out(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
     Under the school list lock and the competition config lock; CloseOutError, writing nothing, says why it refused.
     """
     school_list_lock()
-    config = _lock_config()
+    config = CompetitionConfig.locked()
     stage = event_stage()
     _refuse_a_stale_target(target, stage)
     if problem := close_out_problem(stage):
@@ -665,7 +656,7 @@ def clear_leftover_data(actor: str) -> WipedData:
     next event. Under the school list lock and the competition config lock; CloseOutError when
     clear_leftovers_problem says why not."""
     school_list_lock()
-    config = _lock_config()
+    config = CompetitionConfig.locked()
     if problem := clear_leftovers_problem(event_stage()):
         raise CloseOutError(problem)
     wiped = wipe_competition_data()
@@ -701,7 +692,7 @@ def cancel_event(target: Event, actor: str) -> Event:
     links, tickets) is then left over for Clear leftover data. Under the school list lock and the competition config
     lock; CloseOutError, writing nothing, says why it refused."""
     school_list_lock()
-    _lock_config()
+    CompetitionConfig.locked()
     stage = event_stage()
     if stage.event != target:
         raise CloseOutError(f"{target} is no longer open. Reload the page.")
