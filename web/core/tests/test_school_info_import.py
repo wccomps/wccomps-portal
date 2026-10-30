@@ -610,9 +610,11 @@ def test_each_import_mode_says_what_it_does_under_its_choice(client):
 
 
 def test_without_ids_each_mode_still_shows_its_description():
+    from django.utils.html import escape
+
     from team.forms import IMPORT_MODES, ImportEventForm
 
     html = str(ImportEventForm(season=None, auto_id=False)["mode"])
 
     assert "aria-describedby" not in html
-    assert all(f'<p class="help-text" >{mode.description[:20]}' in html for mode in IMPORT_MODES.values())
+    assert all(f'<p class="help-text">{escape(mode.description)}</p>' in html for mode in IMPORT_MODES.values())
