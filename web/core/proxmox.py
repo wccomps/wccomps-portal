@@ -240,8 +240,8 @@ class ProxmoxClient:
                 vmid = _whole(_field(member, "vmid", "a VM"), "a VM's vmid")
                 name = _clean_text(_field(member, "name", "a VM"), "a VM's name")
                 node = _clean_text(_field(member, "node", "a VM"), "a VM's node")
-                status_raw = member.get("status", "unknown")
-                status = _clean_text(status_raw, "a VM's status") if status_raw is not None else "unknown"
+                status_raw = member.get("status")
+                status = (_clean_text(status_raw, "a VM's status") if status_raw is not None else "") or "unknown"
                 tmpl_raw = member.get("template", 0)
                 if not isinstance(tmpl_raw, int | bool):
                     raise ValueError(f"a VM's template flag isn't a bool or int: {tmpl_raw!r:.80}")
