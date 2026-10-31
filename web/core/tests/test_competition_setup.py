@@ -217,7 +217,7 @@ def test_readiness_failures_link_the_setup_section_that_fixes_them():
 def _authentik_down():
     """An AuthentikManager whose lookups fail to connect."""
     manager = patch("core.admin_views.readiness.AuthentikManager").start().return_value
-    for lookup in ("get_user_with_groups", "get_group_by_name", "get_application_by_slug", "sees_any_sessions"):
+    for lookup in ("list_all_users", "list_all_groups", "get_application_by_slug", "sees_any_sessions"):
         getattr(manager, lookup).side_effect = AuthentikAPIError("Network error (ConnectError)")
     manager.__enter__.return_value = manager
     return manager
@@ -238,7 +238,32 @@ def test_a_readiness_check_says_when_authentik_cant_be_asked():
     assert (line["severity"], line["detail"]) == ("fail", "Could not ask Authentik: Network error (ConnectError)")
 
 
-def test_fixing_group_membership_names_each_team_authentik_couldnt_answer_for(rf):
+def test_team_account_and_group_checks_list_users_and_groups_in_bulk():
+    from core.admin_views import readiness
+
+    Team.objects.create(team_number=1, team_name="Team 1", authentik_group="WCComps_BlueTeam01", is_active=True)
+    Team.objects.create(team_number=2, team_name="Team 2", authentik_group="WCComps_BlueTeam02", is_active=True)
+    manager = patch("core.admin_views.readiness.AuthentikManager").start().return_value
+    manager.__enter__.return_value = manager
+    manager.list_all_users.return_value = [
+        {"pk": 1, "username": "team01", "uid": "u1", "is_active": True, "groups": ["g1"]},
+        {"pk": 2, "username": "team02", "uid": "u2", "is_active": True, "groups": []},
+    ]
+    manager.list_all_groups.return_value = [
+        {"pk": "g1", "name": "WCComps_BlueTeam01", "parents": []},
+        {"pk": "g2", "name": "WCComps_BlueTeam02", "parents": []},
+    ]
+    try:
+        assert readiness._check_team_accounts_exist() == ("pass", "All 2 team accounts exist", None)
+        assert readiness._check_team_group_membership()[:2] == ("fail", "1 in wrong group: team02")
+    finally:
+        patch.stopall()
+
+    assert manager.list_all_users.call_count == 2
+    assert manager.list_all_groups.call_count == 1
+
+
+def test_fixing_group_membership_says_when_authentik_cant_be_asked(rf):
     from core.admin_views import readiness
 
     Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
@@ -248,7 +273,7 @@ def test_fixing_group_membership_names_each_team_authentik_couldnt_answer_for(rf
     finally:
         patch.stopall()
 
-    assert body == {"success": False, "message": "Fixed 0 account(s); failed: team01: Network error (ConnectError)"}
+    assert body == {"success": False, "message": "Could not ask Authentik: Network error (ConnectError)"}
 
 
 def test_a_refused_group_add_never_shows_authentiks_url_or_answer(rf):
@@ -256,8 +281,11 @@ def test_a_refused_group_add_never_shows_authentiks_url_or_answer(rf):
 
     Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
     manager = patch("core.admin_views.readiness.AuthentikManager").start().return_value
-    manager.get_user_with_groups.return_value = {"pk": 5, "username": "team01", "groups_obj": []}
-    manager.get_group_by_name.return_value = {"pk": "g1", "name": "WCComps_BlueTeam01"}
+    manager.__enter__.return_value = manager
+    manager.list_all_users.return_value = [
+        {"pk": 5, "username": "team01", "uid": "u1", "is_active": True, "groups": []}
+    ]
+    manager.list_all_groups.return_value = [{"pk": "g1", "name": "WCComps_BlueTeam01", "parents": []}]
     manager.add_user_to_group.side_effect = AuthentikAPIError(
         "Add user 5 to group g1: Forbidden", 403, response_text='{"detail": "secret"}', url="https://auth.internal/x"
     )

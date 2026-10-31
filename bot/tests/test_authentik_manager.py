@@ -232,20 +232,6 @@ class TestAuthentikManager:
         with pytest.raises(AuthentikAPIError):
             manager.get_blueteam_binding("app-123")
 
-    def test_get_group_by_name_refuses_the_group_without_a_pk(self, manager: AuthentikManager) -> None:
-        """A malformed group must not read as a missing one."""
-        manager.client.get.return_value = self._answer({"results": [{"name": "WCComps_BlueTeam01", "pk": 5}]})
-
-        with pytest.raises(AuthentikAPIError):
-            manager.get_group_by_name("WCComps_BlueTeam01")
-
-    def test_get_user_with_groups_refuses_a_user_without_groups(self, manager: AuthentikManager) -> None:
-        """No groups_obj must not read as a user in no groups, which the group fix would then re-add."""
-        manager.client.get.return_value = self._answer({"results": [{"pk": 42, "username": "team01"}]})
-
-        with pytest.raises(AuthentikAPIError):
-            manager.get_user_with_groups("team01")
-
     def test_get_blueteam_binding_empty_results(self, manager: AuthentikManager) -> None:
         """Test BlueTeam binding with no results."""
         mock_response = Mock()
@@ -449,20 +435,21 @@ class TestAuthentikManager:
         assert manager.sees_any_sessions() is False
         assert manager.client.get.call_args.kwargs["params"] == {"page_size": "1"}
 
-    def test_find_user_returns_only_the_exact_username(self, manager: AuthentikManager) -> None:
-        """Authentik answering another user for team01 must not be taken as team01."""
+    def test_find_user_returns_only_the_exact_username_without_groups_obj(self, manager: AuthentikManager) -> None:
+        """Authentik answering another user for team01 must not be taken as team01, and find_user must pass
+        include_groups=false so Authentik does not serialize groups_obj."""
         manager.client.get.return_value = self._answer({"results": [{"pk": 1, "username": "akadmin"}]})
 
         assert manager.find_user("team01") is None
+        assert manager.client.get.call_args.kwargs["params"] == {"username": "team01", "include_groups": "false"}
 
     def test_lookups_refuse_a_redirected_answer(self, manager: AuthentikManager) -> None:
         manager.client.get.return_value = self._answer({"results": [{"pk": 42, "username": "team01"}]}, 302)
 
-        with pytest.raises(AuthentikAPIError):
-            manager.find_user("team01")
         for lookup in (
-            lambda: manager.get_user_with_groups("team01"),
-            lambda: manager.get_group_by_name("WCComps_BlueTeam01"),
+            lambda: manager.find_user("team01"),
+            manager.list_all_users,
+            manager.list_all_groups,
             manager.list_applications,
         ):
             with pytest.raises(AuthentikAPIError):

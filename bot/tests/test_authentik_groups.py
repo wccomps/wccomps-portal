@@ -33,7 +33,7 @@ def test_list_all_users_follows_pagination():
         return httpx.Response(
             200,
             json={
-                "results": [{"uid": f"u{page}", "is_active": True, "groups": []}],
+                "results": [{"pk": page, "username": f"u{page}", "uid": f"u{page}", "is_active": True, "groups": []}],
                 "pagination": {"next": page + 1 if page < 3 else 0},
             },
         )
