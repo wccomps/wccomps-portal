@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from typing import TypedDict, cast
+from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.models import User
@@ -11,17 +11,12 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from core.auth_utils import get_user_team, require_permission
 from core.stored_files import clean_name, file_response, stored_type
-from core.utils import ndjson_done, run_detached
+from core.utils import list_filters, ndjson_done, requested_sort, run_detached, stable_order
 from team.models import Team
 
 from .forms import PacketActionForm, PacketResendForm, PacketUploadForm
 from .models import Packet, PacketDistribution
 from .services import PacketDistributionService
-
-
-class PacketWithStats(TypedDict):
-    packet: Packet
-    stats: dict[str, int]
 
 
 @require_GET
@@ -77,28 +72,44 @@ def download_packet(request: HttpRequest, packet_id: int) -> HttpResponse:
 @require_GET
 @require_permission("gold_team")
 def packets_list(request: HttpRequest) -> HttpResponse:
-    """List all packets for GoldTeam administrators."""
-    packets = list(Packet.objects.with_distribution_stats().order_by("-created_at"))
+    from django.db.models import Q
 
-    # Active = draft or distributing (there's typically only one)
-    active_packet: Packet | None = None
-    active_stats: dict[str, int] = {}
-    history: list[PacketWithStats] = []
+    filters, filtered = list_filters(request, {"status": "", "search": ""})
 
-    for packet in packets:
-        stats = packet.get_distribution_stats()
-        if not active_packet and packet.status in ("draft", "distributing"):
-            active_packet = packet
-            active_stats = stats
-        else:
-            history.append({"packet": packet, "stats": stats})
+    active_packet = (
+        Packet.objects.with_distribution_stats()
+        .filter(status__in=("draft", "distributing"))
+        .order_by("-created_at")
+        .first()
+    )
+    active_stats: dict[str, int] = active_packet.get_distribution_stats() if active_packet else {}
+
+    history_qs = Packet.objects.with_distribution_stats()
+    if active_packet is not None:
+        history_qs = history_qs.exclude(pk=active_packet.pk)
+
+    if filters["status"]:
+        history_qs = history_qs.filter(status=filters["status"])
+    if search := filters["search"]:
+        history_qs = history_qs.filter(
+            Q(title__icontains=search) | Q(filename__icontains=search) | Q(uploaded_by__icontains=search)
+        )
+
+    sort_by = requested_sort(request, ("title", "status", "created_at"), "-created_at")
 
     context: dict[str, object] = {
         "active_packet": active_packet,
         "active_stats": active_stats,
-        "history": history,
+        "history": stable_order(history_qs, sort_by),
+        "filters": filters,
+        "filtered": filtered,
+        "sort_by": sort_by,
+        "status_choices": Packet.STATUS_CHOICES,
         "teams": Team.objects.filter(is_active=True).order_by("team_number"),
     }
+
+    if request.headers.get("HX-Request"):
+        return render(request, "packets/ops_packets_table.html", context)
 
     return render(request, "packets/ops_packets_list.html", context)
 

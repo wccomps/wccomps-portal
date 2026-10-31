@@ -5,81 +5,34 @@
 {% endblock orange_title %}
 {% block orange_content %}
     <c-page_header title="Review Queue" subtitle="Submitted assignments awaiting review" />
-    <c-module>
+    <c-module filtered="true">
         <c-slot name="toolbar">
             <c-link href="{% url 'orange_team:export_scores' %}" variant="default">Export CSV</c-link>
         </c-slot>
-        {% if review_assignments %}
-            <c-table id="review" aria_label="Assignments for review">
-                <c-slot name="headers">
-                    <tr>
-                        <c-table_header sortable="false">
-                            Check
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Team
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Assignee
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Score
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Status
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Actions
-                        </c-table_header>
-                    </tr>
-                </c-slot>
-                {% for assignment in review_assignments %}
-                    <tr>
-                        <td>{{ assignment.orange_check.title }}</td>
-                        <td>Team {{ assignment.team.team_number }}</td>
-                        <td>{{ assignment.user.username }}</td>
-                        <td>{% if assignment.score is not None %}{{ assignment.score }} / {{ assignment.orange_check.max_score }}{% endif %}</td>
-                        <td>
-                            {% if assignment.status == "submitted" %}
-                                <c-badge variant="warning">
-                                    Submitted
-                                </c-badge>
-                            {% elif assignment.status == "in_progress" %}
-                                <c-badge variant="info">
-                                    In Progress
-                                </c-badge>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if assignment.status == "submitted" %}
-                                <div class="d-flex gap-10">
-                                    <c-form action="{% url 'orange_team:assignment_approve' assignment.pk %}"
-                                            data-confirm="Approve this assignment?">
-                                        {% csrf_token %}
-                                        <c-button type="submit" variant="primary">
-                                            Approve
-                                        </c-button>
-                                    </c-form>
-                                    <c-form action="{% url 'orange_team:assignment_reject' assignment.pk %}"
-                                            data-confirm="Reject this assignment?">
-                                        {% csrf_token %}
-                                        <input type="text"
-                                               name="notes"
-                                               aria-label="Rejection reason for Team {{ assignment.team.team_number }}"
-                                               placeholder="Reason (optional)">
-                                        <c-button type="submit" variant="danger">
-                                            Reject
-                                        </c-button>
-                                    </c-form>
-                                </div>
-                            {% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-            </c-table>
-        {% else %}
-            <c-empty_state title="No assignments for review"
-                           description="No submitted assignments awaiting review." />
-        {% endif %}
+        <c-filter_toolbar form_id="orange-review-filter"
+                          hx_get="{% url 'orange_team:review_queue' %}"
+                          hx_target="#orange-review-content"
+                          hx_swap="outerHTML"
+                          hx_push_url="true">
+            <c-filter_field label="Status" id="id_status">
+                <select name="status" id="id_status" aria-label="Filter by status">
+                    <option value="" {% if not filters.status %}selected{% endif %}>All</option>
+                    <option value="submitted"
+                            {% if filters.status == "submitted" %}selected{% endif %}>Submitted</option>
+                    <option value="in_progress"
+                            {% if filters.status == "in_progress" %}selected{% endif %}>In Progress</option>
+                </select>
+            </c-filter_field>
+            <c-team_filter :numbers="team_numbers" value="{{ chosen_team|default_if_none:'' }}" />
+            <c-filter_field label="Search" id="id_search">
+                <input type="text"
+                       name="search"
+                       id="id_search"
+                       value="{{ filters.search }}"
+                       placeholder="Check or assignee..."
+                       aria-label="Search review queue" />
+            </c-filter_field>
+        </c-filter_toolbar>
+        {% include "orange_team/review_table.html" %}
     </c-module>
 {% endblock orange_content %}

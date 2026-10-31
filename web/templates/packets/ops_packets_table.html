@@ -1,0 +1,56 @@
+{% load cotton status_variants %}
+<div id="packets-history-content">
+    <c-table aria_label="Past packets">
+        <c-slot name="headers">
+            <tr>
+                <c-table_header sort_field="title" current_sort="{{ sort_by }}">
+                    Title
+                </c-table_header>
+                <c-table_header sort_field="status" current_sort="{{ sort_by }}">
+                    Status
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Stats
+                </c-table_header>
+                <c-table_header sort_field="created_at" current_sort="{{ sort_by }}">
+                    Created
+                </c-table_header>
+            </tr>
+        </c-slot>
+        {% for packet in history %}
+            <tr>
+                <td>
+                    <c-link href="{% url 'packet_detail' packet.id %}">{{ packet.title }}</c-link>
+                    <br>
+                    <small class="text-muted">{{ packet.filename }} ({{ packet.file_size|filesizeformat }})</small>
+                </td>
+                <td>
+                    <c-badge variant="{{ packet.status|badge_variant:'packet' }}">
+                        {{ packet.get_status_display }}
+                    </c-badge>
+                </td>
+                <td>
+                    {% with stats=packet.get_distribution_stats %}
+                        <small>{{ stats.sent }} sent, {{ stats.downloaded }} downloaded
+                            {% if stats.failed %}, <span class="text-danger">{{ stats.failed }} failed</span>{% endif %}
+                        </small>
+                    {% endwith %}
+                </td>
+                <td>
+                    <small>{{ packet.created_at|date:"Y-m-d H:i" }} by {{ packet.uploaded_by }}</small>
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="4">
+                    {% if filtered %}
+                        <c-no_matches items="packets" href="{% url 'packets_list' %}" />
+                    {% else %}
+                        <c-empty_state title="No past packets"
+                                       description="Completed or cancelled packets will appear here." />
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+    </c-table>
+</div>

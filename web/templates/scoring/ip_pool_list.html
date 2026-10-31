@@ -5,58 +5,24 @@
 {% block red_content %}
     {% load cotton %}
     <c-page_header title="IP Pools" subtitle="Manage your rotating source IP pools" />
-    <c-module>
+    <c-module filtered="true">
         <c-slot name="toolbar">
-            {% if pools %}<span class="text-muted">{{ pools|length }} pool(s)</span>{% endif %}
             <c-link href="{% url 'scoring:ip_pool_create' %}" variant="add">Create Pool</c-link>
         </c-slot>
-        {% if pools %}
-            <c-table aria_label="IP pools">
-                <c-slot name="headers">
-                    <tr>
-                        <c-table_header sortable="false">
-                            Pool Name
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            IP Count
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Findings
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Created
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                        </c-table_header>
-                    </tr>
-                </c-slot>
-                {% for pool in pools %}
-                    <tr>
-                        <td>
-                            <a href="{% url 'scoring:ip_pool_edit' pool.id %}"><strong>{{ pool.name }}</strong></a>
-                        </td>
-                        <td>{{ pool.ip_count }}</td>
-                        <td>{{ pool.findings.count }}</td>
-                        <td>{{ pool.created_at|date:"M d, Y" }}</td>
-                        <td>
-                            {% if not pool.findings.exists %}
-                                <c-form action="{% url 'scoring:ip_pool_delete' pool.id %}"
-                                        data-confirm="Delete pool '{{ pool.name }}'?">
-                                    {% csrf_token %}
-                                    <c-button type="submit" variant="danger">
-                                        Delete
-                                    </c-button>
-                                </c-form>
-                            {% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-            </c-table>
-        {% else %}
-            <c-empty_state title="No IP pools"
-                           description="Create a pool to use rotating source IPs in your findings.">
-                <c-link href="{% url 'scoring:ip_pool_create' %}" variant="add">Create Pool</c-link>
-            </c-empty_state>
-        {% endif %}
+        <c-filter_toolbar form_id="ip-pool-filter"
+                          hx_get="{% url 'scoring:ip_pool_list' %}"
+                          hx_target="#ip-pool-list-content"
+                          hx_swap="outerHTML"
+                          hx_push_url="true">
+            <c-filter_field label="Search" id="id_search">
+                <input type="text"
+                       name="search"
+                       id="id_search"
+                       value="{{ filters.search }}"
+                       placeholder="Pool name or IP..."
+                       aria-label="Search IP pools" />
+            </c-filter_field>
+        </c-filter_toolbar>
+        {% include "scoring/partials/ip_pool_table.html" %}
     </c-module>
 {% endblock red_content %}

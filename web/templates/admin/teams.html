@@ -40,60 +40,39 @@
                 </c-button>
             </form>
         </c-module>
-        <c-module class="mt-5">
-            <c-table id="teams_list" class="w-full" aria_label="Team management list">
-                <c-slot name="headers">
-                    <tr>
-                        <c-table_header sortable="false">
-                            Team #
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Name
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Members
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Status
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Discord
-                        </c-table_header>
-                    </tr>
-                </c-slot>
-                {% for item in teams %}
-                    <tr>
-                        <th>
-                            <a href="{% url 'admin_team_detail' item.team.team_number %}">{{ item.team.team_number }}</a>
-                        </th>
-                        <td>Team {{ item.team.team_number }}</td>
-                        <td>{{ item.member_count }}/{{ item.team.max_members }}</td>
-                        <td>
-                            {% if item.team.is_active %}
-                                <c-badge variant="success">
-                                    Active
-                                </c-badge>
-                            {% else %}
-                                <c-badge variant="danger">
-                                    Inactive
-                                </c-badge>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if item.team.discord_role_id %}
-                                <c-badge variant="success">
-                                    Configured
-                                </c-badge>
-                            {% else %}
-                                <c-badge variant="neutral">
-                                    Not set
-                                </c-badge>
-                            {% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-            </c-table>
-            <p class="paginator">{{ teams|length }} team(s)</p>
+        <c-module class="mt-5" filtered="true">
+            <c-filter_toolbar form_id="teams-filter"
+                              hx_get="{% url 'admin_teams' %}"
+                              hx_target="#teams-list-content"
+                              hx_swap="outerHTML"
+                              hx_push_url="true">
+                <c-filter_field label="Status" id="id_status">
+                    <select name="status" id="id_status" aria-label="Filter by status">
+                        <option value="" {% if not filters.status %}selected{% endif %}>All</option>
+                        <option value="active" {% if filters.status == "active" %}selected{% endif %}>Active</option>
+                        <option value="inactive"
+                                {% if filters.status == "inactive" %}selected{% endif %}>Inactive</option>
+                    </select>
+                </c-filter_field>
+                <c-filter_field label="Discord" id="id_discord">
+                    <select name="discord" id="id_discord" aria-label="Filter by Discord status">
+                        <option value="" {% if not filters.discord %}selected{% endif %}>All</option>
+                        <option value="configured"
+                                {% if filters.discord == "configured" %}selected{% endif %}>Configured</option>
+                        <option value="not_set"
+                                {% if filters.discord == "not_set" %}selected{% endif %}>Not Set</option>
+                    </select>
+                </c-filter_field>
+                <c-filter_field label="Search" id="id_search">
+                    <input type="text"
+                           name="search"
+                           id="id_search"
+                           value="{{ filters.search }}"
+                           placeholder="Team number or name..."
+                           aria-label="Search teams" />
+                </c-filter_field>
+            </c-filter_toolbar>
+            {% include "admin/teams_table.html" %}
         </c-module>
         <c-toast />
     </div>

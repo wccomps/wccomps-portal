@@ -6,77 +6,35 @@
 {% block admin_content %}
     <div id="content-main">
         <c-page_header title="School Information" />
-        <c-module id="changelist">
+        <c-module id="changelist" filtered="true">
             <c-slot name="toolbar">
                 <c-link href="{% url 'school_info_export' %}">Export CSV</c-link>
                 <c-link href="{% url 'school_info_import' %}" variant="add">Import from CSV</c-link>
             </c-slot>
-            <c-table id="result_list"
-                     class="w-full"
-                     aria_label="School information for all teams">
-                <c-slot name="headers">
-                    <tr>
-                        <c-table_header sortable="false">
-                            Team
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            School Name
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Contact Email
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Secondary Email
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Last Updated
-                        </c-table_header>
-                    </tr>
-                </c-slot>
-                {% for item in teams %}
-                    <tr>
-                        <th>
-                            <a href="{% url 'school_info_edit' item.team.team_number %}">Team {{ item.team.team_number }}</a>
-                            <div>{{ item.team.team_name }}</div>
-                        </th>
-                        <td>
-                            {% if item.school_info %}
-                                {{ item.school_info.school_name }}
-                            {% else %}
-                                Not set
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if item.school_info %}
-                                {{ item.school_info.contact_email }}
-                            {% else %}
-                                Not set
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if item.school_info %}
-                                {{ item.school_info.secondary_email }}
-                            {% else %}
-                                Not set
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if item.school_info %}
-                                {{ item.school_info.updated_at|timesince }} ago
-                            {% else %}
-                                Never
-                            {% endif %}
-                        </td>
-                    </tr>
-                {% empty %}
-                    <tr>
-                        <td colspan="5">
-                            <c-empty_state title="No teams" description="No teams have been configured yet." />
-                        </td>
-                    </tr>
-                {% endfor %}
-            </c-table>
-            <p class="paginator">{{ teams|length }} team(s)</p>
+            <c-filter_toolbar form_id="school-info-filter"
+                              hx_get="{% url 'school_info' %}"
+                              hx_target="#school-info-content"
+                              hx_swap="outerHTML"
+                              hx_push_url="true">
+                <c-filter_field label="Status" id="id_status">
+                    <select name="status" id="id_status" aria-label="Filter by status">
+                        <option value="" {% if not filters.status %}selected{% endif %}>All</option>
+                        <option value="configured"
+                                {% if filters.status == "configured" %}selected{% endif %}>Configured</option>
+                        <option value="not_set"
+                                {% if filters.status == "not_set" %}selected{% endif %}>Not Set</option>
+                    </select>
+                </c-filter_field>
+                <c-filter_field label="Search" id="id_search">
+                    <input type="text"
+                           name="search"
+                           id="id_search"
+                           value="{{ filters.search }}"
+                           placeholder="School, email, or team..."
+                           aria-label="Search school information" />
+                </c-filter_field>
+            </c-filter_toolbar>
+            {% include "school_info_table.html" %}
             <c-button_row class="mt-20 justify-end">
                 <c-link href="{% url 'school_info_clear' %}" variant="danger">Clear All</c-link>
             </c-button_row>

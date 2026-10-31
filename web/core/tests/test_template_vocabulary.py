@@ -229,7 +229,7 @@ VARIANT_EXCEPTIONS: dict[str, str] = {
         "event_panel.STATUS_SHOWN maps each status to a variant; test_every_stored_status_maps_to_a_known_variant "
         "checks it"
     ),
-    'registration/events/list.html:<c-badge variant="{{ status_badge }}">': (
+    'registration/events/table.html:<c-badge variant="{{ status_badge }}">': (
         "registration.views.EVENT_LIST_STATUS_SHOWN maps each event status to a variant; "
         "test_every_stored_status_maps_to_a_known_variant checks it"
     ),

@@ -105,7 +105,15 @@ CASES = [
         query=lambda w: {"token": st.one_of(st.just("prop-link-token"), hostile_text())},
         post=lambda w: _fields(LinkConfirmForm(), token=st.just("prop-link-token")),
     ),
-    ViewCase("school_info", GOLD),
+    ViewCase(
+        "school_info",
+        GOLD,
+        query=lambda w: {
+            "status": st.one_of(st.sampled_from(["configured", "not_set"]), hostile_text()),
+            "search": hostile_text(),
+            "sort": hostile_text(),
+        },
+    ),
     ViewCase("school_info_export", GOLD),
     ViewCase("school_info_clear", GOLD),
     ViewCase("school_info_import", GOLD, post=_school_import),
@@ -132,7 +140,16 @@ CASES = [
     ),
     ViewCase("admin_competition_apps", OPS),
     ViewCase("admin_competition_setup", OPS),
-    ViewCase("admin_teams", OPS),
+    ViewCase(
+        "admin_teams",
+        OPS,
+        query=lambda w: {
+            "status": st.one_of(st.sampled_from(["active", "inactive"]), hostile_text()),
+            "discord": st.one_of(st.sampled_from(["configured", "not_set"]), hostile_text()),
+            "search": hostile_text(),
+            "sort": hostile_text(),
+        },
+    ),
     ViewCase(
         "admin_teams_bulk_action",
         OPS,
@@ -152,7 +169,15 @@ CASES = [
     ViewCase("admin_sync_roles", OPS),
     ViewCase("admin_sync_roles_action", OPS, post=lambda w: _fields(SyncRolesForm()), methods=("POST",)),
     ViewCase("admin_task_status", OPS),
-    ViewCase("admin_categories", may("gold_team", "ticketing_admin")),
+    ViewCase(
+        "admin_categories",
+        may("gold_team", "ticketing_admin"),
+        query=lambda w: {
+            "visibility": st.one_of(st.sampled_from(["visible", "hidden"]), hostile_text()),
+            "search": hostile_text(),
+            "sort": hostile_text(),
+        },
+    ),
     ViewCase(
         "admin_category_create",
         may("gold_team", "ticketing_admin"),

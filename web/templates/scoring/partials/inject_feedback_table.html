@@ -1,128 +1,134 @@
 {% load cotton %}
 <div id="inject-feedback-content">
-    {% if scores %}
-        <c-form id="bulk-approve-form"
-                action="{% url 'scoring:bulk_approve_inject_feedback' %}"
-                x-data="feedbackBulkSelect"
-                ::data-confirm="approveQuestion">
-            {% csrf_token %}
-            <c-table id="inject_feedback" aria_label="Inject feedback review">
-                <c-slot name="headers">
-                    <tr>
-                        <th scope="col" class="action-checkbox-column">
+    <c-form id="bulk-approve-form"
+            action="{% url 'scoring:bulk_approve_inject_feedback' %}"
+            x-data="feedbackBulkSelect"
+            ::data-confirm="approveQuestion">
+        {% csrf_token %}
+        <c-table id="inject_feedback" aria_label="Inject feedback review">
+            <c-slot name="headers">
+                <tr>
+                    <th scope="col" class="action-checkbox-column">
+                        <input type="checkbox"
+                               :checked="allSelected"
+                               :indeterminate="someSelected"
+                               @click="toggleAll"
+                               aria-label="Select all">
+                    </th>
+                    <c-table_header sort_field="inject_name" current_sort="{{ sort_by }}">
+                        Inject
+                    </c-table_header>
+                    <c-table_header sort_field="team__team_number"
+                                    current_sort="{{ sort_by }}">
+                        Team
+                    </c-table_header>
+                    <c-table_header sort_field="points_awarded"
+                                    current_sort="{{ sort_by }}"
+                                    class="text-right">
+                        Score
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Feedback
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Status
+                    </c-table_header>
+                    <c-table_header sortable="false">
+                        Actions
+                    </c-table_header>
+                </tr>
+            </c-slot>
+            {% for score in scores %}
+                {# The editor's scope is the row, so its own Save and Approve are not a click away from it #}
+                <tr x-data="editableCell" @click.outside="stopEditing">
+                    <td class="action-checkbox">
+                        {% if not score.feedback_approved %}
                             <input type="checkbox"
-                                   :checked="allSelected"
-                                   :indeterminate="someSelected"
-                                   @click="toggleAll"
-                                   aria-label="Select all">
-                        </th>
-                        <c-table_header sortable="false">
-                            Inject
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Team
-                        </c-table_header>
-                        <c-table_header sortable="false" class="text-right">
-                            Score
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Feedback
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Status
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Actions
-                        </c-table_header>
-                    </tr>
-                </c-slot>
-                {% for score in scores %}
-                    {# The editor's scope is the row, so its own Save and Approve are not a click away from it #}
-                    <tr x-data="editableCell" @click.outside="stopEditing">
-                        <td class="action-checkbox">
-                            {% if not score.feedback_approved %}
-                                <input type="checkbox"
-                                       name="score_ids"
-                                       value="{{ score.id }}"
-                                       data-feedback-id="{{ score.id }}"
-                                       :checked="selectedMap.{{ score.id|jskey }}"
-                                       @change="toggleItem"
-                                       aria-label="Select {{ score.inject_name }} Team {{ score.team.team_number }}">
+                                   name="score_ids"
+                                   value="{{ score.id }}"
+                                   data-feedback-id="{{ score.id }}"
+                                   :checked="selectedMap.{{ score.id|jskey }}"
+                                   @change="toggleItem"
+                                   aria-label="Select {{ score.inject_name }} Team {{ score.team.team_number }}">
+                        {% endif %}
+                    </td>
+                    <td>{{ score.inject_name }}</td>
+                    <td>Team {{ score.team.team_number }}</td>
+                    <td class="text-right">{{ score.points_awarded|floatformat:0 }}/{{ score.max_points|floatformat:0 }}</td>
+                    <td>
+                        <div x-show="notEditing"
+                             @click="startEditing"
+                             class="click-to-edit"
+                             role="button"
+                             tabindex="0"
+                             @keydown.enter="startEditing"
+                             title="Click to edit">{{ score.feedback|default:"(click to add)" }}</div>
+                        <textarea x-show="editing"
+                                  x-ref="editor"
+                                  @keydown.escape="stopEditing"
+                                  @input="onInput"
+                                  name="feedback"
+                                  form="save-{{ score.id }}"
+                                  aria-label="Feedback for {{ score.inject_name }} Team {{ score.team.team_number }}">{{ score.feedback }}</textarea>
+                    </td>
+                    <td>
+                        {% if score.feedback_approved %}
+                            <c-badge variant="success">
+                                Approved
+                            </c-badge>
+                            {% if score.feedback_approved_by %}
+                                <br>
+                                <small class="text-muted">by {{ score.feedback_approved_by.username }}</small>
                             {% endif %}
-                        </td>
-                        <td>{{ score.inject_name }}</td>
-                        <td>Team {{ score.team.team_number }}</td>
-                        <td class="text-right">{{ score.points_awarded|floatformat:0 }}/{{ score.max_points|floatformat:0 }}</td>
-                        <td>
-                            <div x-show="notEditing"
-                                 @click="startEditing"
-                                 class="click-to-edit"
-                                 role="button"
-                                 tabindex="0"
-                                 @keydown.enter="startEditing"
-                                 title="Click to edit">{{ score.feedback|default:"(click to add)" }}</div>
-                            <textarea x-show="editing"
-                                      x-ref="editor"
-                                      @keydown.escape="stopEditing"
-                                      @input="onInput"
-                                      name="feedback"
-                                      form="save-{{ score.id }}"
-                                      aria-label="Feedback for {{ score.inject_name }} Team {{ score.team.team_number }}">{{ score.feedback }}</textarea>
-                        </td>
-                        <td>
-                            {% if score.feedback_approved %}
-                                <c-badge variant="success">
-                                    Approved
-                                </c-badge>
-                                {% if score.feedback_approved_by %}
-                                    <br>
-                                    <small class="text-muted">by {{ score.feedback_approved_by.username }}</small>
-                                {% endif %}
-                            {% else %}
-                                <c-badge variant="warning">
-                                    Pending
-                                </c-badge>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <c-button type="submit" form="save-{{ score.id }}">
-                                Save
+                        {% else %}
+                            <c-badge variant="warning">
+                                Pending
+                            </c-badge>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <c-button type="submit" form="save-{{ score.id }}">
+                            Save
+                        </c-button>
+                        {% if not score.feedback_approved %}
+                            <c-button type="submit"
+                                      form="approve-{{ score.id }}"
+                                      variant="primary"
+                                      ::disabled="dirty"
+                                      ::title="approveHint">
+                                Approve
                             </c-button>
-                            {% if not score.feedback_approved %}
-                                <c-button type="submit"
-                                          form="approve-{{ score.id }}"
-                                          variant="primary"
-                                          ::disabled="dirty"
-                                          ::title="approveHint">
-                                    Approve
-                                </c-button>
-                            {% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-            </c-table>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="7">
+                        {% if filtered %}
+                            <c-no_matches items="feedback items" href="{% url 'scoring:review_inject_feedback' %}" />
+                        {% else %}
+                            <c-empty_state title="No feedback to review"
+                                           description="No approved inject scores have comments yet" />
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+        </c-table>
+    </c-form>
+    {% for score in scores %}
+        <c-form id="save-{{ score.id }}"
+                action="{% url 'scoring:save_inject_feedback' %}"
+                hidden>
+            {% csrf_token %}
+            <input type="hidden" name="score_id" value="{{ score.id }}">
         </c-form>
-        {% for score in scores %}
-            <c-form id="save-{{ score.id }}"
-                    action="{% url 'scoring:save_inject_feedback' %}"
+        {% if not score.feedback_approved %}
+            <c-form id="approve-{{ score.id }}"
+                    action="{% url 'scoring:approve_inject_feedback' %}"
                     hidden>
                 {% csrf_token %}
                 <input type="hidden" name="score_id" value="{{ score.id }}">
             </c-form>
-            {% if not score.feedback_approved %}
-                <c-form id="approve-{{ score.id }}"
-                        action="{% url 'scoring:approve_inject_feedback' %}"
-                        hidden>
-                    {% csrf_token %}
-                    <input type="hidden" name="score_id" value="{{ score.id }}">
-                </c-form>
-            {% endif %}
-        {% endfor %}
-    {% else %}
-        {% if filtered %}
-            <c-no_matches items="feedback items" href="{% url 'scoring:review_inject_feedback' %}" />
-        {% else %}
-            <c-empty_state title="No feedback to review" description="No approved inject scores have comments yet" />
         {% endif %}
-    {% endif %}
+    {% endfor %}
 </div>

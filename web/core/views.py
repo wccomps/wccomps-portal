@@ -9,6 +9,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest, PermissionDenied
 from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
+from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from registration.forms import ShownSchoolForm
@@ -54,6 +55,7 @@ from .auth_utils import (
 from .errors import json_endpoint
 from .form_errors import ask_for_the_file_again
 from .forms import LinkConfirmForm, SchoolInfoEditForm
+from .utils import list_filters, optional_int, requested_sort, stable_order
 
 logger = logging.getLogger(__name__)
 
@@ -195,24 +197,48 @@ def link_callback(request: HttpRequest) -> HttpResponse:
 
 @require_permission("gold_team")
 def school_info(request: HttpRequest) -> HttpResponse:
-    teams = Team.objects.filter(is_active=True).select_related("school_info__school").order_by("team_number")
+    filters, filtered = list_filters(request, {"status": "", "search": ""})
+    teams = Team.objects.filter(is_active=True).select_related("school_info__school")
 
-    teams_with_info = []
-    for team in teams:
-        try:
-            school_info = team.school_info
-        except SchoolInfo.DoesNotExist:
-            school_info = None
+    if filters["status"] == "configured":
+        teams = teams.filter(school_info__isnull=False)
+    elif filters["status"] == "not_set":
+        teams = teams.filter(school_info__isnull=True)
 
-        teams_with_info.append({"team": team, "school_info": school_info})
+    if search := filters["search"]:
+        query = (
+            Q(team_name__icontains=search)
+            | Q(school_info__school__name__icontains=search)
+            | Q(school_info__contact_email__icontains=search)
+            | Q(school_info__secondary_email__icontains=search)
+        )
+        if (number := optional_int(search)) is not None:
+            query |= Q(team_number=number)
+        teams = teams.filter(query)
 
-    return render(
+    sort_by = requested_sort(
         request,
-        "school_info.html",
-        {
-            "teams": teams_with_info,
-        },
+        (
+            "team_number",
+            "school_info__school__name",
+            "school_info__contact_email",
+            "school_info__secondary_email",
+            "school_info__updated_at",
+        ),
+        "team_number",
     )
+
+    context = {
+        "teams": stable_order(teams, sort_by),
+        "filters": filters,
+        "filtered": filtered,
+        "sort_by": sort_by,
+    }
+
+    if request.headers.get("HX-Request"):
+        return render(request, "school_info_table.html", context)
+
+    return render(request, "school_info.html", context)
 
 
 @require_permission("gold_team")

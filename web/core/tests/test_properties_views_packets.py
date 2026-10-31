@@ -11,6 +11,7 @@ from core.tests.views_harness import (
     echo_sweep,
     every_allowed_role_gets_in,
     form_fields,
+    hostile_text,
     may,
 )
 
@@ -20,7 +21,15 @@ TEAMS = may("blue_team")
 CASES = [
     ViewCase("team_packet", TEAMS),
     ViewCase("download_packet", TEAMS),
-    ViewCase("packets_list", GOLD),
+    ViewCase(
+        "packets_list",
+        GOLD,
+        query=lambda w: {
+            "status": st.one_of(st.sampled_from(["draft", "distributing", "completed", "cancelled"]), hostile_text()),
+            "search": hostile_text(),
+            "sort": hostile_text(),
+        },
+    ),
     ViewCase("upload_packet", GOLD, post=lambda w: form_fields(PacketUploadForm())),
     ViewCase("packet_detail", GOLD),
     ViewCase(

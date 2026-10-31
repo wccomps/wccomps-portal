@@ -10,7 +10,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import get_user_team, has_permission, require_permission, team_record_or_404
 from core.stored_files import file_response
-from core.utils import by_approval, by_team, chosen_team, list_filters, team_numbers
+from core.utils import by_approval, by_team, chosen_team, list_filters, requested_sort, stable_order, team_numbers
 from team.models import Team
 
 from ..calculator import calculate_suggested_recovery_points, suggest_red_score_matches
@@ -79,7 +79,8 @@ def submit_incident_report(request: HttpRequest) -> HttpResponse:
 
 
 def incident_list(request: HttpRequest) -> HttpResponse:
-    """List incident reports (all reports for incident staff, or the user's team reports)."""
+    from django.db.models import Q
+
     user = cast(User, request.user)
 
     if has_permission(user, INCIDENT_STAFF):
@@ -88,11 +89,29 @@ def incident_list(request: HttpRequest) -> HttpResponse:
         incidents = IncidentReport.objects.filter(team=user_team)
     else:
         raise PermissionDenied
-    incidents = incidents.select_related("team", "submitted_by").order_by("-created_at")
+
+    filters, filtered = list_filters(request, {"status": "all", "search": ""})
+    incidents = by_approval(incidents, filters["status"])
+    if search := filters["search"]:
+        incidents = incidents.filter(
+            Q(attack_description__icontains=search)
+            | Q(affected_service__icontains=search)
+            | Q(source_ip__icontains=search)
+        )
+
+    sort_by = requested_sort(request, ("id", "created_at", "attack_detected_at"), "-created_at")
+    incidents = stable_order(incidents.select_related("team", "submitted_by"), sort_by)
 
     context = {
         "incidents": incidents,
+        "filters": filters,
+        "filtered": filtered,
+        "sort_by": sort_by,
     }
+
+    if request.headers.get("HX-Request"):
+        return render(request, "scoring/partials/incident_list_table.html", context)
+
     return render(request, "scoring/incident_list.html", context)
 
 
