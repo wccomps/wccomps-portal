@@ -65,11 +65,9 @@ class TestUpdateUserDiscordId:
 
         assert result is True
 
-        # Verify GET searched by username
         manager.client.get.assert_called_once()
-        assert manager.client.get.call_args.kwargs["params"] == {"username": "testuser", "include_groups": "true"}
+        assert manager.client.get.call_args.kwargs["params"] == {"username": "testuser", "include_groups": "false"}
 
-        # Verify PATCH used the integer PK
         manager.client.patch.assert_called_once()
         assert "/42/" in manager.client.patch.call_args[0][0]
         call_kwargs = manager.client.patch.call_args[1]

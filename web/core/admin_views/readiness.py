@@ -71,12 +71,9 @@ def _check_team_accounts_exist() -> CheckResult:
     if not active_teams.exists():
         return ("warn", "No active teams", None)
 
-    missing: list[str] = []
     with AuthentikManager() as mgr:
-        for team in active_teams:
-            username = team_username(team.team_number)
-            if not mgr.get_user_with_groups(username):
-                missing.append(username)
+        existing = {u["username"] for u in mgr.list_all_users()}
+    missing = [username for team in active_teams if (username := team_username(team.team_number)) not in existing]
 
     if missing:
         names = ", ".join(missing[:5])
@@ -95,15 +92,17 @@ def _check_team_group_membership() -> CheckResult:
     if not active_teams.exists():
         return ("warn", "No active teams", None)
 
-    misconfigured: list[str] = []
     with AuthentikManager() as mgr:
-        for team in active_teams:
-            username = team_username(team.team_number)
-            user = mgr.get_user_with_groups(username)
-            if not user:
-                continue  # handled by account existence check
-            if all(g["name"] != team.authentik_group for g in user["groups_obj"]):
-                misconfigured.append(username)
+        users = {u["username"]: u["groups"] for u in mgr.list_all_users()}
+        groups = {g["name"]: g["pk"] for g in mgr.list_all_groups()}
+    misconfigured: list[str] = []
+    for team in active_teams:
+        username = team_username(team.team_number)
+        if username not in users:
+            continue  # handled by account existence check
+        group_pk = groups.get(team.authentik_group)
+        if not group_pk or group_pk not in users[username]:
+            misconfigured.append(username)
 
     if misconfigured:
         names = ", ".join(misconfigured[:5])
@@ -386,18 +385,26 @@ def _fix_group_membership(request: HttpRequest) -> JsonResponse:
     fixed = 0
     failed: list[str] = []
     with AuthentikManager() as mgr:
+        try:
+            users = {u["username"]: u for u in mgr.list_all_users()}
+            groups = {g["name"]: g["pk"] for g in mgr.list_all_groups()}
+        except AuthentikAPIError as e:
+            return JsonResponse({"success": False, "message": f"Could not ask Authentik: {reason_for(e)}"})
+
         for team in active_teams:
             username = team_username(team.team_number)
             expected_group = team.authentik_group
+            user = users.get(username)
+            if not user:
+                continue
+            group_pk = groups.get(expected_group)
+            if not group_pk:
+                failed.append(f"{username}: group {expected_group} not found")
+                continue
+            if group_pk in user["groups"]:
+                continue
             try:
-                user = mgr.get_user_with_groups(username)
-                if not user or any(g["name"] == expected_group for g in user["groups_obj"]):
-                    continue
-                group = mgr.get_group_by_name(expected_group)
-                if not group:
-                    failed.append(f"{username}: group {expected_group} not found")
-                    continue
-                mgr.add_user_to_group(user["pk"], group["pk"])
+                mgr.add_user_to_group(user["pk"], group_pk)
             except AuthentikAPIError as e:
                 failed.append(f"{username}: {reason_for(e)}")
                 continue
