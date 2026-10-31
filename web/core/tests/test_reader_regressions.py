@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 from quotient.client import QuotientClient
 
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
+from core.proxmox import ProxmoxClient
 from core.tests.external_json import Answer, answer_lists, deep, near, serving
 from core.tests.strategies import rolled_back
 
@@ -260,3 +261,40 @@ def test_a_sign_in_takes_only_usable_answers(answers: list[Answer]) -> None:
         assert response.status_code < 500
         for row in UserGroups.objects.all():
             assert isinstance(row.groups, list) and all(isinstance(g, str) for g in row.groups)
+
+
+PROXMOX_POOL = {
+    "data": {
+        "members": [
+            {"type": "qemu", "vmid": 10105, "name": "team01-web", "node": "pve01", "status": "running", "template": 0}
+        ]
+    }
+}
+
+
+@example(
+    body={
+        "data": {
+            "members": [
+                {"type": "qemu", "vmid": 10105, "name": "team01-web", "node": "pve01", "status": "", "template": 0}
+            ]
+        }
+    }
+)
+@example(
+    body={
+        "data": {
+            "members": [
+                {"type": "qemu", "vmid": 10105, "name": "team01-web", "node": "pve01", "status": "\x00", "template": 0}
+            ]
+        }
+    }
+)
+@given(body=near(PROXMOX_POOL))
+def test_a_proxmox_vm_with_a_blank_status_reads_as_unknown(body: object) -> None:
+    """list_team_vms defaulted a missing or null status to 'unknown', but kept an empty string (or control-only
+    string after stripping) as status=''."""
+    client = ProxmoxClient(base_url="https://proxmox.test", api_token="user@pam!token=secret")
+    with serving([answer(body)]):
+        vms = client.list_team_vms(1)
+    assert vms is None or all(isinstance(vm.status, str) and vm.status for vm in vms)
