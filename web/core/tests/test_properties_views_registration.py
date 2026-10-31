@@ -34,15 +34,37 @@ CASES = [
     ViewCase(
         "registration_review_list",
         GOLD,
-        query=lambda w: {"status": st.one_of(st.sampled_from(["pending", "approved", "rejected"]), hostile_text())},
+        query=lambda w: {
+            "status": st.one_of(st.sampled_from(["pending", "approved", "rejected"]), hostile_text()),
+            "search": hostile_text(),
+            "sort": hostile_text(),
+        },
     ),
     ViewCase("registration_approve", GOLD, idempotent=(TeamRegistration,)),
     ViewCase("registration_reject", GOLD, post=lambda w: form_fields(RejectRegistrationForm())),
-    ViewCase("registration_season_list", GOLD),
+    ViewCase(
+        "registration_season_list",
+        GOLD,
+        query=lambda w: {
+            "status": st.one_of(st.sampled_from(["active", "inactive"]), hostile_text()),
+            "search": hostile_text(),
+            "sort": hostile_text(),
+        },
+    ),
     ViewCase("registration_season_create", GOLD, post=lambda w: form_fields(SeasonForm())),
     ViewCase("registration_season_edit", GOLD, post=lambda w: form_fields(SeasonForm()), idempotent=(Season,)),
     ViewCase("registration_season_delete", GOLD),
-    ViewCase("registration_event_list", GOLD),
+    ViewCase(
+        "registration_event_list",
+        GOLD,
+        query=lambda w: {
+            "event_type": st.one_of(
+                st.sampled_from(["invitational", "qualifier", "regional", "state"]), hostile_text()
+            ),
+            "search": hostile_text(),
+            "sort": hostile_text(),
+        },
+    ),
     ViewCase("registration_event_create", GOLD, post=lambda w: form_fields(EventForm())),
     ViewCase("registration_event_detail", GOLD),
     ViewCase("registration_event_edit", GOLD, post=lambda w: form_fields(EventForm()), idempotent=(Event,)),

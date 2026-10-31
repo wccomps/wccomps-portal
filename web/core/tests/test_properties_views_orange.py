@@ -46,8 +46,25 @@ CASES = [
     ViewCase("orange_team:dashboard", ORANGE),
     ViewCase("orange_team:toggle_checkin", ORANGE),
     ViewCase("orange_team:admin_toggle_checkin", LEAD),
-    ViewCase("orange_team:review_queue", LEAD),
-    ViewCase("orange_team:check_list", LEAD),
+    ViewCase(
+        "orange_team:review_queue",
+        LEAD,
+        query=lambda w: {
+            "status": st.one_of(st.sampled_from(["submitted", "in_progress"]), hostile_text()),
+            "team": st.one_of(st.sampled_from([str(t) for t in w.ids("team_number")]), hostile_text()),
+            "search": hostile_text(),
+            "sort": hostile_text(),
+        },
+    ),
+    ViewCase(
+        "orange_team:check_list",
+        LEAD,
+        query=lambda w: {
+            "status": st.one_of(st.sampled_from(["open", "upcoming", "closed", "unscheduled"]), hostile_text()),
+            "search": hostile_text(),
+            "sort": hostile_text(),
+        },
+    ),
     ViewCase("orange_team:auto_assign_all", LEAD),
     ViewCase("orange_team:check_create", LEAD, post=_check),
     ViewCase("orange_team:check_detail", LEAD),

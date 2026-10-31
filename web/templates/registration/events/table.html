@@ -1,0 +1,68 @@
+{% load cotton %}
+<div id="events-list-content">
+    <c-table id="events_list" class="w-full" aria_label="Events list">
+        <c-slot name="headers">
+            <tr>
+                <c-table_header sort_field="name" current_sort="{{ sort_by }}">
+                    Name
+                </c-table_header>
+                <c-table_header sort_field="event_type" current_sort="{{ sort_by }}">
+                    Type
+                </c-table_header>
+                <c-table_header sort_field="date" current_sort="{{ sort_by }}">
+                    Date
+                </c-table_header>
+                <c-table_header sort_field="start_time" current_sort="{{ sort_by }}">
+                    Time
+                </c-table_header>
+                <c-table_header sort_field="enrollment_count" current_sort="{{ sort_by }}">
+                    Enrollments
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Status
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Actions
+                </c-table_header>
+            </tr>
+        </c-slot>
+        {% for event, status_word, status_badge in events %}
+            <tr>
+                <td>
+                    <a href="{% url 'registration_event_detail' event_id=event.id %}">{{ event.name }}</a>
+                </td>
+                <td>{{ event.get_event_type_display }}</td>
+                <td>{{ event.date|date:"M d, Y" }}</td>
+                <td>{{ event.start_time|time:"g:i A" }} to {{ event.end_time|time:"g:i A" }}</td>
+                <td>{{ event.enrollment_count|default:0 }} / {{ event.max_teams }}</td>
+                <td>
+                    <c-badge variant="{{ status_badge }}">
+                        {{ status_word }}
+                    </c-badge>
+                </td>
+                <td class="field-actions">
+                    <c-link href="{% url 'registration_event_detail' event_id=event.id %}"
+                            variant="secondary">View</c-link>
+                    <c-link href="{% url 'registration_event_edit' event_id=event.id %}"
+                            variant="secondary">Edit</c-link>
+                    <c-link href="{% url 'registration_event_delete' event_id=event.id %}"
+                            variant="danger">Delete</c-link>
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="7">
+                    {% if filtered %}
+                        <c-no_matches items="events"
+                                      href="{% url 'registration_event_list' season_id=season.id %}" />
+                    {% else %}
+                        <c-empty_state title="No events in this season yet">
+                            <c-link href="{% url 'registration_event_create' season_id=season.id %}"
+                                    variant="add">Create Event</c-link>
+                        </c-empty_state>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+    </c-table>
+</div>

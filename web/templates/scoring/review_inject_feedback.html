@@ -72,7 +72,16 @@
                     {% endfor %}
                 </select>
             </c-filter_field>
+            <c-team_filter :numbers="team_numbers" value="{{ chosen_team|default_if_none:'' }}" />
             <c-approval_filter value="{{ filters.status }}" />
+            <c-filter_field label="Search" id="id_search">
+                <input type="text"
+                       name="search"
+                       id="id_search"
+                       value="{{ filters.search }}"
+                       placeholder="Inject or feedback..."
+                       aria-label="Search feedback" />
+            </c-filter_field>
         </c-filter_toolbar>
         {% include "scoring/partials/inject_feedback_table.html" %}
     </c-module>

@@ -5,7 +5,7 @@
 {% endblock orange_title %}
 {% block orange_content %}
     <c-page_header title="Manage Checks" subtitle="Coverage and volunteers" />
-    <c-module title="Checks">
+    <c-module title="Checks" filtered="true">
         <c-slot name="toolbar">
             <c-link href="{% url 'orange_team:check_create' %}" variant="add">Create Check</c-link>
             <c-form action="{% url 'orange_team:auto_assign_all' %}" class="d-inline">
@@ -15,74 +15,32 @@
                 </c-button>
             </c-form>
         </c-slot>
-        {% if checks %}
-            <c-table id="check-list" aria_label="Orange team checks">
-                <c-slot name="headers">
-                    <tr>
-                        <c-table_header sortable="false">
-                            Check
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Window
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Max
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Status
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Scored
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Actions
-                        </c-table_header>
-                    </tr>
-                </c-slot>
-                {% for check in checks %}
-                    <tr>
-                        <td>
-                            <strong><a href="{% url 'orange_team:check_detail' check.pk %}">{{ check.title }}</a></strong>
-                        </td>
-                        <td>
-                            {% if check.scheduled_at %}
-                                {{ check.scheduled_at|date:"H:i" }}
-                                {% if check.window_end %}to {{ check.window_end|date:"H:i" }}{% endif %}
-                            {% endif %}
-                        </td>
-                        <td>{{ check.max_score }}</td>
-                        <td>
-                            {% if check.window_state == "open" %}
-                                <c-badge variant="info">
-                                    Live
-                                </c-badge>
-                            {% elif check.window_state == "upcoming" %}
-                                <c-badge variant="neutral">
-                                    Upcoming
-                                </c-badge>
-                            {% elif check.window_state == "closed" %}
-                                <c-badge variant="warning">
-                                    Closed
-                                </c-badge>
-                            {% else %}
-                                <c-badge variant="neutral">
-                                    Draft
-                                </c-badge>
-                            {% endif %}
-                        </td>
-                        <td>{{ check.scored_count }}/{{ check.team_total }}</td>
-                        <td>
-                            <a href="{% url 'orange_team:check_edit' check.pk %}">Edit</a>
-                            ·
-                            <a href="{% url 'orange_team:check_assign' check.pk %}">Assign</a>
-                        </td>
-                    </tr>
-                {% endfor %}
-            </c-table>
-        {% else %}
-            <c-empty_state title="No checks"
-                           description="Create your first orange team check to get started." />
-        {% endif %}
+        <c-filter_toolbar form_id="orange-checks-filter"
+                          hx_get="{% url 'orange_team:check_list' %}"
+                          hx_target="#orange-checks-content"
+                          hx_swap="outerHTML"
+                          hx_push_url="true">
+            <c-filter_field label="Status" id="id_status">
+                <select name="status" id="id_status" aria-label="Filter by status">
+                    <option value="" {% if not filters.status %}selected{% endif %}>All</option>
+                    <option value="open" {% if filters.status == "open" %}selected{% endif %}>Live</option>
+                    <option value="upcoming"
+                            {% if filters.status == "upcoming" %}selected{% endif %}>Upcoming</option>
+                    <option value="closed" {% if filters.status == "closed" %}selected{% endif %}>Closed</option>
+                    <option value="unscheduled"
+                            {% if filters.status == "unscheduled" %}selected{% endif %}>Draft</option>
+                </select>
+            </c-filter_field>
+            <c-filter_field label="Search" id="id_search">
+                <input type="text"
+                       name="search"
+                       id="id_search"
+                       value="{{ filters.search }}"
+                       placeholder="Check title or description..."
+                       aria-label="Search checks" />
+            </c-filter_field>
+        </c-filter_toolbar>
+        {% include "orange_team/check_list_table.html" %}
     </c-module>
     <c-module title="Volunteers">
         {% if volunteers %}

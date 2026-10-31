@@ -1,10 +1,9 @@
-{# Registration review table - swappable content for htmx #}
 {% load cotton status_variants %}
 <div id="registration-review-content">
     <c-table id="result_list" aria_label="Team registration requests">
         <c-slot name="headers">
             <tr>
-                <c-table_header sortable="false">
+                <c-table_header sort_field="school_name" current_sort="{{ sort_by }}">
                     School Name
                 </c-table_header>
                 <c-table_header sortable="false">
@@ -13,10 +12,10 @@
                 <c-table_header sortable="false">
                     Phone
                 </c-table_header>
-                <c-table_header sortable="false">
+                <c-table_header sort_field="status" current_sort="{{ sort_by }}">
                     Status
                 </c-table_header>
-                <c-table_header sortable="false">
+                <c-table_header sort_field="submitted_at" current_sort="{{ sort_by }}">
                     Submitted
                 </c-table_header>
                 <c-table_header sortable="false">

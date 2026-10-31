@@ -78,7 +78,7 @@
                                 </c-button>
                             {% endif %}
                             <c-link href="{% url 'packet_detail' active_packet.id %}"
-                                    variant="secondary">Distributions</c-link>
+                                     variant="secondary">Distributions</c-link>
                         </div>
                     </div>
                 </div>
@@ -109,50 +109,32 @@
                                description="Upload a packet to distribute to teams" />
             </c-fieldset>
         {% endif %}
-        {% if history %}
-            <c-fieldset heading="History">
-                <c-table aria_label="Past packets">
-                    <c-slot name="headers">
-                        <tr>
-                            <c-table_header sortable="false">
-                                Title
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Status
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Stats
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Created
-                            </c-table_header>
-                        </tr>
-                    </c-slot>
-                    {% for item in history %}
-                        <tr>
-                            <td>
-                                <c-link href="{% url 'packet_detail' item.packet.id %}">{{ item.packet.title }}</c-link>
-                                <br>
-                                <small class="text-muted">{{ item.packet.filename }} ({{ item.packet.file_size|filesizeformat }})</small>
-                            </td>
-                            <td>
-                                <c-badge variant="{{ item.packet.status|badge_variant:'packet' }}">
-                                    {{ item.packet.get_status_display }}
-                                </c-badge>
-                            </td>
-                            <td>
-                                <small>{{ item.stats.sent }} sent, {{ item.stats.downloaded }} downloaded
-                                    {% if item.stats.failed %}, <span class="text-danger">{{ item.stats.failed }} failed</span>{% endif %}
-                                </small>
-                            </td>
-                            <td>
-                                <small>{{ item.packet.created_at|date:"Y-m-d H:i" }} by {{ item.packet.uploaded_by }}</small>
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </c-table>
-            </c-fieldset>
-        {% endif %}
+        <c-module title="History" filtered="true">
+            <c-filter_toolbar form_id="packets-history-filter"
+                              hx_get="{% url 'packets_list' %}"
+                              hx_target="#packets-history-content"
+                              hx_swap="outerHTML"
+                              hx_push_url="true">
+                <c-filter_field label="Status" id="id_status">
+                    <select name="status" id="id_status" aria-label="Filter by status">
+                        <option value="">All Statuses</option>
+                        {% for value, label in status_choices %}
+                            <option value="{{ value }}"
+                                    {% if value == filters.status %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </c-filter_field>
+                <c-filter_field label="Search" id="id_search">
+                    <input type="text"
+                           name="search"
+                           id="id_search"
+                           value="{{ filters.search }}"
+                           placeholder="Title, filename, or uploader..."
+                           aria-label="Search packets" />
+                </c-filter_field>
+            </c-filter_toolbar>
+            {% include "packets/ops_packets_table.html" %}
+        </c-module>
     </div>
     {% if active_packet %}
         <script>

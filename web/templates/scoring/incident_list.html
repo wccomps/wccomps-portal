@@ -6,63 +6,26 @@
 {% block content %}
     <div id="content-main">
         <c-page_header title="Incident Reports" />
-        <c-module>
+        <c-module filtered="true">
             <c-slot name="toolbar">
                 <c-link href="{% url 'scoring:submit_incident_report' %}" variant="add">Submit New Incident</c-link>
             </c-slot>
-            {% if incidents %}
-                <c-table aria_label="Incident reports">
-                    <c-slot name="headers">
-                        <tr>
-                            <c-table_header sortable="false">
-                                ID
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Submitted
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Attack Detected
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Affected Box
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Attack Description
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Status
-                            </c-table_header>
-                        </tr>
-                    </c-slot>
-                    {% for incident in incidents %}
-                        <tr>
-                            <td>
-                                <a href="{% url 'scoring:view_incident_report' incident.id %}">#{{ incident.id }}</a>
-                            </td>
-                            <td>{{ incident.created_at|date:"Y-m-d H:i:s" }}</td>
-                            <td>{{ incident.attack_detected_at|date:"Y-m-d H:i:s" }}</td>
-                            <td>{{ incident.affected_boxes_display|default:"N/A" }}</td>
-                            <td>{{ incident.attack_description|shorten:60 }}</td>
-                            <td>
-                                {% if incident.is_approved %}
-                                    <c-badge variant="success">
-                                        Reviewed
-                                    </c-badge>
-                                {% else %}
-                                    <c-badge variant="warning">
-                                        Pending
-                                    </c-badge>
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </c-table>
-            {% else %}
-                <c-empty_state title="No incidents reported yet"
-                               description="Either you haven't been attacked, or you haven't noticed yet. We're hoping it's the first one.">
-                    <c-link href="{% url 'scoring:submit_incident_report' %}" variant="add">Report an incident</c-link>
-                </c-empty_state>
-            {% endif %}
+            <c-filter_toolbar form_id="incident-list-filter"
+                              hx_get="{% url 'scoring:incident_list' %}"
+                              hx_target="#incident-list-content"
+                              hx_swap="outerHTML"
+                              hx_push_url="true">
+                <c-approval_filter value="{{ filters.status }}" />
+                <c-filter_field label="Search" id="id_search">
+                    <input type="text"
+                           name="search"
+                           id="id_search"
+                           value="{{ filters.search }}"
+                           placeholder="Description, service, or IP..."
+                           aria-label="Search incidents" />
+                </c-filter_field>
+            </c-filter_toolbar>
+            {% include "scoring/partials/incident_list_table.html" %}
         </c-module>
     </div>
 {% endblock content %}
