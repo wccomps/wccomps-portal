@@ -223,14 +223,31 @@ def red_screenshot_download(request: HttpRequest, screenshot_id: int) -> HttpRes
 
 @require_permission("red_team", error_message="Only Red Team members can manage IP pools")
 def ip_pool_list(request: HttpRequest) -> HttpResponse:
+    from django.db.models import Count, Q
+
+    from core.utils import list_filters, requested_sort, stable_order
+
     from ..models import RedTeamIPPool
 
     user = cast(User, request.user)
-    pools = RedTeamIPPool.objects.filter(created_by=user)
+    filters, filtered = list_filters(request, {"search": ""})
+    pools = RedTeamIPPool.objects.filter(created_by=user).annotate(finding_count=Count("findings"))
+    if search := filters["search"]:
+        pools = pools.filter(Q(name__icontains=search) | Q(ip_addresses__icontains=search))
+
+    sort_by = requested_sort(request, ("name", "finding_count", "created_at"), "name")
+    pools = stable_order(pools, sort_by)
 
     context = {
         "pools": pools,
+        "filters": filters,
+        "filtered": filtered,
+        "sort_by": sort_by,
     }
+
+    if request.headers.get("HX-Request"):
+        return render(request, "scoring/partials/ip_pool_table.html", context)
+
     return render(request, "scoring/ip_pool_list.html", context)
 
 

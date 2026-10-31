@@ -1,0 +1,77 @@
+{% load cotton %}
+<div id="school-info-content">
+    <c-table id="result_list"
+             class="w-full"
+             aria_label="School information for all teams">
+        <c-slot name="headers">
+            <tr>
+                <c-table_header sort_field="team_number" current_sort="{{ sort_by }}">
+                    Team
+                </c-table_header>
+                <c-table_header sort_field="school_info__school__name"
+                                current_sort="{{ sort_by }}">
+                    School Name
+                </c-table_header>
+                <c-table_header sort_field="school_info__contact_email"
+                                current_sort="{{ sort_by }}">
+                    Contact Email
+                </c-table_header>
+                <c-table_header sort_field="school_info__secondary_email"
+                                current_sort="{{ sort_by }}">
+                    Secondary Email
+                </c-table_header>
+                <c-table_header sort_field="school_info__updated_at"
+                                current_sort="{{ sort_by }}">
+                    Last Updated
+                </c-table_header>
+            </tr>
+        </c-slot>
+        {% for team in teams %}
+            <tr>
+                <th>
+                    <a href="{% url 'school_info_edit' team.team_number %}">Team {{ team.team_number }}</a>
+                    <div>{{ team.team_name }}</div>
+                </th>
+                <td>
+                    {% if team.school_info %}
+                        {{ team.school_info.school_name }}
+                    {% else %}
+                        Not set
+                    {% endif %}
+                </td>
+                <td>
+                    {% if team.school_info %}
+                        {{ team.school_info.contact_email }}
+                    {% else %}
+                        Not set
+                    {% endif %}
+                </td>
+                <td>
+                    {% if team.school_info %}
+                        {{ team.school_info.secondary_email }}
+                    {% else %}
+                        Not set
+                    {% endif %}
+                </td>
+                <td>
+                    {% if team.school_info %}
+                        {{ team.school_info.updated_at|timesince }} ago
+                    {% else %}
+                        Never
+                    {% endif %}
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="5">
+                    {% if filtered %}
+                        <c-no_matches items="teams" href="{% url 'school_info' %}" />
+                    {% else %}
+                        <c-empty_state title="No teams" description="No teams have been configured yet." />
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+    </c-table>
+    <p class="paginator">{{ teams|length }} team(s)</p>
+</div>

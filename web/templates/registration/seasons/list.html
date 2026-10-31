@@ -6,68 +6,33 @@
 {% block registration_content %}
     <div id="content-main">
         <c-page_header title="Seasons" />
-        <c-module>
+        <c-module filtered="true">
             <c-slot name="toolbar">
                 <c-link href="{% url 'registration_season_create' %}" variant="add">Create Season</c-link>
             </c-slot>
-            <c-table id="seasons_list" class="w-full" aria_label="Seasons list">
-                <c-slot name="headers">
-                    <tr>
-                        <c-table_header sortable="false">
-                            Name
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Year
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Status
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Events
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Actions
-                        </c-table_header>
-                    </tr>
-                </c-slot>
-                {% for season in seasons %}
-                    <tr>
-                        <td>
-                            <a href="{% url 'registration_event_list' season_id=season.id %}">{{ season.name }}</a>
-                        </td>
-                        <td>{{ season.year }}</td>
-                        <td>
-                            {% if season.is_active %}
-                                <c-badge variant="success">
-                                    Active
-                                </c-badge>
-                            {% else %}
-                                <c-badge variant="neutral">
-                                    Inactive
-                                </c-badge>
-                            {% endif %}
-                        </td>
-                        <td>{{ season.events.count }}</td>
-                        <td class="field-actions">
-                            <c-link href="{% url 'registration_event_list' season_id=season.id %}"
-                                    variant="secondary">Events</c-link>
-                            <c-link href="{% url 'registration_season_edit' season_id=season.id %}"
-                                    variant="secondary">Edit</c-link>
-                            <c-link href="{% url 'registration_season_delete' season_id=season.id %}"
-                                    variant="danger">Delete</c-link>
-                        </td>
-                    </tr>
-                {% empty %}
-                    <tr>
-                        <td colspan="5">
-                            <c-empty_state title="No seasons yet">
-                                <c-link href="{% url 'registration_season_create' %}"
-                                        variant="add">Create Season</c-link>
-                            </c-empty_state>
-                        </td>
-                    </tr>
-                {% endfor %}
-            </c-table>
+            <c-filter_toolbar form_id="seasons-filter"
+                              hx_get="{% url 'registration_season_list' %}"
+                              hx_target="#seasons-list-content"
+                              hx_swap="outerHTML"
+                              hx_push_url="true">
+                <c-filter_field label="Status" id="id_status">
+                    <select name="status" id="id_status" aria-label="Filter by status">
+                        <option value="" {% if not filters.status %}selected{% endif %}>All</option>
+                        <option value="active" {% if filters.status == "active" %}selected{% endif %}>Active</option>
+                        <option value="inactive"
+                                {% if filters.status == "inactive" %}selected{% endif %}>Inactive</option>
+                    </select>
+                </c-filter_field>
+                <c-filter_field label="Search" id="id_search">
+                    <input type="text"
+                           name="search"
+                           id="id_search"
+                           value="{{ filters.search }}"
+                           placeholder="Season name or year..."
+                           aria-label="Search seasons" />
+                </c-filter_field>
+            </c-filter_toolbar>
+            {% include "registration/seasons/table.html" %}
         </c-module>
     </div>
 {% endblock registration_content %}

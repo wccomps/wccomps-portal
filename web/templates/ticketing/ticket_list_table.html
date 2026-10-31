@@ -1,4 +1,3 @@
-{# Unified ticket list table - swappable content for htmx #}
 {% load cotton status_variants %}
 <div id="ticket-list-content" {% if is_ops %}x-data="ticketBulkSelect"{% endif %}>
     {# The 30 s refresh swaps the rows and the page links: the selection and the bulk forms outside them stay #}
@@ -87,13 +86,13 @@
                     <c-table_header sortable="false">
                         Title
                     </c-table_header>
-                    <c-table_header sortable="false">
+                    <c-table_header sort_field="category" current_sort="{{ sort_by }}">
                         Category
                     </c-table_header>
-                    <c-table_header sortable="false">
+                    <c-table_header sort_field="status" current_sort="{{ sort_by }}">
                         Status
                     </c-table_header>
-                    <c-table_header sortable="false">
+                    <c-table_header sort_field="created_at" current_sort="{{ sort_by }}">
                         Created
                     </c-table_header>
                 {% endif %}

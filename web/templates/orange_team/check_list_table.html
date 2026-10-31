@@ -1,0 +1,77 @@
+{% load cotton %}
+<div id="orange-checks-content">
+    <c-table id="check-list" aria_label="Orange team checks">
+        <c-slot name="headers">
+            <tr>
+                <c-table_header sort_field="title" current_sort="{{ sort_by }}">
+                    Check
+                </c-table_header>
+                <c-table_header sort_field="scheduled_at" current_sort="{{ sort_by }}">
+                    Window
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Max
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Status
+                </c-table_header>
+                <c-table_header sort_field="scored_count" current_sort="{{ sort_by }}">
+                    Scored
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Actions
+                </c-table_header>
+            </tr>
+        </c-slot>
+        {% for check in checks %}
+            <tr>
+                <td>
+                    <strong><a href="{% url 'orange_team:check_detail' check.pk %}">{{ check.title }}</a></strong>
+                </td>
+                <td>
+                    {% if check.scheduled_at %}
+                        {{ check.scheduled_at|date:"H:i" }}
+                        {% if check.window_end %}to {{ check.window_end|date:"H:i" }}{% endif %}
+                    {% endif %}
+                </td>
+                <td>{{ check.max_score }}</td>
+                <td>
+                    {% if check.window_state == "open" %}
+                        <c-badge variant="info">
+                            Live
+                        </c-badge>
+                    {% elif check.window_state == "upcoming" %}
+                        <c-badge variant="neutral">
+                            Upcoming
+                        </c-badge>
+                    {% elif check.window_state == "closed" %}
+                        <c-badge variant="warning">
+                            Closed
+                        </c-badge>
+                    {% else %}
+                        <c-badge variant="neutral">
+                            Draft
+                        </c-badge>
+                    {% endif %}
+                </td>
+                <td>{{ check.scored_count }}/{{ check.team_total }}</td>
+                <td>
+                    <a href="{% url 'orange_team:check_edit' check.pk %}">Edit</a>
+                    ·
+                    <a href="{% url 'orange_team:check_assign' check.pk %}">Assign</a>
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="6">
+                    {% if filtered %}
+                        <c-no_matches items="checks" href="{% url 'orange_team:check_list' %}" />
+                    {% else %}
+                        <c-empty_state title="No checks"
+                                       description="Create your first orange team check to get started." />
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+    </c-table>
+</div>

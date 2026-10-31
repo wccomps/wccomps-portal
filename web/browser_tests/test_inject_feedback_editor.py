@@ -74,12 +74,12 @@ def test_a_discarded_edit_is_not_saved_later(page, score):
     # get_by_role skips hidden elements, so the closed editor is found by its name
     editor = page.locator('textarea[name="feedback"]')
 
-    page.get_by_role("columnheader", name="Inject").click()
+    page.get_by_role("columnheader", name="Feedback").click()
     assert editor.is_visible()
     assert editor.input_value() == "Draft to throw away"
 
     answer["accept"] = True
-    page.get_by_role("columnheader", name="Inject").click()
+    page.get_by_role("columnheader", name="Feedback").click()
     expect(editor).to_be_hidden()
     assert editor.input_value() == "Good work"
 

@@ -17,6 +17,7 @@ from django.views.decorators.http import require_POST
 from core.auth_utils import has_permission, require_permission
 from core.csv_export import csv_writer
 from core.errors import json_endpoint
+from core.utils import by_team, chosen_team, list_filters, requested_sort, stable_order, team_numbers
 from orange_team.forms import (
     MAX_FOLLOW_UP_MINUTES,
     AssignmentRejectForm,
@@ -112,30 +113,63 @@ def admin_toggle_checkin(request: HttpRequest, user_id: int) -> HttpResponse:
 
 @require_permission("orange_team_lead", error_message="Only leads can review assignments")
 def review_queue(request: HttpRequest) -> HttpResponse:
-    """Lead view showing submitted assignments awaiting review."""
-    review_assignments = (
-        OrangeAssignment.objects.filter(status__in=["submitted", "in_progress"])
-        .select_related("orange_check", "team", "user")
-        .order_by("-submitted_at")
-    )
-    return render(
+    from team.models import Team
+
+    filters, filtered = list_filters(request, {"status": "", "team": "", "search": ""})
+    base_assignments = OrangeAssignment.objects.filter(status__in=["submitted", "in_progress"])
+    team = chosen_team(filters["team"])
+    review_assignments = by_team(base_assignments.select_related("orange_check", "team", "user"), team)
+
+    if filters["status"] in ("submitted", "in_progress"):
+        review_assignments = review_assignments.filter(status=filters["status"])
+    if search := filters["search"]:
+        review_assignments = review_assignments.filter(
+            Q(orange_check__title__icontains=search) | Q(user__username__icontains=search)
+        )
+
+    sort_by = requested_sort(
         request,
-        "orange_team/review.html",
-        {"review_assignments": review_assignments, "is_lead": True},
+        ("orange_check__title", "team__team_number", "user__username", "score", "status"),
+        "-submitted_at",
     )
+    review_assignments = stable_order(review_assignments, sort_by)
+
+    context = {
+        "review_assignments": review_assignments,
+        "team_numbers": team_numbers(Team.objects.filter(orange_assignments__in=base_assignments), team),
+        "chosen_team": team,
+        "filters": filters,
+        "filtered": filtered,
+        "sort_by": sort_by,
+        "is_lead": True,
+    }
+
+    if request.headers.get("HX-Request"):
+        return render(request, "orange_team/review_table.html", context)
+
+    return render(request, "orange_team/review.html", context)
 
 
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
 def check_list(request: HttpRequest) -> HttpResponse:
     now = timezone.now()
-    checks = list(
-        OrangeCheck.objects.annotate(
-            team_total=Count("assignments", distinct=True),
-            scored_count=Count("assignments", filter=Q(assignments__status="approved"), distinct=True),
-        )
-        .select_related("created_by")
-        .order_by("scheduled_at", "-created_at")
+    filters, filtered = list_filters(request, {"status": "", "search": ""})
+    checks_qs = OrangeCheck.objects.annotate(
+        team_total=Count("assignments", distinct=True),
+        scored_count=Count("assignments", filter=Q(assignments__status="approved"), distinct=True),
+    ).select_related("created_by")
+    if search := filters["search"]:
+        checks_qs = checks_qs.filter(Q(title__icontains=search) | Q(description__icontains=search))
+
+    sort_by = requested_sort(
+        request,
+        ("title", "scheduled_at", "scored_count"),
+        "scheduled_at",
     )
+    checks = list(stable_order(checks_qs, sort_by))
+    if filters["status"] in ("open", "upcoming", "closed", "unscheduled"):
+        checks = [c for c in checks if c.state_at(now) == filters["status"]]
+
     checkins = list(OrangeCheckIn.objects.filter(is_active=True).select_related("user").order_by("checked_in_at"))
     by_user: dict[int, list[OrangeAssignment]] = defaultdict(list)
     for assignment in (
@@ -161,11 +195,20 @@ def check_list(request: HttpRequest) -> HttpResponse:
                 "next_task": upcoming[0] if upcoming else None,
             }
         )
-    return render(
-        request,
-        "orange_team/check_list.html",
-        {"checks": checks, "volunteers": volunteers, "is_lead": True},
-    )
+
+    context = {
+        "checks": checks,
+        "volunteers": volunteers,
+        "filters": filters,
+        "filtered": filtered,
+        "sort_by": sort_by,
+        "is_lead": True,
+    }
+
+    if request.headers.get("HX-Request"):
+        return render(request, "orange_team/check_list_table.html", context)
+
+    return render(request, "orange_team/check_list.html", context)
 
 
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")

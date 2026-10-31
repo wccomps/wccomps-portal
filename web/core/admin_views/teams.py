@@ -2,6 +2,7 @@ from typing import cast
 
 from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest
+from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
@@ -13,20 +14,48 @@ from core.discord_tasks import SetupTeamInfrastructure, SyncMemberRoles
 from core.errors import json_endpoint
 from core.forms import TeamActionForm, TeamsBulkActionForm
 from core.models import AuditLog, DiscordTask
+from core.utils import list_filters, optional_int, requested_sort, stable_order
 from team.models import DiscordLink, Team
 
 
 @require_permission("admin", "gold_team")
 def admin_teams(request: HttpRequest) -> HttpResponse:
-    teams_with_info = [
-        {
-            "team": team,
-            "member_count": team.get_member_count(),
-        }
-        for team in Team.objects.with_active_member_count()
-    ]
+    filters, filtered = list_filters(request, {"status": "", "discord": "", "search": ""})
+    teams = Team.objects.with_active_member_count()
 
-    return render(request, "admin/teams.html", {"teams": teams_with_info})
+    if filters["status"] == "active":
+        teams = teams.filter(is_active=True)
+    elif filters["status"] == "inactive":
+        teams = teams.filter(is_active=False)
+
+    if filters["discord"] == "configured":
+        teams = teams.filter(discord_role_id__isnull=False)
+    elif filters["discord"] == "not_set":
+        teams = teams.filter(discord_role_id__isnull=True)
+
+    if search := filters["search"]:
+        query = Q(team_name__icontains=search)
+        if (number := optional_int(search)) is not None:
+            query |= Q(team_number=number)
+        teams = teams.filter(query)
+
+    sort_by = requested_sort(
+        request,
+        ("team_number", "team_name", "active_member_count"),
+        "team_number",
+    )
+
+    context = {
+        "teams": stable_order(teams, sort_by),
+        "filters": filters,
+        "filtered": filtered,
+        "sort_by": sort_by,
+    }
+
+    if request.headers.get("HX-Request"):
+        return render(request, "admin/teams_table.html", context)
+
+    return render(request, "admin/teams.html", context)
 
 
 @require_permission("admin", "gold_team")

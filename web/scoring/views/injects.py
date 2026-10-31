@@ -263,36 +263,40 @@ def inject_grades_bulk_approve(request: HttpRequest) -> HttpResponse:
 
 @require_permission("gold_team", "white_team", error_message="Only Gold/White Team members can review inject feedback")
 def review_inject_feedback(request: HttpRequest) -> HttpResponse:
-    """Gold/White team review of inject feedback before showing to teams."""
-    filters, filtered = list_filters(request, {"inject": "", "status": "all"})
+    from django.db.models import Q
 
-    scores = (
-        InjectScore.objects.filter(is_approved=True)
-        .exclude(feedback="")
-        .select_related("team", "feedback_approved_by")
-        .order_by("inject_name", "team__team_number")
+    filters, filtered = list_filters(request, {"inject": "", "team": "", "status": "all", "search": ""})
+
+    base_scores = InjectScore.objects.filter(is_approved=True).exclude(feedback="")
+    team = chosen_team(filters["team"])
+    scores = by_team(
+        by_approval(base_scores.select_related("team", "feedback_approved_by"), filters["status"], "feedback_approved"),
+        team,
     )
 
     if filters["inject"]:
         scores = scores.filter(inject_id=filters["inject"])
-    scores = by_approval(scores, filters["status"], "feedback_approved")
+    if search := filters["search"]:
+        scores = scores.filter(Q(inject_name__icontains=search) | Q(feedback__icontains=search))
 
-    inject_choices = (
-        InjectScore.objects.filter(is_approved=True)
-        .exclude(feedback="")
-        .values_list("inject_id", "inject_name")
-        .distinct()
-        .order_by("inject_id")
+    sort_by = requested_sort(
+        request,
+        ("inject_name", "team__team_number", "points_awarded"),
+        "inject_name",
     )
+    scores = stable_order(scores, sort_by)
 
-    has_unapproved = scores.filter(feedback_approved=False).exists()
+    inject_choices = base_scores.values_list("inject_id", "inject_name").distinct().order_by("inject_id")
 
     context = {
         "scores": scores,
         "inject_choices": inject_choices,
+        "team_numbers": team_numbers(Team.objects.filter(inject_grades__in=base_scores), team),
+        "chosen_team": team,
         "filters": filters,
         "filtered": filtered,
-        "has_unapproved": has_unapproved,
+        "sort_by": sort_by,
+        "has_unapproved": base_scores.filter(feedback_approved=False).exists(),
     }
 
     if request.headers.get("HX-Request"):

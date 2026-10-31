@@ -1,0 +1,62 @@
+{% load cotton %}
+<div id="incident-list-content">
+    <c-table aria_label="Incident reports">
+        <c-slot name="headers">
+            <tr>
+                <c-table_header sort_field="id" current_sort="{{ sort_by }}">
+                    ID
+                </c-table_header>
+                <c-table_header sort_field="created_at" current_sort="{{ sort_by }}">
+                    Submitted
+                </c-table_header>
+                <c-table_header sort_field="attack_detected_at" current_sort="{{ sort_by }}">
+                    Attack Detected
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Affected Box
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Attack Description
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Status
+                </c-table_header>
+            </tr>
+        </c-slot>
+        {% for incident in incidents %}
+            <tr>
+                <td>
+                    <a href="{% url 'scoring:view_incident_report' incident.id %}">#{{ incident.id }}</a>
+                </td>
+                <td>{{ incident.created_at|date:"Y-m-d H:i:s" }}</td>
+                <td>{{ incident.attack_detected_at|date:"Y-m-d H:i:s" }}</td>
+                <td>{{ incident.affected_boxes_display|default:"N/A" }}</td>
+                <td>{{ incident.attack_description|shorten:60 }}</td>
+                <td>
+                    {% if incident.is_approved %}
+                        <c-badge variant="success">
+                            Reviewed
+                        </c-badge>
+                    {% else %}
+                        <c-badge variant="warning">
+                            Pending
+                        </c-badge>
+                    {% endif %}
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="6">
+                    {% if filtered %}
+                        <c-no_matches items="incidents" href="{% url 'scoring:incident_list' %}" />
+                    {% else %}
+                        <c-empty_state title="No incidents reported yet"
+                                       description="Either you haven't been attacked, or you haven't noticed yet. We're hoping it's the first one.">
+                            <c-link href="{% url 'scoring:submit_incident_report' %}" variant="add">Report an incident</c-link>
+                        </c-empty_state>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+    </c-table>
+</div>

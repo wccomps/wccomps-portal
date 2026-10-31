@@ -4,6 +4,7 @@ from typing import cast
 
 from django.contrib import messages
 from django.db import IntegrityError, transaction
+from django.db.models import Count, Q
 from django.forms import CheckboxSelectMultiple
 from django.http import HttpRequest, HttpResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
@@ -14,7 +15,7 @@ from packets.models import packets_sent
 from core.auth_utils import require_permission
 from core.form_errors import fields_with_errors
 from core.form_renderer import PortalFormRenderer
-from core.utils import client_ip, list_filters
+from core.utils import client_ip, list_filters, optional_int, requested_sort, stable_order
 from team.models import SchoolInfo
 
 from .forms import EventForm, RegistrationForm, RejectRegistrationForm, SeasonForm, ShownSchoolForm
@@ -124,16 +125,26 @@ def register(request: HttpRequest) -> HttpResponse:
 
 @require_permission("gold_team")
 def review_list(request: HttpRequest) -> HttpResponse:
-    filters, filtered = list_filters(request, {"status": ""})
+    filters, filtered = list_filters(request, {"status": "", "search": ""})
 
     registrations = TeamRegistration.objects.prefetch_related("contacts", "event_enrollments__event").all()
     if filters["status"]:
         registrations = registrations.filter(status=filters["status"])
+    if search := filters["search"]:
+        registrations = registrations.filter(
+            Q(school_name__icontains=search)
+            | Q(contacts__name__icontains=search)
+            | Q(contacts__email__icontains=search)
+        ).distinct()
+
+    sort_by = requested_sort(request, ("school_name", "status", "submitted_at"), "-submitted_at")
+    registrations = stable_order(registrations, sort_by)
 
     context = {
         "registrations": registrations,
         "filters": filters,
         "filtered": filtered,
+        "sort_by": sort_by,
         "status_choices": TeamRegistration.STATUS_CHOICES,
     }
 
@@ -177,8 +188,34 @@ def reject_registration(request: HttpRequest, registration_id: int) -> HttpRespo
 
 @require_permission("gold_team")
 def season_list(request: HttpRequest) -> HttpResponse:
-    seasons = Season.objects.prefetch_related("events").all()
-    return render(request, "registration/seasons/list.html", {"seasons": seasons})
+    filters, filtered = list_filters(request, {"status": "", "search": ""})
+    seasons = Season.objects.annotate(event_count=Count("events"))
+
+    if filters["status"] == "active":
+        seasons = seasons.filter(is_active=True)
+    elif filters["status"] == "inactive":
+        seasons = seasons.filter(is_active=False)
+
+    if search := filters["search"]:
+        query = Q(name__icontains=search)
+        if (year := optional_int(search)) is not None:
+            query |= Q(year=year)
+        seasons = seasons.filter(query)
+
+    sort_by = requested_sort(request, ("name", "year", "event_count"), "-year")
+    seasons = stable_order(seasons, sort_by)
+
+    context = {
+        "seasons": seasons,
+        "filters": filters,
+        "filtered": filtered,
+        "sort_by": sort_by,
+    }
+
+    if request.headers.get("HX-Request"):
+        return render(request, "registration/seasons/table.html", context)
+
+    return render(request, "registration/seasons/list.html", context)
 
 
 @require_permission("gold_team")
@@ -238,15 +275,37 @@ def season_delete(request: HttpRequest, season_id: int) -> HttpResponse:
 
 @require_permission("gold_team")
 def event_list(request: HttpRequest, season_id: int) -> HttpResponse:
-    from django.db.models import Count
-
     season = get_object_or_404(Season, id=season_id)
-    events = [
-        (event, *EVENT_LIST_STATUS_SHOWN[registration_page_status(event)])
-        for event in season.events.with_registration_open().annotate(enrollment_count=Count("enrollments"))
-    ]
+    filters, filtered = list_filters(request, {"event_type": "", "search": ""})
 
-    return render(request, "registration/events/list.html", {"season": season, "events": events})
+    events_qs = season.events.with_registration_open().annotate(enrollment_count=Count("enrollments"))
+    if filters["event_type"]:
+        events_qs = events_qs.filter(event_type=filters["event_type"])
+    if search := filters["search"]:
+        events_qs = events_qs.filter(name__icontains=search)
+
+    sort_by = requested_sort(
+        request,
+        ("name", "event_type", "date", "start_time", "enrollment_count"),
+        "date",
+    )
+    events_qs = stable_order(events_qs, sort_by)
+
+    events = [(event, *EVENT_LIST_STATUS_SHOWN[registration_page_status(event)]) for event in events_qs]
+
+    context = {
+        "season": season,
+        "events": events,
+        "filters": filters,
+        "filtered": filtered,
+        "sort_by": sort_by,
+        "event_type_choices": Event.EVENT_TYPE_CHOICES,
+    }
+
+    if request.headers.get("HX-Request"):
+        return render(request, "registration/events/table.html", context)
+
+    return render(request, "registration/events/list.html", context)
 
 
 @require_permission("gold_team")

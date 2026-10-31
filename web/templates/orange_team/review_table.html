@@ -1,0 +1,77 @@
+{% load cotton status_variants %}
+<div id="orange-review-content">
+    <c-table id="review" aria_label="Assignments for review">
+        <c-slot name="headers">
+            <tr>
+                <c-table_header sort_field="orange_check__title"
+                                current_sort="{{ sort_by }}">
+                    Check
+                </c-table_header>
+                <c-table_header sort_field="team__team_number"
+                                current_sort="{{ sort_by }}">
+                    Team
+                </c-table_header>
+                <c-table_header sort_field="user__username" current_sort="{{ sort_by }}">
+                    Assignee
+                </c-table_header>
+                <c-table_header sort_field="score" current_sort="{{ sort_by }}">
+                    Score
+                </c-table_header>
+                <c-table_header sort_field="status" current_sort="{{ sort_by }}">
+                    Status
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Actions
+                </c-table_header>
+            </tr>
+        </c-slot>
+        {% for assignment in review_assignments %}
+            <tr>
+                <td>{{ assignment.orange_check.title }}</td>
+                <td>Team {{ assignment.team.team_number }}</td>
+                <td>{{ assignment.user.username }}</td>
+                <td>{% if assignment.score is not None %}{{ assignment.score }} / {{ assignment.orange_check.max_score }}{% endif %}</td>
+                <td>
+                    <c-badge variant="{{ assignment.status|badge_variant:'orange_assignment' }}">
+                        {{ assignment.get_status_display }}
+                    </c-badge>
+                </td>
+                <td>
+                    {% if assignment.status == "submitted" %}
+                        <div class="d-flex gap-10">
+                            <c-form action="{% url 'orange_team:assignment_approve' assignment.pk %}"
+                                    data-confirm="Approve this assignment?">
+                                {% csrf_token %}
+                                <c-button type="submit" variant="primary">
+                                    Approve
+                                </c-button>
+                            </c-form>
+                            <c-form action="{% url 'orange_team:assignment_reject' assignment.pk %}"
+                                    data-confirm="Reject this assignment?">
+                                {% csrf_token %}
+                                <input type="text"
+                                       name="notes"
+                                       aria-label="Rejection reason for Team {{ assignment.team.team_number }}"
+                                       placeholder="Reason (optional)">
+                                <c-button type="submit" variant="danger">
+                                    Reject
+                                </c-button>
+                            </c-form>
+                        </div>
+                    {% endif %}
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="6">
+                    {% if filtered %}
+                        <c-no_matches items="assignments" href="{% url 'orange_team:review_queue' %}" />
+                    {% else %}
+                        <c-empty_state title="No assignments for review"
+                                       description="No submitted assignments awaiting review." />
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+    </c-table>
+</div>
