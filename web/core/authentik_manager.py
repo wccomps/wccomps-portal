@@ -24,27 +24,16 @@ class AuthentikUser(TypedDict):
     username: str
 
 
-class AuthentikGroup(TypedDict):
+class AuthentikGroupEntry(TypedDict):
     pk: str
     name: str
-
-
-class AuthentikGroupEntry(AuthentikGroup):
     parents: list[str]
 
 
-class AuthentikUserEntry(TypedDict):
+class AuthentikUserEntry(AuthentikUser):
     uid: str
     is_active: bool
     groups: list[str]
-
-
-class AuthentikGroupName(TypedDict):
-    name: str
-
-
-class AuthentikUserWithGroups(AuthentikUser):
-    groups_obj: list[AuthentikGroupName]
 
 
 logger = logging.getLogger(__name__)
@@ -361,7 +350,7 @@ class AuthentikManager:
     def find_user(self, username: str) -> AuthentikUser | None:
         """The user with exactly this username, or None; a user without an integer pk raises."""
         response = self._request(
-            "get", f"{self.base_url}/api/v3/core/users/", params={"username": username, "include_groups": "true"}
+            "get", f"{self.base_url}/api/v3/core/users/", params={"username": username, "include_groups": "false"}
         )
         users, _ = self._results(response, f"Find user {username}")
         user = next((u for u in users if u.get("username") == username), None)
@@ -394,11 +383,13 @@ class AuthentikManager:
         raise AuthentikAPIError(f"List {path}: more than {MAX_PAGES} pages")
 
     def list_all_users(self) -> list[AuthentikUserEntry]:
-        """Every Authentik user, with ``uid``, ``is_active`` and direct group pks in ``groups``."""
+        """Every Authentik user, with ``pk``, ``username``, ``uid``, ``is_active`` and group pks in ``groups``."""
         return cast(
             list[AuthentikUserEntry],
             self._list_all(
-                "/api/v3/core/users/", {"include_groups": "false"}, {"uid": str, "is_active": bool, "groups": list}
+                "/api/v3/core/users/",
+                {"include_groups": "false"},
+                {"pk": int, "username": str, "uid": str, "is_active": bool, "groups": list},
             ),
         )
 
@@ -410,27 +401,6 @@ class AuthentikManager:
                 "/api/v3/core/groups/", {"include_users": "false"}, {"pk": str, "name": str, "parents": list}
             ),
         )
-
-    def get_user_with_groups(self, username: str) -> AuthentikUserWithGroups | None:
-        """An Authentik user with their groups_obj, or None if there is none."""
-        user = self.find_user(username)
-        if user is None:
-            return None
-        raw = cast(dict[str, object], user)
-        groups = raw.get("groups_obj")
-        named = isinstance(groups, list) and all(isinstance(g, dict) and isinstance(g.get("name"), str) for g in groups)
-        if not named:
-            raise AuthentikAPIError(f"Find user {username}: groups without names")
-        return cast(AuthentikUserWithGroups, raw)
-
-    def get_group_by_name(self, name: str) -> AuthentikGroup | None:
-        """An Authentik group by exact name, or None if there is none."""
-        response = self._request("get", f"{self.base_url}/api/v3/core/groups/", params={"name": name})
-        groups, _ = self._results(response, f"Find group {name}")
-        found = next((g for g in groups if g.get("name") == name), None)
-        if found is not None and not isinstance(found.get("pk"), str):
-            raise AuthentikAPIError(f"Find group {name}: the group has no pk")
-        return cast(AuthentikGroup | None, found)
 
     def add_user_to_group(self, user_pk: int, group_pk: str) -> None:
         response = self._request(

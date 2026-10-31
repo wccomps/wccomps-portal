@@ -62,7 +62,6 @@ AUTHENTIK_USER = {
     "uid": "uid-7",
     "is_active": True,
     "groups": ["g1"],
-    "groups_obj": [{"pk": "g1", "name": "WCComps_BlueTeam01"}],
     "attributes": {"discord_id": "1"},
 }
 USERS = {"results": [AUTHENTIK_USER], "pagination": PAGE}
@@ -139,13 +138,15 @@ def check_users(result: object) -> None:
             isinstance(r, list)
             and all(
                 isinstance(u, dict)
+                and is_int(u.get("pk"))
+                and is_str(u.get("username"))
                 and is_str(u.get("uid"))
                 and type(u.get("is_active")) is bool
                 and _strs(u.get("groups"))
                 for u in r
             )
         ),
-        "users with a uid, is_active and group pks",
+        "users with a pk, username, uid, is_active and group pks",
     )
 
 
@@ -165,23 +166,6 @@ def check_groups(result: object) -> None:
 
 def _strs(value: object) -> bool:
     return isinstance(value, list) and all(is_str(v) for v in value)
-
-
-def check_user(result: object) -> None:
-    outcome(
-        result,
-        lambda r: (
-            r is None
-            or (
-                isinstance(r, dict)
-                and is_int(r.get("pk"))
-                and is_str(r.get("username", ""))
-                and isinstance(r.get("groups_obj"), list)
-                and all(isinstance(g, dict) and is_str(g.get("name")) for g in r["groups_obj"])
-            )
-        ),
-        "None or a user with an int pk and named groups",
-    )
 
 
 def check_infrastructure(result: object) -> None:
@@ -506,28 +490,6 @@ READERS = [
         raises=(AuthentikAPIError,),
     ),
     Reader(
-        "get_user_with_groups",
-        lambda: authentik().get_user_with_groups("team01"),
-        (USERS,),
-        check_user,
-        (f"{AM}.get_user_with_groups", *USER),
-        raises=(AuthentikAPIError,),
-    ),
-    Reader(
-        "get_group_by_name",
-        lambda: authentik().get_group_by_name("WCComps_BlueTeam01"),
-        (GROUPS,),
-        lambda r: outcome(
-            r,
-            lambda g: (
-                g is None or (isinstance(g, dict) and g.get("name") == "WCComps_BlueTeam01" and is_str(g.get("pk")))
-            ),
-            "None or the group",
-        ),
-        (f"{AM}.get_group_by_name", *READ),
-        raises=(AuthentikAPIError,),
-    ),
-    Reader(
         "add_user_to_group",
         lambda: authentik().add_user_to_group(7, "g1"),
         (DONE,),
@@ -720,7 +682,11 @@ CALLERS = [
     Caller("reset_team_credentials", _reset_credentials, (USERS, SESSIONS, DONE, SESSIONS, DONE)),
     Caller("store_discord_id_in_authentik", _store_discord_id, (USERS, DONE)),
     Caller("run_competition_to_completion", _start_competition, (APPLICATION, BINDINGS, DONE, USERS, DONE, GROUPS)),
-    Caller("stream_readiness_checks", _readiness, (USERS, USERS, SESSIONS, APPLICATION, BINDINGS, DONE, METADATA)),
+    Caller(
+        "stream_readiness_checks",
+        _readiness,
+        (USERS, USERS, GROUPS, SESSIONS, APPLICATION, BINDINGS, DONE, METADATA),
+    ),
     Caller("_fix_group_membership", _fix_groups, (USERS, GROUPS, DONE)),
 ]
 SERVICES = {

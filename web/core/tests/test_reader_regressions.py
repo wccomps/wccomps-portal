@@ -15,7 +15,7 @@ from core.authentik_manager import AuthentikAPIError, AuthentikManager
 from core.tests.external_json import Answer, answer_lists, deep, near, serving
 from core.tests.strategies import rolled_back
 
-USER = {"pk": 7, "username": "team01", "uid": "uid-7", "is_active": True, "groups": ["g1"], "groups_obj": []}
+USER = {"pk": 7, "username": "team01", "uid": "uid-7", "is_active": True, "groups": ["g1"]}
 USERS = {"results": [USER], "pagination": {"next": 0}}
 PROVIDERS = {"results": [{"assigned_application_slug": "netbird"}], "pagination": {"next": 0}}
 
@@ -62,22 +62,26 @@ def test_a_user_list_of_another_shape_is_an_authentik_error(answers: list[Answer
             users = authentik().list_all_users()
         except AuthentikAPIError:
             return
-    assert all(isinstance(u["uid"], str) and type(u["is_active"]) is bool for u in users)
+    assert all(
+        type(u["pk"]) is int
+        and isinstance(u["username"], str)
+        and isinstance(u["uid"], str)
+        and type(u["is_active"]) is bool
+        for u in users
+    )
 
 
 @example(answers=[answer({"results": [{**USER, "pk": "7"}]})])
-@example(answers=[answer({"results": [{**USER, "groups_obj": ["WCComps_BlueTeam01"]}]})])
 @example(answers=[answer({"results": "none"})])
 @given(answers=answer_lists(USERS))
 def test_a_user_of_another_shape_is_an_authentik_error_or_no_user(answers: list[Answer]) -> None:
-    """get_user_with_groups returned whatever the first result was: a pk that wasn't a number, or groups that
-    weren't objects, failed the readiness checks and their group fix."""
+    """find_user returned a result whose pk wasn't an integer."""
     with serving(answers):
         try:
-            user = authentik().get_user_with_groups("team01")
+            user = authentik().find_user("team01")
         except AuthentikAPIError:
             return
-    assert user is None or (type(user["pk"]) is int and all(isinstance(g, dict) for g in user["groups_obj"]))
+    assert user is None or (type(user["pk"]) is int and user["username"] == "team01")
 
 
 @example(slug=None)

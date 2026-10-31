@@ -71,13 +71,9 @@ def _check_team_accounts_exist() -> CheckResult:
     if not active_teams.exists():
         return ("warn", "No active teams", None)
 
-    mgr = AuthentikManager()
-    missing: list[str] = []
-    for team in active_teams:
-        username = team_username(team.team_number)
-        user = mgr.get_user_with_groups(username)
-        if not user:
-            missing.append(username)
+    with AuthentikManager() as mgr:
+        existing = {u["username"] for u in mgr.list_all_users()}
+    missing = [username for team in active_teams if (username := team_username(team.team_number)) not in existing]
 
     if missing:
         names = ", ".join(missing[:5])
@@ -96,16 +92,16 @@ def _check_team_group_membership() -> CheckResult:
     if not active_teams.exists():
         return ("warn", "No active teams", None)
 
-    mgr = AuthentikManager()
+    with AuthentikManager() as mgr:
+        users = {u["username"]: u["groups"] for u in mgr.list_all_users()}
+        groups = {g["name"]: g["pk"] for g in mgr.list_all_groups()}
     misconfigured: list[str] = []
     for team in active_teams:
         username = team_username(team.team_number)
-        expected_group = team.authentik_group  # e.g. WCComps_BlueTeam01
-        user = mgr.get_user_with_groups(username)
-        if not user:
+        if username not in users:
             continue  # handled by account existence check
-
-        if all(g["name"] != expected_group for g in user["groups_obj"]):
+        group_pk = groups.get(team.authentik_group)
+        if not group_pk or group_pk not in users[username]:
             misconfigured.append(username)
 
     if misconfigured:
@@ -149,15 +145,15 @@ def _check_blueteam_bindings() -> CheckResult:
     if not apps:
         return ("warn", "No controlled apps configured", _configure_apps_link())
 
-    mgr = AuthentikManager()
     missing: list[str] = []
-    for slug in apps:
-        app = mgr.get_application_by_slug(slug)
-        if not app:
-            missing.append(f"{slug} (not found)")
-            continue
-        if not mgr.get_blueteam_binding(app["pk"]):
-            missing.append(slug)
+    with AuthentikManager() as mgr:
+        for slug in apps:
+            app = mgr.get_application_by_slug(slug)
+            if not app:
+                missing.append(f"{slug} (not found)")
+                continue
+            if not mgr.get_blueteam_binding(app["pk"]):
+                missing.append(slug)
 
     if missing:
         return (
@@ -386,26 +382,33 @@ def stream_readiness_checks() -> Iterator[str]:
 def _fix_group_membership(request: HttpRequest) -> JsonResponse:
     """Add team accounts to their correct Authentik groups."""
     active_teams = Team.objects.filter(is_active=True)
-    mgr = AuthentikManager()
-
     fixed = 0
     failed: list[str] = []
-    for team in active_teams:
-        username = team_username(team.team_number)
-        expected_group = team.authentik_group
+    with AuthentikManager() as mgr:
         try:
-            user = mgr.get_user_with_groups(username)
-            if not user or any(g["name"] == expected_group for g in user["groups_obj"]):
+            users = {u["username"]: u for u in mgr.list_all_users()}
+            groups = {g["name"]: g["pk"] for g in mgr.list_all_groups()}
+        except AuthentikAPIError as e:
+            return JsonResponse({"success": False, "message": f"Could not ask Authentik: {reason_for(e)}"})
+
+        for team in active_teams:
+            username = team_username(team.team_number)
+            expected_group = team.authentik_group
+            user = users.get(username)
+            if not user:
                 continue
-            group = mgr.get_group_by_name(expected_group)
-            if not group:
+            group_pk = groups.get(expected_group)
+            if not group_pk:
                 failed.append(f"{username}: group {expected_group} not found")
                 continue
-            mgr.add_user_to_group(user["pk"], group["pk"])
-        except AuthentikAPIError as e:
-            failed.append(f"{username}: {reason_for(e)}")
-            continue
-        fixed += 1
+            if group_pk in user["groups"]:
+                continue
+            try:
+                mgr.add_user_to_group(user["pk"], group_pk)
+            except AuthentikAPIError as e:
+                failed.append(f"{username}: {reason_for(e)}")
+                continue
+            fixed += 1
 
     msg = f"Fixed {fixed} account(s)"
     if failed:
