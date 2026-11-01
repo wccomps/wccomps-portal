@@ -38,6 +38,7 @@ class TestAssignmentApprove:
 
         score = OrangeTeamScore.objects.get(team=team)
         assert score.points_awarded == 5
+        assert score.max_points == 5
         assert score.is_approved
 
     def test_non_lead_cannot_approve(self) -> None:

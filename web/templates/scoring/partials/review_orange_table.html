@@ -67,7 +67,11 @@
                     <td>Team {{ check.team.team_number }}</td>
                     <td>{{ check.description|shorten:60 }}</td>
                     <td class="text-right">
-                        <c-score_value :value="check.points_awarded" format="signed" />
+                        {% if check.max_points is not None %}
+                            {{ check.points_awarded|floatformat:0 }} / {{ check.max_points|floatformat:0 }}
+                        {% else %}
+                            <c-score_value :value="check.points_awarded" format="signed" />
+                        {% endif %}
                     </td>
                     <td>
                         {{ check.created_at|timesince }} ago

@@ -7,6 +7,7 @@ from decimal import Decimal
 import pytest
 from django.contrib.auth.models import User
 from django.template.loader import render_to_string
+from orange_team.models import OrangeCheck
 
 from scoring.models import (
     AttackType,
@@ -28,6 +29,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def scored_teams():
     red_user = User.objects.create_user("red")
+    orange_check = OrangeCheck.objects.create(title="Phone check", description="Call", max_points=10)
     teams = [Team.objects.create(team_number=n, team_name=f"Team {n:02d}", is_active=True) for n in (1, 2, 3)]
     for team, points in zip(teams, (300, 200, 100), strict=True):
         ServiceScore.objects.create(team=team, service_points=Decimal(points), sla_violations=Decimal(-5))
@@ -51,7 +53,11 @@ def scored_teams():
             feedback_approved=True,
         )
         OrangeTeamScore.objects.create(
-            team=team, description="Phone check (max 10 pts)", points_awarded=Decimal("8.25"), is_approved=True
+            team=team,
+            orange_check=orange_check,
+            description="Phone check",
+            points_awarded=Decimal("8.25"),
+            is_approved=True,
         )
     finding = RedTeamScore.objects.create(
         attack_type=AttackType.objects.get_or_create(name="Default Credentials")[0],
@@ -92,4 +98,5 @@ def test_snapshot_keeps_decimals_exact(scored_teams):
     snapshot = serialize_scorecard(_scorecard_context(1))
 
     assert snapshot["orange_scores"][0]["points_awarded"] == {"$d": "8.25"}
+    assert snapshot["orange_scores"][0]["max_points"] == 10
     assert context_from_snapshot(snapshot)["orange_total"] == Decimal("8.25")

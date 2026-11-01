@@ -57,7 +57,11 @@ def serialize_scorecard(context: dict[str, object]) -> dict[str, object]:
             for finding in cast(Iterable[RedTeamScore], context["red_scores"])
         ],
         "orange_scores": [
-            {"description": check.description, "points_awarded": check.points_awarded}
+            {
+                "description": check.description,
+                "points_awarded": check.points_awarded,
+                "max_points": check.max_points,
+            }
             for check in cast(Iterable[OrangeTeamScore], context["orange_scores"])
         ],
         **{
