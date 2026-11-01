@@ -94,3 +94,30 @@ def test_a_second_sync_fetches_fresh_scores(monkeypatch) -> None:
     sync_service_scores()
 
     assert ServiceDetail.objects.get(team=team3).points == 85
+
+
+@pytest.mark.django_db
+def test_sync_skips_unscored_teams_with_no_services(monkeypatch) -> None:
+    """Teams disabled in Quotient export with 0 points and no services; they don't get empty ServiceScore rows."""
+    team3 = Team.objects.create(team_number=3, team_name="Three")
+    unplayed = Team.objects.create(team_number=39, team_name="Thirty-Nine", is_active=False)
+    ServiceScore.objects.create(team=unplayed)
+    monkeypatch.setattr(
+        "scoring.tests.test_quotient_service_sync.EXPORT",
+        [
+            *EXPORT,
+            {
+                "team_id": 39,
+                "team_name": "team39",
+                "services": [],
+                "gross_points": 0,
+                "total_sla_penalty": 0,
+                "total_points": 0,
+            },
+        ],
+    )
+
+    result = sync_service_scores()
+
+    assert result["total"] == 1
+    assert [s.team for s in ServiceScore.objects.all()] == [team3]
