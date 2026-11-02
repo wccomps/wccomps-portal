@@ -97,8 +97,9 @@ def _check_storable(row: models.Model, where: str) -> None:
 
 
 def sync_service_scores(user: User | None = None) -> dict[str, int]:
-    """Sync every team's aggregate ServiceScore and per-service ServiceDetail records from Quotient. Raises
-    ValueError, writing nothing, when Quotient's scores or uptimes can't be read or don't fit the portal's columns."""
+    """Sync each team's aggregate ServiceScore and per-service ServiceDetail records from Quotient, removing and
+    skipping teams with no services in the export. Raises ValueError, writing nothing, when Quotient's scores or
+    uptimes can't be read or don't fit the portal's columns."""
     client = QuotientClient()
 
     export_data = client.get_service_export(force_refresh=True)
@@ -144,6 +145,10 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
 
     with transaction.atomic():
         for team, score, details in rows:
+            ServiceDetail.objects.filter(team=team).delete()
+            if not details:
+                ServiceScore.objects.filter(team=team).delete()
+                continue
             _service_score, created = ServiceScore.objects.update_or_create(
                 team=team,
                 defaults={
@@ -156,7 +161,6 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
                 teams_created += 1
             else:
                 teams_updated += 1
-            ServiceDetail.objects.filter(team=team).delete()
             ServiceDetail.objects.bulk_create(details)
             details_synced += len(details)
 
