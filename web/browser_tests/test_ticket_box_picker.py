@@ -15,6 +15,9 @@ SERVICES = {"db01": ["MySQL"]}
 def _synced() -> None:
     from scoring.models import QuotientMetadataCache
 
+    from core.models import CompetitionConfig
+
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
     QuotientMetadataCache.objects.create(
         boxes=[
             {"name": name, "ip": ip, "services": [{"name": svc, "display_name": svc} for svc in SERVICES.get(name, [])]}

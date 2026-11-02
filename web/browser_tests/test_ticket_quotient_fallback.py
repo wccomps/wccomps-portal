@@ -56,8 +56,10 @@ def test_ticket_filed_with_typed_fields(category, fields, live_server, pw_browse
 def test_the_last_synced_boxes_and_services_stay_pickable_while_quotient_is_down(live_server, pw_browser):
     from scoring.models import QuotientMetadataCache
 
+    from core.models import CompetitionConfig
     from ticketing.models import Ticket
 
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
     QuotientMetadataCache.objects.create(
         boxes=[{"name": "web01", "ip": "10.0.1.5", "services": [{"name": "HTTP", "display_name": "HTTP"}]}]
     )

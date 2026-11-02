@@ -891,3 +891,26 @@ async def test_hostname_autocomplete_reads_the_stored_metadata_without_asking_qu
         choices = await cog.hostname_autocomplete(MagicMock(), "web")
 
     assert [c.value for c in choices] == ["web01"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_service_autocomplete_hides_services_until_competition_starts() -> None:
+    from unittest.mock import MagicMock, patch
+
+    from scoring.models import QuotientMetadataCache
+
+    from core.models import CompetitionConfig
+
+    await QuotientMetadataCache.objects.acreate(
+        boxes=[{"name": "web01", "ip": "10.0.0.5", "services": [{"name": "HTTP", "display_name": "HTTP"}]}]
+    )
+
+    with patch.object(TicketingCog.archive_threads_task, "start"):
+        cog = TicketingCog(MagicMock())
+        before_start = await cog.service_autocomplete(MagicMock(), "")
+        await CompetitionConfig.objects.aupdate_or_create(pk=1, defaults={"applications_enabled": True})
+        after_start = await cog.service_autocomplete(MagicMock(), "")
+
+    assert before_start == []
+    assert [c.value for c in after_start] == ["web01:HTTP"]

@@ -8,6 +8,7 @@ from django.test import Client
 from django.urls import reverse
 from scoring.models import QuotientMetadataCache
 
+from core.models import CompetitionConfig
 from ticketing.models import Ticket, TicketCategory
 
 pytestmark = pytest.mark.django_db
@@ -51,7 +52,19 @@ def test_nothing_synced_renders_text_inputs_and_notice(client):
     assert '<select name="service_name"' not in html
 
 
+def test_before_start_keeps_service_metadata_out_of_team_page(client):
+    _synced({"web01": "10.0.1.5"}, {"web01": ["SECRET"]})
+
+    html = client.get(reverse("create_ticket")).content.decode()
+
+    assert UNAVAILABLE_NOTICE not in html
+    assert 'data-value="web01"' in html
+    assert "SECRET" not in html
+    assert '<select name="service_name"' not in html
+
+
 def test_the_last_synced_lists_render_as_pickers_while_quotient_is_down(client):
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
     _synced({"web01": "10.0.1.5"}, {"web01": ["HTTP"]})
 
     html = client.get(reverse("create_ticket")).content.decode()
@@ -61,6 +74,17 @@ def test_the_last_synced_lists_render_as_pickers_while_quotient_is_down(client):
     assert '<select name="service_name"' in html
     assert "web01:HTTP" in html
     assert "web01: HTTP" in html
+
+
+def test_staff_can_use_service_picker_before_start(ticketing_admin_user):
+    _synced({"web01": "10.0.1.5"}, {"web01": ["HTTP"]})
+    staff_client = Client()
+    staff_client.force_login(ticketing_admin_user)
+
+    html = staff_client.get(reverse("create_ticket")).content.decode()
+
+    assert '<select name="service_name"' in html
+    assert "web01:HTTP" in html
 
 
 def test_scoring_ticket_can_be_filed_with_typed_service_when_unavailable(client, team):
