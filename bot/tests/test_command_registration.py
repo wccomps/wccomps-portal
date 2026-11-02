@@ -83,18 +83,17 @@ async def bot_with_all_cogs() -> AsyncIterator[commands.Bot]:
 
 async def test_loading_the_cogs_leaves_their_modules_patchable() -> None:
     """A loaded-then-closed bot must not swap the cog modules later tests patch by path."""
-    from unittest.mock import patch
+    from unittest.mock import MagicMock, patch
 
     from bot.cogs.ticketing import TicketingCog
 
     async with bot_with_all_cogs():
         pass
 
-    with patch("bot.cogs.ticketing.get_quotient_client") as client:
-        client.return_value.get_infrastructure.return_value = None
-        TicketingCog._load_infrastructure_data()
+    with patch("bot.cogs.ticketing.ticket_infrastructure", return_value=([], {}, [])) as infrastructure:
+        await TicketingCog.hostname_autocomplete(MagicMock(), MagicMock(), "")
 
-    client.assert_called_once()
+    infrastructure.assert_called_once()
 
 
 class TestCommandRegistration:

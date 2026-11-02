@@ -146,7 +146,7 @@ def test_ticket_commands_require_the_categorys_required_fields(bot_world: World,
 
     box_modal = Modal(TicketModal, build_box_modal, frozenset({"blue_team"}))
     infra = (["web01"], {"web01": "10.0.1.5"}, [])
-    with patch.object(TicketingCog, "_load_infrastructure_data", return_value=infra):
+    with patch("bot.ticket_input.ticket_infrastructure", return_value=infra):
         admin = drive(
             ADMIN_TICKET,
             bot_world,

@@ -12,11 +12,18 @@ from core.services.competition import CompetitionRunResult
 @pytest.mark.parametrize("enable", [True, False])
 async def test_runs_the_shared_service(enable: bool) -> None:
     done = CompetitionRunResult(enable=enable)
-    with patch("bot.competition_actions.run_competition_to_completion", return_value=done) as service:
+    calls: list[tuple[bool, str]] = []
+
+    def steps(enable: bool, actor: str, timer: object = None):
+        calls.append((enable, actor))
+        yield "step"
+        return done
+
+    with patch("bot.competition_actions.competition_steps", steps):
         result = await run_competition(enable, actor="discord:admin")
 
     assert result is done
-    service.assert_called_once_with(enable, "discord:admin", None)
+    assert calls == [(enable, "discord:admin")]
 
 
 @pytest.mark.asyncio
@@ -29,14 +36,19 @@ async def test_a_connection_broken_between_runs_does_not_fail_the_next() -> None
 
     from core.models import CompetitionConfig
 
-    def read_config_and_backend(enable: bool, actor: str, on_step=None) -> int:
+    backends: list[int] = []
+
+    def read_config_and_backend(enable: bool, actor: str, timer: object = None):
+        yield "step"
         CompetitionConfig.get_config()
         with connection.cursor() as cursor:
             cursor.execute("select pg_backend_pid()")
-            return cursor.fetchone()[0]
+            backends.append(cursor.fetchone()[0])
+        return CompetitionRunResult(enable=enable)
 
-    with patch("bot.competition_actions.run_competition_to_completion", side_effect=read_config_and_backend):
-        backend = await run_competition(True, actor="timer")
+    with patch("bot.competition_actions.competition_steps", read_config_and_backend):
+        await run_competition(True, actor="timer")
+        backend = backends[0]
 
         def terminate() -> None:
             with connection.cursor() as cursor:
@@ -71,3 +83,23 @@ async def test_schedule_commands_refuse_an_end_before_the_start(mock_interaction
     )
     config = await CompetitionConfig.objects.aget(pk=1)
     assert (config.competition_start_time, config.competition_end_time) == (start, end)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_setting_a_stop_time_ends_the_timers_live_stop_series(mock_interaction, mock_bot) -> None:
+    from django.utils import timezone
+
+    from bot.cogs.admin_competition import AdminCompetitionCog
+    from core.models import CompetitionConfig
+
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={"timer_series_enable": False, "timer_series_attempt": 1, "timer_series_started": timezone.now()},
+    )
+    cog = AdminCompetitionCog(mock_bot)
+
+    await cog.admin_set_end_time.callback(cog, mock_interaction, datetime_str="2030-10-03T17:00", timezone_name="UTC")
+
+    config = await CompetitionConfig.objects.aget(pk=1)
+    assert (config.timer_series_enable, config.timer_series_attempt) == (None, 0)

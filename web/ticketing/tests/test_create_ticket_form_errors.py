@@ -1,12 +1,12 @@
 """A refused ticket shows what was posted again, with each error beside its field."""
 
 import re
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.test import Client
 from django.urls import reverse
+from scoring.models import QuotientMetadataCache
 
 from core.tests.form_html import field_error
 from team.models import Team
@@ -15,19 +15,14 @@ from ticketing.models import Ticket
 pytestmark = pytest.mark.django_db
 
 
-def _quotient(boxes: dict[str, str]) -> MagicMock:
-    client = MagicMock()
-    client.get_infrastructure.return_value = (
-        SimpleNamespace(boxes=[SimpleNamespace(name=name, ip=ip) for name, ip in boxes.items()]) if boxes else None
-    )
-    client.get_box_names.return_value = list(boxes)
-    client.get_service_choices.return_value = []
-    return client
+def _synced(boxes: dict[str, str]) -> None:
+    QuotientMetadataCache.objects.create(boxes=[{"name": name, "ip": ip, "services": []} for name, ip in boxes.items()])
 
 
 @pytest.fixture(autouse=True)
-def _no_quotient():
-    with patch("quotient.client.get_quotient_client", return_value=_quotient({})):
+def _quotient_never_asked():
+    """The form reads the synced snapshot; a live Quotient call would hang it while Quotient is down."""
+    with patch("quotient.client.get_quotient_client", side_effect=AssertionError("the ticket form asked Quotient")):
         yield
 
 
@@ -80,8 +75,9 @@ def test_staff_who_pick_no_team_are_told_beside_the_team_picker(ticketing_admin_
 
 
 def test_the_box_picker_is_the_hostname_field(blue_team_user, blue_team):
-    with patch("quotient.client.get_quotient_client", return_value=_quotient({"web01": "10.0.1.5"})):
-        html = _client(blue_team_user).get(reverse("create_ticket")).content.decode()
+    _synced({"web01": "10.0.1.5"})
+
+    html = _client(blue_team_user).get(reverse("create_ticket")).content.decode()
 
     assert re.search(r"<legend[^>]*>Hostname:</legend>", html)
     assert re.search(r'<select name="hostname" hidden[^>]* id="hostname"', html)
@@ -89,14 +85,13 @@ def test_the_box_picker_is_the_hostname_field(blue_team_user, blue_team):
 
 
 def test_a_refused_ticket_keeps_the_picked_box_pressed(blue_team_user, blue_team, box_reset_category):
-    with patch(
-        "quotient.client.get_quotient_client", return_value=_quotient({"web01": "10.0.1.5", "db01": "10.0.1.6"})
-    ):
-        html = (
-            _client(blue_team_user)
-            .post(reverse("create_ticket"), {"category": box_reset_category.pk, "hostname": "web01"})
-            .content.decode()
-        )
+    _synced({"web01": "10.0.1.5", "db01": "10.0.1.6"})
+
+    html = (
+        _client(blue_team_user)
+        .post(reverse("create_ticket"), {"category": box_reset_category.pk, "hostname": "web01"})
+        .content.decode()
+    )
 
     assert re.search(r'data-value="web01"\s+aria-pressed="true"', html)
     assert re.search(r'data-value="db01"\s+aria-pressed="false"', html)

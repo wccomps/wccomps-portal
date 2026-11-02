@@ -1,6 +1,6 @@
 """Teams create tickets only in user-creatable categories; staff may use any."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.test import Client
@@ -12,12 +12,9 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture(autouse=True)
-def _no_quotient():
-    client = MagicMock()
-    client.get_infrastructure.return_value = None
-    client.get_box_names.return_value = []
-    client.get_service_choices.return_value = []
-    with patch("quotient.client.get_quotient_client", return_value=client):
+def _quotient_never_asked():
+    """The form reads the synced snapshot; a live Quotient call would hang it while Quotient is down."""
+    with patch("quotient.client.get_quotient_client", side_effect=AssertionError("the ticket form asked Quotient")):
         yield
 
 
@@ -79,26 +76,22 @@ def test_box_reset_keeps_the_teams_description_and_the_hostname(blue_team_user, 
 
 
 def test_known_hostname_satisfies_required_ip_and_unknown_does_not(blue_team_user, team_1, box_reset_category):
-    box = MagicMock()
-    box.name, box.ip = "web01", "10.0.1.5"
-    client = MagicMock()
-    client.get_infrastructure.return_value = MagicMock(boxes=[box])
-    client.get_box_names.return_value = ["web01"]
-    client.get_service_choices.return_value = []
+    from scoring.models import QuotientMetadataCache
 
-    with patch("quotient.client.get_quotient_client", return_value=client):
-        unknown = _client(blue_team_user).post(
-            reverse("create_ticket"),
-            {"title": "Reset", "category": box_reset_category.pk, "hostname": "unknown01"},
-        )
-        assert "IP Address is required for this category." in unknown.content.decode()
-        assert not Ticket.objects.exists()
+    QuotientMetadataCache.objects.create(boxes=[{"name": "web01", "ip": "10.0.1.5", "services": []}])
 
-        known = _client(blue_team_user).post(
-            reverse("create_ticket"),
-            {"title": "Reset", "category": box_reset_category.pk, "hostname": "web01"},
-        )
-        assert known.status_code == 302
-        ticket = Ticket.objects.get()
-        assert ticket.hostname == "web01"
-        assert ticket.ip_address == "10.0.1.5"
+    unknown = _client(blue_team_user).post(
+        reverse("create_ticket"),
+        {"title": "Reset", "category": box_reset_category.pk, "hostname": "unknown01"},
+    )
+    assert "IP Address is required for this category." in unknown.content.decode()
+    assert not Ticket.objects.exists()
+
+    known = _client(blue_team_user).post(
+        reverse("create_ticket"),
+        {"title": "Reset", "category": box_reset_category.pk, "hostname": "web01"},
+    )
+    assert known.status_code == 302
+    ticket = Ticket.objects.get()
+    assert ticket.hostname == "web01"
+    assert ticket.ip_address == "10.0.1.5"

@@ -1,7 +1,6 @@
 """The create ticket page's box picker."""
 
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -10,19 +9,18 @@ from .conftest import create_session_context
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 BOXES = {"web01": "10.0.1.5", "db01": "10.0.1.6"}
-SERVICES = [
-    {"value": "db01:MySQL", "label": "db01 - MySQL", "box_name": "db01", "box_ip": "10.0.1.6", "service_name": "MySQL"}
-]
+SERVICES = {"db01": ["MySQL"]}
 
 
-def _quotient() -> MagicMock:
-    client = MagicMock()
-    client.get_infrastructure.return_value = SimpleNamespace(
-        boxes=[SimpleNamespace(name=name, ip=ip) for name, ip in BOXES.items()]
+def _synced() -> None:
+    from scoring.models import QuotientMetadataCache
+
+    QuotientMetadataCache.objects.create(
+        boxes=[
+            {"name": name, "ip": ip, "services": [{"name": svc, "display_name": svc} for svc in SERVICES.get(name, [])]}
+            for name, ip in BOXES.items()
+        ]
     )
-    client.get_box_names.return_value = list(BOXES)
-    client.get_service_choices.return_value = SERVICES
-    return client
 
 
 @pytest.fixture
@@ -45,7 +43,8 @@ def page(live_server, pw_browser, blue_team_user, blue_team, category):
     page = context.new_page()
     errors: list[str] = []
     page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
-    with patch("quotient.client.get_quotient_client", return_value=_quotient()):
+    _synced()
+    with patch("quotient.client.get_quotient_client", side_effect=AssertionError("the ticket form asked Quotient")):
         page.goto(f"{live_server.url}/tickets/create/")
         page.select_option("#category", str(category.pk))
         yield page

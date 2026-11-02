@@ -1,12 +1,15 @@
 """Tests for ticket creation and resolution workflows."""
 
+from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 import pytest
+from asgiref.sync import sync_to_async
 
 from bot.discord_queue import DiscordQueueProcessor
+from core.discord_tasks import TicketCreatedWeb
 from core.models import DiscordTask
 from team.models import Team
 from ticketing.models import Ticket
@@ -100,7 +103,8 @@ class TestTicketCreationWorkflow:
         assert "T035-001" in sent.kwargs["embed"].title
 
     async def test_queue_processor_idempotent_thread_creation(self, db: Any, box_reset_category: Any) -> None:
-        """Test that queue processor doesn't recreate thread if already exists."""
+        """A retry after the thread was made makes no second one, and posts the ticket message if the first lacks it.
+        Six team members were added first, so the message isn't among the thread's first few."""
         team = await Team.objects.acreate(
             team_number=37,
             team_name="Test Team 3",
@@ -116,29 +120,40 @@ class TestTicketCreationWorkflow:
             status="open",
             discord_thread_id=9999,
         )
+        task = await sync_to_async(DiscordTask.enqueue)(TicketCreatedWeb(ticket_id=ticket.id))
 
-        task = await DiscordTask.objects.acreate(
-            task_type="ticket_created_web",
-            payload={
-                "ticket_id": ticket.id,
-                "ticket_number": ticket.ticket_number,
-                "team_number": team.team_number,
-                "category": "Box Reset",
-                "title": "Box Reset",
-                "created_by": "test_user",
-            },
-            status="pending",
-        )
+        # Where the bot's ticket message is: pinned, unpinned after the member notices (its pin failed), or missing
+        for where in ("pinned", "unpinned", "missing"):
+            bot = MagicMock(spec=discord.Client)
+            thread = MagicMock(spec=discord.Thread)
+            ticket_message = MagicMock(author=bot.user, embeds=[MagicMock()])
+            notices = [MagicMock(author=MagicMock(), embeds=[]) for _ in range(6)]
+            notices += [ticket_message] if where == "unpinned" else []
+            pinned = [ticket_message] if where == "pinned" else []
 
-        bot = AsyncMock(spec=discord.Client)
+            async def pins(pinned: list[object] = pinned, **_kwargs: object) -> AsyncIterator[object]:
+                for message in pinned:
+                    yield message
 
-        with patch("bot.discord_queue.trigger_dashboard") as mock_dashboard:
-            processor = DiscordQueueProcessor(bot)
-            await processor._handle_ticket_created_web(task.typed_payload())
+            async def history(notices: list[object] = notices, **_kwargs: object) -> AsyncIterator[object]:
+                for message in notices:
+                    yield message
+
+            thread.pins, thread.history = pins, history
+            bot.get_channel.return_value = thread
+            await DiscordTask.objects.filter(pk=task.pk).aupdate(status="pending", retry_count=0, next_retry_at=None)
+
+            with (
+                patch("bot.discord_queue.trigger_dashboard") as mock_dashboard,
+                patch("bot.discord_queue.create_ticket_thread") as make_thread,
+                patch("bot.discord_queue.post_ticket_message") as post,
+            ):
+                await DiscordQueueProcessor(bot)._process_task(await DiscordTask.objects.aget(pk=task.pk))
 
             mock_dashboard.assert_called_once()
-
-        bot.get_channel.assert_not_called()
+            make_thread.assert_not_called()
+            assert post.await_count == (1 if where == "missing" else 0)
+            assert (await DiscordTask.objects.aget(pk=task.pk)).status == "completed"
 
 
 @pytest.mark.asyncio

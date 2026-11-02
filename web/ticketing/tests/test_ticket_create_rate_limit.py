@@ -1,13 +1,15 @@
 """Teams can't flood Discord by creating (and cancelling) tickets in a loop (security review, Medium)."""
 
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
+from core.discord_tasks import TicketCreatedWeb
+from core.models import DiscordTask
 from team.models import Team
 from ticketing.lifecycle import cancel_ticket
 from ticketing.models import Ticket, TicketCategory
@@ -17,12 +19,9 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture(autouse=True)
-def _no_quotient():
-    client = MagicMock()
-    client.get_infrastructure.return_value = None
-    client.get_box_names.return_value = []
-    client.get_service_choices.return_value = []
-    with patch("quotient.client.get_quotient_client", return_value=client):
+def _quotient_never_asked():
+    """The form reads the synced snapshot; a live Quotient call would hang it while Quotient is down."""
+    with patch("quotient.client.get_quotient_client", side_effect=AssertionError("the ticket form asked Quotient")):
         yield
 
 
@@ -34,6 +33,24 @@ def team(blue_team):
 @pytest.fixture
 def category():
     return TicketCategory.objects.get(pk=6)
+
+
+def test_a_new_ticket_and_its_thread_task_commit_together(team, category):
+    """Every ticket, from the web or the bot, gets its Discord thread from the queue."""
+    ticket = create_ticket_atomic(team=team, category=category, title="t")
+
+    task = DiscordTask.objects.get(task_type="ticket_created_web")
+    assert (task.status, task.typed_payload()) == ("pending", TicketCreatedWeb(ticket_id=ticket.pk))
+
+
+def test_a_refused_ticket_queues_nothing(team, category):
+    _fill(team, category)
+    queued = DiscordTask.objects.count()
+
+    with pytest.raises(TicketRateLimitError):
+        create_ticket_atomic(team=team, category=category, title="t")
+
+    assert DiscordTask.objects.count() == queued
 
 
 def _fill(team, category, n=TEAM_TICKET_LIMIT):

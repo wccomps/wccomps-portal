@@ -14,6 +14,7 @@ from bot.cogs.help_panels import (
     TicketModal,
     create_ticket,
 )
+from bot.discord_queue import DiscordQueueProcessor
 from core.models import DiscordTask, UserGroups
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory
@@ -79,7 +80,7 @@ async def test_category_select_opens_modal_without_db(categories: tuple[TicketCa
     assert modal.title == "Consultation"
 
 
-async def test_help_panel_ticket_gets_thread_and_no_malformed_task(
+async def test_help_panel_ticket_queues_its_thread_and_the_queue_makes_it(
     categories: tuple[TicketCategory, TicketCategory], mock_interaction: Any, mock_bot: Any
 ) -> None:
     consult, _ = categories
@@ -97,6 +98,7 @@ async def test_help_panel_ticket_gets_thread_and_no_malformed_task(
     chat = Mock(spec=discord.TextChannel)
     chat.name = "team-chat"
     chat.create_thread = AsyncMock(return_value=thread)
+    chat.threads = []
     category = Mock(spec=discord.CategoryChannel)
     category.id = 4242
     category.name = "Team 12"
@@ -104,16 +106,23 @@ async def test_help_panel_ticket_gets_thread_and_no_malformed_task(
     mock_interaction.guild.get_channel = Mock(return_value=category)
     mock_interaction.guild.get_member = Mock(return_value=None)
     mock_interaction.client = mock_bot
+    mock_bot.get_guild = Mock(return_value=mock_interaction.guild)
 
-    with patch("bot.ticket_dashboard.trigger_dashboard") as dashboard:
-        await create_ticket(mock_interaction, category_id=str(consult.pk), description="help with dns")
+    await create_ticket(mock_interaction, category_id=str(consult.pk), description="help with dns")
 
+    assert "created" in mock_interaction.followup.send.await_args.args[0]
     ticket = await Ticket.objects.aget(team=team)
+    assert ticket.discord_thread_id is None
+    task = await DiscordTask.objects.aget(task_type="ticket_created_web")
+    assert task.ticket_id == ticket.pk
+
+    with patch("bot.discord_queue.trigger_dashboard") as dashboard:
+        await DiscordQueueProcessor(mock_bot)._process_task(task)
+
+    await ticket.arefresh_from_db()
     assert ticket.discord_thread_id == 777
     assert ticket.ticket_number in thread.send.await_args.kwargs["embed"].title
-    dashboard.assert_called_once()
-    assert not await DiscordTask.objects.filter(task_type="ticket_created_web").aexists()
-    assert "created" in mock_interaction.followup.send.await_args.args[0]
+    dashboard.assert_called()
 
 
 async def test_post_ticket_panel_lists_categories(

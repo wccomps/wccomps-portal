@@ -338,3 +338,17 @@ async def test_a_member_whose_account_has_no_stored_groups_loses_their_roles(tea
     await _sync(_guild(member))
 
     assert _ids(member.remove_roles) == {OPS, TEAM_A, BLUETEAM}
+
+
+async def test_a_long_sync_beats_the_calling_loop_per_member_it_changes(teams, monkeypatch) -> None:
+    """A role sync queued as a task can outlast the queue's budget; each member updated is progress."""
+    from bot import heartbeat
+
+    beats: list[str] = []
+    monkeypatch.setattr(heartbeat, "record", lambda name, bot: beats.append(name))
+    members = [_member(member_id, OPS) for member_id in range(10, 15)]
+    heartbeat.beat_for("queue", MagicMock())
+
+    await _sync(_guild(_member(20), *members))
+
+    assert beats == ["queue"] * 5
