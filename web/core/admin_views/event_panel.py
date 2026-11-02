@@ -185,7 +185,7 @@ class EventPanel:
     @property
     def stop_offered(self) -> bool:
         """Stop while running, or again while stopped after a stop that left something on."""
-        return self.stage.running or (not self.stage.running and self.facts.last_run_incomplete)
+        return self.stage.running or self.facts.last_run_incomplete
 
     @property
     def action_elsewhere(self) -> bool:
