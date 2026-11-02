@@ -3,13 +3,11 @@ from typing import cast
 
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from scoring.quotient_sync import ticket_infrastructure
 
 from core.auth_utils import get_user_team, has_permission
-from core.discord_tasks import TicketCreatedWeb
-from core.models import DiscordTask
 from team.models import Team
 from ticketing.forms import CreateTicketPageForm
 
@@ -31,23 +29,8 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
     if not is_admin and not team:
         raise PermissionDenied("You must be a team member to create tickets.")
 
-    from quotient.client import QuotientAPIError, get_quotient_client
-
-    infrastructure = None
-    service_choices: list[dict[str, str]] = []
-    box_names: list[str] = []
-    box_ip_map: dict[str, str] = {}
-
-    try:
-        quotient_client = get_quotient_client()
-        infrastructure = quotient_client.get_infrastructure()
-        service_choices = quotient_client.get_service_choices()
-        box_names = quotient_client.get_box_names()
-        if infrastructure:
-            for box in infrastructure.boxes:
-                box_ip_map[box.name] = box.ip
-    except QuotientAPIError:
-        logger.warning("Quotient API unavailable, ticket form will have limited functionality")
+    # The last synced Quotient metadata: the pickers keep it while Quotient is down
+    box_names, box_ip_map, service_choices = ticket_infrastructure()
 
     form = CreateTicketPageForm(
         request.POST if request.method == "POST" else None,
@@ -72,20 +55,17 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
 
         cd = form.cleaned_data
         try:
-            # One transaction, so a ticket never exists without the task that gives it a thread.
-            with transaction.atomic():
-                ticket = create_ticket_atomic(
-                    team=team,
-                    category=form.cleaned_data["category"],
-                    title=cd["title"],
-                    description=cd["description"],
-                    hostname=cd["hostname"],
-                    ip_address=cd["ip_address"],
-                    service_name=cd["service_name"],
-                    actor_username=authentik_username,
-                    enforce_team_limit=not is_admin,
-                )
-                DiscordTask.enqueue(TicketCreatedWeb(ticket_id=ticket.id))
+            ticket = create_ticket_atomic(
+                team=team,
+                category=form.cleaned_data["category"],
+                title=cd["title"],
+                description=cd["description"],
+                hostname=cd["hostname"],
+                ip_address=cd["ip_address"],
+                service_name=cd["service_name"],
+                actor_username=authentik_username,
+                enforce_team_limit=not is_admin,
+            )
 
             logger.info(f"Ticket {ticket.ticket_number} created via web by {authentik_username} for {team.team_name}")
 

@@ -5,7 +5,7 @@ import logging
 from discord.ext import commands, tasks
 
 from bot.role_sync import competition_guild, sync_roles
-from bot.utils import off_orm_thread
+from bot.utils import run_blocking
 from core.authentik_manager import AuthentikManager
 from core.services.user_groups import (
     GroupRefreshAbortedError,
@@ -26,7 +26,7 @@ def _refresh() -> GroupRefreshResult | None:
 async def refresh_groups_now() -> None:
     """Refresh once; never raises (the caller is a background loop)."""
     try:
-        result = await off_orm_thread(_refresh)
+        result = await run_blocking(_refresh)
     except GroupRefreshAbortedError as e:
         logger.error(f"Authentik group refresh skipped, nothing changed: {e}")
         return

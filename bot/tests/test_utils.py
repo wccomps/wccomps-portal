@@ -1,6 +1,5 @@
 """Tests for utility functions."""
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
@@ -8,8 +7,8 @@ import pytest
 from django.contrib.auth.models import User
 
 from bot.utils import (
+    find_team,
     get_team_member_discord_ids,
-    get_team_or_respond,
     log_to_ops_channel,
     team_chat_channel,
 )
@@ -20,41 +19,20 @@ from team.models import DiscordLink, Team
 class TestTeamHelpers:
     """Test team helper functions."""
 
-    async def test_get_team_or_respond_success(self, mock_interaction: Any) -> None:
-        """Test successfully getting a team."""
-        team_num = 25
+    async def test_find_team_finds_the_team(self) -> None:
+        await Team.objects.filter(team_number=25).adelete()
+        await Team.objects.acreate(team_number=25, team_name="Test Team")
 
-        # Delete if exists
-        await Team.objects.filter(team_number=team_num).adelete()
+        result = await find_team(25)
 
-        await Team.objects.acreate(
-            team_number=team_num,
-            team_name="Test Team",
-        )
+        assert isinstance(result, Team)
+        assert result.team_number == 25
 
-        result = await get_team_or_respond(mock_interaction, team_num)
+    async def test_find_team_says_a_missing_team_is_not_found(self) -> None:
+        assert await find_team(42) == "Team 42 not found"
 
-        assert result is not None
-        assert result.team_number == team_num
-        mock_interaction.response.send_message.assert_not_called()
-
-    async def test_get_team_or_respond_not_found(self, mock_interaction: Any) -> None:
-        """Test handling team not found."""
-        result = await get_team_or_respond(mock_interaction, 42)
-
-        assert result is None
-        mock_interaction.response.send_message.assert_called_once()
-        call_args = mock_interaction.response.send_message.call_args
-        assert "not found" in call_args.args[0].lower()
-
-    async def test_get_team_or_respond_invalid_range(self, mock_interaction: Any) -> None:
-        """Test handling team number out of range."""
-        result = await get_team_or_respond(mock_interaction, 51)
-
-        assert result is None
-        mock_interaction.response.send_message.assert_called_once()
-        call_args = mock_interaction.response.send_message.call_args
-        assert "between 1 and 50" in call_args.args[0]
+    async def test_find_team_refuses_a_number_out_of_range(self) -> None:
+        assert await find_team(51) == "Team number must be between 1 and 50"
 
     async def test_get_team_member_discord_ids(self) -> None:
         """Test getting Discord IDs for team members."""

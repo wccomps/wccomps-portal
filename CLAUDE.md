@@ -39,6 +39,9 @@ Runs on the deoxys Kubernetes cluster, deployed by Argo CD from `wccomps/wccomps
 - After changing its `configmap.yaml` or `secrets.yaml`, restart the web and bot Deployments.
 - `docker-compose.yml` is for anyone self-hosting the public repo (Postgres + web + bot); it isn't
   how production runs.
+- Starts, stops and Close Out share the Postgres advisory lock `COMPETITION_RUN_LOCK_ID`. If a stuck run holds it,
+  find the holder with `SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND classid = 1 AND objid = 2966672707`
+  and end it with `pg_terminate_backend(pid)`.
 
 ## Python 3.14
 

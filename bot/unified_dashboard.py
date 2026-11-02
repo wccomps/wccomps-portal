@@ -9,7 +9,7 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.utils import timezone
 
-from bot.heartbeat import record as record_heartbeat
+from bot.heartbeat import beat, beat_for
 from bot.permissions import has_permission
 from bot.utils import DISCORD_EMBED_FIELD_CHAR_LIMIT, add_field, fit_lines, recycle_db_connection
 from core.models import BotState
@@ -52,11 +52,12 @@ class UnifiedDashboard:
 
         await self._initialize_dashboard()
 
+        beat_for("dashboard", self.bot)
         while self.running:
             try:
                 await recycle_db_connection()
                 await self._check_and_update()
-                record_heartbeat("dashboard", self.bot)
+                beat()
             except Exception as e:
                 logger.exception(f"Error in dashboard loop: {e}")
 

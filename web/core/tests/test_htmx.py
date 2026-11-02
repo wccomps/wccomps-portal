@@ -1,7 +1,5 @@
 """Tests for htmx partial responses in core views."""
 
-from unittest.mock import MagicMock, patch
-
 import pytest
 from django.test import Client
 from django.urls import reverse
@@ -16,22 +14,15 @@ class TestCreateTicketTemplate:
 
     @pytest.fixture
     def mock_quotient(self):
-        """Mock Quotient client to avoid API calls."""
-        mock_client = MagicMock()
-        mock_client.get_infrastructure.return_value = None
-        mock_client.get_service_choices.return_value = [
-            {
-                "value": "web:http",
-                "label": "web - HTTP",
-                "box_ip": "10.0.0.1",
-                "box_name": "web",
-                "service_name": "http",
-            }
-        ]
-        mock_client.get_box_names.return_value = ["web", "mail"]
+        """The synced Quotient metadata the form reads."""
+        from scoring.models import QuotientMetadataCache
 
-        with patch("quotient.client.get_quotient_client", return_value=mock_client):
-            yield mock_client
+        QuotientMetadataCache.objects.create(
+            boxes=[
+                {"name": "web", "ip": "10.0.0.1", "services": [{"name": "http", "display_name": "HTTP"}]},
+                {"name": "mail", "ip": "10.0.0.2", "services": []},
+            ]
+        )
 
     def test_create_ticket_renders_service_dropdown_without_template_tag(
         self, blue_team_user, mock_quotient, blue_team

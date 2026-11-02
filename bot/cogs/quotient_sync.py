@@ -1,8 +1,9 @@
 import logging
 
-from asgiref.sync import sync_to_async
 from discord.ext import commands, tasks
 from scoring.quotient_sync import sync_quotient_metadata
+
+from bot.utils import run_blocking
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class QuotientSyncCog(commands.Cog):
     async def run_sync(self) -> None:
         """Sync once; back off while Quotient is unavailable."""
         try:
-            await sync_to_async(sync_quotient_metadata)()
+            await run_blocking(sync_quotient_metadata)
         except ValueError as e:
             if self.quotient_unavailable:
                 logger.debug(f"Quotient still unavailable: {e}")

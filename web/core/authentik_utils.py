@@ -2,7 +2,7 @@ import csv
 import io
 import logging
 import secrets
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import NamedTuple
@@ -255,13 +255,19 @@ def set_team_password(team_number: int, actor: str) -> tuple[str | None, str]:
     return password, error
 
 
+# Told a team's new password as soon as Authentik has it
+type OnSet = Callable[[int, str], None]
+
+
 class _NewCredentials(NamedTuple):
     reset: CredentialReset
     user: AuthentikUser | None = None
     changed_at: datetime | None = None
 
 
-def _new_credentials(manager: AuthentikManager, team_number: int) -> _NewCredentials:
+def _new_credentials(
+    manager: AuthentikManager, team_number: int, on_set: OnSet = lambda _n, _pw: None
+) -> _NewCredentials:
     """The new password, then the Authentik sessions ended: an open one still reaches the other Authentik apps."""
     try:
         user = _team_user(manager, team_number)
@@ -275,6 +281,7 @@ def _new_credentials(manager: AuthentikManager, team_number: int) -> _NewCredent
     except AuthentikAPIError as e:
         logger.warning(f"Failed to set the password of team {team_number}: {e}")
         return _NewCredentials(Refused(reason_for(e), sessions_found=found), user)
+    on_set(team_number, password)
     # After: nobody can sign in with the new password before Authentik answers, but the old one works until then
     changed_at = timezone.now()
     listed_after, sessions_error = _end_sessions(manager, user, hidden)
@@ -293,10 +300,16 @@ def _in_own_transaction(what: str, step: Callable[[], object]) -> str | None:
 
 
 def _reset_credentials(
-    manager: AuthentikManager, team_number: int, actor: str, reason: str, *, unlink_on_failure: bool
+    manager: AuthentikManager,
+    team_number: int,
+    actor: str,
+    reason: str,
+    *,
+    unlink_on_failure: bool,
+    on_set: OnSet = lambda _n, _pw: None,
 ) -> CredentialReset:
     """Each database step after the password change runs in a transaction of its own, the stored copy first."""
-    reset, user, changed_at = _new_credentials(manager, team_number)
+    reset, user, changed_at = _new_credentials(manager, team_number, on_set)
     if isinstance(reset, Refused) and not unlink_on_failure:
         return reset
     if isinstance(reset, Changed) and user is not None and changed_at is not None:
@@ -387,6 +400,10 @@ class BulkPasswordResetResult:
     resets: list[tuple[int, CredentialReset]]
 
     @property
+    def team_numbers(self) -> list[int]:
+        return [n for n, _ in self.resets]
+
+    @property
     def password_list(self) -> list[tuple[int, str, str]]:
         return [(n, team_username(n), r.password) for n, r in self.resets if isinstance(r, Changed)]
 
@@ -439,13 +456,102 @@ def sessions_failure_summary(sessions_failed: list[tuple[str, str]]) -> str:
     )
 
 
-def reset_teams_credentials(team_numbers: list[int], actor: str) -> BulkPasswordResetResult:
-    """_reset_credentials for several teams, with one audit row and one ops note, which can't fail it: every new
-    password must reach the caller."""
+RESET_BATCH_SIZE = 10
+
+
+def reset_teams_credentials(
+    team_numbers: list[int],
+    actor: str,
+    room_for_another: Callable[[], bool] = lambda: True,
+    *,
+    hand_over_each: bool = True,
+) -> Generator[BulkPasswordResetResult, None, BulkPasswordResetResult]:
+    """Reset passwords and end sessions RESET_BATCH_SIZE teams at a time, yielding each audited batch; returns them
+    combined when run to the end. A batch is handed over when the caller asks for the next (hand_over_each False: at
+    the end). Ops hears once of passwords never handed over, teams not reached and how many were reset."""
+    batches: list[BulkPasswordResetResult] = []
+    handed_over = 0
+    partial: list[tuple[int, str, str]] = []  # The batch under way's resets so far
+    try:
+        for start in range(0, len(team_numbers), RESET_BATCH_SIZE):
+            if batches and not room_for_another():
+                break
+            partial = []
+            batches.append(_reset_batch(team_numbers[start : start + RESET_BATCH_SIZE], actor, partial))
+            partial = []
+            yield batches[-1]
+            if hand_over_each:
+                handed_over = len(batches)
+        handed_over = len(batches)
+    finally:
+        if partial:
+            batches.append(_partial_batch(partial, actor))
+        note = _bulk_reset_note(actor, team_numbers, batches, handed_over)
+        _in_own_transaction(
+            "Queueing the bulk credentials reset note", lambda: DiscordTask.enqueue(LogToChannel(message=note))
+        )
+    return _combined(batches)
+
+
+def _partial_batch(resets: list[tuple[int, str, str]], actor: str) -> BulkPasswordResetResult:
+    """The resets a batch made before it raised, audited."""
+
+    def record() -> None:
+        AuditLog.objects.create(
+            action="blueteam_passwords_reset",
+            admin_user=actor,
+            target_entity="authentik_users",
+            target_id=0,
+            details={
+                "team_numbers": [number for number, _username, _password in resets],
+                "total_users": len(resets),
+                "success_count": len(resets),
+                "failed_count": 0,
+                "interrupted": True,
+            },
+        )
+
+    _in_own_transaction("Recording the interrupted bulk credentials reset", record)
+    return BulkPasswordResetResult([(number, Changed(password)) for number, _username, password in resets])
+
+
+def _combined(batches: list[BulkPasswordResetResult]) -> BulkPasswordResetResult:
+    return BulkPasswordResetResult([r for b in batches for r in b.resets])
+
+
+def _bulk_reset_note(
+    actor: str, team_numbers: list[int], batches: list[BulkPasswordResetResult], handed_over: int
+) -> str:
+    """Lost and unreached teams first: a long note is cut at Discord's limit, and those are what ops must act on."""
+    parts = []
+    if lost := [username for batch in batches[handed_over:] for _num, username, _pw in batch.password_list]:
+        parts.append(f"the new passwords of {', '.join(lost)} were never handed over: reset them again")
+    reached = {n for batch in batches for n in batch.team_numbers}
+    if unreached := [team_username(n) for n in team_numbers if n not in reached]:
+        parts.append(f"not reached: {', '.join(unreached)}")
+    combined = _combined(batches)
+    if not combined.password_list:
+        parts.append("nothing was changed")
+    parts.append(combined.summary())
+    return f"Credentials reset by {actor}: {'; '.join(parts)}"
+
+
+def _reset_batch(team_numbers: list[int], actor: str, progress: list[tuple[int, str, str]]) -> BulkPasswordResetResult:
+    """One audited batch; each password is also added to progress as soon as Authentik has it."""
     with AuthentikManager() as manager:
         result = BulkPasswordResetResult(
             [
-                (n, _reset_credentials(manager, n, actor, CREDENTIALS_RESET, unlink_on_failure=False))
+                (
+                    n,
+                    _reset_credentials(
+                        manager,
+                        n,
+                        actor,
+                        CREDENTIALS_RESET,
+                        unlink_on_failure=False,
+                        on_set=lambda num, pw: progress.append((num, team_username(num), pw)),
+                    ),
+                )
                 for n in team_numbers
             ]
         )
@@ -458,7 +564,6 @@ def reset_teams_credentials(team_numbers: list[int], actor: str) -> BulkPassword
             target_id=0,
             details=result.audit_details(),
         )
-        DiscordTask.enqueue(LogToChannel(message=f"Credentials reset by {actor}: {result.summary()}"))
 
     _in_own_transaction("Recording the bulk credentials reset", record)
     return result

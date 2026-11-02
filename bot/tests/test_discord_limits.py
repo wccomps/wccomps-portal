@@ -93,30 +93,24 @@ async def test_thread_embed_fits_a_long_web_description() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ticket_reply_fits_a_long_description_and_still_opens_the_thread(mock_interaction: Any) -> None:
+async def test_ticket_reply_fits_a_long_description(mock_interaction: Any) -> None:
     from bot.cogs.ticketing import TicketingCog
-    from bot.ticket_input import TicketInput
 
     description = "w" * 3000
     member = SimpleNamespace(team=SimpleNamespace(team_name="Team 05"))
-    ticket = SimpleNamespace(ticket_number="T005-001")
-    read = TicketInput(
-        SimpleNamespace(display_name="Other", points=0, points_display="0 points"), description, "", "", ""
-    )
+    category = SimpleNamespace(display_name="Other", points=0, points_display="0 points")
+    ticket = SimpleNamespace(ticket_number="T005-001", description=description, category=category)
     cog = TicketingCog.__new__(TicketingCog)
     cog.bot = MagicMock()
     with (
         patch("bot.cogs.ticketing.linked_team_member", AsyncMock(return_value=member)),
-        patch("bot.cogs.ticketing.read_ticket", return_value=read),
-        patch("bot.cogs.ticketing.acreate_ticket_atomic", AsyncMock(return_value=ticket)),
-        patch("bot.cogs.ticketing.publish_new_ticket", AsyncMock()) as publish,
+        patch("bot.cogs.ticketing.file_ticket", return_value=(ticket, category)),
     ):
         await TicketingCog.create_ticket.callback(cog, mock_interaction, category="6", description=description)
 
-    embed = mock_interaction.response.send_message.call_args.kwargs["embed"]
+    embed = mock_interaction.followup.send.call_args.kwargs["embed"]
     field = next(f for f in embed.fields if f.name == "Description")
     assert len(field.value) == 1024
-    publish.assert_awaited_once()
 
 
 @pytest.mark.asyncio

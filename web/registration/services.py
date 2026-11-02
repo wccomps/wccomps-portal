@@ -15,6 +15,7 @@ from scoring.snapshot import SNAPSHOT_VERSION, serialize_scorecard
 from core.competition_utils import WipedData, wipe_competition_data
 from core.discord_tasks import CleanupCompetition
 from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnouncement
+from core.services.competition import EVENT_CLOSED_OUT, run_lock
 from team.models import DiscordLink, SchoolInfo, Team, default_team_name
 from ticketing.models import Ticket
 
@@ -467,6 +468,7 @@ class CloseOutOutcome:
 SERIALIZATION_FAILURE = "40001"
 DEADLOCK_DETECTED = "40P01"
 CHANGED_WHILE_CLOSING_OUT = "Something changed while closing out; nothing was changed. Try again."
+CLOSE_OUT_DURING_RUN = "A competition start or stop is running. Close out when it finishes."
 
 
 def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
@@ -475,11 +477,14 @@ def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
     CHANGED_WHILE_CLOSING_OUT, writing nothing, and rows created after its snapshot stay as live data. It must be the
     outermost transaction: inside another, setting the isolation level fails.
     """
-    # The lock first: inside the transaction it would come after the snapshot
-    with _refusing_conflicts(), school_list_held(), transaction.atomic():
-        with connection.cursor() as cursor:
-            cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-        return _close_out(target, actor)
+    # The locks first: inside the transaction they would come after the snapshot
+    with _refusing_conflicts(), school_list_held(), run_lock() as no_run:
+        if not no_run:
+            raise CloseOutError(CLOSE_OUT_DURING_RUN)
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            return _close_out(target, actor)
 
 
 @contextmanager
@@ -516,14 +521,27 @@ def _close_out(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
     config.competition_start_time = None
     config.competition_end_time = None
     config.start_message = ""
-    config.save(update_fields=["competition_start_time", "competition_end_time", "start_message", "updated_at"])
+    config.timer_series_enable, config.timer_series_attempt = None, 0
+    config.timer_series_started = config.timer_series_schedule = None
+    config.save(
+        update_fields=[
+            "competition_start_time",
+            "competition_end_time",
+            "start_message",
+            "timer_series_enable",
+            "timer_series_attempt",
+            "timer_series_started",
+            "timer_series_schedule",
+            "updated_at",
+        ]
+    )
     QuotientMetadataCache.objects.all().delete()
     announcements, _ = QueuedAnnouncement.objects.all().delete()
     # Committed with the close-out, so the bot never tears Discord down for a close-out that rolled back. The
     # database is reset here, so the bot does only the Discord side.
     DiscordTask.enqueue(CleanupCompetition(requested_by=actor, closed_out_event_id=event.pk))
     AuditLog.objects.create(
-        action="event_closed_out",
+        action=EVENT_CLOSED_OUT,
         admin_user=actor,
         target_entity="event",
         target_id=event.pk,

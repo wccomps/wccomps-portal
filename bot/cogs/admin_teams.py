@@ -16,17 +16,17 @@ from bot.utils import (
     DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT,
     DISCORD_EMBED_FIELD_CHAR_LIMIT,
     add_field,
+    find_team,
     fit_lines,
-    get_team_or_respond,
     log_to_ops_channel,
-    off_orm_thread,
+    run_blocking,
     send_lines,
 )
 from core.authentik_utils import Changed, Refused, parse_team_range, reset_team
 from core.models import AuditLog, CompetitionConfig
 from core.services.linking import ADMIN_UNLINK, TEAM_REMOVED, unlink_discord_links, unlink_teams
 from core.utils import shorten
-from team.models import MAX_TEAMS, DiscordLink, Team
+from team.models import DiscordLink, Team
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +63,9 @@ class AdminTeamsCog(commands.Cog):
     @app_commands.check(permission_check("admin"))
     async def admin_team_info(self, interaction: discord.Interaction, team_number: int) -> None:
         """Get detailed information about a team."""
-        team = await get_team_or_respond(interaction, team_number)
-        if not team:
+        team = await find_team(team_number)
+        if isinstance(team, str):
+            await interaction.response.send_message(team, ephemeral=True)
             return
 
         member_count = await team.members.filter(is_active=True).acount()
@@ -173,8 +174,9 @@ class AdminTeamsCog(commands.Cog):
     @app_commands.check(permission_check("admin"))
     async def admin_remove_team(self, interaction: discord.Interaction, team_number: int) -> None:
         """Remove a team's Discord infrastructure and unlink all members."""
-        if team_number < 1 or team_number > MAX_TEAMS:
-            await interaction.response.send_message(f"Team number must be between 1 and {MAX_TEAMS}", ephemeral=True)
+        team = await find_team(team_number)
+        if isinstance(team, str):
+            await interaction.response.send_message(team, ephemeral=True)
             return
 
         guild = interaction.guild
@@ -183,11 +185,6 @@ class AdminTeamsCog(commands.Cog):
             return
 
         await interaction.response.defer(ephemeral=True)
-
-        team = await Team.objects.filter(team_number=team_number).afirst()
-        if not team:
-            await interaction.followup.send(f"Team {team_number} not found", ephemeral=True)
-            return
 
         unlinked_count = len(
             await sync_to_async(unlink_teams)(Team.objects.filter(pk=team.pk), str(interaction.user), TEAM_REMOVED)
@@ -240,8 +237,9 @@ class AdminTeamsCog(commands.Cog):
         team_number: int,
         recreate_channels: bool = True,
     ) -> None:
-        if team_number < 1 or team_number > MAX_TEAMS:
-            await interaction.response.send_message(f"Team number must be between 1 and {MAX_TEAMS}", ephemeral=True)
+        team = await find_team(team_number)
+        if isinstance(team, str):
+            await interaction.response.send_message(team, ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -250,12 +248,7 @@ class AdminTeamsCog(commands.Cog):
             await interaction.followup.send("This command must be used in a guild", ephemeral=True)
             return
 
-        team = await Team.objects.filter(team_number=team_number).afirst()
-        if not team:
-            await interaction.followup.send(f"Team {team_number} not found", ephemeral=True)
-            return
-
-        credentials, recreation_queued = await off_orm_thread(
+        credentials, recreation_queued = await run_blocking(
             reset_team, team_number, actor=str(interaction.user), recreate_channels=recreate_channels
         )
         if not recreate_channels:
