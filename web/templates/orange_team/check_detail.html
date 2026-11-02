@@ -42,7 +42,7 @@
         </c-slot>
         <c-fieldset heading="Details">
             <p>
-                <strong>Description:</strong> {{ orange_check.description|default:"No description" }}
+                <strong>Description:</strong> <span class="whitespace-pre-wrap">{{ orange_check.description|default:"No description" }}</span>
             </p>
             {% if orange_check.scheduled_at %}
                 <p>

@@ -74,3 +74,21 @@ class TestDashboard:
         assert response.status_code == 200
         assert b"Checked Out" in response.content
         assert b"Check In" in response.content
+
+    def test_assigned_check_shows_multiline_description(self) -> None:
+        from orange_team.models import OrangeAssignment, OrangeCheck
+        from team.models import Team
+
+        user = User.objects.create_user(username="orange5", password="test")
+        UserGroups.objects.create(user=user, authentik_id="orange5-uid", groups=["WCComps_OrangeTeam"])
+        team = Team.objects.create(team_number=1, team_name="Team 01")
+        check = OrangeCheck.objects.create(title="Phone Check", description="1. Dial extension\n2. Verify greeting")
+        OrangeAssignment.objects.create(orange_check=check, user=user, team=team)
+        client = Client()
+        client.force_login(user)
+
+        response = client.get("/orange-team/")
+        assert response.status_code == 200
+        assert b'<div class="text-sm text-muted whitespace-pre-wrap">1. Dial extension\n2. Verify greeting</div>' in (
+            response.content
+        )
