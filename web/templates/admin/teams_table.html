@@ -1,0 +1,67 @@
+{% load cotton %}
+<div id="teams-list-content">
+    <c-table id="teams_list" class="w-full" aria_label="Team management list">
+        <c-slot name="headers">
+            <tr>
+                <c-table_header sort_field="team_number" current_sort="{{ sort_by }}">
+                    Team #
+                </c-table_header>
+                <c-table_header sort_field="team_name" current_sort="{{ sort_by }}">
+                    Name
+                </c-table_header>
+                <c-table_header sort_field="active_member_count"
+                                current_sort="{{ sort_by }}">
+                    Members
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Status
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Discord
+                </c-table_header>
+            </tr>
+        </c-slot>
+        {% for team in teams %}
+            <tr>
+                <th>
+                    <a href="{% url 'admin_team_detail' team.team_number %}">{{ team.team_number }}</a>
+                </th>
+                <td>{{ team.team_name }}</td>
+                <td>{{ team.get_member_count }}/{{ team.max_members }}</td>
+                <td>
+                    {% if team.is_active %}
+                        <c-badge variant="success">
+                            Active
+                        </c-badge>
+                    {% else %}
+                        <c-badge variant="danger">
+                            Inactive
+                        </c-badge>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if team.discord_role_id %}
+                        <c-badge variant="success">
+                            Configured
+                        </c-badge>
+                    {% else %}
+                        <c-badge variant="neutral">
+                            Not set
+                        </c-badge>
+                    {% endif %}
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="5">
+                    {% if filtered %}
+                        <c-no_matches items="teams" href="{% url 'admin_teams' %}" />
+                    {% else %}
+                        <c-empty_state title="No teams" description="No teams have been configured yet." />
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+    </c-table>
+    <p class="paginator">{{ teams|length }} team(s)</p>
+</div>

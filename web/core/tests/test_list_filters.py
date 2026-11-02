@@ -21,6 +21,7 @@ pytestmark = pytest.mark.django_db
 
 APPROVAL_LISTS = [
     "ops_review_tickets",
+    "scoring:incident_list",
     "scoring:review_incidents",
     "scoring:review_orange",
     "scoring:inject_grades_review",
@@ -33,9 +34,31 @@ TEAM_LISTS = [
     "scoring:review_incidents",
     "scoring:review_orange",
     "scoring:inject_grades_review",
+    "scoring:review_inject_feedback",
     "scoring:red_team_findings",
+    "orange_team:review_queue",
 ]
-FILTERED_LISTS = [*dict.fromkeys([*APPROVAL_LISTS, *TEAM_LISTS]), "registration_review_list"]
+FILTERED_LISTS = [
+    *dict.fromkeys([*APPROVAL_LISTS, *TEAM_LISTS]),
+    "school_info",
+    "admin_teams",
+    "admin_categories",
+    "registration_review_list",
+    "registration_season_list",
+    "registration_event_list",
+    "scoring:ip_pool_list",
+    "orange_team:check_list",
+    "packets_list",
+]
+
+
+def list_url(name: str) -> str:
+    if name == "registration_event_list":
+        from registration.models import Season
+
+        season, _ = Season.objects.get_or_create(year=2021, defaults={"name": "c season"})
+        return reverse(name, args=[season.id])
+    return reverse(name)
 
 
 class Selects(HTMLParser):
@@ -75,7 +98,7 @@ def client(admin_user: User) -> Client:
 
 def _rows_for(team: Team, marker: str, submitter: User) -> None:
     """One row of team's on every list with a team filter, each showing marker."""
-    from orange_team.models import OrangeCheck
+    from orange_team.models import OrangeAssignment, OrangeCheck
     from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeamScore
 
     from ticketing.models import Ticket, TicketCategory
@@ -93,8 +116,20 @@ def _rows_for(team: Team, marker: str, submitter: User) -> None:
     )
     check = OrangeCheck.objects.create(title=f"Check {marker}", description="")
     OrangeTeamScore.objects.create(team=team, orange_check=check, description=marker, points_awarded=Decimal(1))
+    OrangeAssignment.objects.create(
+        orange_check=check, team=team, user=submitter, status="submitted", score=1, submitted_at=timezone.now()
+    )
     InjectScore.objects.create(
         team=team, inject_id=marker, inject_name=marker, max_points=Decimal(10), points_awarded=Decimal(5)
+    )
+    InjectScore.objects.create(
+        team=team,
+        inject_id=f"{marker}-fb",
+        inject_name=marker,
+        max_points=Decimal(10),
+        points_awarded=Decimal(5),
+        is_approved=True,
+        feedback=marker,
     )
     finding = RedTeamScore.objects.create(
         affected_service=marker, notes=marker, source_ip="10.0.0.1", points_per_team=Decimal(1), submitted_by=submitter
@@ -158,14 +193,10 @@ def test_every_approval_filter_offers_the_same_statuses(client: Client, name: st
 
 @pytest.mark.parametrize("name", FILTERED_LISTS)
 def test_a_list_its_filters_empty_says_so_in_one_wording(client: Client, name: str) -> None:
-    query = {"search": "no-such-row", "status": "all"}
-    if name == "registration_review_list":
-        query = {"status": "rejected"}
-    if name == "scoring:review_inject_feedback":
-        query = {"inject": "no-such-inject"}
-    page = client.get(reverse(name), query).content.decode()
+    url = list_url(name)
+    page = client.get(url, {"search": "no-such-row", "status": "all"}).content.decode()
     assert re.search(r"No \w+( \w+)* match your filters", page), name
-    assert re.search(rf'<a href="{re.escape(reverse(name))}"[^>]*>\s*clearing all filters\s*</a>', page), name
+    assert re.search(rf'<a href="{re.escape(url)}"[^>]*>\s*clearing all filters\s*</a>', page), name
 
 
 def _filter_keys() -> set[str]:

@@ -7,7 +7,8 @@
     <div id="content-main">
         <c-page_header title="Team Registration Review" />
         <c-module filtered="true">
-            <c-filter_toolbar hx_get="{% url 'registration_review_list' %}"
+            <c-filter_toolbar form_id="registration-review-filter"
+                              hx_get="{% url 'registration_review_list' %}"
                               hx_target="#registration-review-content"
                               hx_swap="outerHTML"
                               hx_push_url="true">
@@ -19,6 +20,14 @@
                                     {% if value == filters.status %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>
+                </c-filter_field>
+                <c-filter_field label="Search" id="id_search">
+                    <input type="text"
+                           name="search"
+                           id="id_search"
+                           value="{{ filters.search }}"
+                           placeholder="School, contact, or email..."
+                           aria-label="Search registrations" />
                 </c-filter_field>
             </c-filter_toolbar>
             {% include "registration/review_table.html" %}

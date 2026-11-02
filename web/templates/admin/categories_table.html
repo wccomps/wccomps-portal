@@ -1,0 +1,95 @@
+{% load cotton %}
+<div id="categories-list-content">
+    <c-table id="categories_list"
+             class="w-full"
+             aria_label="Ticket categories list">
+        <c-slot name="headers">
+            <tr>
+                <c-table_header sort_field="sort_order" current_sort="{{ sort_by }}">
+                    Order
+                </c-table_header>
+                <c-table_header sort_field="display_name" current_sort="{{ sort_by }}">
+                    Name
+                </c-table_header>
+                <c-table_header sort_field="points" current_sort="{{ sort_by }}">
+                    Points
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Playbook
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Required Fields
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Variable
+                </c-table_header>
+                <c-table_header sortable="false">
+                    User Visible
+                </c-table_header>
+                <c-table_header sort_field="ticket_count" current_sort="{{ sort_by }}">
+                    Tickets
+                </c-table_header>
+                <c-table_header sortable="false">
+                    Actions
+                </c-table_header>
+            </tr>
+        </c-slot>
+        {% for category in categories %}
+            <tr>
+                <td>{{ category.sort_order }}</td>
+                <th>
+                    <a href="{% url 'admin_category_edit' category.pk %}">{{ category.display_name }}</a>
+                </th>
+                <td>{{ category.points }}</td>
+                <td>
+                    {% if category.steps %}
+                        <span>{{ category.steps|length }} step{{ category.steps|length|pluralize }}</span>
+                    {% else %}
+                        <span class="text-muted">No steps</span>
+                    {% endif %}
+                </td>
+                <td>{{ category.required_fields|join:", " }}</td>
+                <td>
+                    {% if category.variable_points %}
+                        <c-badge variant="success">
+                            Yes
+                        </c-badge>
+                    {% else %}
+                        <c-badge variant="neutral">
+                            No
+                        </c-badge>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if category.user_creatable %}
+                        <c-badge variant="success">
+                            Yes
+                        </c-badge>
+                    {% else %}
+                        <c-badge variant="neutral">
+                            No
+                        </c-badge>
+                    {% endif %}
+                </td>
+                <td>{{ category.ticket_count }}</td>
+                <td class="field-actions">
+                    <c-link href="{% url 'admin_category_delete' category.pk %}" variant="danger">Delete</c-link>
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="9">
+                    {% if filtered %}
+                        <c-no_matches items="categories" href="{% url 'admin_categories' %}" />
+                    {% else %}
+                        <c-empty_state title="No categories"
+                                       description="Add a ticket category to get started.">
+                            <c-link href="{% url 'admin_category_create' %}" variant="add">Add Category</c-link>
+                        </c-empty_state>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+    </c-table>
+    <p class="paginator">{{ categories|length }} category(ies)</p>
+</div>

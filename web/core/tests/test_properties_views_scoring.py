@@ -130,7 +130,7 @@ CASES = [
         idempotent=(RedTeamScore,),
     ),
     ViewCase("scoring:red_screenshot", may("red_team", "gold_team"), params={"screenshot_id": "red_screenshot_id"}),
-    ViewCase("scoring:ip_pool_list", RED),
+    ViewCase("scoring:ip_pool_list", RED, query=_filters),
     ViewCase(
         "scoring:ip_pool_create",
         RED,
@@ -139,7 +139,7 @@ CASES = [
     ),
     ViewCase("scoring:ip_pool_edit", RED, post=lambda w: form_fields(RedTeamIPPoolForm(user=w.users["red_team"]))),
     ViewCase("scoring:ip_pool_delete", RED),
-    ViewCase("scoring:incident_list", GOLD_WHITE | {"blue_team"}),
+    ViewCase("scoring:incident_list", GOLD_WHITE | {"blue_team"}, query=_filters),
     ViewCase("scoring:submit_incident_report", GOLD_WHITE | {"blue_team"}, post=_incident),
     ViewCase("scoring:view_incident_report", GOLD_WHITE | {"blue_team"}),
     ViewCase("scoring:delete_incident_report", GOLD_WHITE | {"blue_team"}),

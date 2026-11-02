@@ -8,71 +8,35 @@
         <c-page_header title="{{ season.name }} Events"
                        parent_url="{% url 'registration_season_list' %}"
                        parent_label="Seasons" />
-        <c-module>
+        <c-module filtered="true">
             <c-slot name="toolbar">
                 <c-link href="{% url 'registration_event_create' season_id=season.id %}"
                         variant="add">Create Event</c-link>
             </c-slot>
-            <c-table id="events_list" class="w-full" aria_label="Events list">
-                <c-slot name="headers">
-                    <tr>
-                        <c-table_header sortable="false">
-                            Name
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Type
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Date
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Time
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Enrollments
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Status
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Actions
-                        </c-table_header>
-                    </tr>
-                </c-slot>
-                {% for event, status_word, status_badge in events %}
-                    <tr>
-                        <td>
-                            <a href="{% url 'registration_event_detail' event_id=event.id %}">{{ event.name }}</a>
-                        </td>
-                        <td>{{ event.get_event_type_display }}</td>
-                        <td>{{ event.date|date:"M d, Y" }}</td>
-                        <td>{{ event.start_time|time:"g:i A" }} to {{ event.end_time|time:"g:i A" }}</td>
-                        <td>{{ event.enrollment_count|default:0 }} / {{ event.max_teams }}</td>
-                        <td>
-                            <c-badge variant="{{ status_badge }}">
-                                {{ status_word }}
-                            </c-badge>
-                        </td>
-                        <td class="field-actions">
-                            <c-link href="{% url 'registration_event_detail' event_id=event.id %}"
-                                    variant="secondary">View</c-link>
-                            <c-link href="{% url 'registration_event_edit' event_id=event.id %}"
-                                    variant="secondary">Edit</c-link>
-                            <c-link href="{% url 'registration_event_delete' event_id=event.id %}"
-                                    variant="danger">Delete</c-link>
-                        </td>
-                    </tr>
-                {% empty %}
-                    <tr>
-                        <td colspan="7">
-                            <c-empty_state title="No events in this season yet">
-                                <c-link href="{% url 'registration_event_create' season_id=season.id %}"
-                                        variant="add">Create Event</c-link>
-                            </c-empty_state>
-                        </td>
-                    </tr>
-                {% endfor %}
-            </c-table>
+            <c-filter_toolbar form_id="events-filter"
+                              hx_get="{% url 'registration_event_list' season_id=season.id %}"
+                              hx_target="#events-list-content"
+                              hx_swap="outerHTML"
+                              hx_push_url="true">
+                <c-filter_field label="Type" id="id_event_type">
+                    <select name="event_type" id="id_event_type" aria-label="Filter by event type">
+                        <option value="">All Types</option>
+                        {% for value, label in event_type_choices %}
+                            <option value="{{ value }}"
+                                    {% if value == filters.event_type %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </c-filter_field>
+                <c-filter_field label="Search" id="id_search">
+                    <input type="text"
+                           name="search"
+                           id="id_search"
+                           value="{{ filters.search }}"
+                           placeholder="Event name..."
+                           aria-label="Search events" />
+                </c-filter_field>
+            </c-filter_toolbar>
+            {% include "registration/events/table.html" %}
         </c-module>
     </div>
 {% endblock registration_content %}
