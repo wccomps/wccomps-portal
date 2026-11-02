@@ -129,7 +129,6 @@ PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
     "admin/base_site.html:nav-menu": CHROME + "the nav links and tools",
     "admin/base_site.html:nav-menu--open": CHROME + "the phone menu, open",
     "admin/base_site.html:nav-links": CHROME + "the section links",
-    "admin/base_site.html:nav-spacer": CHROME + "the gap before the tools",
     "admin/base_site.html:nav-utils": CHROME + "the dark mode, sound and log out tools",
     "admin/base_site.html:nav-user": CHROME + "the signed-in name",
     "admin/base_site.html:current": CHROME + "the current section's link",
