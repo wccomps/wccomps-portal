@@ -219,6 +219,7 @@ TEAM_REMOVED = "team_removed"
 COMPETITION_CLEANUP = "competition_cleanup"
 CREDENTIALS_RESET = "credentials_reset"
 TEAM_RESET = "team_reset"
+SCHOOL_CHANGED = "school_changed"
 
 
 def unlink_discord_links(

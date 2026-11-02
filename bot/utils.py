@@ -265,10 +265,7 @@ class BlockingSteps[Y, R]:
 
 
 async def report_missing_discord_settings(bot: discord.Client) -> None:
-    """Log and post to the ops channel any required Discord IDs that are unset.
-
-    Unset IDs used to fail silently (roles/channels "not found"), so this runs at startup.
-    """
+    """Log and post to the ops channel any required Discord IDs that are unset."""
     missing = missing_discord_settings()
     if not missing:
         return

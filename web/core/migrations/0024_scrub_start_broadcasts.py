@@ -18,9 +18,10 @@ def scrub_start_broadcasts(apps, schema_editor):
             continue
         if task.status in ("pending", "processing"):
             unfinished.append(task.pk)
-        elif payload.get("message") != SCRUBBED:
+        elif payload.get("message") != SCRUBBED or "\nMessage: " in task.error_message:
             task.payload = {**payload, "message": SCRUBBED}
-            task.save(update_fields=["payload"])
+            task.error_message = task.error_message.partition("\nMessage: ")[0]
+            task.save(update_fields=["payload", "error_message"])
     if config is not None and unfinished:
         config.start_broadcasts = sorted({*config.start_broadcasts, *unfinished})
         config.save(update_fields=["start_broadcasts"])
