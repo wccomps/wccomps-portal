@@ -213,14 +213,14 @@ def test_resending_failed_emails_takes_the_lock(_send, team):
 
 
 @patch.object(PacketDistributionService, "send_packet_email")
-def test_the_admin_retry_takes_the_lock(_send, team):
+def test_the_admin_retry_takes_the_lock(_send, team, django_capture_on_commit_callbacks):
     packet = _sent_packet(team)
     admin = User.objects.create(username="admin")
     UserGroups.objects.update_or_create(user=admin, defaults={"groups": ["WCComps_Discord_Admin"], "authentik_id": "x"})
     client = Client()
     client.force_login(admin)
 
-    with CaptureQueriesContext(connection) as queries:
+    with CaptureQueriesContext(connection) as queries, django_capture_on_commit_callbacks(execute=True):
         client.post(
             reverse("admin:packets_packetdistribution_changelist"),
             {"action": "retry_failed_emails", "_selected_action": [packet.distributions.get().pk]},

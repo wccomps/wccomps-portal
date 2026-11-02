@@ -1,11 +1,10 @@
-"""Derive ScoringTemplate.service_max, inject_max, and orange_max from Quotient and OrangeCheck data."""
+"""Derive ScoringTemplate.service_max and inject_max from Quotient data."""
 
 import logging
 from collections.abc import Sequence
 from decimal import Decimal
 from typing import Literal
 
-from orange_team.models import OrangeCheck
 from quotient.client import Inject
 
 from scoring.models import ScoringTemplate, ServiceDetail
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Below this uptime a single sample extrapolates too far via points/uptime to trust.
 _MIN_RELIABLE_UPTIME = Decimal("0.1")
 
-TemplateMaxField = Literal["service_max", "inject_max", "orange_max"]
+TemplateMaxField = Literal["service_max", "inject_max"]
 
 
 def inject_max_from_titles(injects: Sequence[Inject]) -> Decimal | None:
@@ -56,12 +55,6 @@ def service_max_from_details() -> Decimal | None:
         return None
     total = sum((points / uptime for uptime, points in best.values()), Decimal("0")).quantize(Decimal("1"))
     return total if total > 0 else None
-
-
-def orange_max_from_checks() -> Decimal | None:
-    """Sum of every orange check's maximum score (criteria sum, else its max_points)."""
-    total = sum(check.max_score for check in OrangeCheck.objects.all())
-    return Decimal(total) if total > 0 else None
 
 
 def set_template_max(field: TemplateMaxField, value: Decimal | None) -> None:

@@ -2,6 +2,7 @@ from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ValidationError
+from orange_team.models import OrangeCheck
 
 from scoring.calculator import _get_modifiers
 from scoring.models import ScoringTemplate
@@ -18,13 +19,13 @@ def test_no_stored_modifier_fields() -> None:
 
 def test_modifiers_derived_from_weights_and_maxes() -> None:
     # Equal weight share and equal max → equal modifiers; the max sets the scale.
+    OrangeCheck.objects.create(title="Orange", max_points=500)
     t = ScoringTemplate.objects.create(
         service_weight=Decimal("40"),
         inject_weight=Decimal("40"),
         orange_weight=Decimal("20"),
         service_max=Decimal("1000"),
         inject_max=Decimal("1000"),
-        orange_max=Decimal("500"),
     )
     service_mod, inject_mod, orange_mod = _get_modifiers(t)
     # Each category's scaled maximum is proportional to its weight.

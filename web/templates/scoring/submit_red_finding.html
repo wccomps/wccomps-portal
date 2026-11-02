@@ -52,8 +52,7 @@
                 {{ form.persistence_established.as_field_group }}
             </c-fieldset>
             <c-fieldset heading="Outcomes: Access Level">
-                {{ form.root_access.as_field_group }}
-                {{ form.user_access.as_field_group }}
+                {{ form.access_level.as_field_group }}
                 {{ form.privilege_escalation.as_field_group }}
             </c-fieldset>
             <c-fieldset heading="Outcomes: Data Recovery">
@@ -381,15 +380,9 @@
 
         function calculatePoints() {
             let total = 0;
-            let tier = null;
-            document.querySelectorAll('input[data-points]:checked').forEach(box => {
-                if (box.dataset.accessTier === undefined) {
-                    total += Number(box.dataset.points);
-                } else if (tier === null || Number(box.dataset.accessTier) < Number(tier.dataset.accessTier)) {
-                    tier = box;
-                }
+            document.querySelectorAll('input[data-points]:checked').forEach(input => {
+                total += Number(input.dataset.points);
             });
-            if (tier) total += Number(tier.dataset.points);
             document.getElementById('pointsValue').textContent = total;
         }
 

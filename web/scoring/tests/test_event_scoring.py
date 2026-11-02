@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 from django.test import Client
 from django.urls import reverse
+from orange_team.models import OrangeCheck
 
 from scoring.calculator import Standing
 from scoring.models import InjectScore, ServiceDetail
@@ -385,7 +386,7 @@ class TestScorecardRedTeamDetail:
         attack_type, _ = AttackType.objects.get_or_create(name="Privilege Escalation")
         finding = RedTeamScore.objects.create(
             attack_type=attack_type,
-            root_access=True,
+            access_level="root",
             credentials_recovered=True,
             points_per_team=Decimal("150"),
             is_approved=True,
@@ -407,13 +408,13 @@ class TestScorecardScalingContext:
     def test_scorecard_shows_scaling_weights(self, gold_team_user, teams, scores):
         from scoring.models import ScoringTemplate
 
+        OrangeCheck.objects.create(title="Orange", max_points=160)
         ScoringTemplate.objects.create(
             service_weight=Decimal("40"),
             inject_weight=Decimal("40"),
             orange_weight=Decimal("20"),
             service_max=Decimal("11454"),
             inject_max=Decimal("3060"),
-            orange_max=Decimal("160"),
         )
 
         client = Client()

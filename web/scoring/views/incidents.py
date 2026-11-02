@@ -4,12 +4,12 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import get_user_team, has_permission, require_permission, team_record_or_404
-from core.stored_files import file_response
+from core.stored_files import UploadError
 from core.utils import by_approval, by_team, chosen_team, list_filters, team_numbers
 from team.models import Team
 
@@ -17,7 +17,7 @@ from ..calculator import calculate_suggested_recovery_points, suggest_red_score_
 from ..forms import IncidentMatchForm, IncidentReportForm
 from ..models import IncidentReport, IncidentScreenshot
 from ..quotient_sync import get_box_metadata
-from ..screenshots import ScreenshotError, read_screenshots
+from ..screenshots import read_screenshots
 
 # Who sees and reviews every team's incident reports: White Team (the permission's groups hold Gold Team and admins)
 INCIDENT_STAFF = "white_team"
@@ -41,8 +41,8 @@ def submit_incident_report(request: HttpRequest) -> HttpResponse:
 
         if form.is_valid():
             try:
-                screenshots = read_screenshots(request.FILES.getlist("screenshots"))
-            except ScreenshotError as e:
+                screenshots = read_screenshots(request.FILES.getlist("screenshots"), IncidentScreenshot)
+            except UploadError as e:
                 messages.error(request, f"File upload failed: {e}")
             else:
                 incident = form.save(commit=False)
@@ -59,10 +59,9 @@ def submit_incident_report(request: HttpRequest) -> HttpResponse:
                 incident.submitted_by = user
                 incident.save()
 
-                for file_data, filename, mime_type in screenshots:
-                    IncidentScreenshot.objects.create(
-                        incident=incident, file_data=file_data, filename=filename, mime_type=mime_type
-                    )
+                for screenshot in screenshots:
+                    screenshot.incident = incident
+                    screenshot.save()
 
                 messages.success(request, f"Incident report #{incident.id} submitted successfully")
                 return redirect("scoring:view_incident_report", incident_id=incident.id)
@@ -138,10 +137,7 @@ def incident_screenshot_download(request: HttpRequest, screenshot_id: int) -> Ht
         team_field="incident__team",
         id=screenshot_id,
     )
-    if not screenshot.file_data:
-        raise Http404  # the file was lost
-
-    return file_response(bytes(screenshot.file_data), screenshot.filename, inline=True)
+    return screenshot.serve(inline=True)
 
 
 @require_permission(INCIDENT_STAFF, error_message="Only Gold Team or White Team members can review incident reports")

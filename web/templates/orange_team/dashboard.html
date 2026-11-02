@@ -1,5 +1,5 @@
 {% extends "orange_team/base.html" %}
-{% load cotton %}
+{% load cotton status_variants %}
 {% block orange_title %}
     My Checks - Orange Team
 {% endblock orange_title %}
@@ -156,10 +156,13 @@
                             {% endif %}
                         </td>
                         <td>
-                            {% if assignment.status == "submitted" %}
-                                <c-badge variant="warning">
-                                    Submitted
+                            {% if "submit" not in assignment.actions or assignment.status_info.returned %}
+                                <c-badge variant="{{ assignment.status|badge_variant:'orange_assignment' }}">
+                                    {{ assignment.get_status_display }}
                                 </c-badge>
+                                {% if assignment.status_info.returned and assignment.notes %}
+                                    <p class="text-sm text-muted">{{ assignment.notes }}</p>
+                                {% endif %}
                             {% elif assignment.orange_check.window_state == "open" %}
                                 <c-badge variant="info">
                                     Open now
@@ -191,7 +194,7 @@
                                                            {% if result.met %}checked{% endif %}
                                                            data-criterion-id="{{ result.criterion.pk }}"
                                                            @change="saveCriterion"
-                                                           {% if assignment.status == "submitted" %}disabled{% endif %}>
+                                                           {% if "save" not in assignment.actions %}disabled{% endif %}>
                                                     {{ result.criterion.label }} ({{ result.criterion.points }} pts)
                                                 </label>
                                             </li>
@@ -211,13 +214,13 @@
                                            min="0"
                                            max="{{ assignment.orange_check.max_score }}"
                                            aria-label="Score for Team {{ assignment.team.team_number }}"
-                                           {% if assignment.status == "submitted" %}disabled{% endif %}>
+                                           {% if "save" not in assignment.actions %}disabled{% endif %}>
                                     <span class="text-muted">/ {{ assignment.orange_check.max_score }}</span>
                                 </div>
                             {% endif %}
                         </td>
                         <td>
-                            {% if assignment.status != "submitted" %}
+                            {% if "submit" in assignment.actions %}
                                 <c-form id="submit-{{ assignment.pk }}"
                                         action="{% url 'orange_team:assignment_submit' assignment.pk %}"
                                         data-confirm="Submit this check? You cannot edit the score after submission.">

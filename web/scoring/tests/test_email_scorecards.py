@@ -8,6 +8,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
+from orange_team.models import OrangeCheck
 from registration.models import School
 
 from core.models import AuditLog, UserGroups
@@ -58,13 +59,13 @@ def school_infos(teams):
 
 @pytest.fixture
 def scoring_template():
+    OrangeCheck.objects.create(title="Orange", max_points=100)
     return ScoringTemplate.objects.create(
         service_weight=Decimal("40"),
         inject_weight=Decimal("40"),
         orange_weight=Decimal("20"),
         service_max=Decimal("1000"),
         inject_max=Decimal("500"),
-        orange_max=Decimal("100"),
     )
 
 

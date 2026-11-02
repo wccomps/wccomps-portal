@@ -29,11 +29,11 @@ from packets.models import Packet
 from registration.models import Event, Season, normalize_school_name
 from registration.services import ImportBlockedError, SchoolListRow, import_school_list
 from scoring.models import IncidentScreenshot, RedTeamScreenshot, validate_file_size
-from scoring.screenshots import MAX_SCREENSHOTS, ScreenshotError, read_screenshot, read_screenshots
+from scoring.screenshots import MAX_SCREENSHOTS, read_screenshots
 
 from core.csv_export import safe_cell
 from core.forms import SchoolInfoEditForm
-from core.stored_files import clean_name, detect_inline_type, file_response, stored_type
+from core.stored_files import UploadError, clean_name, detect_inline_type, stored_type
 from core.tests.strategies import (
     PAYLOADS,
     assert_storable,
@@ -306,27 +306,29 @@ def test_team_extras_are_escaped_in_the_packet_email(key: str, value: str) -> No
 
 
 @given(upload=uploaded_files())
-def test_screenshot_is_read_or_refused_and_typed_from_its_bytes(upload: SimpleUploadedFile) -> None:
-    try:
-        data, name, mime = read_screenshot(upload)
-    except ScreenshotError as refused:
-        assert str(refused)
-        return
-    assert mime == stored_type(data, name)
+def test_an_upload_is_stored_or_refused_and_typed_from_its_bytes(upload: SimpleUploadedFile) -> None:
     for model in (RedTeamScreenshot, IncidentScreenshot):
-        assert_storable(column(model, "filename"), name)
-        assert_storable(column(model, "mime_type"), mime)
-    response = file_response(data, name, inline=True)
-    if detect_inline_type(data) is None:
-        assert response["Content-Disposition"].startswith("attachment")
-        assert "sandbox" in response["Content-Security-Policy"]
+        upload.seek(0)
+        try:
+            row = model.from_upload(upload)
+        except UploadError as refused:
+            assert str(refused)
+            continue
+        data = bytes(row.file_data)
+        assert row.mime_type == stored_type(data, row.filename)
+        assert_storable(column(model, "filename"), row.filename)
+        assert_storable(column(model, "mime_type"), row.mime_type)
+        response = row.serve(inline=True)
+        if detect_inline_type(data) is None:
+            assert response["Content-Disposition"].startswith("attachment")
+            assert "sandbox" in response["Content-Security-Policy"]
 
 
 @given(uploads=st.lists(uploaded_files(), max_size=MAX_SCREENSHOTS + 2))
 def test_screenshots_are_read_together_or_refused(uploads: list[SimpleUploadedFile]) -> None:
     try:
-        read = read_screenshots(uploads)
-    except ScreenshotError:
+        read = read_screenshots(uploads, RedTeamScreenshot)
+    except UploadError:
         assert len(uploads) > MAX_SCREENSHOTS
         return
     assert len(read) == len(uploads)
@@ -497,7 +499,7 @@ PARSERS: dict[str, list[Callable[..., None]]] = {
     ],
     "web/packets/views.py:upload_packet": [test_packet_upload_view_answers_any_file],
     "web/scoring/models.py:validate_file_size": [test_file_size_validator_passes_or_refuses_any_upload],
-    "web/scoring/screenshots.py:read_screenshot": [test_screenshot_is_read_or_refused_and_typed_from_its_bytes],
+    "web/core/stored_files.py:StoredFile.from_upload": [test_an_upload_is_stored_or_refused_and_typed_from_its_bytes],
     "web/scoring/screenshots.py:read_screenshots": [test_screenshots_are_read_together_or_refused],
     "web/scoring/views/incidents.py:submit_incident_report": [test_incident_report_view_answers_any_screenshots],
     "web/scoring/views/red_team.py:submit_red_score": [test_red_finding_view_answers_any_screenshots],

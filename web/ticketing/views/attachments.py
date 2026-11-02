@@ -9,7 +9,7 @@ from django.shortcuts import redirect
 from django.views.decorators.http import require_POST
 
 from core.auth_utils import team_record_or_404
-from core.stored_files import clean_name, file_response
+from core.stored_files import UploadError, clean_name
 from ticketing.access import TICKET_STAFF
 from ticketing.models import Ticket, TicketAttachment
 
@@ -21,17 +21,12 @@ def _save_attachment(ticket: Ticket, uploaded_file: UploadedFile[bytes] | None, 
     if not uploaded_file:
         raise BadRequest("No file provided")
 
-    if uploaded_file.size is None or uploaded_file.size > TicketAttachment.MAX_SIZE:
-        uploaded_file.close()
-        raise BadRequest("File too large (max 10MB)")
-
-    filename = clean_name(uploaded_file.name, "")
-    if not filename:
-        uploaded_file.close()
-        raise BadRequest("File must have a name")
-
     try:
-        TicketAttachment.store(ticket, uploaded_file.read(), filename, uploaded_by)
+        if not clean_name(uploaded_file.name, ""):
+            raise BadRequest("File must have a name")
+        TicketAttachment.from_upload(uploaded_file, ticket=ticket, uploaded_by=uploaded_by).save()
+    except UploadError as refused:
+        raise BadRequest(str(refused)) from None
     finally:
         uploaded_file.close()
 
@@ -64,4 +59,4 @@ def ticket_attachment_download(
         ticket__ticket_number=ticket_number,
     )
 
-    return file_response(bytes(attachment.file_data), attachment.filename, inline=request.GET.get("inline") == "1")
+    return attachment.serve(inline=request.GET.get("inline") == "1")

@@ -23,12 +23,19 @@ Navigate to `/scoring/red-team/` and fill out the form.
 
 ### 4. Attack Outcomes
 
-Check all that apply. These determine point deductions per affected team:
+Choose the highest access level you obtained (one choice):
+
+| Access level | Deduction |
+|---|---|
+| No access | 0 |
+| User access | -25 |
+| Root access | -100 |
+
+Then check every other outcome that applies. Each adds to the deduction per affected team. Privilege
+escalation pairs with user access: you got in as a user, then escalated.
 
 | Outcome | Deduction |
 |---|---|
-| Root/Admin access | -100 |
-| User access (only scored if no root) | -25 |
 | Privilege escalation | -100 |
 | Credentials recovered | -50 |
 | Sensitive files recovered | -25 |
@@ -37,7 +44,7 @@ Check all that apply. These determine point deductions per affected team:
 | Encrypted DB recovered | -25 |
 | DB decrypted | -25 |
 
-The total deduction per team updates in real time as you check boxes.
+The total deduction per team updates in real time as you choose the access level and check outcomes.
 
 ### 5. Affected Teams
 

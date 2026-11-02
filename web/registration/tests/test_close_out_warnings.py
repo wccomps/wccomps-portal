@@ -95,8 +95,8 @@ def test_each_kind_of_unfinished_work_is_counted_with_the_page_that_finishes_it(
         CloseOutWarning("2 incident reports are not reviewed.", "scoring:review_incidents"),
         CloseOutWarning("1 red team finding is not approved.", "scoring:red_team_findings"),
         CloseOutWarning("1 orange check score is not approved.", "scoring:review_orange"),
-        # Rejected is done, as on the orange team's own pages
-        CloseOutWarning("2 orange assignments are not scored and reviewed.", "orange_team:check_list"),
+        # Rejected is back with its volunteer, as on the orange team's own pages
+        CloseOutWarning("3 orange assignments are not scored and reviewed.", "orange_team:check_list"),
     ]
     for warning in warnings:
         reverse(warning.url_name)

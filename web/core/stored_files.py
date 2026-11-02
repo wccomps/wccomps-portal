@@ -6,15 +6,18 @@ viewer's session. One policy for all of them:
 - its type comes from its bytes when they are a raster image or PDF (the only types shown inline), otherwise
   from its name, but never an image or PDF from the name alone;
 - file_response serves it inline only when its bytes are such a type, and otherwise as a sandboxed download.
+Every model that stores such a file is a StoredFile, which stores it through with_file; pages serve it through serve.
 """
 
 import mimetypes
 import unicodedata
+from typing import ClassVar, Self
 
-from django.http import HttpResponse
+from django.core.files.uploadedfile import UploadedFile
+from django.db import models
+from django.http import Http404, HttpResponse
 from django.utils.http import content_disposition_header
 
-# The length of every stored file name column (Packet, TicketAttachment, RedTeamScreenshot, IncidentScreenshot)
 MAX_NAME_LENGTH = 255
 DOWNLOAD_MIME = "application/octet-stream"
 
@@ -70,3 +73,46 @@ def file_response(data: bytes, filename: str, *, inline: bool) -> HttpResponse:
     if not (shown and inline_type == "application/pdf"):
         response["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src 'self' data:"
     return response
+
+
+class UploadError(ValueError):
+    """An uploaded file can't be stored; the message says which and why."""
+
+
+class StoredFile(models.Model):
+    DEFAULT_NAME: ClassVar[str]
+    MAX_SIZE: ClassVar[int]
+
+    file_data = models.BinaryField()
+    filename = models.CharField(max_length=MAX_NAME_LENGTH)
+    mime_type = models.CharField(max_length=100)
+
+    class Meta:
+        abstract = True
+
+    @classmethod
+    def too_big(cls, size: int) -> str:
+        """Why a file of this size can't be stored, or ''."""
+        return f"File too large (max {cls.MAX_SIZE // (1024 * 1024)}MB)" if size > cls.MAX_SIZE else ""
+
+    @classmethod
+    def from_upload(cls, upload: UploadedFile[bytes], **fields: object) -> Self:
+        """An unsaved row holding the upload, read at most one byte past MAX_SIZE; UploadError names it when too big."""
+        if upload.size is not None and (problem := cls.too_big(upload.size)):
+            raise UploadError(f"{clean_name(upload.name, cls.DEFAULT_NAME)}: {problem}")
+        data = upload.read(cls.MAX_SIZE + 1)
+        if problem := cls.too_big(len(data)):
+            raise UploadError(f"{clean_name(upload.name, cls.DEFAULT_NAME)}: {problem}")
+        return cls.with_file(data, upload.name, **fields)
+
+    @classmethod
+    def with_file(cls, data: bytes, name: str | None, **fields: object) -> Self:
+        """An unsaved row holding data, under its cleaned name and the type stored_type gives it."""
+        filename = clean_name(name, cls.DEFAULT_NAME)
+        return cls(file_data=data, filename=filename, mime_type=stored_type(data, filename), **fields)
+
+    def serve(self, *, inline: bool) -> HttpResponse:
+        """The file as file_response serves it (an empty file too); Http404 when its bytes were lost."""
+        if self.file_data is None:
+            raise Http404("The file was lost")
+        return file_response(bytes(self.file_data), self.filename, inline=inline)

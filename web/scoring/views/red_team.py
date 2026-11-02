@@ -9,7 +9,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
 from core.errors import wants_json_error
-from core.stored_files import file_response
+from core.stored_files import UploadError
 from core.utils import optional_int
 from team.models import Team
 
@@ -20,7 +20,7 @@ from ..models import (
     RedTeamScreenshot,
 )
 from ..quotient_sync import get_box_metadata
-from ..screenshots import ScreenshotError, read_screenshots
+from ..screenshots import read_screenshots
 
 
 def findings_list(request: HttpRequest, *, default_status: str, page_size: int) -> dict[str, object]:
@@ -131,8 +131,8 @@ def submit_red_score(request: HttpRequest) -> HttpResponse:
 
         if form.is_valid():
             try:
-                screenshots = read_screenshots(request.FILES.getlist("screenshots"))
-            except ScreenshotError as e:
+                screenshots = read_screenshots(request.FILES.getlist("screenshots"), RedTeamScreenshot)
+            except UploadError as e:
                 messages.error(request, f"File upload failed: {e}")
             else:
                 return _create_red_score(request, form, user, screenshots)
@@ -148,15 +148,16 @@ def submit_red_score(request: HttpRequest) -> HttpResponse:
 
 
 def _create_red_score(
-    request: HttpRequest, form: RedTeamScoreForm, user: User, screenshots: list[tuple[bytes, str, str]]
+    request: HttpRequest, form: RedTeamScoreForm, user: User, screenshots: list[RedTeamScreenshot]
 ) -> HttpResponse:
     finding = form.save(commit=False)
     finding.submitted_by = user
     finding.save()
     form.save_m2m()
 
-    for file_data, filename, mime_type in screenshots:
-        RedTeamScreenshot.objects.create(finding=finding, file_data=file_data, filename=filename, mime_type=mime_type)
+    for screenshot in screenshots:
+        screenshot.finding = finding
+        screenshot.save()
 
     messages.success(request, f"Finding #{finding.id} created successfully.")
     return redirect("scoring:red_team_scores")
@@ -211,14 +212,8 @@ def delete_red_score(request: HttpRequest, finding_id: int) -> HttpResponse:
 
 @require_permission("red_team", "gold_team", error_message="Only Red Team or Gold Team can view this")
 def red_screenshot_download(request: HttpRequest, screenshot_id: int) -> HttpResponse:
-    from django.http import Http404
-
     screenshot = get_object_or_404(RedTeamScreenshot, id=screenshot_id)
-
-    if not screenshot.file_data:
-        raise Http404("File data not available (file was lost)")
-
-    return file_response(bytes(screenshot.file_data), screenshot.filename, inline=True)
+    return screenshot.serve(inline=True)
 
 
 @require_permission("red_team", error_message="Only Red Team members can manage IP pools")

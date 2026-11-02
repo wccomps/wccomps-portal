@@ -34,6 +34,25 @@ from core.tests.roles import groups_of, make_user, role_user
 from team.models import Team
 
 
+@pytest.fixture(autouse=True)
+def _detached_runs_run_inline_in_a_test_case(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inside a TestCase's transaction a detached run's own connection couldn't see the test's rows (and would
+    commit past its rollback), so there it runs in the caller's thread."""
+    from django.db import connection
+
+    from core import utils
+
+    start = utils._start
+
+    def start_or_run(run: Callable[[], None]) -> None:
+        if connection.atomic_blocks and connection.atomic_blocks[0]._from_testcase:
+            run()
+        else:
+            start(run)
+
+    monkeypatch.setattr(utils, "_start", start_or_run)
+
+
 @pytest.fixture
 def create_user_with_groups(db: Any) -> Callable[..., User]:
     """Factory fixture to create users with Authentik groups and DiscordLink (core.tests.roles.make_user)."""

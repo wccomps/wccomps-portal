@@ -1,5 +1,5 @@
 {% extends "orange_team/base.html" %}
-{% load cotton %}
+{% load cotton status_variants %}
 {% block orange_title %}
     Assign Volunteers - Orange Team
 {% endblock orange_title %}
@@ -47,7 +47,7 @@
                             <strong>Team {{ row.team.team_number }}</strong>
                         </td>
                         <td>
-                            {% if row.assignment and row.assignment.status != "submitted" and row.assignment.status != "approved" %}
+                            {% if row.assignment and "reassign" in row.assignment.actions %}
                                 <c-form action="{% url 'orange_team:reassign_team' row.assignment.pk %}"
                                         class="d-flex gap-10 items-center">
                                     {% csrf_token %}
@@ -75,25 +75,10 @@
                                 <c-badge variant="neutral">
                                     Unassigned
                                 </c-badge>
-                            {% elif row.assignment.status == "approved" %}
-                                <c-badge variant="success">
-                                    Scored · {{ row.assignment.score }}
-                                </c-badge>
-                            {% elif row.assignment.status == "submitted" %}
-                                <c-badge variant="info">
-                                    Submitted
-                                </c-badge>
-                            {% elif row.assignment.status == "in_progress" %}
-                                <c-badge variant="info">
-                                    In progress
-                                </c-badge>
-                            {% elif row.assignment.status == "rejected" %}
-                                <c-badge variant="warning">
-                                    Rejected
-                                </c-badge>
                             {% else %}
-                                <c-badge variant="neutral">
-                                    Pending
+                                <c-badge variant="{{ row.assignment.status|badge_variant:'orange_assignment' }}">
+                                    {{ row.assignment.get_status_display }}
+                                    {% if row.assignment.status_info.scored %}· {{ row.assignment.score }}{% endif %}
                                 </c-badge>
                             {% endif %}
                         </td>
@@ -101,7 +86,7 @@
                 {% endfor %}
             </c-table>
             <p class="text-muted mt-10">
-                Scored teams are locked to the volunteer who scored them; reassigning affects only pending and in-progress teams.
+                Scored teams are locked to the volunteer who scored them; reassigning affects only {{ reassignable }} teams.
             </p>
         {% else %}
             <c-empty_state title="No active teams"
