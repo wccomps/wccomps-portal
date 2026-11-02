@@ -327,6 +327,19 @@ def test_start_message_goes_out_once_when_the_start_is_retried(authentik, config
     assert not retry.start_message_queued
 
 
+def test_start_message_is_not_queued_again_after_stopping_and_restarting(authentik, config):
+    """Stopping and starting again during the same event must not broadcast the start message a second time."""
+    CompetitionConfig.objects.filter(pk=1).update(start_message="Default login: admin / changeme")
+
+    first = run_competition_to_completion(True, "timer")
+    run_competition_to_completion(False, "discord:admin")
+    second = run_competition_to_completion(True, "discord:admin")
+
+    assert first.start_message_queued
+    assert not second.start_message_queued
+    assert len(_queued_broadcasts()) == 1
+
+
 def test_blank_start_message_sends_nothing(authentik, config):
     CompetitionConfig.objects.filter(pk=1).update(start_message="  \n")
 

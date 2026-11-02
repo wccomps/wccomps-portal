@@ -252,8 +252,8 @@ def _run(
     Toggles each controlled application's BlueTeam binding and the team accounts (start enables the
     active teams' accounts; stop disables every team account), refreshes stored groups so permissions
     follow at once, syncs Quotient metadata on start or final service scores on stop, then records the
-    new state and an audit entry. A start that turns the competition on also queues the start message
-    to every active team. Blocking (Authentik and Quotient HTTP): async callers run it in a thread.
+    new state and an audit entry. The first start of an event also queues the start message to every
+    active team. Blocking (Authentik and Quotient HTTP): async callers run it in a thread.
     """
     from django.contrib.auth.models import User
     from scoring.quotient_sync import sync_quotient_metadata, sync_service_scores
@@ -358,11 +358,11 @@ def _run(
             changes["started_this_window"] = True
         elif locked.end_passed() or locked.competition_end_time is None or "competition_end_time" in changes:
             changes["started_this_window"] = False
-        if enable and not locked.applications_enabled and locked.start_message.strip():
+        if enable and not locked.applications_enabled and not locked.start_broadcasts and locked.start_message.strip():
             task = DiscordTask.enqueue(
                 BroadcastMessage(target="all-teams", message=locked.start_message, sender=START_MESSAGE_SENDER)
             )
-            changes["start_broadcasts"] = [*locked.start_broadcasts, task.pk]
+            changes["start_broadcasts"] = [task.pk]
             result.start_message_queued = True
         CompetitionConfig.objects.filter(pk=locked.pk).update(**changes)
 

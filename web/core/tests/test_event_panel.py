@@ -238,8 +238,9 @@ def test_the_page_shows_only_the_next_steps_section(client, stage, section):
     # One Start and one Stop, both in Competition Controls; the one the state already matches is disabled
     assert page.count(">Start Competition</button>") == 1
     assert page.count(">Stop Competition</button>") == 1
-    assert page.count('@click="startCompetition"') == (0 if stage == "running" else 1)
+    assert page.count('@click="startCompetition"') == (0 if stage in ("running", "played", "unrecorded") else 1)
     assert page.count('@click="stopCompetition"') == (1 if stage == "running" else 0)
+    assert page.count('@click="reopenCompetition"') == (1 if stage in ("played", "unrecorded") else 0)
     # Close Out is the section's button only: no next-step link to it, no step link
     assert page.count('@click="closeOutEvent"') == (1 if section == "close-out" else 0)
     for label in ("Close out the event", "Check readiness and start"):
@@ -594,7 +595,9 @@ def test_while_stopped_stop_is_offered_again_only_after_a_stop_that_left_somethi
 
     assert ('@click="stopCompetition"' in page) == bool(accounts_failed)
     assert ("The last stop didn't turn everything off" in page) == bool(accounts_failed)
-    assert page.count('@click="startCompetition"') == 1
+    assert '@click="startCompetition"' not in page
+    assert page.count('@click="reopenCompetition"') == 1
+    assert page.index('@click="reopenCompetition"') > page.index('id="advanced"')
 
 
 def test_while_the_timer_retries_its_start_the_controls_say_so(client):

@@ -167,7 +167,7 @@
         {% endif %}
         <c-fieldset id="{{ anchors.ADVANCED }}"
                     class="mt-20"
-                    heading="Advanced: reset team passwords{% if can_cancel %}, cancel the event{% endif %}{% if can_clear %}, clear leftover data{% endif %}"
+                    heading="Advanced: reset team passwords{% if panel.reopen_offered %}, start the competition again{% endif %}{% if can_cancel %}, cancel the event{% endif %}{% if can_clear %}, clear leftover data{% endif %}"
                     collapsible="true"
                     collapsed="{{ panel.advanced_open|yesno:'false,true' }}">
             <p class="help">Tools outside the normal run of an event.</p>
@@ -205,6 +205,20 @@
                     </c-action_box>
                 </template>
             </c-action_box>
+            {% if panel.reopen_offered %}
+                <c-action_box heading="Start Competition Again" variant="warning" class="mt-20">
+                    <p class="help">
+                        The competition is stopped and teams have scores. Starting it again opens the competition apps
+                        to the blue teams and turns on the active teams' accounts, without sending the start message
+                        again.
+                    </p>
+                    <c-button_row class="mt-10">
+                        <c-button variant="warning" @click="reopenCompetition" ::disabled="loading">
+                            Start Competition Again
+                        </c-button>
+                    </c-button_row>
+                </c-action_box>
+            {% endif %}
             {% if can_cancel %}
                 <c-action_box heading="Cancel Event" variant="warning" class="mt-20">
                     <p class="help">
@@ -285,6 +299,12 @@ document.addEventListener('alpine:init', () => {
         },
         startCompetition() { this.doStreamAction('start_competition'); },
         stopCompetition() { this.doStreamAction('stop_competition'); },
+        reopenCompetition() {
+            const typed = typedConfirm('START THE COMPETITION AGAIN?\n\n' +
+                'The competition is stopped and teams already have scores.\n' +
+                'This opens the competition apps to the blue teams and turns on the active teams\' accounts, without sending the start message again.');
+            if (typed) this.doStreamAction('start_competition', { confirm: typed });
+        },
 
         async checkCloseOut() {
             this.closeOutChecking = true;

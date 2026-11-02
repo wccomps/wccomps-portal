@@ -304,7 +304,21 @@ class AdminCompetitionCog(commands.Cog):
     async def _run_competition(self, interaction: discord.Interaction, enable: bool) -> None:
         from bot.competition_actions import run_competition, update_status_channel
 
-        await interaction.response.defer(ephemeral=True)
+        action = "Start" if enable else "Stop"
+        prompt = (
+            "Start the competition? This opens the competition apps to the blue teams and turns on the active teams' "
+            "accounts."
+            if enable
+            else "Stop the competition? This closes the competition apps to the blue teams and turns off every team "
+            "account."
+        )
+        view = ConfirmView(confirm_label=f"Confirm {action}")
+        await interaction.response.send_message(prompt, view=view, ephemeral=True)
+        await view.wait()
+        if not view.confirmed:
+            await interaction.followup.send(f"{action} cancelled.", ephemeral=True)
+            return
+
         result = await run_competition(enable, actor=f"discord:{interaction.user}")
         match result.outcome:
             case RunOutcome.REFUSED | RunOutcome.ERRORED:

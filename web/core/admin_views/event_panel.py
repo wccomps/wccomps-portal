@@ -174,13 +174,18 @@ class EventPanel:
 
     @property
     def start_offered(self) -> bool:
-        """Start while stopped, or again while running after a start that left something off."""
-        return not self.stage.running or self.facts.last_run_incomplete
+        """Start before any team has scores, or again while running after a start that left something off."""
+        return not (self.stage.running or self.stage.played) or (self.stage.running and self.facts.last_run_incomplete)
+
+    @property
+    def reopen_offered(self) -> bool:
+        """Start again under Advanced when the competition is stopped after teams scored."""
+        return not self.stage.running and self.stage.played
 
     @property
     def stop_offered(self) -> bool:
         """Stop while running, or again while stopped after a stop that left something on."""
-        return self.stage.running or self.facts.last_run_incomplete
+        return self.stage.running or (not self.stage.running and self.facts.last_run_incomplete)
 
     @property
     def action_elsewhere(self) -> bool:
