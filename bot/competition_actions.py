@@ -28,7 +28,7 @@ from bot.utils import (
 from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams
 from core.discord_tasks import PermanentTaskError
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
-from core.services.competition import Attempt, CompetitionRunResult
+from core.services.competition import START_MESSAGE_SENDER, Attempt, CompetitionRunResult
 from core.services.competition import run_competition as competition_steps
 from core.utils import shorten
 from team.models import MAX_TEAMS, Team
@@ -280,7 +280,8 @@ class BroadcastResult:
             lines.append(f"• Failed: {', '.join(self.failed)}")
         if self.missing:
             lines.append(f"• Not found: {', '.join(self.missing)}")
-        lines.append(f"Message: {shorten(message, 100)}")
+        if sender != START_MESSAGE_SENDER:
+            lines.append(f"Message: {shorten(message, 100)}")
         return "\n".join(lines)
 
 

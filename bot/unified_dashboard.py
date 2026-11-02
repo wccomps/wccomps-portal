@@ -220,7 +220,7 @@ class UnifiedDashboard:
         return f"{category_name} ({len(tickets)})", fit_lines(lines, DISCORD_EMBED_FIELD_CHAR_LIMIT) or "No tickets"
 
     async def _update_dashboard(self) -> None:
-        """Show the tickets now. A deleted message is dropped, and one the bot can't edit (403, or a 400 other than
+        """A deleted message is dropped, and one the bot can't edit (403, or a 400 other than
         our own invalid embed) is deleted first, so a new one is posted; a failed delete raises, so no second
         dashboard with live buttons appears."""
         message = self.message

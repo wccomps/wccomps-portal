@@ -899,6 +899,39 @@ class TestClearTeamChannels:
 
         delete.assert_not_awaited()
 
+    async def test_the_removal_clears_ticket_thread_ids_when_the_chat_channel_is_deleted(
+        self, test_team: Team, box_reset_category: Any, mock_bot_with_guild: Any
+    ) -> None:
+        from ticketing.models import Ticket
+
+        await Team.objects.filter(pk=test_team.pk).aupdate(discord_category_id=22, channels_need_clearing=True)
+        ticket = await Ticket.objects.acreate(
+            ticket_number="T030-001",
+            team=test_team,
+            category=box_reset_category,
+            title="t",
+            discord_thread_id=888,
+            discord_ticket_message_id=999,
+        )
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        guild = processor._guild()
+        chat = MagicMock(spec=discord.TextChannel)
+        chat.name = "team-chat"
+        chat.delete = AsyncMock()
+        category = MagicMock(spec=discord.CategoryChannel)
+        category.id = 22
+        category.channels = [chat]
+        category.delete = AsyncMock()
+        guild.get_channel = MagicMock(return_value=category)
+        guild.get_role = MagicMock(return_value=None)
+        guild.roles = []
+        task = await DiscordTask.objects.acreate(task_type="clear_team_channels", payload={"team_number": 30})
+
+        await processor._process_task(task)
+
+        await ticket.arefresh_from_db()
+        assert (ticket.discord_thread_id, ticket.discord_ticket_message_id) == (None, None)
+
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
@@ -981,3 +1014,5 @@ async def test_a_copy_is_queued_only_while_the_broadcast_is_processing(
 
     assert (result.sent, result.queued, await QueuedAnnouncement.objects.acount()) == (0, copies, copies)
     assert result.failed == ([] if copies else ["Team 41 (not sent: the broadcast was stopped)"])
+    assert "Default login" in result.ops_summary("gold", "41", "Default login")
+    assert "Default login" not in result.ops_summary("Black Team", "all-teams", "Default login")

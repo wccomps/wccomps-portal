@@ -166,7 +166,7 @@ class DiscordTask(models.Model):
         """The payload built from the stored row; raises InvalidPayloadError when it can't be.
 
         Keys the type doesn't declare are dropped: rows outlive the code that wrote them. A missing ticket_id comes
-        from the ticket FK, where the previous release's web put it.
+        from the ticket FK.
         """
         cls = discord_tasks.PAYLOAD_TYPES.get(self.task_type)
         if cls is None:

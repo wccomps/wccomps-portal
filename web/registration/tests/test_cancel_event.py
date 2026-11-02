@@ -177,7 +177,12 @@ def test_cancelling_removes_the_start_broadcasts_copies(event):
 
     start = {"target": "all-teams", "message": "Default login", "sender": "Black Team"}
     unsent = DiscordTask.objects.create(task_type="broadcast_message", payload=start, status="pending")
-    sent = DiscordTask.objects.create(task_type="broadcast_message", payload=start, status="completed")
+    sent = DiscordTask.objects.create(
+        task_type="broadcast_message",
+        payload=start,
+        status="completed",
+        error_message="Broadcast by Black Team\n• Failed: Team 01\nMessage: Default login",
+    )
     other = DiscordTask.objects.create(
         task_type="broadcast_message", payload={**start, "message": "Lunch at noon"}, status="pending"
     )
@@ -190,6 +195,7 @@ def test_cancelling_removes_the_start_broadcasts_copies(event):
     for task, status in ((unsent, "failed"), (sent, "completed")):
         task.refresh_from_db()
         assert (task.status, task.payload["message"]) == (status, START_MESSAGE_SCRUBBED)
+        assert "Default login" not in task.error_message
     other.refresh_from_db()
     assert (other.status, other.payload["message"]) == ("pending", "Lunch at noon")
     assert CompetitionConfig.get_config().start_broadcasts == []

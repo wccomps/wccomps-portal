@@ -318,10 +318,11 @@ def test_unlinking_one_team_locks_its_row_first(linked_team):
     (until the link flow re-checks the team)."""
     from django.db import connection
     from django.test.utils import CaptureQueriesContext
-    from registration.services import unlink_teams
+
+    from core.services.linking import SCHOOL_CHANGED, unlink_teams
 
     with CaptureQueriesContext(connection) as queries:
-        unlink_teams("gold", "school_changed", linked_team)
+        unlink_teams(Team.objects.filter(pk=linked_team.pk), "gold", SCHOOL_CHANGED)
 
     first = next(q["sql"] for q in queries.captured_queries if q["sql"].startswith("SELECT"))
     assert '"team_team"' in first and "FOR NO KEY UPDATE" in first

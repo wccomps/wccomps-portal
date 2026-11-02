@@ -29,17 +29,18 @@ from registration.services import (
     free_teams,
     remove_team_school,
     set_team_school,
-    unlink_teams,
 )
 
 from core.authentik_utils import Changed, Refused, reset_team_credentials
 from core.services.linking import (
+    SCHOOL_CHANGED,
     LinkResult,
     enforce_account_link_policy,
     execute_link,
     finalize_link,
     lookup_valid_link_token,
     store_discord_id_in_authentik,
+    unlink_teams,
     validate_link_token,
 )
 from team.forms import (
@@ -396,7 +397,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
                 new_school = renamed and change == SchoolInfoEditForm.NEW_SCHOOL
                 # A team given its first school here may still have members linked from an earlier one
                 if new_school or current is None:
-                    unlinked = unlink_teams(authentik_username, "school_changed", team)
+                    unlinked = len(unlink_teams(Team.objects.filter(pk=team.pk), authentik_username, SCHOOL_CHANGED))
                 set_team_school(
                     team,
                     school_name,

@@ -20,7 +20,6 @@ from bot.utils import (
     find_team_role,
     send_parts,
     team_category_name,
-    team_chat_channel,
     team_role_name,
 )
 from bot.utils import announcement as announcement_text
@@ -44,7 +43,7 @@ async def delete_team_infrastructure(
 
     category = find_team_category(guild, team)
     if category:
-        chat_channel = team_chat_channel(guild, team)
+        chat_channel = category_chat_channel(category)
         chat_deleted = False
         for channel in category.channels:
             try:

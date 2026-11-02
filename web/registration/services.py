@@ -17,8 +17,7 @@ from core.competition_utils import WipedData, wipe_competition_data
 from core.discord_tasks import ClearTeamChannels, ReconcileTeams
 from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnouncement
 from core.services.competition import run_lock
-from core.services.linking import COMPETITION_CLEANUP
-from core.services.linking import unlink_teams as _unlink_team_links
+from core.services.linking import COMPETITION_CLEANUP, unlink_teams
 from team.models import DiscordLink, SchoolInfo, Team, default_team_name
 from ticketing.models import Ticket
 
@@ -820,7 +819,8 @@ def _reset_for_next_event(config: CompetitionConfig) -> int:
     broadcasts.filter(status="processing").update(status="failed", error_message=START_BROADCAST_CUT_OFF)
     for task in broadcasts:
         task.payload = {**task.payload, "message": START_MESSAGE_SCRUBBED}
-        task.save(update_fields=["payload"])
+        task.error_message = task.error_message.partition("\nMessage: ")[0]
+        task.save(update_fields=["payload", "error_message"])
     config.start_broadcasts = []
     config.started_this_window = False
     config.competition_start_time = None
@@ -849,13 +849,6 @@ def _reset_for_next_event(config: CompetitionConfig) -> int:
     return announcements
 
 
-def unlink_teams(actor: str, reason: str, team: Team | None = None) -> int:
-    """Deactivate the Discord links of every team's members, or one team's (admin and support links stay), auditing
-    each and queueing its role sync; returns how many."""
-    teams = Team.objects.filter(pk=team.pk) if team is not None else Team.objects.all()
-    return len(_unlink_team_links(teams, actor, reason))
-
-
 @dataclass(frozen=True)
 class DiscordCleanupReset:
     unlinked: int
@@ -867,7 +860,9 @@ def reset_for_discord_cleanup(actor: str) -> DiscordCleanupReset:
     """The database side of /competition cleanup-competition: unlink the team members, reset for the next event and
     queue the Discord teardown, recorded in the audit log. Under _locked_transition."""
     with _locked_transition(discord_cleanup_problem) as (config, _):
-        reset = DiscordCleanupReset(unlink_teams(actor, COMPETITION_CLEANUP), _reset_for_next_event(config))
+        reset = DiscordCleanupReset(
+            len(unlink_teams(Team.objects.all(), actor, COMPETITION_CLEANUP)), _reset_for_next_event(config)
+        )
         AuditLog.objects.create(
             action="competition_cleanup_reset",
             admin_user=actor,
