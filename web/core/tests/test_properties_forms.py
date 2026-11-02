@@ -453,7 +453,11 @@ CASES = [
             "school_name": st.one_of(st.text(min_size=1, max_size=255), st.sampled_from(("ß" * 200, " A  b ")))
         },
     ),
-    FormCase(BroadcastForm, use=posts_to(lambda w: reverse("admin_broadcast_action"))),
+    FormCase(
+        BroadcastForm,
+        hints=lambda w: {"target": st.one_of(st.sampled_from(("announcements", " ALL-TEAMS ")), TEAM_RANGES)},
+        use=posts_to(lambda w: reverse("admin_broadcast_action")),
+    ),
     FormCase(SetMaxMembersForm, use=competition_action("set_max_members")),
     FormCase(TypedConfirmForm, hints=lambda w: {"confirm": YOLO}),
     FormCase(

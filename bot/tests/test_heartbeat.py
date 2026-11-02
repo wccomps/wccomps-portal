@@ -121,8 +121,7 @@ async def test_the_dashboard_beats_only_after_a_successful_pass(work_fails, beat
             raise RuntimeError("db down")
 
     monkeypatch.setattr(unified_dashboard, "recycle_db_connection", AsyncMock())
-    monkeypatch.setattr(dashboard, "_check_and_update", work)
-    monkeypatch.setattr(dashboard, "_initialize_dashboard", AsyncMock())
+    monkeypatch.setattr(dashboard, "_pass", work)
     monkeypatch.setattr(unified_dashboard.asyncio, "sleep", AsyncMock())
     dashboard.running = True
 

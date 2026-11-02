@@ -9,7 +9,11 @@ from asgiref.sync import sync_to_async
 from discord import app_commands
 from discord.ext import commands
 
-from bot.discord_manager import delete_team_infrastructure
+from bot.discord_manager import (
+    TeamInfrastructureError,
+    delete_team_infrastructure,
+    recreate_team_infrastructure,
+)
 from bot.permissions import permission_check
 from bot.role_sync import sync_member_roles
 from bot.utils import (
@@ -375,9 +379,6 @@ class AdminTeamsCog(commands.Cog):
             await interaction.followup.send("No teams specified", ephemeral=True)
             return
 
-        from bot.discord_manager import DiscordManager
-
-        discord_manager = DiscordManager(interaction.guild, self.bot)
         guild = interaction.guild
 
         results = []
@@ -391,19 +392,16 @@ class AdminTeamsCog(commands.Cog):
                 failed_count += 1
                 continue
 
-            await delete_team_infrastructure(guild, team, reason=f"Bulk recreate by {interaction.user}")
-
-            role, category = await discord_manager.setup_team_infrastructure(team_number)
-
-            if role and category:
-                results.append(f"Team {team_number:02d}: recreated (role and {len(category.channels)} channels)")
-                success_count += 1
-            elif role or category:
-                results.append(f"Team {team_number:02d}: partly recreated")
+            try:
+                _deleted, category = await recreate_team_infrastructure(
+                    guild, team, f"Bulk recreate by {interaction.user}", bot=self.bot
+                )
+            except TeamInfrastructureError as e:
+                results.append(f"Team {team_number:02d}: failed to recreate: {e}")
                 failed_count += 1
             else:
-                results.append(f"Team {team_number:02d}: failed to recreate")
-                failed_count += 1
+                results.append(f"Team {team_number:02d}: recreated (role and {len(category.channels)} channels)")
+                success_count += 1
 
         await AuditLog.objects.acreate(
             action="teams_recreated",

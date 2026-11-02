@@ -8,12 +8,25 @@ import discord
 import pytest
 import pytest_asyncio
 from asgiref.sync import sync_to_async
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 
-from bot.discord_queue import DiscordQueueProcessor
-from core.discord_tasks import SyncMemberRoles, SyncRoles
+from bot.discord_queue import DiscordQueueProcessor, PermanentTaskError
+from core.discord_tasks import PostTicketUpdate, SyncMemberRoles, SyncRoles
 from core.models import DiscordTask
 from team.models import Team
+
+
+def stub_setup(fake: AsyncMock) -> AsyncMock:
+    """Stand in for the team setup the queue runs, until the test ends."""
+    patch("bot.discord_queue.setup_team_infrastructure", fake).start()
+    return fake
+
+
+@pytest.fixture(autouse=True)
+def _stop_stubs() -> Any:
+    yield
+    patch.stopall()
 
 
 @pytest_asyncio.fixture
@@ -75,14 +88,14 @@ class TestTaskRetry:
             max_retries=5,
         )
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
-        processor._manager.return_value.setup_team_infrastructure = AsyncMock(return_value=(MagicMock(), MagicMock()))
+        setup = stub_setup(AsyncMock(return_value=MagicMock()))
 
         await processor._process_task(task)
 
         await task.arefresh_from_db()
         assert task.status == "completed"
-        processor._manager.return_value.setup_team_infrastructure.assert_awaited_once_with(test_team.team_number)
+        setup.assert_awaited_once()
+        assert setup.await_args.args[1].team_number == test_team.team_number
 
     async def test_task_retries_on_discord_error(self, mock_bot_with_guild: Any, test_team: Team) -> None:
         """A task retries on a Discord API error."""
@@ -97,14 +110,13 @@ class TestTaskRetry:
 
         # Create processor
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
 
         # Create a proper Forbidden error
         mock_response = MagicMock()
         mock_response.status = 403
         mock_response.reason = "Forbidden"
         forbidden_error = discord.errors.Forbidden(mock_response, "Missing Permissions")
-        processor._manager.return_value.setup_team_infrastructure = AsyncMock(side_effect=forbidden_error)
+        stub_setup(AsyncMock(side_effect=forbidden_error))
 
         # Process task
         await processor._process_task(task)
@@ -121,14 +133,13 @@ class TestTaskRetry:
     async def test_task_exponential_backoff_timing(self, mock_bot_with_guild: Any, test_team: Team) -> None:
         """Test exponential backoff timing: 2s, 4s, 8s, 16s."""
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
 
         # Create a proper Forbidden error
         mock_response = MagicMock()
         mock_response.status = 403
         mock_response.reason = "Forbidden"
         forbidden_error = discord.errors.Forbidden(mock_response, "Missing Permissions")
-        processor._manager.return_value.setup_team_infrastructure = AsyncMock(side_effect=forbidden_error)
+        stub_setup(AsyncMock(side_effect=forbidden_error))
 
         # Test only up to retry_count=3 (4th attempt) to avoid hitting max_retries
         expected_backoffs = [2, 4, 8, 16]  # 2^1, 2^2, 2^3, 2^4
@@ -178,17 +189,16 @@ class TestTaskRetry:
         )
 
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
 
         # Create a proper Forbidden error
         mock_response = MagicMock()
         mock_response.status = 403
         mock_response.reason = "Forbidden"
         forbidden_error = discord.errors.Forbidden(mock_response, "Missing Permissions")
-        processor._manager.return_value.setup_team_infrastructure = AsyncMock(side_effect=forbidden_error)
+        stub_setup(AsyncMock(side_effect=forbidden_error))
 
         # Mock log_to_ops_channel to avoid actual Discord calls
-        with patch("bot.utils.log_to_ops_channel", new_callable=AsyncMock):
+        with patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock):
             # Process task
             await processor._process_task(task)
 
@@ -211,7 +221,6 @@ class TestTaskRetry:
         )
 
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
 
         # Create a proper Forbidden error
         mock_response = MagicMock()
@@ -219,7 +228,7 @@ class TestTaskRetry:
         mock_response.reason = "Forbidden"
         error_msg = "Missing Permissions"
         forbidden_error = discord.errors.Forbidden(mock_response, error_msg)
-        processor._manager.return_value.setup_team_infrastructure = AsyncMock(side_effect=forbidden_error)
+        stub_setup(AsyncMock(side_effect=forbidden_error))
 
         # Process task
         await processor._process_task(task)
@@ -231,70 +240,93 @@ class TestTaskRetry:
         assert task.error_message != ""
         assert "Forbidden" in task.error_message
 
-    async def test_task_rate_limit_uses_discord_retry_after(self, mock_bot_with_guild: Any, test_team: Team) -> None:
-        """Test that rate limit errors use Discord's retry_after value."""
+    async def test_setup_failure_records_the_reason(self, mock_bot_with_guild: Any, test_team: Team) -> None:
+        from bot.discord_manager import TeamInfrastructureError
+
         task = await DiscordTask.objects.acreate(
-            task_type="setup_team_infrastructure",
-            payload={"discord_id": 111111111, "team_number": test_team.team_number},
-            status="pending",
-            retry_count=0,
-            max_retries=5,
+            task_type="setup_team_infrastructure", payload={"team_number": test_team.team_number}
+        )
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        stub_setup(
+            AsyncMock(
+                side_effect=TeamInfrastructureError("Created the role for team 30 but not its category: Missing Access")
+            )
         )
 
-        processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
-
-        # Create rate limit error with retry_after
-        rate_limit_error = discord.errors.RateLimited(60)  # 60 second retry
-        processor._manager.return_value.setup_team_infrastructure = AsyncMock(side_effect=rate_limit_error)
-
-        now = timezone.now()
-
-        # Process task
         await processor._process_task(task)
 
-        # Refresh from DB
         await task.arefresh_from_db()
+        assert task.error_message == "Created the role for team 30 but not its category: Missing Access"
 
-        # Verify rate limit handling
-        assert task.retry_count == 1
-        assert task.status == "pending"
-        assert task.next_retry_at is not None
-        assert "rate limited" in task.error_message.lower() or "Rate limited" in task.error_message
-
-        # Verify retry_after is respected (allowing 2 second tolerance)
-        time_diff = (task.next_retry_at - now).total_seconds()
-        assert abs(time_diff - 60) <= 2.0, f"Expected ~60s retry delay, got {time_diff}s"
-
-    async def test_task_missing_payload_fields(self, mock_bot_with_guild: Any, test_team: Team) -> None:
-        """Test handling of missing payload fields - retries then fails."""
-        tasks = await sync_to_async(DiscordTask.objects.bulk_create)(
-            [
-                DiscordTask(
-                    task_type="setup_team_infrastructure",
-                    payload={},  # Missing team_number
-                    status="pending",
-                    retry_count=0,
-                    max_retries=5,
-                )
-            ]
+    @pytest.mark.parametrize(
+        ("task_type", "payload", "reason"),
+        [
+            ("setup_team_infrastructure", {}, "team_number"),
+            ("setup_team_infrastructure", {"team_number": "thirty"}, "team_number"),
+            ("setup_team_infrastructure", [], "not a JSON object"),
+            ("retired_type", {}, "Unknown task type"),
+            ("log_to_channel", {"message": ""}, "Missing message"),
+            ("broadcast_message", {"target": "9-3", "message": "hi", "sender": "ops"}, "Invalid team range"),
+            ("post_comment", {"ticket_id": 0, "comment_id": 0}, "does not exist"),
+            ("setup_team_infrastructure", {"team_number": 49}, "does not exist"),
+        ],
+    )
+    async def test_a_task_that_can_never_succeed_fails_at_once(
+        self, mock_bot_with_guild: Any, task_type: str, payload: Any, reason: str
+    ) -> None:
+        tasks = await DiscordTask.objects.abulk_create(
+            [DiscordTask(task_type=task_type, payload=payload, status="pending", max_retries=5)]
         )
         task = tasks[0]
-
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
+        processor._guild = MagicMock(return_value=MagicMock())
 
-        # Process task
+        with patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock) as ops:
+            await processor._process_task(task)
+
+        await task.arefresh_from_db()
+        assert task.status == "failed"
+        assert task.next_retry_at is None
+        assert task.retry_count == 0
+        assert reason in task.error_message
+        assert reason in ops.await_args.args[1]
+
+    async def test_a_discord_rate_limit_is_retried_like_any_other_error(
+        self, mock_bot_with_guild: Any, test_team: Team
+    ) -> None:
+        task = await DiscordTask.objects.acreate(
+            task_type="setup_team_infrastructure", payload={"team_number": test_team.team_number}
+        )
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        stub_setup(AsyncMock(side_effect=discord.errors.RateLimited(60)))
+
         await processor._process_task(task)
 
-        # Refresh from DB
         await task.arefresh_from_db()
+        assert (task.status, task.retry_count) == ("pending", 1)
 
-        # Verify task is scheduled for retry (not immediately failed)
-        assert task.status == "pending"
-        assert task.retry_count == 1
-        assert task.next_retry_at is not None
-        assert "team_number" in task.error_message
+    async def test_a_recreate_retry_keeps_what_the_first_attempt_built(
+        self, mock_bot_with_guild: Any, test_team: Team
+    ) -> None:
+        task = await DiscordTask.objects.acreate(
+            task_type="setup_team_infrastructure", payload={"team_number": test_team.team_number, "recreate": True}
+        )
+        processor = DiscordQueueProcessor(mock_bot_with_guild)
+        processor._guild = MagicMock(return_value=MagicMock())
+        setup = AsyncMock(side_effect=[RuntimeError("Discord down"), MagicMock()])
+
+        with (
+            patch("bot.discord_manager.setup_team_infrastructure", setup),
+            patch("bot.discord_manager.delete_team_infrastructure", new_callable=AsyncMock) as delete,
+        ):
+            await processor._process_task(task)
+            await DiscordTask.objects.filter(pk=task.pk).aupdate(next_retry_at=None)
+            await task.arefresh_from_db()
+            await processor._process_task(task)
+
+        await task.arefresh_from_db()
+        assert task.status == "completed"
+        delete.assert_awaited_once()
 
     async def test_member_sync_for_someone_not_in_the_guild_completes_without_syncing(
         self, mock_bot_with_guild: Any
@@ -306,7 +338,7 @@ class TestTaskRetry:
         processor = DiscordQueueProcessor(mock_bot_with_guild)
         processor._guild = MagicMock(return_value=guild)
 
-        with patch("bot.role_sync.sync_member_roles", new_callable=AsyncMock) as sync:
+        with patch("bot.discord_queue.sync_member_roles", new_callable=AsyncMock) as sync:
             await processor._handle_sync_member_roles(SyncMemberRoles(discord_id=999999999))
 
         sync.assert_not_awaited()
@@ -318,7 +350,7 @@ class TestTaskRetry:
         processor._guild = MagicMock(return_value=guild)
         result = {"roles_added": 1, "roles_removed": 0, "errors": 0, "changes": []}
 
-        with patch("bot.role_sync.sync_member_roles", new=AsyncMock(return_value=result)) as sync:
+        with patch("bot.discord_queue.sync_member_roles", new=AsyncMock(return_value=result)) as sync:
             await processor._handle_sync_member_roles(SyncMemberRoles(discord_id=42))
 
         sync.assert_awaited_once_with(guild, member)
@@ -332,7 +364,6 @@ class TestDiscordQueueOrdering:
     async def test_tasks_processed_in_created_at_order(self, mock_bot_with_guild: Any) -> None:
         """Test that tasks are fetched and processed in created_at order."""
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
 
         # created_at is auto_now_add: bulk_create stamps each row in list order.
         from core.models import DiscordTask as TaskModel
@@ -368,7 +399,7 @@ class TestDiscordQueueOrdering:
                 processed_ids.append("third")
 
         with patch(
-            "bot.utils.log_to_ops_channel",
+            "bot.discord_queue.log_to_ops_channel",
             side_effect=track_processing,
         ):
             await processor._process_pending_tasks()
@@ -388,7 +419,6 @@ class TestDiscordQueueOrdering:
     async def test_only_ready_tasks_processed(self, mock_bot_with_guild: Any) -> None:
         """Test that tasks not ready for retry are skipped."""
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
 
         now = timezone.now()
 
@@ -409,7 +439,7 @@ class TestDiscordQueueOrdering:
             created_at=now + timedelta(seconds=1),
         )
 
-        with patch("bot.utils.log_to_ops_channel", new_callable=AsyncMock):
+        with patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock):
             await processor._process_pending_tasks()
 
         await task_ready.arefresh_from_db()
@@ -422,7 +452,6 @@ class TestDiscordQueueOrdering:
     async def test_max_ten_tasks_per_poll(self, mock_bot_with_guild: Any) -> None:
         """Test that only max 10 tasks are fetched per poll."""
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
 
         now = timezone.now()
 
@@ -438,7 +467,7 @@ class TestDiscordQueueOrdering:
                 created_at=now + timedelta(seconds=i),
             )
 
-        with patch("bot.utils.log_to_ops_channel", new_callable=AsyncMock):
+        with patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock):
             await processor._process_pending_tasks()
 
         # Count completed tasks - should be max 10
@@ -451,11 +480,10 @@ class TestDiscordQueueOrdering:
 class TestExponentialBackoff:
     """Test exponential backoff retry timing edge cases."""
 
-    async def test_exponential_backoff_formula(self, mock_bot_with_guild: Any) -> None:
+    async def test_exponential_backoff_formula(self, mock_bot_with_guild: Any, test_team: Team) -> None:
         """Test exponential backoff follows 2^retry_count formula."""
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
-        processor._manager.return_value.setup_team_infrastructure = AsyncMock(side_effect=Exception("Network error"))
+        stub_setup(AsyncMock(side_effect=Exception("Network error")))
 
         # Test multiple retry levels: after incrementing retry_count, backoff is 2^retry_count
         test_cases = [
@@ -468,7 +496,7 @@ class TestExponentialBackoff:
         for retry_count, expected_exponent in test_cases:
             task = await DiscordTask.objects.acreate(
                 task_type="setup_team_infrastructure",
-                payload={"discord_id": 111111111, "team_number": 1},
+                payload={"discord_id": 111111111, "team_number": test_team.team_number},
                 status="pending",
                 retry_count=retry_count,
                 max_retries=5,
@@ -487,16 +515,15 @@ class TestExponentialBackoff:
                 f"retry_count={retry_count}: expected {expected_backoff}s, got {time_diff}s"
             )
 
-    async def test_exponential_backoff_capped_at_300_seconds(self, mock_bot_with_guild: Any) -> None:
+    async def test_exponential_backoff_capped_at_300_seconds(self, mock_bot_with_guild: Any, test_team: Team) -> None:
         """Test that exponential backoff is capped at 300 seconds (5 minutes)."""
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
-        processor._manager.return_value.setup_team_infrastructure = AsyncMock(side_effect=Exception("Network error"))
+        stub_setup(AsyncMock(side_effect=Exception("Network error")))
 
         # Create task with high retry count where 2^retry_count > 300
         task = await DiscordTask.objects.acreate(
             task_type="setup_team_infrastructure",
-            payload={"discord_id": 111111111, "team_number": 1},
+            payload={"discord_id": 111111111, "team_number": test_team.team_number},
             status="pending",
             retry_count=8,  # Will be incremented to 9, 2^9 = 512 > 300
             max_retries=10,
@@ -531,8 +558,7 @@ class TestPermanentFailure:
         )
 
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
-        processor._manager.return_value.setup_team_infrastructure = AsyncMock(side_effect=Exception("Network error"))
+        stub_setup(AsyncMock(side_effect=Exception("Network error")))
 
         # Create task at max retries
         task = await DiscordTask.objects.acreate(
@@ -544,7 +570,7 @@ class TestPermanentFailure:
         )
 
         # Mock log_to_ops_channel to avoid Discord calls
-        with patch("bot.utils.log_to_ops_channel", new_callable=AsyncMock):
+        with patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock):
             await processor._process_task(task)
 
         await task.arefresh_from_db()
@@ -568,8 +594,7 @@ class TestPermanentFailure:
         )
 
         processor = DiscordQueueProcessor(mock_bot_with_guild)
-        processor._manager = MagicMock(return_value=AsyncMock())
-        processor._manager.return_value.setup_team_infrastructure = AsyncMock(side_effect=Exception("Critical error"))
+        stub_setup(AsyncMock(side_effect=Exception("Critical error")))
 
         task = await DiscordTask.objects.acreate(
             task_type="setup_team_infrastructure",
@@ -579,7 +604,7 @@ class TestPermanentFailure:
             max_retries=5,
         )
 
-        with patch("bot.utils.log_to_ops_channel", new_callable=AsyncMock) as mock_log:
+        with patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock) as mock_log:
             await processor._process_task(task)
 
             # Verify log_to_ops_channel was called
@@ -610,68 +635,6 @@ class TestStrandedTasks:
         assert recent.status == "pending"
         assert old.status == "failed"
 
-    async def test_a_broadcast_cut_short_is_failed_not_sent_again(self) -> None:
-        """Some teams may already have it; a rerun would post it to them twice."""
-        broadcast = await DiscordTask.objects.acreate(
-            task_type="broadcast_message",
-            payload={"target": "all-teams", "message": "hi", "sender": "ops"},
-            status="processing",
-        )
-
-        with patch("bot.discord_queue.DiscordTask.enqueue") as enqueue:
-            await DiscordQueueProcessor._recover_stranded_tasks()
-
-        await broadcast.arefresh_from_db()
-        assert broadcast.status == "failed"
-        assert "not safe to run again" in broadcast.error_message
-        assert "Broadcast Message task" in enqueue.call_args.args[0].message
-
-    async def test_a_broadcast_is_failed_only_with_its_ops_note(self) -> None:
-        """Failing it without telling ops would lose it silently; the two commit together or not at all."""
-        broadcast = await DiscordTask.objects.acreate(
-            task_type="broadcast_message",
-            payload={"target": "all-teams", "message": "hi", "sender": "ops"},
-            status="processing",
-        )
-
-        with (
-            patch("bot.discord_queue.DiscordTask.enqueue", side_effect=RuntimeError("db down")),
-            pytest.raises(RuntimeError),
-        ):
-            await DiscordQueueProcessor._recover_stranded_tasks()
-
-        await broadcast.arefresh_from_db()
-        assert broadcast.status == "processing"
-
-    async def test_a_broadcast_cut_short_after_it_went_out_is_finished_not_failed(self) -> None:
-        """Every team has it already; only the ops summary and marking it done are left."""
-        delivered = {"sent_count": 3, "queued_count": 0, "failed_count": 0, "delivered": True}
-        broadcast = await DiscordTask.objects.acreate(
-            task_type="broadcast_message",
-            payload={"target": "all-teams", "message": "hi", "sender": "ops"},
-            status="processing",
-            result=delivered,
-        )
-
-        with patch("bot.discord_queue.DiscordTask.enqueue") as enqueue:
-            await DiscordQueueProcessor._recover_stranded_tasks()
-
-        await broadcast.arefresh_from_db()
-        assert broadcast.status == "pending"
-        enqueue.assert_not_called()
-
-    async def test_a_malformed_stranded_broadcast_does_not_hold_up_the_others(self) -> None:
-        malformed = await DiscordTask.objects.acreate(task_type="broadcast_message", payload={}, status="processing")
-        other = await DiscordTask.objects.acreate(
-            task_type="log_to_channel", payload={"message": "hi"}, status="processing"
-        )
-
-        await DiscordQueueProcessor._recover_stranded_tasks()
-
-        await malformed.arefresh_from_db()
-        await other.arefresh_from_db()
-        assert (malformed.status, other.status) == ("failed", "pending")
-
     async def test_task_claimed_elsewhere_is_not_handled(self) -> None:
         task = await DiscordTask.objects.acreate(task_type="log_to_channel", payload={"message": "hi"})
         await DiscordTask.objects.filter(pk=task.pk).aupdate(status="processing")  # another processor won
@@ -697,8 +660,8 @@ async def test_handler_return_is_stored_as_result_and_payload_is_left_alone() ->
 
     with (
         patch("bot.role_sync.competition_guild", return_value=MagicMock()),
-        patch("bot.role_sync.sync_roles", new=AsyncMock(return_value=stats)),
-        patch("bot.utils.log_to_ops_channel", new=AsyncMock()),
+        patch("bot.discord_queue.sync_roles", new=AsyncMock(return_value=stats)),
+        patch("bot.discord_queue.log_to_ops_channel", new=AsyncMock()),
     ):
         await DiscordQueueProcessor(MagicMock())._process_task(task)
 
@@ -731,243 +694,42 @@ class TestCompetitionGuildLookup:
             DiscordQueueProcessor(bot)._guild()
 
 
-async def _thread_task(test_team: Team) -> tuple[DiscordTask, object]:
-    from core.discord_tasks import TicketCreatedWeb
-    from ticketing.models import Ticket, TicketCategory
-
-    category = await TicketCategory.objects.acreate(pk=97, display_name="Other", sort_order=97)
-    ticket = await Ticket.objects.acreate(ticket_number="T030-001", team=test_team, category=category, title="t")
-    return await sync_to_async(DiscordTask.enqueue)(TicketCreatedWeb(ticket_id=ticket.pk)), ticket
-
-
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize("failure", ["no guild", "thread error"])
-async def test_a_ticket_whose_thread_fails_is_retried_and_still_reaches_the_dashboard(
-    failure: str, test_team: Team
-) -> None:
-    """The queue's retry is the only one a ticket's thread gets."""
-    task, _ticket = await _thread_task(test_team)
-    bot = MagicMock()
-    bot.get_guild.return_value = None if failure == "no guild" else MagicMock()
-    error = discord.HTTPException(MagicMock(status=500, reason="x"), "x")
+class TestTaskDeletedWhileRunning:
+    """Deleting a ticket deletes its tasks, possibly while one of them runs."""
 
-    with (
-        patch("bot.discord_queue.team_chat_channel", return_value=MagicMock(threads=[])),
-        patch("bot.discord_queue.create_ticket_thread", AsyncMock(side_effect=error)),
-        patch("bot.discord_queue.trigger_dashboard") as dashboard,
-    ):
-        await DiscordQueueProcessor(bot)._process_task(task)
-
-    await task.arefresh_from_db()
-    assert (task.status, task.retry_count) == ("pending", 1)
-    dashboard.assert_called_once()
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-async def test_a_team_without_a_chat_channel_tells_ops_once_instead_of_retrying(test_team: Team) -> None:
-    task, _ticket = await _thread_task(test_team)
-
-    with (
-        patch("bot.discord_queue.team_chat_channel", return_value=None),
-        patch("bot.discord_queue.create_ticket_thread") as make_thread,
-        patch("bot.utils.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.discord_queue.trigger_dashboard"),
-    ):
-        await DiscordQueueProcessor(MagicMock())._process_task(task)
-
-    await task.arefresh_from_db()
-    assert task.status == "completed"
-    make_thread.assert_not_called()
-    assert "T030-001" in ops.await_args.args[1]
-
-
-def _bot_thread(bot: MagicMock, thread_id: int, name: str) -> MagicMock:
-    thread = MagicMock(spec=discord.Thread, id=thread_id, owner_id=bot.user.id)
-    thread.name = name
-    return thread
-
-
-async def _run_thread_task(bot: MagicMock, task: DiscordTask, threads: list[MagicMock]) -> tuple[MagicMock, MagicMock]:
-    with (
-        patch("bot.discord_queue.team_chat_channel", return_value=MagicMock(threads=threads)),
-        patch("bot.discord_queue.create_ticket_thread", new_callable=AsyncMock) as make_thread,
-        patch.object(DiscordQueueProcessor, "_holds_ticket_message", AsyncMock(return_value=False)),
-        patch("bot.discord_queue.post_ticket_message", new_callable=AsyncMock) as post,
-        patch("bot.discord_queue.trigger_dashboard"),
-    ):
-        await DiscordQueueProcessor(bot)._process_task(task)
-    return make_thread, post
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize("rerun", ["retry", "restart"])
-async def test_a_rerun_adopts_the_thread_an_earlier_run_made_before_it_could_store_it(
-    rerun: str, test_team: Team
-) -> None:
-    """A restart, or a failure between creating the thread and storing its id, must not make a second thread."""
-    task, ticket = await _thread_task(test_team)
-    if rerun == "retry":
-        await DiscordTask.objects.filter(pk=task.pk).aupdate(retry_count=1)
-    else:
-        await DiscordTask.objects.filter(pk=task.pk).aupdate(status="processing")
-        await DiscordQueueProcessor._recover_stranded_tasks()
-    bot = MagicMock()
-    made = discord.utils.time_snowflake(ticket.created_at + timedelta(seconds=5))
-    earlier = _bot_thread(bot, made, "T030-001: Team 30, t")
-    other = _bot_thread(bot, made + 1, "T030-002: Team 30, t")
-    bot.get_channel.return_value = earlier
-
-    make_thread, post = await _run_thread_task(bot, await DiscordTask.objects.aget(pk=task.pk), [other, earlier])
-
-    await ticket.arefresh_from_db()
-    assert ticket.discord_thread_id == earlier.id
-    make_thread.assert_not_called()
-    assert post.await_args.args[0] is earlier
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize("thread_was", ["adopted", "stored"])
-async def test_a_rerun_adds_the_team_to_its_thread(thread_was: str, test_team: Team) -> None:
-    """Ticket threads are private: a run cut short before its member adds left the team unable to see its ticket."""
-    task, ticket = await _thread_task(test_team)
-    await DiscordTask.objects.filter(pk=task.pk).aupdate(retry_count=1)
-    bot = MagicMock()
-    thread = _bot_thread(bot, discord.utils.time_snowflake(ticket.created_at), "T030-001: Team 30, t")
-    thread.add_user = AsyncMock()
-    if thread_was == "stored":
+    @pytest.mark.parametrize(
+        "outcome", [None, PermanentTaskError("bad"), ObjectDoesNotExist("gone"), RuntimeError("discord down")]
+    )
+    async def test_the_batch_goes_on(self, box_reset_category: Any, outcome: Exception | None) -> None:
         from ticketing.models import Ticket
 
-        await Ticket.objects.filter(pk=ticket.pk).aupdate(discord_thread_id=thread.id)
-    bot.get_channel.return_value = thread
-    members = {11: MagicMock(name="member 11"), 12: MagicMock(name="member 12")}
-    bot.get_guild.return_value.get_member.side_effect = members.get
+        team = await Team.objects.acreate(team_number=29, team_name="Team 29")
+        ticket = await Ticket.objects.acreate(
+            ticket_number="T029-001", team=team, category=box_reset_category, title="t"
+        )
+        doomed = await DiscordTask.objects.acreate(
+            task_type="post_ticket_update",
+            ticket=ticket,
+            payload={"ticket_id": ticket.id, "action": "claimed", "actor": "v"},
+        )
+        later = await DiscordTask.objects.acreate(task_type="log_to_channel", payload={"message": "next"})
+        processor = DiscordQueueProcessor(MagicMock())
 
-    with patch("bot.utils.get_team_member_discord_ids", AsyncMock(return_value=[11, 12])):
-        await _run_thread_task(bot, await DiscordTask.objects.aget(pk=task.pk), [thread])
+        async def dispatch(payload: Any, *_progress: Any) -> None:
+            if isinstance(payload, PostTicketUpdate):
+                await ticket.adelete()
+                if outcome:
+                    raise outcome
 
-    assert [c.args[0] for c in thread.add_user.await_args_list] == [members[11], members[12]]
+        with (
+            patch.object(processor, "_dispatch", side_effect=dispatch),
+            patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock) as ops,
+        ):
+            await processor._process_pending_tasks()
 
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-async def test_a_rerun_adopts_a_thread_whose_clock_ran_a_little_behind_the_ticket_s(test_team: Team) -> None:
-    """Discord's clock and the portal's differ by seconds, not the days between events."""
-    task, ticket = await _thread_task(test_team)
-    await DiscordTask.objects.filter(pk=task.pk).aupdate(retry_count=1)
-    bot = MagicMock()
-    earlier = _bot_thread(
-        bot, discord.utils.time_snowflake(ticket.created_at - timedelta(seconds=30)), "T030-001: Team 30, t"
-    )
-    bot.get_channel.return_value = earlier
-
-    make_thread, _post = await _run_thread_task(bot, await DiscordTask.objects.aget(pk=task.pk), [earlier])
-
-    make_thread.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-async def test_a_rerun_leaves_an_older_ticket_s_thread_with_the_same_number_alone(test_team: Team) -> None:
-    """The ticket counter restarts each event: a practice round's T030-001 thread is not this T030-001's."""
-    task, ticket = await _thread_task(test_team)
-    await DiscordTask.objects.filter(pk=task.pk).aupdate(retry_count=1)
-    bot = MagicMock()
-    practice = _bot_thread(
-        bot, discord.utils.time_snowflake(ticket.created_at - timedelta(days=2)), "T030-001: Team 30, practice"
-    )
-
-    make_thread, _post = await _run_thread_task(bot, await DiscordTask.objects.aget(pk=task.pk), [practice])
-
-    await ticket.arefresh_from_db()
-    assert ticket.discord_thread_id is None
-    make_thread.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-async def test_a_first_run_makes_its_own_thread(test_team: Team) -> None:
-    """Only a rerun can have made a thread already."""
-    task, ticket = await _thread_task(test_team)
-    bot = MagicMock()
-    look_alike = _bot_thread(
-        bot, discord.utils.time_snowflake(ticket.created_at + timedelta(seconds=5)), "T030-001: Team 30, t"
-    )
-
-    make_thread, _post = await _run_thread_task(bot, task, [look_alike])
-
-    make_thread.assert_awaited_once()
-
-
-def _ops_channel(settings: Any, bot: MagicMock, send: AsyncMock) -> None:
-    settings.DISCORD_LOG_CHANNEL_ID = 77
-    bot.get_channel.return_value = MagicMock(spec=discord.TextChannel, send=send)
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-async def test_a_broadcast_rerun_after_it_went_out_posts_only_the_missing_ops_summary(settings: Any) -> None:
-    """A restart, or a database error recording the outcome, came after delivery: no team gets it twice."""
-    from core.discord_tasks import BroadcastMessage
-
-    task = await sync_to_async(DiscordTask.enqueue)(BroadcastMessage(target="all-teams", message="hi", sender="ops"))
-    delivered = {"sent_count": 3, "queued_count": 0, "failed_count": 0, "delivered": True}
-    await DiscordTask.objects.filter(pk=task.pk).aupdate(result=delivered, retry_count=1)
-    bot, send = MagicMock(), AsyncMock()
-    _ops_channel(settings, bot, send)
-
-    with patch("bot.competition_actions.deliver_team_broadcast", new_callable=AsyncMock) as deliver:
-        await DiscordQueueProcessor(bot)._process_task(await DiscordTask.objects.aget(pk=task.pk))
-
-    await task.arefresh_from_db()
-    assert task.status == "completed"
-    deliver.assert_not_called()
-    send.assert_awaited_once()
-    assert "Sent: 3" in send.await_args.args[0]
-    assert task.result["reported"] is True
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-async def test_a_broadcast_whose_ops_summary_failed_does_not_record_it_as_posted(settings: Any) -> None:
-    from core.discord_tasks import BroadcastMessage
-
-    task = await sync_to_async(DiscordTask.enqueue)(BroadcastMessage(target="all-teams", message="hi", sender="ops"))
-    bot = MagicMock()
-    _ops_channel(settings, bot, AsyncMock(side_effect=discord.HTTPException(MagicMock(status=503, reason="x"), "x")))
-
-    with (
-        patch("bot.competition_actions.deliver_team_broadcast", AsyncMock(return_value=(3, 0, []))),
-        patch.object(DiscordQueueProcessor, "_guild", return_value=MagicMock()),
-    ):
-        await DiscordQueueProcessor(bot)._process_task(task)
-
-    await task.arefresh_from_db()
-    assert task.status == "completed"
-    assert task.result["delivered"] is True
-    assert "reported" not in task.result
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-async def test_a_broadcast_retried_after_its_ops_summary_went_out_does_not_post_it_again() -> None:
-    """Marking it done failed after the summary; the retry only completes it."""
-    from core.discord_tasks import BroadcastMessage
-
-    task = await sync_to_async(DiscordTask.enqueue)(BroadcastMessage(target="all-teams", message="hi", sender="ops"))
-    result = {"sent_count": 3, "queued_count": 0, "failed_count": 0, "delivered": True, "reported": True}
-    await DiscordTask.objects.filter(pk=task.pk).aupdate(result=result, retry_count=1)
-
-    with (
-        patch("bot.competition_actions.deliver_team_broadcast", new_callable=AsyncMock) as deliver,
-        patch("bot.utils.log_to_ops_channel", new_callable=AsyncMock) as ops,
-    ):
-        await DiscordQueueProcessor(MagicMock())._process_task(await DiscordTask.objects.aget(pk=task.pk))
-
-    await task.arefresh_from_db()
-    assert task.status == "completed"
-    deliver.assert_not_called()
-    ops.assert_not_called()
+        assert not await DiscordTask.objects.filter(pk=doomed.pk).aexists()
+        await later.arefresh_from_db()
+        assert later.status == "completed", later.error_message
+        ops.assert_not_awaited()
