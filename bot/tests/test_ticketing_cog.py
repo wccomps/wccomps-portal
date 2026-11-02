@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock, call
 import discord
 import pytest
 import pytest_asyncio
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.utils import timezone
 
@@ -99,6 +100,7 @@ class TestTicketingCog:
 
         # Mock thread
         mock_thread = AsyncMock(spec=discord.Thread)
+        mock_thread.guild.id = settings.COMPETITION_GUILD_ID
         mock_thread.edit = AsyncMock()
         cog.bot.get_channel = Mock(return_value=mock_thread)
 
@@ -135,6 +137,7 @@ class TestTicketingCog:
         )
 
         mock_thread = AsyncMock(spec=discord.Thread)
+        mock_thread.guild.id = settings.COMPETITION_GUILD_ID
         cog.bot.get_channel = Mock(return_value=mock_thread)
 
         await cog.archive_threads_task()
@@ -312,6 +315,7 @@ class TestTicketingCog:
         mock_threads = {}
         for ticket in tickets:
             mock_thread = AsyncMock(spec=discord.Thread)
+            mock_thread.guild.id = settings.COMPETITION_GUILD_ID
             mock_thread.edit = AsyncMock()
             mock_threads[ticket.discord_thread_id] = mock_thread
 

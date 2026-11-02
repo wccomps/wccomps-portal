@@ -4,15 +4,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 import pytest
-from django.contrib.auth.models import User
 
 from bot.utils import (
     find_team,
-    get_team_member_discord_ids,
+    find_team_role,
     log_to_ops_channel,
     team_chat_channel,
 )
-from team.models import DiscordLink, Team
+from team.models import Team
 
 
 @pytest.mark.django_db(transaction=True)
@@ -33,53 +32,6 @@ class TestTeamHelpers:
 
     async def test_find_team_refuses_a_number_out_of_range(self) -> None:
         assert await find_team(51) == "Team number must be between 1 and 50"
-
-    async def test_get_team_member_discord_ids(self) -> None:
-        """Test getting Discord IDs for team members."""
-        team_num = 26
-
-        # Delete if exists
-        await Team.objects.filter(team_number=team_num).adelete()
-
-        team = await Team.objects.acreate(
-            team_number=team_num,
-            team_name="Test Team",
-        )
-
-        # Create users for the discord links
-        user1 = await User.objects.acreate(username="user1")
-        user2 = await User.objects.acreate(username="user2")
-        user3 = await User.objects.acreate(username="user3")
-
-        # Create active and inactive members
-        await DiscordLink.objects.acreate(
-            discord_id=111111111,
-            discord_username="user1#0001",
-            user=user1,
-            team=team,
-            is_active=True,
-        )
-        await DiscordLink.objects.acreate(
-            discord_id=222222222,
-            discord_username="user2#0002",
-            user=user2,
-            team=team,
-            is_active=True,
-        )
-        await DiscordLink.objects.acreate(
-            discord_id=333333333,
-            discord_username="user3#0003",
-            user=user3,
-            team=team,
-            is_active=False,  # Inactive
-        )
-
-        discord_ids = await get_team_member_discord_ids(team)
-
-        assert len(discord_ids) == 2
-        assert 111111111 in discord_ids
-        assert 222222222 in discord_ids
-        assert 333333333 not in discord_ids
 
 
 class TestLogging:
@@ -145,7 +97,34 @@ class TestTeamChatChannel:
 
     def test_none_without_a_category(self) -> None:
         guild = MagicMock(spec=discord.Guild)
+        guild.categories = []
         guild.get_channel.return_value = _channel(discord.TextChannel, "team05-chat")
 
         assert team_chat_channel(guild, Team(team_number=5)) is None
         assert team_chat_channel(guild, Team(team_number=5, discord_category_id=55)) is None
+
+    def test_finds_the_category_by_name_when_its_id_was_lost(self) -> None:
+        """A category whose cleanup failed keeps its name but no longer has its ID recorded."""
+        chat = _channel(discord.TextChannel, "team05-chat")
+        category = MagicMock(spec=discord.CategoryChannel)
+        category.name = "team 05"
+        category.channels = [chat]
+        guild = MagicMock(spec=discord.Guild)
+        guild.categories = [category]
+
+        assert team_chat_channel(guild, Team(team_number=5)) is chat
+
+
+class TestTeamResourceLookup:
+    def test_role_by_id_then_padded_then_unpadded_name(self) -> None:
+        by_id, padded, unpadded = (MagicMock(spec=discord.Role) for _ in range(3))
+        padded.name, unpadded.name = "Team 07", "Team 7"
+        guild = MagicMock(spec=discord.Guild)
+        guild.get_role.side_effect = lambda role_id: by_id if role_id == 70 else None
+        guild.roles = [unpadded, padded]
+
+        assert find_team_role(guild, Team(team_number=7, discord_role_id=70)) is by_id
+        assert find_team_role(guild, Team(team_number=7, discord_role_id=71)) is padded
+        guild.roles = [unpadded]
+        assert find_team_role(guild, Team(team_number=7)) is unpadded
+        assert find_team_role(guild, Team(team_number=8)) is None

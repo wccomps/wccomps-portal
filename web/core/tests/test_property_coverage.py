@@ -172,10 +172,10 @@ def bot_entry_points() -> dict[str, str]:
                 found[f"bot:command:{path}:{name}"] = "a slash command"
             if any(d in {"discord.ui.button", "discord.ui.select", "ui.button", "ui.select"} for d in decorators):
                 found[f"bot:button:{path}:{name}"] = "a view's button or select callback"
-            if function.name.startswith("on_message") and (
+            if function.name.startswith("on_") and (
                 "commands.Cog.listener" in decorators or any(d.endswith(".event") for d in decorators)
             ):
-                found[f"bot:listener:{path}:{name}"] = "a message listener"
+                found[f"bot:listener:{path}:{name}"] = "an event listener"
     return found
 
 
@@ -189,7 +189,9 @@ FORM_TESTS = (
     test_properties_forms.test_valid_post_fits_its_fields_is_stored_and_cleans_the_same,
 )
 
-EXCEPTIONS: dict[str, str] = {}
+EXCEPTIONS: dict[str, str] = {
+    "bot:listener:bot/cogs/help_panels.py:HelpPanelsCog.on_ready": "takes no input: it posts the help panels",
+}
 # Readers of another service's JSON that can't have a property test, each with why
 READER_EXCEPTIONS: dict[str, str] = {}
 

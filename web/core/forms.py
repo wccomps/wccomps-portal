@@ -6,6 +6,7 @@ from registration.models import SCHOOL_NAME_MAX_LENGTH, Event
 from registration.services import NewEvent
 
 from core.authentik_utils import parse_team_range
+from core.broadcast import parse_broadcast_target
 from team.models import SchoolInfo
 
 
@@ -22,6 +23,14 @@ class SchoolInfoEditForm(forms.Form):
 class BroadcastForm(forms.Form):
     target = forms.CharField()
     message = forms.CharField()
+
+    def clean_target(self) -> str:
+        target: str = self.cleaned_data["target"]
+        try:
+            parse_broadcast_target(target)
+        except ValueError as e:
+            raise forms.ValidationError(str(e)) from e
+        return target
 
 
 class SetMaxMembersForm(forms.Form):

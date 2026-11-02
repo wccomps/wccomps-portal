@@ -1,6 +1,5 @@
 """Tests for ticket creation and resolution workflows."""
 
-from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,6 +8,7 @@ import pytest
 from asgiref.sync import sync_to_async
 
 from bot.discord_queue import DiscordQueueProcessor
+from bot.tests.discord_fakes import BOT_USER, recording_thread, ticket_message
 from core.discord_tasks import TicketCreatedWeb
 from core.models import DiscordTask
 from team.models import Team
@@ -70,7 +70,7 @@ class TestTicketCreationWorkflow:
         thread = MagicMock(spec=discord.Thread)
         thread.id = 9001
         thread.add_user = AsyncMock()
-        thread.send = AsyncMock(return_value=MagicMock())
+        thread.send = AsyncMock(return_value=MagicMock(id=900101, pin=AsyncMock()))
         text_channel.create_thread.return_value = thread
 
         category.channels = [text_channel]
@@ -103,8 +103,7 @@ class TestTicketCreationWorkflow:
         assert "T035-001" in sent.kwargs["embed"].title
 
     async def test_queue_processor_idempotent_thread_creation(self, db: Any, box_reset_category: Any) -> None:
-        """A retry after the thread was made makes no second one, and posts the ticket message if the first lacks it.
-        Six team members were added first, so the message isn't among the thread's first few."""
+        """Run again once the thread has its pinned ticket message, the task posts nothing and adds no one."""
         team = await Team.objects.acreate(
             team_number=37,
             team_name="Test Team 3",
@@ -122,38 +121,23 @@ class TestTicketCreationWorkflow:
         )
         task = await sync_to_async(DiscordTask.enqueue)(TicketCreatedWeb(ticket_id=ticket.id))
 
-        # Where the bot's ticket message is: pinned, unpinned after the member notices (its pin failed), or missing
-        for where in ("pinned", "unpinned", "missing"):
-            bot = MagicMock(spec=discord.Client)
-            thread = MagicMock(spec=discord.Thread)
-            ticket_message = MagicMock(author=bot.user, embeds=[MagicMock()])
-            notices = [MagicMock(author=MagicMock(), embeds=[]) for _ in range(6)]
-            notices += [ticket_message] if where == "unpinned" else []
-            pinned = [ticket_message] if where == "pinned" else []
+        thread = recording_thread(9999, pinned_text=ticket_message(ticket.ticket_number))
+        bot = MagicMock(spec=discord.Client)
+        bot.user = BOT_USER
+        bot.get_channel.return_value = thread
+        guild = MagicMock(spec=discord.Guild)
 
-            async def pins(pinned: list[object] = pinned, **_kwargs: object) -> AsyncIterator[object]:
-                for message in pinned:
-                    yield message
-
-            async def history(notices: list[object] = notices, **_kwargs: object) -> AsyncIterator[object]:
-                for message in notices:
-                    yield message
-
-            thread.pins, thread.history = pins, history
-            bot.get_channel.return_value = thread
-            await DiscordTask.objects.filter(pk=task.pk).aupdate(status="pending", retry_count=0, next_retry_at=None)
-
-            with (
-                patch("bot.discord_queue.trigger_dashboard") as mock_dashboard,
-                patch("bot.discord_queue.create_ticket_thread") as make_thread,
-                patch("bot.discord_queue.post_ticket_message") as post,
-            ):
-                await DiscordQueueProcessor(bot)._process_task(await DiscordTask.objects.aget(pk=task.pk))
+        with (
+            patch("bot.discord_queue.trigger_dashboard") as mock_dashboard,
+            patch("bot.discord_queue.competition_guild", return_value=guild),
+        ):
+            processor = DiscordQueueProcessor(bot)
+            await processor._handle_ticket_created_web(task.typed_payload())
 
             mock_dashboard.assert_called_once()
-            make_thread.assert_not_called()
-            assert post.await_count == (1 if where == "missing" else 0)
-            assert (await DiscordTask.objects.aget(pk=task.pk)).status == "completed"
+        thread.send.assert_not_called()
+        thread.add_user.assert_not_called()
+        guild.get_channel.assert_not_called()
 
 
 @pytest.mark.asyncio

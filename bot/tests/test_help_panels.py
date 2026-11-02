@@ -93,7 +93,7 @@ async def test_help_panel_ticket_queues_its_thread_and_the_queue_makes_it(
 
     thread = MagicMock(spec=discord.Thread)
     thread.id = 777
-    thread.send = AsyncMock()
+    thread.send = AsyncMock(return_value=MagicMock(id=7771, pin=AsyncMock()))
     thread.add_user = AsyncMock()
     chat = Mock(spec=discord.TextChannel)
     chat.name = "team-chat"

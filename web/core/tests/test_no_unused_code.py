@@ -232,6 +232,7 @@ CODE_EXCEPTIONS = {
     "*:field_template_name": "Django's form renderer reads it for field.as_field_group",
     "*:option_template_name": "Django's choice widgets read it for each option",
     "*:use_required_attribute": "Django calls a widget's use_required_attribute as it renders the field",
+    "main.py:message_content": "discord.py reads the intent when the bot connects",
     # Django
     "@admin.register": "Django admin registers the class through its decorator",
     "@*.register_lookup": "Django registers a field lookup through its decorator",
