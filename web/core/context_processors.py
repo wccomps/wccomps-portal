@@ -83,6 +83,7 @@ NAV_MAPPING: dict[str, tuple[str, str]] = {
     "admin_category_delete": ("ops_admin", "categories"),
     "admin_task_status": ("ops_admin", ""),
     "school_info": ("ops_admin", "schools"),
+    "school_info_add": ("ops_admin", "schools"),
     "school_info_edit": ("ops_admin", "schools"),
     "school_info_remove": ("ops_admin", "schools"),
     "school_info_import": ("ops_admin", "schools"),

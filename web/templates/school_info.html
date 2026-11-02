@@ -8,6 +8,7 @@
         <c-page_header title="School Information" />
         <c-module id="changelist">
             <c-slot name="toolbar">
+                {% if event_open %}<c-link href="{% url 'school_info_add' %}" variant="add">Add school</c-link>{% endif %}
                 <c-link href="{% url 'school_info_import' %}" variant="add">Import from CSV</c-link>
                 <c-link href="{% url 'school_info_export' %}" class="ml-auto">Export CSV</c-link>
             </c-slot>
