@@ -235,7 +235,6 @@ def test_the_page_shows_only_the_next_steps_section(client, stage, section):
 
     shown = [key for key, heading in SECTION_HEADINGS.items() if heading in page and f'id="{key}"' in page]
     assert shown == ([section] if section else [])
-    # One Start and one Stop, both in Competition Controls; the one the state already matches is disabled
     assert page.count(">Start Competition</button>") == 1
     assert page.count(">Stop Competition</button>") == 1
     assert page.count('@click="startCompetition"') == (0 if stage in ("running", "played", "unrecorded") else 1)
