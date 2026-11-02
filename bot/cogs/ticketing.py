@@ -9,7 +9,7 @@ from discord.ext import commands, tasks
 from django.utils import timezone
 from quotient.client import get_quotient_client
 
-from bot.permissions import check_blue_team, linked_team_member
+from bot.permissions import check_blue_team, linked_team_member, may_write_to_ticket
 from bot.thread_creator import publish_new_ticket
 from bot.ticket_input import read_ticket
 from bot.utils import add_field, choices, pinging
@@ -215,7 +215,7 @@ class TicketingCog(commands.Cog):
             return
 
         ticket = await Ticket.objects.filter(discord_thread_id=message.channel.id).afirst()
-        if not ticket:
+        if not ticket or not await may_write_to_ticket(ticket, message.author.id):
             return
 
         is_allowed, reason = await sync_to_async(CommentRateLimit.check_rate_limit)(ticket.id, message.author.id)
@@ -289,7 +289,7 @@ class TicketingCog(commands.Cog):
             return
 
         ticket = await Ticket.objects.filter(discord_thread_id=after.channel.id).afirst()
-        if not ticket:
+        if not ticket or not await may_write_to_ticket(ticket, after.author.id):
             return
 
         comment = await TicketComment.objects.filter(ticket=ticket, discord_message_id=after.id).afirst()

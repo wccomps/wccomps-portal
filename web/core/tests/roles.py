@@ -6,7 +6,8 @@ import itertools
 from django.contrib.auth.models import User
 
 from core.models import UserGroups
-from team.models import DiscordLink, Team
+from core.permission_constants import PERMISSION_MAP, TEAM_HELD
+from team.models import DiscordLink, Team, team_group_name
 
 # Each role's Authentik groups; None is a visitor who isn't signed in
 ROLE_GROUPS: dict[str, list[str] | None] = {
@@ -23,6 +24,17 @@ ROLE_GROUPS: dict[str, list[str] | None] = {
     "ticketing_admin": ["WCComps_Ticketing_Admin"],
     "admin": ["WCComps_Discord_Admin"],
 }
+
+
+# The teams the test worlds make active: the blue_team role's (1) and the others they set up
+WORLD_TEAM_GROUPS = frozenset(team_group_name(n) for n in (1, 2, 3))
+
+
+def grants(groups: list[str], permission: str) -> bool:
+    """core.auth_utils.groups_grant for the test worlds, without the database: their teams 1 to 3 are active."""
+    if any(group in groups for group in PERMISSION_MAP[permission]):
+        return True
+    return permission in TEAM_HELD and bool(WORLD_TEAM_GROUPS & set(groups))
 
 
 def groups_of(role: str) -> list[str]:

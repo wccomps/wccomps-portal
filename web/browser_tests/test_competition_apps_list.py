@@ -26,6 +26,7 @@ def test_stale_page_edit_keeps_apps_added_elsewhere(live_server, pw_browser):
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
     manager = MagicMock()
+    manager.__enter__.return_value = manager
     manager.list_applications.return_value = AVAILABLE
 
     try:
@@ -69,6 +70,7 @@ def test_a_slug_missing_from_authentiks_app_list_can_be_typed_in(live_server, pw
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     manager = MagicMock()
+    manager.__enter__.return_value = manager
     manager.list_applications.return_value = AVAILABLE  # no "competitions"
     manager.get_application_by_slug.side_effect = lambda slug: {"slug": slug} if slug == "competitions" else None
 
@@ -98,6 +100,7 @@ def test_start_message_loads_and_saves(live_server, pw_browser):
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     manager = MagicMock()
+    manager.__enter__.return_value = manager
     manager.list_applications.return_value = AVAILABLE
 
     try:

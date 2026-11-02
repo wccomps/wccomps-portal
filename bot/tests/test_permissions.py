@@ -70,16 +70,34 @@ async def test_denial_names_every_group_that_grants_the_permission(permission: s
     assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
 
 
-async def test_blue_team_is_the_team_the_groups_name_not_the_one_linked_at_link_time() -> None:
+async def test_a_seat_on_a_team_the_groups_no_longer_name_is_no_team() -> None:
+    """Moved to another team in Authentik: the seat and the groups disagree, so neither team counts until a relink,
+    as for the Discord roles (role_sync)."""
     linked_to = await Team.objects.acreate(team_number=31, team_name="Team 31")
     now_on = await Team.objects.acreate(team_number=32, team_name="Team 32")
     discord_id = await _linked([now_on.authentik_group], team=linked_to)
 
+    assert await linked_team_member(discord_id) is None
+    assert not await check_blue_team(_interaction(discord_id))
+
+
+async def test_a_seat_the_groups_hold_is_the_members_team() -> None:
+    team = await Team.objects.acreate(team_number=35, team_name="Team 35")
+    discord_id = await _linked([team.authentik_group], team=team)
+
     member = await linked_team_member(discord_id)
 
-    assert member is not None
-    assert member.team == now_on
+    assert member is not None and member.team == team
     assert await check_blue_team(_interaction(discord_id))
+
+
+async def test_blue_team_is_decided_as_on_the_web() -> None:
+    """Staff hold blue_team without a team; a member of an active team does too, with or without a seat."""
+    team = await Team.objects.acreate(team_number=36, team_name="Team 36")
+    assert await has_permission(await _linked([team.authentik_group]), "blue_team")
+    assert await has_permission(await _linked(["WCComps_GoldTeam"]), "blue_team")
+    await Team.objects.filter(pk=team.pk).aupdate(is_active=False)
+    assert not await has_permission(await _linked([team.authentik_group]), "blue_team")
 
 
 async def test_losing_the_team_group_ends_blue_team_access() -> None:
@@ -90,3 +108,15 @@ async def test_losing_the_team_group_ends_blue_team_access() -> None:
     assert await linked_team_member(discord_id) is None
     assert not await check_blue_team(interaction)
     assert "Blue Team membership required" in interaction.response.send_message.await_args.args[0]
+
+
+async def test_a_disabled_team_account_is_told_so_not_to_link() -> None:
+    """After a stop the account is disabled but still on the team: /link would not help."""
+    team = await Team.objects.acreate(team_number=37, team_name="Team 37")
+    discord_id = await _linked([team.authentik_group], team=team)
+    await UserGroups.objects.filter(authentik_id=f"uid{discord_id}").aupdate(account_active=False)
+    interaction = _interaction(discord_id)
+
+    assert not await check_blue_team(interaction)
+    message = interaction.response.send_message.await_args.args[0]
+    assert "disabled" in message and "/link" not in message

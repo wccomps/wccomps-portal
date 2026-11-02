@@ -241,7 +241,7 @@ class TestAuthentikManager:
 
     def test_get_user_with_groups_refuses_a_user_without_groups(self, manager: AuthentikManager) -> None:
         """No groups_obj must not read as a user in no groups, which the group fix would then re-add."""
-        manager.client.get.return_value = self._answer({"results": [{"pk": 42, "username": "team01"}]})
+        manager.client.get.return_value = self._answer({"results": [{"pk": 42, "username": "team01", "uid": "sub-01"}]})
 
         with pytest.raises(AuthentikAPIError):
             manager.get_user_with_groups("team01")
@@ -279,78 +279,39 @@ class TestAuthentikManager:
         with pytest.raises(AuthentikAPIError, match=r"Network error \(ConnectError\)"):
             manager.update_binding_enabled(binding, True)
 
-    def test_enable_application_success(self, manager: AuthentikManager) -> None:
-        """Test successfully enabling an application."""
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_set_application_enabled_sets_the_blueteam_binding(self, manager: AuthentikManager, enabled: bool) -> None:
+        """An enabled binding lets blue teams in; a disabled one keeps them out."""
         with (
-            patch.object(manager, "get_application_by_slug") as mock_get_app,
-            patch.object(manager, "get_blueteam_binding") as mock_get_binding,
+            patch.object(manager, "get_application_by_slug", return_value={"pk": "app-123", "slug": "netbird"}),
+            patch.object(manager, "get_blueteam_binding", return_value={"pk": "binding-456", "enabled": not enabled}),
             patch.object(manager, "update_binding_enabled") as mock_update,
         ):
-            mock_get_app.return_value = {"pk": "app-123", "slug": "netbird"}
-            mock_get_binding.return_value = {"pk": "binding-456", "enabled": False}
+            manager.set_application_enabled("netbird", enabled)
 
-            success, error = manager.enable_application("netbird")
+        mock_update.assert_called_once_with({"pk": "binding-456", "enabled": not enabled}, enabled=enabled)
 
-            assert success is True
-            assert error is None
-            # Check that update_binding_enabled was called with enabled=True
-            # (enabling the binding allows blue team access)
-            mock_update.assert_called_once()
-            call_args = mock_update.call_args
-            assert call_args[0][0] == {"pk": "binding-456", "enabled": False}
-            assert call_args[1]["enabled"] is True
-
-    def test_enable_application_not_found(self, manager: AuthentikManager) -> None:
-        """Test enabling non-existent application."""
-        with patch.object(manager, "get_application_by_slug") as mock_get_app:
-            mock_get_app.return_value = None
-
-            success, error = manager.enable_application("nonexistent")
-
-            assert success is False
-            assert error is not None
-            assert "not found" in error
-
-    def test_enable_application_no_binding(self, manager: AuthentikManager) -> None:
-        """Test enabling application with no BlueTeam binding."""
+    def test_set_application_enabled_raises_for_a_missing_application(self, manager: AuthentikManager) -> None:
         with (
-            patch.object(manager, "get_application_by_slug") as mock_get_app,
-            patch.object(manager, "get_blueteam_binding") as mock_get_binding,
+            patch.object(manager, "get_application_by_slug", return_value=None),
+            pytest.raises(AuthentikAPIError, match="Application 'nonexistent' not found in Authentik"),
         ):
-            mock_get_app.return_value = {"pk": "app-123"}
-            mock_get_binding.return_value = None
+            manager.set_application_enabled("nonexistent", True)
 
-            assert manager.enable_application("test-app") == (
-                False,
-                "Application 'test-app' has no BlueTeam group binding",
-            )
+    def test_set_application_enabled_raises_without_a_blueteam_binding(self, manager: AuthentikManager) -> None:
+        with (
+            patch.object(manager, "get_application_by_slug", return_value={"pk": "app-123"}),
+            patch.object(manager, "get_blueteam_binding", return_value=None),
+            pytest.raises(AuthentikAPIError, match="Application 'test-app' has no BlueTeam group binding"),
+        ):
+            manager.set_application_enabled("test-app", True)
 
-    def test_enable_application_names_why_authentik_could_not_be_asked(self, manager: AuthentikManager) -> None:
+    def test_set_application_enabled_names_why_authentik_could_not_be_asked(self, manager: AuthentikManager) -> None:
         """Authentik being down must not read as the app being missing."""
         manager.client.get.side_effect = httpx.ConnectError("Connection refused")
 
-        assert manager.enable_application("netbird") == (False, "Network error (ConnectError)")
-
-    def test_disable_application_success(self, manager: AuthentikManager) -> None:
-        """Test successfully disabling an application."""
-        with (
-            patch.object(manager, "get_application_by_slug") as mock_get_app,
-            patch.object(manager, "get_blueteam_binding") as mock_get_binding,
-            patch.object(manager, "update_binding_enabled") as mock_update,
-        ):
-            mock_get_app.return_value = {"pk": "app-123"}
-            mock_get_binding.return_value = {"pk": "binding-456", "enabled": True}
-
-            success, error = manager.disable_application("netbird")
-
-            assert success is True
-            assert error is None
-            # Check that update_binding_enabled was called with enabled=False
-            # (disabling the binding blocks blue team access)
-            mock_update.assert_called_once()
-            call_args = mock_update.call_args
-            assert call_args[0][0] == {"pk": "binding-456", "enabled": True}
-            assert call_args[1]["enabled"] is False
+        with pytest.raises(AuthentikAPIError, match=r"^Network error \(ConnectError\)$"):
+            manager.set_application_enabled("netbird", True)
 
     def test_update_user_discord_id_success(self, manager: AuthentikManager) -> None:
         """Test successfully updating user's Discord ID."""
@@ -454,6 +415,14 @@ class TestAuthentikManager:
         manager.client.get.return_value = self._answer({"results": [{"pk": 1, "username": "akadmin"}]})
 
         assert manager.find_user("team01") is None
+
+    @pytest.mark.parametrize("uid", [None, "", 7])
+    def test_find_user_refuses_a_user_without_a_uid(self, manager: AuthentikManager, uid: object) -> None:
+        """The uid is the OIDC sub the portal keys accounts by; without it no portal account can be matched."""
+        manager.client.get.return_value = self._answer({"results": [{"pk": 42, "username": "team01", "uid": uid}]})
+
+        with pytest.raises(AuthentikAPIError, match="no uid"):
+            manager.find_user("team01")
 
     def test_lookups_refuse_a_redirected_answer(self, manager: AuthentikManager) -> None:
         manager.client.get.return_value = self._answer({"results": [{"pk": 42, "username": "team01"}]}, 302)

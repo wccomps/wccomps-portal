@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from django.urls import reverse
 
-from core.authentik_utils import CredentialReset
+from core.authentik_utils import Changed, Refused, SignedOut, TeamReset
 from core.tests.roles import role_user
 
 from .conftest import create_session_context
@@ -25,7 +25,7 @@ def test_reset_password_shows_the_new_password_without_reloading(live_server, pw
     try:
         with patch(
             "core.admin_views.teams.reset_team_credentials",
-            return_value=CredentialReset(password="New-Pass-9!", sessions_found=0),
+            return_value=Changed("New-Pass-9!", sessions_found=0, followup=SignedOut(0)),
         ):
             page.goto(live_server.url + reverse("admin_team_detail", args=[8]))
             with page.expect_response(lambda r: r.url.endswith("/action/")):
@@ -56,8 +56,8 @@ def test_reset_team_keeps_the_password_up_and_hides_the_unlinked_members(live_se
 
     try:
         with patch(
-            "core.admin_views.teams.reset_team_credentials",
-            return_value=CredentialReset(password="Team-Pass-7!", sessions_found=0),
+            "core.admin_views.teams.reset_team",
+            return_value=TeamReset(Changed("Team-Pass-7!", sessions_found=0, followup=SignedOut(1)), True),
         ):
             page.goto(live_server.url + reverse("admin_team_detail", args=[8]))
             assert page.get_by_text("memberdiscord").is_visible()
@@ -69,6 +69,36 @@ def test_reset_team_keeps_the_password_up_and_hides_the_unlinked_members(live_se
                 "Reset Team used to reload after 3s, wiping the password"
             )
             assert not page.get_by_text("memberdiscord").is_visible()
+            assert page.get_by_text("All members were unlinked").is_visible()
+    finally:
+        context.close()
+
+
+def test_reset_password_hides_the_members_it_unlinked(live_server, pw_browser):
+    """Their Unlink buttons would only fail now: the reset ended their links."""
+    from django.contrib.auth.models import User
+
+    from team.models import DiscordLink, Team
+
+    team = Team.objects.create(team_number=8, team_name="Team 08", is_active=True)
+    member = User.objects.create(username="member08d")
+    DiscordLink.objects.create(user=member, discord_id=4545, discord_username="memberlinked", team=team, is_active=True)
+    user = role_user("admin")
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    page.on("dialog", lambda dialog: dialog.accept())
+
+    try:
+        with patch(
+            "core.admin_views.teams.reset_team_credentials",
+            return_value=Changed("New-Pass-8!", sessions_found=0, followup=SignedOut(1)),
+        ):
+            page.goto(live_server.url + reverse("admin_team_detail", args=[8]))
+            assert page.get_by_text("memberlinked").is_visible()
+            with page.expect_response(lambda r: r.url.endswith("/action/")):
+                page.get_by_role("button", name="Reset Password").click()
+            page.get_by_text("New-Pass-8!").wait_for()
+            assert not page.get_by_text("memberlinked").is_visible()
             assert page.get_by_text("All members were unlinked").is_visible()
     finally:
         context.close()
@@ -97,7 +127,7 @@ def test_django_admin_team_pages_have_reset_password(live_server, pw_browser, pa
     try:
         with patch(
             "core.admin_views.teams.reset_team_credentials",
-            return_value=CredentialReset(password="New-Pass-9!", sessions_found=0),
+            return_value=Changed("New-Pass-9!", sessions_found=0, followup=SignedOut(0)),
         ) as reset:
             page.goto(live_server.url + page_path.format(team_pk=team.pk, school_pk=school.pk))
             with page.expect_response(lambda r: r.url.endswith("/action/")):
@@ -124,7 +154,7 @@ def test_competition_reset_passwords_keeps_the_csv_and_its_download(live_server,
             patch("core.authentik_utils.AuthentikManager"),
             patch(
                 "core.authentik_utils._reset_credentials",
-                return_value=CredentialReset(password="Csv-Pass-3!", sessions_found=0),
+                return_value=Changed("Csv-Pass-3!", sessions_found=0, followup=SignedOut(0)),
             ),
         ):
             page.goto(live_server.url + reverse("admin_competition"))
@@ -150,8 +180,8 @@ def test_competition_reset_passwords_partial_failure_keeps_the_error_and_the_csv
     for number in (3, 4):
         Team.objects.create(team_number=number, team_name=f"Team 0{number}", is_active=True)
     results = {
-        3: CredentialReset(password="Csv-Pass-3!", sessions_found=0),
-        4: CredentialReset(password=None, error="User team04 not found"),
+        3: Changed("Csv-Pass-3!", sessions_found=0, followup=SignedOut(0)),
+        4: Refused("User team04 not found"),
     }
     user = role_user("admin")
     context = create_session_context(pw_browser, live_server, user)
@@ -161,7 +191,9 @@ def test_competition_reset_passwords_partial_failure_keeps_the_error_and_the_csv
     try:
         with (
             patch("core.authentik_utils.AuthentikManager"),
-            patch("core.authentik_utils._reset_credentials", side_effect=lambda _m, n: results[n]),
+            patch(
+                "core.authentik_utils._reset_credentials", side_effect=lambda _m, n, _actor, _reason, **_kw: results[n]
+            ),
         ):
             page.goto(live_server.url + reverse("admin_competition"))
             page.get_by_role("button", name="Advanced: reset team passwords").click()

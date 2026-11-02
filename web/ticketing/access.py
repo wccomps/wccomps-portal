@@ -5,11 +5,18 @@ from dataclasses import dataclass
 from django.contrib.auth.models import User
 
 from core.auth_utils import has_permission
+from team.models import Team
 from ticketing.lifecycle import assignee_refusal, refusal
 from ticketing.models import Ticket
 
 # Ticketing staff see and work every team's tickets; the permission's groups hold ticketing admins and portal admins
 TICKET_STAFF = "ticketing_support"
+
+
+def ticket_open_to(ticket: Ticket, *, staff: bool, team: Team | None) -> bool:
+    """Whether someone may see and write to the ticket: ticket staff, or a member of its team (team: the one the
+    person's own groups put them on)."""
+    return staff or (team is not None and team.pk == ticket.team_id)
 
 
 @dataclass(frozen=True)

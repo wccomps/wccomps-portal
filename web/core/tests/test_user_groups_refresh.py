@@ -56,14 +56,24 @@ def test_added_group_appears_with_its_parents():
     assert _groups("a") == ["WCComps_Discord_Admin", "WCComps_Ticketing_Admin"]
 
 
-def test_deactivated_user_has_no_groups():
+def test_deactivated_user_keeps_its_membership_but_no_permissions():
     _stored("a", ["WCComps_BlueTeam"])
     _stored("b", ["WCComps_GoldTeam"])
 
     refresh_user_groups(_manager([_authentik_user("a", ["g-blue"], is_active=False), _authentik_user("b", ["g-gold"])]))
 
-    assert _groups("a") == []
-    assert _groups("b") == ["WCComps_GoldTeam"]
+    disabled = UserGroups.objects.get(authentik_id="a")
+    assert (disabled.groups, disabled.account_active, disabled.permission_groups) == (["WCComps_BlueTeam"], False, [])
+    assert UserGroups.objects.get(authentik_id="b").permission_groups == ["WCComps_GoldTeam"]
+
+
+def test_reenabling_an_account_restores_its_permissions():
+    UserGroups.objects.filter(pk=_stored("a", ["WCComps_GoldTeam"]).pk).update(account_active=False)
+
+    result = refresh_user_groups(_manager([_authentik_user("a", ["g-gold"])]))
+
+    assert UserGroups.objects.get(authentik_id="a").permission_groups == ["WCComps_GoldTeam"]
+    assert result.changed == 1
 
 
 def test_user_deleted_from_authentik_has_no_groups():
@@ -126,3 +136,33 @@ def test_listing_errors_propagate_without_changes():
         refresh_user_groups(manager)
 
     assert _groups("a") == ["WCComps_Discord_Admin"]
+
+
+def test_the_refresh_takes_its_lock_before_reading_authentik():
+    """Two refreshes (the bot's pass, a competition start or stop) run one at a time, so no refresh commits over
+    another refresh's newer snapshot."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    _stored("a", [])
+    manager = _manager([_authentik_user("a", ["g-gold"])])
+    locked_when_reading: list[bool] = []
+
+    with CaptureQueriesContext(connection) as queries:
+
+        def read_groups():
+            locked_when_reading.append(any("pg_advisory_xact_lock" in q["sql"] for q in queries.captured_queries))
+            return GROUPS
+
+        manager.list_all_groups.side_effect = read_groups
+        refresh_user_groups(manager)
+
+    assert locked_when_reading == [True]
+
+
+def test_a_refresh_reads_the_state_of_an_account_it_had_never_asked_about():
+    UserGroups.objects.filter(pk=_stored("a", ["WCComps_GoldTeam"]).pk).update(account_active=None)
+
+    refresh_user_groups(_manager([_authentik_user("a", ["g-gold"], is_active=False)]))
+
+    assert UserGroups.objects.get(authentik_id="a").account_active is False

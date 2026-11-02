@@ -2,14 +2,14 @@
 
 import logging
 import re
+from typing import cast
 
 import discord
 from asgiref.sync import sync_to_async
 from discord import app_commands
 from discord.ext import commands
-from django.utils import timezone
 
-from bot.discord_manager import delete_team_infrastructure, unlink_team_members
+from bot.discord_manager import delete_team_infrastructure
 from bot.permissions import permission_check
 from bot.role_sync import sync_member_roles
 from bot.utils import (
@@ -19,10 +19,12 @@ from bot.utils import (
     fit_lines,
     get_team_or_respond,
     log_to_ops_channel,
+    off_orm_thread,
     send_lines,
 )
-from core.authentik_utils import parse_team_range, reset_team_credentials
+from core.authentik_utils import Changed, Refused, parse_team_range, reset_team
 from core.models import AuditLog, CompetitionConfig
+from core.services.linking import ADMIN_UNLINK, TEAM_REMOVED, unlink_discord_links, unlink_teams
 from core.utils import shorten
 from team.models import MAX_TEAMS, DiscordLink, Team
 
@@ -124,44 +126,17 @@ class AdminTeamsCog(commands.Cog):
                 member = interaction.guild.get_member(user_id)
                 user_display = member.mention if member else f"User ID {user_id}"
 
-                link = await (
-                    DiscordLink.objects.filter(discord_id=user_id, is_active=True)
-                    .select_related("team", "user")
-                    .afirst()
+                links = DiscordLink.objects.filter(discord_id=user_id, is_active=True)
+                ended = await sync_to_async(unlink_discord_links)(
+                    links.filter(team__isnull=False), str(interaction.user), ADMIN_UNLINK
                 )
-
-                if not link:
-                    results.append(f"{user_display}: not linked to any team")
+                if not ended:
+                    why = "the link has no team" if await links.aexists() else "not linked to any team"
+                    results.append(f"{user_display}: {why}")
                     error_count += 1
                     continue
 
-                team = link.team
-                if not team:
-                    results.append(f"{user_display}: the link has no team")
-                    error_count += 1
-                    continue
-
-                link.is_active = False
-                link.unlinked_at = timezone.now()
-                await link.asave()
-
-                if member:
-                    await sync_member_roles(interaction.guild, member)
-
-                await AuditLog.objects.acreate(
-                    action="user_unlinked",
-                    admin_user=str(interaction.user),
-                    target_entity="discord_link",
-                    target_id=user_id,
-                    details={
-                        "discord_username": str(member) if member else f"ID:{user_id}",
-                        "team_name": team.team_name,
-                        "authentik_username": link.user.username,
-                        "multiple_users": len(user_ids) > 1,
-                    },
-                )
-
-                results.append(f"{user_display}: unlinked from **{team.team_name}**")
+                results.append(f"{user_display}: unlinked from **{cast(Team, ended[0].team).team_name}**")
                 success_count += 1
 
             except Exception as e:
@@ -214,11 +189,8 @@ class AdminTeamsCog(commands.Cog):
             await interaction.followup.send(f"Team {team_number} not found", ephemeral=True)
             return
 
-        unlinked_count = await unlink_team_members(
-            guild,
-            team,
-            str(interaction.user),
-            audit_reason="team_removed",
+        unlinked_count = len(
+            await sync_to_async(unlink_teams)(Team.objects.filter(pk=team.pk), str(interaction.user), TEAM_REMOVED)
         )
 
         removed_items = await delete_team_infrastructure(
@@ -253,7 +225,9 @@ class AdminTeamsCog(commands.Cog):
 
     @teams_group.command(
         name="reset",
-        description="[ADMIN] Team reset: unlink users, reset password, end Authentik sessions, recreate channels",
+        description=(
+            "[ADMIN] Team reset: unlink users, new password, end Authentik and portal sessions, recreate channels"
+        ),
     )
     @app_commands.describe(
         team_number="Team number (1-50)",
@@ -266,7 +240,6 @@ class AdminTeamsCog(commands.Cog):
         team_number: int,
         recreate_channels: bool = True,
     ) -> None:
-        """Team reset: unlinks users, resets password, ends Authentik sessions, optionally recreates infrastructure."""
         if team_number < 1 or team_number > MAX_TEAMS:
             await interaction.response.send_message(f"Team number must be between 1 and {MAX_TEAMS}", ephemeral=True)
             return
@@ -282,69 +255,22 @@ class AdminTeamsCog(commands.Cog):
             await interaction.followup.send(f"Team {team_number} not found", ephemeral=True)
             return
 
-        results = []
-        guild = interaction.guild
-
-        unlinked_count = await unlink_team_members(
-            guild,
-            team,
-            str(interaction.user),
-            audit_reason="team_reset",
+        credentials, recreation_queued = await off_orm_thread(
+            reset_team, team_number, actor=str(interaction.user), recreate_channels=recreate_channels
         )
-
-        results.append(f"Unlinked {unlinked_count} Discord user(s)")
-
-        reset = await sync_to_async(reset_team_credentials)(team_number, actor=str(interaction.user))
-        if reset.password is not None:
-            results.append(f"Reset the Authentik password and {reset.sessions_outcome}")
+        if not recreate_channels:
+            channels = "the channels were kept"
+        elif recreation_queued:
+            channels = "the role and channels are being recreated"
         else:
-            results.append(f"Failed to reset the password: {reset.error}")
-
-        if recreate_channels:
-            deleted_items = await delete_team_infrastructure(
-                guild, team, reason=f"Team {team_number} reset by {interaction.user}"
-            )
-
-            if deleted_items:
-                results.append(f"Deleted {', '.join(deleted_items)}")
-
-            from bot.discord_manager import DiscordManager
-
-            discord_manager = DiscordManager(guild, self.bot)
-            role, category = await discord_manager.setup_team_infrastructure(team_number)
-
-            if role and category:
-                results.append(f"Recreated the role and category with {len(category.channels)} channels")
-            elif role:
-                results.append("Recreated the role (creating the category failed)")
-            else:
-                results.append("Failed to recreate the role and category")
-        else:
-            results.append("Skipped recreating channels (recreate_channels=False)")
-
-        await AuditLog.objects.acreate(
-            action="team_reset",
-            admin_user=str(interaction.user),
-            target_entity="team",
-            target_id=team_number,
-            details={
-                "team_name": team.team_name,
-                "unlinked_members": unlinked_count,
-                "password_reset": reset.password is not None,
-                "recreated_channels": recreate_channels,
-            },
-        )
-
-        await log_to_ops_channel(
-            self.bot,
-            f"Team Reset: **{team.team_name}** by {interaction.user.mention}\n"
-            + "\n".join([f"• {r}" for r in results]),
-        )
-
-        response = f"**Team {team_number} Reset Complete**\n\n" + "\n".join(results)
-        if reset.password is not None:
-            response += f"\n\n**New Team Password:** `{reset.password}`"
-            response += "\n\nMake sure to securely share this password with the team."
+            channels = "recreating the role and channels could not be queued; run /teams recreate"
+        response = f"**Team {team_number} Reset**\n\n{credentials.describe()}; {channels}"
+        match credentials:
+            case Changed(password=password):
+                response += f"\n\n**New Team Password:** `{password}`"
+                response += "\n\nMake sure to securely share this password with the team."
+            case Refused():
+                pass
         await interaction.followup.send(response, ephemeral=True)
 
     async def _set_teams_active(self, interaction: discord.Interaction, teams: str, *, active: bool) -> None:

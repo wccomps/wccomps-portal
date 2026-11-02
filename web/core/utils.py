@@ -119,6 +119,14 @@ def ndjson_done(message: str, success: bool = True) -> str:
     return json.dumps({"done": True, "success": success, "message": message}) + "\n"
 
 
+def database_clock() -> datetime:
+    """Postgres's clock_timestamp(): one clock for every pod, read at the call even inside a transaction."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT clock_timestamp()")
+        moment: datetime = cursor.fetchone()[0]
+    return moment
+
+
 @contextmanager
 def advisory_lock(key: int | str, *, wait: bool = False, conn: BaseDatabaseWrapper | None = None) -> Iterator[bool]:
     """Yields whether the lock was taken; re-entrant within one connection."""

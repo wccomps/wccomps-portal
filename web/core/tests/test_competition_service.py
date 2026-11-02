@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django.utils import timezone
 
+from core.authentik_manager import AuthentikAPIError
 from core.discord_tasks import BroadcastMessage
 from core.models import AuditLog, CompetitionConfig, DiscordTask
 from core.services.competition import run_competition, run_competition_to_completion
@@ -17,18 +18,19 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture(autouse=True)
 def _team_accounts_through_the_manager():
-    with patch(
-        "core.services.competition.set_team_account_active",
-        side_effect=lambda manager, number, is_active: manager.team_account(team_username(number), is_active=is_active),
-    ):
+    def switch(manager: MagicMock, number: int, is_active: bool) -> None:
+        ok, why = manager.team_account(team_username(number), is_active=is_active)
+        if not ok:
+            raise AuthentikAPIError(why)
+
+    with patch("core.services.competition.set_team_account_active", side_effect=switch):
         yield
 
 
 @pytest.fixture
 def authentik() -> Iterator[MagicMock]:
     manager = MagicMock()
-    manager.enable_application.return_value = (True, None)
-    manager.disable_application.return_value = (True, None)
+    manager.__enter__.return_value = manager
     manager.team_account.return_value = (True, "")
     with (
         patch("core.authentik_manager.AuthentikManager", return_value=manager),
@@ -147,7 +149,7 @@ def test_stop_clears_only_the_end_time(authentik, config):
 
     result = run_competition_to_completion(False, "discord:admin")
 
-    assert result.success and authentik.disable_application.call_count == 2
+    assert result.success and authentik.set_application_enabled.call_count == 2
     config.refresh_from_db()
     assert not config.applications_enabled
     assert config.competition_end_time is None

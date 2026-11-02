@@ -152,7 +152,7 @@ class PacketDistributionServiceTestCase(TestCase):
 
         with patch("core.authentik_utils.AuthentikManager") as cls:
             manager = cls.return_value.__enter__.return_value
-            manager.find_user.return_value = {"pk": 5, "username": "team01"}
+            manager.find_user.return_value = {"pk": 5, "username": "team01", "uid": "sub-01"}
             self.service.send_packet_email(distribution)
             self.service.send_test_packet_email(self.packet, team, "gold@example.com")
 
@@ -175,7 +175,7 @@ class PacketDistributionServiceTestCase(TestCase):
 
         with patch("core.authentik_utils.AuthentikManager") as cls:
             manager = cls.return_value.__enter__.return_value
-            manager.find_user.return_value = {"pk": 5, "username": "team01"}
+            manager.find_user.return_value = {"pk": 5, "username": "team01", "uid": "sub-01"}
             self.service.send_packet_email(distribution)
 
         manager.user_sessions.assert_not_called()

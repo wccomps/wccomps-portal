@@ -1,5 +1,6 @@
 """Tests for ticketing cog commands and listeners."""
 
+from collections.abc import Iterator
 from datetime import timedelta
 from unittest.mock import AsyncMock, Mock
 
@@ -13,6 +14,18 @@ from bot.cogs.ticketing import TicketingCog
 from core.models import UserGroups
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory, TicketComment, TicketHistory
+
+
+@pytest.fixture(autouse=True)
+def _authors_may_write() -> Iterator[None]:
+    """Who may write to a ticket thread is test_ticket_thread_access's; here every author may."""
+    names = TicketingCog.on_message.__globals__
+    original = names["may_write_to_ticket"]
+    names["may_write_to_ticket"] = AsyncMock(return_value=True)
+    try:
+        yield
+    finally:
+        names["may_write_to_ticket"] = original
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,7 @@ class AuthentikBinding(TypedDict):
 class AuthentikUser(TypedDict):
     pk: int
     username: str
+    uid: str
 
 
 class AuthentikGroup(TypedDict):
@@ -201,21 +202,8 @@ class AuthentikManager:
         hold the "Can view provider" global permission (authentik_core.view_provider); without it the
         request 403s.
         """
-        url = f"{self.base_url}/api/v3/providers/all/"
-        slugs: set[str] = set()
-        for page in range(1, MAX_PAGES + 1):
-            params: dict[str, str | int] = {"page_size": 100, "page": page}
-            self._log_request("GET", url, params=params)
-            response = self._request("get", url, params=params)
-            providers, has_next = self._results(response, "List providers")
-            for provider in providers:
-                slug = provider.get("assigned_application_slug")
-                if isinstance(slug, str) and slug:
-                    slugs.add(slug)
-            if not has_next:
-                break
-        else:
-            raise AuthentikAPIError(f"List providers: more than {MAX_PAGES} pages")
+        providers = self._list_all("/api/v3/providers/all/", {}, {})
+        slugs = {slug for p in providers if isinstance(slug := p.get("assigned_application_slug"), str) and slug}
         logger.info(f"Found {len(slugs)} application slugs via providers")
         return sorted(slugs)
 
@@ -259,30 +247,17 @@ class AuthentikManager:
         self._check(response, f"Update binding {binding_pk}")
         logger.info(f"Set binding {binding_pk} to {'enabled' if enabled else 'disabled'}")
 
-    def _toggle_application(self, app_slug: str, *, enable: bool) -> tuple[bool, str | None]:
-        """Enable or disable an application for blue teams via its BlueTeam group binding."""
-        action = "enable" if enable else "disable"
-        try:
-            app = self.get_application_by_slug(app_slug)
-            if not app:
-                return False, f"Application '{app_slug}' not found in Authentik"
-            binding = self.get_blueteam_binding(app["pk"])
-            if not binding:
-                return False, f"Application '{app_slug}' has no BlueTeam group binding"
-            self.update_binding_enabled(binding, enabled=enable)
-        except AuthentikAPIError as e:
-            logger.warning(f"Failed to {action} application '{app_slug}': {e}")
-            return False, reason_for(e)
-        logger.info(f"Application '{app_slug}' {action}d for blue teams")
-        return True, None
-
-    def enable_application(self, app_slug: str) -> tuple[bool, str | None]:
-        """Enable application for blue teams by enabling the BlueTeam group binding."""
-        return self._toggle_application(app_slug, enable=True)
-
-    def disable_application(self, app_slug: str) -> tuple[bool, str | None]:
-        """Disable application for blue teams by disabling the BlueTeam group binding."""
-        return self._toggle_application(app_slug, enable=False)
+    def set_application_enabled(self, app_slug: str, enabled: bool) -> None:
+        """Open or close an application to blue teams through its BlueTeam group binding; AuthentikAPIError when it
+        can't, the application or its binding missing included."""
+        app = self.get_application_by_slug(app_slug)
+        if not app:
+            raise AuthentikAPIError(f"Application '{app_slug}' not found in Authentik")
+        binding = self.get_blueteam_binding(app["pk"])
+        if not binding:
+            raise AuthentikAPIError(f"Application '{app_slug}' has no BlueTeam group binding")
+        self.update_binding_enabled(binding, enabled=enabled)
+        logger.info(f"Application '{app_slug}' {'enabled' if enabled else 'disabled'} for blue teams")
 
     def update_user_discord_id(self, username: str, discord_id: int, uid: str) -> bool:
         """Store Discord ID in Authentik user attributes, preserving existing attributes; False if it wasn't stored.
@@ -359,7 +334,8 @@ class AuthentikManager:
         self._check(response, f"Set {user['username']} active={is_active}")
 
     def find_user(self, username: str) -> AuthentikUser | None:
-        """The user with exactly this username, or None; a user without an integer pk raises."""
+        """The user with exactly this username, or None; a user without an integer pk or a uid (the OIDC sub)
+        raises."""
         response = self._request(
             "get", f"{self.base_url}/api/v3/core/users/", params={"username": username, "include_groups": "true"}
         )
@@ -367,6 +343,8 @@ class AuthentikManager:
         user = next((u for u in users if u.get("username") == username), None)
         if user is not None and type(user.get("pk")) is not int:
             raise AuthentikAPIError(f"Find user {username}: the user has no integer pk")
+        if user is not None and not (isinstance(user.get("uid"), str) and user["uid"]):
+            raise AuthentikAPIError(f"Find user {username}: the user has no uid")
         return cast(AuthentikUser | None, user)
 
     def set_password(self, user: AuthentikUser, password: str) -> None:

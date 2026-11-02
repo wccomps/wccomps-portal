@@ -177,6 +177,41 @@ class TestLinkCallback:
         attempt = LinkAttempt.objects.get(discord_id=987654321)
         assert attempt.success
 
+    @pytest.mark.parametrize("method", ["get", "post"])
+    def test_a_disabled_account_with_a_live_session_links_nothing(self, blue_team, method):
+        """Its permission groups are empty, so it would link as a team-less account and store a Discord ID on the
+        team account in Authentik."""
+        from unittest.mock import patch
+
+        from core.models import UserGroups
+
+        account = User.objects.create(username="team01")
+        UserGroups.objects.create(
+            user=account, authentik_id="sub-01", groups=[blue_team.authentik_group], account_active=False
+        )
+        token = LinkToken.objects.create(
+            token="disabled_token_123",
+            discord_id=987654322,
+            discord_username="discorduser",
+            used=False,
+            expires_at=timezone.now() + timedelta(minutes=15),
+        )
+        client = Client()
+        client.force_login(account)
+        session = client.session
+        session["pending_link_token"] = token.token
+        session.save()
+
+        with patch("core.authentik_manager.AuthentikManager") as manager:
+            if method == "get":
+                response = client.get(f"/auth/link-callback?token={token.token}")
+            else:
+                response = client.post("/auth/link-callback", {"token": token.token})
+
+        assert b"This account is disabled" in response.content
+        assert not DiscordLink.objects.filter(discord_id=987654322).exists()
+        manager.assert_not_called()
+
     def test_team_full_prevents_linking(self, blue_team_user, blue_team):
         """Cannot link when team is at max capacity."""
         from unittest.mock import patch

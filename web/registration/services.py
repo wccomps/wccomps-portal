@@ -1,4 +1,5 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 
@@ -116,7 +117,9 @@ def activate_teams(teams: list[Team]) -> int:
     """Activate the teams given a school: only active teams show on School Info, get packets and count in standings.
 
     Returns how many were inactive."""
-    return Team.objects.filter(pk__in=[team.pk for team in teams], is_active=False).update(is_active=True)
+    with transaction.atomic():
+        locked = Team.objects.filter(pk__in=[team.pk for team in teams], is_active=False).lock()
+        return Team.objects.filter(pk__in=locked).update(is_active=True)
 
 
 @transaction.atomic
@@ -295,6 +298,7 @@ def import_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
     event.open()
     clear_school_list()
     # Names like a school's shortname belong to the last event's assignment, not the team slot
+    Team.objects.all().lock()
     all_teams = list(Team.objects.all())
     for team in all_teams:
         team.team_name = default_team_name(team.team_number)
@@ -364,6 +368,7 @@ def add_to_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
         raise ImportBlockedError(f"{listed[0]} is already on the list. Upload the file again.")
 
     new_teams = list(teams.values())
+    Team.objects.filter(pk__in=[team.pk for team in new_teams]).lock()
     for team in new_teams:
         team.team_name = default_team_name(team.team_number)
     Team.objects.bulk_update(new_teams, ["team_name"])
@@ -458,9 +463,9 @@ class CloseOutOutcome:
     wiped: WipedData
 
 
-# PostgreSQL's could-not-serialize error: a REPEATABLE READ transaction would change a row another one changed
-# since its snapshot (a score, the config row, a ticket counter, ...)
+# A row changed since the REPEATABLE READ snapshot, and a deadlock (a defence: not every writer takes TeamQuerySet.lock)
 SERIALIZATION_FAILURE = "40001"
+DEADLOCK_DETECTED = "40P01"
 CHANGED_WHILE_CLOSING_OUT = "Something changed while closing out; nothing was changed. Try again."
 
 
@@ -470,14 +475,20 @@ def close_out_event(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
     CHANGED_WHILE_CLOSING_OUT, writing nothing, and rows created after its snapshot stay as live data. It must be the
     outermost transaction: inside another, setting the isolation level fails.
     """
+    # The lock first: inside the transaction it would come after the snapshot
+    with _refusing_conflicts(), school_list_held(), transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        return _close_out(target, actor)
+
+
+@contextmanager
+def _refusing_conflicts() -> Iterator[None]:
+    """A serialization failure or deadlock becomes CloseOutError(CHANGED_WHILE_CLOSING_OUT): nothing was written."""
     try:
-        # The lock first: inside the transaction it would come after the snapshot
-        with school_list_held(), transaction.atomic():
-            with connection.cursor() as cursor:
-                cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-            return _close_out(target, actor)
+        yield
     except OperationalError as e:
-        if getattr(e.__cause__, "pgcode", None) == SERIALIZATION_FAILURE:
+        if getattr(e.__cause__, "pgcode", None) in (SERIALIZATION_FAILURE, DEADLOCK_DETECTED):
             raise CloseOutError(CHANGED_WHILE_CLOSING_OUT) from e
         raise
 
@@ -659,11 +670,16 @@ def clear_leftovers_problem(stage: EventStage) -> str:
     return ""
 
 
-@transaction.atomic
 def clear_leftover_data(actor: str) -> WipedData:
     """Delete live data no open event holds, unarchived. The schedule stays: a start may already be set for the
     next event. Under the school list lock and the competition config lock; CloseOutError when
-    clear_leftovers_problem says why not."""
+    clear_leftovers_problem says why not, or when a write it raced made it give up, writing nothing."""
+    with _refusing_conflicts():
+        return _clear_leftover_data(actor)
+
+
+@transaction.atomic
+def _clear_leftover_data(actor: str) -> WipedData:
     school_list_lock()
     config = _lock_config()
     if problem := clear_leftovers_problem(event_stage()):

@@ -5,10 +5,13 @@ from dataclasses import dataclass
 
 from django.contrib.auth.models import User
 from django.db import transaction
+from django.db.models import QuerySet
+from django.utils import timezone
 
+from core.auth_utils import signed_out_since
 from core.discord_tasks import LogToChannel, SetupTeamInfrastructure, SyncMemberRoles
-from core.models import DiscordTask
-from team.models import DiscordLink, LinkAttempt, LinkToken, Team
+from core.models import AuditLog, DiscordTask
+from team.models import DiscordLink, LinkAttempt, LinkToken, Team, TeamQuerySet
 
 logger = logging.getLogger(__name__)
 
@@ -141,16 +144,30 @@ def store_discord_id_in_authentik(username: str, discord_id: int, authentik_id: 
         manager.update_user_discord_id(username, discord_id, authentik_id)
 
 
+SIGNED_OUT = LinkResult(
+    success=False,
+    error_template="link_error.html",
+    error_context={
+        "error": "Signed out",
+        "message": "Your account was signed out while linking, as a password reset does. Sign in and run /link again.",
+    },
+)
+
+
 def execute_link(
     discord_id: int,
     discord_username: str,
     user: User,
     team: Team | None,
 ) -> LinkResult | None:
-    """Create the DiscordLink, locking the team row to enforce fullness; returns an error LinkResult or None."""
+    """Create the DiscordLink, or an error LinkResult. Under the team row lock a reset's unlink also takes, a session
+    signed out since the request began (user is the request's) is refused."""
     if team:
         with transaction.atomic():
-            team = Team.objects.select_for_update().get(pk=team.pk)
+            Team.objects.filter(pk=team.pk).lock()
+            team = Team.objects.get(pk=team.pk)
+            if signed_out_since(user):
+                return SIGNED_OUT
             relinking = team.members.filter(discord_id=discord_id, is_active=True).exists()
             if not relinking and team.is_full():
                 LinkAttempt.objects.create(
@@ -174,6 +191,8 @@ def execute_link(
                 )
             _create_link(discord_id, discord_username, user, team)
     else:
+        if signed_out_since(user):
+            return SIGNED_OUT
         _create_link(discord_id, discord_username, user, team=None)
     return None
 
@@ -193,6 +212,64 @@ def _create_link(
         team=team,
         is_active=True,
     )
+
+
+ADMIN_UNLINK = "admin_unlink"
+TEAM_REMOVED = "team_removed"
+COMPETITION_CLEANUP = "competition_cleanup"
+CREDENTIALS_RESET = "credentials_reset"
+TEAM_RESET = "team_reset"
+
+
+def unlink_discord_links(
+    links: QuerySet[DiscordLink], actor: str, reason: str, *, sync_roles: bool = True
+) -> list[DiscordLink]:
+    """End the active links among these, audited; returns them as they were. sync_roles=False: the caller syncs the
+    whole guild right after."""
+    with transaction.atomic():
+        ended = list(
+            links.filter(is_active=True).select_for_update(of=("self",)).select_related("team", "user").order_by("pk")
+        )
+        DiscordLink.objects.filter(pk__in=[link.pk for link in ended]).update(
+            is_active=False, unlinked_at=timezone.now()
+        )
+        AuditLog.objects.bulk_create(
+            AuditLog(
+                action="user_unlinked",
+                admin_user=actor,
+                target_entity="discord_link",
+                target_id=link.discord_id,
+                details={
+                    "discord_id": link.discord_id,
+                    "discord_username": link.discord_username,
+                    "team_name": link.team.team_name if link.team else None,
+                    "authentik_username": link.user.username,
+                    "reason": reason,
+                },
+            )
+            for link in ended
+        )
+        if sync_roles:
+            for link in ended:
+                DiscordTask.enqueue(SyncMemberRoles(discord_id=link.discord_id))
+    return ended
+
+
+def unlink_teams(teams: TeamQuerySet, actor: str, reason: str, *, sync_roles: bool = True) -> list[DiscordLink]:
+    """unlink_discord_links for every link on these teams, after locking them: one committing meanwhile is ended."""
+    with transaction.atomic():
+        locked = teams.lock()
+        return unlink_discord_links(
+            DiscordLink.objects.filter(team_id__in=locked), actor, reason, sync_roles=sync_roles
+        )
+
+
+def clear_team_discord_ids() -> int:
+    """Forget every team's Discord role and category, after TeamQuerySet.lock."""
+    with transaction.atomic():
+        return Team.objects.filter(pk__in=Team.objects.all().lock()).update(
+            discord_category_id=None, discord_role_id=None
+        )
 
 
 def finalize_link(

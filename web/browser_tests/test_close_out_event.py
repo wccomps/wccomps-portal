@@ -42,6 +42,7 @@ def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_bro
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept(typed))
     manager = MagicMock()
+    manager.__enter__.return_value = manager
     manager.list_applications.return_value = []
 
     try:
@@ -79,6 +80,7 @@ def test_a_failing_check_leaves_close_out_usable(live_server, pw_browser):
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     manager = MagicMock()
+    manager.__enter__.return_value = manager
     manager.list_applications.return_value = []
 
     try:
@@ -188,6 +190,7 @@ def test_a_blocking_problem_comes_first_and_the_warnings_never_say_go_ahead(live
     context = create_session_context(pw_browser, live_server, user)
     page = context.new_page()
     manager = MagicMock()
+    manager.__enter__.return_value = manager
     manager.list_applications.return_value = []
 
     try:

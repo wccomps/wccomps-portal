@@ -256,6 +256,7 @@ def test_a_refused_group_add_never_shows_authentiks_url_or_answer(rf):
 
     Team.objects.create(team_number=1, team_name="Team 1", is_active=True)
     manager = patch("core.admin_views.readiness.AuthentikManager").start().return_value
+    manager.__enter__.return_value = manager
     manager.get_user_with_groups.return_value = {"pk": 5, "username": "team01", "groups_obj": []}
     manager.get_group_by_name.return_value = {"pk": "g1", "name": "WCComps_BlueTeam01"}
     manager.add_user_to_group.side_effect = AuthentikAPIError(

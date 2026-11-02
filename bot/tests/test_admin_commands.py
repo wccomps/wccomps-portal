@@ -11,8 +11,8 @@ from django.contrib.auth.models import User
 from bot.cogs.admin_competition import AdminCompetitionCog
 from bot.cogs.admin_teams import AdminTeamsCog
 from bot.cogs.admin_tickets import AdminTicketsCog
-from core.authentik_utils import CredentialReset
-from core.models import AuditLog
+from core.authentik_utils import Changed, Refused, SignedOut
+from core.models import AuditLog, DiscordTask
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
@@ -32,6 +32,11 @@ def patch_globals(callback: Any, overrides: dict[str, Any]):
         yield
     finally:
         g.update(orig)
+
+
+async def _queued_role_syncs() -> list[int]:
+    tasks = DiscordTask.objects.filter(task_type="sync_member_roles", status="pending")
+    return sorted([task.payload["discord_id"] async for task in tasks])
 
 
 @pytest.mark.asyncio
@@ -91,10 +96,11 @@ class TestAdminCommands:
             patch("core.authentik_utils.AuthentikManager"),
             patch(
                 "core.authentik_utils._reset_credentials",
-                side_effect=lambda _m, n: CredentialReset(
-                    password=f"pw-{n}",
+                side_effect=lambda _m, n, _actor, _reason, **_kw: Changed(
+                    f"pw-{n}",
                     sessions_error="HTTP 403" if n == 2 else None,
                     sessions_found=None if n == 3 else 0,
+                    followup=SignedOut(0),
                 ),
             ) as reset,
             patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
@@ -106,9 +112,10 @@ class TestAdminCommands:
         mock_interaction.response.defer.assert_called_once_with(ephemeral=True)
         first, *rest = mock_interaction.followup.send.call_args_list
         csv_text = first.kwargs["file"].fp.getvalue().decode()
+        assert first.args[0].startswith("Password reset incomplete")
         assert csv_text.splitlines()[1:] == ["team01,pw-1", "team02,pw-2", "team03,pw-3"]
-        assert any("Sessions: could not end sessions for team02: HTTP 403" in c.args[0] for c in rest)
-        assert any("Could not count the sessions of team03\n" in c.args[0] for c in rest)
+        assert any("• could not end sessions for team02 (HTTP 403)" in c.args[0] for c in rest)
+        assert any("• could not count the sessions of team03\n" in c.args[0] for c in rest)
         rows = [r.details["team_numbers"] async for r in AuditLog.objects.filter(action="blueteam_passwords_reset")]
         assert rows == [[1, 2, 3]]
 
@@ -122,21 +129,23 @@ class TestAdminCommands:
         mock_interaction.user.id = mock_admin_user._discord_id
 
         results = {
-            1: CredentialReset(password="pw-1", sessions_found=0),
-            2: CredentialReset(password=None, error="HTTP 500"),
-            3: CredentialReset(password="pw-3", sessions_found=0),
+            1: Changed("pw-1", sessions_found=0, followup=SignedOut(0)),
+            2: Refused("HTTP 500"),
+            3: Changed("pw-3", sessions_found=0, followup=SignedOut(0)),
         }
         callback = AdminCompetitionCog.admin_reset_blueteam_passwords.callback
         with (
             patch("core.authentik_utils.AuthentikManager"),
-            patch("core.authentik_utils._reset_credentials", side_effect=lambda _m, n: results[n]),
+            patch(
+                "core.authentik_utils._reset_credentials", side_effect=lambda _m, n, _actor, _reason, **_kw: results[n]
+            ),
             patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
         ):
             cog = AdminCompetitionCog(mock_bot)
             await cog.admin_reset_blueteam_passwords.callback(cog, mock_interaction, team_numbers="1-3")
 
         first, *rest = mock_interaction.followup.send.call_args_list
-        assert "Success: 2/3" in first.args[0]
+        assert "Reset 2/3 passwords" in first.args[0]
         assert any("team02: HTTP 500" in c.args[0] for c in rest)
         csv_text = first.kwargs["file"].fp.getvalue().decode()
         assert "team02" not in csv_text, "a failed reset keeps its old password, so it must not be listed"
@@ -154,8 +163,10 @@ class TestAdminCommands:
             patch("core.authentik_utils.AuthentikManager"),
             patch(
                 "core.authentik_utils._reset_credentials",
-                side_effect=lambda _m, n: CredentialReset(
-                    password=None if n % 2 else f"pw-{n}", error=f"failure {n} " + "x" * 80
+                side_effect=lambda _m, n, _actor, _reason, **_kw: (
+                    Refused(f"failure {n} " + "x" * 80)
+                    if n % 2
+                    else Changed(f"pw-{n}", sessions_found=0, followup=SignedOut(0))
                 ),
             ),
             patch_globals(callback, {"settings": MagicMock(AUTHENTIK_TOKEN="t")}),
@@ -234,17 +245,8 @@ class TestAdminCommands:
         category.delete = AsyncMock()
         team_role.delete = AsyncMock()
 
-        synced: list[tuple[int, bool]] = []
-
-        async def record_sync(guild: Any, member: Any) -> None:
-            still_linked = await DiscordLink.objects.filter(discord_id=member.id, is_active=True).aexists()
-            synced.append((member.id, still_linked))
-
         callback = AdminTeamsCog.admin_remove_team.callback
-        with (
-            patch("bot.role_sync.sync_member_roles", side_effect=record_sync),
-            patch_globals(callback, {"log_to_ops_channel": AsyncMock()}),
-        ):
+        with patch_globals(callback, {"log_to_ops_channel": AsyncMock()}):
             cog = AdminTeamsCog(mock_bot)
             await cog.admin_remove_team.callback(cog, mock_interaction, team_number=team_number)
 
@@ -254,8 +256,7 @@ class TestAdminCommands:
             send_call_args = mock_interaction.followup.send.call_args
             assert "Removed" in send_call_args.args[0]
 
-            # Each member's roles are synced once their link is already inactive, so they lose them
-            assert sorted(synced) == [(111111111, False), (222222222, False)]
+            assert await _queued_role_syncs() == [111111111, 222222222]
             await member1_link.arefresh_from_db()
             await member2_link.arefresh_from_db()
             assert member1_link.is_active is False
@@ -338,17 +339,9 @@ class TestAdminCommands:
         mock_interaction.guild.get_member.return_value = member_mock
 
         mock_log_ops = AsyncMock()
-        still_linked_at_sync: list[bool] = []
-
-        async def record_sync(guild: Any, member: Any) -> None:
-            still_linked_at_sync.append(
-                await DiscordLink.objects.filter(discord_id=member.id, is_active=True).aexists()
-            )
-
-        mock_sync = AsyncMock(side_effect=record_sync)
 
         callback = AdminTeamsCog.admin_unlink.callback
-        with patch_globals(callback, {"sync_member_roles": mock_sync, "log_to_ops_channel": mock_log_ops}):
+        with patch_globals(callback, {"log_to_ops_channel": mock_log_ops}):
             cog = AdminTeamsCog(mock_bot)
             await cog.admin_unlink.callback(cog, mock_interaction, str(member_id))
 
@@ -356,9 +349,7 @@ class TestAdminCommands:
             assert updated_link.is_active is False
             assert updated_link.unlinked_at is not None
 
-            # The member's roles are synced after the link ends, so every synced role goes at once
-            mock_sync.assert_awaited_once_with(mock_interaction.guild, member_mock)
-            assert still_linked_at_sync == [False]
+            assert await _queued_role_syncs() == [member_id]
 
             # Verify audit log was created
             audit_logs = [log async for log in AuditLog.objects.filter(action="user_unlinked")]
@@ -403,6 +394,20 @@ class TestAdminCommands:
         call_args = mock_interaction.followup.send.call_args
         assert "not linked to any team" in call_args.args[0] or "❌" in call_args.args[0]
         assert call_args.kwargs.get("ephemeral") is True
+
+    async def test_admin_unlink_leaves_a_link_without_a_team_and_says_so(
+        self, mock_interaction: Any, mock_admin_user: Any, mock_bot: Any
+    ) -> None:
+        mock_interaction.user.id = mock_admin_user._discord_id
+        staff = await User.objects.acreate(username="staff_account")
+        await DiscordLink.objects.acreate(discord_id=777, discord_username="staff", user=staff, is_active=True)
+        mock_interaction.guild.get_member.return_value = None
+
+        cog = AdminTeamsCog(mock_bot)
+        await cog.admin_unlink.callback(cog, mock_interaction, "<@777>")
+
+        assert mock_interaction.followup.send.call_args.args[0] == "User ID 777: the link has no team"
+        assert await DiscordLink.objects.filter(discord_id=777, is_active=True).aexists()
 
     async def test_admin_unlink_user_not_in_server(
         self, mock_interaction: Any, mock_admin_user: Any, mock_bot: Any

@@ -80,8 +80,7 @@ from scoring.models import (
 
 from core.errors import is_json_endpoint, wants_json_error
 from core.models import AuditLog, BotState, CompetitionConfig, DiscordTask
-from core.permission_constants import check_groups_for_permission
-from core.tests.roles import ROLE_GROUPS, role_user
+from core.tests.roles import ROLE_GROUPS, grants, role_user
 from core.tests.strategies import PAYLOADS, field_values, request_text, rolled_back, uploaded_files, valid_values
 from team.models import LinkAttempt, LinkRateLimit, LinkToken, Team
 from ticketing.models import (
@@ -103,11 +102,11 @@ SIGNED_IN = EVERYONE - {"anonymous"}
 
 
 def may(*permissions: str) -> frozenset[str]:
-    """The roles whose groups grant any of these permissions (core.permission_constants)."""
+    """The roles whose groups grant any of these permissions in the World (roles.grants)."""
     return frozenset(
         role
         for role, groups in ROLE_GROUPS.items()
-        if groups is not None and any(check_groups_for_permission(groups, p) for p in permissions)
+        if groups is not None and any(grants(groups, p) for p in permissions)
     )
 
 

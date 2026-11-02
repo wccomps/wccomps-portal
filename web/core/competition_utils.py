@@ -59,6 +59,7 @@ def wipe_competition_data() -> WipedData:
     Preserves teams, orange checks (reusable rubrics), AuditLog, BotState, DiscordTask and LinkToken/LinkAttempt.
     Each team's ticket counter is reset with its tickets, so the next event's numbering starts at T0NN-001.
     """
+    Team.objects.all().lock()
     deleted = {label: rows().delete()[0] for label, rows in COMPETITION_DATA}
     return WipedData(deleted=deleted, ticket_counters_reset=_used_ticket_counters().update(ticket_counter=0))
 

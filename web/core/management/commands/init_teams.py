@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from team.models import MAX_TEAMS, Team, default_team_name
+from team.models import MAX_TEAMS, Team, default_team_name, team_group_name
 
 
 class Command(BaseCommand):
@@ -12,7 +12,7 @@ class Command(BaseCommand):
 
         for team_num in range(1, MAX_TEAMS + 1):
             team_name = default_team_name(team_num)
-            authentik_group = f"WCComps_BlueTeam{team_num:02d}"
+            authentik_group = team_group_name(team_num)
 
             _team, created = Team.objects.get_or_create(
                 team_number=team_num,

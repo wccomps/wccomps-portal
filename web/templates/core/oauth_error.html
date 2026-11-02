@@ -11,7 +11,8 @@
                 <p class="m-0">{{ error_message }}</p>
             </c-alert>
             <c-button_row class="mt-20">
-                <c-link href="{% url 'oauth_login' %}" variant="primary">Try again</c-link>
+                {% url 'oauth_login' as login_url %}
+                <c-link href="{{ retry_url|default:login_url }}" variant="primary">Try again</c-link>
             </c-button_row>
         </c-module>
     </div>
