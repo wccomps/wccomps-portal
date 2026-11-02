@@ -159,7 +159,7 @@ def test_a_team_still_carrying_per_team_data_is_not_free(event, teams, leftover)
 
     if leftover == "discord_link":
         user = User.objects.create(username="member")
-        DiscordLink.objects.create(discord_id=1, discord_username="member", user=user, team=teams[1], is_active=False)
+        DiscordLink.objects.create(discord_id=1, discord_username="member", user=user, team=teams[1], is_active=True)
     elif leftover == "ticket":
         Ticket.objects.create(ticket_number="T002-001", team=teams[1], title="Help")
     else:
@@ -175,3 +175,60 @@ def test_held_schools_are_those_on_the_list_or_at_the_event(event, teams):
     EventTeamAssignment.objects.create(event=event, team=teams[1], school=School.for_name("School Two"))
 
     assert held_schools(["school one", "school two", "school three"], event) == {"school one", "school two"}
+
+
+def test_handing_over_a_team_with_old_channels_queues_their_removal_ahead_of_a_link(event, teams):
+    """The last school's role and category outlived its teardown (the bot was down, or a delete failed): the team is
+    still free, and handing it over queues their removal before any setup a new member's link queues."""
+    from core.discord_tasks import SetupTeamInfrastructure
+    from core.models import DiscordTask
+
+    Team.objects.filter(pk=teams[1].pk).update(discord_role_id=5, discord_category_id=6)
+    assert 2 in set(free_teams(event).values_list("team_number", flat=True))
+
+    add_to_school_list(event, [_row(2, "School Two")], "gold")
+    DiscordTask.enqueue(SetupTeamInfrastructure(team_number=2))
+
+    queued = DiscordTask.objects.order_by("created_at", "pk").values_list("task_type", "payload__team_number")
+    assert list(queued) == [("clear_team_channels", 2), ("setup_team_infrastructure", 2)]
+    assert Team.objects.get(pk=teams[1].pk).channels_need_clearing
+
+
+def test_two_hand_overs_queue_one_removal(event, teams):
+    from core.models import DiscordTask
+    from registration.services import set_team_school
+
+    Team.objects.filter(pk=teams[1].pk).update(discord_role_id=5, discord_category_id=6)
+    set_team_school(teams[1], "School Two", contact_email="a@example.com")
+    set_team_school(teams[1], "School Three", contact_email="a@example.com")
+
+    assert list(DiscordTask.objects.values_list("task_type", flat=True)) == ["clear_team_channels"]
+
+
+def test_the_same_school_keeping_its_team_queues_no_removal(event, teams):
+    from core.models import DiscordTask
+    from registration.services import set_team_school
+
+    set_team_school(teams[1], "School Two", contact_email="a@example.com")
+    Team.objects.filter(pk=teams[1].pk).update(discord_role_id=5, discord_category_id=6)
+    set_team_school(teams[1], "School Two", contact_email="b@example.com")
+
+    assert not DiscordTask.objects.exists()
+    assert not Team.objects.get(pk=teams[1].pk).channels_need_clearing
+
+
+def test_clearing_the_school_list_is_refused_while_a_team_has_linked_members(event, teams):
+    from django.contrib.auth.models import User
+
+    from registration.services import LINKED_TEAMS_CLEAR, TeamLinkedError, clear_school_list, set_team_school
+    from team.models import DiscordLink
+
+    set_team_school(teams[0], "School One", contact_email="a@example.com")
+    user = User.objects.create(username="member01")
+    DiscordLink.objects.create(discord_id=11, discord_username="m", user=user, team=teams[0], is_active=True)
+
+    with pytest.raises(TeamLinkedError, match="Close Out Event or Clear leftover data unlinks them first"):
+        clear_school_list()
+
+    assert str(LINKED_TEAMS_CLEAR).startswith("Teams have linked Discord members")
+    assert SchoolInfo.objects.exists()

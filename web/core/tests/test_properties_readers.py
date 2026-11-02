@@ -636,9 +636,9 @@ def _readiness() -> object:
 def _fix_groups() -> object:
     from django.test import RequestFactory
 
-    from core.admin_views.readiness import _fix_group_membership
+    from core.admin_views.readiness import fix_group_membership
 
-    return _fix_group_membership(RequestFactory().post("/"))
+    return fix_group_membership(RequestFactory().post("/"), "admin")
 
 
 CALLERS = [
@@ -653,7 +653,7 @@ CALLERS = [
         _readiness,
         (USERS, USERS, GROUPS, SESSIONS, APPLICATION, BINDINGS, DONE, METADATA),
     ),
-    Caller("_fix_group_membership", _fix_groups, (USERS, GROUPS, DONE)),
+    Caller("fix_group_membership", _fix_groups, (USERS, GROUPS, DONE)),
 ]
 SERVICES = {
     "AUTHENTIK_URL": "https://auth.test",

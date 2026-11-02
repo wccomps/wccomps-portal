@@ -35,7 +35,8 @@ class RoleGrants:
 
 def role_grants(discord_ids: set[int] | None = None) -> RoleGrants:
     """What active DiscordLinks grant: the staff roles mapped from the account's permission groups, and for any seat
-    (DiscordLink.seat, enabled or not) that team's role and Blueteam. Limited to discord_ids when given.
+    (DiscordLink.seat, enabled or not) that team's role (not while channels_need_clearing) and Blueteam. Limited to
+    discord_ids when given.
     held: links whose account Authentik hasn't been asked about yet (account_active null), their roles left alone."""
     from team.models import DiscordLink, Team
 
@@ -56,7 +57,8 @@ def role_grants(discord_ids: set[int] | None = None) -> RoleGrants:
         roles = [role_id for group, role_id in mapped.items() if group in groups]
         # Any seat, enabled or not: a team account disabled when the competition stops keeps its team's roles
         if seat := link.seat():
-            roles += [seat.team.discord_role_id or 0, settings.BLUETEAM_ROLE_ID]
+            team_role = 0 if seat.team.channels_need_clearing else seat.team.discord_role_id or 0
+            roles += [team_role, settings.BLUETEAM_ROLE_ID]
         by_member[link.discord_id] = frozenset(role_id for role_id in roles if role_id)
     return RoleGrants(managed, by_member, frozenset(held))
 
@@ -94,7 +96,11 @@ async def sync_member_roles(guild: discord.Guild, member: discord.Member, *, dry
 
 
 async def _reconcile(
-    guild: discord.Guild, members: Sequence[discord.Member], *, dry_run: bool, recheck: bool
+    guild: discord.Guild,
+    members: Sequence[discord.Member],
+    *,
+    dry_run: bool,
+    recheck: bool,
 ) -> SyncRolesResult:
     stats: SyncRolesResult = {"roles_added": 0, "roles_removed": 0, "errors": 0, "changes": []}
     grants = await sync_to_async(role_grants)(None if recheck else {m.id for m in members})
@@ -132,13 +138,13 @@ async def _reconcile(
             logger.warning(f"Could not update roles for {who}: {e}")
             stats["errors"] += 1
             stats["changes"].append(f"Could not update roles for {who}: {e}")
-            beat()
             continue
+        finally:
+            beat()
         stats["roles_added"] += len(add)
         stats["roles_removed"] += len(remove)
         stats["changes"] += [f"{prefix}Added {role.name} to {who}" for role in add]
         stats["changes"] += [f"{prefix}Removed {role.name} from {who} ({reason})" for role in remove]
-        beat()
     return stats
 
 

@@ -264,14 +264,6 @@ def unlink_teams(teams: TeamQuerySet, actor: str, reason: str, *, sync_roles: bo
         )
 
 
-def clear_team_discord_ids() -> int:
-    """Forget every team's Discord role and category, after TeamQuerySet.lock."""
-    with transaction.atomic():
-        return Team.objects.filter(pk__in=Team.objects.all().lock()).update(
-            discord_category_id=None, discord_role_id=None
-        )
-
-
 def finalize_link(
     link_token: LinkToken,
     discord_id: int,

@@ -10,12 +10,11 @@ from orange_team.models import OrangeAssignment
 from scoring.calculator import Standing
 from scoring.models import IncidentReport, InjectScore, OrangeTeamScore, RedTeamScore
 
-from core.models import AuditLog
 from ticketing.models import Ticket
 
 from .models import Event
 from .services import current_snapshots
-from .stage import SCORECARDS_EMAILED
+from .stage import ScorecardsEmailed
 
 
 @dataclass(frozen=True)
@@ -106,31 +105,17 @@ def scorecards_fingerprint(event: Event | None, standings: list[Standing] | None
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 
-def record_scorecards_emailed(event: Event | None, fingerprint: str, sent: int, failed: int, actor: str) -> None:
-    """Record an Email Scorecards send with the fingerprint of the scorecards it emailed (taken from the standings
-    its emails were built from, before sending). A send with no event open is recorded for the audit trail only: it
-    can't be matched to the event a later close-out records."""
-    AuditLog.objects.create(
-        action=SCORECARDS_EMAILED,
-        admin_user=actor,
-        target_entity="event",
-        target_id=event.pk if event else 0,
-        details={"event": event.pk if event else None, "teams": sent, "failed": failed, "scorecards_hash": fingerprint},
-    )
-
-
 def _scorecard_warnings(event: Event | None) -> list[str]:
     """Warnings about the last Email Scorecards for the event: none sent, failures, or scores changed since."""
     if event is None:
         return ["No event is open, so scorecard emails can't be checked: make sure the scorecards went out."]
-    sends = AuditLog.objects.filter(action=SCORECARDS_EMAILED, details__event=event.pk)
-    emailed = sends.order_by("-created_at", "-pk").first()
+    emailed = ScorecardsEmailed.latest(event)
     if emailed is None:
         return ["No scorecard email is recorded for this event. If you already emailed them, you can close out."]
     warnings = []
-    if failed := emailed.details.get("failed", 0):
+    if failed := emailed.failed:
         one, many = "scorecard email failed in the last send", "scorecard emails failed in the last send"
         warnings.append(_sentence(failed, one, many))
-    if emailed.details.get("scorecards_hash") != scorecards_fingerprint(event):
+    if emailed.scorecards_hash != scorecards_fingerprint(event):
         warnings.append("Scores changed after the last scorecard email.")
     return warnings

@@ -15,7 +15,7 @@ from registration.stage import ACTIONS, Action, EventStage
 
 from core.admin_views.places import PLACES, STEPS, Section, action_url
 from core.models import CompetitionConfig
-from core.services.competition import TIMER_ATTEMPTS, Attempt, GiveUp, current_timer_plan, incomplete_run
+from core.services.competition import TIMER_ATTEMPTS, Attempt, GiveUp, current_timer_plan
 from team.models import DiscordLink, SchoolInfo
 
 
@@ -70,7 +70,7 @@ class EventFacts:
     members_linked: int  # Discord accounts linked to a team
     starts_at: datetime | None  # The scheduled start, while the schedule will still start it
     ends_at: datetime | None  # The scheduled stop
-    incomplete_run: bool | None  # A last start (True) or stop (False) that needs running again
+    last_run_incomplete: bool
     timer_retrying: Attempt | None = None  # The timer's next attempt at a start or stop left incomplete or errored
 
 
@@ -175,12 +175,12 @@ class EventPanel:
     @property
     def start_offered(self) -> bool:
         """Start while stopped, or again while running after a start that left something off."""
-        return not self.stage.running or self.facts.incomplete_run is True
+        return not self.stage.running or self.facts.last_run_incomplete
 
     @property
     def stop_offered(self) -> bool:
         """Stop while running, or again while stopped after a stop that left something on."""
-        return self.stage.running or self.facts.incomplete_run is False
+        return self.stage.running or self.facts.last_run_incomplete
 
     @property
     def action_elsewhere(self) -> bool:
@@ -237,6 +237,6 @@ def event_facts(stage: EventStage) -> EventFacts:
         members_linked=DiscordLink.objects.filter(is_active=True, team__isnull=False).count(),
         starts_at=config.competition_start_time if config.schedule_will_start() else None,
         ends_at=config.competition_end_time,
-        incomplete_run=incomplete_run(),
+        last_run_incomplete=config.last_run_incomplete,
         timer_retrying=retrying,
     )

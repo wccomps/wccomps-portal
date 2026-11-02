@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import os
 import sys
@@ -12,7 +11,7 @@ django.setup()
 
 from django.conf import settings
 
-from bot.command_tree import PortalCommandTree
+from bot.command_tree import PortalCommandTree, command_hash, command_plan
 from bot.competition_timer import CompetitionTimer
 from bot.discord_queue import DiscordQueueProcessor
 from bot.unified_dashboard import UnifiedDashboard
@@ -42,31 +41,10 @@ class PortalBot(commands.Bot):
         self.queue_processor: DiscordQueueProcessor | None = None
         self.unified_dashboard: UnifiedDashboard | None = None
 
-    def _get_command_hash(self) -> str:
-        """Hash cog and command-parameter source files to detect command changes."""
-        from pathlib import Path
-
-        root = Path(__file__).parent
-        cogs_dir = root / "bot" / "cogs"
-        tracked_files = [
-            *sorted(cogs_dir.glob("*.py")),
-            root / "bot" / "utils.py",
-            root / "web" / "team" / "models.py",
-            root / "web" / "ticketing" / "models.py",
-            root / "web" / "scoring" / "models.py",
-        ]
-        hasher = hashlib.sha256()
-        for path in tracked_files:
-            if path.exists():
-                hasher.update(path.read_bytes())
-        return hasher.hexdigest()[:16]
-
-    async def _should_sync_commands(self) -> bool:
+    async def _should_sync_commands(self, current_hash: str) -> bool:
         from asgiref.sync import sync_to_async
 
         from core.models import BotState
-
-        current_hash = self._get_command_hash()
 
         if os.environ.get("SYNC_COMMANDS", "").lower() in ("true", "1", "yes"):
             logger.info(f"SYNC_COMMANDS=true, forcing sync (hash: {current_hash})")
@@ -113,53 +91,30 @@ class PortalBot(commands.Bot):
             else:
                 logger.info(f"  - {cmd.name} (Command)")
 
-        # Competition guild gets all commands
-        competition_guild_id = settings.COMPETITION_GUILD_ID
-        # Volunteer guild gets only the /link command so staff can link their accounts there
-        volunteer_guild_id = settings.VOLUNTEER_GUILD_ID
-
-        if not await self._should_sync_commands():
+        plan = command_plan(self.tree, settings.COMPETITION_GUILD_ID, settings.VOLUNTEER_GUILD_ID)
+        current_hash = command_hash(self.tree, plan)
+        if not await self._should_sync_commands(current_hash):
             return
 
         synced = True
-
-        if competition_guild_id:
-            guild = discord.Object(id=competition_guild_id)
-            self.tree.copy_global_to(guild=guild)
+        for guild_id, guild_commands in plan.items():
+            guild = discord.Object(id=guild_id) if guild_id else None
+            where = f"guild {guild_id}" if guild_id else "global"
+            self.tree.clear_commands(guild=guild)
+            for command in guild_commands:
+                self.tree.add_command(command, guild=guild)
             try:
                 await self.tree.sync(guild=guild)
-                logger.info(f"Command tree synced to competition guild ({competition_guild_id})")
+                logger.info(f"Synced {len(guild_commands)} commands to {where}")
             except discord.HTTPException as e:
                 synced = False
-                logger.warning(f"Guild sync failed: {e}")
-
-        # Clear global commands to avoid duplicates with guild commands
-        self.tree.clear_commands(guild=None)
-        try:
-            await self.tree.sync()
-            logger.info("Cleared global commands")
-        except discord.HTTPException as e:
-            synced = False
-            logger.warning(f"Failed to clear global commands: {e}")
-
-        if volunteer_guild_id and volunteer_guild_id != competition_guild_id:
-            volunteer_guild = discord.Object(id=volunteer_guild_id)
-            self.tree.clear_commands(guild=volunteer_guild)
-            link_command = self.tree.get_command("link")
-            if link_command:
-                self.tree.add_command(link_command, guild=volunteer_guild)
-                try:
-                    await self.tree.sync(guild=volunteer_guild)
-                    logger.info(f"Synced /link command to volunteer guild ({volunteer_guild_id})")
-                except discord.HTTPException as e:
-                    synced = False
-                    logger.warning(f"Volunteer guild sync failed: {e}")
+                logger.warning(f"Command sync to {where} failed: {e}")
 
         # Only a complete sync is recorded, so a failed one is retried on the next start.
         if synced:
             from core.models import BotState
 
-            await BotState.objects.aupdate_or_create(key="command_hash", defaults={"value": self._get_command_hash()})
+            await BotState.objects.aupdate_or_create(key="command_hash", defaults={"value": current_hash})
 
     async def on_ready(self) -> None:
         if not self.user:
