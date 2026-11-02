@@ -452,3 +452,44 @@ def test_clearing_leftovers_deletes_queued_announcements(admin_client):
     assert _post(admin_client, "clear_leftover_data", confirm="yolo").json()["success"]
 
     assert not QueuedAnnouncement.objects.exists()
+
+
+@pytest.mark.parametrize("typed", [None, "", "no"])
+def test_restarting_a_stopped_played_competition_needs_typed_confirmation(admin_client, typed):
+    from scoring.models import ServiceScore
+
+    CompetitionConfig.objects.update_or_create(
+        pk=1, defaults={"controlled_applications": ["scoring"], "applications_enabled": False}
+    )
+    _open_event()
+    ServiceScore.objects.create(team=_team_with_school(), service_points=1)
+
+    response = _post(admin_client, "start_competition", **({} if typed is None else {"confirm": typed}))
+    lines = [json.loads(line) for line in b"".join(response.streaming_content).decode().splitlines()]
+
+    assert lines == [{"done": True, "success": False, "message": 'Type "yolo" to confirm.'}]
+    assert not CompetitionConfig.get_config().applications_enabled
+
+
+def test_restarting_a_stopped_played_competition_with_typed_confirmation_succeeds(admin_client):
+    from scoring.models import ServiceScore
+
+    CompetitionConfig.objects.update_or_create(
+        pk=1, defaults={"controlled_applications": ["scoring"], "applications_enabled": False}
+    )
+    _open_event()
+    ServiceScore.objects.create(team=_team_with_school(), service_points=1)
+    manager = MagicMock()
+    manager.__enter__.return_value = manager
+    manager.team_account.return_value = (True, "")
+
+    with (
+        patch("core.authentik_manager.AuthentikManager", return_value=manager),
+        patch("core.services.user_groups.refresh_user_groups"),
+        patch("scoring.quotient_sync.sync_quotient_metadata"),
+    ):
+        response = _post(admin_client, "start_competition", confirm="yolo")
+        lines = [json.loads(line) for line in b"".join(response.streaming_content).decode().splitlines()]
+
+    assert lines[-1]["done"] and lines[-1]["success"]
+    assert CompetitionConfig.get_config().applications_enabled

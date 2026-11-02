@@ -3,7 +3,8 @@
 import asyncio
 import contextlib
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 import pytest
@@ -517,3 +518,28 @@ async def test_an_end_with_no_start_that_passed_is_a_missed_window() -> None:
         await timer._check_competition_times()
 
     assert "would have refused a new start time" in ops.await_args.args[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("enable", [True, False], ids=["start", "stop"])
+@pytest.mark.parametrize("confirmed", [False, True], ids=["cancelled", "confirmed"])
+async def test_the_start_and_stop_commands_ask_for_confirmation_before_running(
+    mock_interaction: Any, enable: bool, confirmed: bool
+) -> None:
+    from bot.cogs.admin_competition import AdminCompetitionCog
+
+    cog = AdminCompetitionCog(MagicMock())
+    command = cog.admin_start_competition if enable else cog.admin_stop_competition
+    with (
+        patch("bot.cogs.admin_competition.ConfirmView") as view,
+        patch("bot.competition_actions.run_competition", new=AsyncMock(return_value=_run(0))) as run,
+        patch("bot.cogs.admin_competition.log_to_ops_channel", new_callable=AsyncMock),
+        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
+    ):
+        view.return_value.wait = AsyncMock()
+        view.return_value.confirmed = confirmed
+        await command.callback(cog, mock_interaction)
+
+    mock_interaction.response.send_message.assert_awaited_once()
+    assert run.await_count == (1 if confirmed else 0)

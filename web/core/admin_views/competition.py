@@ -184,6 +184,14 @@ def _stream_competition_run(enable: bool, authentik_username: str) -> Iterator[s
 
 
 def _toggle_competition(request: HttpRequest, authentik_username: str, *, enable: bool) -> StreamingHttpResponse:
+    if enable:
+        stage = event_stage()
+        if stage.played and not stage.running:
+            form = TypedConfirmForm(request.POST)
+            if not form.is_valid():
+                return StreamingHttpResponse(
+                    iter([ndjson_done(form.first_error(), success=False)]), content_type="application/x-ndjson"
+                )
     return StreamingHttpResponse(
         run_detached(_stream_competition_run(enable, authentik_username)), content_type="application/x-ndjson"
     )
