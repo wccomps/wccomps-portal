@@ -218,6 +218,7 @@ class OrangeTeamScoreAdmin(PortalModelAdmin[OrangeTeamScore]):
         "team",
         "description_short",
         "points_awarded",
+        "max_points",
         "submitted_by",
         "created_at",
     ]

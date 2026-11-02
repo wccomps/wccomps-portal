@@ -584,7 +584,14 @@ class OrangeTeamScore(Approvable):
         verbose_name_plural = "Orange Team Checks"
         ordering = ["-created_at"]
 
+    @property
+    def max_points(self) -> int | None:
+        """Maximum available points for the linked check; manual legacy scores have no maximum."""
+        return self.orange_check.max_score if self.orange_check else None
+
     def __str__(self) -> str:
+        if self.max_points is not None:
+            return f"{self.team.team_name}, {shorten(self.description, 50)}: {self.points_awarded}/{self.max_points}"
         sign = "+" if self.points_awarded >= 0 else ""
         return f"{self.team.team_name}, {shorten(self.description, 50)}: {sign}{self.points_awarded}"
 

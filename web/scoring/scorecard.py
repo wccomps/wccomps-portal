@@ -263,7 +263,11 @@ def build_scorecard_context(
         detailed = calculate_team_score_detailed(team)
         scaling = {key: detailed[key] for key in SCALING_FIELDS}  # type: ignore[literal-required]
 
-    orange_scores = OrangeTeamScore.objects.filter(team=team, is_approved=True).order_by("description", "pk")
+    orange_scores = (
+        OrangeTeamScore.objects.filter(team=team, is_approved=True)
+        .select_related("orange_check")
+        .order_by("description", "pk")
+    )
 
     return {
         "team": team,

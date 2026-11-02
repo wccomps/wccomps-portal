@@ -11,6 +11,7 @@ from decimal import Decimal
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.urls import reverse
+from orange_team.models import OrangeCheck
 
 from core.models import UserGroups
 from scoring.models import OrangeTeamScore
@@ -223,3 +224,18 @@ class ReviewOrangePageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         # HTMX response should use the table template, not the full page
         self.assertTemplateUsed(response, "scoring/partials/review_orange_table.html")
+
+    def test_review_page_shows_awarded_and_maximum_points(self) -> None:
+        check = OrangeCheck.objects.create(title="Phone support", description="Call", max_points=10)
+        OrangeTeamScore.objects.create(
+            team=self.team,
+            orange_check=check,
+            description="Check: Phone support",
+            points_awarded=Decimal("8.00"),
+            submitted_by=self.orange_user,
+        )
+
+        self.client.force_login(self.orange_user)
+        response = self.client.get(reverse("scoring:review_orange"))
+
+        self.assertContains(response, "8 / 10", html=False)

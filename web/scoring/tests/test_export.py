@@ -135,7 +135,10 @@ def incident_reports(test_teams, admin_user, red_team_findings):
 @pytest.fixture
 def orange_adjustments(test_teams, admin_user):
     """Create orange team checks for testing."""
+    from orange_team.models import OrangeCheck
+
     adjustments = []
+    check = OrangeCheck.objects.create(title="Customer service", description="Call check", max_points=12)
 
     # Adjustment 1: Approved bonus
     adj1 = OrangeTeamScore.objects.create(
@@ -146,6 +149,7 @@ def orange_adjustments(test_teams, admin_user):
         approved_at=timezone.now(),
         approved_by=admin_user,
         submitted_by=admin_user,
+        orange_check=check,
     )
     adjustments.append(adj1)
 
@@ -555,7 +559,8 @@ class TestOrangeAdjustmentsExport:
             "ID",
             "Team",
             "Description",
-            "Points",
+            "Max Points",
+            "Points Awarded",
             "Approved",
             "Approved By",
             "Approved At",
@@ -581,7 +586,8 @@ class TestOrangeAdjustmentsExport:
         # Find approved bonus
         bonus = next((r for r in rows if "Excellent customer service" in r["Description"]), None)
         assert bonus is not None, "Approved bonus not found"
-        assert bonus["Points"] == "10.00"
+        assert bonus["Max Points"] == "12"
+        assert bonus["Points Awarded"] == "10.00"
         assert bonus["Approved"] == "True"
 
     def test_json_export_contains_all_required_fields(self, admin_user, orange_adjustments):
@@ -600,6 +606,7 @@ class TestOrangeAdjustmentsExport:
             "team",
             "team_number",
             "description",
+            "max_points",
             "points_awarded",
             "is_approved",
             "approved_by",

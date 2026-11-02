@@ -469,7 +469,9 @@
                     {% for o in orange_scores %}
                         <tr>
                             <td>{{ o.description }}</td>
-                            <td class="text-right">{{ o.points_awarded|floatformat:0 }}</td>
+                            <td class="text-right">
+                                {{ o.points_awarded|floatformat:0 }}{% if o.max_points is not None %} / {{ o.max_points|floatformat:0 }}{% endif %}
+                            </td>
                         </tr>
                     {% endfor %}
                     <tr class="row-total">
