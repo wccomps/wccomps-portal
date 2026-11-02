@@ -2,19 +2,18 @@
 
 import logging
 import threading
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from enum import StrEnum
+from enum import Enum, StrEnum
 
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import Q
-from django.utils import timezone
 
 from core.authentik_utils import set_team_account_active
 from core.discord_tasks import BroadcastMessage
-from core.models import AuditLog, CompetitionConfig, DiscordTask
+from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, DiscordTask
 from core.utils import advisory_lock
 from team.models import MAX_TEAMS, active_team_numbers, team_username
 
@@ -27,7 +26,6 @@ COMPETITION_STARTED = "competition_started"
 # The audit action a stop records, with the same details
 COMPETITION_STOPPED = "competition_stopped"
 TIMER_GAVE_UP = "competition_timer_gave_up"
-EVENT_CLOSED_OUT = "event_closed_out"
 
 TIMER_ACTOR = "timer"
 # Attempts the timer makes at one scheduled start or stop, one a tick, while it is left incomplete or errored
@@ -191,20 +189,6 @@ def run_lock() -> Iterator[bool]:
             db.dec_thread_sharing()
 
 
-def set_schedule(*, start: datetime | None = None, end: datetime | None = None) -> None:
-    """Save a new start and/or end time and end the timer's series for each, in one transaction holding the config
-    row, so a timer attempt finishing meanwhile never revives the old series."""
-    pk = CompetitionConfig.get_config().pk
-    changes: dict[str, object] = {"updated_at": timezone.now()}
-    with transaction.atomic():
-        CompetitionConfig.objects.select_for_update().filter(pk=pk).values_list("pk").get()
-        for enable, when in ((True, start), (False, end)):
-            if when is not None:
-                end_timer_series(enable)
-                changes["competition_start_time" if enable else "competition_end_time"] = when
-        CompetitionConfig.objects.filter(pk=pk).update(**changes)
-
-
 def end_timer_series(enable: bool) -> None:
     """End a live timer series for a start (True) or stop: a new schedule replaces what it was carrying out."""
     CompetitionConfig.objects.filter(pk=CompetitionConfig.get_config().pk, timer_series_enable=enable).update(
@@ -278,6 +262,7 @@ def _run(
     from core.services.user_groups import refresh_user_groups
 
     config = CompetitionConfig.get_config()
+    began_with = config.competition_start_time
     result = CompetitionRunResult(enable=enable, controlled_apps=list(config.controlled_applications))
     if not result.controlled_apps:
         result.error = "No controlled applications configured"
@@ -348,29 +333,38 @@ def _run(
             result.quotient_synced = False
             yield CompetitionStep(f"Quotient score sync failed: {e}", step, total, ok=False)
 
-    # Only the fields this run owns: a schedule or app-list edit made meanwhile must survive.
-    changes: dict[str, object] = {"applications_enabled": enable}
-    schedule = "competition_start_time" if enable else "competition_end_time"
+    # Only the fields this run owns and the schedule times it consumes: other edits made meanwhile survive
+    changes: dict[str, object] = {
+        "applications_enabled": enable,
+        "last_run_incomplete": result.has_failures,
+    }
+    if enable:
+        changes["last_start_accounts_ok"] = result.accounts_ok
+        changes["last_start_accounts_tried"] = result.accounts_ok + result.accounts_failed
     if timer is None:
-        changes |= {schedule: None, **no_timer_series()}
+        changes |= no_timer_series()
+    expected_start = began_with if timer is None else timer.schedule
     with transaction.atomic():
         # Locked so the timer's retries and a concurrent manual start send the start message once.
-        was_enabled, start_message = (
-            CompetitionConfig.objects.select_for_update()
-            .values_list("applications_enabled", "start_message")
-            .get(pk=config.pk)
-        )
-        CompetitionConfig.objects.filter(pk=config.pk).update(**changes)
+        locked = CompetitionConfig.locked()
         if timer is not None:
             left = _series(timer) if result.outcome is RunOutcome.INCOMPLETE else no_timer_series()
             _write_series(timer, planned, left)
-            # Only the schedule the series carries out: a time set since is the admin's
-            CompetitionConfig.objects.filter(pk=config.pk, **{schedule: timer.schedule}).update(**{schedule: None})
-        if enable and not was_enabled and start_message.strip():
-            DiscordTask.enqueue(
-                BroadcastMessage(target="all-teams", message=start_message, sender=START_MESSAGE_SENDER)
+        if (enable and locked.competition_start_time == expected_start) or locked.start_passed():
+            changes["competition_start_time"] = None
+        if (not enable and timer is not None and locked.competition_end_time == timer.schedule) or locked.end_passed():
+            changes["competition_end_time"] = None
+        if enable:
+            changes["started_this_window"] = True
+        elif locked.end_passed() or locked.competition_end_time is None or "competition_end_time" in changes:
+            changes["started_this_window"] = False
+        if enable and not locked.applications_enabled and locked.start_message.strip():
+            task = DiscordTask.enqueue(
+                BroadcastMessage(target="all-teams", message=locked.start_message, sender=START_MESSAGE_SENDER)
             )
+            changes["start_broadcasts"] = [*locked.start_broadcasts, task.pk]
             result.start_message_queued = True
+        CompetitionConfig.objects.filter(pk=locked.pk).update(**changes)
 
         AuditLog.objects.create(
             action=COMPETITION_STARTED if enable else COMPETITION_STOPPED,
@@ -388,33 +382,6 @@ def _run(
             },
         )
     return result
-
-
-def last_start_accounts() -> tuple[int, int] | None:
-    """The team accounts the last recorded start turned on, and how many it tried; None when none is recorded."""
-    details = (
-        AuditLog.objects.filter(action=COMPETITION_STARTED).order_by("-created_at").values_list("details", flat=True)
-    ).first()
-    if not details or "accounts_ok" not in details or "accounts_failed" not in details:
-        return None
-    return details["accounts_ok"], details["accounts_ok"] + details["accounts_failed"]
-
-
-def incomplete_run() -> bool | None:
-    """Whether the last recorded run was a start (True) or a stop (False) that left an app or team account
-    unchanged, so it needs running again; None when it changed everything, or no run is recorded."""
-    last = (
-        AuditLog.objects.filter(action__in=(COMPETITION_STARTED, COMPETITION_STOPPED))
-        .order_by("-created_at")
-        .values_list("action", "details")
-        .first()
-    )
-    if last is None:
-        return None
-    action, details = last
-    if not details.get("apps_failed") and not details.get("accounts_failed"):
-        return None
-    return action == COMPETITION_STARTED
 
 
 def current_timer_plan(now: datetime) -> TimerPlan | None:
@@ -459,3 +426,103 @@ def give_up_timer_series(plan: GiveUp) -> bool:
                 details={"enable": plan.enable, "attempts": plan.attempt, "reason": plan.reason},
             )
     return bool(ended)
+
+
+class ConfigEditError(ValueError):
+    """A competition setting was refused; the message says why."""
+
+
+def _audit_config(action: str, actor: str, config: CompetitionConfig, details: dict[str, object]) -> None:
+    AuditLog.objects.create(
+        action=action, admin_user=actor, target_entity="competition_config", target_id=config.pk, details=details
+    )
+
+
+@transaction.atomic
+def set_max_members(max_members: int, actor: str) -> int:
+    """Set how many members a team may link; returns the old limit."""
+    if not 1 <= max_members <= MAX_TEAM_MEMBERS_LIMIT:
+        raise ConfigEditError(f"Max members must be 1-{MAX_TEAM_MEMBERS_LIMIT}")
+    config = CompetitionConfig.locked()
+    old_max = config.max_team_members
+    config.max_team_members = max_members
+    config.save(update_fields=["max_team_members", "updated_at"])
+    _audit_config("max_team_members_updated", actor, config, {"old_max": old_max, "new_max": max_members})
+    return old_max
+
+
+@transaction.atomic
+def set_start_message(message: str, actor: str) -> None:
+    """Set the start message; its audit records only the length, since it usually carries credentials."""
+    config = CompetitionConfig.locked()
+    config.start_message = message
+    config.save(update_fields=["start_message", "updated_at"])
+    _audit_config("competition_start_message_updated", actor, config, {"length": len(message)})
+
+
+class Keep(Enum):
+    """set_schedule's default for a time it leaves as stored."""
+
+    KEEP = "keep"
+
+
+KEEP = Keep.KEEP
+
+
+@transaction.atomic
+def set_schedule(
+    actor: str = "", *, start: datetime | None | Keep = KEEP, end: datetime | None | Keep = KEEP
+) -> CompetitionConfig:
+    """Set the start and/or end time, None clearing one (or both); a time not given stays. Returns the saved config."""
+    config = CompetitionConfig.locked()
+    new_start = config.competition_start_time if isinstance(start, Keep) else start
+    new_end = config.competition_end_time if isinstance(end, Keep) else end
+    if new_start and new_end and new_end <= new_start:
+        raise ConfigEditError("The end time must be after the start time")
+    changes: dict[str, datetime | None] = {}
+    if not isinstance(start, Keep):
+        end_timer_series(True)
+        changes["competition_start_time"] = new_start
+    if not isinstance(end, Keep):
+        end_timer_series(False)
+        changes["competition_end_time"] = new_end
+    for name, value in changes.items():
+        setattr(config, name, value)
+    window_reset = isinstance(start, datetime) or end is None
+    if window_reset:
+        config.started_this_window = False
+    config.save(update_fields=[*changes, *(["started_this_window"] if window_reset else []), "updated_at"])
+    details = {
+        name.removeprefix("competition_"): value.isoformat() if value else None for name, value in changes.items()
+    }
+    _audit_config(
+        "competition_schedule_set", actor, config, {**details, "controlled_apps": config.controlled_applications}
+    )
+    return config
+
+
+@transaction.atomic
+def clear_missed_window(actor: str) -> str:
+    """Clear an end that passed while the competition was stopped, with any start before it. Returns "" when there was
+    none, END_AFTER_STOP when a start ran in this window (a manual stop came before the end), else MISSED_WINDOW."""
+    config = CompetitionConfig.locked()
+    if not config.stale_end():
+        return ""
+    kind = END_AFTER_STOP if config.started_this_window else MISSED_WINDOW
+    set_schedule(actor, start=None, end=None)
+    return kind
+
+
+MISSED_WINDOW = "missed_window"
+END_AFTER_STOP = "end_after_stop"
+
+
+@transaction.atomic
+def set_controlled_apps(change: Callable[[list[str]], list[str]], actor: str, **details: object) -> list[str]:
+    """Store change(the stored list of controlled app slugs), read under the row lock; returns the new list."""
+    config = CompetitionConfig.locked()
+    apps = change(list(config.controlled_applications or []))
+    config.controlled_applications = apps
+    config.save(update_fields=["controlled_applications", "updated_at"])
+    _audit_config("competition_apps_configured", actor, config, {"controlled_apps": apps, **details})
+    return apps

@@ -1,7 +1,11 @@
 """The bot's command tree: what every slash command gets before and after its own handler."""
 
 import contextlib
+import hashlib
+import json
 import logging
+from collections.abc import Mapping, Sequence
+from typing import Protocol
 
 import discord
 from discord import app_commands
@@ -50,3 +54,35 @@ class PortalCommandTree(app_commands.CommandTree):
                 await interaction.followup.send(message, ephemeral=True)
             else:
                 await interaction.response.send_message(message, ephemeral=True)
+
+
+class SyncedCommand(Protocol):
+    def to_dict(self, tree: app_commands.CommandTree) -> dict[str, object]: ...
+
+
+class _Commands[C](Protocol):
+    def get_commands(self) -> list[C]: ...
+    def get_command(self, command: str) -> C | None: ...
+
+
+def command_plan[C](
+    tree: _Commands[C], competition_guild_id: int, volunteer_guild_id: int
+) -> dict[int | None, list[C]]:
+    """Each guild's commands (None: the global ones), read before a sync changes the tree: all of them to the
+    competition guild, /link alone to the volunteer guild, none global (each would show twice)."""
+    plan: dict[int | None, list[C]] = {None: []}
+    if competition_guild_id:
+        plan[competition_guild_id] = list(tree.get_commands())
+    if volunteer_guild_id and volunteer_guild_id != competition_guild_id:
+        link = tree.get_command("link")
+        plan[volunteer_guild_id] = [link] if link else []
+    return plan
+
+
+def command_hash(tree: app_commands.CommandTree, plan: Mapping[int | None, Sequence[SyncedCommand]]) -> str:
+    """A fingerprint of what syncing the plan sends Discord: each guild's commands as Discord receives them."""
+    payload = {
+        str(guild): sorted((command.to_dict(tree) for command in commands), key=lambda c: (c["type"], c["name"]))
+        for guild, commands in plan.items()
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]

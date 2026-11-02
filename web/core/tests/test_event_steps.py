@@ -44,7 +44,7 @@ def _panel(stage, **facts):
             members_linked=0,
             starts_at=None,
             ends_at=None,
-            incomplete_run=None,
+            last_run_incomplete=False,
         )
     )
 

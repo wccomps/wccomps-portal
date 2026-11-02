@@ -352,3 +352,15 @@ async def test_a_long_sync_beats_the_calling_loop_per_member_it_changes(teams, m
     await _sync(_guild(_member(20), *members))
 
     assert beats == ["queue"] * 5
+
+
+async def test_a_team_whose_old_channels_await_removal_grants_no_team_role(teams) -> None:
+    """The role is the last school's until its removal: a new member would read the old channels."""
+    await Team.objects.filter(pk=teams[0].pk).aupdate(channels_need_clearing=True)
+    await _link(1, [], team=teams[0])
+    member = _member(1, TEAM_A)
+
+    await _sync(_guild(member))
+
+    assert _ids(member.add_roles) == {BLUETEAM}
+    assert _ids(member.remove_roles) == {TEAM_A}

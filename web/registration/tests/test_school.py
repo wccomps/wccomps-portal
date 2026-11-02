@@ -418,3 +418,25 @@ def test_event_detail_shows_the_contact_assignment_emails(gold_team_user, event)
     content = _client(gold_team_user).get(reverse("registration_event_detail", args=[event.pk])).content.decode()
 
     assert "coach@example.edu" in content
+
+
+def test_unassigning_a_team_with_linked_members_is_refused(gold_team_user, event):
+    from django.contrib.auth.models import User
+
+    from registration.services import LINKED_TEAM_REMOVE
+    from team.models import DiscordLink
+
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+    user = User.objects.create(username="member04")
+    DiscordLink.objects.create(discord_id=44, discord_username="m", user=user, team=team, is_active=True)
+    client = Client()
+    client.force_login(gold_team_user)
+
+    response = client.post(
+        reverse("registration_unassign_team", args=[EventTeamAssignment.objects.get().pk]), _shown(), follow=True
+    )
+
+    assert LINKED_TEAM_REMOVE in [str(m) for m in response.context["messages"]]
+    assert EventTeamAssignment.objects.exists()
+    assert DiscordLink.objects.filter(is_active=True).exists()

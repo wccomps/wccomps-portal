@@ -320,20 +320,13 @@ def test_the_competition_status_table_and_the_setup_forms_are_gone(client):
 def test_while_running_the_page_shows_the_live_numbers(client):
     from scoring.models import QuotientMetadataCache
 
-    from core.models import AuditLog
     from ticketing.models import Ticket
 
     _arrange("running")
     team = Team.objects.get(team_number=1)
     for number, status in enumerate(("open", "claimed", "resolved", "cancelled"), 1):
         Ticket.objects.create(ticket_number=f"T001-00{number}", team=team, title="t", status=status)
-    AuditLog.objects.create(
-        action="competition_started",
-        admin_user="gold",
-        target_entity="competition_config",
-        target_id=1,
-        details={"accounts_ok": 33, "accounts_failed": 1},
-    )
+    CompetitionConfig.objects.filter(pk=1).update(last_start_accounts_ok=33, last_start_accounts_tried=34)
     QuotientMetadataCache.objects.create()
 
     live = _flat(_page(client))
@@ -576,22 +569,14 @@ def test_rendering_the_page_builds_no_scorecard_pdf_or_email(client, stage):
         assert not mock.called, name
 
 
-def _last_run(action, accounts_failed):
-    from core.models import AuditLog
-
-    AuditLog.objects.create(
-        action=action,
-        admin_user="admin",
-        target_entity="competition_config",
-        target_id=1,
-        details={"apps_ok": [], "apps_failed": [], "accounts_ok": 1, "accounts_failed": accounts_failed},
-    )
+def _last_run(accounts_failed):
+    CompetitionConfig.objects.filter(pk=1).update(last_run_incomplete=bool(accounts_failed))
 
 
 @pytest.mark.parametrize("accounts_failed", [0, 1])
 def test_while_running_start_is_offered_again_only_after_a_start_that_left_something_off(client, accounts_failed):
     _arrange("running")
-    _last_run("competition_started", accounts_failed)
+    _last_run(accounts_failed)
 
     page = _flat(_page(client))
 
@@ -603,8 +588,7 @@ def test_while_running_start_is_offered_again_only_after_a_start_that_left_somet
 @pytest.mark.parametrize("accounts_failed", [0, 1])
 def test_while_stopped_stop_is_offered_again_only_after_a_stop_that_left_something_on(client, accounts_failed):
     _arrange("played")
-    _last_run("competition_started", 0)
-    _last_run("competition_stopped", accounts_failed)
+    _last_run(accounts_failed)
 
     page = _flat(_page(client))
 

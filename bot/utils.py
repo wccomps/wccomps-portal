@@ -322,7 +322,10 @@ def _named[T: discord.Role | discord.CategoryChannel](
 
 
 def team_chat_channel(guild: discord.Guild, team: Team) -> discord.TextChannel | None:
-    """The text channel with "chat" in its name in the team's category, which may predate the bot."""
+    """The text channel with "chat" in its name in the team's category, which may predate the bot; none while the
+    team is marked channels_need_clearing."""
+    if team.channels_need_clearing:
+        return None
     category = find_team_category(guild, team)
     return category_chat_channel(category) if category else None
 

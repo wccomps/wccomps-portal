@@ -5,8 +5,10 @@ import re
 from collections.abc import Awaitable, Collection, Sequence
 
 import discord
+from asgiref.sync import sync_to_async
 from discord.ext import commands
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from bot.cogs.help_panels import HelpPanelsCog, TicketButton, _has_button
@@ -22,17 +24,23 @@ from bot.utils import (
     team_role_name,
 )
 from bot.utils import announcement as announcement_text
-from core.models import QueuedAnnouncement
+from core.discord_tasks import SetupTeamInfrastructure
+from core.models import DiscordTask, QueuedAnnouncement
 from team.models import Team
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
 
 
-async def delete_team_infrastructure(guild: discord.Guild, team: Team, reason: str) -> list[str]:
-    """Delete a team's Discord category, channels and role and clear their IDs; returns which of the category and
-    role it deleted. Deleting the chat channel deletes its ticket threads, so their IDs are cleared too."""
+async def delete_team_infrastructure(
+    guild: discord.Guild, team: Team, reason: str, *, then_setup: bool = False
+) -> list[str]:
+    """Delete a team's category, channels and role (by ID or name); return the kinds deleted. An ID is cleared once
+    its object is gone; channels_need_clearing is set while one is left (a failed channel delete is only logged).
+    then_setup queues the setup in the same transaction when nothing is left and members are linked. Deleting the
+    chat channel deletes its ticket threads, so their IDs are cleared too."""
     deleted_items: list[str] = []
+    category_gone = role_gone = True
 
     category = find_team_category(guild, team)
     if category:
@@ -53,7 +61,10 @@ async def delete_team_infrastructure(guild: discord.Guild, team: Team, reason: s
         try:
             await category.delete(reason=reason)
             deleted_items.append("category")
+        except discord.NotFound:
+            pass
         except Exception as e:
+            category_gone = False
             logger.exception(f"Failed to delete category: {e}")
 
     role = find_team_role(guild, team)
@@ -61,14 +72,29 @@ async def delete_team_infrastructure(guild: discord.Guild, team: Team, reason: s
         try:
             await role.delete(reason=reason)
             deleted_items.append("role")
+        except discord.NotFound:
+            pass
         except Exception as e:
+            role_gone = False
             logger.exception(f"Failed to delete role: {e}")
 
-    team.discord_role_id = None
-    team.discord_category_id = None
-    await team.asave(update_fields=["discord_role_id", "discord_category_id"])
+    cleared = [
+        field for field, gone in (("discord_role_id", role_gone), ("discord_category_id", category_gone)) if gone
+    ]
+    for field in cleared:
+        setattr(team, field, None)
+    team.channels_need_clearing = not (role_gone and category_gone)
+    await _record_teardown(team, cleared, then_setup)
 
     return deleted_items
+
+
+@sync_to_async
+def _record_teardown(team: Team, cleared: list[str], then_setup: bool) -> None:
+    with transaction.atomic():
+        team.save(update_fields=[*cleared, "channels_need_clearing"])
+        if then_setup and not team.channels_need_clearing and team.members.filter(is_active=True).exists():
+            DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team.team_number))
 
 
 class TeamInfrastructureError(Exception):
@@ -103,24 +129,33 @@ async def recreate_team_infrastructure(
     progress the delete counts as a step, so a retry keeps what the first attempt built."""
     deleted: list[str] = []
     gone: set[int] = set()
-    if not (progress and progress.done):
+    if not (progress and progress.done) or team.channels_need_clearing:
         old = {"role": find_team_role(guild, team), "category": find_team_category(guild, team)}
         deleted = await delete_team_infrastructure(guild, team, reason=reason)
+        if team.channels_need_clearing:
+            raise TeamInfrastructureError(f"Could not delete team {team.team_number}'s old role or category")
         gone = {item.id for kind, item in old.items() if item and kind in deleted}
         if progress:
             await progress.advance()
-    return deleted, await setup_team_infrastructure(guild, team, bot=bot, gone=gone)
+    category = await setup_team_infrastructure(guild, team, bot=bot, gone=gone)
+    if category is None:
+        raise TeamInfrastructureError(f"Could not delete team {team.team_number}'s old role or category")
+    return deleted, category
 
 
 async def setup_team_infrastructure(
     guild: discord.Guild, team: Team, bot: discord.Client | None = None, *, gone: Collection[int] = ()
-) -> discord.CategoryChannel:
+) -> discord.CategoryChannel | None:
     """Give a team its role and its category with chat and voice channels, reusing what exists (never the IDs in
     gone) and recording each ID once created; then deliver its queued announcements and sync its members' roles.
 
     When a reused category had no team role entry, it and each of its channels without one get one; no other entry
-    is touched. Raises TeamInfrastructureError naming the step that failed."""
+    is touched. Refused while channels_need_clearing: the old ones would be reused. Raises TeamInfrastructureError
+    naming the step that failed."""
     team_number = team.team_number
+    if team.channels_need_clearing:
+        logger.info(f"Team {team_number} is set up once its old role and category are removed")
+        return None
 
     async def step[T](what: str, work: Awaitable[T]) -> T:
         try:

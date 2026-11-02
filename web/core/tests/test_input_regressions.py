@@ -30,7 +30,6 @@ from registration.models import (
 from registration.services import SchoolListRow, import_school_list
 from scoring.models import RedTeamScreenshot, ScoringTemplate
 
-from core.admin_views.competition import TIMEZONE_CHOICES
 from core.forms import SchoolInfoEditForm
 from core.stored_files import DOWNLOAD_MIME, detect_inline_type
 from core.tests.strategies import (
@@ -43,7 +42,7 @@ from core.tests.strategies import (
     rolled_back,
     uploaded_file,
 )
-from core.utils import parse_datetime_to_utc
+from core.utils import TIMEZONE_CHOICES, parse_datetime_to_utc
 from team.forms import parse_csv_file
 from team.models import SchoolInfo, Team
 from ticketing.models import Ticket, TicketAttachment, TicketCategory

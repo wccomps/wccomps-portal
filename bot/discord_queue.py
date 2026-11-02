@@ -9,10 +9,11 @@ from typing import assert_never
 import discord
 from asgiref.sync import sync_to_async
 from django.core.exceptions import ObjectDoesNotExist
+from django.db import transaction
 from django.db.models import Model, Q, QuerySet
 from django.utils import timezone
 
-from bot.competition_actions import deliver_broadcast, run_competition_cleanup
+from bot.competition_actions import deliver_broadcast
 from bot.discord_manager import recreate_team_infrastructure, setup_team_infrastructure
 from bot.heartbeat import beat, beat_for
 from bot.role_sync import competition_guild, sync_member_roles, sync_roles
@@ -30,11 +31,12 @@ from core.broadcast import parse_broadcast_target
 from core.discord_tasks import (
     AddUserToThread,
     BroadcastMessage,
-    CleanupCompetition,
+    ClearTeamChannels,
     LogToChannel,
     PermanentTaskError,
     PostComment,
     PostTicketUpdate,
+    ReconcileTeams,
     SetupTeamInfrastructure,
     SyncMemberRoles,
     SyncRoles,
@@ -42,7 +44,7 @@ from core.discord_tasks import (
     TaskPayload,
     TicketCreatedWeb,
 )
-from core.models import DiscordTask
+from core.models import DiscordTask, QueuedAnnouncement
 from core.utils import role_sync_summary
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketComment
@@ -69,6 +71,7 @@ class DiscordQueueProcessor:
         self.bot = bot
         self.running = False
         self.task: asyncio.Task[None] | None = None
+        self._current_task: int | None = None
 
     def start(self) -> None:
         self.running = True
@@ -139,6 +142,27 @@ class DiscordQueueProcessor:
             await self._process_task(task)
             beat()
 
+    async def _still_processing(self) -> bool:
+        current = self._current_task
+        return current is not None and await DiscordTask.objects.filter(pk=current, status="processing").aexists()
+
+    async def _queue_copy(self, team: Team, message: str, sender: str) -> bool:
+        """Queue the broadcast's copy for a team with no channel, only while the running task is still processing: its
+        row is locked meanwhile, so a reset failing it waits, and the reset's on_commit delete catches the copy."""
+
+        current = self._current_task
+
+        @sync_to_async
+        def queue() -> bool:
+            with transaction.atomic():
+                running = DiscordTask.objects.select_for_update(no_key=True)
+                if current is None or not running.filter(pk=current, status="processing").exists():
+                    return False
+                QueuedAnnouncement.objects.create(team=team, message=message, sender_name=sender)
+                return True
+
+        return await queue()
+
     async def _process_task(self, task: DiscordTask) -> None:
 
         # Claim with a conditional UPDATE so a task is never handled twice.
@@ -146,9 +170,10 @@ class DiscordQueueProcessor:
         if not claimed:
             return
         task.status = "processing"
+        self._current_task = task.pk
 
         async def save_progress(state: ProgressState) -> None:
-            await DiscordTask.objects.filter(pk=task.pk).aupdate(progress=state)
+            await DiscordTask.objects.filter(pk=task.pk, status="processing").aupdate(progress=state)
 
         try:
             task_result = await self._dispatch(task.typed_payload(), TaskProgress(task.progress, save_progress))
@@ -183,9 +208,10 @@ class DiscordQueueProcessor:
 
     @staticmethod
     async def _record(task: DiscordTask, **outcome: object) -> bool:
-        """Write the task's outcome; False when its row is gone (deleting a ticket deletes its tasks)."""
-        if not await DiscordTask.objects.filter(pk=task.pk).aupdate(**outcome):
-            logger.info(f"Task {task.id} ({task.task_type}) was deleted while it ran")
+        """Write the task's outcome only while the row is still this bot's to finish: False when deleted or when a
+        reset failed or scrubbed it meanwhile."""
+        if not await DiscordTask.objects.filter(pk=task.pk, status="processing").aupdate(**outcome):
+            logger.info(f"Task {task.id} ({task.task_type}) was deleted or ended while it ran")
             return False
         for name, value in outcome.items():
             setattr(task, name, value)
@@ -203,8 +229,10 @@ class DiscordQueueProcessor:
                 await self._handle_log_to_channel(payload)
             case TicketCreatedWeb():
                 await self._handle_ticket_created_web(payload)
-            case CleanupCompetition():
-                await self._handle_cleanup_competition(payload)
+            case ReconcileTeams():
+                await self._handle_reconcile_teams(payload)
+            case ClearTeamChannels():
+                await self._handle_clear_team_channels(payload)
             case PostComment():
                 await self._handle_post_comment(payload, progress)
             case PostTicketUpdate():
@@ -240,11 +268,26 @@ class DiscordQueueProcessor:
         if link and link.team_id:
             await add_to_team_threads(self.bot, member, link.team_id)
 
-    async def _handle_cleanup_competition(self, payload: CleanupCompetition) -> None:
-        """Run the competition cleanup Close Out Event queued: only the Discord side for a close-out."""
-        await run_competition_cleanup(
-            self.bot, self._guild(), payload.requested_by, closed_out_event_id=payload.closed_out_event_id
+    async def _handle_reconcile_teams(self, payload: ReconcileTeams) -> None:
+        from bot.competition_actions import reconcile_teams
+
+        await reconcile_teams(self.bot, self._guild(), payload.requested_by, payload.open_event_id, beat)
+
+    async def _handle_clear_team_channels(self, payload: ClearTeamChannels) -> None:
+        from bot.discord_manager import delete_team_infrastructure
+
+        number = payload.team_number
+        team = await Team.objects.filter(team_number=number).afirst()
+        if team is None or not team.channels_need_clearing:
+            return
+        await delete_team_infrastructure(
+            self._guild(), team, reason=f"Team {number} handed to a new school", then_setup=True
         )
+        if await Team.objects.filter(pk=team.pk, channels_need_clearing=True).aexists():
+            raise RuntimeError(
+                f"Team {number}'s old Discord role or category could not be deleted. Delete them in Discord, then run "
+                f"/teams recreate for team {number}."
+            )
 
     async def _handle_setup_team_infrastructure(self, payload: SetupTeamInfrastructure, progress: TaskProgress) -> None:
         team = await _target(Team.objects.all(), team_number=payload.team_number)
@@ -370,7 +413,15 @@ class DiscordQueueProcessor:
         except ValueError as e:
             raise PermanentTaskError(f"Invalid team range: {e}") from e
 
-        result = await deliver_broadcast(self._guild(), target, payload.message, payload.sender, progress)
+        result = await deliver_broadcast(
+            self._guild(),
+            target,
+            payload.message,
+            payload.sender,
+            progress,
+            wanted=self._still_processing,
+            queue_copy=self._queue_copy,
+        )
         summary = result.ops_summary(payload.sender, payload.target, payload.message)
         if result.failed:
             # A retry tries only the recipients that may yet succeed; the last failure posts this summary

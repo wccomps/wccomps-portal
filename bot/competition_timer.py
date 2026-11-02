@@ -9,13 +9,16 @@ from django.utils import timezone
 
 from bot.competition_actions import run_competition, update_status_channel
 from bot.heartbeat import beat, beat_for
-from bot.utils import log_to_ops_channel, recycle_db_connection
+from bot.utils import log_to_ops_channel, recycle_db_connection, run_blocking
+from core.models import CompetitionConfig
 from core.services.competition import (
+    END_AFTER_STOP,
     TIMER_ACTOR,
     TIMER_ATTEMPTS,
     Attempt,
     GiveUp,
     RunOutcome,
+    clear_missed_window,
     current_timer_plan,
     give_up_timer_series,
 )
@@ -55,11 +58,30 @@ class CompetitionTimer(commands.Cog):
         # config is not alive in any useful sense.
         match await sync_to_async(current_timer_plan)(timezone.now()):
             case None:
-                pass
+                if await sync_to_async(lambda: CompetitionConfig.get_config().stale_end())():
+                    await self._clear_missed_window()
             case GiveUp() as plan:
                 await self._give_up(plan)
             case Attempt() as attempt:
                 await self._attempt(attempt)
+
+    async def _clear_missed_window(self) -> None:
+        # Off the shared thread (the lock waits out a Close Out), and caught so the heartbeat keeps beating
+        try:
+            cleared = await run_blocking(clear_missed_window, TIMER_ACTOR)
+        except Exception:
+            logger.exception("Could not clear a missed competition window")
+            return
+        if cleared == END_AFTER_STOP:
+            await log_to_ops_channel(self.bot, "**Schedule cleared:** the scheduled end passed after a manual stop.")
+            await update_status_channel(self.bot)
+        elif cleared:
+            await log_to_ops_channel(
+                self.bot,
+                "**Schedule cleared:** its end passed while the competition was stopped and would have refused "
+                "a new start time. Set a new schedule on the Competition setup page.",
+            )
+            await update_status_channel(self.bot)
 
     async def _give_up(self, plan: GiveUp) -> None:
         action = "Start" if plan.enable else "Stop"

@@ -11,6 +11,32 @@ from .conftest import create_session_context, visit_and_capture_errors
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
 
+def test_clear_end_time_asks_then_cancels_the_scheduled_stop(live_server, pw_browser):
+    from datetime import UTC, datetime
+
+    from core.models import CompetitionConfig
+
+    CompetitionConfig.objects.update_or_create(
+        pk=1, defaults={"competition_end_time": datetime(2099, 1, 1, tzinfo=UTC)}
+    )
+    context = create_session_context(pw_browser, live_server, role_user("gold_team"))
+    manager = MagicMock()
+    manager.list_applications.return_value = []
+    url = f"{live_server.url}/ops/admin/competition/setup/"
+    try:
+        with patch("core.admin_views.competition.AuthentikManager", return_value=manager):
+            page, _, errors = visit_and_capture_errors(context, url)
+            page.on("dialog", lambda dialog: dialog.accept())
+            with page.expect_navigation(url=url, timeout=10000):
+                page.get_by_role("button", name="Clear end time").click()
+
+            assert CompetitionConfig.get_config().competition_end_time is None
+            assert page.get_by_role("button", name="Clear end time").count() == 0
+            assert not errors, errors
+    finally:
+        context.close()
+
+
 def test_a_save_returns_to_the_setup_page_with_no_console_errors(live_server, pw_browser):
     from core.models import CompetitionConfig
 
