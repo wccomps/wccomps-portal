@@ -159,7 +159,7 @@ def test_the_button_shows_for_sent_packets(current_event, gold_team_user, status
 
     content = client.get(reverse("packet_detail", args=[packet.id])).content.decode()
 
-    assert ("Send to Teams Without It" in content) is shown
+    assert ("Send to New Teams" in content) is shown
 
 
 def test_the_done_line_names_new_teams_without_per_team_extras(current_event):
