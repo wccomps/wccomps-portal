@@ -1,5 +1,7 @@
 """School info CSV import: upload previews, confirm imports, and failures say why."""
 
+import re
+
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
@@ -589,3 +591,30 @@ def test_a_new_event_with_a_bad_season_says_why(client):
         reverse("school_info_import"), {"upload": "true", "csv_file": csv, **fields, "current_season": "x"}
     )
     assert "Current season: Enter a whole number." in response.content.decode()
+
+
+def test_each_import_mode_says_what_it_does_under_its_choice(client):
+    from django.utils.html import escape
+
+    from team.forms import IMPORT_MODES
+
+    html = client.get(reverse("school_info_import")).content.decode()
+
+    for value, mode in IMPORT_MODES.items():
+        radio = re.search(rf'<input type="radio" name="mode" value="{value}"[^>]*>', html)
+        assert radio, value
+        described = re.search(r'aria-describedby="([^"]+)"', radio.group(0))
+        assert described, radio.group(0)
+        assert f'<p class="help-text" id="{described.group(1)}">{escape(mode.description)}</p>' in html
+    assert "Replace the school list replaces" not in html
+
+
+def test_without_ids_each_mode_still_shows_its_description():
+    from django.utils.html import escape
+
+    from team.forms import IMPORT_MODES, ImportEventForm
+
+    html = str(ImportEventForm(season=None, auto_id=False)["mode"])
+
+    assert "aria-describedby" not in html
+    assert all(f'<p class="help-text">{escape(mode.description)}</p>' in html for mode in IMPORT_MODES.values())

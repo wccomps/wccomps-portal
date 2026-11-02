@@ -1,0 +1,5 @@
+{# DescribedRadioSelect (core/widgets.py): description_id is the id its radio's aria-describedby names #}
+{% include "django/forms/widgets/input_option.html" %}
+{% if widget.description %}
+    <p class="help-text"{% if widget.description_id %} id="{{ widget.description_id }}"{% endif %}>{{ widget.description }}</p>
+{% endif %}
