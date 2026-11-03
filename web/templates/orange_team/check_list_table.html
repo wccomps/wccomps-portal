@@ -1,4 +1,4 @@
-{% load cotton %}
+{% load cotton status_variants %}
 <div id="orange-checks-content">
     <c-table id="check-list" aria_label="Orange team checks">
         <c-slot name="headers">
@@ -36,23 +36,9 @@
                 </td>
                 <td>{{ check.max_score }}</td>
                 <td>
-                    {% if check.window_state == "open" %}
-                        <c-badge variant="info">
-                            Live
-                        </c-badge>
-                    {% elif check.window_state == "upcoming" %}
-                        <c-badge variant="neutral">
-                            Upcoming
-                        </c-badge>
-                    {% elif check.window_state == "closed" %}
-                        <c-badge variant="warning">
-                            Closed
-                        </c-badge>
-                    {% else %}
-                        <c-badge variant="neutral">
-                            Draft
-                        </c-badge>
-                    {% endif %}
+                    <c-badge variant="{{ check.window_state|badge_variant:'orange_check_window' }}">
+                        {{ check.window_state_display }}
+                    </c-badge>
                 </td>
                 <td>{{ check.scored_count }}/{{ check.team_total }}</td>
                 <td>

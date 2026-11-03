@@ -4,7 +4,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from orange_team.models import OrangeAssignment, OrangeCheck
-from orange_team.services import assign_all_checks, auto_assign_check, rebalance_unstarted
+from orange_team.services import auto_assign_check, rebalance_unstarted
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
@@ -28,15 +28,36 @@ def test_balanced_and_covers_everyone(users: list[User], teams: list[Team]) -> N
     assert sorted(per_user.values()) == [3, 3, 3]
 
 
-def test_rotation_shifts_across_checks(users: list[User], teams: list[Team]) -> None:
-    c0 = OrangeCheck.objects.create(title="c0", description="d")
-    c1 = OrangeCheck.objects.create(title="c1", description="d")
-    auto_assign_check(c0, users, teams, rotation_offset=0)
-    auto_assign_check(c1, users, teams, rotation_offset=1)
-    team1 = teams[0]
-    u0 = OrangeAssignment.objects.get(orange_check=c0, team=team1).user_id
-    u1 = OrangeAssignment.objects.get(orange_check=c1, team=team1).user_id
-    assert u0 != u1
+def test_randomizes_assignments_across_checks(users: list[User], teams: list[Team]) -> None:
+    checks = [OrangeCheck.objects.create(title=f"c{i}", description="d") for i in range(6)]
+    for check in checks:
+        auto_assign_check(check, users, teams)
+    mappings = {
+        tuple(
+            OrangeAssignment.objects.filter(orange_check=c)
+            .order_by("team__team_number")
+            .values_list("user_id", flat=True)
+        )
+        for c in checks
+    }
+    assert len(mappings) > 1
+    for check in checks:
+        per_user = [OrangeAssignment.objects.filter(orange_check=check, user=u).count() for u in users]
+        assert sorted(per_user) == [3, 3, 3]
+
+
+def test_unstarted_remainders_are_balanced_when_some_teams_are_already_started(
+    users: list[User], teams: list[Team]
+) -> None:
+    check = OrangeCheck.objects.create(title="C", description="d")
+    for team in teams[:3]:
+        OrangeAssignment.objects.create(orange_check=check, user=users[0], team=team, status="in_progress")
+    count = auto_assign_check(check, users, teams)
+    assert count == 6
+    unstarted_per_user = [
+        OrangeAssignment.objects.filter(orange_check=check, user=u, status="pending").count() for u in users
+    ]
+    assert sorted(unstarted_per_user) == [2, 2, 2]
 
 
 def test_no_checked_in_users_is_noop(teams: list[Team]) -> None:
@@ -81,9 +102,3 @@ def test_rebalance_moves_pending_off_absent(users: list[User], teams: list[Team]
     rebalance_unstarted(check, remaining)
     assigned = set(OrangeAssignment.objects.filter(orange_check=check).values_list("user_id", flat=True))
     assert users[2].id not in assigned
-
-
-def test_assign_all_rotates_per_check(users: list[User], teams: list[Team]) -> None:
-    checks = [OrangeCheck.objects.create(title=f"c{i}", description="d") for i in range(3)]
-    total = assign_all_checks(checks, users, teams)
-    assert total == 27

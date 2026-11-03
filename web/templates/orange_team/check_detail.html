@@ -8,23 +8,9 @@
                    parent_url="{% url 'orange_team:check_list' %}"
                    parent_label="Manage Checks">
         <c-slot name="subtitle">
-            {% if orange_check.window_state == "open" %}
-                <c-badge variant="info">
-                    Live
-                </c-badge>
-            {% elif orange_check.window_state == "upcoming" %}
-                <c-badge variant="neutral">
-                    Upcoming
-                </c-badge>
-            {% elif orange_check.window_state == "closed" %}
-                <c-badge variant="warning">
-                    Closed
-                </c-badge>
-            {% else %}
-                <c-badge variant="neutral">
-                    Not scheduled
-                </c-badge>
-            {% endif %}
+            <c-badge variant="{{ orange_check.window_state|badge_variant:'orange_check_window' }}">
+                {{ orange_check.window_state_display }}
+            </c-badge>
         </c-slot>
     </c-page_header>
     <c-module>

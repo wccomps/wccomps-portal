@@ -155,35 +155,22 @@
                             {% endif %}
                         </td>
                         <td>
+                            <c-badge variant="{{ assignment.orange_check.window_state|badge_variant:'orange_check_window' }}">
+                                {{ assignment.orange_check.window_state_display }}
+                            </c-badge>
                             {% if assignment.orange_check.scheduled_at %}
-                                {{ assignment.orange_check.scheduled_at|date:"H:i" }}
-                                {% if assignment.orange_check.window_end %}to {{ assignment.orange_check.window_end|date:"H:i" }}{% endif %}
+                                <div class="text-sm text-muted">
+                                    {{ assignment.orange_check.scheduled_at|date:"H:i" }}
+                                    {% if assignment.orange_check.window_end %}to {{ assignment.orange_check.window_end|date:"H:i" }}{% endif %}
+                                </div>
                             {% endif %}
                         </td>
                         <td>
-                            {% if "submit" not in assignment.actions or assignment.status_info.returned %}
-                                <c-badge variant="{{ assignment.status|badge_variant:'orange_assignment' }}">
-                                    {{ assignment.get_status_display }}
-                                </c-badge>
-                                {% if assignment.status_info.returned and assignment.notes %}
-                                    <p class="text-sm text-muted">{{ assignment.notes }}</p>
-                                {% endif %}
-                            {% elif assignment.orange_check.window_state == "open" %}
-                                <c-badge variant="info">
-                                    Open now
-                                </c-badge>
-                            {% elif assignment.orange_check.window_state == "upcoming" %}
-                                <c-badge variant="neutral">
-                                    Opens {{ assignment.orange_check.scheduled_at|date:"H:i" }}
-                                </c-badge>
-                            {% elif assignment.orange_check.window_state == "closed" %}
-                                <c-badge variant="warning">
-                                    Window closed
-                                </c-badge>
-                            {% else %}
-                                <c-badge variant="neutral">
-                                    Not scheduled
-                                </c-badge>
+                            <c-badge variant="{{ assignment.status|badge_variant:'orange_assignment' }}">
+                                {{ assignment.get_status_display }}
+                            </c-badge>
+                            {% if assignment.status_info.returned and assignment.notes %}
+                                <p class="text-sm text-muted">{{ assignment.notes }}</p>
                             {% endif %}
                         </td>
                         <td>

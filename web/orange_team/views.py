@@ -44,7 +44,6 @@ from orange_team.models import (
     scores_total_problem,
 )
 from orange_team.services import (
-    assign_all_checks,
     auto_assign_check,
     create_orange_score_from_assignment,
     rebalance_unstarted,
@@ -184,7 +183,7 @@ def check_list(request: HttpRequest) -> HttpResponse:
         "scheduled_at",
     )
     checks = list(stable_order(checks_qs, sort_by))
-    if filters["status"] in ("open", "upcoming", "closed", "unscheduled"):
+    if filters["status"] in OrangeCheck.WINDOW_STATES:
         checks = [c for c in checks if c.state_at(now) == filters["status"]]
 
     checkins = list(OrangeCheckIn.objects.filter(is_active=True).select_related("user").order_by("checked_in_at"))
@@ -216,6 +215,7 @@ def check_list(request: HttpRequest) -> HttpResponse:
     context = {
         "checks": checks,
         "volunteers": volunteers,
+        "window_states": OrangeCheck.WINDOW_STATES,
         "filters": filters,
         "filtered": filtered,
         "sort_by": sort_by,
@@ -240,7 +240,7 @@ def auto_assign_all(request: HttpRequest) -> HttpResponse:
     ]
     users = list(User.objects.filter(orange_checkins__is_active=True).distinct())
     teams = list(Team.objects.filter(is_active=True).order_by("team_number"))
-    total = assign_all_checks(checks, users, teams)
+    total = sum(auto_assign_check(check, users, teams) for check in checks)
     messages.success(request, f"Auto-assigned {total} team checks across {len(users)} volunteers.")
     return redirect("orange_team:check_list")
 
@@ -399,7 +399,6 @@ def check_assign(request: HttpRequest, check_id: int) -> HttpResponse:
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
 @require_POST
 def check_auto_assign(request: HttpRequest, check_id: int) -> HttpResponse:
-    """Rotate on-shift volunteers across this check's teams (pending/missing cells only)."""
     orange_check = get_object_or_404(OrangeCheck, pk=check_id)
     users = list(User.objects.filter(orange_checkins__is_active=True).distinct())
     teams = list(Team.objects.filter(is_active=True).order_by("team_number"))
