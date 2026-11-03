@@ -24,6 +24,9 @@
                 {% csrf_token %}
                 <input type="hidden" name="token" value="{{ token }}">
                 <c-button_row class="justify-end">
+                    <c-link href="{{ switch_account_url }}" variant="secondary">
+                        Switch account
+                    </c-link>
                     <c-button type="submit" variant="primary">
                         Link {{ discord_username }}
                     </c-button>

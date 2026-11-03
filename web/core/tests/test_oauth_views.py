@@ -76,9 +76,35 @@ class TestLinkInitiate:
         response = client.get(f"/auth/link?token={token.token}")
         assert response.status_code == 302
         assert "/auth/login/" in response.url
-        from urllib.parse import unquote
+        from urllib.parse import parse_qs, unquote, urlsplit
 
         assert f"token={token.token}" in unquote(response.url)
+        assert "prompt" not in parse_qs(urlsplit(response.url).query)
+
+    def test_relink_after_unlink_forces_authentik_relogin(self, blue_team_user, blue_team):
+        from urllib.parse import parse_qs, urlsplit
+
+        DiscordLink.objects.create(
+            discord_id=123456789,
+            discord_username="testuser",
+            user=blue_team_user,
+            team=blue_team,
+            is_active=False,
+            unlinked_at=timezone.now(),
+        )
+        token = LinkToken.objects.create(
+            token="relink_after_unlink_token",
+            discord_id=123456789,
+            discord_username="testuser",
+            used=False,
+            expires_at=timezone.now() + timedelta(minutes=15),
+        )
+        client = Client()
+        response = client.get(f"/auth/link?token={token.token}")
+        assert response.status_code == 302
+        query = parse_qs(urlsplit(response.url).query)
+        assert query.get("prompt") == ["login"]
+        assert query.get("next") == [f"/auth/link-callback?token={token.token}"]
 
     def test_valid_token_stores_in_session(self):
         """Valid token should be stored in session for CSRF protection."""
@@ -155,6 +181,8 @@ class TestLinkCallback:
         assert response.status_code == 200
         assert b"Confirm Discord Link" in response.content
         assert b"discorduser" in response.content
+        assert b"Switch account" in response.content
+        assert b"prompt=login" in response.content
         assert not DiscordLink.objects.filter(discord_id=987654321).exists()
 
         # Mock the Authentik API call to avoid real API errors
@@ -279,6 +307,92 @@ class TestLinkCallback:
 
         assert b"Team full" not in response.content
         assert DiscordLink.objects.filter(discord_id=987654321, team=team, is_active=True).count() == 1
+
+    def test_switching_portal_account_during_oauth_preserves_pending_link_token(self, blue_team_user, blue_team):
+        from unittest.mock import MagicMock, patch
+        from urllib.parse import parse_qs, urlsplit
+
+        from team.models import Team
+
+        team02 = Team.objects.create(
+            team_number=2,
+            team_name="Blue Team 02",
+            authentik_group="WCComps_BlueTeam02",
+            is_active=True,
+        )
+        token = LinkToken.objects.create(
+            token="switch_team_token",
+            discord_id=987654321,
+            discord_username="discorduser",
+            used=False,
+            expires_at=timezone.now() + timedelta(minutes=15),
+        )
+        DiscordLink.objects.create(
+            discord_id=987654321,
+            discord_username="discorduser",
+            user=blue_team_user,
+            team=blue_team,
+            is_active=False,
+            unlinked_at=timezone.now(),
+        )
+        client = Client()
+        client.force_login(blue_team_user)
+
+        init_resp = client.get(f"/auth/link?token={token.token}")
+        assert init_resp.status_code == 302
+
+        mock_config = {
+            "client_id": "test-client-id",
+            "client_secret": "test-secret",
+            "authorization_endpoint": "https://auth.example.com/authorize/",
+            "token_endpoint": "https://auth.example.com/token/",
+            "userinfo_endpoint": "https://auth.example.com/userinfo/",
+            "end_session_endpoint": "https://auth.example.com/end-session/",
+        }
+        with patch("core.oauth._get_oauth_config", return_value=mock_config):
+            login_resp = client.get(init_resp.url)
+        assert login_resp.status_code == 302
+        auth_query = parse_qs(urlsplit(login_resp.url).query)
+        assert auth_query.get("prompt") == ["login"]
+        state = auth_query["state"][0]
+
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {"access_token": "test-token"}
+        mock_userinfo_response = MagicMock()
+        mock_userinfo_response.json.return_value = {
+            "sub": "authentik-team02-sub",
+            "preferred_username": "team02",
+            "email": "team02@wccomps.org",
+            "groups": ["WCComps_BlueTeam02"],
+        }
+        with (
+            patch("core.oauth._get_oauth_config", return_value=mock_config),
+            patch("core.oauth.httpx.Client") as mock_httpx,
+        ):
+            mock_http = MagicMock()
+            mock_http.post.return_value = mock_token_response
+            mock_http.get.return_value = mock_userinfo_response
+            mock_http.__enter__.return_value = mock_http
+            mock_http.__exit__.return_value = False
+            mock_httpx.return_value = mock_http
+            cb_resp = client.get(f"/auth/callback/?code=test-code&state={state}")
+
+        assert cb_resp.status_code == 302
+        assert cb_resp.url == f"/auth/link-callback?token={token.token}"
+
+        confirm_get = client.get(cb_resp.url)
+        assert confirm_get.status_code == 200
+        assert b"Confirm Discord Link" in confirm_get.content
+        assert b"Team 2" in confirm_get.content
+
+        with patch("core.authentik_manager.AuthentikManager"):
+            confirm_post = client.post("/auth/link-callback", {"token": token.token})
+        assert confirm_post.status_code == 200
+        assert b"Successfully Linked" in confirm_post.content
+
+        active_link = DiscordLink.objects.get(discord_id=987654321, is_active=True)
+        assert active_link.team == team02
+        assert active_link.user.username == "team02"
 
 
 class TestLinkHijackProtection:
@@ -440,3 +554,16 @@ class TestDiscordLinkConstraints:
         link2.refresh_from_db()
         assert link1.is_active
         assert link2.is_active
+
+
+def test_discord_link_is_read_only_in_admin():
+    from django.contrib.admin.sites import AdminSite
+    from django.test import RequestFactory
+
+    from team.admin import DiscordLinkAdmin
+
+    model_admin = DiscordLinkAdmin(DiscordLink, AdminSite())
+    request = RequestFactory().get("/")
+    assert not model_admin.has_add_permission(request)
+    assert not model_admin.has_change_permission(request)
+    assert not model_admin.has_delete_permission(request)
