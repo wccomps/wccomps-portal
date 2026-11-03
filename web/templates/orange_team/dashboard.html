@@ -148,7 +148,12 @@
                 {% for assignment in assignments %}
                     <tr {% if assignment.has_criteria %}x-data="assignmentRow" data-score="{{ assignment.score|default:'0' }}" data-max-score="{{ assignment.orange_check.max_score }}" data-save-url="{% url 'orange_team:assignment_save' assignment.pk %}"{% endif %}>
                         <td>Team {{ assignment.team.team_number }}</td>
-                        <td>{{ assignment.orange_check.title }}</td>
+                        <td>
+                            {{ assignment.orange_check.title }}
+                            {% if assignment.orange_check.description %}
+                                <div class="text-sm text-muted whitespace-pre-wrap">{{ assignment.orange_check.description }}</div>
+                            {% endif %}
+                        </td>
                         <td>
                             {% if assignment.orange_check.scheduled_at %}
                                 {{ assignment.orange_check.scheduled_at|date:"H:i" }}

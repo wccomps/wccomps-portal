@@ -134,12 +134,13 @@ class TestCheckDetail:
     def test_view_detail(self) -> None:
         user = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
-        check = OrangeCheck.objects.create(title="Test", description="Desc", created_by=user)
+        check = OrangeCheck.objects.create(title="Test", description="Step 1\nStep 2", created_by=user)
         client = Client()
         client.force_login(User.objects.get(username="gold1"))
         response = client.get(f"/orange-team/checks/{check.pk}/")
         assert response.status_code == 200
         assert b"Test" in response.content
+        assert b'<span class="whitespace-pre-wrap">Step 1\nStep 2</span>' in response.content
 
     def test_non_lead_denied(self) -> None:
         user = User.objects.create_user(username="orange1", password="test")
