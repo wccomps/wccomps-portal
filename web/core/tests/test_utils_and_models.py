@@ -10,7 +10,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from core.auth_utils import get_authentik_id, permission_groups_of, team_for_groups
-from core.discord_tasks import CleanupCompetition, PostTicketUpdate, SyncRoles
+from core.discord_tasks import PostTicketUpdate, ReconcileTeams, SyncRoles
 from core.models import AuditLog, CompetitionConfig, DiscordTask, InvalidPayloadError
 from team.models import Team
 
@@ -149,7 +149,7 @@ class TestDiscordTaskModel:
             ("setup_team_infrastructure", {"team_number": True}),
             ("setup_team_infrastructure", {"team_number": 5, "recreate": "yes"}),
             ("log_to_channel", {"message": 5}),
-            ("cleanup_competition", {"requested_by": "ops", "closed_out_event_id": "7"}),
+            ("reconcile_teams", {"requested_by": "ops", "open_event_id": "7"}),
         ],
     )
     def test_typed_payload_rejects_a_field_of_the_wrong_type(self, task_type, payload):
@@ -185,11 +185,9 @@ class TestDiscordTaskModel:
         assert DiscordTask(task_type="tagged", payload={}).typed_payload() == Tagged()
 
     def test_typed_payload_accepts_none_for_an_optional_field(self):
-        task = DiscordTask(
-            task_type="cleanup_competition", payload={"requested_by": "ops", "closed_out_event_id": None}
-        )
+        task = DiscordTask(task_type="reconcile_teams", payload={"requested_by": "ops", "open_event_id": None})
 
-        assert task.typed_payload() == CleanupCompetition(requested_by="ops")
+        assert task.typed_payload() == ReconcileTeams(requested_by="ops")
 
     def test_clean_rejects_a_payload_missing_a_field(self):
         from django.core.exceptions import ValidationError

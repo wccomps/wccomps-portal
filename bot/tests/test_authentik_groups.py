@@ -19,7 +19,7 @@ async def _run_with(result=None, error=None):
 async def test_the_refresh_runs_off_the_shared_orm_thread():
     """Waiting on the refresh lock must not hold the thread every other ORM call in the bot waits on."""
     off_thread = AsyncMock(return_value=MagicMock(changed=0))
-    with patch.dict(authentik_groups.refresh_groups_now.__globals__, {"off_orm_thread": off_thread}):
+    with patch.dict(authentik_groups.refresh_groups_now.__globals__, {"run_blocking": off_thread}):
         await authentik_groups.refresh_groups_now()
 
     off_thread.assert_awaited_once_with(authentik_groups._refresh)

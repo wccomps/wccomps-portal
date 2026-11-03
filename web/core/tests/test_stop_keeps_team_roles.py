@@ -9,8 +9,9 @@ from django.contrib.auth.models import User
 from bot.role_sync import role_grants
 from core.auth_utils import has_permission, permission_groups_of
 from core.models import CompetitionConfig, UserGroups
-from core.services.competition import run_competition_to_completion
+from core.services.competition import run_competition
 from core.services.user_groups import refresh_user_groups
+from core.utils import drain
 from team.models import DiscordLink, Team
 
 pytestmark = pytest.mark.django_db
@@ -56,7 +57,7 @@ def test_stopping_keeps_the_team_roles_and_takes_the_portal_away(member):
         patch("core.authentik_manager.AuthentikManager", return_value=manager),
         patch("scoring.quotient_sync.sync_service_scores"),
     ):
-        result = run_competition_to_completion(False, "gold-admin")
+        result = drain(run_competition(False, "gold-admin"))
 
     assert result.accounts_ok == result.accounts_total
     assert role_grants().by_member[77] == frozenset({TEAM_ROLE, BLUETEAM})
