@@ -84,7 +84,6 @@ def oauth_login(request: HttpRequest) -> HttpResponse:
         "redirect_uri": redirect_uri,
         "state": state,
     }
-    # After a refused sign-in from before a reset: make Authentik ask again rather than reuse its session
     if request.GET.get("prompt") == "login":
         params |= {"prompt": "login"}
 
@@ -344,7 +343,12 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
                 groups=groups, account_active=True, groups_updated_at=read_at
             )
 
+    # login() flushes the session when switching from another signed-in portal account (e.g. relinking from team05
+    # to team12); keep the pending /link token started in this browser across the account switch.
+    pending_link_token = request.session.get("pending_link_token")
     login(request, user)
+    if pending_link_token is not None:
+        request.session["pending_link_token"] = pending_link_token
 
     if next_url == "/":
         next_url = get_role_based_landing_url(groups)

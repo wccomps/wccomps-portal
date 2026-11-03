@@ -68,6 +68,17 @@ class DiscordLinkAdmin(PortalModelAdmin[DiscordLink]):
     readonly_fields = ["linked_at", "unlinked_at"]
     ordering = ["-linked_at"]
 
+    # Links come from /link and are deactivated by unlink_discord_links; editing team or user here would put
+    # DiscordLink.team out of sync with the user's Authentik group, which DiscordLink.seat() refuses on role sync.
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: DiscordLink | None = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: DiscordLink | None = None) -> bool:
+        return False
+
 
 @admin.register(LinkToken)
 class LinkTokenAdmin(PortalModelAdmin[LinkToken]):

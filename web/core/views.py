@@ -3,6 +3,7 @@ import secrets
 from contextlib import suppress
 from dataclasses import asdict
 from typing import cast
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.models import User
@@ -51,7 +52,7 @@ from team.forms import (
     ImportMode,
     parse_csv_file,
 )
-from team.models import SchoolInfo, Team
+from team.models import DiscordLink, SchoolInfo, Team
 
 from .auth_utils import (
     get_authentik_id,
@@ -102,11 +103,12 @@ def link_initiate(request: HttpRequest) -> HttpResponse:
     request.session["pending_link_token"] = link_token.token
     request.session["pending_link_discord_id"] = link_token.discord_id
 
-    # Pass token through OAuth redirect via next parameter
-    from urllib.parse import quote
-
-    next_url = quote(f"/auth/link-callback?token={link_token.token}", safe="")
-    return redirect(f"/auth/login/?next={next_url}")
+    params = {"next": f"/auth/link-callback?token={link_token.token}"}
+    if DiscordLink.objects.filter(discord_id=link_token.discord_id, is_active=False).exists():
+        # Someone unlinked from the wrong team still has that team's Authentik session in their browser;
+        # prompt=login makes Authentik ask for the right account's credentials instead of reusing it.
+        params["prompt"] = "login"
+    return redirect(f"/auth/login/?{urlencode(params)}")
 
 
 def link_callback(request: HttpRequest) -> HttpResponse:
@@ -164,6 +166,7 @@ def link_callback(request: HttpRequest) -> HttpResponse:
         if isinstance(token_result, LinkResult):
             return _render_error(token_result)
         link_token = token_result
+        switch_params = urlencode({"prompt": "login", "next": f"/auth/link-callback?token={link_token.token}"})
         return render(
             request,
             "link_confirm.html",
@@ -173,6 +176,7 @@ def link_callback(request: HttpRequest) -> HttpResponse:
                 "authentik_username": authentik_username,
                 "team_name": f"Team {team.team_number}" if team else None,
                 "is_team_account": team is not None,
+                "switch_account_url": f"/auth/login/?{switch_params}",
             },
         )
 
