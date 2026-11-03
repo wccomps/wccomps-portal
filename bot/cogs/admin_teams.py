@@ -279,10 +279,6 @@ class AdminTeamsCog(commands.Cog):
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
             return
 
-        if not team_numbers:
-            await interaction.followup.send("No teams specified", ephemeral=True)
-            return
-
         already_state = "active" if active else "inactive"
         verb = "activated" if active else "deactivated"
         title_verb = "Activated" if active else "Deactivated"
@@ -373,10 +369,6 @@ class AdminTeamsCog(commands.Cog):
             team_numbers = parse_team_range(teams)
         except ValueError as e:
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
-            return
-
-        if not team_numbers:
-            await interaction.followup.send("No teams specified", ephemeral=True)
             return
 
         guild = interaction.guild

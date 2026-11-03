@@ -205,6 +205,9 @@ def test_a_ticket_number_option_is_as_long_as_the_column(name: str) -> None:
 
 
 ACTIVATE = Command(AdminTeamsCog, AdminTeamsCog.admin_activate_teams.callback, may("admin"))
+RESET_PASSWORDS = Command(
+    AdminCompetitionCog, AdminCompetitionCog.admin_reset_blueteam_passwords.callback, may("gold_team")
+)
 SET_APPS = Command(AdminCompetitionCog, AdminCompetitionCog.admin_competition_set_apps.callback, may("admin"))
 REOPEN = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_reopen.callback, may("ticketing_admin"))
 
@@ -215,6 +218,16 @@ REOPEN = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_reopen.callback, 
 def test_a_team_range_error_repeats_only_the_start_of_the_range(bot_world: World, teams: str) -> None:
     """parse_team_range's error repeated the whole part it couldn't read, and the reply went past 2000 characters."""
     drive(ACTIVATE, bot_world, Chosen({"role": "admin", "teams": teams}))
+
+
+@example(team_numbers=" ")
+@example(team_numbers=",")
+@views_profile()
+@given(team_numbers=st.text(alphabet=" ,\t", min_size=1, max_size=5))
+def test_a_blank_team_range_is_refused(bot_world: World, team_numbers: str) -> None:
+    """parse_team_range answered [] for whitespace or commas, so /competition reset-blueteam-passwords deferred and
+    never sent a followup."""
+    drive(RESET_PASSWORDS, bot_world, Chosen({"role": "admin", "team_numbers": team_numbers}))
 
 
 @example(app_slugs="netbird," + "x" * 3000)
