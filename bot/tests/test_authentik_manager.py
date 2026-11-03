@@ -257,6 +257,16 @@ class TestAuthentikManager:
         call_args = manager.client.put.call_args
         assert call_args[1]["json"]["enabled"] is True
 
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_update_binding_enabled_skips_put_when_already_in_target_state(
+        self, manager: AuthentikManager, enabled: bool
+    ) -> None:
+        binding = {"pk": "binding-123", "enabled": enabled}
+
+        manager.update_binding_enabled(binding, enabled)
+
+        manager.client.put.assert_not_called()
+
     def test_update_binding_enabled_failure(self, manager: AuthentikManager) -> None:
         """Test binding update failure handling."""
         binding = {"pk": "binding-123", "enabled": False}
@@ -423,6 +433,25 @@ class TestAuthentikManager:
         ):
             with pytest.raises(AuthentikAPIError):
                 lookup()
+
+    @pytest.mark.parametrize("is_active", ["yes", 1, None])
+    def test_find_user_refuses_a_user_with_non_boolean_is_active(
+        self, manager: AuthentikManager, is_active: object
+    ) -> None:
+        manager.client.get.return_value = self._answer(
+            {"results": [{"pk": 42, "username": "team01", "uid": "u-1", "is_active": is_active}]}
+        )
+
+        with pytest.raises(AuthentikAPIError, match="no boolean is_active"):
+            manager.find_user("team01")
+
+    @pytest.mark.parametrize("is_active", [True, False])
+    def test_set_user_active_skips_patch_when_already_in_target_state(
+        self, manager: AuthentikManager, is_active: bool
+    ) -> None:
+        manager.set_user_active({"pk": 42, "username": "team01", "uid": "u-1", "is_active": is_active}, is_active)
+
+        manager.client.patch.assert_not_called()
 
     def test_set_user_active_refuses_a_redirect(self, manager: AuthentikManager) -> None:
         manager.client.patch.return_value = self._answer({}, 302)

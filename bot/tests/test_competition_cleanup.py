@@ -598,3 +598,61 @@ async def test_a_failing_teardown_reports_the_teams_left_before_it_raises(compet
     summary = ops.await_args.args[1]
     assert summary.startswith("Discord cleanup failed partway")
     assert "Could not delete the role or category of teams 03" in summary
+
+
+async def test_opening_an_event_deletes_and_provisions_nextcloud_accounts(competition: Team, settings: Any) -> None:
+    settings.NEXTCLOUD_URL = "https://files.test"
+    settings.NEXTCLOUD_USERNAME = "admin"
+    settings.NEXTCLOUD_PASSWORD = "secret"
+    opened = await _open_event()
+    await Team.objects.acreate(team_number=4, team_name="Team 04", is_active=False)
+    nc = MagicMock()
+    nc.__enter__.return_value = nc
+    nc.delete_team_user.side_effect = [True, False]
+
+    with (
+        patch("bot.competition_actions.NextcloudManager", return_value=nc),
+        patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
+        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
+        patch("bot.role_sync.sync_roles", _sync_removing(0)),
+    ):
+        await reconcile_teams(MagicMock(), _guild("Team 03"), "gold", opened, _no_beat)
+
+    assert [c.args[0] for c in nc.delete_team_user.call_args_list] == [3, 4]
+    assert [c.args[0] for c in nc.provision_team_user.call_args_list] == [3]
+    audit = await AuditLog.objects.aget(action="competition_cleanup")
+    assert audit.details["deleted_nextcloud_users"] == 1
+    summary = ops.await_args.args[1]
+    assert "Deleted 1 Nextcloud team accounts" in summary
+
+
+async def test_clear_team_channels_resets_nextcloud_for_handed_over_team(competition: Team, settings: Any) -> None:
+    from bot.utils import TaskProgress
+    from core.nextcloud import NextcloudAPIError
+
+    settings.NEXTCLOUD_URL = "https://files.test"
+    settings.NEXTCLOUD_USERNAME = "admin"
+    settings.NEXTCLOUD_PASSWORD = "secret"
+    await Team.objects.filter(pk=competition.pk).aupdate(
+        channels_need_clearing=True, discord_role_id=None, discord_category_id=None
+    )
+    task = await DiscordTask.objects.acreate(task_type="clear_team_channels", payload={"team_number": 3})
+    processor = DiscordQueueProcessor(MagicMock())
+    guild = _guild("Staff")
+    guild.roles = []
+    guild.get_role.side_effect = lambda role_id: None
+    processor._guild = MagicMock(return_value=guild)
+    nc = MagicMock()
+    nc.__enter__.return_value = nc
+    nc.delete_team_user.side_effect = [NextcloudAPIError("HTTP 502"), True]
+
+    with patch("core.nextcloud.NextcloudManager", return_value=nc):
+        with pytest.raises(NextcloudAPIError):
+            await processor._dispatch(task.typed_payload(), TaskProgress())
+        # channels_need_clearing stays True so a retry runs the Nextcloud reset again
+        assert await Team.objects.filter(pk=competition.pk, channels_need_clearing=True).aexists()
+        await processor._dispatch(task.typed_payload(), TaskProgress())
+
+    assert nc.delete_team_user.call_count == 2
+    nc.provision_team_user.assert_called_once_with(3)
+    assert not await Team.objects.filter(pk=competition.pk, channels_need_clearing=True).aexists()

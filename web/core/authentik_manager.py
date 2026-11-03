@@ -23,6 +23,7 @@ class AuthentikUser(TypedDict):
     pk: int
     username: str
     uid: str
+    is_active: bool
 
 
 class AuthentikGroupEntry(TypedDict):
@@ -32,8 +33,6 @@ class AuthentikGroupEntry(TypedDict):
 
 
 class AuthentikUserEntry(AuthentikUser):
-    uid: str
-    is_active: bool
     groups: list[str]
 
 
@@ -231,6 +230,9 @@ class AuthentikManager:
     def update_binding_enabled(self, binding: AuthentikBinding, enabled: bool) -> None:
         """Set a binding's enabled state; an enabled binding allows the group access."""
         binding_pk = binding["pk"]
+        if binding.get("enabled") is enabled:
+            logger.info(f"Binding {binding_pk} is already {'enabled' if enabled else 'disabled'}")
+            return
         binding["enabled"] = enabled
         response = self._request("put", f"{self.base_url}/api/v3/policies/bindings/{binding_pk}/", json=binding)
         self._check(response, f"Update binding {binding_pk}")
@@ -317,6 +319,9 @@ class AuthentikManager:
         return bool(sessions)
 
     def set_user_active(self, user: AuthentikUser, is_active: bool) -> None:
+        if user.get("is_active") is is_active:
+            logger.info(f"User {user['username']} is already active={is_active}")
+            return
         response = self._request(
             "patch", f"{self.base_url}/api/v3/core/users/{user['pk']}/", json={"is_active": is_active}
         )
@@ -334,6 +339,8 @@ class AuthentikManager:
             raise AuthentikAPIError(f"Find user {username}: the user has no integer pk")
         if user is not None and not (isinstance(user.get("uid"), str) and user["uid"]):
             raise AuthentikAPIError(f"Find user {username}: the user has no uid")
+        if user is not None and "is_active" in user and type(user["is_active"]) is not bool:
+            raise AuthentikAPIError(f"Find user {username}: the user has no boolean is_active")
         return cast(AuthentikUser | None, user)
 
     def set_password(self, user: AuthentikUser, password: str) -> None:

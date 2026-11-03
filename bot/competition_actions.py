@@ -21,6 +21,7 @@ from bot.utils import (
     TaskProgress,
     announcement,
     log_to_ops_channel,
+    run_blocking,
     send_announcement,
     send_parts,
     team_chat_channel,
@@ -28,6 +29,7 @@ from bot.utils import (
 from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams
 from core.discord_tasks import PermanentTaskError
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
+from core.nextcloud import NextcloudManager, nextcloud_configured
 from core.services.competition import START_MESSAGE_SENDER, Attempt, CompetitionRunResult
 from core.services.competition import run_competition as competition_steps
 from core.utils import shorten
@@ -136,26 +138,40 @@ def _build_status_embed(config: CompetitionConfig) -> discord.Embed:
 
 @dataclass
 class Teardown:
-    """What tearing the team channels and roles down did, kept up to date as it goes; stopped says why it stopped
-    early, or ''."""
+    """What tearing the team channels, roles and Nextcloud accounts down did, kept up to date as it goes; stopped says
+    why it stopped early, or ''."""
 
     member_roles_removed: int = 0
     categories: int = 0
     team_roles: int = 0
     judges: int = 0
+    nextcloud_users: int = 0
     left: list[int] = field(default_factory=list)
     stopped: str = ""
 
     @property
     def changed(self) -> bool:
-        return bool(self.member_roles_removed or self.categories or self.team_roles or self.judges)
+        return bool(
+            self.member_roles_removed or self.categories or self.team_roles or self.judges or self.nextcloud_users
+        )
+
+
+def _delete_nextcloud_team_user(team_number: int) -> bool:
+    with NextcloudManager() as manager:
+        return manager.delete_team_user(team_number)
+
+
+def _provision_nextcloud_teams(team_numbers: list[int]) -> None:
+    with NextcloudManager() as manager:
+        for number in team_numbers:
+            manager.provision_team_user(number)
 
 
 async def _tear_down_teams(
     guild: discord.Guild, problem: Callable[[], str], beat: Callable[[], None], done: Teardown
 ) -> None:
-    """Delete every team's category, channels and role, then take the Room Judge role away; problem, asked before each
-    team, stops it early. Counts go into done as they happen."""
+    """Delete every team's category, channels, role and Nextcloud account, then take the Room Judge role away;
+    problem, asked before each team, stops it early. Counts go into done as they happen."""
     from bot.role_sync import sync_roles
 
     # While the role IDs are recorded, so the sync still counts team roles as its own
@@ -169,6 +185,8 @@ async def _tear_down_teams(
         done.team_roles += removed.count("role")
         if team.channels_need_clearing:
             done.left.append(team.team_number)
+        if nextcloud_configured() and await run_blocking(_delete_nextcloud_team_user, team.team_number):
+            done.nextcloud_users += 1
         beat()
     done.judges = await _remove_room_judges(guild)
 
@@ -190,8 +208,9 @@ async def _remove_room_judges(guild: discord.Guild) -> int:
 async def reconcile_teams(
     bot: discord.Client, guild: discord.Guild, actor: str, open_event_id: int | None, beat: Callable[[], None] = beat
 ) -> None:
-    """Tear the team channels and roles down unless teardown_problem refuses, then set the linked teams up again,
-    even after a teardown that failed; a failure raises once both have run."""
+    """Tear the team channels, roles and Nextcloud accounts down unless teardown_problem refuses, then set the linked
+    teams up again and pre-provision the open event's active Nextcloud accounts, even after a teardown that failed; a
+    failure raises once both have run."""
 
     def problem() -> str:
         return teardown_problem(event_stage(), open_event_id)
@@ -215,6 +234,16 @@ async def reconcile_teams(
             await setup_team_infrastructure(guild, team, bot=bot)
             beat()
         await sync_roles(guild)
+        if open_event_id is not None and not skipped and not done.stopped and nextcloud_configured():
+            active_numbers = [
+                n
+                async for n in Team.objects.filter(is_active=True)
+                .order_by("team_number")
+                .values_list("team_number", flat=True)
+            ]
+            if active_numbers:
+                await run_blocking(_provision_nextcloud_teams, active_numbers)
+                beat()
     except Exception as e:
         failure = failure or e
     quiet = event is not None and failure is None and not (done.changed or done.stopped or done.left)
@@ -228,6 +257,7 @@ async def reconcile_teams(
                 "event": open_event_id,
                 "deleted_categories": done.categories,
                 "deleted_team_roles": done.team_roles,
+                "deleted_nextcloud_users": done.nextcloud_users,
                 "member_roles_removed": done.member_roles_removed,
                 "room_judges_removed": done.judges,
                 "stopped": done.stopped,
@@ -249,6 +279,8 @@ async def _report_teardown(bot: discord.Client, event: Event | None, done: Teard
         f"• Deleted {done.categories} team categories and {done.team_roles} team roles",
         f"• Removed {done.member_roles_removed} roles from members who are no longer linked",
     ]
+    if done.nextcloud_users:
+        lines.append(f"• Deleted {done.nextcloud_users} Nextcloud team accounts")
     if done.judges:
         lines.append(f"• Removed the Room Judge role from {done.judges} members")
     if done.left:

@@ -92,6 +92,9 @@ class CompetitionRunResult:
     accounts_total: int = 0
     accounts_ok: int = 0
     accounts_failed: int = 0
+    account_failures: list[tuple[str, str]] = field(default_factory=list)
+    nextcloud_ok: int = 0
+    nextcloud_failed: list[tuple[str, str]] = field(default_factory=list)
     quotient_synced: bool | None = None
     start_message_queued: bool = False
     error: str | None = None
@@ -107,8 +110,8 @@ class CompetitionRunResult:
 
     @property
     def has_failures(self) -> bool:
-        """Some app binding or team account didn't change: the run finished, but not completely."""
-        return bool(self.apps_failed) or self.accounts_failed > 0
+        """Some app binding, team account or Nextcloud account didn't change: the run finished, but not completely."""
+        return bool(self.apps_failed) or self.accounts_failed > 0 or bool(self.nextcloud_failed)
 
     def summary(self) -> str:
         if self.error:
@@ -122,6 +125,11 @@ class CompetitionRunResult:
         if self.accounts_failed:
             accounts += f" ({self.accounts_failed} failed)"
         lines.append(accounts)
+        lines.extend(f"Failed: {username}: {error}" for username, error in self.account_failures)
+        if self.nextcloud_ok or self.nextcloud_failed:
+            nc_total = self.nextcloud_ok + len(self.nextcloud_failed)
+            lines.append(f"Nextcloud accounts provisioned: {self.nextcloud_ok}/{nc_total}")
+            lines.extend(f"Failed Nextcloud: {username}: {error}" for username, error in self.nextcloud_failed)
         if self.quotient_synced is not None:
             what = "Quotient metadata" if self.enable else "Quotient service scores"
             lines.append(f"{what}: {'synced' if self.quotient_synced else 'sync failed'}")
@@ -253,12 +261,14 @@ def _run(
     active teams' accounts; stop disables every team account), refreshes stored groups so permissions
     follow at once, syncs Quotient metadata on start or final service scores on stop, then records the
     new state and an audit entry. The first start of an event also queues the start message to every
-    active team. Blocking (Authentik and Quotient HTTP): async callers run it in a thread.
+    active team. Blocking (Authentik, Nextcloud and Quotient HTTP): async callers run it in a thread.
     """
     from django.contrib.auth.models import User
     from scoring.quotient_sync import sync_quotient_metadata, sync_service_scores
 
     from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
+    from core.nextcloud import NextcloudAPIError, NextcloudManager, nextcloud_configured
+    from core.nextcloud import reason_for as nextcloud_reason_for
     from core.services.user_groups import refresh_user_groups
 
     config = CompetitionConfig.get_config()
@@ -273,7 +283,8 @@ def _run(
     # disables every team account, closing any that was left enabled.
     numbers = active_team_numbers() if enable else list(range(1, MAX_TEAMS + 1))
     result.accounts_total = len(numbers)
-    total = len(result.controlled_apps) + len(numbers) + 2
+    provision_nextcloud = enable and nextcloud_configured()
+    total = len(result.controlled_apps) + len(numbers) + 2 + (1 if provision_nextcloud else 0)
     step = 0
     with AuthentikManager() as manager:
         for slug in result.controlled_apps:
@@ -296,8 +307,10 @@ def _run(
                 set_team_account_active(manager, number, enable)
             except AuthentikAPIError as e:
                 logger.warning(f"Failed to set {username} active={enable}: {e}")
+                why = reason_for(e)
                 result.accounts_failed += 1
-                yield CompetitionStep(f"Failed {username}: {reason_for(e)}", step, total, ok=False)
+                result.account_failures.append((username, why))
+                yield CompetitionStep(f"Failed {username}: {why}", step, total, ok=False)
             else:
                 result.accounts_ok += 1
                 yield CompetitionStep(f"{verb} {username}", step, total)
@@ -311,6 +324,29 @@ def _run(
             logger.warning(f"Group refresh after competition {'start' if enable else 'stop'} failed: {e}")
             why = reason_for(e) if isinstance(e, AuthentikAPIError) else str(e)
             yield CompetitionStep(f"Permission refresh failed (retried within 5 minutes): {why}", step, total, ok=False)
+
+    if provision_nextcloud:
+        step += 1
+        with NextcloudManager() as nextcloud:
+            for number in numbers:
+                username = team_username(number)
+                try:
+                    nextcloud.provision_team_user(number)
+                except NextcloudAPIError as e:
+                    logger.warning(f"Failed to provision Nextcloud user {username}: {e}")
+                    result.nextcloud_failed.append((username, nextcloud_reason_for(e)))
+                else:
+                    result.nextcloud_ok += 1
+        if result.nextcloud_failed:
+            failed = ", ".join(f"{u} ({w})" for u, w in result.nextcloud_failed)
+            yield CompetitionStep(
+                f"Nextcloud provisioned {result.nextcloud_ok}/{len(numbers)} teams (failed: {failed})",
+                step,
+                total,
+                ok=False,
+            )
+        else:
+            yield CompetitionStep(f"Nextcloud provisioned ({result.nextcloud_ok} teams)", step, total)
 
     step += 1
     actor_user = User.objects.filter(username=actor).first()
@@ -376,8 +412,14 @@ def _run(
                 "apps_failed": [app for app, _ in result.apps_failed],
                 "accounts_ok": result.accounts_ok,
                 "accounts_failed": result.accounts_failed,
+                "account_failures": dict(result.account_failures),
                 "quotient_synced": result.quotient_synced,
                 "start_message_queued": result.start_message_queued,
+                **(
+                    {"nextcloud_ok": result.nextcloud_ok, "nextcloud_failed": dict(result.nextcloud_failed)}
+                    if provision_nextcloud
+                    else {}
+                ),
                 **({"timer_attempt": timer.number} if timer is not None else {}),
             },
         )

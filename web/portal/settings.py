@@ -236,6 +236,11 @@ PROXMOX_CA_FILE = os.environ.get("PROXMOX_CA_FILE", "")
 PROXMOX_VERIFY_SSL = os.environ.get("PROXMOX_VERIFY_SSL", "True") == "True"
 PROXMOX_DEFAULT_SNAPSHOT = os.environ.get("PROXMOX_DEFAULT_SNAPSHOT", "clean")
 
+NEXTCLOUD_URL = os.environ.get("NEXTCLOUD_URL", "")
+NEXTCLOUD_USERNAME = os.environ.get("NEXTCLOUD_USERNAME", "")
+NEXTCLOUD_PASSWORD = os.environ.get("NEXTCLOUD_PASSWORD", "")
+NEXTCLOUD_OIDC_PROVIDER_ID = int(os.environ.get("NEXTCLOUD_OIDC_PROVIDER_ID", "1"))
+
 # Email configuration for packet and scorecard distribution
 _EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
 MAILERS = {
