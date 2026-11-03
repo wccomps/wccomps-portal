@@ -23,12 +23,9 @@
             <c-filter_field label="Status" id="id_status">
                 <select name="status" id="id_status" aria-label="Filter by status">
                     <option value="" {% if not filters.status %}selected{% endif %}>All</option>
-                    <option value="open" {% if filters.status == "open" %}selected{% endif %}>Live</option>
-                    <option value="upcoming"
-                            {% if filters.status == "upcoming" %}selected{% endif %}>Upcoming</option>
-                    <option value="closed" {% if filters.status == "closed" %}selected{% endif %}>Closed</option>
-                    <option value="unscheduled"
-                            {% if filters.status == "unscheduled" %}selected{% endif %}>Draft</option>
+                    {% for value, label in window_states.items %}
+                        <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
                 </select>
             </c-filter_field>
             <c-filter_field label="Search" id="id_search">

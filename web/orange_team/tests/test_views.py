@@ -92,3 +92,39 @@ class TestDashboard:
         assert b'<div class="text-sm text-muted whitespace-pre-wrap">1. Dial extension\n2. Verify greeting</div>' in (
             response.content
         )
+
+    def test_dashboard_shows_assignment_status_and_window_badges(self) -> None:
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from orange_team.models import OrangeAssignment, OrangeCheck
+        from team.models import Team
+
+        user = User.objects.create_user(username="orange6", password="test")
+        UserGroups.objects.create(user=user, authentik_id="orange6-uid", groups=["WCComps_OrangeTeam"])
+        now = timezone.now()
+        t1 = Team.objects.create(team_number=1, team_name="Team 01")
+        t2 = Team.objects.create(team_number=2, team_name="Team 02")
+        live_check = OrangeCheck.objects.create(
+            title="Live Check",
+            description="desc",
+            scheduled_at=now - timedelta(minutes=5),
+            time_limit=timedelta(hours=1),
+        )
+        upcoming_check = OrangeCheck.objects.create(
+            title="Upcoming Check",
+            description="desc",
+            scheduled_at=now + timedelta(hours=1),
+            time_limit=timedelta(hours=1),
+        )
+        OrangeAssignment.objects.create(orange_check=live_check, user=user, team=t1, status="pending")
+        OrangeAssignment.objects.create(orange_check=upcoming_check, user=user, team=t2, status="in_progress")
+
+        client = Client()
+        client.force_login(user)
+        html = client.get("/orange-team/").content.decode()
+        assert "Pending" in html
+        assert "In Progress" in html
+        assert "badge--success" in html
+        assert "badge--info" in html

@@ -806,7 +806,12 @@ def test_every_stored_status_maps_to_a_known_variant() -> None:
     known = known_variants()
     problems = []
     for kind, (label, field_name, mapping) in status_variants.BADGE_STATUSES.items():
-        choices = {value for value, _ in apps.get_model(label)._meta.get_field(field_name).choices}
+        model = apps.get_model(label)
+        choices = (
+            set(model.WINDOW_STATES)
+            if field_name == "window_state"
+            else {value for value, _ in model._meta.get_field(field_name).choices}
+        )
         if set(mapping) != choices:
             problems.append(f"{kind}: maps {sorted(mapping)}, {label}.{field_name} stores {sorted(choices)}")
         problems += [

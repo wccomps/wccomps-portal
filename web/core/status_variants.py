@@ -49,6 +49,16 @@ BADGE_STATUSES: dict[str, tuple[str, str, dict[str, str]]] = {
             "rejected": "danger",
         },
     ),
+    "orange_check_window": (
+        "orange_team.OrangeCheck",
+        "window_state",
+        {
+            "open": "success",
+            "upcoming": "info",
+            "closed": "neutral",
+            "unscheduled": "warning",
+        },
+    ),
 }
 
 # Django message level tag -> c-alert variant

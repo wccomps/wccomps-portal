@@ -132,6 +132,13 @@ class OrangeCheck(models.Model):
         end = self.window_end
         return end is not None and now >= end
 
+    WINDOW_STATES: Mapping[str, str] = {
+        "open": "Live",
+        "upcoming": "Upcoming",
+        "closed": "Closed",
+        "unscheduled": "Draft",
+    }
+
     def state_at(self, now: datetime) -> str:
         """The check's scheduling state at `now`: open / upcoming / closed / unscheduled."""
         if self.is_open(now):
@@ -146,6 +153,10 @@ class OrangeCheck(models.Model):
     def window_state(self) -> str:
         """The check's scheduling state for display: open / upcoming / closed / unscheduled."""
         return self.state_at(timezone.now())
+
+    @property
+    def window_state_display(self) -> str:
+        return self.WINDOW_STATES[self.window_state]
 
 
 def check_worth(criteria_points: Sequence[int], max_points: int) -> int:

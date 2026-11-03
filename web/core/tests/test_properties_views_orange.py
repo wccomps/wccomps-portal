@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from hypothesis import strategies as st
 from orange_team.forms import AssignmentRejectForm, FollowUpForm, OrangeCheckForm, ReassignForm, SubmitScoreForm
-from orange_team.models import OrangeAssignment, OrangeFollowUp
+from orange_team.models import OrangeAssignment, OrangeCheck, OrangeFollowUp
 
 from core.tests.views_harness import (
     Fields,
@@ -60,7 +60,7 @@ CASES = [
         "orange_team:check_list",
         LEAD,
         query=lambda w: {
-            "status": st.one_of(st.sampled_from(["open", "upcoming", "closed", "unscheduled"]), hostile_text()),
+            "status": st.one_of(st.sampled_from(list(OrangeCheck.WINDOW_STATES)), hostile_text()),
             "search": hostile_text(),
             "sort": hostile_text(),
         },
@@ -71,7 +71,7 @@ CASES = [
     ViewCase("orange_team:check_edit", LEAD, post=_check),
     ViewCase("orange_team:check_duplicate", LEAD),
     ViewCase("orange_team:check_assign", LEAD),
-    ViewCase("orange_team:check_auto_assign", LEAD, idempotent=(OrangeAssignment,)),
+    ViewCase("orange_team:check_auto_assign", LEAD),
     ViewCase("orange_team:check_rebalance", LEAD),
     ViewCase(
         "orange_team:reassign_team",

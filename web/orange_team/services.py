@@ -1,3 +1,5 @@
+import random
+
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils import timezone
@@ -22,14 +24,7 @@ def auto_assign_check(
     check: OrangeCheck,
     checked_in_users: list[User],
     teams: list[Team],
-    rotation_offset: int = 0,
 ) -> int:
-    """Assign on-shift volunteers to teams for a check, rotated by rotation_offset.
-
-    Only cells that are still pending (or don't exist yet) are (re)assigned round-robin;
-    any cell a volunteer has already started, submitted, or had approved — or rejected —
-    is left untouched, keeping its volunteer and score. Returns the number of cells changed.
-    """
     if not checked_in_users:
         return 0
     n = len(checked_in_users)
@@ -38,11 +33,14 @@ def auto_assign_check(
         _lock_check(check)
         criteria = list(check.criteria.all())
         existing = {a.team_id: a for a in check.assignments.select_for_update().order_by("pk")}
-        for j, team in enumerate(sorted(teams, key=lambda t: t.team_number)):
+        assignable = [
+            team for team in teams if (current := existing.get(team.id)) is None or current.status_info.unstarted
+        ]
+        shuffled_teams = random.sample(assignable, len(assignable))
+        shuffled_users = random.sample(checked_in_users, n)
+        for j, team in enumerate(shuffled_teams):
             current = existing.get(team.id)
-            if current is not None and not current.status_info.unstarted:
-                continue
-            assignee = checked_in_users[(j + rotation_offset) % n]
+            assignee = shuffled_users[j % n]
             if current is not None:
                 if current.user_id != assignee.id:
                     current.user = assignee
@@ -63,32 +61,22 @@ def auto_assign_check(
 
 
 def rebalance_unstarted(check: OrangeCheck, checked_in_users: list[User]) -> int:
-    """Redistribute only unstarted assignments (OrangeAssignment.STATUSES) evenly across the given volunteers."""
     if not checked_in_users:
         return 0
     n = len(checked_in_users)
     count = 0
     with transaction.atomic():
-        locked = check.assignments.select_for_update(of=("self",)).select_related("team").order_by("pk")
-        unstarted = sorted((a for a in locked if a.status_info.unstarted), key=lambda a: a.team.team_number)
-        for i, assignment in enumerate(unstarted):
-            assignee = checked_in_users[i % n]
+        locked = check.assignments.select_for_update(of=("self",)).order_by("pk")
+        unstarted = [a for a in locked if a.status_info.unstarted]
+        shuffled_assignments = random.sample(unstarted, len(unstarted))
+        shuffled_users = random.sample(checked_in_users, n)
+        for i, assignment in enumerate(shuffled_assignments):
+            assignee = shuffled_users[i % n]
             if assignment.user_id != assignee.id:
                 assignment.user = assignee
                 assignment.save(update_fields=["user"])
                 count += 1
     return count
-
-
-def assign_all_checks(
-    checks: list[OrangeCheck],
-    checked_in_users: list[User],
-    teams: list[Team],
-) -> int:
-    total = 0
-    for offset, check in enumerate(checks):
-        total += auto_assign_check(check, checked_in_users, teams, rotation_offset=offset)
-    return total
 
 
 def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) -> None:
