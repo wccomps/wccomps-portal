@@ -95,7 +95,7 @@
     </c-fieldset>
 {% endif %}
 <c-fieldset heading="Evidence">
-    {% if finding.screenshots.exists %}
+    {% if finding.screenshots.all %}
         <c-image_grid>
             {% for screenshot in finding.screenshots.all %}
                 <a href="{% url 'scoring:red_screenshot' screenshot.id %}"

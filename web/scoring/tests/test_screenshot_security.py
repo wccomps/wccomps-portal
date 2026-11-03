@@ -237,3 +237,21 @@ def test_a_refused_screenshot_is_named_among_the_others(team, red_team_user, moc
     assert response.status_code == 200
     assert b"too-big.png: File too large" in response.content
     assert not RedTeamScore.objects.exists()
+
+
+def test_review_incidents_counts_evidence_without_fetching_file_bytes(incident, gold_team_user):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    IncidentScreenshot.objects.create(incident=incident, file_data=PNG, filename="a.png", mime_type="image/png")
+    IncidentScreenshot.objects.create(incident=incident, file_data=PDF, filename="b.pdf", mime_type="application/pdf")
+    client = Client()
+    client.force_login(gold_team_user)
+
+    with CaptureQueriesContext(connection) as captured:
+        response = client.get(reverse("scoring:review_incidents"))
+
+    assert response.status_code == 200
+    assert b"2 files" in response.content
+    assert sum("incident_screenshot" in q["sql"] for q in captured.captured_queries) == 1
+    assert not any("file_data" in q["sql"] for q in captured.captured_queries)

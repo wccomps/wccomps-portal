@@ -1,4 +1,3 @@
-{# Review incidents table - swappable content for htmx #}
 {% load cotton %}
 <div id="review-incidents-content"
      x-data="incidentsBulkSelect">
@@ -70,9 +69,9 @@
                         <div class="text-sm text-muted">Submitted: {{ incident.created_at|date:"m/d H:i" }}</div>
                     </td>
                     <td>
-                        {% if incident.screenshots.exists %}
+                        {% if incident.screenshots.all %}
                             <c-badge variant="success">
-                                {{ incident.screenshots.count }} files
+                                {{ incident.screenshots.all|length }} files
                             </c-badge>
                         {% else %}
                             <span class="text-muted">No evidence</span>

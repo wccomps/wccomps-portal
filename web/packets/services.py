@@ -274,6 +274,8 @@ class PacketDistributionService:
         total = len(distributions)
         sent = 0
         failed = 0
+        if distributions:
+            _ = distributions[0].packet.file_data  # load deferred bytes once before worker threads share the packet
 
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = {executor.submit(self._send_one, dist): dist for dist in distributions}
@@ -308,7 +310,6 @@ class PacketDistributionService:
         yield ndjson_done(f"Sent {sent}, failed {failed}" if failed else f"Distributed to {sent} teams", failed == 0)
 
     def _stream_resend(self, packet: Packet, status_filter: str, only: Collection[int] | None = None) -> Iterator[str]:
-        """Resend distributions matching a status filter, with parallel streaming progress."""
         if refusal := check_resendable(packet):
             yield ndjson_done(refusal, success=False)
             return
@@ -322,6 +323,8 @@ class PacketDistributionService:
             if matching.filter(pk=pk).update(email_status="pending", email_error_message="")
         ]
         dists = list(PacketDistribution.objects.filter(pk__in=claimed).select_related("team"))
+        for dist in dists:
+            dist.packet = packet
         if not dists:
             yield ndjson_done(f"No {status_filter} distributions to resend")
             return
