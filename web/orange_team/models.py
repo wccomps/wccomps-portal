@@ -225,7 +225,7 @@ class AssignmentStatus:
     label: str
     on_dashboard: bool
     in_review_queue: bool
-    scored: bool  # its score stands: exported, counted as scored, kept in step with a rubric edit
+    scored: bool  # its score stands: exported and counted as scored
     unstarted: bool  # auto-assign and rebalance may hand it to another volunteer
     returned: bool  # sent back to the volunteer by the lead, whose notes say why
     moves: Mapping[Action, str]
