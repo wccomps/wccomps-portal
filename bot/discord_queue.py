@@ -144,7 +144,7 @@ class DiscordQueueProcessor:
 
     async def _still_processing(self) -> bool:
         current = self._current_task
-        return current is not None and await DiscordTask.objects.filter(pk=current, status="processing").aexists()
+        return current is None or await DiscordTask.objects.filter(pk=current, status="processing").aexists()
 
     async def _queue_copy(self, team: Team, message: str, sender: str) -> bool:
         """Queue the broadcast's copy for a team with no channel, only while the running task is still processing: its
@@ -156,7 +156,7 @@ class DiscordQueueProcessor:
         def queue() -> bool:
             with transaction.atomic():
                 running = DiscordTask.objects.select_for_update(no_key=True)
-                if current is None or not running.filter(pk=current, status="processing").exists():
+                if current is not None and not running.filter(pk=current, status="processing").exists():
                     return False
                 QueuedAnnouncement.objects.create(team=team, message=message, sender_name=sender)
                 return True

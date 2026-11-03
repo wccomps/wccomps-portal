@@ -125,6 +125,24 @@ async def _team_reset(blocked: Callable[..., Any]) -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_blocking_runs_on_a_pool_thread_and_closes_its_connection() -> None:
+    from bot import utils
+
+    flags: list[bool] = []
+
+    def recording(func: Callable[..., Any], *, thread_sensitive: bool = True) -> Callable[..., Awaitable[Any]]:
+        flags.append(thread_sensitive)
+        return sync_to_async(func, thread_sensitive=thread_sensitive)
+
+    connection = MagicMock()
+    with patch.dict(utils._hop.__globals__, {"sync_to_async": recording, "connection": connection}):
+        assert await utils.run_blocking(lambda a, b=0: a + b, 2, b=3) == 5
+
+    assert flags == [False]
+    connection.close.assert_called_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize(
     "start",
