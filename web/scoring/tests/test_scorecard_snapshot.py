@@ -97,6 +97,7 @@ def test_snapshot_renders_like_the_live_scorecard(scored_teams, team_number, tem
 def test_snapshot_keeps_decimals_exact(scored_teams):
     snapshot = serialize_scorecard(_scorecard_context(1))
 
+    assert snapshot["stats"]["inject_stats"][0]["max_points"] == {"$d": "10.00"}
     assert snapshot["orange_scores"][0]["points_awarded"] == {"$d": "8.25"}
     assert snapshot["orange_scores"][0]["max_points"] == 10
     assert context_from_snapshot(snapshot)["orange_total"] == Decimal("8.25")

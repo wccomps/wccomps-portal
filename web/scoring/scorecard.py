@@ -69,6 +69,7 @@ class _CategoryRank(TypedDict):
 class _InjectStat(TypedDict):
     name: str
     points: Decimal
+    max_points: Decimal | None
     rank: int
     avg: Decimal
     max: Decimal
@@ -163,6 +164,7 @@ def _compute_scorecard_stats(
             _InjectStat(
                 name=inj.inject_name,
                 points=inj.points_awarded,
+                max_points=inj.max_points,
                 rank=inj_rank,
                 avg=inj_avg,
                 max=inj_max,

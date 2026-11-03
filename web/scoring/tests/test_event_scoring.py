@@ -89,6 +89,7 @@ class TestComputeScorecardStats:
                 team=t,
                 inject_id="inj-1",
                 inject_name="Inject 1",
+                max_points=Decimal("100"),
                 points_awarded=Decimal(str(pts)),
                 is_approved=True,
             )
@@ -106,6 +107,7 @@ class TestComputeScorecardStats:
         assert len(stats["inject_stats"]) == 2
         inj1 = next(s for s in stats["inject_stats"] if s["name"] == "Inject 1")
         assert inj1["points"] == Decimal("80")
+        assert inj1["max_points"] == Decimal("100")
         assert inj1["rank"] == 2
         assert inj1["avg"] == Decimal("80")
         inj2 = next(s for s in stats["inject_stats"] if s["name"] == "Inject 2")

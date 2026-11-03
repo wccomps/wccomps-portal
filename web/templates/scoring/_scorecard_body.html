@@ -340,7 +340,9 @@
                         {{ inj.name }}
                         {% if inj.below_avg %}<span class="visually-hidden">(below average)</span>{% endif %}
                     </td>
-                    <td class="text-right">{{ inj.points|floatformat:0 }}</td>
+                    <td class="text-right">
+                        {{ inj.points|floatformat:0 }}{% if inj.max_points is not None %} / {{ inj.max_points|floatformat:0 }}{% endif %}
+                    </td>
                     <td class="text-right">
                         <c-score_value value="{{ inj.delta }}" format="signed" />
                     </td>
