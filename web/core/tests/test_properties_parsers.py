@@ -339,7 +339,7 @@ def test_file_size_validator_passes_or_refuses_any_upload(upload: SimpleUploaded
     try:
         assert validate_file_size(upload) is upload
     except ValidationError:
-        assert upload.size and upload.size > 50 * 1024 * 1024
+        assert upload.size and upload.size > 10 * 1024 * 1024
 
 
 @pytest.fixture

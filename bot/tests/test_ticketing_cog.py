@@ -829,7 +829,6 @@ class TestAttachmentHandling:
         # Verify attachment saved
         assert await TicketAttachment.objects.acount() == initial_count + 1
 
-        # Verify attachment data
         saved = await TicketAttachment.objects.filter(ticket=ticket).defer(None).afirst()
         assert saved is not None
         assert saved.filename == "screenshot.png"
