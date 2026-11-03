@@ -52,7 +52,32 @@ class TestAssignmentSave:
         assert data["score"] == 5
         assert data["max_score"] == 8
         r1.refresh_from_db()
+        assignment.refresh_from_db()
         assert r1.met is True
+        assert assignment.score == 5
+
+    def test_saved_score_persists_on_dashboard_reload_and_after_setting_reminder(self) -> None:
+        user, assignment, c1, c2, r1, r2 = self._setup()
+        client = Client()
+        client.force_login(user)
+        client.post(
+            f"/orange-team/assignments/{assignment.pk}/save/",
+            data=json.dumps({"criterion_id": c1.pk, "met": True}),
+            content_type="application/json",
+        )
+
+        dashboard_html = client.get("/orange-team/").content.decode()
+        assert 'data-score="5"' in dashboard_html
+        assert "5 / 8" in dashboard_html
+
+        reminder_response = client.post(
+            "/orange-team/followups/create/",
+            {"assignment_id": assignment.pk, "minutes": "15", "note": "Recheck"},
+            follow=True,
+        )
+        reminder_html = reminder_response.content.decode()
+        assert 'data-score="5"' in reminder_html
+        assert "5 / 8" in reminder_html
 
     def test_save_updates_status_to_in_progress(self) -> None:
         user, assignment, c1, c2, r1, r2 = self._setup()

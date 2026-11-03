@@ -479,12 +479,13 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
         criterion_id, met = posted
         if not moved:
             raise BadRequest("Assignment already submitted")
-        assignment.save(update_fields=["status"])
         result = get_object_or_404(OrangeAssignmentResult, assignment=assignment, criterion_id=criterion_id)
         result.met = met
         result.save(update_fields=["met"])
+        score = assignment.calculate_score()
+        assignment.score = score
+        assignment.save(update_fields=["status", "score"])
 
-    score = assignment.calculate_score()
     max_score = assignment.orange_check.max_score
     return JsonResponse({"score": score, "max_score": max_score})
 

@@ -110,7 +110,7 @@ def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) ->
 
         has_criteria = check.criteria.exists()
         for assignment in assignments:
-            if assignment.status_info.scored:
+            if not assignment.status_info.unstarted:
                 if has_criteria:
                     assignment.score = assignment.calculate_score()
                     assignment.save(update_fields=["score"])
