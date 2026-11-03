@@ -21,6 +21,7 @@ def test_clear_end_time_asks_then_cancels_the_scheduled_stop(live_server, pw_bro
     )
     context = create_session_context(pw_browser, live_server, role_user("gold_team"))
     manager = MagicMock()
+    manager.__enter__.return_value = manager
     manager.list_applications.return_value = []
     url = f"{live_server.url}/ops/admin/competition/setup/"
     try:
