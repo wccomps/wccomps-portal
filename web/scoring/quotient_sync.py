@@ -186,22 +186,29 @@ def get_box_metadata() -> dict[str, dict[str, object]]:
     }
 
 
-def ticket_infrastructure() -> tuple[list[str], dict[str, str], list[dict[str, str]]]:
+def ticket_infrastructure(*, staff: bool = False) -> tuple[list[str], dict[str, str], list[dict[str, str]]]:
     """Box names, box IPs and service choices (keys: value, label, box_ip, box_name, service_name) for filing a
-    ticket, from cached metadata."""
+    ticket, from cached metadata. Services are omitted for non-staff while applications are disabled."""
+    from core.models import CompetitionConfig
+
     metadata = QuotientMetadataCache.objects.first()
     boxes = metadata.boxes if metadata else []
-    services = [
-        {
-            "value": f"{box['name']}:{svc['name']}",
-            "label": f"{box['name']}: {svc['display_name']}",
-            "box_ip": box["ip"],
-            "box_name": box["name"],
-            "service_name": svc["name"],
-        }
-        for box in boxes
-        for svc in box.get("services", [])
-    ]
+    show_services = staff or CompetitionConfig.get_config().applications_enabled
+    services = (
+        [
+            {
+                "value": f"{box['name']}:{svc['name']}",
+                "label": f"{box['name']}: {svc['display_name']}",
+                "box_ip": box["ip"],
+                "box_name": box["name"],
+                "service_name": svc["name"],
+            }
+            for box in boxes
+            for svc in box.get("services", [])
+        ]
+        if show_services
+        else []
+    )
     return (
         sorted(box["name"] for box in boxes),
         {box["name"]: box["ip"] for box in boxes},

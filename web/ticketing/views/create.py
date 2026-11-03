@@ -29,8 +29,7 @@ def create_ticket(request: HttpRequest) -> HttpResponse:
     if not is_admin and not team:
         raise PermissionDenied("You must be a team member to create tickets.")
 
-    # The last synced Quotient metadata: the pickers keep it while Quotient is down
-    box_names, box_ip_map, service_choices = ticket_infrastructure()
+    box_names, box_ip_map, service_choices = ticket_infrastructure(staff=is_admin)
 
     form = CreateTicketPageForm(
         request.POST if request.method == "POST" else None,

@@ -17,6 +17,9 @@ class TestCreateTicketTemplate:
         """The synced Quotient metadata the form reads."""
         from scoring.models import QuotientMetadataCache
 
+        from core.models import CompetitionConfig
+
+        CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": True})
         QuotientMetadataCache.objects.create(
             boxes=[
                 {"name": "web", "ip": "10.0.0.1", "services": [{"name": "http", "display_name": "HTTP"}]},

@@ -43,7 +43,7 @@ def file_ticket(
     box_ip_map: dict[str, str] | None = None
     service_choices: list[dict[str, str]] = []
     if (hostname.strip() and not ip_address.strip()) or (service_name.strip() and not hostname.strip()):
-        _, box_ip_map, service_choices = ticket_infrastructure()
+        _, box_ip_map, service_choices = ticket_infrastructure(staff=staff)
     form = CreateTicketForm(
         {
             "title": "ticket",
