@@ -631,6 +631,9 @@ def parse_team_range(range_str: str) -> list[int]:
                 raise ValueError(f"Team number must be 1-{MAX_TEAMS}, got: {shorten(str(num), 30)}")
             team_numbers.add(num)
 
+    if not team_numbers:
+        raise ValueError("No teams specified")
+
     return sorted(team_numbers)
 
 

@@ -31,7 +31,4 @@ def parse_broadcast_target(target: str) -> BroadcastTarget:
         return Announcements()
     if target == "all-teams":
         return AllTeams()
-    numbers = parse_team_range(target)
-    if not numbers:
-        raise ValueError("The target names no team")
-    return Teams(tuple(numbers))
+    return Teams(tuple(parse_team_range(target)))

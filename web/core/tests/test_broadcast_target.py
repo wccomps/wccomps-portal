@@ -21,7 +21,7 @@ def test_targets_parse_to_their_kind(target: str, parsed: object) -> None:
 
 
 @pytest.mark.parametrize(
-    ("target", "reason"), [("9-3", "Invalid range"), ("teams", "Invalid team number"), (",", "no team")]
+    ("target", "reason"), [("9-3", "Invalid range"), ("teams", "Invalid team number"), (",", "No teams specified")]
 )
 def test_a_bad_target_is_a_value_error(target: str, reason: str) -> None:
     with pytest.raises(ValueError, match=reason):
