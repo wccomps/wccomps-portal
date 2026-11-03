@@ -79,9 +79,16 @@ class UploadError(ValueError):
     """An uploaded file can't be stored; the message says which and why."""
 
 
+class StoredFileManager[S: StoredFile](models.Manager[S]):
+    def get_queryset(self) -> models.QuerySet[S]:
+        return super().get_queryset().defer("file_data")
+
+
 class StoredFile(models.Model):
     DEFAULT_NAME: ClassVar[str]
     MAX_SIZE: ClassVar[int]
+
+    objects = StoredFileManager()
 
     file_data = models.BinaryField()
     filename = models.CharField(max_length=MAX_NAME_LENGTH)

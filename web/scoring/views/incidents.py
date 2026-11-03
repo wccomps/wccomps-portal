@@ -116,7 +116,9 @@ def incident_list(request: HttpRequest) -> HttpResponse:
 
 def view_incident_report(request: HttpRequest, incident_id: int) -> HttpResponse:
     user = cast(User, request.user)
-    incident = team_record_or_404(IncidentReport.objects.all(), user, staff=(INCIDENT_STAFF,), id=incident_id)
+    incident = team_record_or_404(
+        IncidentReport.objects.prefetch_related("screenshots"), user, staff=(INCIDENT_STAFF,), id=incident_id
+    )
 
     can_delete = incident.submitted_by == user and not incident.is_approved
 
@@ -227,7 +229,9 @@ def bulk_approve_incidents(request: HttpRequest) -> HttpResponse:
 @transaction.atomic
 def match_incident(request: HttpRequest, incident_id: int) -> HttpResponse:
     """Match an incident report to a red team finding."""
-    incident = get_object_or_404(IncidentReport.objects.select_for_update(), id=incident_id)
+    incident = get_object_or_404(
+        IncidentReport.objects.select_for_update().prefetch_related("screenshots"), id=incident_id
+    )
 
     suggested_findings = suggest_red_score_matches(incident)
 

@@ -29,8 +29,8 @@
                     <small>{{ incident.attack_description|linebreaks }}</small>
                 </c-info_box>
             </c-fieldset>
-            <c-fieldset heading="Evidence ({{ incident.screenshots.count }})">
-                {% if incident.screenshots.exists %}
+            <c-fieldset heading="Evidence ({{ incident.screenshots.all|length }})">
+                {% if incident.screenshots.all %}
                     <c-image_grid>
                         {% for screenshot in incident.screenshots.all %}
                             <a href="{% url 'scoring:incident_screenshot' screenshot.id %}"

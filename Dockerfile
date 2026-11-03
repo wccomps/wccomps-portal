@@ -59,5 +59,5 @@ RUN groupadd --system --gid 1001 app \
 USER 1001:1001
 
 ENTRYPOINT ["/entrypoint.sh"]
-# Bind address, workers (GUNICORN_WORKERS), timeout and logging live in web/gunicorn.conf.py
+# Bind address, workers (GUNICORN_WORKERS), threads (GUNICORN_THREADS), timeout and logging live in web/gunicorn.conf.py
 CMD ["gunicorn", "portal.wsgi:application"]

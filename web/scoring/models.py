@@ -21,7 +21,7 @@ def format_boxes_display(boxes: list[str] | str | None) -> str:
     return ", ".join(boxes)
 
 
-MAX_SCREENSHOT_SIZE = 50 * 1024 * 1024  # largest real upload so far was ~31MB (a .tar.gz)
+MAX_SCREENSHOT_SIZE = 10 * 1024 * 1024
 
 
 def validate_file_size(file: UploadedFile[bytes]) -> UploadedFile[bytes]:

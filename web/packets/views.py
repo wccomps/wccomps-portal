@@ -21,7 +21,6 @@ from .services import PacketDistributionService
 @require_GET
 @require_permission("blue_team")
 def team_packet(request: HttpRequest) -> HttpResponse:
-    """List all available packets for the current team (or all packets for gold_team)."""
     from core.auth_utils import has_permission
 
     user = cast(User, request.user)
@@ -39,6 +38,7 @@ def team_packet(request: HttpRequest) -> HttpResponse:
     context = {
         "distributions": PacketDistribution.objects.visible_to(team)
         .select_related("packet")
+        .defer("packet__file_data")
         .order_by("-packet__created_at"),
         "team": team,
     }

@@ -91,3 +91,11 @@ def test_no_stored_file_claims_a_type_before_its_bytes_are_seen() -> None:
 def test_every_stored_file_names_its_unnamed_files_and_limits_its_size() -> None:
     assert [m._meta.label for m in _file_models() if not isinstance(getattr(m, "DEFAULT_NAME", None), str)] == []
     assert [m._meta.label for m in _file_models() if not isinstance(getattr(m, "MAX_SIZE", None), int)] == []
+
+
+def test_every_stored_file_defers_its_bytes_by_default() -> None:
+    assert [
+        m._meta.label
+        for m in _file_models()
+        if m.objects.all().query.deferred_loading != (frozenset({"file_data"}), True)
+    ] == []

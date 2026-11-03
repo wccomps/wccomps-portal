@@ -39,7 +39,7 @@ Submit an **Incident Report** at `portal.wccomps.org/scoring/incident/submit/` t
 - **Attacker Source IP** + **Target Box / Service** (click the box button to auto-fill your `10.100.1X.*` IP)
 - **When** you detected it + whether it's **mitigated**
 - **What happened:** How they got in, what accounts/data they touched, and how you fixed it
-- **Proof:** Attach logs, screenshots, PDFs, or archives (up to 20 files, 50MB each)
+- **Proof:** Attach logs, screenshots, PDFs, or archives (up to 20 files, 10MB each, 50MB total)
 
 ---
 

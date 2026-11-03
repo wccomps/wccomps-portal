@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from django.db import models
 from django.db.models import Count, F, Q, Value
@@ -6,7 +6,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 from registration.models import Event
 
-from core.stored_files import StoredFile
+from core.stored_files import StoredFile, StoredFileManager
 
 if TYPE_CHECKING:
     from team.models import Team
@@ -36,6 +36,20 @@ class PacketQuerySet(models.QuerySet["Packet"]):
         )
 
 
+class PacketManager(StoredFileManager["Packet"]):
+    def get_queryset(self) -> PacketQuerySet:
+        return PacketQuerySet(self.model, using=self._db).defer("file_data")
+
+    def sent(self) -> PacketQuerySet:
+        return self.get_queryset().sent()
+
+    def downloadable(self) -> PacketQuerySet:
+        return self.get_queryset().downloadable()
+
+    def with_distribution_stats(self) -> PacketQuerySet:
+        return self.get_queryset().with_distribution_stats()
+
+
 def packets_sent(event: Event | None) -> bool:
     """Whether any packet went out for the event; sent packets reached its teams under their schools."""
     return event is not None and Packet.objects.sent().filter(event=event).exists()
@@ -44,7 +58,7 @@ def packets_sent(event: Event | None) -> bool:
 class Packet(StoredFile):
     """Pre-competition information packet to be distributed to all teams."""
 
-    objects = PacketQuerySet.as_manager()
+    objects: ClassVar[PacketManager] = PacketManager()
     DEFAULT_NAME = "unnamed"
     MAX_SIZE = 25 * 1024 * 1024
 

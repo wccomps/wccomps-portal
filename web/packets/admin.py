@@ -309,7 +309,7 @@ class PacketDistributionAdmin(PortalModelAdmin[PacketDistribution]):
         from .services import PacketDistributionService, check_resendable
 
         chosen: dict[Packet, list[int]] = {}
-        for dist in queryset.filter(email_status="failed").select_related("packet"):
+        for dist in queryset.filter(email_status="failed").select_related("packet").defer("packet__file_data"):
             chosen.setdefault(dist.packet, []).append(dist.pk)
         if not chosen:
             self.message_user(request, "None of the selected emails failed.", level=messages.WARNING)

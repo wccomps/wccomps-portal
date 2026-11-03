@@ -52,7 +52,7 @@ Click team number buttons to select which teams were compromised. "Select All" a
 
 ### 6. Evidence
 
-Upload screenshots, logs, or other proof — up to 20 files, max 50MB each.
+Upload screenshots, logs, or other proof: up to 20 files, max 10MB each (50MB total).
 
 ### 7. Notes
 
