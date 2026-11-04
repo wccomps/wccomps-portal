@@ -35,6 +35,7 @@ from quotient.client import (
 )
 
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
+from core.nextcloud import NextcloudAPIError, NextcloudManager
 from core.proxmox import ProxmoxAPIError, ProxmoxClient, ProxmoxSnapshot, ProxmoxTaskStatus, ProxmoxVM
 from core.tests.external_json import Answer, answer_lists, deep, serving
 from core.tests.strategies import rolled_back
@@ -112,6 +113,7 @@ PROXMOX_SNAPSHOTS = {
 }
 PROXMOX_UPID = {"data": "UPID:pve01:00001A2B:00000001:65000000:qmrollback:10105:user@pam!token:"}
 PROXMOX_TASK_STATUS = {"data": {"status": "stopped", "exitstatus": "OK"}}
+NEXTCLOUD_USER = {"ocs": {"meta": {"status": "ok", "statuscode": 200}, "data": {"user_id": "team01"}}}
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -338,6 +340,10 @@ def proxmox() -> ProxmoxClient:
     return ProxmoxClient(base_url="https://proxmox.test", api_token="user@pam!token=secret")
 
 
+def nextcloud() -> NextcloudManager:
+    return NextcloudManager(base_url="https://nextcloud.test", username="admin", password="secret")
+
+
 def error_from_answer() -> object:
     """_handle_response_error reads an error answer's body: it gets the first answer served, as is."""
 
@@ -350,12 +356,14 @@ def check_bool(result: object) -> None:
 
 
 AM = "web/core/authentik_manager.py:AuthentikManager"
+NC = "web/core/nextcloud.py:NextcloudManager"
 QC = "web/quotient/client.py:QuotientClient"
 QJ = "web/quotient/client.py:_json"
 PX = "web/core/proxmox.py:ProxmoxClient"
 PJ = "web/core/proxmox.py:_json"
 READ = (f"{AM}._results", f"{AM}._json")
 USER = (f"{AM}.find_user", *READ)
+NC_USER = (f"{NC}._user_id", f"{NC}._json")
 READERS = [
     Reader(
         "_handle_response_error",
@@ -398,7 +406,7 @@ READERS = [
     ),
     Reader(
         "set_application_enabled",
-        lambda: authentik().set_application_enabled("netbird", True),
+        lambda: authentik().set_application_enabled("netbird", False),
         (APPLICATION, BINDINGS, DONE),
         lambda r: outcome(r, lambda v: v is None, "None"),
         (f"{AM}.set_application_enabled",),
@@ -549,6 +557,22 @@ READERS = [
         check_proxmox_task,
         (f"{PX}.wait_for_task", f"{PX}.get_task_status", PJ),
         raises=(ProxmoxAPIError,),
+    ),
+    Reader(
+        "nextcloud_provision_team_user",
+        lambda: nextcloud().provision_team_user(1),
+        (NEXTCLOUD_USER,),
+        lambda r: outcome(r, lambda v: v is None, "None"),
+        (f"{NC}.provision_team_user", *NC_USER),
+        raises=(NextcloudAPIError,),
+    ),
+    Reader(
+        "nextcloud_delete_team_user",
+        lambda: nextcloud().delete_team_user(1),
+        (NEXTCLOUD_USER,),
+        check_bool,
+        (f"{NC}.delete_team_user", *NC_USER),
+        raises=(NextcloudAPIError,),
     ),
 ]
 

@@ -25,6 +25,7 @@ from bot.utils import (
     add_field,
     log_to_ops_channel,
     recycle_db_connection,
+    run_blocking,
     send_parts,
 )
 from core.broadcast import parse_broadcast_target
@@ -275,11 +276,20 @@ class DiscordQueueProcessor:
 
     async def _handle_clear_team_channels(self, payload: ClearTeamChannels) -> None:
         from bot.discord_manager import delete_team_infrastructure
+        from core.nextcloud import NextcloudManager, nextcloud_configured
+
+        def reset_nextcloud(team_number: int, is_active: bool) -> None:
+            with NextcloudManager() as manager:
+                manager.delete_team_user(team_number)
+                if is_active:
+                    manager.provision_team_user(team_number)
 
         number = payload.team_number
         team = await Team.objects.filter(team_number=number).afirst()
         if team is None or not team.channels_need_clearing:
             return
+        if nextcloud_configured():
+            await run_blocking(reset_nextcloud, number, team.is_active)
         await delete_team_infrastructure(
             self._guild(), team, reason=f"Team {number} handed to a new school", then_setup=True
         )

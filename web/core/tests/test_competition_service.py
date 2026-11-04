@@ -22,7 +22,7 @@ from core.services.competition import (
     current_timer_plan,
     run_competition,
 )
-from core.utils import drain
+from core.utils import Stepped, drain
 from team.models import MAX_TEAMS, Team, team_username
 
 pytestmark = pytest.mark.django_db
@@ -419,9 +419,39 @@ def test_the_migration_takes_the_last_runs_from_the_audit_log(runs, expected):
 def test_a_failed_account_step_says_why(authentik, config):
     authentik.team_account.return_value = (False, "User team02 not found")
 
-    steps = list(run_competition(True, "timer"))
+    stepped = Stepped(run_competition(True, "timer"))
+    steps = list(stepped)
+    result = stepped.result
 
     assert any(s.message == "Failed team01: User team02 not found" for s in steps)
+    assert ("team01", "User team02 not found") in result.account_failures
+    assert "Failed: team01: User team02 not found" in result.summary()
+    audit = AuditLog.objects.get(action="competition_started")
+    assert audit.details["account_failures"]["team01"] == "User team02 not found"
+
+
+def test_start_provisions_nextcloud_accounts_when_configured(authentik, config, settings):
+    from core.nextcloud import NextcloudAPIError
+
+    settings.NEXTCLOUD_URL = "https://files.test"
+    settings.NEXTCLOUD_USERNAME = "admin"
+    settings.NEXTCLOUD_PASSWORD = "secret"
+    nc = MagicMock()
+    nc.__enter__.return_value = nc
+    nc.provision_team_user.side_effect = [None, NextcloudAPIError("Provision Nextcloud user team02: HTTP 502"), None]
+
+    with patch("core.nextcloud.NextcloudManager", return_value=nc):
+        result = run_competition_to_completion(True, "timer")
+
+    assert [c.args[0] for c in nc.provision_team_user.call_args_list] == ACTIVE_TEAMS
+    assert result.outcome is RunOutcome.INCOMPLETE
+    assert result.nextcloud_ok == 2
+    assert result.nextcloud_failed == [("team02", "Provision Nextcloud user team02: HTTP 502")]
+    assert "Nextcloud accounts provisioned: 2/3" in result.summary()
+    assert "Failed Nextcloud: team02: Provision Nextcloud user team02: HTTP 502" in result.summary()
+    audit = AuditLog.objects.get(action="competition_started")
+    assert audit.details["nextcloud_ok"] == 2
+    assert audit.details["nextcloud_failed"] == {"team02": "Provision Nextcloud user team02: HTTP 502"}
 
 
 def test_a_failed_group_refresh_never_shows_authentiks_url_or_answer(authentik, config):
