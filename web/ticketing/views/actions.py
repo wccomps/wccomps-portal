@@ -203,7 +203,8 @@ def ticket_reopen(request: HttpRequest, ticket_number: str) -> HttpResponse:
     logger.info(
         f"Ticket {ticket_number} reopened by {authentik_username}" + (f": {reopen_reason}" if reopen_reason else "")
     )
-    return back_to_list(request, reverse("ticket_detail", args=[ticket_number]))
+    messages.success(request, f"Ticket {ticket_number} reopened.")
+    return redirect("ticket_detail", ticket_number=ticket_number)
 
 
 @require_POST
@@ -235,6 +236,7 @@ def ticket_adjust_points(request: HttpRequest, ticket_number: str) -> HttpRespon
         return redirect("ticket_detail", ticket_number=ticket_number)
 
     logger.info(f"Ticket {ticket_number} points adjusted to {points_charged} by {authentik_username}")
+    messages.success(request, f"Updated points for {ticket_number} to {points_charged}pt.")
     return redirect("ticket_detail", ticket_number=ticket_number)
 
 

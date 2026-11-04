@@ -154,6 +154,15 @@ class TestReopenFlow:
         open_ticket.refresh_from_db()
         assert open_ticket.points_charged == 25
 
+        # Submitting the same points_charged value is refused without creating a duplicate history row
+        ops_client.post(
+            reverse("ticket_adjust_points", kwargs={"ticket_number": tn}),
+            {"points_charged": "25", "reason": "Duplicate click"},
+        )
+        detail_html = ops_client.get(reverse("ticket_detail", kwargs={"ticket_number": tn})).content.decode()
+        assert "10 to 25 pts · Extended consultation" in detail_html
+        assert "Duplicate click" not in detail_html
+
     def test_reopen_cancelled_ticket(self, ticketing_support_user, open_ticket):
         open_ticket.status = "cancelled"
         open_ticket.save()

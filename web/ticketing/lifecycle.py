@@ -429,6 +429,8 @@ def adjust_ticket_points(
             return None, "Point value cannot be negative."
 
         old_points = ticket.points_charged
+        if old_points == points_charged:
+            return None, f"Ticket {ticket.ticket_number} already has {points_charged} points charged."
         ticket.points_charged = points_charged
         ticket.save(update_fields=["points_charged", "updated_at"])
 

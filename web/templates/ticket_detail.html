@@ -47,7 +47,7 @@
                     {% if ticket.assigned_to %}<span>Assigned: {{ ticket.assigned_to }}</span>{% endif %}
                 </div>
                 {% if is_ops %}
-                    <div class="d-flex gap-10 items-center mt-10">
+                    <div class="d-flex gap-10 items-center flex-wrap mt-10">
                         {% if ticket.status == "open" %}
                             <c-form action="{% url 'ticket_claim' ticket.ticket_number %}" class="m-0">
                                 {% csrf_token %}
@@ -65,17 +65,29 @@
                         {% endif %}
                         {% if actions.reopen %}
                             <c-form action="{% url 'ticket_reopen' ticket.ticket_number %}"
-                                    class="d-flex gap-10 items-center m-0">
+                                    class="d-flex gap-10 items-center flex-wrap flex-1 m-0"
+                                    data-confirm="Reopen this ticket? This will return it to the open queue, clear resolution notes, and refund any points charged.">
                                 {% csrf_token %}
+                                <label for="reopen_reason" class="font-semibold text-sm">Reason:</label>
                                 <input type="text"
                                        name="reopen_reason"
-                                       placeholder="Reason (optional)"
-                                       aria-label="Reopen reason"
-                                       class="py-5 px-10 w-150">
+                                       id="reopen_reason"
+                                       placeholder="Optional reason for reopening..."
+                                       class="py-5 px-10 flex-1">
                                 <c-button type="submit" variant="warning">
                                     Reopen
                                 </c-button>
                             </c-form>
+                        {% elif ticket.status == "resolved" or ticket.status == "cancelled" %}
+                            {% if ticket.is_approved %}
+                                <p class="text-muted m-0 text-sm">
+                                    Verified by Gold Team. Approved tickets cannot be reopened{% if not actions.adjust_points %} or have points adjusted{% endif %}.
+                                </p>
+                            {% elif ticket.assigned_to %}
+                                <p class="text-muted m-0 text-sm">
+                                    Assigned to <strong>{{ ticket.assigned_to.username }}</strong>. Only they or a ticketing admin can reopen or adjust points.
+                                </p>
+                            {% endif %}
                         {% endif %}
                     </div>
                 {% endif %}
@@ -157,59 +169,6 @@
                     </p>
                 {% endif %}
             {% endif %}
-            {% if actions.adjust_points %}
-                <c-fieldset heading="Point Penalty">
-                    <c-form action="{% url 'ticket_adjust_points' ticket.ticket_number %}"
-                            class="d-flex gap-10 items-center flex-wrap m-0 px-10">
-                        {% csrf_token %}
-                        <input type="number"
-                               name="points_charged"
-                               value="{{ ticket.points_charged }}"
-                               min="0"
-                               aria-label="Points charged"
-                               required
-                               class="py-5 px-10 w-150">
-                        <input type="text"
-                               name="reason"
-                               placeholder="Reason (optional)"
-                               aria-label="Adjustment reason"
-                               class="py-5 px-10 w-150">
-                        <c-button type="submit" variant="default">
-                            Update Points
-                        </c-button>
-                    </c-form>
-                </c-fieldset>
-            {% endif %}
-            {% if actions.reassign %}
-                <c-fieldset heading="Assignment">
-                    <c-form action="{% url 'ticket_reassign' ticket.ticket_number %}"
-                            class="d-flex gap-10 items-center m-0 px-10">
-                        {% csrf_token %}
-                        <input type="text"
-                               name="new_assignee_username"
-                               list="staff-usernames"
-                               placeholder="{% if ticket.status == 'open' %}Assign to...{% else %}Reassign to...{% endif %}"
-                               aria-label="Assign to username"
-                               required
-                               class="py-5 px-10 w-150">
-                        <datalist id="staff-usernames">
-                            {% for name in staff_usernames %}<option value="{{ name }}"></option>{% endfor %}
-                        </datalist>
-                        <c-button type="submit" variant="default">
-                            {% if ticket.status == "open" %}
-                                Assign
-                            {% else %}
-                                Reassign
-                            {% endif %}
-                        </c-button>
-                    </c-form>
-                    {% if ticket.status == "open" %}
-                        <p class="help mt-5">Assigning an open ticket claims it for that person.</p>
-                    {% elif ticket.status == "resolved" or ticket.status == "cancelled" %}
-                        <p class="help mt-5">Only the assignee changes; status and points stay as they are.</p>
-                    {% endif %}
-                </c-fieldset>
-            {% endif %}
             {% if is_ops and playbook_steps %}
                 <c-fieldset heading="Response Playbook">
                     <ol class="playbook-steps">
@@ -237,6 +196,73 @@
                     {% endif %}
                 </c-detail_grid>
             </c-fieldset>
+            {% if actions.adjust_points %}
+                <c-fieldset heading="Point Penalty">
+                    <c-form action="{% url 'ticket_adjust_points' ticket.ticket_number %}"
+                            class="d-flex gap-10 items-center flex-wrap m-0 px-10">
+                        {% csrf_token %}
+                        <label for="id_points_charged" class="font-semibold text-sm">Points charged:</label>
+                        <input type="number"
+                               name="points_charged"
+                               id="id_points_charged"
+                               value="{{ ticket.points_charged }}"
+                               min="0"
+                               required
+                               class="py-5 px-10 w-150">
+                        <label for="id_adjust_reason" class="font-semibold text-sm">Reason:</label>
+                        <input type="text"
+                               name="reason"
+                               id="id_adjust_reason"
+                               placeholder="Optional reason for adjustment..."
+                               class="py-5 px-10 flex-1">
+                        <c-button type="submit" variant="default">
+                            Update Points
+                        </c-button>
+                    </c-form>
+                    {% if ticket.category %}
+                        <p class="help mt-5">
+                            Category ({{ ticket.category.display_name }}): {{ ticket.category.points_label }}.
+                        </p>
+                    {% endif %}
+                </c-fieldset>
+            {% endif %}
+            {% if actions.reassign %}
+                <c-fieldset heading="Assignment">
+                    <c-form action="{% url 'ticket_reassign' ticket.ticket_number %}"
+                            class="d-flex gap-10 items-center flex-wrap m-0 px-10">
+                        {% csrf_token %}
+                        <label for="id_new_assignee_username" class="font-semibold text-sm">
+                            {% if ticket.status == "open" %}
+                                Assign to:
+                            {% else %}
+                                Reassign to:
+                            {% endif %}
+                        </label>
+                        <input type="text"
+                               name="new_assignee_username"
+                               id="id_new_assignee_username"
+                               list="staff-usernames"
+                               placeholder="{% if ticket.status == 'open' %}Assign to...{% else %}Reassign to...{% endif %}"
+                               required
+                               class="py-5 px-10 w-150">
+                        <datalist id="staff-usernames">
+                            {% for name in staff_usernames %}<option value="{{ name }}"></option>{% endfor %}
+                        </datalist>
+                        <c-button type="submit" variant="default">
+                            {% if ticket.status == "open" %}
+                                Assign
+                            {% else %}
+                                Reassign
+                            {% endif %}
+                        </c-button>
+                    </c-form>
+                    {% if ticket.status == "open" %}
+                        <p class="help mt-5">Assigning an open ticket claims it for that person.</p>
+                    {% elif ticket.status == "resolved" or ticket.status == "cancelled" %}
+                        <p class="help mt-5">Only the assignee changes; status and points stay as they are.</p>
+                    {% endif %}
+                </c-fieldset>
+            {% endif %}
             {% if is_ops and ticket.service_name %}
                 <c-fieldset heading="Service Check History" collapsible="true" collapsed="false">
                     <div id="service-checks-panel"
