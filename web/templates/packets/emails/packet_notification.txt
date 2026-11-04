@@ -11,7 +11,11 @@ Your Team Credentials:
 {% if team_extras %}
 Your Team Resources:
 {% for key, value in team_extras.items %}- {{ key }}: {{ value }}
-{% endfor %}{% endif %}
+{% endfor %}{% endif %}{% if competition_start_time_display or competition_end_time_display %}
+Competition Schedule:
+{% if competition_start_time_display %}- Starts: {{ competition_start_time_display }}
+{% endif %}{% if competition_end_time_display %}- Ends: {{ competition_end_time_display }}
+{% endif %}{% endif %}
 Packet Details:
 - Title: {{ packet.title }}
 - File: {{ packet.filename }}

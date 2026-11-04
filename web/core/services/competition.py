@@ -14,24 +14,31 @@ from django.db.models import Q
 from core.authentik_utils import set_team_account_active
 from core.discord_tasks import BroadcastMessage
 from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, DiscordTask
-from core.utils import advisory_lock
+from core.utils import advisory_lock, format_competition_time
 from team.models import MAX_TEAMS, active_team_numbers, team_username
 
 logger = logging.getLogger(__name__)
 
 START_MESSAGE_SENDER = "Black Team"
+COUNTDOWN_SENDER = "Gold Team"
 
 # The audit action a start records, with the team accounts it turned on (accounts_ok) and could not (accounts_failed)
 COMPETITION_STARTED = "competition_started"
 # The audit action a stop records, with the same details
 COMPETITION_STOPPED = "competition_stopped"
 TIMER_GAVE_UP = "competition_timer_gave_up"
+COMPETITION_COUNTDOWN_QUEUED = "competition_countdown_queued"
 
 TIMER_ACTOR = "timer"
 # Attempts the timer makes at one scheduled start or stop, one a tick, while it is left incomplete or errored
 TIMER_ATTEMPTS = 4
 # The timer retries only within this long of its first attempt, so a restart never resumes a stale one
 TIMER_RETRY_WINDOW = timedelta(hours=1)
+COUNTDOWN_WINDOW = timedelta(minutes=5)
+COUNTDOWN_MILESTONES: tuple[tuple[int, str], ...] = (
+    (60, "1 hour"),
+    (30, "30 minutes"),
+)
 
 # Arbitrary, but fixed; CLAUDE.md says how to free it from a stuck holder
 COMPETITION_RUN_LOCK_ID = 7_261_640_003
@@ -468,6 +475,67 @@ def give_up_timer_series(plan: GiveUp) -> bool:
                 details={"enable": plan.enable, "attempts": plan.attempt, "reason": plan.reason},
             )
     return bool(ended)
+
+
+def competition_schedule_context() -> dict[str, object]:
+    config = CompetitionConfig.get_config()
+    start = config.competition_start_time
+    end = config.competition_end_time
+    return {
+        "competition_start_time": start,
+        "competition_start_time_display": format_competition_time(start) if start else "",
+        "competition_end_time": end,
+        "competition_end_time_display": format_competition_time(end) if end else "",
+    }
+
+
+def _due_countdown_milestone(config: CompetitionConfig, now: datetime) -> tuple[int, str] | None:
+    if not config.applications_enabled or config.competition_end_time is None:
+        return None
+    remaining = config.competition_end_time - now
+    for minutes, label in COUNTDOWN_MILESTONES:
+        threshold = timedelta(minutes=minutes)
+        if threshold - COUNTDOWN_WINDOW <= remaining <= threshold:
+            return minutes, label
+    return None
+
+
+def queue_due_countdown(now: datetime) -> str | None:
+    if _due_countdown_milestone(CompetitionConfig.get_config(), now) is None:
+        return None
+    with transaction.atomic():
+        config = CompetitionConfig.locked()
+        milestone = _due_countdown_milestone(config, now)
+        if milestone is None or config.competition_end_time is None:
+            return None
+        minutes, label = milestone
+        end_time = config.competition_end_time
+        end_iso = end_time.isoformat()
+        if AuditLog.objects.filter(
+            action=COMPETITION_COUNTDOWN_QUEUED,
+            details__end_time=end_iso,
+            details__minutes_remaining=minutes,
+        ).exists():
+            return None
+        verb = "is" if minutes == 60 else "are"
+        end_display = format_competition_time(end_time)
+        message = (
+            f"There {verb} {label} remaining in the competition. "
+            f"The competition ends at {end_display} (<t:{int(end_time.timestamp())}:t>)."
+        )
+        task = DiscordTask.enqueue(BroadcastMessage(target="all-teams", message=message, sender=COUNTDOWN_SENDER))
+        AuditLog.objects.create(
+            action=COMPETITION_COUNTDOWN_QUEUED,
+            admin_user=TIMER_ACTOR,
+            target_entity="competition_config",
+            target_id=config.pk,
+            details={
+                "end_time": end_iso,
+                "minutes_remaining": minutes,
+                "task_id": task.pk,
+            },
+        )
+        return label
 
 
 class ConfigEditError(ValueError):

@@ -21,6 +21,7 @@ from core.services.competition import (
     clear_missed_window,
     current_timer_plan,
     give_up_timer_series,
+    queue_due_countdown,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,13 +54,18 @@ class CompetitionTimer(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _check_competition_times(self) -> None:
-        """Carry out current_timer_plan. A failure is reported on attempt 1 and when the timer gives up."""
         # Errors here propagate so check_loop skips its heartbeat: a timer that can't read the
         # config is not alive in any useful sense.
-        match await sync_to_async(current_timer_plan)(timezone.now()):
+        now = timezone.now()
+        match await sync_to_async(current_timer_plan)(now):
             case None:
                 if await sync_to_async(lambda: CompetitionConfig.get_config().stale_end())():
                     await self._clear_missed_window()
+                elif label := await sync_to_async(queue_due_countdown)(now):
+                    await log_to_ops_channel(
+                        self.bot,
+                        f"**Competition Countdown:** queued the {label} remaining announcement for all active teams.",
+                    )
             case GiveUp() as plan:
                 await self._give_up(plan)
             case Attempt() as attempt:

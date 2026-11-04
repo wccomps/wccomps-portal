@@ -1,11 +1,34 @@
 {% extends "admin/base_site.html" %}
-{% load cotton %}
+{% load cotton static %}
 {% block title %}
     Packets - WCComps Portal
 {% endblock title %}
 {% block content %}
     <div id="content-main">
         <c-page_header title="Your Packets" />
+        {% if competition_start_time or competition_end_time %}
+            <c-module class="mb-20">
+                <c-slot name="title">
+                    Competition Schedule
+                </c-slot>
+                <c-detail_grid>
+                    {% if competition_start_time %}
+                        <c-detail_row label="Starts">
+                            <span x-data="formatTime"
+                                  data-iso="{{ competition_start_time|date:'c' }}"
+                                  x-text="formatted">{{ competition_start_time_display }}</span>
+                        </c-detail_row>
+                    {% endif %}
+                    {% if competition_end_time %}
+                        <c-detail_row label="Ends">
+                            <span x-data="formatTime"
+                                  data-iso="{{ competition_end_time|date:'c' }}"
+                                  x-text="formatted">{{ competition_end_time_display }}</span>
+                        </c-detail_row>
+                    {% endif %}
+                </c-detail_grid>
+            </c-module>
+        {% endif %}
         <c-module>
             {% if is_gold_view %}
                 {% if packets %}
@@ -113,4 +136,5 @@
             {% endif %}
         </c-module>
     </div>
+    <script src="{% static 'js/competition.js' %}"></script>
 {% endblock content %}

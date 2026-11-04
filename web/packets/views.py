@@ -22,13 +22,15 @@ from .services import PacketDistributionService
 @require_permission("blue_team")
 def team_packet(request: HttpRequest) -> HttpResponse:
     from core.auth_utils import has_permission
+    from core.services.competition import competition_schedule_context
 
     user = cast(User, request.user)
     is_gold = has_permission(user, "gold_team")
+    schedule = competition_schedule_context()
 
     if is_gold:
         packets = Packet.objects.downloadable().order_by("-created_at")
-        context: dict[str, object] = {"packets": packets, "is_gold_view": True}
+        context: dict[str, object] = {"packets": packets, "is_gold_view": True, **schedule}
         return render(request, "packets/team_packet.html", context)
 
     team = get_user_team(user)
@@ -41,6 +43,7 @@ def team_packet(request: HttpRequest) -> HttpResponse:
         .defer("packet__file_data")
         .order_by("-packet__created_at"),
         "team": team,
+        **schedule,
     }
 
     return render(request, "packets/team_packet.html", context)

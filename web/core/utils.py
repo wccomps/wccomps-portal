@@ -95,6 +95,12 @@ def parse_datetime_to_utc(datetime_str: str, tz_name: str = DEFAULT_TIMEZONE) ->
         raise ValueError(f"{datetime_str} in {tz_name} is outside the calendar") from e
 
 
+def format_competition_time(moment: datetime) -> str:
+    local = moment.astimezone(ZoneInfo(DEFAULT_TIMEZONE))
+    time_str = local.strftime("%I:%M %p %Z").lstrip("0")
+    return f"{local.strftime('%b')} {local.day}, {local.year}, {time_str}"
+
+
 def shorten(text: str, limit: int) -> str:
     """A preview of the text: its first `limit` characters, back to the last whitespace in their second half (inside a
     word when there is none), then "..." and a ")" for each parenthesis the cut left open. truncatechars and

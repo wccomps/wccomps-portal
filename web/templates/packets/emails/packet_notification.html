@@ -91,6 +91,23 @@
                     </ul>
                 </div>
             {% endif %}
+            {% if competition_start_time_display or competition_end_time_display %}
+                <div class="details">
+                    <strong>Competition Schedule:</strong>
+                    <ul style="margin: 10px 0;">
+                        {% if competition_start_time_display %}
+                            <li>
+                                <strong>Starts:</strong> {{ competition_start_time_display }}
+                            </li>
+                        {% endif %}
+                        {% if competition_end_time_display %}
+                            <li>
+                                <strong>Ends:</strong> {{ competition_end_time_display }}
+                            </li>
+                        {% endif %}
+                    </ul>
+                </div>
+            {% endif %}
             <div class="details">
                 <strong>Packet Details:</strong>
                 <ul style="margin: 10px 0;">
