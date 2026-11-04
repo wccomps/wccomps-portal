@@ -5,7 +5,7 @@ from typing import Literal
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.core.validators import MaxValueValidator, MinValueValidator
+from django.core.validators import MaxValueValidator
 from django.db import IntegrityError, models, transaction
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -183,9 +183,19 @@ def scores_total_problem(check_pk: int | None, max_score: int) -> str:
 class OrangeCheckCriterion(models.Model):
     """A rubric line item for a check."""
 
+    class CriterionType(models.TextChoices):
+        CHECKBOX = "checkbox", "Checkbox"
+        RANGE = "range", "Variable range"
+
     orange_check = models.ForeignKey(OrangeCheck, on_delete=models.CASCADE, related_name="criteria")
     label = models.CharField(max_length=200)
-    points = models.PositiveIntegerField(validators=[MinValueValidator(1), MaxValueValidator(MAX_POINTS)])
+    points = models.PositiveIntegerField(validators=[MaxValueValidator(MAX_POINTS)])
+    criterion_type = models.CharField(
+        max_length=10,
+        choices=CriterionType.choices,
+        default=CriterionType.CHECKBOX,
+        db_default=CriterionType.CHECKBOX,
+    )
     sort_order = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -202,6 +212,16 @@ class OrangeCheckCriterion(models.Model):
 
     def __str__(self) -> str:
         return f"{self.label} ({self.points} pts)"
+
+    def reconcile_results(self) -> None:
+        """Keep existing results consistent with this criterion's type and point cap."""
+        if self.criterion_type == self.CriterionType.RANGE:
+            self.results.filter(met=True, points_awarded__isnull=True).update(
+                points_awarded=self.points, met=self.points > 0
+            )
+            self.results.filter(points_awarded__gt=self.points).update(points_awarded=self.points, met=self.points > 0)
+        else:
+            self.results.exclude(points_awarded__isnull=True).update(points_awarded=None)
 
 
 Action = Literal["save", "submit", "reassign", "approve", "reject"]
@@ -310,7 +330,7 @@ class OrangeAssignment(models.Model):
         return frozenset(self.status_info.moves)
 
     def calculate_score(self) -> int:
-        return self.results.filter(met=True).aggregate(total=models.Sum("criterion__points"))["total"] or 0
+        return sum(result.effective_points() for result in self.results.select_related("criterion"))
 
 
 class OrangeAssignmentResult(models.Model):
@@ -319,6 +339,7 @@ class OrangeAssignmentResult(models.Model):
     assignment = models.ForeignKey(OrangeAssignment, on_delete=models.CASCADE, related_name="results")
     criterion = models.ForeignKey(OrangeCheckCriterion, on_delete=models.CASCADE, related_name="results")
     met = models.BooleanField(default=False)
+    points_awarded = models.PositiveIntegerField(null=True, blank=True, default=None, db_default=None)
 
     class Meta:
         db_table = "orange_assignment_result"
@@ -326,7 +347,30 @@ class OrangeAssignmentResult(models.Model):
             models.UniqueConstraint(fields=["assignment", "criterion"], name="one_result_per_criterion_per_assignment"),
         ]
 
+    def effective_points(self) -> int:
+        if self.criterion.criterion_type == OrangeCheckCriterion.CriterionType.RANGE:
+            return min(self.points_awarded or 0, self.criterion.points)
+        return self.criterion.points if self.met else 0
+
+    def record_grade(self, *, met: bool | None, points: int | None) -> bool:
+        """Apply a dashboard grade according to the criterion's type; return False when invalid."""
+        if self.criterion.criterion_type == OrangeCheckCriterion.CriterionType.RANGE:
+            if points is None or points > self.criterion.points:
+                return False
+            self.points_awarded = points
+            self.met = points > 0
+            self.save(update_fields=["points_awarded", "met"])
+            return True
+        if met is None:
+            return False
+        self.met = met
+        self.points_awarded = None
+        self.save(update_fields=["met", "points_awarded"])
+        return True
+
     def __str__(self) -> str:
+        if self.criterion.criterion_type == OrangeCheckCriterion.CriterionType.RANGE:
+            return f"{self.criterion.label}: {self.effective_points()}/{self.criterion.points}"
         status = "MET" if self.met else "NOT MET"
         return f"{self.criterion.label}: {status}"
 

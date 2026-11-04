@@ -48,6 +48,19 @@
                                    required>
                         </div>
                         <div>
+                            <label :for="criterion.typeName" class="required">Type:</label>
+                            <select :id="criterion.typeName"
+                                    :name="criterion.typeName"
+                                    :value="criterion.criterion_type"
+                                    @change="setCriterionField"
+                                    :data-index="index"
+                                    data-prop="criterion_type">
+                                {% for value, label in criterion_types %}
+                                    <option value="{{ value }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
                             <label :for="criterion.pointsName" class="required">Points:</label>
                             <input type="number"
                                    class="vTextField"
@@ -57,7 +70,7 @@
                                    @input="setCriterionField"
                                    :data-index="index"
                                    data-prop="points"
-                                   min="1"
+                                   min="0"
                                    max="{{ max_points }}"
                                    required>
                         </div>
@@ -106,9 +119,11 @@
             function row(n, c) {
                 return {
                     n: n, id: c.id, label: c.label, points: String(c.points),
+                    criterion_type: c.criterion_type || 'checkbox',
                     idName: 'criterion_id_' + n,
                     labelName: 'criterion_label_' + n,
-                    pointsName: 'criterion_points_' + n
+                    pointsName: 'criterion_points_' + n,
+                    typeName: 'criterion_type_' + n
                 };
             }
             var data = document.getElementById('criteria-data');

@@ -31,6 +31,7 @@ def _check(w: World) -> Fields:
     for n in ("1", "2", "007", "١"):
         rows[f"criterion_label_{n}"] = hostile_text(200)
         rows[f"criterion_points_{n}"] = st.one_of(st.integers(0, 20).map(str), hostile_text())
+        rows[f"criterion_type_{n}"] = st.one_of(st.sampled_from(["checkbox", "range", ""]), hostile_text())
         rows[f"criterion_id_{n}"] = st.one_of(st.sampled_from([str(c) for c in w.ids("criterion_id")]), hostile_text())
     return form_fields(OrangeCheckForm()) | rows
 
@@ -86,7 +87,11 @@ CASES = [
         ORANGE,
         json_body=True,
         methods=("POST",),
-        post=lambda w: {"criterion_id": _ids(w, "criterion_id").map(int), "met": st.booleans()},
+        post=lambda w: {
+            "criterion_id": _ids(w, "criterion_id").map(int),
+            "met": st.booleans(),
+            "points": st.one_of(st.none(), st.integers(-1, 20)),
+        },
         idempotent=(OrangeAssignment,),
         idempotent_as="orange_team",
     ),
