@@ -34,6 +34,34 @@
         Refresh
     </c-button>
 </div>
+{% if last_reset %}
+    <div class="d-flex items-center flex-wrap gap-10 text-sm mt-10">
+        {% if last_reset.action == "box_reset" %}
+            <c-badge variant="success">
+                Reset Completed
+            </c-badge>
+            <span>
+                Reverted <code>{{ last_reset.details.vm_name }}</code> to <code>{{ last_reset.details.snapshot }}</code>
+                by <strong>{{ last_reset.details.reset_by }}</strong> ({{ last_reset.timestamp|timesince }} ago)
+            </span>
+        {% else %}
+            <c-badge variant="danger">
+                Last Reset Failed
+            </c-badge>
+            <span>
+                <code>{{ last_reset.details.vm_name }}</code> → <code>{{ last_reset.details.snapshot }}</code>:
+                {{ last_reset.details.error }}
+            </span>
+        {% endif %}
+    </div>
+{% endif %}
+{% if ticket.status == "resolved" and not has_completed_reset %}
+    <div class="d-flex items-center flex-wrap gap-10 text-sm mt-10">
+        <c-badge variant="warning">
+            Resolved without Proxmox box reset
+        </c-badge>
+    </div>
+{% endif %}
 {% if matched_vm and not proxmox_unreachable %}
     {% if not snapshots %}
         <p class="text-muted mt-10 m-0">No snapshots available for {{ matched_vm.name }}.</p>

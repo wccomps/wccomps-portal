@@ -219,6 +219,12 @@ def ticket_box_reset_panel(request: HttpRequest, ticket_number: str) -> HttpResp
         (s.name for s in (snapshots or ()) if s.name == default_snapshot),
         snapshots[0].name if snapshots else "",
     )
+    last_reset = (
+        TicketHistory.objects.filter(ticket=ticket, action__in=("box_reset", "box_reset_failed"))
+        .order_by("-timestamp", "-id")
+        .first()
+    )
+    has_completed_reset = TicketHistory.objects.filter(ticket=ticket, action="box_reset").exists()
 
     return render(
         request,
@@ -231,5 +237,7 @@ def ticket_box_reset_panel(request: HttpRequest, ticket_number: str) -> HttpResp
             "snapshots": snapshots,
             "selected_snapshot": selected_snapshot,
             "pool_name": team_pool_id(team_number),
+            "last_reset": last_reset,
+            "has_completed_reset": has_completed_reset,
         },
     )
