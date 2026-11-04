@@ -94,7 +94,7 @@ def test_played_and_stopped_the_page_checks_unfinished_work(live_server, pw_brow
             ]
             assert page.locator("#readiness").count() == 0 and page.locator("#live").count() == 0
             assert _controls(page) == {"start": 1, "stop": 1, "close out": 1}
-            assert page.locator("#controls").get_by_role("button", name="Start Competition").is_enabled()
+            assert page.locator("#controls").get_by_role("button", name="Start Competition").is_disabled()
             assert page.locator("#controls").get_by_role("button", name="Stop Competition").is_disabled()
             assert page.locator("#steps_list td a", has_text="Close Out").count() == 0
             assert (action.inner_text(), action.get_attribute("href")) == (
