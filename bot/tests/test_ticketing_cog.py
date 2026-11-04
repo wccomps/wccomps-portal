@@ -880,16 +880,21 @@ async def test_hostname_autocomplete_reads_the_stored_metadata_without_asking_qu
 
     from scoring.models import QuotientMetadataCache
 
-    await QuotientMetadataCache.objects.acreate(boxes=[{"name": "web01", "ip": "10.0.0.5", "services": []}])
+    await QuotientMetadataCache.objects.acreate(
+        boxes=[
+            {"name": "web01", "ip": "10.0.0.5", "services": []},
+            {"name": "router", "ip": "", "services": []},
+        ]
+    )
 
     with (
         patch("quotient.client.QuotientClient._request", side_effect=AssertionError("asked Quotient")),
         patch.object(TicketingCog.archive_threads_task, "start"),
     ):
         cog = TicketingCog(MagicMock())
-        choices = await cog.hostname_autocomplete(MagicMock(), "web")
+        choices = await cog.hostname_autocomplete(MagicMock(), "")
 
-    assert [c.value for c in choices] == ["web01"]
+    assert [(c.name, c.value) for c in choices] == [("router", "router"), ("web01 (10.0.0.5)", "web01")]
 
 
 @pytest.mark.asyncio

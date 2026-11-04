@@ -27,8 +27,40 @@ class BoxData(TypedDict):
     services: list[ServiceData]
 
 
+def _merge_proxmox_boxes(boxes_data: list[BoxData], previous_boxes: list[BoxData]) -> None:
+    """Append team VMs from Proxmox (such as routers/firewalls without scored services) not already in Quotient."""
+    from core.proxmox import get_proxmox_client, normalize_ticket_host
+
+    team_number = (
+        Team.objects.filter(is_active=True, team_number__gte=1, team_number__lte=99)
+        .order_by("team_number")
+        .values_list("team_number", flat=True)
+        .first()
+        or 1
+    )
+    known_hosts = {normalize_ticket_host(team_number, box["name"]) or box["name"].lower() for box in boxes_data}
+    vms = get_proxmox_client().list_team_vms(team_number)
+    if vms is None:
+        # Proxmox unconfigured (as on the bot) or unreachable: keep previously synced unscored boxes
+        for cached_box in previous_boxes:
+            name = cached_box.get("name", "")
+            host = normalize_ticket_host(team_number, name) or name.lower()
+            if name and not cached_box.get("services") and not cached_box.get("ip") and host not in known_hosts:
+                known_hosts.add(host)
+                boxes_data.append({"name": name, "ip": "", "services": []})
+        return
+
+    uppercase_names = bool(boxes_data) and all(box["name"].isupper() for box in boxes_data if box["name"])
+    for vm in vms:
+        if vm.host in known_hosts:
+            continue
+        known_hosts.add(vm.host)
+        box_name = vm.host.upper() if uppercase_names else vm.host
+        boxes_data.append({"name": box_name, "ip": "", "services": []})
+
+
 def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
-    """Sync the box, service and IP metadata behind the scoring form dropdowns from Quotient.
+    """Sync the box, service and IP metadata behind the scoring form dropdowns from Quotient and Proxmox.
 
     Raises ValueError if Quotient is unreachable. The last synced metadata stays: one failed fetch mid-competition
     must not empty the red-team and incident dropdowns. Competition cleanup deletes it between events.
@@ -65,6 +97,7 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
 
     # Update or create metadata cache (singleton)
     metadata = QuotientMetadataCache.objects.first()
+    _merge_proxmox_boxes(boxes_data, metadata.boxes if metadata else [])
     if metadata:
         metadata.boxes = boxes_data
         metadata.services = services_data
@@ -230,9 +263,21 @@ def get_box_choices() -> list[tuple[str, str]]:
     return []
 
 
+OTHER_SERVICE_CHOICE: tuple[str, str] = ("Other", "Other")
+
+
 def get_service_choices() -> list[tuple[str, str]]:
-    """Service dropdown choices from cached metadata."""
+    """Service dropdown choices from cached metadata, ending with 'Other' for unscored services."""
     metadata = QuotientMetadataCache.objects.first()
-    if not metadata:
-        return []
-    return [(s["name"], s["display_name"] or s["name"]) for s in metadata.services]
+    choices: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    if metadata:
+        raw_services = [*(svc for box in metadata.boxes for svc in box.get("services", [])), *metadata.services]
+        for s in raw_services:
+            name = s.get("name", "")
+            if name and name not in seen:
+                seen.add(name)
+                choices.append((name, s.get("display_name") or name))
+    if OTHER_SERVICE_CHOICE[0] not in seen:
+        choices.append(OTHER_SERVICE_CHOICE)
+    return choices
