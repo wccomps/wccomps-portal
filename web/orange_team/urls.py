@@ -18,6 +18,7 @@ urlpatterns = [
     path("checks/<int:check_id>/assign/", views.check_assign, name="check_assign"),
     path("checks/<int:check_id>/auto-assign/", views.check_auto_assign, name="check_auto_assign"),
     path("checks/<int:check_id>/rebalance/", views.check_rebalance, name="check_rebalance"),
+    path("assignments/bulk-approve/", views.assignment_bulk_approve, name="assignment_bulk_approve"),
     path("assignments/<int:assignment_id>/reassign/", views.reassign_team, name="reassign_team"),
     path("assignments/<int:assignment_id>/save/", views.assignment_save, name="assignment_save"),
     path("assignments/<int:assignment_id>/submit/", views.assignment_submit, name="assignment_submit"),

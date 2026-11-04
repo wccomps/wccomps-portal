@@ -59,14 +59,13 @@ def test_edit_keeps_results_adds_new_and_drops_removed(gold_team_user, graded_ch
 def test_edit_recomputes_started_scores(gold_team_user, graded_check):
     from scoring.models import OrangeTeamScore
 
-    from orange_team.services import create_orange_score_from_assignment
+    from orange_team.services import approve_assignment
 
     check, keep, drop = graded_check
     assignment = OrangeAssignment.objects.get(orange_check=check)
-    assignment.status = "approved"
     assignment.score = assignment.calculate_score()
     assignment.save()
-    score = create_orange_score_from_assignment(assignment, gold_team_user)
+    score = approve_assignment(assignment, gold_team_user)
     assert (assignment.score, int(score.points_awarded)) == (8, 8)
 
     team2 = Team.objects.create(team_number=5, team_name="Team 05")

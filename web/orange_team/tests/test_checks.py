@@ -304,17 +304,15 @@ class TestCheckDelete:
     def test_delete_removes_check_criteria_assignments_and_scores(self) -> None:
         from scoring.models import OrangeTeamScore
 
-        from orange_team.services import create_orange_score_from_assignment
+        from orange_team.services import approve_assignment
 
         user = User.objects.create_user(username="gold1", password="test")
         UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
         team = Team.objects.create(team_number=1, team_name="Team 01")
         check = OrangeCheck.objects.create(title="Obsolete Check", description="Desc", created_by=user)
         OrangeCheckCriterion.objects.create(orange_check=check, label="C1", points=5)
-        assignment = OrangeAssignment.objects.create(
-            orange_check=check, user=user, team=team, status="approved", score=5
-        )
-        create_orange_score_from_assignment(assignment, user)
+        assignment = OrangeAssignment.objects.create(orange_check=check, user=user, team=team, score=5)
+        approve_assignment(assignment, user)
 
         client = Client()
         client.force_login(User.objects.get(username="gold1"))

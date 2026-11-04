@@ -290,9 +290,11 @@ class OrangeAssignment(models.Model):
         ),
     }
     STATUS_CHOICES = [(status, row.label) for status, row in STATUSES.items()]
+    DASHBOARD_STATUSES: Mapping[str, str] = {status: row.label for status, row in STATUSES.items() if row.on_dashboard}
     FINISHED_STATUSES = tuple(status for status, row in STATUSES.items() if not row.on_dashboard)
     REVIEW_STATUSES = tuple(status for status, row in STATUSES.items() if row.in_review_queue)
     SCORED_STATUSES = tuple(status for status, row in STATUSES.items() if row.scored)
+    APPROVABLE_STATUSES = tuple(status for status, row in STATUSES.items() if "approve" in row.moves)
 
     orange_check = models.ForeignKey(OrangeCheck, on_delete=models.CASCADE, related_name="assignments")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="orange_assignments")

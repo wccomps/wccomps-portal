@@ -18,7 +18,7 @@ from core.auth_utils import has_permission, require_permission
 from core.csv_export import csv_writer
 from core.errors import json_endpoint
 from core.stored_files import UploadError, read_screenshots
-from core.utils import by_team, chosen_team, list_filters, requested_sort, stable_order, team_numbers
+from core.utils import bulk_approve, by_team, chosen_team, list_filters, requested_sort, stable_order, team_numbers
 from orange_team.forms import (
     MAX_FOLLOW_UP_MINUTES,
     AssignmentRejectForm,
@@ -46,8 +46,8 @@ from orange_team.models import (
     scores_total_problem,
 )
 from orange_team.services import (
+    approve_assignment,
     auto_assign_check,
-    create_orange_score_from_assignment,
     rebalance_unstarted,
     update_check_criteria,
 )
@@ -71,13 +71,18 @@ def _checks_with_max_score() -> Prefetch[str]:
 @require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
 def dashboard(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)
+    filters, filtered = list_filters(request, {"status": ""})
 
     active_checkin = OrangeCheckIn.objects.filter(user=user, is_active=True).first()
 
+    assignments_qs = OrangeAssignment.objects.filter(user=user).unfinished()
+    if filters["status"] == "unsubmitted":
+        assignments_qs = assignments_qs.exclude(status__in=OrangeAssignment.SCORED_STATUSES)
+    elif filters["status"] in OrangeAssignment.DASHBOARD_STATUSES:
+        assignments_qs = assignments_qs.filter(status=filters["status"])
+
     my_assignments = list(
-        OrangeAssignment.objects.filter(user=user)
-        .unfinished()
-        .select_related("team")
+        assignments_qs.select_related("team")
         .prefetch_related(_checks_with_max_score(), "results__criterion", "screenshots")
         .order_by("orange_check__scheduled_at", "orange_check__title", "team__team_number")
     )
@@ -94,10 +99,16 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     context: dict[str, object] = {
         "active_checkin": active_checkin,
         "assignments": my_assignments,
+        "dashboard_statuses": OrangeAssignment.DASHBOARD_STATUSES,
+        "filters": filters,
+        "filtered": filtered,
         "followups": followups,
         "is_lead": is_lead,
         "max_follow_up_minutes": MAX_FOLLOW_UP_MINUTES,
     }
+
+    if request.headers.get("HX-Request"):
+        return render(request, "orange_team/dashboard_table.html", context)
 
     return render(request, "orange_team/dashboard.html", context)
 
@@ -144,6 +155,7 @@ def review_queue(request: HttpRequest) -> HttpResponse:
 
     context = {
         "review_assignments": review_assignments,
+        "has_approvable": base_assignments.filter(status__in=OrangeAssignment.APPROVABLE_STATUSES).exists(),
         "team_numbers": team_numbers(Team.objects.filter(orange_assignments__in=base_assignments), team),
         "chosen_team": team,
         "filters": filters,
@@ -638,7 +650,6 @@ def followup_dismiss(request: HttpRequest, followup_id: int) -> HttpResponse:
 @require_permission("orange_team_lead", error_message="Only leads can approve assignments")
 @require_POST
 def assignment_approve(request: HttpRequest, assignment_id: int) -> HttpResponse:
-    """Approve a submitted orange team check, creating an OrangeTeamScore record."""
     user = cast(User, request.user)
     # Locked so a double submit or a racing reject can't act on the same submission twice.
     with transaction.atomic():
@@ -649,17 +660,29 @@ def assignment_approve(request: HttpRequest, assignment_id: int) -> HttpResponse
             messages.error(request, "Only submitted assignments can be approved.")
             return redirect("orange_team:review_queue")
 
-        assignment.reviewed_by = user
-        assignment.reviewed_at = timezone.now()
-        assignment.save()
-
-        create_orange_score_from_assignment(assignment, user)
+        approve_assignment(assignment, user)
 
     messages.success(
         request,
         f"Approved: {assignment.orange_check.title} for Team {assignment.team.team_number} ({assignment.score} pts)",
     )
     return redirect("orange_team:review_queue")
+
+
+@require_permission("orange_team_lead", error_message="Only leads can approve assignments")
+@require_POST
+def assignment_bulk_approve(request: HttpRequest) -> HttpResponse:
+    user = cast(User, request.user)
+    return bulk_approve(
+        request,
+        field_name="assignment_ids",
+        queryset=OrangeAssignment.objects.filter(status__in=OrangeAssignment.APPROVABLE_STATUSES)
+        .select_related("orange_check", "team", "user")
+        .order_by("pk"),
+        redirect_url="orange_team:review_queue",
+        item_label="assignment",
+        on_item=lambda assignment: approve_assignment(assignment, user),
+    )
 
 
 @require_permission("orange_team_lead", error_message="Only leads can reject assignments")

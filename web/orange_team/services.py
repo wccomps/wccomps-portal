@@ -134,11 +134,14 @@ def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) ->
         OrangeTeamScore.objects.filter(orange_check=check).update(description=f"Check: {check.title}")
 
 
-def create_orange_score_from_assignment(
+def approve_assignment(
     assignment: OrangeAssignment,
     approver: User,
 ) -> OrangeTeamScore:
-    """Create or update an OrangeTeamScore record from an approved orange team check."""
+    assignment.status = "approved"
+    assignment.reviewed_by = approver
+    assignment.reviewed_at = timezone.now()
+    assignment.save(update_fields=["status", "reviewed_by", "reviewed_at"])
     score, _ = OrangeTeamScore.objects.update_or_create(
         orange_check=assignment.orange_check,
         team=assignment.team,

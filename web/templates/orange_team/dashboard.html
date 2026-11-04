@@ -1,5 +1,5 @@
 {% extends "orange_team/base.html" %}
-{% load cotton status_variants %}
+{% load cotton %}
 {% block orange_title %}
     My Checks - Orange Team
 {% endblock orange_title %}
@@ -144,185 +144,24 @@
             </c-table>
         </c-module>
     {% endif %}
-    <c-module title="My Checks">
-        {% if assignments %}
-            <c-table id="my-checks" aria_label="My assigned checks">
-                <c-slot name="headers">
-                    <tr>
-                        <c-table_header sortable="false">
-                            Team
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Check
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Window
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Status
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Score
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Notes / Files
-                        </c-table_header>
-                        <c-table_header sortable="false">
-                            Actions
-                        </c-table_header>
-                    </tr>
-                </c-slot>
-                {% for assignment in assignments %}
-                    <tr {% if assignment.has_criteria %}x-data="assignmentRow" data-score="{{ assignment.score|default:'0' }}" data-max-score="{{ assignment.orange_check.max_score }}" data-save-url="{% url 'orange_team:assignment_save' assignment.pk %}"{% endif %}>
-                        <td>Team {{ assignment.team.team_number }}</td>
-                        <td>
-                            {{ assignment.orange_check.title }}
-                            {% if assignment.orange_check.description %}
-                                <div class="text-sm text-muted whitespace-pre-wrap">{{ assignment.orange_check.description }}</div>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <c-badge variant="{{ assignment.orange_check.window_state|badge_variant:'orange_check_window' }}">
-                                {{ assignment.orange_check.window_state_display }}
-                            </c-badge>
-                            {% if assignment.orange_check.scheduled_at %}
-                                <div class="text-sm text-muted">
-                                    {{ assignment.orange_check.scheduled_at|date:"H:i" }}
-                                    {% if assignment.orange_check.window_end %}to {{ assignment.orange_check.window_end|date:"H:i" }}{% endif %}
-                                </div>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <c-badge variant="{{ assignment.status|badge_variant:'orange_assignment' }}">
-                                {{ assignment.get_status_display }}
-                            </c-badge>
-                            {% if assignment.status_info.returned and assignment.notes %}
-                                <p class="text-sm text-muted">{{ assignment.notes }}</p>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if assignment.has_criteria %}
-                                <span x-text="scoreDisplay" aria-live="polite">{{ assignment.score|default:"0" }} / {{ assignment.orange_check.max_score }}</span>
-                                <details>
-                                    <summary>Criteria</summary>
-                                    <ul>
-                                        {% for result in assignment.results.all %}
-                                            <li>
-                                                <label>
-                                                    {% if result.criterion.criterion_type == "range" %}
-                                                        <input type="number"
-                                                               min="0"
-                                                               max="{{ result.criterion.points }}"
-                                                               value="{{ result.effective_points }}"
-                                                               data-saved-points="{{ result.effective_points }}"
-                                                               data-criterion-id="{{ result.criterion.pk }}"
-                                                               @change="saveCriterion"
-                                                               {% if "save" not in assignment.actions %}disabled{% endif %}>
-                                                        {{ result.criterion.label }} (0-{{ result.criterion.points }} pts)
-                                                    {% else %}
-                                                        <input type="checkbox"
-                                                               {% if result.met %}checked{% endif %}
-                                                               data-criterion-id="{{ result.criterion.pk }}"
-                                                               @change="saveCriterion"
-                                                               {% if "save" not in assignment.actions %}disabled{% endif %}>
-                                                        {{ result.criterion.label }} ({{ result.criterion.points }} pts)
-                                                    {% endif %}
-                                                </label>
-                                            </li>
-                                        {% endfor %}
-                                    </ul>
-                                </details>
-                                <span x-show="saveError"
-                                      x-text="saveError"
-                                      class="text-danger text-sm d-block"
-                                      x-cloak></span>
-                            {% else %}
-                                <div class="d-flex items-center gap-10">
-                                    <input type="number"
-                                           name="score"
-                                           form="submit-{{ assignment.pk }}"
-                                           value="{{ assignment.score|default:'' }}"
-                                           min="0"
-                                           max="{{ assignment.orange_check.max_score }}"
-                                           aria-label="Score for Team {{ assignment.team.team_number }}"
-                                           {% if "save" not in assignment.actions %}disabled{% endif %}>
-                                    <span class="text-muted">/ {{ assignment.orange_check.max_score }}</span>
-                                </div>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if "submit" in assignment.actions %}
-                                <div>
-                                    <textarea name="evaluator_notes"
-                                              form="submit-{{ assignment.pk }}"
-                                              rows="2"
-                                              placeholder="Evaluator notes (optional)"
-                                              aria-label="Evaluator notes for Team {{ assignment.team.team_number }}">{{ assignment.evaluator_notes }}</textarea>
-                                    <input type="file"
-                                           name="screenshots"
-                                           form="submit-{{ assignment.pk }}"
-                                           class="d-block mt-5"
-                                           multiple
-                                           aria-label="Screenshots or files for Team {{ assignment.team.team_number }}">
-                                </div>
-                            {% elif assignment.evaluator_notes %}
-                                <div class="text-sm whitespace-pre-wrap">{{ assignment.evaluator_notes }}</div>
-                            {% endif %}
-                            {% if assignment.screenshots.all %}
-                                <ul class="text-sm mt-5">
-                                    {% for screenshot in assignment.screenshots.all %}
-                                        <li>
-                                            <a href="{% url 'orange_team:assignment_screenshot' screenshot.pk %}"
-                                               target="_blank">{{ screenshot.filename }}</a>
-                                        </li>
-                                    {% endfor %}
-                                </ul>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if "submit" in assignment.actions %}
-                                <c-form id="submit-{{ assignment.pk }}"
-                                        action="{% url 'orange_team:assignment_submit' assignment.pk %}"
-                                        enctype="multipart/form-data"
-                                        data-confirm="Submit this check? You cannot edit the score after submission.">
-                                    {% csrf_token %}
-                                    <c-button type="submit" variant="primary">
-                                        Submit
-                                    </c-button>
-                                </c-form>
-                            {% else %}
-                                <span class="text-muted">Awaiting approval</span>
-                            {% endif %}
-                            <details>
-                                <summary>Set Reminder</summary>
-                                <c-form action="{% url 'orange_team:followup_create' %}"
-                                        class="d-flex gap-10 items-end">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="assignment_id" value="{{ assignment.pk }}">
-                                    <label>
-                                        Minutes:
-                                        <input type="number"
-                                               name="minutes"
-                                               value="15"
-                                               min="1"
-                                               max="{{ max_follow_up_minutes }}">
-                                    </label>
-                                    <label>
-                                        Note:
-                                        <input type="text" name="note" placeholder="Optional note">
-                                    </label>
-                                    <c-button type="submit" variant="primary">
-                                        Set
-                                    </c-button>
-                                </c-form>
-                            </details>
-                        </td>
-                    </tr>
-                {% endfor %}
-            </c-table>
-        {% else %}
-            <c-empty_state title="No checks"
-                           description="You have no checks assigned to you yet." />
-        {% endif %}
+    <c-module title="My Checks" filtered="true">
+        <c-filter_toolbar form_id="my-checks-filter"
+                          hx_get="{% url 'orange_team:dashboard' %}"
+                          hx_target="#my-checks-content"
+                          hx_swap="outerHTML"
+                          hx_push_url="true">
+            <c-filter_field label="Status" id="id_status">
+                <select name="status" id="id_status" aria-label="Filter by status">
+                    <option value="" {% if not filters.status %}selected{% endif %}>All</option>
+                    <option value="unsubmitted"
+                            {% if filters.status == "unsubmitted" %}selected{% endif %}>Hide Submitted</option>
+                    {% for value, label in dashboard_statuses.items %}
+                        <option value="{{ value }}"
+                                {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </c-filter_field>
+        </c-filter_toolbar>
+        {% include "orange_team/dashboard_table.html" %}
     </c-module>
 {% endblock orange_content %}

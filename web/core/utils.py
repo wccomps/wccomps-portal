@@ -312,7 +312,7 @@ def bulk_approve(  # type: ignore[explicit-any]
     queryset: QuerySet,  # type: ignore[type-arg]
     redirect_url: str,
     item_label: str,
-    on_item: Callable[..., None],
+    on_item: Callable[..., object],
 ) -> HttpResponse:
     """Extract IDs from POST, apply per-item approval, redirect with message.
 

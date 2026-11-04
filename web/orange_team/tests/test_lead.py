@@ -56,6 +56,36 @@ class TestAssignmentApprove:
         assignment.refresh_from_db()
         assert assignment.status == "submitted"  # unchanged
 
+    def test_bulk_approve_approves_selected_submitted_assignments(self) -> None:
+        from scoring.models import OrangeTeamScore
+
+        lead = User.objects.create_user(username="gold1", password="test")
+        UserGroups.objects.create(user=lead, authentik_id="g1", groups=["WCComps_GoldTeam"])
+        orange = User.objects.create_user(username="orange1")
+        t1 = Team.objects.create(team_number=1, team_name="T1")
+        t2 = Team.objects.create(team_number=2, team_name="T2")
+        t3 = Team.objects.create(team_number=3, team_name="T3")
+        check = OrangeCheck.objects.create(title="Test", description="Desc", max_points=10)
+        a1 = OrangeAssignment.objects.create(orange_check=check, user=orange, team=t1, status="submitted", score=8)
+        a2 = OrangeAssignment.objects.create(orange_check=check, user=orange, team=t2, status="submitted", score=6)
+        a3 = OrangeAssignment.objects.create(orange_check=check, user=orange, team=t3, status="in_progress", score=4)
+
+        client = Client()
+        client.force_login(lead)
+        response = client.post(
+            "/orange-team/assignments/bulk-approve/",
+            {"assignment_ids": [str(a1.pk), str(a2.pk), str(a3.pk)]},
+        )
+        assert response.status_code == 302
+
+        a1.refresh_from_db()
+        a2.refresh_from_db()
+        a3.refresh_from_db()
+        assert (a1.status, a1.reviewed_by) == ("approved", lead)
+        assert (a2.status, a2.reviewed_by) == ("approved", lead)
+        assert a3.status == "in_progress"
+        assert dict(OrangeTeamScore.objects.values_list("team__team_number", "points_awarded")) == {1: 8, 2: 6}
+
 
 class TestAssignmentReject:
     def test_reject_with_notes(self) -> None:

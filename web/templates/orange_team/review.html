@@ -4,6 +4,11 @@
     Review Queue - Orange Team
 {% endblock orange_title %}
 {% block orange_content %}
+    <script>
+    document.addEventListener('alpine:init', () => {
+        Alpine.data('orangeReviewBulkSelect', () => bulkSelectMixin('assignment-id', 'assignment'));
+    });
+    </script>
     <c-page_header title="Review Queue" subtitle="Submitted assignments awaiting review" />
     <c-module filtered="true">
         <c-slot name="toolbar">
@@ -14,6 +19,13 @@
                           hx_target="#orange-review-content"
                           hx_swap="outerHTML"
                           hx_push_url="true">
+            {% if has_approvable %}
+                <c-slot name="actions">
+                    <c-button type="submit" form="bulk-approve-form" variant="primary">
+                        Approve Selected
+                    </c-button>
+                </c-slot>
+            {% endif %}
             <c-filter_field label="Status" id="id_status">
                 <select name="status" id="id_status" aria-label="Filter by status">
                     <option value="" {% if not filters.status %}selected{% endif %}>All</option>

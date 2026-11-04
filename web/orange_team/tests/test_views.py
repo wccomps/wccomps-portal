@@ -128,3 +128,33 @@ class TestDashboard:
         assert "In Progress" in html
         assert "badge--success" in html
         assert "badge--info" in html
+
+    def test_dashboard_filter_hides_submitted_checks(self) -> None:
+        from orange_team.models import OrangeAssignment, OrangeCheck
+        from team.models import Team
+
+        user = User.objects.create_user(username="orange7", password="test")
+        UserGroups.objects.create(user=user, authentik_id="orange7-uid", groups=["WCComps_OrangeTeam"])
+        t1 = Team.objects.create(team_number=1, team_name="Team 01")
+        t2 = Team.objects.create(team_number=2, team_name="Team 02")
+        check = OrangeCheck.objects.create(title="Service Check", description="desc", max_points=10)
+        OrangeAssignment.objects.create(orange_check=check, user=user, team=t1, status="pending")
+        OrangeAssignment.objects.create(orange_check=check, user=user, team=t2, status="submitted", score=10)
+
+        client = Client()
+        client.force_login(user)
+
+        all_html = client.get("/orange-team/").content.decode()
+        assert "Team 1" in all_html
+        assert "Team 2" in all_html
+
+        unsubmitted_html = client.get("/orange-team/?status=unsubmitted").content.decode()
+        assert "Team 1" in unsubmitted_html
+        assert "Team 2" not in unsubmitted_html
+
+        submitted_html = client.get(
+            "/orange-team/?status=submitted",
+            headers={"HX-Request": "true"},
+        ).content.decode()
+        assert "Team 1" not in submitted_html
+        assert "Team 2" in submitted_html
