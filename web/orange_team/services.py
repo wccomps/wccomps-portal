@@ -80,12 +80,7 @@ def rebalance_unstarted(check: OrangeCheck, checked_in_users: list[User]) -> int
 
 
 def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) -> None:
-    """Apply an edited rubric in place, so grading already done on kept criteria survives.
-
-    Posted rows with a known id are updated; rows without one are created, with an unmet
-    result on every existing assignment so they can be graded; criteria left out are
-    deleted along with their results.
-    """
+    """Apply an edited rubric in place, so grading already done on kept criteria survives."""
     with transaction.atomic():
         # The check, then its assignments, then criteria and results: auto-assign and autosave lock in this order
         _lock_check(check)
@@ -94,12 +89,11 @@ def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) ->
         posted_ids = {c["id"] for c in criteria if c["id"] in existing}
         check.criteria.exclude(pk__in=posted_ids).delete()
         for c in criteria:
-            criterion_type = c.get("criterion_type", OrangeCheckCriterion.CriterionType.CHECKBOX)
             criterion = existing.get(c["id"]) if c["id"] is not None else None
             if criterion is not None:
                 criterion.label = c["label"]
                 criterion.points = c["points"]
-                criterion.criterion_type = criterion_type
+                criterion.criterion_type = c["criterion_type"]
                 criterion.sort_order = c["sort_order"]
                 criterion.save(update_fields=["label", "points", "criterion_type", "sort_order"])
                 criterion.reconcile_results()
@@ -108,7 +102,7 @@ def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) ->
                 orange_check=check,
                 label=c["label"],
                 points=c["points"],
-                criterion_type=criterion_type,
+                criterion_type=c["criterion_type"],
                 sort_order=c["sort_order"],
             )
             OrangeAssignmentResult.objects.bulk_create(

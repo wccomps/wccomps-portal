@@ -1,6 +1,6 @@
 import re
 from datetime import timedelta
-from typing import NotRequired, TypedDict
+from typing import TypedDict
 
 from django import forms
 from django.http import QueryDict
@@ -80,7 +80,6 @@ class SubmitScoreForm(forms.Form):
 
 
 ROW_NUMBER = re.compile(r"[0-9]{1,9}")
-# A rubric row's field as the check page names it: criterion_label_3, criterion_points_3, criterion_type_3, etc.
 CRITERION_KEY = re.compile(r"criterion_(label|points|type|id)_([0-9]{1,9})")
 
 
@@ -105,15 +104,12 @@ class CriterionInput(TypedDict):
     id: int | None
     label: str
     points: int
-    criterion_type: NotRequired[str]
+    criterion_type: str
     sort_order: int
 
 
 def criterion_rows(post_data: QueryDict) -> list[CriterionRow]:
-    """The posted criterion_label_{n} / criterion_points_{n} / criterion_type_{n} / criterion_id_{n} rows in n order.
-
-    n can skip values: the form keeps a row's number when an earlier row is removed.
-    """
+    """n can skip values: the form keeps a row's number when an earlier row is removed."""
     numbers = sorted({int(m.group(2)) for key in post_data if (m := CRITERION_KEY.fullmatch(key))})
     return [
         {

@@ -273,7 +273,7 @@ def check_create(request: HttpRequest) -> HttpResponse:
                 orange_check=orange_check,
                 label=c["label"],
                 points=c["points"],
-                criterion_type=c.get("criterion_type", OrangeCheckCriterion.CriterionType.CHECKBOX),
+                criterion_type=c["criterion_type"],
                 sort_order=c["sort_order"],
             )
 
@@ -362,7 +362,6 @@ def _check_page(
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
 @require_POST
 def check_duplicate(request: HttpRequest, check_id: int) -> HttpResponse:
-    """Duplicate a check and its criteria into a new draft."""
     original = get_object_or_404(OrangeCheck.objects.prefetch_related("criteria"), pk=check_id)
     criteria = list(original.criteria.all())
     worth = check_worth([c.points for c in criteria], original.max_points)
@@ -487,7 +486,6 @@ def _locked_for(assignments: OrangeAssignmentQuerySet, action: Action, pk: int) 
 
 
 def _criterion_result(body: bytes) -> tuple[int, bool | None, int | None] | None:
-    """The criterion id and its graded value (met or points), from the dashboard's JSON body; None for anything else."""
     try:
         data = json.loads(body)
     except ValueError:  # not JSON, or not UTF-8
@@ -512,7 +510,6 @@ def _criterion_result(body: bytes) -> tuple[int, bool | None, int | None] | None
 @require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
 @require_POST
 def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
-    """Autosave a criterion result for an assignment."""
     user = cast(User, request.user)
     with transaction.atomic():
         assignment, moved = _locked_for(OrangeAssignment.objects.filter(user=user), "save", assignment_id)
