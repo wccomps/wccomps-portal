@@ -478,7 +478,6 @@ def give_up_timer_series(plan: GiveUp) -> bool:
 
 
 def competition_schedule_context() -> dict[str, object]:
-    """Template context for the configured competition start and end times."""
     config = CompetitionConfig.get_config()
     start = config.competition_start_time
     end = config.competition_end_time
@@ -502,9 +501,6 @@ def _due_countdown_milestone(config: CompetitionConfig, now: datetime) -> tuple[
 
 
 def queue_due_countdown(now: datetime) -> str | None:
-    """Queue a countdown broadcast to all active teams when the running competition enters a countdown window
-    (1 hour or 30 minutes before competition_end_time) and hasn't already queued that milestone for this end time.
-    Returns the milestone label ('1 hour' or '30 minutes') when queued, else None."""
     if _due_countdown_milestone(CompetitionConfig.get_config(), now) is None:
         return None
     with transaction.atomic():

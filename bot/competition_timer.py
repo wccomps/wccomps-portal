@@ -54,7 +54,6 @@ class CompetitionTimer(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _check_competition_times(self) -> None:
-        """Carry out current_timer_plan. A failure is reported on attempt 1 and when the timer gives up."""
         # Errors here propagate so check_loop skips its heartbeat: a timer that can't read the
         # config is not alive in any useful sense.
         now = timezone.now()

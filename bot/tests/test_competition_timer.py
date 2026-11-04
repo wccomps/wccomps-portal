@@ -567,22 +567,18 @@ async def test_timer_queues_1h_and_30m_countdown_announcements_once_each() -> No
         patch("bot.competition_timer.timezone.now", return_value=now - timedelta(seconds=30)) as mock_now,
         patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
     ):
-        # 60m30s remaining: not yet in the 1-hour window
         await timer._check_competition_times()
         assert await DiscordTask.objects.acount() == 0
 
-        # 59m remaining: enters 1-hour countdown window; repeat tick does not duplicate
         mock_now.return_value = end_time - timedelta(minutes=59)
         await timer._check_competition_times()
         await timer._check_competition_times()
         assert await DiscordTask.objects.acount() == 1
 
-        # 45m remaining: between milestones, nothing queued
         mock_now.return_value = end_time - timedelta(minutes=45)
         await timer._check_competition_times()
         assert await DiscordTask.objects.acount() == 1
 
-        # 29m remaining: enters 30-minute countdown window; repeat tick does not duplicate
         mock_now.return_value = end_time - timedelta(minutes=29)
         await timer._check_competition_times()
         await timer._check_competition_times()
