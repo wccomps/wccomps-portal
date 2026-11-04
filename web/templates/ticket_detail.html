@@ -99,15 +99,13 @@
             {% endif %}
             {% if is_ops and ticket.status == "claimed" %}
                 {% if actions.resolve %}
-                    {# djlint:off #}
-                    <c-fieldset heading="{% if is_box_reset %}Resolve Without Box Reset{% else %}Resolve Ticket{% endif %}"
-                                collapsible="{% if is_box_reset %}true{% else %}false{% endif %}"
-                                collapsed="{% if is_box_reset %}true{% else %}false{% endif %}">
-                    {# djlint:on #}
+                    <c-fieldset heading="{% if is_box_reset %}Resolve Ticket Manually{% else %}Resolve Ticket{% endif %}">
                         <c-form action="{% url 'ticket_resolve' ticket.ticket_number %}" class="p-10">
                             {% csrf_token %}
                             {% if is_box_reset %}
-                                <p class="help mb-10">Marks this ticket resolved without reverting the VM in Proxmox.</p>
+                                <p class="help mb-10">
+                                    Closes this ticket without running an automated reset above (for example, after resetting the host manually in Proxmox).
+                                </p>
                             {% endif %}
                             <div class="mb-15">
                                 <div class="mb-15">
@@ -139,7 +137,7 @@
                             </div>
                             {% if is_box_reset %}
                                 <c-button type="submit" variant="default">
-                                    Resolve Without Box Reset
+                                    Resolve Ticket Manually
                                 </c-button>
                             {% else %}
                                 <c-button type="submit" variant="primary">

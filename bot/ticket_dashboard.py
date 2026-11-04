@@ -231,19 +231,19 @@ class ResolveTicketModal(discord.ui.Modal, title="Resolve Ticket"):
         from ticketing.models import BOX_RESET_CATEGORY_ID
 
         is_box_reset = ticket.category_id == BOX_RESET_CATEGORY_ID
-        super().__init__(title="Resolve Without Proxmox Reset" if is_box_reset else "Resolve Ticket")
+        super().__init__(title="Resolve Ticket Manually" if is_box_reset else "Resolve Ticket")
         self.ticket = ticket
         cat = ticket.category
 
         self.notes: discord.ui.TextInput[ResolveTicketModal] = discord.ui.TextInput(
             label="Resolution Notes",
             placeholder=(
-                "Does not revert the VM in Proxmox. Use Box Reset in the portal to revert automatically."
+                "Closes the ticket only (use after resetting manually, or use Box Reset in the portal)."
                 if is_box_reset
                 else "Describe how the issue was resolved..."
             ),
             style=discord.TextStyle.paragraph,
-            required=is_box_reset,
+            required=False,
             max_length=1000,
         )
 

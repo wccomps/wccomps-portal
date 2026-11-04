@@ -57,9 +57,10 @@
 {% endif %}
 {% if ticket.status == "resolved" and not has_completed_reset %}
     <div class="d-flex items-center flex-wrap gap-10 text-sm mt-10">
-        <c-badge variant="warning">
-            Resolved without Proxmox box reset
+        <c-badge variant="info">
+            Resolved manually
         </c-badge>
+        <span class="text-muted">No automated portal reset was run for this ticket.</span>
     </div>
 {% endif %}
 {% if matched_vm and not proxmox_unreachable %}
