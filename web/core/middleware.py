@@ -3,6 +3,7 @@ import time
 import zoneinfo
 from collections.abc import Callable, Iterable
 from typing import Any
+from urllib.parse import unquote
 
 from django.conf import settings
 from django.db import connection
@@ -109,7 +110,7 @@ class UserTimezoneMiddleware:
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         try:
-            timezone.activate(zoneinfo.ZoneInfo(request.COOKIES["tz"]))
+            timezone.activate(zoneinfo.ZoneInfo(unquote(request.COOKIES["tz"])))
         except KeyError, ValueError, zoneinfo.ZoneInfoNotFoundError:
             timezone.deactivate()
         return self.get_response(request)

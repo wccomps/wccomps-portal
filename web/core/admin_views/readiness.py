@@ -221,7 +221,7 @@ def _check_quotient_synced() -> CheckResult:
             f"Last synced {days} days ago",
             {"type": "fix", "key": "sync_quotient", "label": "Sync Now"},
         )
-    return ("pass", f"Synced {cache.last_synced.strftime('%b %d %H:%M')}", None)
+    return ("pass", f"Synced {timezone.localtime(cache.last_synced).strftime('%b %d %H:%M')}", None)
 
 
 @dataclass(frozen=True)

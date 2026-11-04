@@ -3,6 +3,7 @@ from typing import cast
 from django.contrib import admin, messages
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
+from django.utils import timezone
 from django.utils.html import format_html
 
 from core.admin import PortalModelAdmin
@@ -299,7 +300,9 @@ class PacketDistributionAdmin(PortalModelAdmin[PacketDistribution]):
             return format_html(
                 "{} download(s)<br><small>Last: {}</small>",
                 obj.download_count,
-                obj.last_downloaded_at.strftime("%Y-%m-%d %H:%M") if obj.last_downloaded_at else "Never",
+                timezone.localtime(obj.last_downloaded_at).strftime("%Y-%m-%d %H:%M")
+                if obj.last_downloaded_at
+                else "Never",
             )
         return "Not downloaded"
 
