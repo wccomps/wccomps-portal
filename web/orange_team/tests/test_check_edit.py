@@ -65,7 +65,8 @@ def test_edit_recomputes_started_scores(gold_team_user, graded_check):
     assignment = OrangeAssignment.objects.get(orange_check=check)
     assignment.score = assignment.calculate_score()
     assignment.save()
-    score = approve_assignment(assignment, gold_team_user)
+    approve_assignment(assignment, gold_team_user)
+    score = OrangeTeamScore.objects.get(orange_check=check, team=assignment.team)
     assert (assignment.score, int(score.points_awarded)) == (8, 8)
 
     team2 = Team.objects.create(team_number=5, team_name="Team 05")

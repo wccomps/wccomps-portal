@@ -335,8 +335,6 @@ class OrangeAssignment(models.Model):
 
 
 class OrangeAssignmentResult(models.Model):
-    """Per-criterion result for an assignment."""
-
     assignment = models.ForeignKey(OrangeAssignment, on_delete=models.CASCADE, related_name="results")
     criterion = models.ForeignKey(OrangeCheckCriterion, on_delete=models.CASCADE, related_name="results")
     met = models.BooleanField(default=False)

@@ -131,12 +131,12 @@ def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) ->
 def approve_assignment(
     assignment: OrangeAssignment,
     approver: User,
-) -> OrangeTeamScore:
+) -> None:
     assignment.status = "approved"
     assignment.reviewed_by = approver
     assignment.reviewed_at = timezone.now()
     assignment.save(update_fields=["status", "reviewed_by", "reviewed_at"])
-    score, _ = OrangeTeamScore.objects.update_or_create(
+    OrangeTeamScore.objects.update_or_create(
         orange_check=assignment.orange_check,
         team=assignment.team,
         defaults={
@@ -148,4 +148,3 @@ def approve_assignment(
             "approved_at": timezone.now(),
         },
     )
-    return score
