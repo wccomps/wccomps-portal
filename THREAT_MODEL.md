@@ -68,7 +68,7 @@ flowchart LR
     W -- "4 rows, DiscordTask payloads" --> Q
     Q --> T
     W & T -- "5 service token" --> A
-    W -- "6 API token, team pool only" --> P
+    W & T -- "6 API token, team pool only" --> P
     W & T -- "7 login session" --> S
     W -- "8 packet emails with passwords" --> M
     T -- "9 bot token" --> G

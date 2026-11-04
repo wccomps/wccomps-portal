@@ -21,20 +21,27 @@ def test_match_to_suggested_finding_saves(gold_team_user: User) -> None:
         team=team, submitted_by=blue, attack_description="x", source_ip="10.0.0.5", attack_detected_at=timezone.now()
     )
     finding = RedTeamScore.objects.create(
-        source_ip="10.0.0.5", points_per_team=Decimal("-50"), submitted_by=gold_team_user
+        source_ip="10.0.0.5", points_per_team=Decimal("-100.00"), submitted_by=gold_team_user
     )
     finding.affected_teams.add(team)
 
     client = Client()
     client.force_login(gold_team_user)
+    match_url = reverse("scoring:match_incident", args=[incident.id])
+    get_response = client.get(match_url)
+    assert get_response.status_code == 200
+    initial_points = get_response.context["form"]["points_returned"].value()
+    assert str(initial_points) == "80.00"
+
     response = client.post(
-        reverse("scoring:match_incident", args=[incident.id]),
-        {"matched_to_red_score": finding.id, "points_returned": "40", "approval_notes": ""},
+        match_url,
+        {"matched_to_red_score": finding.id, "points_returned": str(initial_points), "approval_notes": ""},
     )
 
     assert response.status_code == 302
     incident.refresh_from_db()
     assert incident.matched_to_red_score_id == finding.id
+    assert incident.points_returned == Decimal("80.00")
     assert incident.is_approved
 
 

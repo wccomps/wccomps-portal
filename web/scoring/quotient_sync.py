@@ -33,15 +33,15 @@ def _merge_proxmox_boxes(boxes_data: list[BoxData], previous_boxes: list[BoxData
 
     team_number = (
         Team.objects.filter(is_active=True, team_number__gte=1, team_number__lte=99)
-        .order_by("team_number")
+        .order_by(models.Case(models.When(school_info__isnull=False, then=0), default=1), "team_number")
         .values_list("team_number", flat=True)
         .first()
         or 1
     )
     known_hosts = {normalize_ticket_host(team_number, box["name"]) or box["name"].lower() for box in boxes_data}
     vms = get_proxmox_client().list_team_vms(team_number)
-    if vms is None:
-        # Proxmox unconfigured or unreachable: keep previously synced unscored boxes
+    if not vms:
+        # Proxmox unconfigured, unreachable, or pool empty: keep previously synced unscored boxes
         for cached_box in previous_boxes:
             name = cached_box.get("name", "")
             host = normalize_ticket_host(team_number, name) or name.lower()
