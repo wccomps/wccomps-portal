@@ -78,3 +78,51 @@ def test_an_unreachable_quotient_is_reported_not_answered_as_a_server_error(admi
         "message": "Sync failed: Failed to retrieve infrastructure from Quotient",
     }
     assert not AuditLog.objects.filter(action="quotient_metadata_synced").exists()
+
+
+def test_metadata_sync_merges_unscored_proxmox_team_vms_and_keeps_them_on_proxmox_blip():
+    from quotient.client import QuotientBox, QuotientInfrastructure, QuotientService
+
+    from core.proxmox import ProxmoxVM
+    from scoring.quotient_sync import get_box_choices, get_service_choices
+
+    infra = QuotientInfrastructure(
+        boxes=[
+            QuotientBox(
+                name="TREX",
+                ip="10.100.1_.12",
+                services=[QuotientService(name="DNS", display_name="DNS")],
+            )
+        ]
+    )
+    proxmox_vms = [
+        ProxmoxVM(vmid=10101, name="team01-trex", host="trex", node="pve01", status="running"),
+        ProxmoxVM(vmid=10102, name="team01-pangea", host="pangea", node="pve01", status="running"),
+    ]
+
+    with (
+        patch("scoring.quotient_sync.QuotientClient") as client,
+        patch("core.proxmox.ProxmoxClient.list_team_vms", return_value=proxmox_vms),
+    ):
+        client.return_value.get_infrastructure.return_value = infra
+        client.return_value.get_injects.return_value = []
+        sync_quotient_metadata()
+
+    cache = QuotientMetadataCache.objects.get()
+    assert cache.boxes == [
+        {"name": "TREX", "ip": "10.100.1_.12", "services": [{"name": "DNS", "display_name": "DNS"}]},
+        {"name": "PANGEA", "ip": "", "services": []},
+    ]
+    assert get_box_choices() == [("TREX", ".12 TREX"), ("PANGEA", "PANGEA")]
+    assert get_service_choices() == [("DNS", "DNS"), ("Other", "Other")]
+
+    # Transient Proxmox failure or unconfigured bot sync preserves previously synced unscored boxes
+    with (
+        patch("scoring.quotient_sync.QuotientClient") as client,
+        patch("core.proxmox.ProxmoxClient.list_team_vms", return_value=None),
+    ):
+        client.return_value.get_infrastructure.return_value = infra
+        client.return_value.get_injects.return_value = []
+        sync_quotient_metadata()
+
+    assert [b["name"] for b in QuotientMetadataCache.objects.get().boxes] == ["TREX", "PANGEA"]

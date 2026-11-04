@@ -85,7 +85,7 @@ class TicketingCog(commands.Cog):
         # The metadata the sync stores: one quick read a keystroke, no Quotient call
         box_names, box_ip_map, _ = await sync_to_async(ticket_infrastructure)()
         matches = [name for name in box_names if current.lower() in name.lower()]
-        return choices([(f"{name} ({box_ip_map.get(name, '')})", name) for name in matches])
+        return choices([(f"{name} ({ip})" if (ip := box_ip_map.get(name, "")) else name, name) for name in matches])
 
     async def service_autocomplete(
         self, interaction: discord.Interaction, current: str

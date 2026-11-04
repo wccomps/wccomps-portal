@@ -1,5 +1,5 @@
-"""The incident form fills Affected IP from the first box picked, keeps an IP the team typed, and still follows the
-boxes on the form a failed submit sends back."""
+"""The incident form fills Affected IP from the first picked box with an IP, keeps an IP the team typed, and still
+follows the boxes on the form a failed submit sends back."""
 
 import pytest
 from scoring.models import QuotientMetadataCache
@@ -8,7 +8,11 @@ from .conftest import create_session_context
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
 
-BOXES = [{"name": "web", "ip": "10.2_.0.20", "services": []}, {"name": "db", "ip": "10.2_.0.30", "services": []}]
+BOXES = [
+    {"name": "web", "ip": "10.2_.0.20", "services": [{"name": "HTTP", "display_name": "HTTP"}]},
+    {"name": "db", "ip": "10.2_.0.30", "services": [{"name": "MySQL", "display_name": "MySQL"}]},
+    {"name": "router", "ip": "", "services": []},
+]
 
 
 @pytest.fixture
@@ -48,3 +52,16 @@ def test_after_a_failed_submit_a_box_change_still_replaces_the_filled_ip(page):
     box(page, "web").click()
     box(page, "db").click()
     assert ip.input_value() == "10.201.0.30"
+
+
+def test_selecting_unscored_router_box_filters_service_dropdown_to_other(page):
+    service_options = page.locator("#id_affected_service option")
+    assert service_options.all_inner_texts() == ["Select a service...", "HTTP", "MySQL", "Other"]
+
+    box(page, "router").click()
+    assert page.locator("#id_destination_ip").input_value() == ""
+    assert service_options.all_inner_texts() == ["Select a service...", "Other"]
+
+    box(page, "web").click()
+    assert page.locator("#id_destination_ip").input_value() == "10.201.0.20"
+    assert service_options.all_inner_texts() == ["Select a service...", "HTTP", "Other"]

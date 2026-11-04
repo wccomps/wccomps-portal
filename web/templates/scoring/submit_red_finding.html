@@ -342,40 +342,24 @@
 
             const currentValue = serviceSelect.value;
 
-            // Collect unique services from selected boxes
             const services = new Set();
-            boxNames.forEach(boxName => {
+            const sourceBoxes = boxNames.length > 0 ? boxNames : Object.keys(boxMetadata);
+            sourceBoxes.forEach(boxName => {
                 const boxData = boxMetadata[boxName];
                 if (boxData && boxData.services) {
                     boxData.services.forEach(svc => services.add(svc));
                 }
             });
 
-            // Rebuild options
             serviceSelect.innerHTML = '<option value="">Select a service...</option>';
-            if (services.size > 0) {
-                Array.from(services).sort().forEach(svc => {
-                    const option = document.createElement('option');
-                    option.value = svc;
-                    option.textContent = svc;
-                    if (svc === currentValue) option.selected = true;
-                    serviceSelect.appendChild(option);
-                });
-            } else {
-                // No boxes selected - show all services
-                for (const [boxName, boxData] of Object.entries(boxMetadata)) {
-                    if (boxData.services) {
-                        boxData.services.forEach(svc => services.add(svc));
-                    }
-                }
-                Array.from(services).sort().forEach(svc => {
-                    const option = document.createElement('option');
-                    option.value = svc;
-                    option.textContent = svc;
-                    if (svc === currentValue) option.selected = true;
-                    serviceSelect.appendChild(option);
-                });
-            }
+            const options = [...Array.from(services).filter(s => s !== 'Other').sort(), 'Other'];
+            options.forEach(svc => {
+                const option = document.createElement('option');
+                option.value = svc;
+                option.textContent = svc;
+                if (svc === currentValue) option.selected = true;
+                serviceSelect.appendChild(option);
+            });
         }
 
         function calculatePoints() {

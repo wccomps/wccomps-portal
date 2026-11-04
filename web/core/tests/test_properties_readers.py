@@ -616,7 +616,8 @@ class Caller:
 def _sync_metadata() -> object:
     from scoring.quotient_sync import sync_quotient_metadata
 
-    return sync_quotient_metadata()
+    with override_settings(PROXMOX_API_URL="https://proxmox.test", PROXMOX_API_TOKEN="user@pam!tok=secret"):
+        return sync_quotient_metadata()
 
 
 def _sync_scores() -> object:
@@ -666,7 +667,7 @@ def _fix_groups() -> object:
 
 
 CALLERS = [
-    Caller("sync_quotient_metadata", _sync_metadata, (DONE, METADATA, INJECTS), (ValueError,)),
+    Caller("sync_quotient_metadata", _sync_metadata, (DONE, METADATA, PROXMOX_POOL, INJECTS), (ValueError,)),
     Caller("sync_service_scores", _sync_scores, (DONE, EXPORT, UPTIMES), (ValueError,)),
     Caller("refresh_user_groups", _refresh_groups, (GROUPS, USERS), (Exception,)),
     Caller("reset_team_credentials", _reset_credentials, (USERS, SESSIONS, DONE, SESSIONS, DONE)),
