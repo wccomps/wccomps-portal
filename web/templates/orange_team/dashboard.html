@@ -141,6 +141,9 @@
                             Score
                         </c-table_header>
                         <c-table_header sortable="false">
+                            Notes / Files
+                        </c-table_header>
+                        <c-table_header sortable="false">
                             Actions
                         </c-table_header>
                     </tr>
@@ -213,8 +216,38 @@
                         </td>
                         <td>
                             {% if "submit" in assignment.actions %}
+                                <div>
+                                    <textarea name="evaluator_notes"
+                                              form="submit-{{ assignment.pk }}"
+                                              rows="2"
+                                              placeholder="Evaluator notes (optional)"
+                                              aria-label="Evaluator notes for Team {{ assignment.team.team_number }}">{{ assignment.evaluator_notes }}</textarea>
+                                    <input type="file"
+                                           name="screenshots"
+                                           form="submit-{{ assignment.pk }}"
+                                           class="d-block mt-5"
+                                           multiple
+                                           aria-label="Screenshots or files for Team {{ assignment.team.team_number }}">
+                                </div>
+                            {% elif assignment.evaluator_notes %}
+                                <div class="text-sm whitespace-pre-wrap">{{ assignment.evaluator_notes }}</div>
+                            {% endif %}
+                            {% if assignment.screenshots.all %}
+                                <ul class="text-sm mt-5">
+                                    {% for screenshot in assignment.screenshots.all %}
+                                        <li>
+                                            <a href="{% url 'orange_team:assignment_screenshot' screenshot.pk %}"
+                                               target="_blank">{{ screenshot.filename }}</a>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if "submit" in assignment.actions %}
                                 <c-form id="submit-{{ assignment.pk }}"
                                         action="{% url 'orange_team:assignment_submit' assignment.pk %}"
+                                        enctype="multipart/form-data"
                                         data-confirm="Submit this check? You cannot edit the score after submission.">
                                     {% csrf_token %}
                                     <c-button type="submit" variant="primary">

@@ -20,6 +20,9 @@ from django.utils.http import content_disposition_header
 
 MAX_NAME_LENGTH = 255
 DOWNLOAD_MIME = "application/octet-stream"
+MAX_SCREENSHOT_SIZE = 10 * 1024 * 1024
+MAX_SCREENSHOTS = 20  # per submission
+MAX_SUBMISSION_SIZE = 50 * 1024 * 1024
 
 # Raster images only: SVG can carry script
 _SIGNATURES: tuple[tuple[bytes, str], ...] = (
@@ -123,3 +126,21 @@ class StoredFile(models.Model):
         if self.file_data is None:
             raise Http404("The file was lost")
         return file_response(bytes(self.file_data), self.filename, inline=inline)
+
+
+def read_screenshots[S: StoredFile](uploads: list[UploadedFile[bytes]], model: type[S]) -> list[S]:
+    """A submission's uploads as unsaved rows of model; UploadError when there are too many or they are too big.
+
+    Read them before saving the submission, so a refused file leaves nothing to roll back.
+    """
+    if len(uploads) > MAX_SCREENSHOTS:
+        raise UploadError(f"Maximum {MAX_SCREENSHOTS} screenshots allowed per submission")
+    rows: list[S] = []
+    total = 0
+    for upload in uploads:
+        row = model.from_upload(upload)
+        total += len(bytes(row.file_data))
+        if total > MAX_SUBMISSION_SIZE:
+            raise UploadError(f"Total upload size cannot exceed {MAX_SUBMISSION_SIZE // (1024 * 1024)}MB")
+        rows.append(row)
+    return rows

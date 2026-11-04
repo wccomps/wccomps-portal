@@ -76,6 +76,7 @@ class ReassignForm(forms.Form):
 
 class SubmitScoreForm(forms.Form):
     score = forms.IntegerField(required=False, min_value=0)
+    evaluator_notes = forms.CharField(required=False)
 
 
 ROW_NUMBER = re.compile(r"[0-9]{1,9}")

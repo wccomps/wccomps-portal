@@ -24,16 +24,23 @@ from django.test import Client
 from django.urls import reverse
 from hypothesis import example, given
 from hypothesis import strategies as st
+from orange_team.models import OrangeAssignment, OrangeAssignmentScreenshot, OrangeCheck
 from packets.forms import PacketUploadForm, parse_team_extras
 from packets.models import Packet
 from registration.models import Event, Season, normalize_school_name
 from registration.services import ImportBlockedError, SchoolListRow, import_school_list
 from scoring.models import IncidentScreenshot, RedTeamScreenshot, validate_file_size
-from scoring.screenshots import MAX_SCREENSHOTS, read_screenshots
 
 from core.csv_export import safe_cell
 from core.forms import SchoolInfoEditForm
-from core.stored_files import UploadError, clean_name, detect_inline_type, stored_type
+from core.stored_files import (
+    MAX_SCREENSHOTS,
+    UploadError,
+    clean_name,
+    detect_inline_type,
+    read_screenshots,
+    stored_type,
+)
 from core.tests.strategies import (
     PAYLOADS,
     assert_storable,
@@ -301,13 +308,13 @@ def test_team_extras_are_escaped_in_the_packet_email(key: str, value: str) -> No
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# Evidence files (scoring.screenshots) and ticket attachments
+# Evidence files (core.stored_files) and ticket attachments
 # ---------------------------------------------------------------------------------------------------------------
 
 
 @given(upload=uploaded_files())
 def test_an_upload_is_stored_or_refused_and_typed_from_its_bytes(upload: SimpleUploadedFile) -> None:
-    for model in (RedTeamScreenshot, IncidentScreenshot):
+    for model in (RedTeamScreenshot, IncidentScreenshot, OrangeAssignmentScreenshot):
         upload.seek(0)
         try:
             row = model.from_upload(upload)
@@ -458,6 +465,28 @@ def test_red_finding_view_answers_any_screenshots(files: list[SimpleUploadedFile
 
 
 @views_profile()
+@given(files=st.lists(uploaded_files(), max_size=3), evaluator_notes=request_text())
+def test_orange_assignment_submit_view_answers_any_screenshots(
+    files: list[SimpleUploadedFile], evaluator_notes: str, orange_team_user: User
+) -> None:
+    team, _ = Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01"})
+    check, _ = OrangeCheck.objects.get_or_create(
+        title="Phone Check", defaults={"description": "Call", "max_points": 10}
+    )
+    assignment, _ = OrangeAssignment.objects.get_or_create(
+        orange_check=check, team=team, defaults={"user": orange_team_user}
+    )
+    client = _client_for(orange_team_user)
+    post = {
+        "score": "5",
+        "evaluator_notes": evaluator_notes,
+        "screenshots": files,
+    }
+    with rolled_back():
+        _no_server_error(client.post(reverse("orange_team:assignment_submit", args=[assignment.pk]), post))
+
+
+@views_profile()
 @given(upload=uploaded_files())
 def test_ticket_attachment_view_answers_any_file(
     upload: SimpleUploadedFile, ticket: Ticket, ticketing_support_user: User
@@ -500,7 +529,8 @@ PARSERS: dict[str, list[Callable[..., None]]] = {
     "web/packets/views.py:upload_packet": [test_packet_upload_view_answers_any_file],
     "web/scoring/models.py:validate_file_size": [test_file_size_validator_passes_or_refuses_any_upload],
     "web/core/stored_files.py:StoredFile.from_upload": [test_an_upload_is_stored_or_refused_and_typed_from_its_bytes],
-    "web/scoring/screenshots.py:read_screenshots": [test_screenshots_are_read_together_or_refused],
+    "web/core/stored_files.py:read_screenshots": [test_screenshots_are_read_together_or_refused],
+    "web/orange_team/views.py:assignment_submit": [test_orange_assignment_submit_view_answers_any_screenshots],
     "web/scoring/views/incidents.py:submit_incident_report": [test_incident_report_view_answers_any_screenshots],
     "web/scoring/views/red_team.py:submit_red_score": [test_red_finding_view_answers_any_screenshots],
     "web/ticketing/views/attachments.py:_save_attachment": [

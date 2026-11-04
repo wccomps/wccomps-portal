@@ -17,6 +17,7 @@ from django.views.decorators.http import require_POST
 from core.auth_utils import has_permission, require_permission
 from core.csv_export import csv_writer
 from core.errors import json_endpoint
+from core.stored_files import UploadError, read_screenshots
 from core.utils import by_team, chosen_team, list_filters, requested_sort, stable_order, team_numbers
 from orange_team.forms import (
     MAX_FOLLOW_UP_MINUTES,
@@ -36,6 +37,7 @@ from orange_team.models import (
     OrangeAssignment,
     OrangeAssignmentQuerySet,
     OrangeAssignmentResult,
+    OrangeAssignmentScreenshot,
     OrangeCheck,
     OrangeCheckCriterion,
     OrangeCheckIn,
@@ -68,7 +70,6 @@ def _checks_with_max_score() -> Prefetch[str]:
 
 @require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
 def dashboard(request: HttpRequest) -> HttpResponse:
-    """Orange team dashboard showing check-in status and assignments."""
     user = cast(User, request.user)
 
     active_checkin = OrangeCheckIn.objects.filter(user=user, is_active=True).first()
@@ -77,7 +78,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         OrangeAssignment.objects.filter(user=user)
         .unfinished()
         .select_related("team")
-        .prefetch_related(_checks_with_max_score(), "results__criterion")
+        .prefetch_related(_checks_with_max_score(), "results__criterion", "screenshots")
         .order_by("orange_check__scheduled_at", "orange_check__title", "team__team_number")
     )
     for assignment in my_assignments:
@@ -119,12 +120,11 @@ def admin_toggle_checkin(request: HttpRequest, user_id: int) -> HttpResponse:
 
 @require_permission("orange_team_lead", error_message="Only leads can review assignments")
 def review_queue(request: HttpRequest) -> HttpResponse:
-    """Lead view showing submitted assignments awaiting review."""
     filters, filtered = list_filters(request, {"status": "", "team": "", "search": ""})
     base_assignments = OrangeAssignment.objects.filter(status__in=OrangeAssignment.REVIEW_STATUSES)
     team = chosen_team(filters["team"])
     review_assignments = by_team(
-        base_assignments.select_related("team", "user").prefetch_related(_checks_with_max_score()),
+        base_assignments.select_related("team", "user").prefetch_related(_checks_with_max_score(), "screenshots"),
         team,
     )
 
@@ -268,7 +268,9 @@ def check_create(request: HttpRequest) -> HttpResponse:
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
 def check_detail(request: HttpRequest, check_id: int) -> HttpResponse:
     orange_check = get_object_or_404(
-        OrangeCheck.objects.with_max_score().prefetch_related("criteria", "assignments__user", "assignments__team"),
+        OrangeCheck.objects.with_max_score().prefetch_related(
+            "criteria", "assignments__user", "assignments__team", "assignments__screenshots"
+        ),
         pk=check_id,
     )
     return render(
@@ -512,13 +514,14 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
         messages.error(request, "Assignment already submitted.")
         return redirect("orange_team:dashboard")
 
+    score_form = SubmitScoreForm(request.POST)
+    if not score_form.is_valid():
+        messages.error(request, f"Score must be between 0 and {assignment.orange_check.max_score}.")
+        return redirect("orange_team:dashboard")
+
     if assignment.orange_check.criteria.exists():
         assignment.score = assignment.calculate_score()
     else:
-        score_form = SubmitScoreForm(request.POST)
-        if not score_form.is_valid():
-            messages.error(request, f"Score must be between 0 and {assignment.orange_check.max_score}.")
-            return redirect("orange_team:dashboard")
         posted = score_form.cleaned_data.get("score")
         if posted is not None:
             if posted > assignment.orange_check.max_score:
@@ -531,10 +534,34 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
         else:
             # A score kept from before a rejection can't outlast a lowered maximum
             assignment.score = min(assignment.score, assignment.orange_check.max_score)
+
+    try:
+        screenshots = read_screenshots(request.FILES.getlist("screenshots"), OrangeAssignmentScreenshot)
+    except UploadError as e:
+        messages.error(request, f"File upload failed: {e}")
+        return redirect("orange_team:dashboard")
+
+    assignment.evaluator_notes = score_form.cleaned_data.get("evaluator_notes", "")
     assignment.submitted_at = timezone.now()
     # A resubmit after a rejection waits for a new review
     assignment.reviewed_by, assignment.reviewed_at, assignment.notes = None, None, ""
-    assignment.save(update_fields=["score", "status", "submitted_at", "reviewed_by", "reviewed_at", "notes"])
+    assignment.save(
+        update_fields=[
+            "score",
+            "evaluator_notes",
+            "status",
+            "submitted_at",
+            "reviewed_by",
+            "reviewed_at",
+            "notes",
+        ]
+    )
+
+    for screenshot in screenshots:
+        screenshot.assignment = assignment
+    if screenshots:
+        assignment.screenshots.all().delete()
+        OrangeAssignmentScreenshot.objects.bulk_create(screenshots)
 
     messages.success(
         request,
@@ -543,6 +570,16 @@ def assignment_submit(request: HttpRequest, assignment_id: int) -> HttpResponse:
         f" ({assignment.score}/{assignment.orange_check.max_score})",
     )
     return redirect("orange_team:dashboard")
+
+
+@require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
+def assignment_screenshot(request: HttpRequest, screenshot_id: int) -> HttpResponse:
+    user = cast(User, request.user)
+    screenshots = OrangeAssignmentScreenshot.objects.all()
+    if not has_permission(user, "orange_team_lead"):
+        screenshots = screenshots.filter(assignment__user=user)
+    screenshot = get_object_or_404(screenshots, pk=screenshot_id)
+    return screenshot.serve(inline=True)
 
 
 @require_permission("orange_team", "orange_team_lead", error_message="Only Orange Team members can access this page")
@@ -651,6 +688,7 @@ def export_scores(request: HttpRequest) -> HttpResponse:
             "Assignee",
             "Score",
             "Max Score",
+            "Evaluator Notes",
             "Status",
             "Submitted At",
             "Reviewed By",
@@ -666,6 +704,7 @@ def export_scores(request: HttpRequest) -> HttpResponse:
                 a.user.username,
                 a.score or 0,
                 a.orange_check.max_score,
+                a.evaluator_notes,
                 a.status,
                 timezone.localtime(a.submitted_at).strftime("%Y-%m-%d %H:%M") if a.submitted_at else "",
                 a.reviewed_by.username if a.reviewed_by else "",

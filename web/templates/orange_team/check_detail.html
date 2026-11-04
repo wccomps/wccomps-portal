@@ -102,6 +102,9 @@
                         <c-table_header sortable="false">
                             Score
                         </c-table_header>
+                        <c-table_header sortable="false">
+                            Notes / Files
+                        </c-table_header>
                     </tr>
                 </c-slot>
                 {% for assignment in orange_check.assignments.all %}
@@ -114,6 +117,21 @@
                             </c-badge>
                         </td>
                         <td>{% if assignment.score is not None %}{{ assignment.score }} / {{ orange_check.max_score }}{% endif %}</td>
+                        <td>
+                            {% if assignment.evaluator_notes %}
+                                <div class="text-sm whitespace-pre-wrap">{{ assignment.evaluator_notes }}</div>
+                            {% endif %}
+                            {% if assignment.screenshots.all %}
+                                <ul class="text-sm">
+                                    {% for screenshot in assignment.screenshots.all %}
+                                        <li>
+                                            <a href="{% url 'orange_team:assignment_screenshot' screenshot.pk %}"
+                                               target="_blank">{{ screenshot.filename }}</a>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            {% endif %}
+                        </td>
                     </tr>
                 {% endfor %}
             </c-table>

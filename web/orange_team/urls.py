@@ -23,6 +23,7 @@ urlpatterns = [
     path("assignments/<int:assignment_id>/submit/", views.assignment_submit, name="assignment_submit"),
     path("assignments/<int:assignment_id>/approve/", views.assignment_approve, name="assignment_approve"),
     path("assignments/<int:assignment_id>/reject/", views.assignment_reject, name="assignment_reject"),
+    path("screenshots/<int:screenshot_id>/", views.assignment_screenshot, name="assignment_screenshot"),
     path("export/", views.export_scores, name="export_scores"),
     path("followups/create/", views.followup_create, name="followup_create"),
     path("followups/<int:followup_id>/dismiss/", views.followup_dismiss, name="followup_dismiss"),

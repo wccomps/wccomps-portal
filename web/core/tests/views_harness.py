@@ -48,6 +48,7 @@ from hypothesis import strategies as st
 from orange_team.models import (
     OrangeAssignment,
     OrangeAssignmentResult,
+    OrangeAssignmentScreenshot,
     OrangeCheck,
     OrangeCheckCriterion,
     OrangeCheckIn,
@@ -262,7 +263,6 @@ def build_world() -> World:
         for team, approved in ((teams[0], True), (teams[1], False))
     ]
 
-    # Orange team: a check with criteria; orange's pending and submitted assignments, lead's approved one
     check = OrangeCheck.objects.create(
         title="Phones", description="Call", max_points=10, scheduled_at=timezone.now(), time_limit=timedelta(hours=1)
     )
@@ -293,6 +293,9 @@ def build_world() -> World:
     ]
     orange_score = OrangeTeamScore.objects.create(
         team=teams[0], submitted_by=users["orange_team"], description="Answered", points_awarded=5
+    )
+    orange_shot = OrangeAssignmentScreenshot.objects.create(
+        assignment=assignments[0], file_data=b"\x89PNG\r\n\x1a\n", filename="o.png", mime_type="image/png"
     )
 
     packet = Packet.objects.create(
@@ -346,6 +349,7 @@ def build_world() -> World:
         "assignment_id": [a.pk for a in assignments],
         "followup_id": [f.pk for f in followups],
         "orange_score_id": [orange_score.pk],
+        "orange_screenshot_id": [orange_shot.pk],
         "packet_id": [packet.pk, draft.pk],
         "registration_id": [r.pk for r in registrations],
         "season_id": [season.pk],
