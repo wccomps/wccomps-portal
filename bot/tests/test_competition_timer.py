@@ -543,3 +543,58 @@ async def test_the_start_and_stop_commands_ask_for_confirmation_before_running(
 
     mock_interaction.response.send_message.assert_awaited_once()
     assert run.await_count == (1 if confirmed else 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_timer_queues_1h_and_30m_countdown_announcements_once_each() -> None:
+    from core.discord_tasks import BroadcastMessage
+    from core.models import DiscordTask
+    from core.services.competition import COMPETITION_COUNTDOWN_QUEUED, COUNTDOWN_SENDER
+
+    now = datetime(2026, 10, 3, 23, 0, tzinfo=timezone.UTC)
+    end_time = now + timedelta(hours=1)
+    await CompetitionConfig.objects.aupdate_or_create(
+        pk=1,
+        defaults={
+            "applications_enabled": True,
+            "competition_start_time": None,
+            "competition_end_time": end_time,
+        },
+    )
+    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+    with (
+        patch("bot.competition_timer.timezone.now", return_value=now - timedelta(seconds=30)) as mock_now,
+        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
+    ):
+        # 60m30s remaining: not yet in the 1-hour window
+        await timer._check_competition_times()
+        assert await DiscordTask.objects.acount() == 0
+
+        # 59m remaining: enters 1-hour countdown window; repeat tick does not duplicate
+        mock_now.return_value = end_time - timedelta(minutes=59)
+        await timer._check_competition_times()
+        await timer._check_competition_times()
+        assert await DiscordTask.objects.acount() == 1
+
+        # 45m remaining: between milestones, nothing queued
+        mock_now.return_value = end_time - timedelta(minutes=45)
+        await timer._check_competition_times()
+        assert await DiscordTask.objects.acount() == 1
+
+        # 29m remaining: enters 30-minute countdown window; repeat tick does not duplicate
+        mock_now.return_value = end_time - timedelta(minutes=29)
+        await timer._check_competition_times()
+        await timer._check_competition_times()
+        assert await DiscordTask.objects.acount() == 2
+
+    broadcasts = [t.typed_payload() async for t in DiscordTask.objects.order_by("pk")]
+    assert len(broadcasts) == 2
+    assert all(
+        isinstance(b, BroadcastMessage) and b.target == "all-teams" and b.sender == COUNTDOWN_SENDER for b in broadcasts
+    )
+    assert isinstance(broadcasts[0], BroadcastMessage) and "1 hour remaining" in broadcasts[0].message
+    assert "Oct 3, 2026, 5:00 PM PDT" in broadcasts[0].message
+    assert isinstance(broadcasts[1], BroadcastMessage) and "30 minutes remaining" in broadcasts[1].message
+    assert await AuditLog.objects.filter(action=COMPETITION_COUNTDOWN_QUEUED).acount() == 2
+    assert ops.await_count == 2

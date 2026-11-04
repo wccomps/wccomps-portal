@@ -174,6 +174,8 @@ class PacketDistributionService:
         recipients: list[str],
         subject: str,
     ) -> EmailMultiAlternatives:
+        from core.services.competition import competition_schedule_context
+
         password = self._team_password(team)
         username = team_username(team.team_number)
         raw_extras = packet.team_extras.get(str(team.team_number), {}) if packet.team_extras else {}
@@ -185,6 +187,7 @@ class PacketDistributionService:
             "password": password,
             "team_extras": team_extras,
             "portal_url": team_packet_url(),
+            **competition_schedule_context(),
         }
 
         text_content = render_to_string("packets/emails/packet_notification.txt", context)
