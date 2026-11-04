@@ -214,7 +214,6 @@ class OrangeCheckCriterion(models.Model):
         return f"{self.label} ({self.points} pts)"
 
     def reconcile_results(self) -> None:
-        """Keep existing results consistent with this criterion's type and point cap."""
         if self.criterion_type == self.CriterionType.RANGE:
             self.results.filter(met=True, points_awarded__isnull=True).update(
                 points_awarded=self.points, met=self.points > 0
@@ -290,9 +289,11 @@ class OrangeAssignment(models.Model):
         ),
     }
     STATUS_CHOICES = [(status, row.label) for status, row in STATUSES.items()]
+    DASHBOARD_STATUSES: Mapping[str, str] = {status: row.label for status, row in STATUSES.items() if row.on_dashboard}
     FINISHED_STATUSES = tuple(status for status, row in STATUSES.items() if not row.on_dashboard)
     REVIEW_STATUSES = tuple(status for status, row in STATUSES.items() if row.in_review_queue)
     SCORED_STATUSES = tuple(status for status, row in STATUSES.items() if row.scored)
+    APPROVABLE_STATUSES = tuple(status for status, row in STATUSES.items() if "approve" in row.moves)
 
     orange_check = models.ForeignKey(OrangeCheck, on_delete=models.CASCADE, related_name="assignments")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="orange_assignments")
@@ -334,8 +335,6 @@ class OrangeAssignment(models.Model):
 
 
 class OrangeAssignmentResult(models.Model):
-    """Per-criterion result for an assignment."""
-
     assignment = models.ForeignKey(OrangeAssignment, on_delete=models.CASCADE, related_name="results")
     criterion = models.ForeignKey(OrangeCheckCriterion, on_delete=models.CASCADE, related_name="results")
     met = models.BooleanField(default=False)
@@ -353,7 +352,6 @@ class OrangeAssignmentResult(models.Model):
         return self.criterion.points if self.met else 0
 
     def record_grade(self, *, met: bool | None, points: int | None) -> bool:
-        """Apply a dashboard grade according to the criterion's type; return False when invalid."""
         if self.criterion.criterion_type == OrangeCheckCriterion.CriterionType.RANGE:
             if points is None or points > self.criterion.points:
                 return False

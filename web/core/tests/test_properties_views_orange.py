@@ -45,7 +45,16 @@ def _form(form: Any, **hints: Any) -> Any:
 
 
 CASES = [
-    ViewCase("orange_team:dashboard", ORANGE),
+    ViewCase(
+        "orange_team:dashboard",
+        ORANGE,
+        query=lambda w: {
+            "status": st.one_of(
+                st.sampled_from(["unsubmitted", *OrangeAssignment.DASHBOARD_STATUSES]),
+                hostile_text(),
+            ),
+        },
+    ),
     ViewCase("orange_team:toggle_checkin", ORANGE),
     ViewCase("orange_team:admin_toggle_checkin", LEAD),
     ViewCase(
@@ -101,6 +110,12 @@ CASES = [
         post=lambda w: form_fields(SubmitScoreForm()) | {"screenshots": uploads(3)},
     ),
     ViewCase("orange_team:assignment_approve", LEAD),
+    ViewCase(
+        "orange_team:assignment_bulk_approve",
+        LEAD,
+        post=lambda w: {"assignment_ids": _ids(w, "assignment_id")},
+        idempotent=(OrangeAssignment,),
+    ),
     ViewCase("orange_team:assignment_reject", LEAD, post=_form(AssignmentRejectForm())),
     ViewCase("orange_team:assignment_screenshot", ORANGE, params={"screenshot_id": "orange_screenshot_id"}),
     ViewCase("orange_team:export_scores", LEAD),

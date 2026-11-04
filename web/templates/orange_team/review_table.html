@@ -1,14 +1,25 @@
 {% load cotton status_variants %}
-<div id="orange-review-content">
+<div id="orange-review-content" x-data="orangeReviewBulkSelect">
+    <c-form id="bulk-approve-form"
+            action="{% url 'orange_team:assignment_bulk_approve' %}"
+            ::data-confirm="approveQuestion">
+        {% csrf_token %}
+    </c-form>
     <c-table id="review" aria_label="Assignments for review">
         <c-slot name="headers">
             <tr>
-                <c-table_header sort_field="orange_check__title"
-                                current_sort="{{ sort_by }}">
+                <th scope="col" class="action-checkbox-column">
+                    <input type="checkbox"
+                           :checked="allSelected"
+                           :indeterminate="someSelected"
+                           @click="toggleAll"
+                           title="Select all"
+                           aria-label="Select all assignments">
+                </th>
+                <c-table_header sort_field="orange_check__title" current_sort="{{ sort_by }}">
                     Check
                 </c-table_header>
-                <c-table_header sort_field="team__team_number"
-                                current_sort="{{ sort_by }}">
+                <c-table_header sort_field="team__team_number" current_sort="{{ sort_by }}">
                     Team
                 </c-table_header>
                 <c-table_header sort_field="user__username" current_sort="{{ sort_by }}">
@@ -30,6 +41,18 @@
         </c-slot>
         {% for assignment in review_assignments %}
             <tr>
+                <td class="action-checkbox">
+                    {% if "approve" in assignment.actions %}
+                        <input type="checkbox"
+                               form="bulk-approve-form"
+                               name="assignment_ids"
+                               value="{{ assignment.pk }}"
+                               data-assignment-id="{{ assignment.pk }}"
+                               aria-label="Select assignment #{{ assignment.pk }}"
+                               :checked="selectedMap.{{ assignment.pk|jskey }}"
+                               @change="toggleItem">
+                    {% endif %}
+                </td>
                 <td>{{ assignment.orange_check.title }}</td>
                 <td>Team {{ assignment.team.team_number }}</td>
                 <td>{{ assignment.user.username }}</td>
@@ -81,7 +104,7 @@
             </tr>
         {% empty %}
             <tr>
-                <td colspan="7">
+                <td colspan="8">
                     {% if filtered %}
                         <c-no_matches items="assignments" href="{% url 'orange_team:review_queue' %}" />
                     {% else %}

@@ -67,7 +67,9 @@ def test_an_autosave_and_a_rubric_edit_dropping_its_criterion_finish_together(
     def edit() -> None:
         try:
             assert save_locked.wait(timeout=60)
-            update_check_criteria(check, [{"id": kept.pk, "label": "Kept", "points": 2, "sort_order": 1}])
+            update_check_criteria(
+                check, [{"id": kept.pk, "label": "Kept", "points": 2, "criterion_type": "checkbox", "sort_order": 1}]
+            )
         except Exception as e:
             failures.append(f"rubric edit: {e}")
         finally:
@@ -120,7 +122,10 @@ def test_an_auto_assign_and_a_rubric_edit_of_the_same_check_finish_together(
     def edit() -> None:
         try:
             assert assignments_locked.wait(timeout=60)
-            update_check_criteria(check, [{"id": criterion.pk, "label": "Kept", "points": 3, "sort_order": 1}])
+            update_check_criteria(
+                check,
+                [{"id": criterion.pk, "label": "Kept", "points": 3, "criterion_type": "checkbox", "sort_order": 1}],
+            )
         except Exception as e:
             failures.append(f"rubric edit: {e}")
         finally:
@@ -173,8 +178,8 @@ def test_a_rubric_edit_racing_the_first_auto_assign_gives_every_assignment_every
             update_check_criteria(
                 check,
                 [
-                    {"id": kept.pk, "label": "Kept", "points": 2, "sort_order": 1},
-                    {"id": None, "label": "Added", "points": 3, "sort_order": 2},
+                    {"id": kept.pk, "label": "Kept", "points": 2, "criterion_type": "checkbox", "sort_order": 1},
+                    {"id": None, "label": "Added", "points": 3, "criterion_type": "checkbox", "sort_order": 2},
                 ],
             )
         except Exception as e:
