@@ -55,7 +55,6 @@ NAV_MAPPING: dict[str, tuple[str, str]] = {
     "check_detail": ("orange", "checks"),
     "check_edit": ("orange", "checks"),
     "check_duplicate": ("orange", "checks"),
-    "check_delete": ("orange", "checks"),
     "check_assign": ("orange", "checks"),
     "assignment_save": ("orange", "dashboard"),
     "assignment_submit": ("orange", "dashboard"),

@@ -372,7 +372,6 @@ def check_duplicate(request: HttpRequest, check_id: int) -> HttpResponse:
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
 @require_POST
 def check_delete(request: HttpRequest, check_id: int) -> HttpResponse:
-    """Delete a check and its criteria, assignments, and scores."""
     with transaction.atomic():
         orange_check = get_object_or_404(OrangeCheck.objects.select_for_update(), pk=check_id)
         list(orange_check.assignments.select_for_update().order_by("pk"))
