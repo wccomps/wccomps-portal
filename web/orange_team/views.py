@@ -655,9 +655,9 @@ def export_scores(request: HttpRequest) -> HttpResponse:
                 a.score or 0,
                 a.orange_check.max_score,
                 a.status,
-                a.submitted_at.strftime("%Y-%m-%d %H:%M") if a.submitted_at else "",
+                timezone.localtime(a.submitted_at).strftime("%Y-%m-%d %H:%M") if a.submitted_at else "",
                 a.reviewed_by.username if a.reviewed_by else "",
-                a.reviewed_at.strftime("%Y-%m-%d %H:%M") if a.reviewed_at else "",
+                timezone.localtime(a.reviewed_at).strftime("%Y-%m-%d %H:%M") if a.reviewed_at else "",
             ]
         )
     return response

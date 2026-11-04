@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
+from django.utils import timezone
 
 from core.admin import PortalModelAdmin
 
@@ -206,8 +207,8 @@ class TicketAdmin(PortalModelAdmin[Ticket]):
                     ticket.service_name or "",
                     assigned_to_name,
                     ticket.points_charged,
-                    ticket.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    ticket.resolved_at.strftime("%Y-%m-%d %H:%M:%S") if ticket.resolved_at else "",
+                    timezone.localtime(ticket.created_at).strftime("%Y-%m-%d %H:%M:%S"),
+                    timezone.localtime(ticket.resolved_at).strftime("%Y-%m-%d %H:%M:%S") if ticket.resolved_at else "",
                     ticket.resolution_notes or "",
                 ]
             )
