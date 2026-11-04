@@ -91,6 +91,32 @@ def test_reassigning_a_resolved_ticket_someone_holds_is_theirs_or_an_admins(hold
     assert resolved.assigned_to.username == "holder"
 
 
+@pytest.mark.parametrize(
+    ("url_name", "data"),
+    [
+        ("ticket_reopen", {"reopen_reason": "oops"}),
+        ("ticket_adjust_points", {"points_charged": "25"}),
+    ],
+)
+def test_reopening_or_adjusting_points_on_a_resolved_ticket_someone_holds_is_theirs_or_an_admins(
+    url_name: str, data: dict[str, str], holder, other_support: Client, ticketing_admin: Client
+) -> None:
+    resolved = _ticket("T001-005", "resolved", holder)
+    response = other_support.post(reverse(url_name, args=[resolved.ticket_number]), data)
+    assert "holder" in _said(response)[0]
+    resolved.refresh_from_db()
+    assert (resolved.status, resolved.points_charged) == ("resolved", 0)
+
+    other_page = other_support.get(reverse("ticket_detail", args=[resolved.ticket_number])).content.decode()
+    assert reverse(url_name, args=[resolved.ticket_number]) not in other_page
+
+    holder_client = Client()
+    holder_client.force_login(holder)
+    for allowed_client in (holder_client, ticketing_admin):
+        page = allowed_client.get(reverse("ticket_detail", args=[resolved.ticket_number])).content.decode()
+        assert reverse(url_name, args=[resolved.ticket_number]) in page
+
+
 def test_an_unheld_ticket_is_claimed_first(other_support: Client) -> None:
     open_ticket = _ticket("T001-003", "open", None)
     response = other_support.post(

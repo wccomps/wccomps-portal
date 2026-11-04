@@ -59,6 +59,7 @@ def _discord_id(user):
         ("resolve", lambda t, u: lifecycle.resolve_ticket(t.id, "x", user=u)),
         ("cancel", lambda t, u: lifecycle.cancel_ticket(t.id, "x", user=u, staff=True)),
         ("reopen", lambda t, u: lifecycle.reopen_ticket(t.id, "x", user=u)),
+        ("adjust_points", lambda t, u: lifecycle.adjust_ticket_points(t.id, 15, "x", user=u)),
     ],
 )
 @pytest.mark.parametrize("status", ["open", "claimed", "resolved", "cancelled"])
@@ -120,6 +121,40 @@ def test_reopen_view(ticketing_admin_user, team):
     ticket = _ticket(team, "resolved")
     _post(ticketing_admin_user, "ticket_reopen", ticket, {"reopen_reason": "not fixed"})
     assert _effects(ticket) == (["reopened"], ["reopened"], [])
+
+
+def test_adjust_points_view(ticketing_support_user, team):
+    ticket = _ticket(team, "resolved", assigned_to=ticketing_support_user, points_charged=50)
+    _post(
+        ticketing_support_user,
+        "ticket_adjust_points",
+        ticket,
+        {"points_charged": "20", "reason": "reduced penalty"},
+    )
+    assert _effects(ticket) == (["points_adjusted"], ["points_adjusted"], [])
+    ticket.refresh_from_db()
+    assert ticket.points_charged == 20
+    history = TicketHistory.objects.get(ticket=ticket, action="points_adjusted")
+    assert history.details == {
+        "adjusted_by": ticketing_support_user.username,
+        "old_points": 50,
+        "points_charged": 20,
+        "reason": "reduced penalty",
+    }
+
+
+def test_adjust_points_refused_for_support_once_approved(ticketing_support_user, ticketing_admin_user, team):
+    ticket = _ticket(team, "resolved", assigned_to=ticketing_support_user, is_approved=True, points_charged=25)
+
+    changed, error = lifecycle.adjust_ticket_points(ticket.id, 10, "x", user=ticketing_support_user)
+    assert changed is None
+    assert error == "Cannot adjust points of an approved ticket."
+    assert _effects(ticket) == ([], [], [])
+
+    changed, error = lifecycle.adjust_ticket_points(ticket.id, 10, "admin", user=ticketing_admin_user)
+    assert error is None and changed is not None
+    ticket.refresh_from_db()
+    assert ticket.points_charged == 10
 
 
 def test_reopen_refused_once_approved(ticketing_admin_user, team):

@@ -20,6 +20,7 @@ urlpatterns = [
     path("<str:ticket_number>/reassign/", views.ticket_reassign, name="ticket_reassign"),
     path("<str:ticket_number>/resolve/", views.ticket_resolve, name="ticket_resolve"),
     path("<str:ticket_number>/reopen/", views.ticket_reopen, name="ticket_reopen"),
+    path("<str:ticket_number>/adjust-points/", views.ticket_adjust_points, name="ticket_adjust_points"),
     path("<str:ticket_number>/change-category/", views.ticket_change_category, name="ticket_change_category"),
     path(
         "<str:ticket_number>/attachment/upload/",

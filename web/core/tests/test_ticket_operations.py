@@ -356,12 +356,11 @@ class TestOpsTicketResolve:
 class TestOpsTicketReopen:
     """Tests for ops_ticket_reopen view."""
 
-    def test_reopen_requires_admin(self, ticketing_support_user, team_with_tickets):
-        """Only ticketing admin can reopen tickets."""
+    def test_reopen_requires_staff(self, blue_team_user, team_with_tickets):
         team, tickets = team_with_tickets
         resolved_ticket = tickets[2]
         client = Client()
-        client.force_login(ticketing_support_user)
+        client.force_login(blue_team_user)
         response = client.post(reverse("ticket_reopen", args=[resolved_ticket.ticket_number]))
         assert response.status_code == 403
 

@@ -19,6 +19,7 @@ NAV_MAPPING: dict[str, tuple[str, str]] = {
     "ticket_unclaim": ("tickets", ""),
     "ticket_resolve": ("tickets", ""),
     "ticket_reopen": ("tickets", ""),
+    "ticket_adjust_points": ("tickets", ""),
     "ticket_reassign": ("tickets", ""),
     "ticket_comment": ("tickets", ""),
     "ticket_change_category": ("tickets", ""),

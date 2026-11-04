@@ -1,6 +1,7 @@
 """Re-exports every view so callers can use ``from ticketing import views``."""
 
 from .actions import (
+    ticket_adjust_points,
     ticket_box_reset,
     ticket_cancel,
     ticket_change_category,
@@ -27,6 +28,7 @@ __all__ = [
     "create_ticket",
     "ops_batch_verify_tickets",
     "ops_review_tickets",
+    "ticket_adjust_points",
     "ticket_attachment_download",
     "ticket_attachment_upload",
     "ticket_box_reset",

@@ -25,7 +25,7 @@
                 {% for event in history %}
                     <tr>
                         <td>{{ event.timestamp|timesince }} ago</td>
-                        <td>{{ event.action }}</td>
+                        <td>{{ event.action|format_history_action }}</td>
                         <td>
                             {% if event.actor %}
                                 {{ event.actor }}
@@ -42,7 +42,7 @@
             {% for event in history %}
                 <div class="history-card">
                     <div class="history-card-header">
-                        <span>{{ event.action }} ·
+                        <span>{{ event.action|format_history_action }} ·
                             {% if event.actor %}
                                 {{ event.actor }}
                             {% else %}
