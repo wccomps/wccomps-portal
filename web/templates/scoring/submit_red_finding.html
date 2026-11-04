@@ -336,30 +336,26 @@
             updateServiceDropdown(boxNames);
         }
 
+        const allServiceOptions = Array.from(
+            document.querySelectorAll('#id_affected_service option'),
+            opt => ({ value: opt.value, label: opt.textContent })
+        ).filter(opt => opt.value);
+
         function updateServiceDropdown(boxNames) {
             const serviceSelect = document.getElementById('id_affected_service');
             if (!serviceSelect) return;
 
             const currentValue = serviceSelect.value;
-
-            const services = new Set();
-            const sourceBoxes = boxNames.length > 0 ? boxNames : Object.keys(boxMetadata);
-            sourceBoxes.forEach(boxName => {
-                const boxData = boxMetadata[boxName];
-                if (boxData && boxData.services) {
-                    boxData.services.forEach(svc => services.add(svc));
-                }
-            });
+            const allowed = boxNames.length > 0
+                ? new Set([...boxNames.flatMap(name => boxMetadata[name]?.services || []), 'Other'])
+                : null;
 
             serviceSelect.innerHTML = '<option value="">Select a service...</option>';
-            const options = [...Array.from(services).filter(s => s !== 'Other').sort(), 'Other'];
-            options.forEach(svc => {
-                const option = document.createElement('option');
-                option.value = svc;
-                option.textContent = svc;
-                if (svc === currentValue) option.selected = true;
-                serviceSelect.appendChild(option);
-            });
+            allServiceOptions
+                .filter(opt => !allowed || allowed.has(opt.value))
+                .forEach(opt => {
+                    serviceSelect.appendChild(new Option(opt.label, opt.value, false, opt.value === currentValue));
+                });
         }
 
         function calculatePoints() {

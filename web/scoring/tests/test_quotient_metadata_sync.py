@@ -116,7 +116,6 @@ def test_metadata_sync_merges_unscored_proxmox_team_vms_and_keeps_them_on_proxmo
     assert get_box_choices() == [("TREX", ".12 TREX"), ("PANGEA", "PANGEA")]
     assert get_service_choices() == [("DNS", "DNS"), ("Other", "Other")]
 
-    # Transient Proxmox failure or unconfigured bot sync preserves previously synced unscored boxes
     with (
         patch("scoring.quotient_sync.QuotientClient") as client,
         patch("core.proxmox.ProxmoxClient.list_team_vms", return_value=None),

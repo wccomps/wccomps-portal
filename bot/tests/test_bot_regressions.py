@@ -145,7 +145,7 @@ def test_ticket_commands_require_the_categorys_required_fields(bot_world: World,
         return TicketModal(TicketCategory.objects.get(pk=2))
 
     box_modal = Modal(TicketModal, build_box_modal, frozenset({"blue_team"}))
-    infra = (["web01"], {"web01": "10.0.1.5"}, [])
+    infra = (["router", "web01"], {"router": "", "web01": "10.0.1.5"}, [])
     with patch("bot.ticket_input.ticket_infrastructure", return_value=infra):
         admin = drive(
             ADMIN_TICKET,
@@ -161,6 +161,9 @@ def test_ticket_commands_require_the_categorys_required_fields(bot_world: World,
             box_modal, bot_world, Chosen({"role": "blue_team", "Hostname": "unknown01", "IP Address": ""})
         )
         known_modal = drive(box_modal, bot_world, Chosen({"role": "blue_team", "Hostname": "web01", "IP Address": " "}))
+        unscored_modal = drive(
+            box_modal, bot_world, Chosen({"role": "blue_team", "Hostname": "router", "IP Address": ""})
+        )
         admin_ok = drive(
             ADMIN_TICKET,
             bot_world,
@@ -172,6 +175,7 @@ def test_ticket_commands_require_the_categorys_required_fields(bot_world: World,
     assert "ticketing_ticket" not in team.written
     assert "ticketing_ticket" not in unknown_modal.written
     assert "ticketing_ticket" in known_modal.written
+    assert "ticketing_ticket" in unscored_modal.written
     assert "ticketing_ticket" in admin_ok.written
 
 
