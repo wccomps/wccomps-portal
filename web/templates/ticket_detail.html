@@ -132,13 +132,15 @@
                                            class="w-full">
                                 </div>
                             </div>
-                            <c-button type="submit" variant="{% if is_box_reset %}default{% else %}primary{% endif %}">
-                                {% if is_box_reset %}
+                            {% if is_box_reset %}
+                                <c-button type="submit" variant="default">
                                     Resolve Without Box Reset
-                                {% else %}
+                                </c-button>
+                            {% else %}
+                                <c-button type="submit" variant="primary">
                                     Resolve Ticket
-                                {% endif %}
-                            </c-button>
+                                </c-button>
+                            {% endif %}
                         </c-form>
                     </c-fieldset>
                 {% else %}

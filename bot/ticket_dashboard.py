@@ -238,7 +238,7 @@ class ResolveTicketModal(discord.ui.Modal, title="Resolve Ticket"):
         self.notes: discord.ui.TextInput[ResolveTicketModal] = discord.ui.TextInput(
             label="Resolution Notes",
             placeholder=(
-                "Does not revert the VM in Proxmox — use Box Reset in the portal to revert automatically."
+                "Does not revert the VM in Proxmox. Use Box Reset in the portal to revert automatically."
                 if is_box_reset
                 else "Describe how the issue was resolved..."
             ),
