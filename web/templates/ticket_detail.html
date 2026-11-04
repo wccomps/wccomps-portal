@@ -82,10 +82,38 @@
                     </div>
                 {% endif %}
             </div>
+            <c-fieldset heading="Ticket Information">
+                <c-detail_grid>
+                    {% if ticket.description %}<c-detail_row label="Description">{{ ticket.description }}</c-detail_row>{% endif %}
+                    <c-detail_row label="Created">
+                        {{ ticket.created_at|timesince }} ago
+                    </c-detail_row>
+                    {% if ticket.resolved_at %}
+                        <c-detail_row label="Resolved">
+                            {{ ticket.resolved_at|timesince }} ago
+                        </c-detail_row>
+                    {% endif %}
+                    {% if ticket.resolution_notes %}
+                        <c-detail_row label="Resolution Notes">
+                            {{ ticket.resolution_notes }}
+                        </c-detail_row>
+                    {% endif %}
+                </c-detail_grid>
+            </c-fieldset>
+            {% if is_ops and playbook_steps %}
+                <c-fieldset heading="Response Playbook">
+                    <ol class="playbook-steps">
+                        {% for step in playbook_steps %}
+                            <li>{{ step }}</li>
+                        {% endfor %}
+                    </ol>
+                </c-fieldset>
+            {% endif %}
             {% if is_ops and is_box_reset %}
                 <c-fieldset heading="Box Reset" collapsible="true" collapsed="false">
                     <div x-data="boxReset" class="p-10">
                         <div id="box-reset-panel"
+                             aria-live="polite"
                              hx-get="{% url 'ticket_box_reset_panel' ticket.ticket_number %}"
                              hx-trigger="load"
                              hx-swap="innerHTML">
@@ -98,8 +126,14 @@
             {% endif %}
             {% if is_ops and ticket.status == "claimed" %}
                 {% if actions.resolve %}
-                    <c-fieldset heading="{% if is_box_reset %}Resolve Without Box Reset{% else %}Resolve Ticket{% endif %}">
-                        <c-form action="{% url 'ticket_resolve' ticket.ticket_number %}" class="p-10">
+                    {# djlint:off #}
+                    <c-fieldset heading="{% if is_box_reset %}Resolve Without Box Reset{% else %}Resolve Ticket{% endif %}"
+                                collapsible="{% if is_box_reset %}true{% else %}false{% endif %}"
+                                collapsed="{% if is_box_reset %}true{% else %}false{% endif %}">
+                        <c-form action="{% url 'ticket_resolve' ticket.ticket_number %}"
+                                data-confirm="{% if is_box_reset %}Resolve this Box Reset ticket without reverting the VM in Proxmox?{% endif %}"
+                                class="p-10">
+                    {# djlint:on #}
                             {% csrf_token %}
                             {% if is_box_reset %}
                                 <p class="help mb-10">Marks this ticket resolved without reverting the VM in Proxmox.</p>
@@ -179,33 +213,6 @@
                     {% endif %}
                 </c-fieldset>
             {% endif %}
-            {% if is_ops and playbook_steps %}
-                <c-fieldset heading="Response Playbook">
-                    <ol class="playbook-steps">
-                        {% for step in playbook_steps %}
-                            <li>{{ step }}</li>
-                        {% endfor %}
-                    </ol>
-                </c-fieldset>
-            {% endif %}
-            <c-fieldset heading="Ticket Information">
-                <c-detail_grid>
-                    {% if ticket.description %}<c-detail_row label="Description">{{ ticket.description }}</c-detail_row>{% endif %}
-                    <c-detail_row label="Created">
-                        {{ ticket.created_at|timesince }} ago
-                    </c-detail_row>
-                    {% if ticket.resolved_at %}
-                        <c-detail_row label="Resolved">
-                            {{ ticket.resolved_at|timesince }} ago
-                        </c-detail_row>
-                    {% endif %}
-                    {% if ticket.resolution_notes %}
-                        <c-detail_row label="Resolution Notes">
-                            {{ ticket.resolution_notes }}
-                        </c-detail_row>
-                    {% endif %}
-                </c-detail_grid>
-            </c-fieldset>
             {% if is_ops and ticket.service_name %}
                 <c-fieldset heading="Service Check History" collapsible="true" collapsed="false">
                     <div id="service-checks-panel"

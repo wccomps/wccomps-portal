@@ -243,7 +243,7 @@ class ResolveTicketModal(discord.ui.Modal, title="Resolve Ticket"):
                 else "Describe how the issue was resolved..."
             ),
             style=discord.TextStyle.paragraph,
-            required=False,
+            required=is_box_reset,
             max_length=1000,
         )
 

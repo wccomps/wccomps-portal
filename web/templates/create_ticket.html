@@ -55,7 +55,7 @@
                 requiredFields: [],
 
                 get showHostname() { return this.visibleFields.includes('hostname'); },
-                get showIpAddress() { return this.visibleFields.includes('ip_address'); },
+                get showIpAddress() { return this.visibleFields.includes('ip_address') && !(this.selectedHostname in boxIpMap && !boxIpMap[this.selectedHostname]); },
                 get showServiceName() { return this.visibleFields.includes('service_name'); },
                 get showDescription() { return this.visibleFields.includes('description'); },
                 get hostnameRequired() { return this.requiredFields.includes('hostname'); },

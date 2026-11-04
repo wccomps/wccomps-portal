@@ -71,7 +71,6 @@
             <select name="snapshot"
                     id="box-reset-snapshot"
                     @change="onSnapshotChange"
-                    aria-label="Snapshot to roll back to"
                     class="py-5 px-10">
                 {% for snap in snapshots %}
                     <option value="{{ snap.name }}"
