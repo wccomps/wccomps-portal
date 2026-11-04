@@ -427,7 +427,9 @@
                     {% for inj in stats.inject_stats %}
                         <tr {% if inj.below_avg %}class="row-danger"{% endif %}>
                             <td>{{ inj.name }}</td>
-                            <td class="text-right">{{ inj.points|floatformat:0 }}</td>
+                            <td class="text-right">
+                                {{ inj.points|floatformat:0 }}{% if inj.max_points is not None %} / {{ inj.max_points|floatformat:0 }}{% endif %}
+                            </td>
                             <td class="text-right">
                                 {% if inj.delta > 0 %}
                                     <span class="score-positive">+{{ inj.delta }}</span>
