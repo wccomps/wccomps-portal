@@ -108,8 +108,6 @@ class TestCancelFlow:
 
 
 class TestReopenFlow:
-    """Create -> claim -> resolve -> reopen -> reclaim -> re-resolve."""
-
     def test_full_reopen_cycle(self, ticketing_admin_user, ticketing_support_user, open_ticket):
         tn = open_ticket.ticket_number
         ops_client = Client()
@@ -117,12 +115,11 @@ class TestReopenFlow:
         admin_client = Client()
         admin_client.force_login(ticketing_admin_user)
 
-        # Claim
         ops_client.post(reverse("ticket_claim", kwargs={"ticket_number": tn}))
         open_ticket.refresh_from_db()
         assert open_ticket.status == "claimed"
 
-        # Resolve (category 6 has variable_points, so points_override required)
+        # Category 6 has variable_points, so points_override required
         ops_client.post(
             reverse("ticket_resolve", kwargs={"ticket_number": tn}),
             {"points_override": "10"},
@@ -130,8 +127,7 @@ class TestReopenFlow:
         open_ticket.refresh_from_db()
         assert open_ticket.status == "resolved"
 
-        # Reopen (requires ticketing_admin)
-        admin_client.post(
+        ops_client.post(
             reverse("ticket_reopen", kwargs={"ticket_number": tn}),
             {"reopen_reason": "Needs more work"},
         )
@@ -139,7 +135,6 @@ class TestReopenFlow:
         assert open_ticket.status == "open"
         assert open_ticket.assigned_to is None
 
-        # Reclaim and re-resolve
         ops_client.post(reverse("ticket_claim", kwargs={"ticket_number": tn}))
         open_ticket.refresh_from_db()
         assert open_ticket.status == "claimed"
@@ -150,6 +145,27 @@ class TestReopenFlow:
         )
         open_ticket.refresh_from_db()
         assert open_ticket.status == "resolved"
+        assert open_ticket.points_charged == 10
+
+        ops_client.post(
+            reverse("ticket_adjust_points", kwargs={"ticket_number": tn}),
+            {"points_charged": "25", "reason": "Extended consultation"},
+        )
+        open_ticket.refresh_from_db()
+        assert open_ticket.points_charged == 25
+
+    def test_reopen_cancelled_ticket(self, ticketing_support_user, open_ticket):
+        open_ticket.status = "cancelled"
+        open_ticket.save()
+
+        client = Client()
+        client.force_login(ticketing_support_user)
+        client.post(
+            reverse("ticket_reopen", kwargs={"ticket_number": open_ticket.ticket_number}),
+            {"reopen_reason": "Closed by mistake"},
+        )
+        open_ticket.refresh_from_db()
+        assert open_ticket.status == "open"
 
 
 class TestInvalidTransitions:
@@ -165,11 +181,7 @@ class TestInvalidTransitions:
         open_ticket.refresh_from_db()
         assert open_ticket.status == "open"
 
-    def test_cannot_reopen_cancelled_ticket(self, ticketing_admin_user, open_ticket):
-        """Admin can't reopen a cancelled ticket."""
-        open_ticket.status = "cancelled"
-        open_ticket.save()
-
+    def test_cannot_reopen_open_ticket(self, ticketing_admin_user, open_ticket):
         client = Client()
         client.force_login(ticketing_admin_user)
         client.post(
@@ -177,15 +189,14 @@ class TestInvalidTransitions:
             {"reopen_reason": "Try again"},
         )
         open_ticket.refresh_from_db()
-        assert open_ticket.status == "cancelled"
+        assert open_ticket.status == "open"
 
-    def test_support_cannot_reopen(self, ticketing_support_user, open_ticket):
-        """Only ticketing_admin can reopen, not ticketing_support."""
+    def test_blue_team_cannot_reopen(self, blue_team_user, open_ticket):
         open_ticket.status = "resolved"
         open_ticket.save()
 
         client = Client()
-        client.force_login(ticketing_support_user)
+        client.force_login(blue_team_user)
         response = client.post(reverse("ticket_reopen", kwargs={"ticket_number": open_ticket.ticket_number}))
         assert response.status_code == 403
         open_ticket.refresh_from_db()

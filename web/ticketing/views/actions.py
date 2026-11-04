@@ -13,6 +13,7 @@ from core.auth_utils import require_permission, team_record_or_404
 from core.utils import advisory_lock, ndjson_done, ndjson_progress, run_detached
 from ticketing.access import TICKET_STAFF
 from ticketing.forms import (
+    TicketAdjustPointsForm,
     TicketBoxResetForm,
     TicketChangeCategoryForm,
     TicketReassignForm,
@@ -20,6 +21,7 @@ from ticketing.forms import (
     TicketResolveForm,
 )
 from ticketing.lifecycle import (
+    adjust_ticket_points,
     assign_ticket,
     assignee_refusal,
     cancel_ticket,
@@ -176,9 +178,8 @@ def ticket_resolve(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
 
 @require_POST
-@require_permission("ticketing_admin")
+@require_permission(TICKET_STAFF)
 def ticket_reopen(request: HttpRequest, ticket_number: str) -> HttpResponse:
-    """Reopen a resolved ticket (ticketing admins)."""
     user = cast(User, request.user)
     authentik_username = user.username
 
@@ -203,6 +204,38 @@ def ticket_reopen(request: HttpRequest, ticket_number: str) -> HttpResponse:
         f"Ticket {ticket_number} reopened by {authentik_username}" + (f": {reopen_reason}" if reopen_reason else "")
     )
     return back_to_list(request, reverse("ticket_detail", args=[ticket_number]))
+
+
+@require_POST
+@require_permission(TICKET_STAFF)
+def ticket_adjust_points(request: HttpRequest, ticket_number: str) -> HttpResponse:
+    user = cast(User, request.user)
+    authentik_username = user.username
+
+    ticket_obj = get_object_or_404(Ticket.objects.select_related("team"), ticket_number=ticket_number)
+
+    form = TicketAdjustPointsForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Invalid form data. Check points value.")
+        return redirect("ticket_detail", ticket_number=ticket_number)
+
+    points_charged = form.cleaned_data["points_charged"]
+    reason = form.cleaned_data.get("reason", "")
+
+    ticket, error = adjust_ticket_points(
+        ticket_id=ticket_obj.id,
+        points_charged=points_charged,
+        actor_username=authentik_username,
+        reason=reason,
+        user=user,
+    )
+
+    if error or ticket is None:
+        messages.error(request, error or "Failed to adjust points")
+        return redirect("ticket_detail", ticket_number=ticket_number)
+
+    logger.info(f"Ticket {ticket_number} points adjusted to {points_charged} by {authentik_username}")
+    return redirect("ticket_detail", ticket_number=ticket_number)
 
 
 @require_POST

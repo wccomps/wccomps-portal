@@ -297,6 +297,11 @@ class TicketReopenForm(forms.Form):
     reopen_reason = forms.CharField(required=False)
 
 
+class TicketAdjustPointsForm(forms.Form):
+    points_charged = forms.IntegerField(validators=Ticket._meta.get_field("points_charged").validators)
+    reason = forms.CharField(required=False)
+
+
 class TicketChangeCategoryForm(forms.Form):
     new_category = forms.IntegerField()
 

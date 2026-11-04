@@ -373,6 +373,11 @@ class DiscordQueueProcessor:
             if payload.reason:
                 msg += f"\nReason: {payload.reason}"
             await send_parts(thread, msg, progress=progress)
+        elif action == "points_adjusted":
+            msg = f"Ticket points adjusted to **{payload.points_charged}** by **{actor}**"
+            if payload.reason:
+                msg += f"\nReason: {payload.reason}"
+            await send_parts(thread, msg, progress=progress)
         else:
             await thread.send(f"Ticket updated: {action} by **{actor}**")
 

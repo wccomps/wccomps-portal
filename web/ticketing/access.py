@@ -27,13 +27,20 @@ class TicketActions:
     unclaim: bool
     recategorize: bool
     reassign: bool
+    reopen: bool
+    adjust_points: bool
 
 
 def ticket_actions(user: User, ticket: Ticket) -> TicketActions:
-    """What to offer on a claimed ticket (resolve, unclaim, change its category) and on any ticket (give it to
-    someone): each where its status allows it and assignee_refusal lets the person through."""
     if not has_permission(user, TICKET_STAFF):
-        return TicketActions(resolve=False, unclaim=False, recategorize=False, reassign=False)
+        return TicketActions(
+            resolve=False,
+            unclaim=False,
+            recategorize=False,
+            reassign=False,
+            reopen=False,
+            adjust_points=False,
+        )
     claimed = ticket.status == Ticket.STATUS_CLAIMED
     held = claimed and assignee_refusal(ticket, user, "resolve") is None
     return TicketActions(
@@ -41,4 +48,8 @@ def ticket_actions(user: User, ticket: Ticket) -> TicketActions:
         unclaim=held and refusal(ticket, "unclaim") is None,
         recategorize=held,
         reassign=assignee_refusal(ticket, user, "reassign") is None,
+        reopen=refusal(ticket, "reopen") is None and assignee_refusal(ticket, user, "reopen") is None,
+        adjust_points=(
+            refusal(ticket, "adjust_points") is None and assignee_refusal(ticket, user, "adjust_points") is None
+        ),
     )

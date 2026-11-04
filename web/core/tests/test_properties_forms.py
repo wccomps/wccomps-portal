@@ -106,6 +106,7 @@ from team.models import DiscordLink, LinkToken, Team
 from ticketing.forms import (
     CreateTicketForm,
     CreateTicketPageForm,
+    TicketAdjustPointsForm,
     TicketBoxResetForm,
     TicketBulkActionForm,
     TicketCategoryForm,
@@ -708,6 +709,11 @@ CASES = [
     FormCase(
         TicketReopenForm,
         use=posts_to(lambda w: reverse("ticket_reopen", args=[w.resolved.ticket_number])),
+    ),
+    FormCase(
+        TicketAdjustPointsForm,
+        examples=({"points_charged": "2147483648"},),
+        use=posts_to(lambda w: reverse("ticket_adjust_points", args=[w.resolved.ticket_number])),
     ),
     FormCase(
         TicketChangeCategoryForm,

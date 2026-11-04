@@ -1,4 +1,4 @@
-"""Ticket lifecycle: every claim, assignment, unclaim, resolve, cancel and reopen goes through here.
+"""Ticket lifecycle: every claim, assignment, unclaim, resolve, cancel, reopen and point adjustment goes through here.
 
 Each function locks the ticket row, checks the move against TRANSITIONS, applies it, writes the
 TicketHistory entry and queues the Discord side effects in the same transaction: a
@@ -39,14 +39,25 @@ TRANSITIONS: dict[str, tuple[frozenset[str], str]] = {
     ),
     "resolve": (frozenset({Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED}), "Cannot resolve ticket with status: {status}."),
     "cancel": (frozenset({Ticket.STATUS_OPEN, Ticket.STATUS_CLAIMED}), "Cannot cancel ticket with status: {status}."),
-    "reopen": (frozenset({Ticket.STATUS_RESOLVED}), "Cannot reopen ticket with status: {status}."),
+    "reopen": (
+        frozenset({Ticket.STATUS_RESOLVED, Ticket.STATUS_CANCELLED}),
+        "Cannot reopen ticket with status: {status}.",
+    ),
+    "adjust_points": (
+        frozenset({Ticket.STATUS_RESOLVED}),
+        "Cannot adjust points of ticket with status: {status}.",
+    ),
 }
 
 
 def refusal(ticket: Ticket, action: str) -> str | None:
     """Why `action` can't be applied to the ticket in its current status, or None if it can."""
     sources, message = TRANSITIONS[action]
-    return None if ticket.status in sources else message.format(status=ticket.status)
+    if ticket.status not in sources:
+        return message.format(status=ticket.status)
+    if action == "reopen" and ticket.is_approved:
+        return "Cannot reopen an approved ticket."
+    return None
 
 
 # action -> how the assignee refusal names it
@@ -55,20 +66,20 @@ HELD_ACTIONS = {
     "unclaim": "unclaim",
     "recategorize": "change the category of",
     "reassign": "reassign",
+    "reopen": "reopen",
+    "adjust_points": "adjust the points of",
 }
 
 
 def assignee_refusal(ticket: Ticket, actor: User | None, action: str) -> str | None:
-    """Why the actor may not take `action` on the ticket as its holder stands, or None if they may.
-
-    A ticket someone holds is resolved, unclaimed, recategorized or given away only by its assignee or a ticketing
-    admin; a ticket no one holds is claimed first (or given away: assigning an open ticket claims it for someone).
-    Each transition checks this under its row lock; pages ask it to decide what to offer."""
+    """Why the actor may not take `action` on the ticket as its holder stands, or None if they may."""
     if actor is not None and has_permission(actor, "ticketing_admin"):
         return None
+    if action == "adjust_points" and ticket.is_approved:
+        return "Cannot adjust points of an approved ticket."
     holder = ticket.assigned_to
     if holder is None:
-        return None if action == "reassign" else "Claim this ticket first."
+        return None if action in ("reassign", "reopen", "adjust_points") else "Claim this ticket first."
     if actor is not None and holder.pk == actor.pk:
         return None
     return f"{holder.username} holds this ticket: only they or a ticketing admin can {HELD_ACTIONS[action]} it."
@@ -350,16 +361,18 @@ def reopen_ticket(
     actor_username: str,
     reopen_reason: str = "",
     user: User | None = None,
+    discord_id: int | None = None,
 ) -> tuple[Ticket | None, str | None]:
-    """Reopen a resolved ticket, unassigned, refunding its points until it is resolved again."""
+    """Reopen a resolved or cancelled ticket, unassigned, refunding its points until it is resolved again."""
     with transaction.atomic():
         ticket = _lock(ticket_id)
         if not ticket:
             return None, "Ticket not found."
         if error := refusal(ticket, "reopen"):
             return None, error
-        if ticket.is_approved:
-            return None, "Cannot reopen an approved ticket."
+        actor = get_user_for_ticket(discord_id=discord_id, user=user)
+        if error := assignee_refusal(ticket, actor, "reopen"):
+            return None, error
 
         old_assignee = ticket.assigned_to
         refunded_points = ticket.points_charged
@@ -390,11 +403,53 @@ def reopen_ticket(
         if reopen_reason:
             details["reason"] = reopen_reason
 
-        _record(ticket, "reopened", user, actor_username, details, reason=reopen_reason)
+        _record(ticket, "reopened", actor, actor_username, details, reason=reopen_reason)
         return ticket, None
 
 
 areopen_ticket = _make_async(reopen_ticket)
+
+
+def adjust_ticket_points(
+    ticket_id: int,
+    points_charged: int,
+    actor_username: str,
+    reason: str = "",
+    user: User | None = None,
+) -> tuple[Ticket | None, str | None]:
+    with transaction.atomic():
+        ticket = _lock(ticket_id)
+        if not ticket:
+            return None, "Ticket not found."
+        if error := refusal(ticket, "adjust_points"):
+            return None, error
+        if error := assignee_refusal(ticket, user, "adjust_points"):
+            return None, error
+        if points_charged < 0:
+            return None, "Point value cannot be negative."
+
+        old_points = ticket.points_charged
+        ticket.points_charged = points_charged
+        ticket.save(update_fields=["points_charged", "updated_at"])
+
+        details: dict[str, object] = {
+            "adjusted_by": actor_username,
+            "old_points": old_points,
+            "points_charged": points_charged,
+        }
+        if reason:
+            details["reason"] = reason
+
+        _record(
+            ticket,
+            "points_adjusted",
+            user,
+            actor_username,
+            details,
+            points_charged=points_charged,
+            reason=reason,
+        )
+        return ticket, None
 
 
 def change_ticket_category_atomic(

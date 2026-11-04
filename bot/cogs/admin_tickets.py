@@ -386,13 +386,12 @@ class AdminTicketsCog(commands.Cog):
             f"• To: {new_assignee}",
         )
 
-    @tickets_group.command(name="reopen", description="[ADMIN] Reopen a resolved ticket")
+    @tickets_group.command(name="reopen", description="[ADMIN] Reopen a closed ticket")
     @app_commands.describe(ticket_number="Ticket number (e.g., T050-003)", reason="Reason for reopening")
     @app_commands.check(permission_check("ticketing_admin"))
     async def admin_ticket_reopen(
         self, interaction: discord.Interaction, ticket_number: TicketNumber, reason: str
     ) -> None:
-        """Reopen a resolved ticket."""
         from ticketing.lifecycle import areopen_ticket
 
         await interaction.response.defer(ephemeral=True)
@@ -404,7 +403,10 @@ class AdminTicketsCog(commands.Cog):
 
         refunded = ticket.points_charged
         reopened, error = await areopen_ticket(
-            ticket_id=ticket.id, actor_username=str(interaction.user), reopen_reason=reason
+            ticket_id=ticket.id,
+            actor_username=str(interaction.user),
+            reopen_reason=reason,
+            discord_id=interaction.user.id,
         )
         if error or reopened is None:
             await interaction.followup.send(error or "Failed to reopen ticket.", ephemeral=True)

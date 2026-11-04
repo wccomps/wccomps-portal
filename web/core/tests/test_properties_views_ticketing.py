@@ -20,6 +20,7 @@ from core.tests.views_harness import (
 )
 from ticketing.forms import (
     CreateTicketForm,
+    TicketAdjustPointsForm,
     TicketBoxResetForm,
     TicketBulkActionForm,
     TicketChangeCategoryForm,
@@ -107,7 +108,8 @@ CASES = [
         ),
     ),
     ViewCase("ticket_resolve", STAFF, post=_form(TicketResolveForm())),
-    ViewCase("ticket_reopen", may("ticketing_admin"), post=_form(TicketReopenForm())),
+    ViewCase("ticket_reopen", STAFF, post=_form(TicketReopenForm())),
+    ViewCase("ticket_adjust_points", STAFF, post=_form(TicketAdjustPointsForm())),
     ViewCase(
         "ticket_change_category",
         STAFF,

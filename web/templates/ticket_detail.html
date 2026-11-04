@@ -63,10 +63,15 @@
                                 </c-button>
                             </c-form>
                         {% endif %}
-                        {% if ticket.status == "resolved" and is_ticketing_admin %}
-                            <c-form action="{% url 'ticket_reopen' ticket.ticket_number %}" class="m-0">
+                        {% if actions.reopen %}
+                            <c-form action="{% url 'ticket_reopen' ticket.ticket_number %}"
+                                    class="d-flex gap-10 items-center m-0">
                                 {% csrf_token %}
-                                <input type="hidden" name="reopen_reason" value="">
+                                <input type="text"
+                                       name="reopen_reason"
+                                       placeholder="Reason (optional)"
+                                       aria-label="Reopen reason"
+                                       class="py-5 px-10 w-150">
                                 <c-button type="submit" variant="warning">
                                     Reopen
                                 </c-button>
@@ -151,6 +156,29 @@
                         Assigned to <strong>{{ ticket.assigned_to.username }}</strong>. Only they or a ticketing admin can resolve it.
                     </p>
                 {% endif %}
+            {% endif %}
+            {% if actions.adjust_points %}
+                <c-fieldset heading="Point Penalty">
+                    <c-form action="{% url 'ticket_adjust_points' ticket.ticket_number %}"
+                            class="d-flex gap-10 items-center flex-wrap m-0 px-10">
+                        {% csrf_token %}
+                        <input type="number"
+                               name="points_charged"
+                               value="{{ ticket.points_charged }}"
+                               min="0"
+                               aria-label="Points charged"
+                               required
+                               class="py-5 px-10 w-150">
+                        <input type="text"
+                               name="reason"
+                               placeholder="Reason (optional)"
+                               aria-label="Adjustment reason"
+                               class="py-5 px-10 w-150">
+                        <c-button type="submit" variant="default">
+                            Update Points
+                        </c-button>
+                    </c-form>
+                </c-fieldset>
             {% endif %}
             {% if actions.reassign %}
                 <c-fieldset heading="Assignment">
