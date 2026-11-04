@@ -64,7 +64,6 @@
                         <div class="mb-5">
                             <c-button type="button"
                                       variant="danger"
-                                      x-show="canRemove"
                                       x-on:click="removeCriterion"
                                       data-confirm="Remove this criterion?"
                                       ::data-index="index">
@@ -118,7 +117,6 @@
             return {
                 criteria: saved.map(function(c, i) { return row(i, c); }),
                 _nextN: saved.length,
-                get canRemove() { return this.criteria.length > 1; },
                 setCriterionField(e) {
                     var idx = parseInt(e.target.dataset.index);
                     this.criteria[idx][e.target.dataset.prop] = e.target.value;

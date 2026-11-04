@@ -25,6 +25,14 @@
                     Duplicate
                 </c-button>
             </c-form>
+            <c-form action="{% url 'orange_team:check_delete' orange_check.pk %}"
+                    class="d-inline"
+                    data-confirm="Delete check '{{ orange_check.title }}'? This will also delete its assignments and scores.">
+                {% csrf_token %}
+                <c-button type="submit" variant="danger">
+                    Delete
+                </c-button>
+            </c-form>
         </c-slot>
         <c-fieldset heading="Details">
             <p>

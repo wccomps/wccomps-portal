@@ -66,3 +66,29 @@ def test_remove_deletes_the_row_clicked(live_server, pw_browser):
         assert [labels.nth(i).input_value() for i in range(labels.count())] == ["First", "Third"]
     finally:
         context.close()
+
+
+def test_remove_sole_criterion_and_delete_check(live_server, pw_browser):
+    from orange_team.models import OrangeCheck, OrangeCheckCriterion
+
+    user = role_user("gold_team")
+    check = OrangeCheck.objects.create(title="Phones", description="", max_points=10, created_by=user)
+    OrangeCheckCriterion.objects.create(orange_check=check, label="Only Criterion", points=5, sort_order=0)
+
+    context = create_session_context(pw_browser, live_server, user)
+    page = context.new_page()
+    page.on("dialog", lambda dialog: dialog.accept())
+    try:
+        page.goto(f"{live_server.url}/orange-team/checks/{check.pk}/edit/")
+        page.get_by_role("button", name="Remove").click()
+        assert page.locator('input[name^="criterion_label_"]').count() == 0
+        with page.expect_navigation():
+            page.get_by_role("button", name="Save Changes").click()
+
+        assert check.criteria.count() == 0
+
+        with page.expect_navigation():
+            page.get_by_role("button", name="Delete").click()
+        assert not OrangeCheck.objects.filter(pk=check.pk).exists()
+    finally:
+        context.close()

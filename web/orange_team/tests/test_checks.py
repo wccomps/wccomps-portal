@@ -298,3 +298,50 @@ class TestCheckEdit:
         assert criterion is not None
         assert criterion.label == "New C1"
         assert criterion.points == 10
+
+
+class TestCheckDelete:
+    def test_delete_removes_check_criteria_assignments_and_scores(self) -> None:
+        from scoring.models import OrangeTeamScore
+
+        from orange_team.services import create_orange_score_from_assignment
+
+        user = User.objects.create_user(username="gold1", password="test")
+        UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
+        team = Team.objects.create(team_number=1, team_name="Team 01")
+        check = OrangeCheck.objects.create(title="Obsolete Check", description="Desc", created_by=user)
+        OrangeCheckCriterion.objects.create(orange_check=check, label="C1", points=5)
+        assignment = OrangeAssignment.objects.create(
+            orange_check=check, user=user, team=team, status="approved", score=5
+        )
+        create_orange_score_from_assignment(assignment, user)
+
+        client = Client()
+        client.force_login(User.objects.get(username="gold1"))
+        response = client.post(f"/orange-team/checks/{check.pk}/delete/")
+
+        assert response.status_code == 302
+        assert not OrangeCheck.objects.filter(pk=check.pk).exists()
+        assert not OrangeCheckCriterion.objects.filter(orange_check_id=check.pk).exists()
+        assert not OrangeAssignment.objects.filter(orange_check_id=check.pk).exists()
+        assert not OrangeTeamScore.objects.filter(orange_check_id=check.pk).exists()
+
+    def test_non_lead_denied(self) -> None:
+        user = User.objects.create_user(username="orange1", password="test")
+        UserGroups.objects.create(user=user, authentik_id="o1", groups=["WCComps_OrangeTeam"])
+        check = OrangeCheck.objects.create(title="Protected", description="Desc")
+        client = Client()
+        client.force_login(User.objects.get(username="orange1"))
+        response = client.post(f"/orange-team/checks/{check.pk}/delete/")
+        assert response.status_code == 403
+        assert OrangeCheck.objects.filter(pk=check.pk).exists()
+
+    def test_get_not_allowed(self) -> None:
+        user = User.objects.create_user(username="gold1", password="test")
+        UserGroups.objects.create(user=user, authentik_id="g1", groups=["WCComps_GoldTeam"])
+        check = OrangeCheck.objects.create(title="Original", description="Desc", created_by=user)
+        client = Client()
+        client.force_login(User.objects.get(username="gold1"))
+        response = client.get(f"/orange-team/checks/{check.pk}/delete/")
+        assert response.status_code == 405
+        assert OrangeCheck.objects.filter(pk=check.pk).exists()

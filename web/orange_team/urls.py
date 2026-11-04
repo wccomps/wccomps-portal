@@ -14,6 +14,7 @@ urlpatterns = [
     path("checks/<int:check_id>/", views.check_detail, name="check_detail"),
     path("checks/<int:check_id>/edit/", views.check_edit, name="check_edit"),
     path("checks/<int:check_id>/duplicate/", views.check_duplicate, name="check_duplicate"),
+    path("checks/<int:check_id>/delete/", views.check_delete, name="check_delete"),
     path("checks/<int:check_id>/assign/", views.check_assign, name="check_assign"),
     path("checks/<int:check_id>/auto-assign/", views.check_auto_assign, name="check_auto_assign"),
     path("checks/<int:check_id>/rebalance/", views.check_rebalance, name="check_rebalance"),

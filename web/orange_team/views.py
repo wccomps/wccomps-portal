@@ -370,6 +370,18 @@ def check_duplicate(request: HttpRequest, check_id: int) -> HttpResponse:
 
 
 @require_permission("orange_team_lead", error_message="Only leads can manage checks")
+@require_POST
+def check_delete(request: HttpRequest, check_id: int) -> HttpResponse:
+    with transaction.atomic():
+        orange_check = get_object_or_404(OrangeCheck.objects.select_for_update(), pk=check_id)
+        list(orange_check.assignments.select_for_update().order_by("pk"))
+        title = orange_check.title
+        orange_check.delete()
+    messages.success(request, f"Deleted check '{title}'.")
+    return redirect("orange_team:check_list")
+
+
+@require_permission("orange_team_lead", error_message="Only leads can manage checks")
 def check_assign(request: HttpRequest, check_id: int) -> HttpResponse:
     """Show the assign grid for a check: every active team with its volunteer dropdown."""
     orange_check = get_object_or_404(OrangeCheck, pk=check_id)

@@ -70,6 +70,7 @@ CASES = [
     ViewCase("orange_team:check_detail", LEAD),
     ViewCase("orange_team:check_edit", LEAD, post=_check),
     ViewCase("orange_team:check_duplicate", LEAD),
+    ViewCase("orange_team:check_delete", LEAD),
     ViewCase("orange_team:check_assign", LEAD),
     ViewCase("orange_team:check_auto_assign", LEAD),
     ViewCase("orange_team:check_rebalance", LEAD),
