@@ -9,7 +9,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import has_permission, require_permission
 from core.errors import wants_json_error
-from core.stored_files import UploadError
+from core.stored_files import UploadError, read_screenshots
 from core.utils import optional_int
 from team.models import Team
 
@@ -20,7 +20,6 @@ from ..models import (
     RedTeamScreenshot,
 )
 from ..quotient_sync import get_box_metadata
-from ..screenshots import read_screenshots
 
 
 def findings_list(request: HttpRequest, *, default_status: str, page_size: int) -> dict[str, object]:

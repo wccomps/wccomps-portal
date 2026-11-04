@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from core.auth_utils import get_user_team, has_permission, require_permission, team_record_or_404
-from core.stored_files import UploadError
+from core.stored_files import UploadError, read_screenshots
 from core.utils import by_approval, by_team, chosen_team, list_filters, requested_sort, stable_order, team_numbers
 from team.models import Team
 
@@ -17,7 +17,6 @@ from ..calculator import calculate_suggested_recovery_points, suggest_red_score_
 from ..forms import IncidentMatchForm, IncidentReportForm
 from ..models import IncidentReport, IncidentScreenshot
 from ..quotient_sync import get_box_metadata
-from ..screenshots import read_screenshots
 
 # Who sees and reviews every team's incident reports: White Team (the permission's groups hold Gold Team and admins)
 INCIDENT_STAFF = "white_team"

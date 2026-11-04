@@ -153,6 +153,84 @@ class TestAssignmentSubmit:
         assert assignment.score == 5
         assert assignment.submitted_at is not None
 
+    def test_submit_assignment_with_evaluator_notes_and_screenshots(self) -> None:
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from orange_team.models import OrangeAssignmentScreenshot
+
+        user = User.objects.create_user(username="orange1", password="test")
+        UserGroups.objects.create(user=user, authentik_id="o1", groups=["WCComps_OrangeTeam"])
+        other = User.objects.create_user(username="orange2", password="test")
+        UserGroups.objects.create(user=other, authentik_id="o2", groups=["WCComps_OrangeTeam"])
+        lead = User.objects.create_user(username="lead1", password="test")
+        UserGroups.objects.create(user=lead, authentik_id="l1", groups=["WCComps_OrangeTeam_Lead"])
+
+        team = Team.objects.create(team_number=1, team_name="T1")
+        check = OrangeCheck.objects.create(title="Phone Check", description="Desc")
+        c1 = OrangeCheckCriterion.objects.create(orange_check=check, label="C1", points=5)
+        assignment = OrangeAssignment.objects.create(orange_check=check, user=user, team=team)
+        OrangeAssignmentResult.objects.create(assignment=assignment, criterion=c1, met=False)
+
+        png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+        upload = SimpleUploadedFile("call-log.png", png_bytes, content_type="image/png")
+
+        client = Client()
+        client.force_login(user)
+        response = client.post(
+            f"/orange-team/assignments/{assignment.pk}/submit/",
+            {
+                "evaluator_notes": "Team did not answer after 3 attempts.",
+                "screenshots": [upload],
+            },
+        )
+        assert response.status_code == 302
+        assignment.refresh_from_db()
+        assert assignment.status == "submitted"
+        assert assignment.evaluator_notes == "Team did not answer after 3 attempts."
+        screenshot = OrangeAssignmentScreenshot.objects.get(assignment=assignment)
+        assert screenshot.filename == "call-log.png"
+        assert screenshot.mime_type == "image/png"
+
+        dashboard_html = client.get("/orange-team/").content.decode()
+        assert "Team did not answer after 3 attempts." in dashboard_html
+        assert "call-log.png" in dashboard_html
+
+        own_dl = client.get(f"/orange-team/screenshots/{screenshot.pk}/")
+        assert own_dl.status_code == 200
+        assert own_dl["Content-Type"] == "image/png"
+
+        other_client = Client()
+        other_client.force_login(other)
+        assert other_client.get(f"/orange-team/screenshots/{screenshot.pk}/").status_code == 404
+
+        lead_client = Client()
+        lead_client.force_login(lead)
+        review_html = lead_client.get("/orange-team/review/").content.decode()
+        assert "Team did not answer after 3 attempts." in review_html
+        assert "call-log.png" in review_html
+
+        detail_html = lead_client.get(f"/orange-team/checks/{check.pk}/").content.decode()
+        assert "Team did not answer after 3 attempts." in detail_html
+        assert "call-log.png" in detail_html
+
+        lead_dl = lead_client.get(f"/orange-team/screenshots/{screenshot.pk}/")
+        assert lead_dl.status_code == 200
+
+        export_csv = lead_client.get("/orange-team/export/").content.decode()
+        assert "Evaluator Notes" in export_csv
+        assert "Team did not answer after 3 attempts." in export_csv
+
+        lead_client.post(f"/orange-team/assignments/{assignment.pk}/reject/", {"notes": "Wrong file"})
+        replacement = SimpleUploadedFile("updated-log.png", png_bytes, content_type="image/png")
+        client.post(
+            f"/orange-team/assignments/{assignment.pk}/submit/",
+            {
+                "evaluator_notes": "Updated notes",
+                "screenshots": [replacement],
+            },
+        )
+        assert list(assignment.screenshots.values_list("filename", flat=True)) == ["updated-log.png"]
+
     def test_cannot_submit_twice(self) -> None:
         user = User.objects.create_user(username="orange1", password="test")
         UserGroups.objects.create(user=user, authentik_id="o1", groups=["WCComps_OrangeTeam"])

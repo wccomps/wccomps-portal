@@ -8,7 +8,7 @@ from django.db import models
 from django.utils.functional import cached_property
 
 from core.models import Approvable
-from core.stored_files import StoredFile
+from core.stored_files import MAX_SCREENSHOT_SIZE, StoredFile
 from core.utils import shorten
 
 
@@ -19,9 +19,6 @@ def format_boxes_display(boxes: list[str] | str | None) -> str:
     if isinstance(boxes, str):
         return boxes
     return ", ".join(boxes)
-
-
-MAX_SCREENSHOT_SIZE = 10 * 1024 * 1024
 
 
 def validate_file_size(file: UploadedFile[bytes]) -> UploadedFile[bytes]:

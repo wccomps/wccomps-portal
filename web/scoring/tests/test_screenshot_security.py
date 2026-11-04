@@ -240,9 +240,9 @@ def test_a_refused_screenshot_is_named_among_the_others(team, red_team_user, moc
 
 
 def test_total_submission_size_is_bounded(team, red_team_user, mock_quotient_client, monkeypatch):
-    import scoring.screenshots
+    import core.stored_files
 
-    monkeypatch.setattr(scoring.screenshots, "MAX_SUBMISSION_SIZE", len(PNG) + 1)
+    monkeypatch.setattr(core.stored_files, "MAX_SUBMISSION_SIZE", len(PNG) + 1)
     response = _submit_red(red_team_user, [_upload(PNG, "first.png"), _upload(PNG, "second.png")])
 
     assert response.status_code == 200

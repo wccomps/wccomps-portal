@@ -30,6 +30,7 @@ def test_every_stored_file_model_is_a_stored_file() -> None:
         "ticketing.TicketAttachment",
         "scoring.RedTeamScreenshot",
         "scoring.IncidentScreenshot",
+        "orange_team.OrangeAssignmentScreenshot",
     }
     assert [m._meta.label for m in models if not issubclass(m, StoredFile)] == []
 

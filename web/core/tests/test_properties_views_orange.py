@@ -18,6 +18,7 @@ from core.tests.views_harness import (
     hostile_text,
     may,
     repeated_post_changes_nothing_more,
+    uploads,
 )
 
 ORANGE = may("orange_team", "orange_team_lead")
@@ -88,9 +89,14 @@ CASES = [
         idempotent=(OrangeAssignment,),
         idempotent_as="orange_team",
     ),
-    ViewCase("orange_team:assignment_submit", ORANGE, post=_form(SubmitScoreForm())),
+    ViewCase(
+        "orange_team:assignment_submit",
+        ORANGE,
+        post=lambda w: form_fields(SubmitScoreForm()) | {"screenshots": uploads(3)},
+    ),
     ViewCase("orange_team:assignment_approve", LEAD),
     ViewCase("orange_team:assignment_reject", LEAD, post=_form(AssignmentRejectForm())),
+    ViewCase("orange_team:assignment_screenshot", ORANGE, params={"screenshot_id": "orange_screenshot_id"}),
     ViewCase("orange_team:export_scores", LEAD),
     ViewCase(
         "orange_team:followup_create",

@@ -17,6 +17,9 @@
                 <c-table_header sort_field="score" current_sort="{{ sort_by }}">
                     Score
                 </c-table_header>
+                <c-table_header sortable="false">
+                    Notes / Files
+                </c-table_header>
                 <c-table_header sort_field="status" current_sort="{{ sort_by }}">
                     Status
                 </c-table_header>
@@ -31,6 +34,21 @@
                 <td>Team {{ assignment.team.team_number }}</td>
                 <td>{{ assignment.user.username }}</td>
                 <td>{% if assignment.score is not None %}{{ assignment.score }} / {{ assignment.orange_check.max_score }}{% endif %}</td>
+                <td>
+                    {% if assignment.evaluator_notes %}
+                        <div class="text-sm whitespace-pre-wrap">{{ assignment.evaluator_notes }}</div>
+                    {% endif %}
+                    {% if assignment.screenshots.all %}
+                        <ul class="text-sm">
+                            {% for screenshot in assignment.screenshots.all %}
+                                <li>
+                                    <a href="{% url 'orange_team:assignment_screenshot' screenshot.pk %}"
+                                       target="_blank">{{ screenshot.filename }}</a>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                </td>
                 <td>
                     <c-badge variant="{{ assignment.status|badge_variant:'orange_assignment' }}">
                         {{ assignment.get_status_display }}
@@ -63,7 +81,7 @@
             </tr>
         {% empty %}
             <tr>
-                <td colspan="6">
+                <td colspan="7">
                     {% if filtered %}
                         <c-no_matches items="assignments" href="{% url 'orange_team:review_queue' %}" />
                     {% else %}

@@ -10,6 +10,8 @@ from django.db import IntegrityError, models, transaction
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
+from core.stored_files import MAX_SCREENSHOT_SIZE, StoredFile
+
 # The most a check, or one of its criteria, is worth
 MAX_POINTS = 10_000
 # The previous release writes the checks' sum to scoringtemplate.orange_max, numeric(10, 2), until that column goes
@@ -232,8 +234,6 @@ class AssignmentStatus:
 
 
 class OrangeAssignment(models.Model):
-    """Assignment of an orange teamer to score a specific team on a check."""
-
     objects = OrangeAssignmentQuerySet.as_manager()
 
     STATUSES: Mapping[str, AssignmentStatus] = {
@@ -279,6 +279,9 @@ class OrangeAssignment(models.Model):
     team = models.ForeignKey("team.Team", on_delete=models.CASCADE, related_name="orange_assignments")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     score = models.PositiveIntegerField(null=True, blank=True)
+    evaluator_notes = models.TextField(
+        blank=True, default="", db_default="", help_text="Evaluator notes on the check assignment"
+    )
     notes = models.TextField(blank=True, help_text="Reviewer notes (for rejections)")
     submitted_at = models.DateTimeField(null=True, blank=True)
     reviewed_by = models.ForeignKey(
@@ -326,6 +329,21 @@ class OrangeAssignmentResult(models.Model):
     def __str__(self) -> str:
         status = "MET" if self.met else "NOT MET"
         return f"{self.criterion.label}: {status}"
+
+
+class OrangeAssignmentScreenshot(StoredFile):
+    DEFAULT_NAME = "screenshot.png"
+    MAX_SIZE = MAX_SCREENSHOT_SIZE
+
+    assignment = models.ForeignKey(OrangeAssignment, on_delete=models.CASCADE, related_name="screenshots")
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "orange_assignment_screenshot"
+        ordering = ["uploaded_at"]
+
+    def __str__(self) -> str:
+        return f"{self.filename} ({self.assignment})"
 
 
 class OrangeFollowUp(models.Model):
