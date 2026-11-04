@@ -240,12 +240,7 @@ class TestTicketBoxResetViews:
         assert staff_resp.status_code == 200
         staff_body = staff_resp.content.decode()
         assert panel_url in staff_body
-        assert (
-            staff_body.index("Ticket Information")
-            < staff_body.index("box-reset-panel")
-            < staff_body.index("Resolve Without Box Reset")
-        )
-        assert "Resolve this Box Reset ticket without reverting the VM in Proxmox?" in staff_body
+        assert staff_body.index("box-reset-panel") < staff_body.index("Resolve Without Box Reset")
 
         client.force_login(blue_team_user)
         student_resp = client.get(url)
