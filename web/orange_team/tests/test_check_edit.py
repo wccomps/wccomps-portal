@@ -118,8 +118,8 @@ def test_extract_criteria_reads_rows_past_gaps():
     post.update({"criterion_label_5": "", "criterion_points_5": "", "criterion_id_5": ""})  # an empty row
 
     assert extract_criteria(post) == [
-        {"id": None, "label": "A", "points": 1, "sort_order": 0},
-        {"id": None, "label": "B", "points": 3, "sort_order": 1},
+        {"id": None, "label": "A", "points": 1, "criterion_type": "checkbox", "sort_order": 0},
+        {"id": None, "label": "B", "points": 3, "criterion_type": "checkbox", "sort_order": 1},
     ]
 
 
@@ -228,3 +228,54 @@ def test_extract_criteria_refuses_a_row_key_it_does_not_know(key):
 
     with pytest.raises(ValidationError):
         extract_criteria(post)
+
+
+def test_zero_point_and_variable_range_criteria_create_edit_and_duplicate(gold_team_user):
+    client = Client()
+    client.force_login(gold_team_user)
+
+    create_resp = client.post(
+        "/orange-team/checks/create/",
+        {
+            "title": "Service Call",
+            "max_points": "50",
+            "criterion_label_0": "Greeted customer",
+            "criterion_points_0": "0",
+            "criterion_type_0": "checkbox",
+            "criterion_label_1": "Troubleshooting quality",
+            "criterion_points_1": "10",
+            "criterion_type_1": "range",
+        },
+    )
+    assert create_resp.status_code == 302
+    check = OrangeCheck.objects.with_max_score().get(title="Service Call")
+    assert check.max_score == 10
+    criteria = list(check.criteria.all())
+    assert [(c.label, c.points, c.criterion_type) for c in criteria] == [
+        ("Greeted customer", 0, "checkbox"),
+        ("Troubleshooting quality", 10, "range"),
+    ]
+
+    dup_resp = client.post(f"/orange-team/checks/{check.pk}/duplicate/")
+    assert dup_resp.status_code == 302
+    dup = OrangeCheck.objects.get(title="Service Call (copy)")
+    assert [(c.label, c.points, c.criterion_type) for c in dup.criteria.all()] == [
+        ("Greeted customer", 0, "checkbox"),
+        ("Troubleshooting quality", 10, "range"),
+    ]
+
+    edit_resp = client.post(
+        f"/orange-team/checks/{check.pk}/edit/",
+        {
+            "title": "Service Call",
+            "max_points": "50",
+            "criterion_id_0": str(criteria[0].pk),
+            "criterion_label_0": "Greeted customer",
+            "criterion_points_0": "0",
+            "criterion_type_0": "checkbox",
+        },
+    )
+    assert edit_resp.status_code == 302
+    check_reloaded = OrangeCheck.objects.with_max_score().get(pk=check.pk)
+    assert check_reloaded.max_score == 0
+    assert check_reloaded.annotated_max_score == 0

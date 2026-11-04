@@ -18,26 +18,50 @@
                 this._saveUrl = this.$el.dataset.saveUrl;
             },
             async saveCriterion(e) {
-                const criterionId = parseInt(e.target.dataset.criterionId);
-                const met = e.target.checked;
+                const input = e.target;
+                const criterionId = parseInt(input.dataset.criterionId);
+                const isCheckbox = input.type === 'checkbox';
+                let payload;
+                const revert = () => {
+                    if (isCheckbox) {
+                        input.checked = !input.checked;
+                    } else {
+                        input.value = input.dataset.savedPoints;
+                    }
+                };
+                if (isCheckbox) {
+                    payload = {criterion_id: criterionId, met: input.checked};
+                } else {
+                    const raw = input.value.trim();
+                    if (!/^\d+$/.test(raw)) {
+                        revert();
+                        this.saveError = 'Save failed (invalid points)';
+                        return;
+                    }
+                    payload = {criterion_id: criterionId, points: parseInt(raw, 10)};
+                }
                 this.saving = true;
                 this.saveError = '';
                 try {
                     const resp = await fetch(this._saveUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() },
-                        body: JSON.stringify({criterion_id: criterionId, met: met})
+                        body: JSON.stringify(payload)
                     });
                     if (resp.ok) {
                         const data = await resp.json();
                         this.score = data.score;
                         this.maxScore = data.max_score;
+                        if (!isCheckbox) {
+                            input.dataset.savedPoints = String(payload.points);
+                            input.value = String(payload.points);
+                        }
                     } else {
-                        e.target.checked = !met;
+                        revert();
                         this.saveError = 'Save failed (server error)';
                     }
                 } catch (err) {
-                    e.target.checked = !met;
+                    revert();
                     this.saveError = 'Save failed (network error)';
                 }
                 this.saving = false;
@@ -185,12 +209,24 @@
                                         {% for result in assignment.results.all %}
                                             <li>
                                                 <label>
-                                                    <input type="checkbox"
-                                                           {% if result.met %}checked{% endif %}
-                                                           data-criterion-id="{{ result.criterion.pk }}"
-                                                           @change="saveCriterion"
-                                                           {% if "save" not in assignment.actions %}disabled{% endif %}>
-                                                    {{ result.criterion.label }} ({{ result.criterion.points }} pts)
+                                                    {% if result.criterion.criterion_type == "range" %}
+                                                        <input type="number"
+                                                               min="0"
+                                                               max="{{ result.criterion.points }}"
+                                                               value="{{ result.effective_points }}"
+                                                               data-saved-points="{{ result.effective_points }}"
+                                                               data-criterion-id="{{ result.criterion.pk }}"
+                                                               @change="saveCriterion"
+                                                               {% if "save" not in assignment.actions %}disabled{% endif %}>
+                                                        {{ result.criterion.label }} (0-{{ result.criterion.points }} pts)
+                                                    {% else %}
+                                                        <input type="checkbox"
+                                                               {% if result.met %}checked{% endif %}
+                                                               data-criterion-id="{{ result.criterion.pk }}"
+                                                               @change="saveCriterion"
+                                                               {% if "save" not in assignment.actions %}disabled{% endif %}>
+                                                        {{ result.criterion.label }} ({{ result.criterion.points }} pts)
+                                                    {% endif %}
                                                 </label>
                                             </li>
                                         {% endfor %}

@@ -1,6 +1,6 @@
 import re
 from datetime import timedelta
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from django import forms
 from django.http import QueryDict
@@ -80,8 +80,8 @@ class SubmitScoreForm(forms.Form):
 
 
 ROW_NUMBER = re.compile(r"[0-9]{1,9}")
-# A rubric row's field as the check page names it: criterion_label_3, criterion_points_3, criterion_id_3
-CRITERION_KEY = re.compile(r"criterion_(label|points|id)_([0-9]{1,9})")
+# A rubric row's field as the check page names it: criterion_label_3, criterion_points_3, criterion_type_3, etc.
+CRITERION_KEY = re.compile(r"criterion_(label|points|type|id)_([0-9]{1,9})")
 
 
 class CriterionForm(forms.ModelForm[OrangeCheckCriterion]):
@@ -89,7 +89,7 @@ class CriterionForm(forms.ModelForm[OrangeCheckCriterion]):
 
     class Meta:
         model = OrangeCheckCriterion
-        fields = ["label", "points"]
+        fields = ["label", "points", "criterion_type"]
 
 
 class CriterionRow(TypedDict):
@@ -98,17 +98,19 @@ class CriterionRow(TypedDict):
     id: str
     label: str
     points: str
+    criterion_type: str
 
 
 class CriterionInput(TypedDict):
     id: int | None
     label: str
     points: int
+    criterion_type: NotRequired[str]
     sort_order: int
 
 
 def criterion_rows(post_data: QueryDict) -> list[CriterionRow]:
-    """The posted criterion_label_{n} / criterion_points_{n} / criterion_id_{n} rows in n order.
+    """The posted criterion_label_{n} / criterion_points_{n} / criterion_type_{n} / criterion_id_{n} rows in n order.
 
     n can skip values: the form keeps a row's number when an earlier row is removed.
     """
@@ -118,6 +120,8 @@ def criterion_rows(post_data: QueryDict) -> list[CriterionRow]:
             "id": post_data.get(f"criterion_id_{n}", "").strip(),
             "label": post_data.get(f"criterion_label_{n}", ""),
             "points": post_data.get(f"criterion_points_{n}", "").strip(),
+            "criterion_type": post_data.get(f"criterion_type_{n}", OrangeCheckCriterion.CriterionType.CHECKBOX).strip()
+            or OrangeCheckCriterion.CriterionType.CHECKBOX,
         }
         for n in numbers
     ]
@@ -136,13 +140,21 @@ def extract_criteria(post_data: QueryDict) -> list[CriterionInput]:
     for position, row in enumerate(criterion_rows(post_data), start=1):
         if not (row["id"] or row["label"].strip() or row["points"]):
             continue
-        form = CriterionForm({"label": row["label"], "points": row["points"]})
+        form = CriterionForm(
+            {
+                "label": row["label"],
+                "points": row["points"],
+                "criterion_type": row["criterion_type"],
+            }
+        )
         name = f"Criterion {position} ({row['label'].strip()[:40] or 'no label'})"
         if row["id"] and not ROW_NUMBER.fullmatch(row["id"]):
             problems.append(f"{name}: the page sent an invalid row id; reload the page.")
         elif not form.is_valid():
             problems += [
-                f"{name}: {field.capitalize()}: {error}" for field, errors in form.errors.items() for error in errors
+                f"{name}: {field.replace('_', ' ').capitalize()}: {error}"
+                for field, errors in form.errors.items()
+                for error in errors
             ]
         else:
             criteria.append(
@@ -150,6 +162,7 @@ def extract_criteria(post_data: QueryDict) -> list[CriterionInput]:
                     "id": int(row["id"]) if row["id"] else None,
                     "label": form.cleaned_data["label"],
                     "points": form.cleaned_data["points"],
+                    "criterion_type": form.cleaned_data["criterion_type"],
                     "sort_order": len(criteria),
                 }
             )

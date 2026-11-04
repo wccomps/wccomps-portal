@@ -134,6 +134,74 @@ class TestAssignmentSave:
         )
         assert response.status_code == 404
 
+    def test_save_range_and_zero_point_criteria_and_clamp_on_edit(self, gold_team_user: User) -> None:
+        user, assignment, c1, c2, r1, r2 = self._setup()
+        c1.points = 0
+        c1.save()
+        c2.points = 10
+        c2.criterion_type = OrangeCheckCriterion.CriterionType.RANGE
+        c2.save()
+
+        client = Client()
+        client.force_login(user)
+
+        resp_zero = client.post(
+            f"/orange-team/assignments/{assignment.pk}/save/",
+            data=json.dumps({"criterion_id": c1.pk, "met": True}),
+            content_type="application/json",
+        )
+        assert resp_zero.status_code == 200
+        assert resp_zero.json() == {"score": 0, "max_score": 10}
+        r1.refresh_from_db()
+        assert r1.met is True
+
+        resp_range = client.post(
+            f"/orange-team/assignments/{assignment.pk}/save/",
+            data=json.dumps({"criterion_id": c2.pk, "points": 7}),
+            content_type="application/json",
+        )
+        assert resp_range.status_code == 200
+        assert resp_range.json() == {"score": 7, "max_score": 10}
+        r2.refresh_from_db()
+        assignment.refresh_from_db()
+        assert r2.points_awarded == 7
+        assert assignment.score == 7
+
+        for invalid in (
+            {"criterion_id": c2.pk, "points": 11},
+            {"criterion_id": c2.pk, "points": -1},
+            {"criterion_id": c2.pk, "met": True},
+            {"criterion_id": c1.pk, "points": 0},
+        ):
+            bad_resp = client.post(
+                f"/orange-team/assignments/{assignment.pk}/save/",
+                data=json.dumps(invalid),
+                content_type="application/json",
+            )
+            assert bad_resp.status_code == 400
+
+        lead_client = Client()
+        lead_client.force_login(gold_team_user)
+        edit_resp = lead_client.post(
+            f"/orange-team/checks/{assignment.orange_check_id}/edit/",
+            {
+                "title": "Test",
+                "criterion_id_0": str(c1.pk),
+                "criterion_label_0": "C1",
+                "criterion_points_0": "0",
+                "criterion_type_0": "checkbox",
+                "criterion_id_1": str(c2.pk),
+                "criterion_label_1": "C2",
+                "criterion_points_1": "5",
+                "criterion_type_1": "range",
+            },
+        )
+        assert edit_resp.status_code == 302
+        r2.refresh_from_db()
+        assignment.refresh_from_db()
+        assert r2.points_awarded == 5
+        assert assignment.score == 5
+
 
 class TestAssignmentSubmit:
     def test_submit_assignment(self) -> None:

@@ -258,7 +258,11 @@ def check_create(request: HttpRequest) -> HttpResponse:
         orange_check = OrangeCheck.objects.create(**form.model_fields(), created_by=user)
         for c in criteria:
             OrangeCheckCriterion.objects.create(
-                orange_check=orange_check, label=c["label"], points=c["points"], sort_order=c["sort_order"]
+                orange_check=orange_check,
+                label=c["label"],
+                points=c["points"],
+                criterion_type=c.get("criterion_type", OrangeCheckCriterion.CriterionType.CHECKBOX),
+                sort_order=c["sort_order"],
             )
 
     messages.success(request, f"Check '{orange_check.title}' created with {len(criteria)} criteria.")
@@ -287,7 +291,10 @@ def check_detail(request: HttpRequest, check_id: int) -> HttpResponse:
 def check_edit(request: HttpRequest, check_id: int) -> HttpResponse:
     orange_check = get_object_or_404(OrangeCheck, pk=check_id)
     if request.method != "POST":
-        shown = [CriterionRow(id=str(c.pk), label=c.label, points=str(c.points)) for c in orange_check.criteria.all()]
+        shown = [
+            CriterionRow(id=str(c.pk), label=c.label, points=str(c.points), criterion_type=c.criterion_type)
+            for c in orange_check.criteria.all()
+        ]
         return _check_page(request, orange_check, OrangeCheckForm.for_check(orange_check), shown)
     form, criteria = _posted_check(request, orange_check)
     if criteria is None:
@@ -333,6 +340,7 @@ def _check_page(
             "orange_check": orange_check,
             "form": form,
             "criteria": criteria,
+            "criterion_types": OrangeCheckCriterion.CriterionType.choices,
             "max_points": MAX_POINTS,
             "is_lead": True,
         },
@@ -365,6 +373,7 @@ def check_duplicate(request: HttpRequest, check_id: int) -> HttpResponse:
                 orange_check=new_check,
                 label=criterion.label,
                 points=criterion.points,
+                criterion_type=criterion.criterion_type,
                 sort_order=criterion.sort_order,
             )
     messages.success(request, f"Duplicated '{original.title}' as new draft.")
@@ -465,18 +474,26 @@ def _locked_for(assignments: OrangeAssignmentQuerySet, action: Action, pk: int) 
         raise Http404 from None
 
 
-def _criterion_result(body: bytes) -> tuple[int, bool] | None:
-    """The criterion id and whether it was met, from the dashboard's JSON body; None for anything else."""
+def _criterion_result(body: bytes) -> tuple[int, bool | None, int | None] | None:
+    """The criterion id and its graded value (met or points), from the dashboard's JSON body; None for anything else."""
     try:
         data = json.loads(body)
     except ValueError:  # not JSON, or not UTF-8
         return None
     if not isinstance(data, dict):
         return None
-    criterion_id, met = data.get("criterion_id"), data.get("met")
-    if type(criterion_id) is not int or not isinstance(met, bool):
+    criterion_id = data.get("criterion_id")
+    if type(criterion_id) is not int:
         return None
-    return criterion_id, met
+    if data.get("points") is not None:
+        points = data.get("points")
+        if type(points) is not int or points < 0:
+            return None
+        return criterion_id, None, points
+    met = data.get("met")
+    if not isinstance(met, bool):
+        return None
+    return criterion_id, met, None
 
 
 @json_endpoint
@@ -490,12 +507,16 @@ def assignment_save(request: HttpRequest, assignment_id: int) -> HttpResponse:
         posted = _criterion_result(request.body)
         if posted is None:
             raise BadRequest("Invalid data")
-        criterion_id, met = posted
+        criterion_id, met, points = posted
         if not moved:
             raise BadRequest("Assignment already submitted")
-        result = get_object_or_404(OrangeAssignmentResult, assignment=assignment, criterion_id=criterion_id)
-        result.met = met
-        result.save(update_fields=["met"])
+        result = get_object_or_404(
+            OrangeAssignmentResult.objects.select_related("criterion"),
+            assignment=assignment,
+            criterion_id=criterion_id,
+        )
+        if not result.record_grade(met=met, points=points):
+            raise BadRequest("Invalid data")
         score = assignment.calculate_score()
         assignment.score = score
         assignment.save(update_fields=["status", "score"])

@@ -94,15 +94,22 @@ def update_check_criteria(check: OrangeCheck, criteria: list[CriterionInput]) ->
         posted_ids = {c["id"] for c in criteria if c["id"] in existing}
         check.criteria.exclude(pk__in=posted_ids).delete()
         for c in criteria:
+            criterion_type = c.get("criterion_type", OrangeCheckCriterion.CriterionType.CHECKBOX)
             criterion = existing.get(c["id"]) if c["id"] is not None else None
             if criterion is not None:
                 criterion.label = c["label"]
                 criterion.points = c["points"]
+                criterion.criterion_type = criterion_type
                 criterion.sort_order = c["sort_order"]
-                criterion.save(update_fields=["label", "points", "sort_order"])
+                criterion.save(update_fields=["label", "points", "criterion_type", "sort_order"])
+                criterion.reconcile_results()
                 continue
             criterion = OrangeCheckCriterion.objects.create(
-                orange_check=check, label=c["label"], points=c["points"], sort_order=c["sort_order"]
+                orange_check=check,
+                label=c["label"],
+                points=c["points"],
+                criterion_type=criterion_type,
+                sort_order=c["sort_order"],
             )
             OrangeAssignmentResult.objects.bulk_create(
                 OrangeAssignmentResult(assignment=a, criterion=criterion) for a in assignments
