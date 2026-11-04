@@ -45,6 +45,15 @@
                     <a href="{% url 'orange_team:check_edit' check.pk %}">Edit</a>
                     ·
                     <a href="{% url 'orange_team:check_assign' check.pk %}">Assign</a>
+                    ·
+                    <c-form action="{% url 'orange_team:check_delete' check.pk %}"
+                            class="d-inline"
+                            data-confirm="Delete check '{{ check.title }}'? This will also delete its assignments and scores.">
+                        {% csrf_token %}
+                        <c-button type="submit" variant="danger">
+                            Delete
+                        </c-button>
+                    </c-form>
                 </td>
             </tr>
         {% empty %}
