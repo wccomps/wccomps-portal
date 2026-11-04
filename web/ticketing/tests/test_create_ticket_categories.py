@@ -78,7 +78,12 @@ def test_box_reset_keeps_the_teams_description_and_the_hostname(blue_team_user, 
 def test_known_hostname_satisfies_required_ip_and_unknown_does_not(blue_team_user, team_1, box_reset_category):
     from scoring.models import QuotientMetadataCache
 
-    QuotientMetadataCache.objects.create(boxes=[{"name": "web01", "ip": "10.0.1.5", "services": []}])
+    QuotientMetadataCache.objects.create(
+        boxes=[
+            {"name": "web01", "ip": "10.0.1.5", "services": []},
+            {"name": "router", "ip": "", "services": []},
+        ]
+    )
 
     unknown = _client(blue_team_user).post(
         reverse("create_ticket"),
@@ -92,6 +97,13 @@ def test_known_hostname_satisfies_required_ip_and_unknown_does_not(blue_team_use
         {"title": "Reset", "category": box_reset_category.pk, "hostname": "web01"},
     )
     assert known.status_code == 302
-    ticket = Ticket.objects.get()
-    assert ticket.hostname == "web01"
+    ticket = Ticket.objects.get(hostname="web01")
     assert ticket.ip_address == "10.0.1.5"
+
+    unscored = _client(blue_team_user).post(
+        reverse("create_ticket"),
+        {"title": "Reset router", "category": box_reset_category.pk, "hostname": "router"},
+    )
+    assert unscored.status_code == 302
+    router_ticket = Ticket.objects.get(hostname="router")
+    assert router_ticket.ip_address is None

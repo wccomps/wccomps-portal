@@ -82,11 +82,31 @@
                     </div>
                 {% endif %}
             </div>
+            {% if is_ops and is_box_reset %}
+                <c-fieldset heading="Box Reset" collapsible="true" collapsed="false">
+                    <div x-data="boxReset" class="p-10">
+                        <div id="box-reset-panel"
+                             aria-live="polite"
+                             hx-get="{% url 'ticket_box_reset_panel' ticket.ticket_number %}"
+                             hx-trigger="load"
+                             hx-swap="innerHTML">
+                            <p class="text-muted m-0">Loading Proxmox VM and snapshots...</p>
+                        </div>
+                        <c-progress_bar class="mt-10" />
+                        <c-toast />
+                    </div>
+                </c-fieldset>
+            {% endif %}
             {% if is_ops and ticket.status == "claimed" %}
                 {% if actions.resolve %}
-                    <c-fieldset heading="Resolve Ticket">
+                    <c-fieldset heading="{% if is_box_reset %}Resolve Ticket Manually{% else %}Resolve Ticket{% endif %}">
                         <c-form action="{% url 'ticket_resolve' ticket.ticket_number %}" class="p-10">
                             {% csrf_token %}
+                            {% if is_box_reset %}
+                                <p class="help mb-10">
+                                    Closes this ticket without running an automated reset above (for example, after resetting the host manually in Proxmox).
+                                </p>
+                            {% endif %}
                             <div class="mb-15">
                                 <div class="mb-15">
                                     <label for="resolution_notes"
@@ -115,9 +135,15 @@
                                            class="w-full">
                                 </div>
                             </div>
-                            <c-button type="submit" variant="primary">
-                                Resolve Ticket
-                            </c-button>
+                            {% if is_box_reset %}
+                                <c-button type="submit" variant="default">
+                                    Resolve Ticket Manually
+                                </c-button>
+                            {% else %}
+                                <c-button type="submit" variant="primary">
+                                    Resolve Ticket
+                                </c-button>
+                            {% endif %}
                         </c-form>
                     </c-fieldset>
                 {% else %}
@@ -183,20 +209,6 @@
                     {% endif %}
                 </c-detail_grid>
             </c-fieldset>
-            {% if is_ops and is_box_reset %}
-                <c-fieldset heading="Box Reset" collapsible="true" collapsed="false">
-                    <div x-data="boxReset" class="p-10">
-                        <div id="box-reset-panel"
-                             hx-get="{% url 'ticket_box_reset_panel' ticket.ticket_number %}"
-                             hx-trigger="load"
-                             hx-swap="innerHTML">
-                            <p class="text-muted m-0">Loading Proxmox VM and snapshots...</p>
-                        </div>
-                        <c-progress_bar class="mt-10" />
-                        <c-toast />
-                    </div>
-                </c-fieldset>
-            {% endif %}
             {% if is_ops and ticket.service_name %}
                 <c-fieldset heading="Service Check History" collapsible="true" collapsed="false">
                     <div id="service-checks-panel"

@@ -211,6 +211,8 @@ class CreateTicketForm(forms.Form):
         cleaned["ip_address"] = ip_address
 
         for field in category.required_fields:
+            if field == "ip_address" and hostname in self.box_ip_map:
+                continue
             if field in REQUIRED_FIELD_ERRORS and field not in self.errors and not cleaned.get(field):
                 self.add_error(field, REQUIRED_FIELD_ERRORS[field])
         return cleaned

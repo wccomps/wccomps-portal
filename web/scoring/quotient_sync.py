@@ -41,7 +41,7 @@ def _merge_proxmox_boxes(boxes_data: list[BoxData], previous_boxes: list[BoxData
     known_hosts = {normalize_ticket_host(team_number, box["name"]) or box["name"].lower() for box in boxes_data}
     vms = get_proxmox_client().list_team_vms(team_number)
     if vms is None:
-        # Proxmox unconfigured (as on the bot) or unreachable: keep previously synced unscored boxes
+        # Proxmox unconfigured or unreachable: keep previously synced unscored boxes
         for cached_box in previous_boxes:
             name = cached_box.get("name", "")
             host = normalize_ticket_host(team_number, name) or name.lower()
@@ -263,21 +263,9 @@ def get_box_choices() -> list[tuple[str, str]]:
     return []
 
 
-OTHER_SERVICE_CHOICE: tuple[str, str] = ("Other", "Other")
-
-
 def get_service_choices() -> list[tuple[str, str]]:
     """Service dropdown choices from cached metadata, ending with 'Other' for unscored services."""
     metadata = QuotientMetadataCache.objects.first()
-    choices: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    if metadata:
-        raw_services = [*(svc for box in metadata.boxes for svc in box.get("services", [])), *metadata.services]
-        for s in raw_services:
-            name = s.get("name", "")
-            if name and name not in seen:
-                seen.add(name)
-                choices.append((name, s.get("display_name") or name))
-    if OTHER_SERVICE_CHOICE[0] not in seen:
-        choices.append(OTHER_SERVICE_CHOICE)
-    return choices
+    raw = [*(s for b in metadata.boxes for s in b.get("services", [])), *metadata.services] if metadata else []
+    by_name = {s["name"]: s.get("display_name") or s["name"] for s in raw if s.get("name") and s.get("name") != "Other"}
+    return [*by_name.items(), ("Other", "Other")]

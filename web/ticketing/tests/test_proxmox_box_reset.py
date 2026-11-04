@@ -238,7 +238,9 @@ class TestTicketBoxResetViews:
         client.force_login(ticketing_support_user)
         staff_resp = client.get(url)
         assert staff_resp.status_code == 200
-        assert panel_url in staff_resp.content.decode()
+        staff_body = staff_resp.content.decode()
+        assert panel_url in staff_body
+        assert staff_body.index("box-reset-panel") < staff_body.index("Resolve Ticket Manually")
 
         client.force_login(blue_team_user)
         student_resp = client.get(url)
@@ -452,6 +454,32 @@ class TestTicketBoxResetViews:
         assert audit is not None
         assert audit.details["result"] == "ok"
         assert audit.details["vmid"] == 10105
+
+        panel_url = reverse("ticket_box_reset_panel", kwargs={"ticket_number": box_ticket.ticket_number})
+        with patch("core.proxmox.get_proxmox_client", return_value=mock_client):
+            panel_html = client.get(panel_url).content.decode()
+        assert "Reset Completed" in panel_html
+        assert "Resolved manually" not in panel_html
+
+    def test_box_reset_panel_notes_when_resolved_without_portal_reset(
+        self,
+        client: Client,
+        box_ticket: Ticket,
+        ticketing_support_user,
+    ) -> None:
+        mock_client = MagicMock()
+        mock_client.list_team_vms.return_value = [
+            ProxmoxVM(vmid=10105, name="team01-web", host="web", node="pve01", status="running"),
+        ]
+        mock_client.list_snapshots.return_value = [ProxmoxSnapshot(name="clean", description="Clean baseline")]
+
+        Ticket.objects.filter(id=box_ticket.id).update(status=Ticket.STATUS_RESOLVED)
+        client.force_login(ticketing_support_user)
+        panel_url = reverse("ticket_box_reset_panel", kwargs={"ticket_number": box_ticket.ticket_number})
+        with patch("core.proxmox.get_proxmox_client", return_value=mock_client):
+            panel_html = client.get(panel_url).content.decode()
+        assert "Resolved manually" in panel_html
+        assert "No automated portal reset was run for this ticket." in panel_html
 
     def test_box_reset_failure_records_history_and_audit_without_resolving(
         self,
