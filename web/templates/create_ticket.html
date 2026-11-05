@@ -81,7 +81,6 @@
                 },
 
                 init() {
-                    this.rebuildServiceOptions();
                     if (this.selectedCategory) {
                         this.onCategoryChange();
                     }
@@ -90,21 +89,16 @@
                     }
                 },
 
-                getFilteredServices() {
-                    if (this.selectedHostname) {
-                        return allServiceChoices.filter(s => s.box_name === this.selectedHostname);
-                    }
-                    return allServiceChoices;
-                },
-
                 rebuildServiceOptions() {
-                    const select = this.$refs.serviceSelect;
-                    if (!select) return;
+                    const select = document.getElementById('service_name');
+                    if (!select || select.tagName !== 'SELECT') return;
 
                     const currentValue = this.selectedService;
                     select.innerHTML = '<option value="">Select a service...</option>';
 
-                    const services = this.getFilteredServices();
+                    const services = this.selectedHostname
+                        ? allServiceChoices.filter(s => s.box_name === this.selectedHostname)
+                        : allServiceChoices;
                     services.forEach(svc => {
                         const option = document.createElement('option');
                         option.value = svc.value;
@@ -121,6 +115,25 @@
                     const catData = categories[this.selectedCategory] || { required_fields: [], optional_fields: [] };
                     this.requiredFields = catData.required_fields;
                     this.visibleFields = [...catData.required_fields, ...catData.optional_fields];
+                    if (!this.showServiceName) {
+                        this.selectedService = '';
+                    }
+                    if (!this.visibleFields.includes('ip_address')) {
+                        this.ipAddress = '';
+                    }
+                    if (!this.showHostname && this.selectedHostname) {
+                        const hostname = document.getElementById('hostname');
+                        if (hostname) {
+                            hostname.value = '';
+                            hostname.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                        if (this.selectedHostname) {
+                            this.selectedHostname = '';
+                            this.onHostnameChange();
+                        }
+                        return;
+                    }
+                    this.rebuildServiceOptions();
                 },
 
                 onHostnameChange() {
@@ -130,7 +143,7 @@
                         // Without Quotient data the IP is typed by hand; don't wipe it
                         this.ipAddress = '';
                     }
-                    if (this.selectedService) {
+                    if (this.selectedHostname && this.selectedService) {
                         const svc = allServiceChoices.find(s => s.value === this.selectedService);
                         if (svc && svc.box_name !== this.selectedHostname) {
                             this.selectedService = '';

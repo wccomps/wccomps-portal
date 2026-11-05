@@ -261,9 +261,11 @@ class CreateTicketPageForm(CreateTicketForm):
             ip_address.widget.attrs["placeholder"] = "Select a hostname above"
         if self.service_choices:
             self.fields["service_name"].widget = forms.Select(
-                choices=[("", "Select a service...")],
+                choices=[
+                    ("", "Select a service..."),
+                    *((svc["value"], svc.get("label", svc["value"])) for svc in self.service_choices),
+                ],
                 attrs={
-                    "x-ref": "serviceSelect",
                     ":value": "selectedService",
                     "x-on:change": "onServiceChange",
                     ":required": "serviceRequired",
