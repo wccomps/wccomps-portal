@@ -72,8 +72,7 @@ def test_the_last_synced_lists_render_as_pickers_while_quotient_is_down(client):
     assert UNAVAILABLE_NOTICE not in html
     assert 'data-value="web01"' in html
     assert '<select name="service_name"' in html
-    assert "web01:HTTP" in html
-    assert "web01: HTTP" in html
+    assert '<option value="web01:HTTP">web01: HTTP</option>' in html
 
 
 def test_staff_can_use_service_picker_before_start(ticketing_admin_user):
@@ -84,7 +83,7 @@ def test_staff_can_use_service_picker_before_start(ticketing_admin_user):
     html = staff_client.get(reverse("create_ticket")).content.decode()
 
     assert '<select name="service_name"' in html
-    assert "web01:HTTP" in html
+    assert '<option value="web01:HTTP">web01: HTTP</option>' in html
 
 
 def test_scoring_ticket_can_be_filed_with_typed_service_when_unavailable(client, team):
