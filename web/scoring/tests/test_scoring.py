@@ -800,6 +800,7 @@ class TestIncidentFindingMatching:
         suggested_points = calculate_suggested_recovery_points(incident, red_finding)
 
         assert suggested_points == Decimal("40.00")
+        assert suggested_points.as_tuple().exponent == -2
 
     def test_reviewer_tracking_fields_nullable(self, create_user_with_groups) -> None:
         """Reviewer tracking fields can be null for unreviewed incidents."""

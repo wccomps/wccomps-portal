@@ -125,3 +125,13 @@ def test_metadata_sync_merges_unscored_proxmox_team_vms_and_keeps_them_on_proxmo
         sync_quotient_metadata()
 
     assert [b["name"] for b in QuotientMetadataCache.objects.get().boxes] == ["TREX", "PANGEA"]
+
+    with (
+        patch("scoring.quotient_sync.QuotientClient") as client,
+        patch("core.proxmox.ProxmoxClient.list_team_vms", return_value=[]),
+    ):
+        client.return_value.get_infrastructure.return_value = infra
+        client.return_value.get_injects.return_value = []
+        sync_quotient_metadata()
+
+    assert [b["name"] for b in QuotientMetadataCache.objects.get().boxes] == ["TREX", "PANGEA"]

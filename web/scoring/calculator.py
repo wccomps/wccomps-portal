@@ -71,6 +71,7 @@ SCALING_FIELDS = (
 )
 
 RECOVERY_POINT_RATIO = Decimal("0.80")
+RECOVERY_POINT_QUANTUM = Decimal("0.01")
 
 
 def _get_modifiers(template: ScoringTemplate) -> tuple[Decimal, Decimal, Decimal]:
@@ -310,5 +311,4 @@ def suggest_red_score_matches(incident: IncidentReport) -> QuerySet[RedTeamScore
 def calculate_suggested_recovery_points(incident: IncidentReport, red_score: RedTeamScore) -> Decimal:
     """Suggested recovery points: RECOVERY_POINT_RATIO of the red team deduction, as a positive value."""
     deduction_amount = abs(red_score.points_per_team)
-    suggested_return = deduction_amount * RECOVERY_POINT_RATIO
-    return suggested_return
+    return (deduction_amount * RECOVERY_POINT_RATIO).quantize(RECOVERY_POINT_QUANTUM, rounding=ROUND_HALF_UP)
