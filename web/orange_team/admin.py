@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from core.admin import PortalModelAdmin
+from core.admin import PortalModelAdmin, PortalTabularInline
 from orange_team.models import (
     OrangeAssignment,
     OrangeAssignmentResult,
@@ -11,12 +11,12 @@ from orange_team.models import (
 )
 
 
-class OrangeCheckCriterionInline(admin.TabularInline[OrangeCheckCriterion, OrangeCheck]):
+class OrangeCheckCriterionInline(PortalTabularInline[OrangeCheckCriterion, OrangeCheck]):
     model = OrangeCheckCriterion
     extra = 1
 
 
-class OrangeAssignmentResultInline(admin.TabularInline[OrangeAssignmentResult, OrangeAssignment]):
+class OrangeAssignmentResultInline(PortalTabularInline[OrangeAssignmentResult, OrangeAssignment]):
     model = OrangeAssignmentResult
     extra = 0
 

@@ -3,9 +3,11 @@
    Extended from Django admin variables
    ============================================ */
 :root {
+    /* Each status -fg reads at 4.5:1 or more on its -bg and on the page (WCAG AA text) */
+
     /* Info (blue) - "Open" status, informational alerts */
     --info-bg: #e3f2fd;
-    --info-fg: #1976d2;
+    --info-fg: #1565c0;
 
     /* Warning (orange) - "Claimed" status badges */
     --warning-bg: #fff3e0;
@@ -20,14 +22,18 @@
 
     /* Success (green) - "Resolved" status */
     --success-bg: #e8f5e9;
-    --success-fg: #388e3c;
+    --success-fg: #2e7d32;
 
     /* Danger (red) - errors, extends Django's --error-fg */
     --danger-bg: #ffebee;
 
     /* Neutral (grey) - "Cancelled" status */
     --neutral-bg: #f5f5f5;
-    --neutral-fg: #757575;
+    --neutral-fg: #616161;
+
+    /* The nav panel inside the header, darker than it in both themes: Django's light --primary (#79aec8) under
+       white links reads at 2.4:1 */
+    --nav-bg: #264b5d;
 }
 
 /* Dark mode - app-specific variables (Django admin handles --error-fg, --darkened-bg, etc.) */
@@ -114,11 +120,32 @@ nav[role="navigation"] {
     line-height: 1.3;
 }
 
+/* At 18px the title's text needs more than Django's 8px beside it; 12px matches the changelist cells' padding */
 .module h2,
-.module caption,
-.module-header {
+.module caption {
     font-size: 18px;
     line-height: 1.4;
+    padding: 8px 12px;
+}
+
+/* Prose stays within about 75 characters a line (60ch: a 0, which ch measures, is wider than most letters) and doesn't
+   leave one word alone on its last line, but for the paragraphs Django draws as full-width bars (a list's paginator,
+   an error note). :where keeps a width class in charge. */
+:where(#content) :is(p, .help, .help-text):where(:not(.paginator, .errornote)) {
+    max-width: 60ch;
+}
+
+:where(#content) :is(p, li, .help, .help-text) {
+    text-wrap: pretty;
+}
+
+.text-center p {
+    margin-inline: auto;
+}
+
+/* The browser's smaller is under 11px beside 13px text: 12px at least */
+small {
+    font-size: max(0.75rem, 0.85em);
 }
 
 /* Portal pages put their breadcrumb bar inside #content, hence no top padding above. Django admin pages
@@ -129,11 +156,25 @@ body.dashboard #content {
     padding-top: 20px;
 }
 
+/* The bar spans #content's side padding, which Django narrows from 40px to 20px at 1024px and 15px at 767px */
 #content > .breadcrumbs {
-    margin-left: -40px;
-    margin-right: -40px;
-    padding-left: 40px;
-    padding-right: 40px;
+    --gutter: 40px;
+    margin-left: calc(-1 * var(--gutter));
+    margin-right: calc(-1 * var(--gutter));
+    padding-left: var(--gutter);
+    padding-right: var(--gutter);
+}
+
+@media (max-width: 1024px) {
+    #content > .breadcrumbs {
+        --gutter: 20px;
+    }
+}
+
+@media (max-width: 767px) {
+    #content > .breadcrumbs {
+        --gutter: 15px;
+    }
 }
 
 /* Filter bar layout - organized horizontal layout */
@@ -355,9 +396,10 @@ a.button.danger:active {
 .table-fixed { table-layout: fixed; }
 
 /* Grid layouts */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-@media (max-width: 767px) { .grid-2, .grid-4 { grid-template-columns: 1fr; } }
+/* minmax(0, 1fr): a bare 1fr column grows to its widest content, past a phone's edge */
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 767px) { .grid-2, .grid-4 { grid-template-columns: minmax(0, 1fr); } }
 
 /* Container widths */
 .max-w-400 { max-width: 400px; margin: 0 auto; }
@@ -481,6 +523,13 @@ a.btn-secondary:focus-visible {
 }
 .vTextField,
 .vLargeTextField {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+/* A select is as wide as its longest option and a textarea as its cols: each stays inside its column, on a phone
+   the page. The id outranks responsive.css's later phone rule, textarea { max-width: none; } */
+#content select,
+#content textarea {
     max-width: 100%;
     box-sizing: border-box;
 }
@@ -861,7 +910,7 @@ fieldset:has([required]) > legend.required::after,
 }
 
 .primary-navigation {
-    background: var(--primary, #417690);
+    background: var(--nav-bg);
     padding: 10px 20px;
     border-bottom: 1px solid var(--primary-dark, #2e5266);
     display: flex;
@@ -888,12 +937,13 @@ fieldset:has([required]) > legend.required::after,
     transition: background-color 0.2s;
 }
 
+/* The header's color, so the current section reads as cut out of the darker panel */
 .primary-navigation a:hover {
-    background-color: var(--primary-dark, #2e5266);
+    background-color: var(--header-bg, #417690);
 }
 
 .primary-navigation a.current {
-    background-color: var(--primary-dark, #2e5266);
+    background-color: var(--header-bg, #417690);
     font-weight: 600;
 }
 
@@ -980,7 +1030,7 @@ fieldset:has([required]) > legend.required::after,
         top: 100%;
         left: 0;
         right: 0;
-        background: var(--primary, #417690);
+        background: var(--nav-bg);
         padding: 10px 15px;
         border-bottom: 1px solid var(--primary-dark, #2e5266);
         z-index: 1000;
@@ -1010,6 +1060,18 @@ fieldset:has([required]) > legend.required::after,
         min-width: 0;
         overflow-wrap: anywhere;
     }
+}
+
+/* A sorted column's arrow (cotton/table_header.html), drawn from its aria-sort. The empty alternative text keeps a
+   screen reader from reading it as a triangle: aria-sort already says the order. */
+th[aria-sort="ascending"] > .text > a::after {
+    content: "\25B2";
+    content: "\25B2" / "";
+}
+
+th[aria-sort="descending"] > .text > a::after {
+    content: "\25BC";
+    content: "\25BC" / "";
 }
 
 /* Table improvements - better density for scanning */
@@ -1054,6 +1116,12 @@ button[type="submit"]:hover {
     padding: 8px 10px;
 }
 
+/* Django admin's breadcrumbs wrap on a phone onto lines too close together: 24px lines keep each link clear of the
+   next (WCAG 2.5.8) */
+ol.breadcrumbs li {
+    line-height: 24px;
+}
+
 /* Actions dropdown */
 .actions select {
     padding: 6px 10px;
@@ -1080,7 +1148,7 @@ button[type="submit"]:hover {
 }
 
 .dark-mode-toggle:hover {
-    background: var(--primary-dark, #2e5266);
+    background: var(--header-bg, #417690);
 }
 
 .audio-toggle {
@@ -1098,12 +1166,13 @@ button[type="submit"]:hover {
 }
 
 .audio-toggle:hover {
-    background: var(--primary-dark, #2e5266);
+    background: var(--header-bg, #417690);
 }
 
-/* Ticket notification badge */
+/* Ticket notification badge: Django's light --error-fg in both themes, since dark mode's (#e35f5f, made for
+   text on a dark page) under white reads at 3.5:1 */
 .notif-count {
-    background: var(--error-fg, #dc3545);
+    background: #ba2121;
     color: #fff;
     font-size: 12px;
     font-weight: 700;
@@ -1156,7 +1225,7 @@ button[type="submit"]:hover {
 }
 
 .toast-enter {
-    transition: all 0.3s ease-out;
+    transition: opacity 0.3s ease-out, transform 0.3s ease-out;
 }
 
 .toast-enter-start {
@@ -1170,7 +1239,7 @@ button[type="submit"]:hover {
 }
 
 .toast-leave {
-    transition: all 0.2s ease-in;
+    transition: opacity 0.2s ease-in, transform 0.2s ease-in;
     pointer-events: none;
 }
 
@@ -1343,15 +1412,6 @@ button[type="submit"]:hover {
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 15px;
 }
-
-/* Match incident: the two panels' title bars (scoring/match_incident.html) */
-.module-header {
-    background: var(--primary, #417690);
-    color: white;
-    margin: -15px -15px 15px -15px;
-    padding: 15px;
-}
-.module-header-success { background: var(--success-fg); }
 
 /* Scorecard (scoring/_scorecard_body.html, scoring/scorecard.html) */
 .neighbors {

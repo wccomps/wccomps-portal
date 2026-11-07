@@ -32,7 +32,8 @@ def test_headers_align_and_show_the_current_sort(live_server, pw_browser):
         assert len(text_tops) == 8 and len(set(text_tops)) == 1, text_tops
 
         team_header = page.locator("#result_list thead th", has_text="Team")
-        assert "▲" in team_header.inner_text()
+        assert team_header.get_attribute("aria-sort") == "ascending"
+        assert "▲" in team_header.locator("a").evaluate("a => getComputedStyle(a, '::after').content")
         assert "sort=-team__team_number" in (team_header.locator("a").get_attribute("href") or "")
     finally:
         context.close()

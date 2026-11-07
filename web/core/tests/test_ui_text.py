@@ -63,14 +63,11 @@ JS_ESCAPES = {"n": "\n", "t": "\t"}
 # "template:line:problem" or "file.py:function:line:problem" (fnmatch) -> why that string reads right, or isn't UI
 # text
 UI_TEXT_EXCEPTIONS = {
-    "cotton/table_header.html:*:▲": "the sort direction arrow on the sorted column",
-    "cotton/table_header.html:*:▼": "the sort direction arrow on the sorted column",
     "cotton/fieldset.html:*:▶": "the collapsible fieldset's expand arrow",
     "registration/register.html:*:©": "the copyright line",
     "scoring/_scorecard_body.html:*:×": "multiplication in the score formula",
     "scoring/scorecard_print.html:*:×": "multiplication in the score formula",
     # Hyphens in code, not text
-    "cotton/table_header.html:*:hyphen for no value": "the descending sort prefix the sort links compare and add",
     "web/core/utils.py:requested_sort:*:hyphen for no value": "the descending sort prefix",
     "web/core/authentik_utils.py:generate_blueteam_password:*:hyphen for no value": "the passwords' word separator",
     "web/core/authentik_utils.py:parse_team_range:*:hyphen for no value": "the separator in a team range (5-10)",

@@ -3,7 +3,7 @@ from django.db.models import QuerySet
 from django.forms import ModelForm
 from django.http import HttpRequest
 
-from core.admin import PortalModelAdmin
+from core.admin import PortalModelAdmin, PortalTabularInline
 
 from .models import (
     Event,
@@ -16,12 +16,12 @@ from .models import (
 from .services import event_delete_problem, season_delete_problem
 
 
-class RegistrationContactInline(admin.TabularInline[RegistrationContact, TeamRegistration]):
+class RegistrationContactInline(PortalTabularInline[RegistrationContact, TeamRegistration]):
     model = RegistrationContact
     extra = 0
 
 
-class RegistrationEventEnrollmentInline(admin.TabularInline[RegistrationEventEnrollment, TeamRegistration]):
+class RegistrationEventEnrollmentInline(PortalTabularInline[RegistrationEventEnrollment, TeamRegistration]):
     model = RegistrationEventEnrollment
     extra = 0
 
@@ -78,7 +78,7 @@ class SeasonAdmin(PortalModelAdmin[Season]):
         return super().has_delete_permission(request, obj)
 
 
-class EventTeamAssignmentInline(admin.TabularInline[EventTeamAssignment, Event]):
+class EventTeamAssignmentInline(PortalTabularInline[EventTeamAssignment, Event]):
     """Shown only: assignments are set through registration.services."""
 
     model = EventTeamAssignment

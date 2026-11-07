@@ -3,7 +3,7 @@ from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 
-from core.admin import PortalModelAdmin
+from core.admin import PortalModelAdmin, PortalTabularInline
 
 from .forms import TicketCategoryForm
 from .models import (
@@ -16,7 +16,7 @@ from .models import (
 )
 
 
-class TicketAttachmentInline(admin.TabularInline[TicketAttachment, Ticket]):
+class TicketAttachmentInline(PortalTabularInline[TicketAttachment, Ticket]):
     model = TicketAttachment
     extra = 0
     readonly_fields = ["uploaded_at", "uploaded_by", "filename", "mime_type"]
@@ -26,14 +26,14 @@ class TicketAttachmentInline(admin.TabularInline[TicketAttachment, Ticket]):
         return False
 
 
-class TicketCommentInline(admin.TabularInline[TicketComment, Ticket]):
+class TicketCommentInline(PortalTabularInline[TicketComment, Ticket]):
     model = TicketComment
     extra = 0
     readonly_fields = ["posted_at", "author"]
     fields = ["author", "comment_text", "posted_at"]
 
 
-class TicketHistoryInline(admin.TabularInline[TicketHistory, Ticket]):
+class TicketHistoryInline(PortalTabularInline[TicketHistory, Ticket]):
     model = TicketHistory
     extra = 0
     readonly_fields = ["timestamp", "action", "actor"]

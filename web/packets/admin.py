@@ -6,13 +6,13 @@ from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 from django.utils.html import format_html
 
-from core.admin import PortalModelAdmin
+from core.admin import PortalModelAdmin, PortalTabularInline
 from core.utils import start_detached
 
 from .models import Packet, PacketDistribution, PacketQuerySet
 
 
-class PacketDistributionInline(admin.TabularInline[PacketDistribution, Packet]):
+class PacketDistributionInline(PortalTabularInline[PacketDistribution, Packet]):
     model = PacketDistribution
     extra = 0
     fields = [

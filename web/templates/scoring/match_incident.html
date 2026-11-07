@@ -6,7 +6,7 @@
                    parent_label="Incidents" />
     <div class="grid-2 gap-20">
         <c-module class="p-15">
-            <h2 class="module-header">Incident Report #{{ incident.id }}</h2>
+            <h2>Incident Report #{{ incident.id }}</h2>
             <c-detail_grid class="mb-15">
                 <c-detail_row label="Team">
                     Team {{ incident.team.team_number }}
@@ -53,7 +53,7 @@
             </c-fieldset>
         </c-module>
         <c-module class="p-15">
-            <h2 class="module-header module-header-success">Review & Match</h2>
+            <h2>Review & Match</h2>
             {% if suggested_findings %}
                 <p class="mb-5">
                     <strong>Suggested Matches ({{ suggested_findings|length }})</strong> <span class="text-muted text-sm">(based on source IP, affected box, and service)</span>
