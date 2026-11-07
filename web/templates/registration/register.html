@@ -399,6 +399,11 @@
                 margin-top: 0.25rem;
             }
 
+            p,
+            .help-text {
+                text-wrap: pretty;
+            }
+
             .error-text {
                 font-size: 0.75rem;
                 color: var(--error);
@@ -484,10 +489,6 @@
                 display: flex;
                 align-items: center;
                 gap: 0.75rem;
-                padding: 1rem;
-                background: var(--input-bg);
-                border: 1px solid var(--border);
-                border-radius: 0.5rem;
             }
 
             .rules-checkbox input[type="checkbox"] {

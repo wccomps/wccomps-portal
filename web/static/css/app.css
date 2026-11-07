@@ -120,10 +120,31 @@ nav[role="navigation"] {
     line-height: 1.3;
 }
 
+/* At 18px the title's text needs more than Django's 8px beside it; 12px matches the changelist cells' padding */
 .module h2,
 .module caption {
     font-size: 18px;
     line-height: 1.4;
+    padding: 8px 12px;
+}
+
+/* Prose stays within 80 characters a line and doesn't leave one word alone on its last line, but for the paragraphs
+   Django draws as full-width bars (a list's paginator, an error note). :where keeps a width class in charge. */
+:where(#content) :is(p, .help, .help-text):where(:not(.paginator, .errornote)) {
+    max-width: 80ch;
+}
+
+:where(#content) :is(p, li, .help, .help-text) {
+    text-wrap: pretty;
+}
+
+.text-center p {
+    margin-inline: auto;
+}
+
+/* The browser's smaller is under 11px beside 13px text: 12px at least */
+small {
+    font-size: max(0.75rem, 0.85em);
 }
 
 /* Portal pages put their breadcrumb bar inside #content, hence no top padding above. Django admin pages
