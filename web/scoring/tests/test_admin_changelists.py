@@ -34,8 +34,16 @@ def client_with_rows(admin_user: User) -> Client:
     return client
 
 
-@pytest.mark.parametrize("model", ["incidentreport", "injectscore", "servicescore"])
-def test_changelist_renders(client_with_rows: Client, model: str) -> None:
+@pytest.mark.parametrize(
+    ("model", "cell"),
+    [
+        ("incidentreport", b'<span class="badge badge--warning">Pending</span>'),
+        ("injectscore", b'<span class="text-success">90.0%</span>'),
+        ("servicescore", b'<span class="score-positive">4.00</span>'),
+    ],
+)
+def test_changelist_renders(client_with_rows: Client, model: str, cell: bytes) -> None:
+    """Each colored column draws its tone with the portal's classes, which follow the theme."""
     response = client_with_rows.get(reverse(f"admin:scoring_{model}_changelist"))
     assert response.status_code == 200
-    assert b'<span style="color: ' in response.content
+    assert cell in response.content

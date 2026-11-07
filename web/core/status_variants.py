@@ -1,4 +1,4 @@
-"""The component variant each stored status is shown with.
+"""The component variant each stored status is shown with, and the class a score is shown in.
 
 A badge or alert given a value it doesn't know falls back to its default look without an error, so a status
 shown straight from the database (variant="{{ dist.email_status }}") rendered "delivered" and "bounced" as
@@ -7,6 +7,7 @@ test_template_vocabulary checks every stored value is mapped to a variant the co
 """
 
 import logging
+from decimal import Decimal
 
 from django.conf import settings
 
@@ -70,6 +71,9 @@ MESSAGE_ALERTS: dict[str, str] = {
     "error": "error",
 }
 
+# A score's sign -> the class it is shown in (c-score_value, the admin's net score column)
+SCORE_CLASSES: dict[int, str] = {1: "score-positive", 0: "score-zero", -1: "score-negative"}
+
 
 def badge_variant(value: str, kind: str) -> str:
     """The variant for a stored value. An unknown kind is a template mistake: it raises under DEBUG and is logged
@@ -85,3 +89,7 @@ def badge_variant(value: str, kind: str) -> str:
 
 def alert_variant(tag: str) -> str:
     return MESSAGE_ALERTS.get(tag, "info")
+
+
+def score_class(value: Decimal | float) -> str:
+    return SCORE_CLASSES[(value > 0) - (value < 0)]

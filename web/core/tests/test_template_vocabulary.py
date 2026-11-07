@@ -269,6 +269,9 @@ CLASSLIST_RE = re.compile(
     r"""classList\.(?:add|remove|toggle|replace)\(\s*(["'])([^"']+)\1(?:\s*,\s*(["'])([^"']+)\3)?"""
 )
 DICT_CLASS_RE = re.compile(r"""["']class["']\s*:\s*["']([^"']+)["']""")
+# Filters a class attribute writes a class with, and every class each returns (core.status_variants)
+CLASS_FILTERS = {"score_class": frozenset(status_variants.SCORE_CLASSES.values())}
+CLASS_FILTER_RE = re.compile(r"{{[^{}]*\|\s*(\w+)\s*}}")
 CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 CSS_RULE_RE = re.compile(r"([^{}]+)\{[^{}]*\}")
 CSS_CLASS_RE = re.compile(r"\.(-?[A-Za-z_][\w-]*)")
@@ -282,13 +285,15 @@ def literal_classes(literal: str) -> set[str]:
 
 def attribute_classes(value: str) -> set[str]:
     """The class names in a class attribute. {% %} tags separate names and a name containing {{ }} is skipped, as it
-    is only known at render; a {% cycle %} writes its quoted arguments."""
-    cycled = {
+    is only known at render, but for a class filter's, which writes any of its classes; a {% cycle %} writes its
+    quoted arguments."""
+    written = {
         name for tag in CYCLE_RE.findall(value) for _, arg in QUOTED_RE.findall(tag) for name in literal_classes(arg)
     }
+    written |= {name for f in CLASS_FILTER_RE.findall(value) for name in CLASS_FILTERS.get(f, ())}
     value = re.sub(r"{%.*?%}", " ", value, flags=re.DOTALL)
     value = re.sub(r"{{.*?}}", "\0", value, flags=re.DOTALL)
-    return cycled | {token for token in value.split() if "\0" not in token and CLASS_NAME_RE.fullmatch(token)}
+    return written | {token for token in value.split() if "\0" not in token and CLASS_NAME_RE.fullmatch(token)}
 
 
 def written_classes(path: Path) -> set[str]:

@@ -6,6 +6,7 @@ from django.http import HttpRequest
 from django.utils.html import format_html
 
 from core.admin import PortalModelAdmin
+from core.status_variants import score_class
 from core.utils import shorten
 
 from .models import (
@@ -185,8 +186,8 @@ class IncidentReportAdmin(PortalModelAdmin[IncidentReport]):
     @admin.display(description="Status")
     def reviewed_status(self, obj: IncidentReport) -> str:
         if obj.is_approved:
-            return format_html('<span style="color: {};">{}</span>', "green", "Reviewed")
-        return format_html('<span style="color: {};">{}</span>', "orange", "Pending")
+            return format_html('<span class="badge badge--success">{}</span>', "Reviewed")
+        return format_html('<span class="badge badge--warning">{}</span>', "Pending")
 
 
 @admin.register(InjectScore)
@@ -215,8 +216,8 @@ class InjectScoreAdmin(PortalModelAdmin[InjectScore]):
     def percentage(self, obj: InjectScore) -> str:
         if obj.max_points and obj.max_points > 0:
             pct = (obj.points_awarded / obj.max_points) * 100
-            color = "green" if pct >= 80 else "orange" if pct >= 60 else "red"
-            return format_html('<span style="color: {};">{}%</span>', color, f"{pct:.1f}")
+            tone = "text-success" if pct >= 80 else "text-warning" if pct >= 60 else "text-danger"
+            return format_html('<span class="{}">{}%</span>', tone, f"{pct:.1f}")
         return "N/A"
 
 
@@ -256,8 +257,7 @@ class ServiceScoreAdmin(PortalModelAdmin[ServiceScore]):
     @admin.display(description="Net")
     def net_score(self, obj: ServiceScore) -> str:
         total = obj.service_points + obj.sla_violations
-        color = "green" if total > 0 else "red" if total < 0 else "black"
-        return format_html('<span style="color: {};">{}</span>', color, f"{total:.2f}")
+        return format_html('<span class="{}">{}</span>', score_class(total), f"{total:.2f}")
 
 
 @admin.register(ScoringExclusion)
