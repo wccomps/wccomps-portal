@@ -256,8 +256,8 @@ class ServiceScoreAdmin(PortalModelAdmin[ServiceScore]):
 
     @admin.display(description="Net")
     def net_score(self, obj: ServiceScore) -> str:
-        total = obj.service_points + obj.sla_violations
-        return format_html('<span class="{}">{}</span>', score_class(total), f"{total:.2f}")
+        shown = f"{obj.service_points + obj.sla_violations:.2f}"
+        return format_html('<span class="{}">{}</span>', score_class(shown), shown)
 
 
 @admin.register(ScoringExclusion)

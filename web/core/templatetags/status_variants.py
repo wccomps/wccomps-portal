@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from django import template
 
 from core import status_variants
@@ -20,6 +18,6 @@ def alert_variant(tag: str) -> str:
 
 
 @register.filter
-def score_class(value: Decimal | float) -> str:
-    """The class a score is shown in, by its sign: {{ total|score_class }}."""
-    return status_variants.score_class(value)
+def score_class(shown: object) -> str:
+    """The class for a score, from the text shown for it: {{ shown|score_class }}."""
+    return status_variants.score_class(shown)

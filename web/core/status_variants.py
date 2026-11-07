@@ -7,9 +7,10 @@ test_template_vocabulary checks every stored value is mapped to a variant the co
 """
 
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
+from django.utils.formats import sanitize_separators
 
 logger = logging.getLogger(__name__)
 
@@ -91,5 +92,14 @@ def alert_variant(tag: str) -> str:
     return MESSAGE_ALERTS.get(tag, "info")
 
 
-def score_class(value: Decimal | float) -> str:
-    return SCORE_CLASSES[(value > 0) - (value < 0)]
+def score_class(shown: object) -> str:
+    """The class for a score by the sign of the text the page shows for it, so the color and the number agree (0.6
+    shown as 1 is positive), read as Django wrote it (thousand separators too). Anything that isn't a finite number
+    takes the zero class."""
+    try:
+        number = Decimal(sanitize_separators(str(shown)))
+    except InvalidOperation:
+        return SCORE_CLASSES[0]
+    if not number.is_finite():
+        return SCORE_CLASSES[0]
+    return SCORE_CLASSES[(number > 0) - (number < 0)]
