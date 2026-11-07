@@ -135,11 +135,25 @@ body.dashboard #content {
     padding-top: 20px;
 }
 
+/* The bar spans #content's side padding, which Django narrows from 40px to 20px at 1024px and 15px at 767px */
 #content > .breadcrumbs {
-    margin-left: -40px;
-    margin-right: -40px;
-    padding-left: 40px;
-    padding-right: 40px;
+    --gutter: 40px;
+    margin-left: calc(-1 * var(--gutter));
+    margin-right: calc(-1 * var(--gutter));
+    padding-left: var(--gutter);
+    padding-right: var(--gutter);
+}
+
+@media (max-width: 1024px) {
+    #content > .breadcrumbs {
+        --gutter: 20px;
+    }
+}
+
+@media (max-width: 767px) {
+    #content > .breadcrumbs {
+        --gutter: 15px;
+    }
 }
 
 /* Filter bar layout - organized horizontal layout */
@@ -361,9 +375,10 @@ a.button.danger:active {
 .table-fixed { table-layout: fixed; }
 
 /* Grid layouts */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-@media (max-width: 767px) { .grid-2, .grid-4 { grid-template-columns: 1fr; } }
+/* minmax(0, 1fr): a bare 1fr column grows to its widest content, past a phone's edge */
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 767px) { .grid-2, .grid-4 { grid-template-columns: minmax(0, 1fr); } }
 
 /* Container widths */
 .max-w-400 { max-width: 400px; margin: 0 auto; }
@@ -487,6 +502,13 @@ a.btn-secondary:focus-visible {
 }
 .vTextField,
 .vLargeTextField {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+/* A select is as wide as its longest option and a textarea as its cols: each stays inside its column, on a phone
+   the page. The id outranks responsive.css's later phone rule, textarea { max-width: none; } */
+#content select,
+#content textarea {
     max-width: 100%;
     box-sizing: border-box;
 }

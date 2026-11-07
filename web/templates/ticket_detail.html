@@ -349,7 +349,7 @@
         {% if ticket.status != "resolved" and ticket.status != "cancelled" %}
             <c-form action="{% url 'ticket_attachment_upload' ticket.ticket_number %}"
                     enctype="multipart/form-data"
-                    class="mt-20 d-flex gap-10 items-center px-10">
+                    class="mt-20 d-flex flex-wrap gap-10 items-center px-10">
                 {% csrf_token %}
                 <input type="file"
                        name="attachment"
