@@ -135,3 +135,63 @@ def test_metadata_sync_merges_unscored_proxmox_team_vms_and_keeps_them_on_proxmo
         sync_quotient_metadata()
 
     assert [b["name"] for b in QuotientMetadataCache.objects.get().boxes] == ["TREX", "PANGEA"]
+
+
+def test_metadata_sync_pushes_config_to_aweful_proxy():
+    import httpx
+    from django.test import override_settings
+    from quotient.client import QuotientBox, QuotientInfrastructure, QuotientService, ServiceCheck
+
+    from team.models import Team
+
+    Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
+    Team.objects.create(team_number=38, team_name="Team 38", is_active=True)
+
+    infra = QuotientInfrastructure(
+        boxes=[
+            QuotientBox(
+                name="BUGS",
+                ip="10.100.1_.10",
+                services=[QuotientService(name="DNS", display_name="DNS")],
+            )
+        ]
+    )
+    checks = [
+        ServiceCheck(
+            round_number=1,
+            timestamp=None,
+            passed=True,
+            debug="record chat.acme.anvil returned 192.168.220.13. acceptable answers were: [192.168.220.13]",
+            error="",
+        )
+    ]
+
+    with (
+        override_settings(AWEFUL_PROXY_URL="http://10.0.0.10:8080/"),
+        patch("scoring.quotient_sync.QuotientClient") as client,
+        patch("scoring.quotient_sync.httpx.post") as mock_post,
+    ):
+        client.return_value.get_infrastructure.return_value = infra
+        client.return_value.get_injects.return_value = []
+        client.return_value.get_service_checks.return_value = checks
+        sync_quotient_metadata()
+
+    mock_post.assert_called_once()
+    assert mock_post.call_args.args[0] == "http://10.0.0.10:8080/config"
+    assert mock_post.call_args.kwargs["json"] == {
+        "number_of_teams": 38,
+        "external_mask": "10.100.1xx.",
+        "team_dns_server_last_octet": 10,
+        "team_domain_name": "acme.anvil",
+        "internal_mask": "192.168.220.",
+    }
+
+    with (
+        override_settings(AWEFUL_PROXY_URL="http://10.0.0.10:8080"),
+        patch("scoring.quotient_sync.QuotientClient") as client,
+        patch("scoring.quotient_sync.httpx.post", side_effect=httpx.ConnectError("proxy down")),
+    ):
+        client.return_value.get_infrastructure.return_value = infra
+        client.return_value.get_injects.return_value = []
+        client.return_value.get_service_checks.return_value = checks
+        sync_quotient_metadata()

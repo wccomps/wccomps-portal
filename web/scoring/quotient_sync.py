@@ -1,15 +1,23 @@
+import logging
+import re
 from decimal import Decimal
 from typing import TypedDict
 
+import httpx
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from quotient.client import QuotientClient
+from quotient.client import QuotientClient, ServiceCheck
 
 from team.models import Team
 
 from .maxes import inject_max_from_titles, service_max_from_details, set_template_max
 from .models import QuotientMetadataCache, ServiceDetail, ServiceScore
+
+logger = logging.getLogger(__name__)
+_DNS_RECORD_DOMAIN_RE = re.compile(r"\brecord\s+([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)\.?(?=[\s:\->]|$)")
+_DNS_ANSWER_IPV4_PREFIX_RE = re.compile(r"\[(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}\b")
 
 
 class ServiceData(TypedDict):
@@ -57,6 +65,97 @@ def _merge_proxmox_boxes(boxes_data: list[BoxData], previous_boxes: list[BoxData
         known_hosts.add(vm.host)
         box_name = vm.host.upper() if uppercase_names else vm.host
         boxes_data.append({"name": box_name, "ip": "", "services": []})
+
+
+def _parse_dns_box_ip_template(ip_template: str) -> tuple[str, int] | None:
+    """Extract (external_mask, last_octet) from a Quotient IP template such as '10.100.1_.10'."""
+    octets = ip_template.strip().split(".")
+    if len(octets) != 4 or not octets[3].isdigit():
+        return None
+    last_octet = int(octets[3])
+    if not 1 <= last_octet <= 254:
+        return None
+    prefix = ".".join(octets[:3]) + "."
+    if "xx" not in prefix:
+        if "_" in prefix:
+            prefix = prefix.replace("_", "xx", 1)
+        elif "X" in prefix:
+            prefix = prefix.replace("X", "xx", 1)
+    if "xx" not in prefix:
+        return None
+    return prefix, last_octet
+
+
+def _extract_dns_check_network(checks: list[ServiceCheck] | None) -> tuple[str, str]:
+    """Extract (team_domain_name, internal_mask) from Quotient DNS service check debug strings."""
+    domain = ""
+    internal_mask = ""
+    for check in checks or ():
+        debug = check.debug or ""
+        if not domain and (domain_match := _DNS_RECORD_DOMAIN_RE.search(debug)):
+            fqdn = domain_match.group(1).lower()
+            domain = fqdn.split(".", 1)[1] if fqdn.count(".") >= 2 else fqdn
+        if not internal_mask and (ip_match := _DNS_ANSWER_IPV4_PREFIX_RE.search(debug)):
+            internal_mask = f"{ip_match.group(1)}."
+        if domain and internal_mask:
+            break
+    return domain, internal_mask
+
+
+def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> None:
+    """Push team count, external/internal subnet masks, DNS server octet, and domain to aweful-proxy."""
+    proxy_url = str(getattr(settings, "AWEFUL_PROXY_URL", "")).strip().rstrip("/")
+    if not proxy_url:
+        return
+
+    payload: dict[str, int | str] = {}
+    max_team = (
+        Team.objects.filter(is_active=True, team_number__gte=1, team_number__lte=99)
+        .aggregate(models.Max("team_number"))["team_number__max"]
+    )
+    if max_team:
+        payload["number_of_teams"] = max_team
+
+    for box in boxes_data:
+        dns_service = next(
+            (
+                s["name"]
+                for s in box.get("services", [])
+                if s.get("name", "").upper() == "DNS" or s.get("display_name", "").upper() == "DNS"
+            ),
+            None,
+        )
+        if not dns_service:
+            continue
+        if parsed := _parse_dns_box_ip_template(box.get("ip", "")):
+            payload["external_mask"], payload["team_dns_server_last_octet"] = parsed
+        sample_team = (
+            Team.objects.filter(is_active=True, team_number__gte=1, team_number__lte=99)
+            .order_by("team_number")
+            .values_list("team_number", flat=True)
+            .first()
+            or 1
+        )
+        checks = client.get_service_checks(sample_team, f"{box['name']}:{dns_service}")
+        domain, internal_mask = _extract_dns_check_network(checks)
+        if domain:
+            payload["team_domain_name"] = domain
+        if internal_mask:
+            payload["internal_mask"] = internal_mask
+        break
+
+    if not payload:
+        return
+
+    try:
+        response = httpx.post(
+            f"{proxy_url}/config",
+            json=payload,
+            timeout=settings.HTTPX_DEFAULT_TIMEOUT,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        logger.warning(f"Failed to push config to aweful-proxy at {proxy_url}: {e}")
 
 
 def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
@@ -114,6 +213,8 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
     injects = client.get_injects(force_refresh=True)
     if injects:
         set_template_max("inject_max", inject_max_from_titles(injects))
+
+    _sync_aweful_proxy(client, boxes_data)
 
     return metadata
 
