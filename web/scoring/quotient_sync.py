@@ -1,15 +1,27 @@
+import ipaddress
+import logging
+import re
 from decimal import Decimal
 from typing import TypedDict
 
+import httpx
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from quotient.client import QuotientClient
+from quotient.client import QuotientClient, ServiceCheck
 
-from team.models import Team
+from team.models import MAX_TEAMS, Team
 
 from .maxes import inject_max_from_titles, service_max_from_details, set_template_max
 from .models import QuotientMetadataCache, ServiceDetail, ServiceScore
+
+logger = logging.getLogger(__name__)
+_DNS_RECORD_DOMAIN_RE = re.compile(r"^record\s+([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)\.?(?=[\s:\->]|$)")
+_DNS_ANSWER_IPV4_PREFIX_RE = re.compile(
+    r"(?:^record\s+\S+\s*(?::|->\s*(?:acceptable answers were:\s*)?)|(?:within|acceptable answers were:)\s*)"
+    r"\[(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}\b"
+)
 
 
 class ServiceData(TypedDict):
@@ -27,17 +39,20 @@ class BoxData(TypedDict):
     services: list[ServiceData]
 
 
+def _sample_team_numbers() -> list[int]:
+    return list(
+        Team.objects.filter(is_active=True, team_number__gte=1, team_number__lte=MAX_TEAMS)
+        .order_by(models.Case(models.When(school_info__isnull=False, then=0), default=1), "team_number")
+        .values_list("team_number", flat=True)
+    )
+
+
 def _merge_proxmox_boxes(boxes_data: list[BoxData], previous_boxes: list[BoxData]) -> None:
     """Append team VMs from Proxmox (such as routers/firewalls without scored services) not already in Quotient."""
     from core.proxmox import get_proxmox_client, normalize_ticket_host
 
-    team_number = (
-        Team.objects.filter(is_active=True, team_number__gte=1, team_number__lte=99)
-        .order_by(models.Case(models.When(school_info__isnull=False, then=0), default=1), "team_number")
-        .values_list("team_number", flat=True)
-        .first()
-        or 1
-    )
+    sample_teams = _sample_team_numbers()
+    team_number = sample_teams[0] if sample_teams else 1
     known_hosts = {normalize_ticket_host(team_number, box["name"]) or box["name"].lower() for box in boxes_data}
     vms = get_proxmox_client().list_team_vms(team_number)
     if not vms:
@@ -57,6 +72,98 @@ def _merge_proxmox_boxes(boxes_data: list[BoxData], previous_boxes: list[BoxData
         known_hosts.add(vm.host)
         box_name = vm.host.upper() if uppercase_names else vm.host
         boxes_data.append({"name": box_name, "ip": "", "services": []})
+
+
+def _parse_dns_box_ip_template(ip_template: str) -> tuple[str, int] | None:
+    octets = ip_template.strip().split(".")
+    if len(octets) != 4 or not octets[3].isdigit():
+        return None
+    last_octet = int(octets[3])
+    if not 1 <= last_octet <= 254:
+        return None
+    prefix = re.sub(r"[_xX]+", "xx", ".".join(octets[:3]) + ".", count=1)
+    if prefix.count("xx") != 1 or re.search(r"[_xX]", prefix.replace("xx", "")):
+        return None
+    try:
+        ipaddress.IPv4Address(f"{prefix.replace('xx', '01')}{last_octet}")
+    except ValueError:
+        return None
+    return prefix, last_octet
+
+
+def _extract_dns_check_network(checks: list[ServiceCheck] | None) -> tuple[str, str]:
+    domain = ""
+    internal_mask = ""
+    for check in checks or ():
+        debug = check.debug or ""
+        if not domain and (domain_match := _DNS_RECORD_DOMAIN_RE.search(debug)):
+            fqdn = domain_match.group(1).lower()
+            if not fqdn.endswith(".arpa") and not all(part.isdigit() for part in fqdn.split(".")):
+                domain = fqdn.split(".", 1)[1] if fqdn.count(".") >= 2 else fqdn
+        if not internal_mask and (ip_match := _DNS_ANSWER_IPV4_PREFIX_RE.search(debug)):
+            try:
+                ipaddress.IPv4Address(f"{ip_match.group(1)}.1")
+                internal_mask = f"{ip_match.group(1)}."
+            except ValueError:
+                pass
+        if domain and internal_mask:
+            break
+    return domain, internal_mask
+
+
+def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> None:
+    proxy_url = settings.AWEFUL_PROXY_URL.strip().rstrip("/")
+    if not proxy_url:
+        return
+
+    payload: dict[str, int | str] = {}
+    sample_teams = _sample_team_numbers()
+    if sample_teams:
+        payload["number_of_teams"] = max(sample_teams)
+
+    for box in boxes_data:
+        dns_service = next(
+            (
+                s["name"]
+                for s in box.get("services", [])
+                if s.get("name", "").upper() == "DNS" or s.get("display_name", "").upper() == "DNS"
+            ),
+            None,
+        )
+        if not dns_service:
+            continue
+        if "external_mask" not in payload and (parsed := _parse_dns_box_ip_template(box.get("ip", ""))):
+            payload["external_mask"], payload["team_dns_server_last_octet"] = parsed
+        for sample_team in sample_teams[:3] or [1]:
+            checks = client.get_service_checks(
+                sample_team,
+                f"{box['name']}:{dns_service}",
+                force_refresh=True,
+            )
+            domain, internal_mask = _extract_dns_check_network(checks)
+            if domain and "team_domain_name" not in payload:
+                payload["team_domain_name"] = domain
+            if internal_mask and "internal_mask" not in payload:
+                payload["internal_mask"] = internal_mask
+            if "team_domain_name" in payload and "internal_mask" in payload:
+                break
+        if "external_mask" in payload and "team_domain_name" in payload and "internal_mask" in payload:
+            break
+
+    if not payload:
+        return
+
+    headers = {"Authorization": f"Bearer {token}"} if (token := settings.AWEFUL_PROXY_TOKEN.strip()) else None
+    try:
+        response = httpx.post(
+            f"{proxy_url}/config",
+            json=payload,
+            headers=headers,
+            timeout=settings.HTTPX_DEFAULT_TIMEOUT,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        logger.warning(f"Failed to push config to aweful-proxy at {proxy_url}: {e}")
 
 
 def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
@@ -95,7 +202,6 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
         }
         boxes_data.append(box_dict)
 
-    # Update or create metadata cache (singleton)
     metadata = QuotientMetadataCache.objects.first()
     _merge_proxmox_boxes(boxes_data, metadata.boxes if metadata else [])
     if metadata:
@@ -114,6 +220,8 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
     injects = client.get_injects(force_refresh=True)
     if injects:
         set_template_max("inject_max", inject_max_from_titles(injects))
+
+    _sync_aweful_proxy(client, boxes_data)
 
     return metadata
 
