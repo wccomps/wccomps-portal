@@ -1115,6 +1115,12 @@ button[type="submit"]:hover {
     padding: 8px 10px;
 }
 
+/* Django admin's breadcrumbs wrap on a phone onto lines too close together: 24px lines keep each link clear of the
+   next (WCAG 2.5.8) */
+ol.breadcrumbs li {
+    line-height: 24px;
+}
+
 /* Actions dropdown */
 .actions select {
     padding: 6px 10px;

@@ -5,7 +5,7 @@ URL pattern, so a new page is walked without being listed here. Each is rendered
 in that gets it, and as a blue team and a signed-out visitor where they get it: those see a different nav and page.
 test_every_page_renders fails on a page no role gets, unless UNRENDERED says why."""
 
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Literal
@@ -125,7 +125,7 @@ def open_pages(
     live_server: LiveServer,
     viewport: ViewportSize,
     schemes: tuple[Literal["light", "dark"], ...] = ("light",),
-) -> Iterator[tuple[Visit, str, Page]]:
+) -> Generator[tuple[Visit, str, Page]]:
     """Each visit loaded in the browser at the viewport, once per color scheme, in a context per role and scheme: the
     visit, the scheme and the page, which closes when the caller moves on. A page that answers an error or lands
     elsewhere (the sign-in) fails rather than being checked. Iterate under contextlib.closing, so the contexts close
