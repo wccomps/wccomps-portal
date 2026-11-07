@@ -1,19 +1,16 @@
 {# Table header component - sortable column header with optional tooltip #}
 {# Usage: <c-table_header sort_field="team__team_number" current_sort="-created_at">Team</c-table_header> #}
 {# Props: sort_field, current_sort, sortable (bool), tooltip (optional help text). The link keeps the page's query and goes to page 1 #}
+{# The sorted column's aria-sort tells a screen reader the order; the stylesheet draws the arrow from it #}
 <c-vars sort_field="" current_sort="" sortable="true" tooltip="" />
 <th scope="col"
     {{ attrs }}
+    {% if sortable == "true" and sort_field %}{% if current_sort == sort_field %}aria-sort="ascending"{% elif current_sort == "-"|add:sort_field %}aria-sort="descending"{% endif %}{% endif %}
     {% if tooltip %}title="{{ tooltip }}"{% endif %}>
     <div class="text" {% if tooltip %}style="white-space:nowrap"{% endif %}>
         {% if sortable == "true" and sort_field %}
             <a href="{% if current_sort == sort_field %}{% querystring sort="-"|add:sort_field page=None %}{% elif current_sort == "-"|add:sort_field %}{% querystring sort="default" page=None %}{% else %}{% querystring sort=sort_field page=None %}{% endif %}">
                 {{ slot }}
-                {% if current_sort == sort_field %}
-                    ▲
-                {% elif current_sort == "-"|add:sort_field %}
-                    ▼
-                {% endif %}
             </a>
         {% else %}
             <span>{{ slot }}</span>

@@ -1,12 +1,14 @@
+{# The step is a polite live region, so a screen reader hears each step as it streams, not only the final message #}
 <c-vars class="mt-10" />
 <template x-if="hasProgress">
     <div {{ attrs }} class="px-10 {{ class }}">
         <div class="d-flex justify-between mb-5">
-            <span class="text-sm" x-text="progressStep"></span>
+            <span class="text-sm" role="status" x-text="progressStep"></span>
             <span class="text-sm" x-text="progressText"></span>
         </div>
         <div class="progress-bar"
              role="progressbar"
+             aria-label="Progress"
              :aria-valuenow="progressCurrent"
              aria-valuemin="0"
              :aria-valuemax="progressTotal">

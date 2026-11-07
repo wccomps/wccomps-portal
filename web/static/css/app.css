@@ -1041,6 +1041,18 @@ fieldset:has([required]) > legend.required::after,
     }
 }
 
+/* A sorted column's arrow (cotton/table_header.html), drawn from its aria-sort. The empty alternative text keeps a
+   screen reader from reading it as a triangle: aria-sort already says the order. */
+th[aria-sort="ascending"] > .text > a::after {
+    content: "\25B2";
+    content: "\25B2" / "";
+}
+
+th[aria-sort="descending"] > .text > a::after {
+    content: "\25BC";
+    content: "\25BC" / "";
+}
+
 /* Table improvements - better density for scanning */
 .results table td,
 .results table th,
