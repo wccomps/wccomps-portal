@@ -236,6 +236,9 @@ PROXMOX_CA_FILE = os.environ.get("PROXMOX_CA_FILE", "")
 PROXMOX_VERIFY_SSL = os.environ.get("PROXMOX_VERIFY_SSL", "True") == "True"
 PROXMOX_DEFAULT_SNAPSHOT = os.environ.get("PROXMOX_DEFAULT_SNAPSHOT", "clean")
 
+AWEFUL_PROXY_URL = os.environ.get("AWEFUL_PROXY_URL", "")
+AWEFUL_PROXY_TOKEN = os.environ.get("AWEFUL_PROXY_TOKEN", "")
+
 NEXTCLOUD_URL = os.environ.get("NEXTCLOUD_URL", "")
 NEXTCLOUD_USERNAME = os.environ.get("NEXTCLOUD_USERNAME", "")
 NEXTCLOUD_PASSWORD = os.environ.get("NEXTCLOUD_PASSWORD", "")
