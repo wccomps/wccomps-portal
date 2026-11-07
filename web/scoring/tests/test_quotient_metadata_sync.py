@@ -179,7 +179,7 @@ def test_metadata_sync_pushes_config_to_aweful_proxy():
     ]
 
     with (
-        override_settings(AWEFUL_PROXY_URL="http://10.0.0.10:8080/"),
+        override_settings(AWEFUL_PROXY_URL="http://10.0.0.10:8080/", AWEFUL_PROXY_TOKEN="secret-token"),
         patch("scoring.quotient_sync.QuotientClient") as client,
         patch("scoring.quotient_sync.httpx.post") as mock_post,
     ):
@@ -191,6 +191,7 @@ def test_metadata_sync_pushes_config_to_aweful_proxy():
     client.return_value.get_service_checks.assert_called_once_with(1, "BUGS:DNS", force_refresh=True)
     mock_post.assert_called_once()
     assert mock_post.call_args.args[0] == "http://10.0.0.10:8080/config"
+    assert mock_post.call_args.kwargs["headers"] == {"Authorization": "Bearer secret-token"}
     assert mock_post.call_args.kwargs["json"] == {
         "number_of_teams": 38,
         "external_mask": "10.100.1xx.",

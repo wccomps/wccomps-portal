@@ -11,7 +11,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from quotient.client import QuotientClient, ServiceCheck
 
-from team.models import MAX_TEAMS, Team, active_team_numbers
+from team.models import MAX_TEAMS, Team
 
 from .maxes import inject_max_from_titles, service_max_from_details, set_template_max
 from .models import QuotientMetadataCache, ServiceDetail, ServiceScore
@@ -117,11 +117,10 @@ def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> Non
         return
 
     payload: dict[str, int | str] = {}
-    active_teams = [t for t in active_team_numbers() if 1 <= t <= MAX_TEAMS]
-    if active_teams:
-        payload["number_of_teams"] = active_teams[-1]
+    sample_teams = _sample_team_numbers()
+    if sample_teams:
+        payload["number_of_teams"] = max(sample_teams)
 
-    sample_teams = _sample_team_numbers()[:3] or [1]
     for box in boxes_data:
         dns_service = next(
             (
@@ -135,7 +134,7 @@ def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> Non
             continue
         if "external_mask" not in payload and (parsed := _parse_dns_box_ip_template(box.get("ip", ""))):
             payload["external_mask"], payload["team_dns_server_last_octet"] = parsed
-        for sample_team in sample_teams:
+        for sample_team in sample_teams[:3] or [1]:
             checks = client.get_service_checks(
                 sample_team,
                 f"{box['name']}:{dns_service}",
@@ -154,10 +153,12 @@ def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> Non
     if not payload:
         return
 
+    headers = {"Authorization": f"Bearer {token}"} if (token := settings.AWEFUL_PROXY_TOKEN.strip()) else None
     try:
         response = httpx.post(
             f"{proxy_url}/config",
             json=payload,
+            headers=headers,
             timeout=settings.HTTPX_DEFAULT_TIMEOUT,
         )
         response.raise_for_status()
