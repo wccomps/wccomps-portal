@@ -365,6 +365,55 @@ def test_every_admin_is_a_portal_model_admin() -> None:
     assert not others, f"Admins not built on PortalModelAdmin: {others}"
 
 
+def test_every_tabular_inline_labels_its_fields() -> None:
+    """Every registered tabular inline is built on PortalTabularInline."""
+    from django.contrib import admin
+
+    from core.admin import PortalTabularInline
+
+    unlabelled = [
+        f"{type(model_admin).__name__}.{inline.__name__}"
+        for model_admin in admin.site._registry.values()
+        for inline in model_admin.inlines
+        if issubclass(inline, admin.TabularInline) and not issubclass(inline, PortalTabularInline)
+    ]
+    assert not unlabelled, f"Tabular inlines not built on PortalTabularInline: {unlabelled}"
+
+
+def _inline_controls(html: str, group: str) -> list[str]:
+    """The fields an inline group draws, from its group to the end of the form, less hidden fields and buttons."""
+    return [
+        tag
+        for tag in re.findall(r"<(?:input|select|textarea)\b[^>]*>", html[html.index(f'id="{group}-group"') :])
+        if not re.search(r'type="(?:hidden|submit|button)"', tag)
+    ]
+
+
+def test_an_inline_rows_fields_are_named(admin_site_client: Client) -> None:
+    """Each row's fields and its delete box, and the empty row Add another copies."""
+    check = OrangeCheck.objects.create(title="Phones", description="", max_points=5)
+    OrangeCheckCriterion.objects.create(orange_check=check, label="Answered", points=5, sort_order=1)
+    html = admin_site_client.get(reverse("admin:orange_team_orangecheck_change", args=[check.pk])).content.decode()
+    controls = _inline_controls(html, "criteria")
+    assert len(controls) >= 8, controls
+    assert all("aria-label=" in tag for tag in controls), [tag for tag in controls if "aria-label=" not in tag]
+
+
+def test_an_inline_foreign_key_select_is_named_in_the_first_row(
+    admin_site_client: Client, orange_team_user: User, blue_team: Any
+) -> None:
+    """A foreign key's select sits in the admin's related-widget wrapper. The first row's form is the first built,
+    before any form's label could reach the widget the wrapper copies from."""
+    check = OrangeCheck.objects.create(title="Phones", description="", max_points=5)
+    criterion = OrangeCheckCriterion.objects.create(orange_check=check, label="Answered", points=5, sort_order=1)
+    assignment = OrangeAssignment.objects.create(orange_check=check, user=orange_team_user, team=blue_team)
+    OrangeAssignmentResult.objects.create(assignment=assignment, criterion=criterion)
+    page = reverse("admin:orange_team_orangeassignment_change", args=[assignment.pk])
+    controls = _inline_controls(admin_site_client.get(page).content.decode(), "results")
+    assert any(tag.startswith("<select") and 'name="results-0-criterion"' in tag for tag in controls), controls
+    assert all("aria-label=" in tag for tag in controls), [tag for tag in controls if "aria-label=" not in tag]
+
+
 def test_django_still_fails_on_a_text_prefill_for_a_date(admin_user: User) -> None:
     """The canary for PortalModelAdmin.get_changeform_initial_data: Django's own add page, given a date field's
     prefill as text, still fails. When it stops failing, check whether Django fixed it, and if so drop that part of

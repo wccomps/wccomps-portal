@@ -5,7 +5,7 @@ from django.db.models import Count, QuerySet
 from django.http import HttpRequest
 from django.utils.html import format_html
 
-from core.admin import PortalModelAdmin
+from core.admin import PortalModelAdmin, PortalTabularInline
 from core.status_variants import score_class
 from core.utils import shorten
 
@@ -51,7 +51,7 @@ class AttackTypeAdmin(PortalModelAdmin[AttackType]):
         return obj.findings_total
 
 
-class RedTeamScreenshotInline(admin.TabularInline[RedTeamScreenshot, RedTeamScore]):
+class RedTeamScreenshotInline(PortalTabularInline[RedTeamScreenshot, RedTeamScore]):
     model = RedTeamScreenshot
     extra = 0
     fields = ["filename"]
@@ -112,7 +112,7 @@ class RedTeamScoreAdmin(PortalModelAdmin[RedTeamScore]):
         return obj.affected_teams.count()
 
 
-class IncidentScreenshotInline(admin.TabularInline[IncidentScreenshot, IncidentReport]):
+class IncidentScreenshotInline(PortalTabularInline[IncidentScreenshot, IncidentReport]):
     model = IncidentScreenshot
     extra = 0
     fields = ["filename"]

@@ -6,10 +6,13 @@ from django import forms
 from django.contrib import admin
 from django.contrib.admin.exceptions import DisallowedModelAdminToField
 from django.contrib.admin.options import TO_FIELD_VAR
+from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Model, QuerySet
+from django.forms.models import BaseInlineFormSet
+from django.forms.utils import pretty_name
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.urls import reverse
 
@@ -89,6 +92,27 @@ class PortalModelAdmin[ModelT: Model](admin.ModelAdmin[ModelT]):
             else:
                 initial[name] = value
         return initial
+
+
+class LabelledInlineFormSet[ModelT: Model, ParentT: Model](BaseInlineFormSet[ModelT, ParentT, forms.ModelForm[ModelT]]):
+    """A tabular inline's fields sit under column headings with no label of their own: each takes its field's label
+    (its column's heading) as its aria-label, the delete checkbox too."""
+
+    def add_fields(self, form: forms.ModelForm[ModelT], index: int | None) -> None:
+        super().add_fields(form, index)
+        for name, field in form.fields.items():
+            # A foreign key's select renders as the admin wrapper's inner widget: a copied wrapper's own attrs are still
+            # the original inner widget's, which this form doesn't render
+            widget = field.widget.widget if isinstance(field.widget, RelatedFieldWidgetWrapper) else field.widget
+            if not widget.is_hidden:
+                widget.attrs.setdefault("aria-label", str(field.label or pretty_name(name)))
+
+
+class PortalTabularInline[ModelT: Model, ParentT: Model](admin.TabularInline[ModelT, ParentT]):
+    """Every portal tabular inline (test_every_tabular_inline_labels_its_fields checks)."""
+
+    # The class object can't carry the inline's type parameters, which the stubs type formset by
+    formset = cast("type[LabelledInlineFormSet[ModelT, ParentT]]", LabelledInlineFormSet)
 
 
 @admin.register(AuditLog)
