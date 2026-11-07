@@ -121,8 +121,7 @@ nav[role="navigation"] {
 }
 
 .module h2,
-.module caption,
-.module-header {
+.module caption {
     font-size: 18px;
     line-height: 1.4;
 }
@@ -1198,7 +1197,7 @@ button[type="submit"]:hover {
 }
 
 .toast-enter {
-    transition: all 0.3s ease-out;
+    transition: opacity 0.3s ease-out, transform 0.3s ease-out;
 }
 
 .toast-enter-start {
@@ -1212,7 +1211,7 @@ button[type="submit"]:hover {
 }
 
 .toast-leave {
-    transition: all 0.2s ease-in;
+    transition: opacity 0.2s ease-in, transform 0.2s ease-in;
     pointer-events: none;
 }
 
@@ -1385,15 +1384,6 @@ button[type="submit"]:hover {
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 15px;
 }
-
-/* Match incident: the two panels' title bars (scoring/match_incident.html) */
-.module-header {
-    background: var(--primary, #417690);
-    color: white;
-    margin: -15px -15px 15px -15px;
-    padding: 15px;
-}
-.module-header-success { background: var(--success-fg); }
 
 /* Scorecard (scoring/_scorecard_body.html, scoring/scorecard.html) */
 .neighbors {

@@ -175,10 +175,6 @@ PAGE_STYLE_EXCEPTIONS: dict[str, str] = {
     "scoring/leaderboard.html:show-schools": "Switches the leaderboard between team and school names",
     "scoring/leaderboard.html:team-name": "The leaderboard's team names, hidden while it shows schools",
     "scoring/leaderboard.html:school-name": "The leaderboard's school names, hidden while it shows teams",
-    "scoring/match_incident.html:module-header": (
-        "The match page's two panels carry a full-width title bar; c-module's heading is Django's compact bar"
-    ),
-    "scoring/match_incident.html:module-header-success": "The match page's matching panel: its title bar in green",
     "scoring/partials/inject_feedback_table.html:click-to-edit": "Feedback edited in place; no other table does",
     "scoring/scoring_config.html:max-points-grid": (
         "The weight and maximum fields side by side, wrapping below 200px each; grid-2 and grid-4 have fixed columns"
