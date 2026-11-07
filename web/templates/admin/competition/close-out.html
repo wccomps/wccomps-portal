@@ -51,7 +51,7 @@
                 <span x-text="closeOutProblem"></span>
                 <ul class="mt-10 ml-20">
                     <template x-for="(fix, index) in closeOutFixes" :key="index">
-                        <li>
+                        <li class="mb-8">
                             <a :href="fix.url" x-text="fix.text"></a>
                         </li>
                     </template>
@@ -68,7 +68,7 @@
                 </template>
                 <ul class="mt-10 ml-20">
                     <template x-for="(warning, index) in closeOutWarnings" :key="index">
-                        <li>
+                        <li class="mb-8">
                             <a :href="warning.url" x-text="warning.text"></a>
                         </li>
                     </template>

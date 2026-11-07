@@ -1,11 +1,11 @@
 """Browser test fixtures: Playwright + session injection, no OAuth required."""
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from django.test import Client
-from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, Page, ViewportSize, sync_playwright
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -38,9 +38,12 @@ def create_session_context(
     pw_browser: Browser,
     live_server: LiveServer,
     user: User | None,
+    viewport: ViewportSize | None = None,
+    color_scheme: Literal["light", "dark"] | None = None,
 ) -> BrowserContext:
-    """Create a Playwright BrowserContext with the user's session cookie injected."""
-    context = pw_browser.new_context(viewport={"width": 1920, "height": 1080})
+    """Create a Playwright BrowserContext with the user's session cookie injected, 1920x1080 unless given a
+    viewport."""
+    context = pw_browser.new_context(viewport=viewport or {"width": 1920, "height": 1080}, color_scheme=color_scheme)
 
     if user is not None:
         # force_login creates a real session in the test DB

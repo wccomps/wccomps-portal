@@ -15,3 +15,9 @@ def badge_variant(value: str, kind: str) -> str:
 def alert_variant(tag: str) -> str:
     """The c-alert variant a Django message is shown with: {{ message.level_tag|alert_variant }}."""
     return status_variants.alert_variant(tag)
+
+
+@register.filter
+def score_class(shown: object) -> str:
+    """The class for a score, from the text shown for it: {{ shown|score_class }}."""
+    return status_variants.score_class(shown)

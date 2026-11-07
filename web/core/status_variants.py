@@ -1,4 +1,4 @@
-"""The component variant each stored status is shown with.
+"""The component variant each stored status is shown with, and the class a score is shown in.
 
 A badge or alert given a value it doesn't know falls back to its default look without an error, so a status
 shown straight from the database (variant="{{ dist.email_status }}") rendered "delivered" and "bounced" as
@@ -7,8 +7,10 @@ test_template_vocabulary checks every stored value is mapped to a variant the co
 """
 
 import logging
+from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
+from django.utils.formats import sanitize_separators
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,9 @@ MESSAGE_ALERTS: dict[str, str] = {
     "error": "error",
 }
 
+# A score's sign -> the class it is shown in (c-score_value, the admin's net score column)
+SCORE_CLASSES: dict[int, str] = {1: "score-positive", 0: "score-zero", -1: "score-negative"}
+
 
 def badge_variant(value: str, kind: str) -> str:
     """The variant for a stored value. An unknown kind is a template mistake: it raises under DEBUG and is logged
@@ -85,3 +90,16 @@ def badge_variant(value: str, kind: str) -> str:
 
 def alert_variant(tag: str) -> str:
     return MESSAGE_ALERTS.get(tag, "info")
+
+
+def score_class(shown: object) -> str:
+    """The class for a score by the sign of the text the page shows for it, so the color and the number agree (0.6
+    shown as 1 is positive), read as Django wrote it (thousand separators too). Anything that isn't a finite number
+    takes the zero class."""
+    try:
+        number = Decimal(sanitize_separators(str(shown)))
+    except InvalidOperation:
+        return SCORE_CLASSES[0]
+    if not number.is_finite():
+        return SCORE_CLASSES[0]
+    return SCORE_CLASSES[(number > 0) - (number < 0)]

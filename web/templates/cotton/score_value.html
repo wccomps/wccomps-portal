@@ -2,9 +2,10 @@
 {# Usage: <c-score_value value="150" /> #}
 {# Usage: <c-score_value :value="score" format="signed" /> #}
 {# Props: value (numeric), format (optional: "default" or "signed") #}
+{# The class and the + come from the whole number shown, so 0.6 shows as a positive 1 #}
 <c-vars value="0" format="default" />
-{% with num_value=value|add:0 %}
-    <span {{ attrs }}
-          class="{% if num_value > 0 %}score-positive{% elif num_value < 0 %}score-negative{% else %}score-zero{% endif %}">
-    {% if format == "signed" and num_value > 0 %}+{% endif %}{{ value|floatformat:0 }}</span>
+{% load status_variants %}
+{% with shown=value|floatformat:0 %}
+    <span {{ attrs }} class="{{ shown|score_class }}">
+    {% if format == "signed" and shown|score_class == "score-positive" %}+{% endif %}{{ shown }}</span>
 {% endwith %}

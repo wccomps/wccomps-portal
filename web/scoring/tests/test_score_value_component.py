@@ -74,6 +74,13 @@ class TestScoreValueComponentRendering:
         html = self._render_component(value)
         assert expected_class in html
 
+    def test_a_score_shown_with_thousand_separators_keeps_its_class(self, settings) -> None:
+        """floatformat writes -4720 as -4,720 when thousand separators are on; the class still reads it as negative."""
+        settings.USE_THOUSAND_SEPARATOR = True
+        html = self._render_component("-4720")
+        assert "-4,720" in html
+        assert "score-negative" in html
+
     def test_decimal_zero_renders_as_integer_zero(self) -> None:
         """Values like 0.00 or Decimal('0.00') should render as '0' without trailing decimals."""
         from decimal import Decimal
@@ -97,3 +104,22 @@ class TestScoreValueComponentRendering:
         assert "score-positive" in html
         assert "+15" in html.replace(" ", "").replace("\n", "")
         assert "15.00" not in html
+
+    @pytest.mark.parametrize(
+        ("value", "shown", "expected_class"),
+        [
+            ("0.6", "+1", "score-positive"),
+            ("-0.6", "-1", "score-negative"),
+            ("0.4", "0", "score-zero"),
+            ("2.5", "+3", "score-positive"),
+            ("-0.4", "0", "score-zero"),
+            ("0.49999999999999999999999999999", "0", "score-zero"),
+        ],
+    )
+    def test_the_class_and_sign_follow_the_rounded_value_shown(
+        self, value: str, shown: str, expected_class: str
+    ) -> None:
+        """A score is shown as a whole number, so 0.6 shows as +1 and is colored as positive, not as zero."""
+        html = self._render_component(value, "signed")
+        assert expected_class in html
+        assert f">{shown}<" in html.replace(" ", "").replace("\n", "")

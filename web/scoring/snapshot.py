@@ -1,8 +1,8 @@
 """A team's scorecard frozen as JSON: its template context, Decimals kept exact.
 
 The keys match what scoring/_scorecard_body.html and scoring/scorecard_print.html read, so both render a
-snapshot unchanged. Decimals are stored as {"$d": "<str>"} because the templates compare and format them
-as numbers (floatformat, c-score_value's add:0), which plain strings would break.
+snapshot unchanged. Decimals are stored as {"$d": "<str>"} and decoded back, so the templates get the same
+Decimals a live scorecard gives them.
 """
 
 from collections.abc import Iterable

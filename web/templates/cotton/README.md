@@ -166,10 +166,11 @@ Props:
 - `value` (required): Numeric value to display
 - `format` (optional): "default" (no + prefix) or "signed" (adds + to positive)
 
-Color mapping:
-- Positive values: #28a745 (green)
-- Negative values: #dc3545 (red)
-- Zero: #6c757d (gray)
+Color mapping (classes in `app.css`). The class and the `+` follow the value as shown, rounded to a whole number,
+so 0.6 shows as `+1` in green:
+- Positive: `score-positive` (green)
+- Negative: `score-negative` (red)
+- Zero, or text that isn't a number: `score-zero` (grey)
 
 #### `<c-empty_state>`
 Empty state display for when no data is available.

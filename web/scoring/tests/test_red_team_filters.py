@@ -340,10 +340,8 @@ class TestRedTeamSortCycle:
         client.force_login(gold_user)
         response = client.get(reverse("scoring:red_team_findings"), {"sort": "default", "status": "all"})
         content = response.content.decode()
-        # The sort indicators should NOT appear in any table header
-        # (they only appear when current_sort matches a sort_field)
-        assert "▲" not in content
-        assert "▼" not in content
+        # No header is marked sorted (its aria-sort draws the arrow)
+        assert "aria-sort" not in content
 
     def test_first_visit_uses_default_sort(self, create_user_with_groups: Callable[..., User]) -> None:
         """First visit (no sort param) should use the view's default sort."""
