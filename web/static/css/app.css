@@ -128,10 +128,11 @@ nav[role="navigation"] {
     padding: 8px 12px;
 }
 
-/* Prose stays within 80 characters a line and doesn't leave one word alone on its last line, but for the paragraphs
-   Django draws as full-width bars (a list's paginator, an error note). :where keeps a width class in charge. */
+/* Prose stays within about 75 characters a line (60ch: a 0, which ch measures, is wider than most letters) and doesn't
+   leave one word alone on its last line, but for the paragraphs Django draws as full-width bars (a list's paginator,
+   an error note). :where keeps a width class in charge. */
 :where(#content) :is(p, .help, .help-text):where(:not(.paginator, .errornote)) {
-    max-width: 80ch;
+    max-width: 60ch;
 }
 
 :where(#content) :is(p, li, .help, .help-text) {
