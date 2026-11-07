@@ -151,7 +151,7 @@ def test_metadata_sync_pushes_config_to_aweful_proxy():
         boxes=[
             QuotientBox(
                 name="BUGS",
-                ip="10.100.1_.10",
+                ip="10.100.1XX.10",
                 services=[QuotientService(name="DNS", display_name="DNS")],
             )
         ]
@@ -160,10 +160,22 @@ def test_metadata_sync_pushes_config_to_aweful_proxy():
         ServiceCheck(
             round_number=1,
             timestamp=None,
-            passed=True,
-            debug="record chat.acme.anvil returned 192.168.220.13. acceptable answers were: [192.168.220.13]",
-            error="",
-        )
+            passed=False,
+            debug=(
+                "record 10.220.168.192.in-addr.arpa failed to get expected result "
+                "within [bugs.acme.anvil], received [evil.spoofed.domain, 10.99.88.77]"
+            ),
+            error="incorrect answer",
+        ),
+        ServiceCheck(
+            round_number=1,
+            timestamp=None,
+            passed=False,
+            debug=(
+                "record chat.acme.anvil failed to get expected result within [192.168.220.13], received [10.99.88.77]"
+            ),
+            error="incorrect answer",
+        ),
     ]
 
     with (
@@ -176,6 +188,7 @@ def test_metadata_sync_pushes_config_to_aweful_proxy():
         client.return_value.get_service_checks.return_value = checks
         sync_quotient_metadata()
 
+    client.return_value.get_service_checks.assert_called_once_with(1, "BUGS:DNS", force_refresh=True)
     mock_post.assert_called_once()
     assert mock_post.call_args.args[0] == "http://10.0.0.10:8080/config"
     assert mock_post.call_args.kwargs["json"] == {

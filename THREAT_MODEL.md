@@ -59,6 +59,7 @@ flowchart LR
     P[Proxmox API]
     S[Quotient scoring API]
     N[Nextcloud OCS API]
+    X[aweful-proxy HTTP API]
     M[SMTP]
     G[Discord API]
     B -- "1 HTTPS, session cookie, CSRF" --> W
@@ -73,6 +74,7 @@ flowchart LR
     W -- "8 packet emails with passwords" --> M
     T -- "9 bot token" --> G
     W & T -- "10 admin credentials, team accounts only" --> N
+    W & T -- "11 competition network config" --> X
 ```
 
 ## Threats per boundary (STRIDE) and their mitigations
@@ -120,6 +122,7 @@ flowchart LR
 | 8 | Portal to SMTP | I: a password mailed to the wrong address | Packets go to the school's contact addresses on its `SchoolInfo` (`web/team/models.py` `SchoolInfo.emails`), or to an address gold team enters for a test send; only gold team sends them, and Django admin's send actions only Discord admins reach (`web/packets/views.py` `packet_action`, `packet_resend_team`; `web/packets/admin.py` `PacketAdmin.distribute_now`, `PacketDistributionAdmin.retry_failed_emails`; `web/core/admin.py` `AuthentikAdminSite.has_permission`). A resend of failed emails claims each one before sending, so overlapping resends of failures send it once (`web/packets/services.py` `PacketDistributionService._stream_resend`) |
 | 9 | Bot to Discord | I: new team passwords seen by others | A bulk reset's CSVs go only to whoever ran it: as ephemeral followups in Discord (`bot/cogs/admin_competition.py` `AdminCompetitionCog._send_reset_result`), or in the answer to their own request on the web; its ops note names teams, never passwords (`web/core/authentik_utils.py` `_bulk_reset_note`) |
 | 10 | Portal to Nextcloud | E: a provision or teardown reaches a non-team account | Only `team{NN}` with 1 to `MAX_TEAMS` is provisioned or deleted, and answers must be 2xx OCS JSON naming that exact `user_id` (`web/core/nextcloud.py` `_team_account`, `NextcloudManager.provision_team_user`, `NextcloudManager.delete_team_user`, `NextcloudManager._check`, `NextcloudManager._json`, `NextcloudManager._user_id`); operators see `reason_for`, the message alone (`web/core/nextcloud.py` `reason_for`); property tests cover every reader (`web/core/tests/test_properties_readers.py`) |
+| 11 | Portal to aweful-proxy | T, D: a spoofed DNS check answer or unreachable proxy corrupts proxy config or stalls metadata sync | DNS box IP templates and Quotient's expected DNS check records are validated as IPv4 addresses and non-reverse domain names (`web/scoring/quotient_sync.py` `_parse_dns_box_ip_template`, `_extract_dns_check_network`), and proxy push failures are logged without failing `sync_quotient_metadata` (`web/portal/settings.py` `AWEFUL_PROXY_URL`; `web/scoring/quotient_sync.py` `_sync_aweful_proxy`) |
 | all | Logs and errors | I: tokens or OAuth codes in logs | The access log drops query strings and referers (`web/gunicorn.conf.py` `access_log_format`); httpx URL logging is off (`web/core/tests/test_httpx_logging.py`); error answers come from `web/core/errors.py`: a fixed message for 404, 405 and 500, and only the view's own stated reason for 400 and 403 |
 | all | Logs and errors | T: request text forges a log line or an alert | Request text is escaped where the app logs it (`web/core/middleware.py` `_field`; `web/core/log_safety.py`), the console formatter keeps every message on one line, gunicorn escapes its access and error lines (`web/gunicorn.conf.py` `EscapingLogger`), and the Discord alert shows request text in code spans (`web/core/discord_logging.py` `_code`); property tests cover each line (`web/core/tests/test_properties_log_lines.py`) |
 | all | Secrets | S: forged sessions | The web refuses to start without a real `SECRET_KEY` (`web/portal/wsgi.py`); the session cookie is HttpOnly and SameSite=Lax, and outside `DEBUG` the session and CSRF cookies are Secure with HSTS (`web/portal/settings.py` `SESSION_COOKIE_HTTPONLY`, `SESSION_COOKIE_SAMESITE`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECURE_HSTS_SECONDS`) |
