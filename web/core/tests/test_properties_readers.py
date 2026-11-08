@@ -25,11 +25,13 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 from quotient.client import (
     Inject,
+    PreflightRound,
     QuotientBox,
     QuotientClient,
     QuotientInfrastructure,
     QuotientService,
     ServiceCheck,
+    TeamOutage,
     TeamServiceExport,
     TeamUptime,
 )
@@ -98,6 +100,22 @@ SERVICE_CHECKS = [
         "Error": "unexpected status code",
     }
 ]
+PREFLIGHT = {
+    "round": 4,
+    "start_time": "2026-10-31T15:30:00Z",
+    "checks": [
+        {
+            "team_id": 1,
+            "team_name": "team01",
+            "service_name": "web-http",
+            "service_type": "Custom",
+            "result": False,
+            "error": "exit status 1",
+            "debug": "check_web.py 10.0.0.5 output: FAILURE: wiki returned HTTP 503",
+        }
+    ],
+}
+OUTAGES = [{"team_id": 16, "team_name": "team16", "rounds_down": 4, "down_since": "2026-10-31T19:00:20.936611Z"}]
 PROXMOX_POOL = {
     "data": {
         "members": [
@@ -203,6 +221,42 @@ def check_injects(result: object) -> None:
         ),
         "None or injects with an int id, a title and a description",
     )
+
+
+def check_preflight(result: object) -> None:
+    def ok(r: object) -> bool:
+        return r is None or (
+            isinstance(r, PreflightRound)
+            and is_int(r.round_number)
+            and (r.start_time is None or isinstance(r.start_time, datetime))
+            and all(
+                is_str(c.team_name)
+                and is_str(c.service_name)
+                and is_str(c.service_type)
+                and type(c.passed) is bool
+                and is_str(c.error)
+                and is_str(c.debug)
+                for c in r.checks
+            )
+        )
+
+    outcome(result, ok, "None or a preflight round of team checks")
+
+
+def check_outages(result: object) -> None:
+    def ok(r: object) -> bool:
+        return r is None or (
+            isinstance(r, list)
+            and all(
+                isinstance(o, TeamOutage)
+                and is_str(o.team_name)
+                and is_int(o.rounds_down)
+                and (o.down_since is None or isinstance(o.down_since, datetime))
+                for o in r
+            )
+        )
+
+    outcome(result, ok, "None or teams with a whole number of rounds down")
 
 
 def check_export(result: object) -> None:
@@ -519,6 +573,20 @@ READERS = [
         (DONE, SERVICE_CHECKS),
         check_service_checks,
         (f"{QC}.get_service_checks", f"{QC}._cached", QJ),
+    ),
+    Reader(
+        "get_preflight",
+        lambda: quotient().get_preflight(),
+        (DONE, PREFLIGHT),
+        check_preflight,
+        (f"{QC}.get_preflight", QJ),
+    ),
+    Reader(
+        "get_outages",
+        lambda: quotient().get_outages(),
+        (DONE, OUTAGES),
+        check_outages,
+        (f"{QC}.get_outages", QJ),
     ),
     Reader(
         "proxmox_list_team_vms",

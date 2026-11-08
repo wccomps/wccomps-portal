@@ -8,21 +8,13 @@ from datetime import UTC, datetime
 import httpx
 from django.conf import settings
 
-from core.log_safety import escape_unprintable
+from core.log_safety import BACKTICK_LOOKALIKE, code_span, escape_unprintable
 
 logger = logging.getLogger(__name__)
 
 # Discord's embed limits: a longer title or field value makes it refuse the whole alert
 TITLE_LIMIT = 256
 FIELD_LIMIT = 1024
-# A backtick lookalike: request text then holds no backtick to end its code span or the traceback's block
-_BACKTICK = "\u02cb"
-
-
-def _code(text: str) -> str:
-    """text as one inline code span, inside which Discord renders no markdown, link or mention."""
-    inner = escape_unprintable(text).replace("`", _BACKTICK) or " "
-    return f"`{inner[: FIELD_LIMIT - 2]}`"
 
 
 class DiscordWebhookHandler(logging.Handler):
@@ -46,7 +38,7 @@ class DiscordWebhookHandler(logging.Handler):
                 exc_info = "".join(traceback.format_exception(*record.exc_info))
 
             fields: list[dict[str, object]] = [
-                {"name": "Message", "value": _code(record.getMessage()), "inline": False},
+                {"name": "Message", "value": code_span(record.getMessage(), FIELD_LIMIT), "inline": False},
                 {"name": "Logger", "value": record.name, "inline": True},
                 {"name": "Host", "value": self.hostname, "inline": True},
             ]
@@ -60,17 +52,24 @@ class DiscordWebhookHandler(logging.Handler):
             if exc_info:
                 # The tail, where the exception is, within the field limit with its fences
                 shown = "\n".join(escape_unprintable(line) for line in exc_info.split("\n"))
-                tail = shown.replace("`", _BACKTICK)[-(FIELD_LIMIT - 8) :]
+                tail = shown.replace("`", BACKTICK_LOOKALIKE)[-(FIELD_LIMIT - 8) :]
                 fields.append({"name": "Traceback", "value": f"```\n{tail}\n```", "inline": False})
 
             # Add request path if available (from django.request logger)
             if hasattr(record, "request"):
                 request = record.request
                 fields.insert(
-                    0, {"name": "Request", "value": _code(f"{request.method} {request.path}"), "inline": True}
+                    0,
+                    {
+                        "name": "Request",
+                        "value": code_span(f"{request.method} {request.path}", FIELD_LIMIT),
+                        "inline": True,
+                    },
                 )
                 if hasattr(request, "user") and request.user.is_authenticated:
-                    fields.insert(1, {"name": "User", "value": _code(request.user.username), "inline": True})
+                    fields.insert(
+                        1, {"name": "User", "value": code_span(request.user.username, FIELD_LIMIT), "inline": True}
+                    )
 
             payload = {"embeds": [embed]}
 
