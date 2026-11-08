@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 _SERVICE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _INJECT_POINTS_RE = re.compile(r"\(\s*([\d,]+)\s*(?:pts?|points?)\s*\)", re.IGNORECASE)
 MAX_CHECK_OUTPUT_CHARS = 16_384
+TRUNCATED = "\n... [truncated]"
 _UNSAFE_OUTPUT_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
 
@@ -66,7 +67,7 @@ def _clean_output(value: object, what: str) -> str:
     """Sanitize untrusted check output from a team's box: strip control/BiDi chars and cap length."""
     cleaned = _UNSAFE_OUTPUT_CHARS_RE.sub("", _text(value, what))
     if len(cleaned) > MAX_CHECK_OUTPUT_CHARS:
-        return f"{cleaned[:MAX_CHECK_OUTPUT_CHARS]}\n... [truncated]"
+        return cleaned[:MAX_CHECK_OUTPUT_CHARS] + TRUNCATED
     return cleaned
 
 
@@ -209,6 +210,34 @@ class ServiceCheck:
     error: str
 
 
+@dataclass
+class PreflightCheck:
+    team_name: str
+    service_name: str
+    service_type: str
+    passed: bool
+    error: str
+    debug: str
+
+
+@dataclass
+class PreflightRound:
+    """The latest round Quotient ran before the competition started; round_number 0 if none ran."""
+
+    round_number: int
+    start_time: datetime | None
+    checks: list[PreflightCheck]
+
+
+@dataclass
+class TeamOutage:
+    """A team whose every check failed in each of its last rounds_down scored rounds."""
+
+    team_name: str
+    rounds_down: int
+    down_since: datetime | None
+
+
 class QuotientAPIError(Exception):
     """Raised when Quotient API returns an error."""
 
@@ -342,6 +371,14 @@ class QuotientClient:
             "service checks",
         )
 
+    def get_preflight(self) -> PreflightRound | None:
+        """Fetch the latest preflight round from Quotient, or None if unavailable."""
+        return self._fetch("/api/engine/preflight", _preflight, "the preflight round")
+
+    def get_outages(self) -> list[TeamOutage] | None:
+        """Fetch the teams with every check failing in the latest scored round, or None if unavailable."""
+        return self._fetch("/api/engine/outages", _outages, "team outages")
+
 
 def _infrastructure(data: object) -> QuotientInfrastructure:
     # /api/metadata returns: {"boxes": [{"name": str, "ip": str, "services": [str]}]}
@@ -440,6 +477,37 @@ def _service_checks(data: object) -> list[ServiceCheck]:
         old_check.debug = ""
         old_check.error = ""
     return checks
+
+
+def _preflight(data: object) -> PreflightRound:
+    checks = [
+        PreflightCheck(
+            team_name=_text(_field(entry, "team_name", "a preflight check"), "a team's name"),
+            service_name=_text(_field(entry, "service_name", "a preflight check"), "a service's name"),
+            service_type=_text(entry.get("service_type", ""), "a service's type"),
+            passed=_boolean(_field(entry, "result", "a preflight check"), "a preflight check's result"),
+            error=_clean_output(entry.get("error", ""), "a preflight check's error"),
+            debug=_clean_output(entry.get("debug", ""), "a preflight check's debug output"),
+        )
+        for entry in _objects(_field(data, "checks", "the preflight round"), "the preflight checks")
+    ]
+    start = _field(data, "start_time", "the preflight round")
+    return PreflightRound(
+        round_number=_whole(_field(data, "round", "the preflight round"), "a preflight round number"),
+        start_time=None if start is None else _timestamp(start, "a preflight round's start time"),
+        checks=checks,
+    )
+
+
+def _outages(data: object) -> list[TeamOutage]:
+    return [
+        TeamOutage(
+            team_name=_text(_field(entry, "team_name", "an outage"), "a team's name"),
+            rounds_down=_whole(_field(entry, "rounds_down", "an outage"), "an outage's rounds"),
+            down_since=_timestamp(_field(entry, "down_since", "an outage"), "an outage's start"),
+        )
+        for entry in _objects(data, "the outages")
+    ]
 
 
 @lru_cache(maxsize=1)

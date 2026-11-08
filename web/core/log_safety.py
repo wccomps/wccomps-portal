@@ -1,4 +1,5 @@
-"""Escaping for request text in log lines. No Django imports: gunicorn.conf.py loads it before Django is set up."""
+"""Escaping for untrusted text in log lines and Discord messages. No Django imports: gunicorn.conf.py loads it before
+Django is set up."""
 
 import logging
 from collections.abc import Callable
@@ -18,6 +19,17 @@ def _escape(text: str, also: Callable[[str], bool]) -> str:
 
 def escape_unprintable(text: str) -> str:
     return text if text.isprintable() else _escape(text, lambda c: False)
+
+
+# A backtick lookalike: text then holds no backtick to end its code span or code block
+BACKTICK_LOOKALIKE = "\u02cb"
+
+
+def code_span(text: str, limit: int) -> str:
+    """text as one inline code span of at most limit characters, inside which Discord renders no markdown, link or
+    mention."""
+    inner = escape_unprintable(text).replace("`", BACKTICK_LOOKALIKE) or " "
+    return f"`{inner[: limit - 2]}`"
 
 
 def escape_log_text(text: str) -> str:
