@@ -104,9 +104,13 @@ def test_a_maximum_too_large_or_below_the_points_earned_refuses_the_sync(monkeyp
 
 
 @pytest.mark.django_db
-def test_a_team_the_portal_does_not_score_does_not_set_the_service_maximum(monkeypatch) -> None:
-    """A Quotient team with no portal team (checked in more rounds, say) would otherwise raise every team's maximum."""
+@pytest.mark.parametrize("has_inactive_team", [True, False])
+def test_only_competing_teams_set_the_service_maximum(monkeypatch, has_inactive_team) -> None:
+    """A team Quotient checks that is inactive in the portal, or not in it, would otherwise raise every team's
+    maximum (it may have been checked in more rounds)."""
     Team.objects.create(team_number=3, team_name="Three")
+    if has_inactive_team:
+        Team.objects.create(team_number=48, team_name="Forty-Eight", is_active=False)
     ScoringTemplate.objects.create()
     outsider = {
         "team_name": "team48",

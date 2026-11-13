@@ -254,12 +254,12 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
 
     total = 0
 
-    # Only the portal's teams: one Quotient checks but the portal doesn't score must not set the service maximum.
-    teams = {t.team_number: t for t in Team.objects.filter(team_number__in={e.team_number for e in export_data} - {0})}
-    scored = [e for e in export_data if e.team_number in teams]
+    teams = {t.team_number: t for t in Team.objects.filter(team_number__in={e.team_number for e in export_data})}
     rows: list[tuple[Team, ServiceScore, list[ServiceDetail]]] = []
-    for team_export in scored:
-        team = teams[team_export.team_number]
+    for team_export in export_data:
+        team = teams.get(team_export.team_number)
+        if team is None:
+            continue
         score = ServiceScore(
             team=team,
             service_points=Decimal(team_export.gross_points),
@@ -278,7 +278,10 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
         for row in (score, *details):
             _check_storable(row, f"team {team.team_number}")
         rows.append((team, score, details))
-    service_max = service_max_from_export(scored)
+    # Only competing teams, the ones the calculator scores: a team slot Quotient checked in more rounds than any of
+    # them must not raise the maximum they are scaled by.
+    competing = [e for e in export_data if e.team_number in teams and teams[e.team_number].is_active]
+    service_max = service_max_from_export(competing)
     if service_max:
         _check_storable(ScoringTemplate(service_max=service_max), "the service maximum")
 

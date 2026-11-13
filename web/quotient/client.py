@@ -167,7 +167,6 @@ class ServiceExportEntry:
 
 @dataclass
 class TeamServiceExport:
-    team_name: str
     team_number: int
     services: list[ServiceExportEntry]
     gross_points: int
@@ -382,7 +381,6 @@ def _service_export(data: object) -> list[TeamServiceExport]:
         team_name = _text(_field(team_data, "team_name", "a team"), "a team's name")
         exports.append(
             TeamServiceExport(
-                team_name=team_name,
                 team_number=_team_number(team_name),
                 services=services,
                 gross_points=_whole(team_data.get("gross_points", 0), "a team's points"),

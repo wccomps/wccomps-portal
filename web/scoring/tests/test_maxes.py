@@ -53,13 +53,7 @@ def _team_export(team_number: int, *services: tuple[str, int, int | None]) -> Te
         for name, points, max_points in services
     ]
     gross = sum(e.service_points for e in entries)
-    return TeamServiceExport(
-        team_name=f"team{team_number:02d}",
-        team_number=team_number,
-        services=entries,
-        gross_points=gross,
-        total_sla_penalty=0,
-    )
+    return TeamServiceExport(team_number=team_number, services=entries, gross_points=gross, total_sla_penalty=0)
 
 
 def test_service_max_sums_each_services_max_points_even_where_no_team_scored() -> None:
