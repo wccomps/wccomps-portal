@@ -55,7 +55,7 @@ def test_stopping_keeps_the_team_roles_and_takes_the_portal_away(member):
     manager = _authentik(account_active=False, groups=["g-team", "g-ops"])
     with (
         patch("core.authentik_manager.AuthentikManager", return_value=manager),
-        patch("scoring.quotient_sync.sync_service_scores", return_value={"total": 0, "max_not_updated": None}),
+        patch("scoring.quotient_sync.sync_service_scores", return_value={"total": 0, "service_max_note": None}),
     ):
         result = drain(run_competition(False, "gold-admin"))
 

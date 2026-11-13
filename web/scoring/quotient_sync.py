@@ -239,7 +239,7 @@ class ServiceSyncResult(TypedDict):
     as it was (None when it was stored, or the export had no checks to add up)."""
 
     total: int
-    max_not_updated: str | None
+    service_max_note: str | None
 
 
 def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
@@ -298,17 +298,15 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
             ServiceDetail.objects.bulk_create(details)
             total += 1
 
-    max_not_updated = None
+    note = None
     if service_max is None:
-        max_not_updated = (
+        note = (
             "The service maximum was not updated: Quotient's export gave no max points, so scores still scale by "
             "the maximum already stored."
         )
     elif service_max and not set_template_max("service_max", service_max):
-        max_not_updated = (
-            "The service maximum was not stored: no scoring setup is saved yet. Open Scoring setup, then sync again."
-        )
-    return {"total": total, "max_not_updated": max_not_updated}
+        note = "The service maximum was not stored: no scoring setup is saved yet. Open Scoring setup, then sync again."
+    return {"total": total, "service_max_note": note}
 
 
 def get_box_metadata() -> dict[str, dict[str, object]]:

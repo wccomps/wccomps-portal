@@ -64,7 +64,7 @@ def test_sync_stores_the_exported_service_max() -> None:
     Team.objects.create(team_number=3, team_name="Three")
     ScoringTemplate.objects.create(service_max=Decimal("1"))
 
-    assert sync_service_scores() == {"total": 1, "max_not_updated": None}
+    assert sync_service_scores() == {"total": 1, "service_max_note": None}
 
     assert ScoringTemplate.objects.get().service_max == Decimal("45")
 
@@ -79,7 +79,7 @@ def test_sync_keeps_service_max_when_the_export_has_no_max_points(monkeypatch) -
     result = sync_service_scores()
 
     assert result["total"] == 1
-    assert result["max_not_updated"].startswith("The service maximum was not updated")
+    assert result["service_max_note"].startswith("The service maximum was not updated")
     assert ScoringTemplate.objects.get().service_max == Decimal("777")
 
 
@@ -87,7 +87,7 @@ def test_sync_keeps_service_max_when_the_export_has_no_max_points(monkeypatch) -
 def test_sync_says_when_there_is_no_scoring_setup_to_store_the_maximum_in() -> None:
     Team.objects.create(team_number=3, team_name="Three")
 
-    assert sync_service_scores()["max_not_updated"].startswith("The service maximum was not stored")
+    assert sync_service_scores()["service_max_note"].startswith("The service maximum was not stored")
 
 
 @pytest.mark.django_db

@@ -133,16 +133,17 @@ class CompetitionRunResult:
         if self.accounts_failed:
             accounts += f" ({self.accounts_failed} failed)"
         lines.append(accounts)
-        lines.extend(f"Failed: {username}: {error}" for username, error in self.account_failures)
-        if self.nextcloud_ok or self.nextcloud_failed:
-            nc_total = self.nextcloud_ok + len(self.nextcloud_failed)
-            lines.append(f"Nextcloud accounts provisioned: {self.nextcloud_ok}/{nc_total}")
-            lines.extend(f"Failed Nextcloud: {username}: {error}" for username, error in self.nextcloud_failed)
+        # Before the per-account failure lines: the ops post is cut from the end at Discord's limit.
         if self.quotient_synced is not None:
             what = "Quotient metadata" if self.enable else "Quotient service scores"
             lines.append(f"{what}: {'synced' if self.quotient_synced else 'sync failed'}")
         if self.service_max_note:
             lines.append(self.service_max_note)
+        lines.extend(f"Failed: {username}: {error}" for username, error in self.account_failures)
+        if self.nextcloud_ok or self.nextcloud_failed:
+            nc_total = self.nextcloud_ok + len(self.nextcloud_failed)
+            lines.append(f"Nextcloud accounts provisioned: {self.nextcloud_ok}/{nc_total}")
+            lines.extend(f"Failed Nextcloud: {username}: {error}" for username, error in self.nextcloud_failed)
         if self.start_message_queued:
             lines.append("Start message queued for every active team")
         return "\n".join(lines)
@@ -371,7 +372,7 @@ def _run(
             yield CompetitionStep(f"Quotient sync failed: {e}", step, total, ok=False)
     else:
         try:
-            note = sync_service_scores(actor_user)["max_not_updated"]
+            note = sync_service_scores(actor_user)["service_max_note"]
             result.quotient_synced = True
             result.service_max_note = note
             done = "Quotient service scores synced"

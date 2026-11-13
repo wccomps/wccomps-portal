@@ -43,8 +43,8 @@ def sync_scores(request: HttpRequest) -> HttpResponse:
     try:
         result = sync_service_scores(cast(User, request.user))
         messages.success(request, f"Synced {result['total']} teams")
-        if result["max_not_updated"]:
-            messages.warning(request, result["max_not_updated"])
+        if result["service_max_note"]:
+            messages.warning(request, result["service_max_note"])
     except Exception as e:
         messages.error(request, f"Failed to sync scores: {e}")
     return redirect("scoring:scoring_config")

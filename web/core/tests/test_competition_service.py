@@ -53,7 +53,7 @@ def authentik() -> Iterator[MagicMock]:
         patch("core.services.user_groups.refresh_user_groups") as refresh,
         patch("scoring.quotient_sync.sync_quotient_metadata") as sync_metadata,
         patch(
-            "scoring.quotient_sync.sync_service_scores", return_value={"total": 0, "max_not_updated": None}
+            "scoring.quotient_sync.sync_service_scores", return_value={"total": 0, "service_max_note": None}
         ) as sync_scores,
     ):
         manager.refresh = refresh
@@ -140,10 +140,12 @@ def test_stop_syncs_service_scores_and_records_actor_user(authentik, config, dja
 
 
 def test_stop_keeps_the_note_that_the_service_maximum_was_not_updated(authentik, config):
-    """In the step, and in what outlasts it: the summary the bot posts and the audit entry."""
+    """In the step, and in what outlasts it: the summary the bot posts (ahead of the per-account failure lines, which
+    the post's length limit cuts first) and the audit entry."""
     CompetitionConfig.objects.filter(pk=1).update(applications_enabled=True)
     note = "The service maximum was not updated: Quotient's export gave no max points."
-    authentik.sync_scores.return_value = {"total": 3, "max_not_updated": note}
+    authentik.sync_scores.return_value = {"total": 3, "service_max_note": note}
+    authentik.team_account.return_value = (False, "timed out")
 
     steps = []
     gen = run_competition(False, "gold_admin")
@@ -155,7 +157,7 @@ def test_stop_keeps_the_note_that_the_service_maximum_was_not_updated(authentik,
             break
 
     assert (steps[-1].message, steps[-1].ok) == (f"Quotient service scores synced. {note}", False)
-    assert note in result.summary()
+    assert result.summary().index(note) < result.summary().index("Failed: team")
     assert AuditLog.objects.get(action="competition_stopped").details["service_max_note"] == note
 
 
