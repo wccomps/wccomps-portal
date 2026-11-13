@@ -96,12 +96,6 @@ def _timestamp(value: object, what: str) -> datetime | None:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
-def _fraction(value: object, what: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float) or not 0 <= value <= 1:
-        raise ValueError(f"{what} isn't a fraction from 0 to 1: {value!r:.80}")
-    return float(value)
-
-
 def _object(value: object, what: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError(f"{what} isn't an object: {value!r:.80}")
@@ -169,7 +163,7 @@ class ServiceExportEntry:
     service_points: int
     sla_violations: int
     sla_penalty: int
-    max_points: int = 0
+    max_points: int | None  # what every check passing would have earned; None when the export doesn't say
 
 
 @dataclass
@@ -180,13 +174,6 @@ class TeamServiceExport:
     gross_points: int
     total_sla_penalty: int
     total_points: int
-
-
-@dataclass
-class TeamUptime:
-    team_name: str
-    team_number: int
-    uptimes: dict[str, float]  # service_name -> uptime (0.0-1.0)
 
 
 @dataclass
@@ -318,10 +305,6 @@ class QuotientClient:
         """Fetch per-service score breakdown from Quotient, or None if unavailable."""
         return self._fetch("/api/engine/export/scores", _service_export, "the service export")
 
-    def get_uptimes(self) -> list[TeamUptime] | None:
-        """Fetch per-service uptime percentages from Quotient, or None if unavailable."""
-        return self._fetch("/api/graphs/uptimes", _uptimes, "uptimes")
-
     def get_service_checks(
         self,
         team_number: int,
@@ -389,7 +372,7 @@ def _service_export(data: object) -> list[TeamServiceExport]:
                 service_points=_whole(_field(s, "service_points", "a service"), "a service's points"),
                 sla_violations=_whole(s.get("sla_violations", 0), "a service's SLA violations"),
                 sla_penalty=_whole(s.get("sla_penalty", 0), "a service's SLA penalty"),
-                max_points=_whole(s.get("max_points", 0), "a service's max points"),
+                max_points=_whole(s["max_points"], "a service's max points") if "max_points" in s else None,
             )
             for s in _objects(team_data.get("services", []), "a team's services")
         ]
@@ -406,21 +389,6 @@ def _service_export(data: object) -> list[TeamServiceExport]:
         )
     logger.info(f"Fetched service export for {len(exports)} teams")
     return exports
-
-
-def _uptimes(data: object) -> list[TeamUptime]:
-    result = []
-    for team_data in _objects(_object(data, "the uptimes").get("series", []), "the uptimes"):
-        team_name = _text(_field(team_data, "Name", "a team"), "a team's name")
-        uptimes = {
-            _text(_field(entry, "Service", "an uptime"), "a service"): _fraction(
-                _field(entry, "Uptime", "an uptime"), "an uptime"
-            )
-            for entry in _objects(team_data.get("Data", []), "a team's uptimes")
-        }
-        result.append(TeamUptime(team_name=team_name, team_number=_team_number(team_name), uptimes=uptimes))
-    logger.info(f"Fetched uptimes for {len(result)} teams")
-    return result
 
 
 def _service_checks(data: object) -> list[ServiceCheck]:

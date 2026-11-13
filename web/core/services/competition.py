@@ -271,7 +271,7 @@ def _run(
     active team. Blocking (Authentik, Nextcloud and Quotient HTTP): async callers run it in a thread.
     """
     from django.contrib.auth.models import User
-    from scoring.quotient_sync import sync_quotient_metadata, sync_service_scores
+    from scoring.quotient_sync import SERVICE_MAX_NOT_UPDATED, sync_quotient_metadata, sync_service_scores
 
     from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
     from core.nextcloud import NextcloudAPIError, NextcloudManager, nextcloud_configured
@@ -368,9 +368,14 @@ def _run(
             yield CompetitionStep(f"Quotient sync failed: {e}", step, total, ok=False)
     else:
         try:
-            sync_service_scores(actor_user)
+            synced = sync_service_scores(actor_user)
             result.quotient_synced = True
-            yield CompetitionStep("Quotient service scores synced", step, total)
+            if synced["service_max"] is None:
+                yield CompetitionStep(
+                    f"Quotient service scores synced. {SERVICE_MAX_NOT_UPDATED}", step, total, ok=False
+                )
+            else:
+                yield CompetitionStep("Quotient service scores synced", step, total)
         except Exception as e:
             logger.warning(f"Failed to sync Quotient service scores: {e}")
             result.quotient_synced = False

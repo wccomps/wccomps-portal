@@ -130,17 +130,6 @@ def test_scores_of_another_shape_are_none(body: object) -> None:
     assert exports is None or all(type(t.gross_points) is int for t in exports)
 
 
-@example(uptime=float("nan"))
-@example(uptime=7)
-@given(uptime=st.one_of(st.floats(), st.integers(), st.text(max_size=3)))
-def test_an_uptime_that_is_no_fraction_is_refused(uptime: object) -> None:
-    """get_uptimes passed NaN, numbers past 1 and text along as uptimes."""
-    body = {"series": [{"Name": "team01", "Data": [{"Service": "web", "Uptime": uptime}]}]}
-    with override_settings(**QUOTIENT), serving([LOGIN, Answer(200, json.dumps(body).encode())]):
-        uptimes = quotient().get_uptimes()
-    assert uptimes is None or all(0 <= u <= 1 for t in uptimes for u in t.uptimes.values())
-
-
 @example(answers=[LOGIN, Answer(200, deep(100_000))])
 @given(answers=st.just([LOGIN, Answer(200, deep(100_000))]))
 def test_json_too_deep_to_read_is_no_answer(answers: list[Answer]) -> None:
@@ -166,7 +155,7 @@ def test_scores_that_dont_fit_refuse_the_sync(points: int, name: str) -> None:
         Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01"})
         with (
             override_settings(QUOTIENT_API_URL="https://quotient.test", **QUOTIENT),
-            serving([LOGIN, answer(body), answer({"series": []})]),
+            serving([LOGIN, answer(body)]),
         ):
             cache.clear()
             with contextlib.suppress(ValueError):
@@ -175,36 +164,15 @@ def test_scores_that_dont_fit_refuse_the_sync(points: int, name: str) -> None:
 
 
 @pytest.mark.django_db
-@example(export=Answer(500, b""), uptimes=answer({"series": []}))
-@example(
-    export=answer(
-        [{"team_name": "team01", "services": [{"service_name": "web", "service_points": 10}], "gross_points": 10}]
-    ),
-    uptimes=Answer(500, b""),
-)
+@example(export=Answer(500, b""))
 @given(
-    export=st.sampled_from(
-        (
-            Answer(500, b""),
-            answer(
-                [
-                    {
-                        "team_name": "team01",
-                        "services": [{"service_name": "web", "service_points": 10}],
-                        "gross_points": 10,
-                    }
-                ]
-            ),
-        )
-    ),
-    uptimes=st.one_of(
+    export=st.one_of(
         st.builds(Answer, st.sampled_from((400, 404, 429, 500, 502, 503)), st.binary(max_size=40)),
         st.text(max_size=20).map(answer),
-    ),
+    )
 )
-def test_unreadable_export_or_uptimes_refuses_the_sync(export: Answer, uptimes: Answer) -> None:
-    """When the score export failed, sync_service_scores returned 0 teams (a green "Synced 0 teams" banner); when
-    uptimes failed, it overwrote every service's uptime with 0."""
+def test_an_unreadable_export_refuses_the_sync(export: Answer) -> None:
+    """When the score export failed, sync_service_scores returned 0 teams (a green "Synced 0 teams" banner)."""
     from decimal import Decimal
 
     from scoring.models import ServiceDetail
@@ -214,12 +182,12 @@ def test_unreadable_export_or_uptimes_refuses_the_sync(export: Answer, uptimes: 
 
     with rolled_back():
         team, _ = Team.objects.get_or_create(team_number=1, defaults={"team_name": "Team 01"})
-        ServiceDetail.objects.create(team=team, service_name="web", points=Decimal("5.00"), uptime=Decimal("0.9500"))
-        with override_settings(QUOTIENT_API_URL="https://quotient.test", **QUOTIENT), serving([LOGIN, export, uptimes]):
+        ServiceDetail.objects.create(team=team, service_name="web", points=Decimal("5.00"))
+        with override_settings(QUOTIENT_API_URL="https://quotient.test", **QUOTIENT), serving([LOGIN, export]):
             cache.clear()
             with pytest.raises(ValueError):
                 sync_service_scores()
-        assert ServiceDetail.objects.get(team=team, service_name="web").uptime == Decimal("0.9500")
+        assert ServiceDetail.objects.get(team=team, service_name="web").points == Decimal("5.00")
 
 
 OAUTH_CONFIG = {

@@ -10,7 +10,7 @@ from core.auth_utils import require_permission
 
 from ..forms import ScoringTemplateForm
 from ..models import ScoringTemplate
-from ..quotient_sync import sync_service_scores
+from ..quotient_sync import SERVICE_MAX_NOT_UPDATED, sync_service_scores
 
 
 @require_permission("gold_team", error_message="Only Gold Team members can access this")
@@ -43,6 +43,8 @@ def sync_scores(request: HttpRequest) -> HttpResponse:
     try:
         result = sync_service_scores(cast(User, request.user))
         messages.success(request, f"Synced {result['total']} teams")
+        if result["service_max"] is None:
+            messages.warning(request, SERVICE_MAX_NOT_UPDATED)
     except Exception as e:
         messages.error(request, f"Failed to sync scores: {e}")
     return redirect("scoring:scoring_config")

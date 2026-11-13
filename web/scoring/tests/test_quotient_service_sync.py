@@ -1,11 +1,14 @@
-"""Service sync matches Quotient's export and uptime series to portal teams by the number in the team name."""
+"""Service sync matches Quotient's export to portal teams by the number in the team name."""
+
+from decimal import Decimal
 
 import httpx
 import pytest
 from django.core.cache import cache
+from django.urls import reverse
 from quotient import client as client_module
 
-from scoring.models import ServiceDetail, ServiceScore
+from scoring.models import ScoringTemplate, ServiceDetail, ServiceScore
 from scoring.quotient_sync import sync_service_scores
 from team.models import Team
 
@@ -22,12 +25,6 @@ EXPORT = [
         "total_points": 35,
     }
 ]
-UPTIMES = {
-    "series": [
-        {"Name": "team01", "Data": [{"Service": "web", "Uptime": 0.1}]},
-        {"Name": "team03", "Data": [{"Service": "web", "Uptime": 0.9}]},
-    ]
-}
 
 
 @pytest.fixture(autouse=True)
@@ -40,8 +37,6 @@ def _quotient(settings, monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/engine/export/scores":
             return httpx.Response(200, json=EXPORT)
-        if request.url.path == "/api/graphs/uptimes":
-            return httpx.Response(200, json=UPTIMES)
         return httpx.Response(200, json={})
 
     real_client = httpx.Client
@@ -51,7 +46,7 @@ def _quotient(settings, monkeypatch):
 
 
 @pytest.mark.django_db
-def test_sync_attaches_scores_and_uptimes_to_the_named_team() -> None:
+def test_sync_attaches_scores_to_the_named_team() -> None:
     Team.objects.create(team_number=1, team_name="One")
     team3 = Team.objects.create(team_number=3, team_name="Three")
 
@@ -61,60 +56,57 @@ def test_sync_attaches_scores_and_uptimes_to_the_named_team() -> None:
     assert ServiceScore.objects.get().team == team3
     detail = ServiceDetail.objects.get()
     assert detail.team == team3
-    assert float(detail.uptime) == pytest.approx(0.9)
     assert detail.sla_violations == 1
 
 
 @pytest.mark.django_db
 def test_sync_derives_service_max() -> None:
-    from decimal import Decimal
-
-    from scoring.models import ScoringTemplate
-
     Team.objects.create(team_number=3, team_name="Three")
-    ScoringTemplate.objects.create(
-        service_weight=Decimal("40"),
-        inject_weight=Decimal("40"),
-        orange_weight=Decimal("20"),
-        service_max=Decimal("1"),
-    )
+    ScoringTemplate.objects.create(service_max=Decimal("1"))
 
-    sync_service_scores()
+    assert sync_service_scores()["service_max"] == Decimal("45")
 
-    assert ScoringTemplate.objects.first().service_max == Decimal("45")
+    assert ScoringTemplate.objects.get().service_max == Decimal("45")
 
 
 @pytest.mark.django_db
-def test_sync_keeps_service_max_when_quotient_exports_no_max_points(monkeypatch) -> None:
-    """A Quotient that predates max_points still syncs scores; the maximum stays as it was."""
-    from decimal import Decimal
-
-    from scoring.models import ScoringTemplate
-
+def test_sync_keeps_service_max_when_the_export_has_no_max_points(monkeypatch) -> None:
+    """An export with no max_points still syncs scores; the maximum stays as it was, and the result says so."""
     Team.objects.create(team_number=3, team_name="Three")
     ScoringTemplate.objects.create(service_max=Decimal("777"))
     monkeypatch.delitem(EXPORT[0]["services"][0], "max_points")
 
-    assert sync_service_scores()["total"] == 1
+    result = sync_service_scores()
 
+    assert (result["total"], result["service_max"]) == (1, None)
     assert ScoringTemplate.objects.get().service_max == Decimal("777")
 
 
 @pytest.mark.django_db
 def test_a_maximum_too_large_to_store_refuses_the_sync(monkeypatch) -> None:
-    from decimal import Decimal
-
-    from scoring.models import ScoringTemplate
-
     Team.objects.create(team_number=3, team_name="Three")
     ScoringTemplate.objects.create(service_max=Decimal("777"))
     monkeypatch.setitem(EXPORT[0]["services"][0], "max_points", 10**30)
 
-    with pytest.raises(ValueError, match="the service maximum"):
+    with pytest.raises(ValueError, match="service maximum doesn't fit"):
         sync_service_scores()
 
     assert not ServiceScore.objects.exists()
     assert ScoringTemplate.objects.get().service_max == Decimal("777")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("exported", [True, False])
+def test_the_sync_page_warns_only_when_the_maximum_was_not_updated(client, gold_team_user, monkeypatch, exported):
+    Team.objects.create(team_number=3, team_name="Three")
+    if not exported:
+        monkeypatch.delitem(EXPORT[0]["services"][0], "max_points")
+    client.force_login(gold_team_user)
+
+    page = client.post(reverse("scoring:sync_scores"), follow=True).content.decode()
+
+    assert "Synced 1 teams" in page
+    assert ("The service maximum was not updated" in page) is not exported
 
 
 @pytest.mark.django_db

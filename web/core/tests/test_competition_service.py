@@ -137,6 +137,16 @@ def test_stop_syncs_service_scores_and_records_actor_user(authentik, config, dja
     assert audit is not None and audit.details["quotient_synced"] is True
 
 
+def test_stop_flags_a_service_maximum_the_sync_could_not_update(authentik, config):
+    CompetitionConfig.objects.filter(pk=1).update(applications_enabled=True)
+    authentik.sync_scores.return_value = {"service_max": None}
+
+    steps = list(run_competition(False, "gold_admin"))
+
+    assert steps[-1].message.startswith("Quotient service scores synced. The service maximum was not updated")
+    assert steps[-1].ok is False
+
+
 def test_stop_records_failed_score_sync_without_aborting(authentik, config):
     CompetitionConfig.objects.filter(pk=1).update(applications_enabled=True)
     authentik.sync_scores.side_effect = ValueError("Failed to retrieve service scores from Quotient")

@@ -23,6 +23,8 @@ EXCEPTIONS: dict[str, str] = {
     "scoring_template.orange_max": "scoring 0048 forgot it: the scoring sums the orange checks instead; when it "
     "is dropped, orange_team.models.MAX_TOTAL_POINTS (kept for the old release's writes) goes, and only the per-check "
     "MAX_POINTS remains",
+    "service_detail.uptime": "scoring 0050 forgot it: the service maximum comes from Quotient's export, and nothing "
+    "else read a service's uptime",
 }
 
 

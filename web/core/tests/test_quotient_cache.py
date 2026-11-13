@@ -16,7 +16,6 @@ CACHED: list[Getter] = [
 ]
 UNCACHED: list[Getter] = [
     ("/api/engine/export/scores", [], lambda c: c.get_service_export()),
-    ("/api/graphs/uptimes", {"series": []}, lambda c: c.get_uptimes()),
 ]
 
 
@@ -55,4 +54,3 @@ def test_the_score_syncs_reads_fetch_every_time_and_cache_nothing(
 ) -> None:
     assert _asked_twice(monkeypatch, body, get) == [endpoint, endpoint]
     assert cache.get("quotient_service_export") is None
-    assert cache.get("quotient_uptimes") is None

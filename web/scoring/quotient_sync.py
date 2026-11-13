@@ -9,12 +9,12 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from quotient.client import QuotientClient, ServiceCheck, TeamServiceExport
+from quotient.client import QuotientClient, ServiceCheck
 
 from team.models import MAX_TEAMS, Team
 
 from .maxes import inject_max_from_titles, service_max_from_export, set_template_max
-from .models import QuotientMetadataCache, ScoringTemplate, ServiceDetail, ServiceScore
+from .models import QuotientMetadataCache, ServiceDetail, ServiceScore
 
 logger = logging.getLogger(__name__)
 _DNS_RECORD_DOMAIN_RE = re.compile(r"^record\s+([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)\.?(?=[\s:\->]|$)")
@@ -226,9 +226,6 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
     return metadata
 
 
-UPTIME_PLACES = Decimal(10) ** -ServiceDetail._meta.get_field("uptime").decimal_places
-
-
 def _check_storable(row: models.Model, where: str) -> None:
     """ValueError when a value Quotient sent doesn't fit its column (a name too long, points too large)."""
     try:
@@ -237,29 +234,39 @@ def _check_storable(row: models.Model, where: str) -> None:
         raise ValueError(f"Quotient's scores for {where} don't fit the portal's: {'; '.join(e.messages)}") from e
 
 
-def sync_service_scores(user: User | None = None) -> dict[str, int]:
+SERVICE_MAX_NOT_UPDATED = (
+    "The service maximum was not updated: Quotient's export gave no max points, so scores still scale by the "
+    "maximum already stored."
+)
+
+
+class ServiceSyncResult(TypedDict):
+    """What a service score sync wrote. service_max is None when Quotient's export gave no maximum to store."""
+
+    teams_created: int
+    teams_updated: int
+    total: int
+    details_synced: int
+    service_max: Decimal | None
+
+
+def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
     """Sync each team's aggregate ServiceScore and per-service ServiceDetail records from Quotient, removing and
-    skipping teams with no services in the export. Raises ValueError, writing nothing, when Quotient's scores or
-    uptimes can't be read or don't fit the portal's columns."""
+    skipping teams with no services in the export, and store the service maximum the export gives. Raises
+    ValueError, writing nothing, when Quotient's scores can't be read or don't fit the portal's columns."""
     client = QuotientClient()
 
     export_data = client.get_service_export()
     if export_data is None:
         raise ValueError("Failed to retrieve service scores from Quotient")
     if not export_data:
-        return {"teams_created": 0, "teams_updated": 0, "total": 0, "details_synced": 0}
-
-    uptimes_data = client.get_uptimes()
-    if uptimes_data is None:
-        raise ValueError("Failed to retrieve uptimes from Quotient")
-    uptimes_by_team = {tu.team_number: tu.uptimes for tu in uptimes_data}
+        return {"teams_created": 0, "teams_updated": 0, "total": 0, "details_synced": 0, "service_max": None}
 
     teams_updated = 0
     teams_created = 0
     details_synced = 0
 
     rows: list[tuple[Team, ServiceScore, list[ServiceDetail]]] = []
-    synced_exports: list[TeamServiceExport] = []
     for team_export in export_data:
         team = Team.objects.filter(team_number=team_export.team_number).first() if team_export.team_number else None
         if team is None:
@@ -270,13 +277,11 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
             sla_violations=Decimal(-team_export.total_sla_penalty),
             synced_by=user,
         )
-        team_uptimes = uptimes_by_team.get(team_export.team_number, {})
         details = [
             ServiceDetail(
                 team=team,
                 service_name=svc.service_name,
                 points=Decimal(svc.service_points),
-                uptime=Decimal(str(team_uptimes.get(svc.service_name, 0))).quantize(UPTIME_PLACES),
                 sla_violations=svc.sla_violations,
             )
             for svc in team_export.services
@@ -284,11 +289,7 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
         for row in (score, *details):
             _check_storable(row, f"team {team.team_number}")
         rows.append((team, score, details))
-        if details:
-            synced_exports.append(team_export)
-    service_max = service_max_from_export(synced_exports)
-    if service_max is not None:
-        _check_storable(ScoringTemplate(service_max=service_max), "the service maximum")
+    service_max = service_max_from_export(export_data)
 
     with transaction.atomic():
         for team, score, details in rows:
@@ -311,7 +312,6 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
             ServiceDetail.objects.bulk_create(details)
             details_synced += len(details)
 
-    # Keep the reactive service scaling current: the max possible service points.
     set_template_max("service_max", service_max)
 
     return {
@@ -319,6 +319,7 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
         "teams_updated": teams_updated,
         "total": teams_created + teams_updated,
         "details_synced": details_synced,
+        "service_max": service_max,
     }
 
 

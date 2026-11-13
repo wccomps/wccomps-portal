@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from decimal import Decimal
 from typing import Literal
 
+from django.core.exceptions import ValidationError
 from quotient.client import Inject, TeamServiceExport
 
 from scoring.models import ScoringTemplate
@@ -28,32 +29,26 @@ def inject_max_from_titles(injects: Sequence[Inject]) -> Decimal | None:
 
 
 def service_max_from_export(exports: Sequence[TeamServiceExport]) -> Decimal | None:
-    """Sum of per-service maximum points across teams from a Quotient score export, or None if incomplete.
+    """Each service's highest max_points across the exported teams, summed; None unless every entry has one.
 
-    Takes the highest max_points seen for each service across teams so a check disabled
-    for one team does not under-count the service. All-or-nothing on purpose: if any
-    service in the export has no positive max_points, a partial sum would under-count.
+    The highest, since a team Quotient checked in fewer rounds reports less for the same service. Raises ValueError
+    when the sum doesn't fit the column.
     """
     best: dict[str, int] = {}
-    services: set[str] = set()
     for team in exports:
         for svc in team.services:
-            services.add(svc.service_name)
-            if svc.max_points > 0:
-                current = best.get(svc.service_name)
-                if current is None or svc.max_points > current:
-                    best[svc.service_name] = svc.max_points
-    uncovered = services - set(best)
-    if uncovered:
-        logger.warning(
-            "service_max not derived: %d service(s) have no max_points in Quotient export: %s",
-            len(uncovered),
-            sorted(uncovered),
-        )
+            if svc.max_points is None:
+                logger.warning("service_max not derived: Quotient's export has no max_points for %s", svc.service_name)
+                return None
+            best[svc.service_name] = max(best.get(svc.service_name, 0), svc.max_points)
+    total = Decimal(sum(best.values()))
+    if total <= 0:
         return None
-    if not best:
-        return None
-    return Decimal(sum(best.values()))
+    try:
+        ScoringTemplate._meta.get_field("service_max").clean(total, None)
+    except ValidationError as e:
+        raise ValueError(f"Quotient's service maximum doesn't fit the portal's: {'; '.join(e.messages)}") from e
+    return total
 
 
 def set_template_max(field: TemplateMaxField, value: Decimal | None) -> None:

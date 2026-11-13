@@ -47,7 +47,7 @@ def test_inject_max_none_without_any_values() -> None:
     assert inject_max_from_titles(_injects("A", "B")) is None
 
 
-def _team_export(team_number: int, *services: tuple[str, int, int]) -> TeamServiceExport:
+def _team_export(team_number: int, *services: tuple[str, int, int | None]) -> TeamServiceExport:
     entries = [
         ServiceExportEntry(
             service_name=name, service_points=points, max_points=max_points, sla_violations=0, sla_penalty=0
@@ -65,26 +65,26 @@ def _team_export(team_number: int, *services: tuple[str, int, int]) -> TeamServi
     )
 
 
-def test_service_max_sums_exact_max_points_across_services() -> None:
+def test_service_max_sums_each_services_max_points_even_where_no_team_scored() -> None:
     exports = [
         _team_export(1, ("web", 10, 1115), ("ssh", 558, 1115), ("dns", 0, 1115)),
         _team_export(2, ("web", 1004, 1115), ("ssh", 0, 1115), ("dns", 0, 1115)),
     ]
-    # Even when every team scored 0 on dns, its exact max_points is included.
     assert service_max_from_export(exports) == Decimal("3345")
 
 
-def test_service_max_uses_highest_max_points_when_check_disabled_for_one_team() -> None:
+def test_service_max_takes_each_services_highest_across_teams() -> None:
     exports = [
-        _team_export(1, ("web", 900, 1000), ("ssh", 558, 1115)),  # web disabled for some rounds on team 1
-        _team_export(2, ("web", 800, 1115), ("ssh", 558, 1115)),  # full rounds on team 2
+        _team_export(1, ("web", 900, 1000), ("ssh", 558, 1115)),
+        _team_export(2, ("web", 800, 1115), ("ssh", 558, 1115)),
     ]
     assert service_max_from_export(exports) == Decimal("2230")
 
 
-def test_service_max_none_if_any_service_lacks_max_points() -> None:
+def test_service_max_none_if_any_entry_has_no_max_points() -> None:
     exports = [
-        _team_export(1, ("web", 1000, 1115), ("ssh", 500, 0)),
+        _team_export(1, ("web", 1000, 1115), ("ssh", 500, None)),
+        _team_export(2, ("web", 1000, 1115), ("ssh", 500, 1115)),
     ]
     assert service_max_from_export(exports) is None
 
