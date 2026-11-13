@@ -80,6 +80,16 @@ def test_service_max_none_if_any_entry_has_no_max_points() -> None:
     assert service_max_from_export(exports) is None
 
 
+def test_a_service_name_with_a_newline_cannot_forge_a_log_line(caplog) -> None:
+    """The name comes from Quotient: logged as-is, a newline would start a line that looks like the portal's own."""
+    exports = [_team_export(1, ("web\nERROR forged entry", 10, None))]
+
+    with caplog.at_level("WARNING", logger="scoring.maxes"):
+        service_max_from_export(exports)
+
+    assert "\n" not in caplog.records[0].getMessage()
+
+
 def test_set_template_max_writes_when_present() -> None:
     ScoringTemplate.objects.create(
         service_weight=Decimal("40"), inject_weight=Decimal("40"), orange_weight=Decimal("20")

@@ -1,10 +1,12 @@
 """Service sync matches Quotient's export to portal teams by the number in the team name."""
 
 from decimal import Decimal
+from unittest.mock import Mock
 
 import httpx
 import pytest
 from django.core.cache import cache
+from django.db import DatabaseError
 from django.urls import reverse
 from quotient import client as client_module
 
@@ -122,6 +124,34 @@ def test_only_competing_teams_set_the_service_maximum(monkeypatch, has_inactive_
     sync_service_scores()
 
     assert ScoringTemplate.objects.get().service_max == Decimal("45")
+
+
+@pytest.mark.django_db
+def test_a_sync_with_no_active_team_says_the_maximum_was_not_updated() -> None:
+    """After the event's teams are deactivated, no exported team is competing: the maximum stays, and the sync
+    says so as it does when the export gives none."""
+    Team.objects.create(team_number=3, team_name="Three", is_active=False)
+    ScoringTemplate.objects.create(service_max=Decimal("777"))
+
+    result = sync_service_scores()
+
+    assert result["service_max_note"].startswith("The service maximum was not updated: no team Quotient scored")
+    assert ScoringTemplate.objects.get().service_max == Decimal("777")
+
+
+@pytest.mark.django_db
+def test_scores_and_the_maximum_are_stored_together(monkeypatch) -> None:
+    """One transaction: a reader (Close Out) never sees the new scores with the old maximum, so a maximum that
+    fails to store takes the scores with it."""
+    Team.objects.create(team_number=3, team_name="Three")
+    ScoringTemplate.objects.create(service_max=Decimal("777"))
+    monkeypatch.setattr("scoring.quotient_sync.set_template_max", Mock(side_effect=DatabaseError("lost")))
+
+    with pytest.raises(DatabaseError):
+        sync_service_scores()
+
+    assert not ServiceScore.objects.exists()
+    assert ScoringTemplate.objects.get().service_max == Decimal("777")
 
 
 @pytest.mark.django_db

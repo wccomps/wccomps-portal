@@ -301,6 +301,8 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
             )
             ServiceDetail.objects.bulk_create(details)
             total += 1
+        # With the scores, so nothing reading both (Close Out) sees new scores against the old maximum.
+        stored = bool(service_max) and set_template_max("service_max", service_max)
 
     note = None
     if service_max is None:
@@ -308,7 +310,12 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
             "The service maximum was not updated: Quotient's export gave no max points, so scores still scale by "
             "the maximum already stored."
         )
-    elif service_max and not set_template_max("service_max", service_max):
+    elif not competing and any(details for _, _, details in rows):
+        note = (
+            "The service maximum was not updated: no team Quotient scored is active in the portal, so scores still "
+            "scale by the maximum already stored."
+        )
+    elif service_max and not stored:
         note = "The service maximum was not stored: no scoring setup is saved yet. Open Scoring setup, then sync again."
     return {"total": total, "service_max_note": note}
 

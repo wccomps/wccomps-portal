@@ -36,7 +36,7 @@ def service_max_from_export(exports: Sequence[TeamServiceExport]) -> Decimal | N
     for team in exports:
         for svc in team.services:
             if svc.max_points is None:
-                logger.warning("service_max not derived: Quotient's export has no max_points for %s", svc.service_name)
+                logger.warning("service_max not derived: Quotient's export has no max_points for %r", svc.service_name)
                 return None
             best[svc.service_name] = max(best.get(svc.service_name, 0), svc.max_points)
     return Decimal(sum(best.values()))
