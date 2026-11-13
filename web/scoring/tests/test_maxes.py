@@ -89,10 +89,6 @@ def test_service_max_none_if_any_entry_has_no_max_points() -> None:
     assert service_max_from_export(exports) is None
 
 
-def test_service_max_none_when_empty() -> None:
-    assert service_max_from_export([]) is None
-
-
 def test_set_template_max_writes_when_present() -> None:
     ScoringTemplate.objects.create(
         service_weight=Decimal("40"), inject_weight=Decimal("40"), orange_weight=Decimal("20")

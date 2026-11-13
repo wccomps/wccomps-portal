@@ -14,7 +14,7 @@ from quotient.client import QuotientClient, ServiceCheck
 from team.models import MAX_TEAMS, Team
 
 from .maxes import inject_max_from_titles, service_max_from_export, set_template_max
-from .models import QuotientMetadataCache, ServiceDetail, ServiceScore
+from .models import QuotientMetadataCache, ScoringTemplate, ServiceDetail, ServiceScore
 
 logger = logging.getLogger(__name__)
 _DNS_RECORD_DOMAIN_RE = re.compile(r"^record\s+([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)\.?(?=[\s:\->]|$)")
@@ -234,20 +234,12 @@ def _check_storable(row: models.Model, where: str) -> None:
         raise ValueError(f"Quotient's scores for {where} don't fit the portal's: {'; '.join(e.messages)}") from e
 
 
-SERVICE_MAX_NOT_UPDATED = (
-    "The service maximum was not updated: Quotient's export gave no max points, so scores still scale by the "
-    "maximum already stored."
-)
-
-
 class ServiceSyncResult(TypedDict):
-    """What a service score sync wrote. service_max is None when Quotient's export gave no maximum to store."""
+    """How many teams a service score sync wrote, and what to tell whoever ran it when the service maximum was left
+    as it was (None when it was stored, or the export had no checks to add up)."""
 
-    teams_created: int
-    teams_updated: int
     total: int
-    details_synced: int
-    service_max: Decimal | None
+    max_not_updated: str | None
 
 
 def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
@@ -259,12 +251,8 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
     export_data = client.get_service_export()
     if export_data is None:
         raise ValueError("Failed to retrieve service scores from Quotient")
-    if not export_data:
-        return {"teams_created": 0, "teams_updated": 0, "total": 0, "details_synced": 0, "service_max": None}
 
-    teams_updated = 0
-    teams_created = 0
-    details_synced = 0
+    total = 0
 
     rows: list[tuple[Team, ServiceScore, list[ServiceDetail]]] = []
     for team_export in export_data:
@@ -290,6 +278,8 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
             _check_storable(row, f"team {team.team_number}")
         rows.append((team, score, details))
     service_max = service_max_from_export(export_data)
+    if service_max:
+        _check_storable(ScoringTemplate(service_max=service_max), "the service maximum")
 
     with transaction.atomic():
         for team, score, details in rows:
@@ -297,7 +287,7 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
             if not details:
                 ServiceScore.objects.filter(team=team).delete()
                 continue
-            _service_score, created = ServiceScore.objects.update_or_create(
+            ServiceScore.objects.update_or_create(
                 team=team,
                 defaults={
                     "service_points": score.service_points,
@@ -305,22 +295,20 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
                     "synced_by": user,
                 },
             )
-            if created:
-                teams_created += 1
-            else:
-                teams_updated += 1
             ServiceDetail.objects.bulk_create(details)
-            details_synced += len(details)
+            total += 1
 
-    set_template_max("service_max", service_max)
-
-    return {
-        "teams_created": teams_created,
-        "teams_updated": teams_updated,
-        "total": teams_created + teams_updated,
-        "details_synced": details_synced,
-        "service_max": service_max,
-    }
+    max_not_updated = None
+    if service_max is None:
+        max_not_updated = (
+            "The service maximum was not updated: Quotient's export gave no max points, so scores still scale by "
+            "the maximum already stored."
+        )
+    elif service_max and not set_template_max("service_max", service_max):
+        max_not_updated = (
+            "The service maximum was not stored: no scoring setup is saved yet. Open Scoring setup, then sync again."
+        )
+    return {"total": total, "max_not_updated": max_not_updated}
 
 
 def get_box_metadata() -> dict[str, dict[str, object]]:

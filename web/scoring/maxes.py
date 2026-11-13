@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from decimal import Decimal
 from typing import Literal
 
-from django.core.exceptions import ValidationError
 from quotient.client import Inject, TeamServiceExport
 
 from scoring.models import ScoringTemplate
@@ -31,8 +30,7 @@ def inject_max_from_titles(injects: Sequence[Inject]) -> Decimal | None:
 def service_max_from_export(exports: Sequence[TeamServiceExport]) -> Decimal | None:
     """Each service's highest max_points across the exported teams, summed; None unless every entry has one.
 
-    The highest, since a team Quotient checked in fewer rounds reports less for the same service. Raises ValueError
-    when the sum doesn't fit the column.
+    The highest, since a team Quotient checked in fewer rounds reports less for the same service.
     """
     best: dict[str, int] = {}
     for team in exports:
@@ -41,27 +39,21 @@ def service_max_from_export(exports: Sequence[TeamServiceExport]) -> Decimal | N
                 logger.warning("service_max not derived: Quotient's export has no max_points for %s", svc.service_name)
                 return None
             best[svc.service_name] = max(best.get(svc.service_name, 0), svc.max_points)
-    total = Decimal(sum(best.values()))
-    if total <= 0:
-        return None
-    try:
-        ScoringTemplate._meta.get_field("service_max").clean(total, None)
-    except ValidationError as e:
-        raise ValueError(f"Quotient's service maximum doesn't fit the portal's: {'; '.join(e.messages)}") from e
-    return total
+    return Decimal(sum(best.values()))
 
 
-def set_template_max(field: TemplateMaxField, value: Decimal | None) -> None:
-    """Set one raw-max field on the ScoringTemplate when a value was derived.
+def set_template_max(field: TemplateMaxField, value: Decimal | None) -> bool:
+    """Set one raw-max field on the ScoringTemplate when a value was derived, and say whether it was stored.
 
     No-op when the value is missing (never clobbers a good max with a stale one) or when
     no template exists yet (the config page owns creating it).
     """
     if value is None:
-        return
+        return False
     template = ScoringTemplate.objects.first()
     if template is None:
-        return
+        return False
     setattr(template, field, value)
     template.updated_by = None  # a derived write, not a human edit — keep the audit trail honest
     template.save(update_fields=[field, "updated_by", "updated_at"])
+    return True

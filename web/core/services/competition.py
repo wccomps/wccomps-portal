@@ -103,6 +103,7 @@ class CompetitionRunResult:
     nextcloud_ok: int = 0
     nextcloud_failed: list[tuple[str, str]] = field(default_factory=list)
     quotient_synced: bool | None = None
+    service_max_note: str | None = None
     start_message_queued: bool = False
     error: str | None = None
     refused: bool = False
@@ -140,6 +141,8 @@ class CompetitionRunResult:
         if self.quotient_synced is not None:
             what = "Quotient metadata" if self.enable else "Quotient service scores"
             lines.append(f"{what}: {'synced' if self.quotient_synced else 'sync failed'}")
+        if self.service_max_note:
+            lines.append(self.service_max_note)
         if self.start_message_queued:
             lines.append("Start message queued for every active team")
         return "\n".join(lines)
@@ -271,7 +274,7 @@ def _run(
     active team. Blocking (Authentik, Nextcloud and Quotient HTTP): async callers run it in a thread.
     """
     from django.contrib.auth.models import User
-    from scoring.quotient_sync import SERVICE_MAX_NOT_UPDATED, sync_quotient_metadata, sync_service_scores
+    from scoring.quotient_sync import sync_quotient_metadata, sync_service_scores
 
     from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
     from core.nextcloud import NextcloudAPIError, NextcloudManager, nextcloud_configured
@@ -368,14 +371,11 @@ def _run(
             yield CompetitionStep(f"Quotient sync failed: {e}", step, total, ok=False)
     else:
         try:
-            synced = sync_service_scores(actor_user)
+            note = sync_service_scores(actor_user)["max_not_updated"]
             result.quotient_synced = True
-            if synced["service_max"] is None:
-                yield CompetitionStep(
-                    f"Quotient service scores synced. {SERVICE_MAX_NOT_UPDATED}", step, total, ok=False
-                )
-            else:
-                yield CompetitionStep("Quotient service scores synced", step, total)
+            result.service_max_note = note
+            done = "Quotient service scores synced"
+            yield CompetitionStep(f"{done}. {note}" if note else done, step, total, ok=note is None)
         except Exception as e:
             logger.warning(f"Failed to sync Quotient service scores: {e}")
             result.quotient_synced = False
@@ -426,6 +426,7 @@ def _run(
                 "accounts_failed": result.accounts_failed,
                 "account_failures": dict(result.account_failures),
                 "quotient_synced": result.quotient_synced,
+                **({"service_max_note": result.service_max_note} if result.service_max_note else {}),
                 "start_message_queued": result.start_message_queued,
                 **(
                     {"nextcloud_ok": result.nextcloud_ok, "nextcloud_failed": dict(result.nextcloud_failed)}

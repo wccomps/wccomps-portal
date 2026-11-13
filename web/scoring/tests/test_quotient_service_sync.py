@@ -60,11 +60,11 @@ def test_sync_attaches_scores_to_the_named_team() -> None:
 
 
 @pytest.mark.django_db
-def test_sync_derives_service_max() -> None:
+def test_sync_stores_the_exported_service_max() -> None:
     Team.objects.create(team_number=3, team_name="Three")
     ScoringTemplate.objects.create(service_max=Decimal("1"))
 
-    assert sync_service_scores()["service_max"] == Decimal("45")
+    assert sync_service_scores() == {"total": 1, "max_not_updated": None}
 
     assert ScoringTemplate.objects.get().service_max == Decimal("45")
 
@@ -78,17 +78,26 @@ def test_sync_keeps_service_max_when_the_export_has_no_max_points(monkeypatch) -
 
     result = sync_service_scores()
 
-    assert (result["total"], result["service_max"]) == (1, None)
+    assert result["total"] == 1
+    assert result["max_not_updated"].startswith("The service maximum was not updated")
     assert ScoringTemplate.objects.get().service_max == Decimal("777")
 
 
 @pytest.mark.django_db
-def test_a_maximum_too_large_to_store_refuses_the_sync(monkeypatch) -> None:
+def test_sync_says_when_there_is_no_scoring_setup_to_store_the_maximum_in() -> None:
+    Team.objects.create(team_number=3, team_name="Three")
+
+    assert sync_service_scores()["max_not_updated"].startswith("The service maximum was not stored")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(("max_points", "why"), [(10**30, "the service maximum"), (39, "Failed to retrieve")])
+def test_a_maximum_too_large_or_below_the_points_earned_refuses_the_sync(monkeypatch, max_points, why) -> None:
     Team.objects.create(team_number=3, team_name="Three")
     ScoringTemplate.objects.create(service_max=Decimal("777"))
-    monkeypatch.setitem(EXPORT[0]["services"][0], "max_points", 10**30)
+    monkeypatch.setitem(EXPORT[0]["services"][0], "max_points", max_points)
 
-    with pytest.raises(ValueError, match="service maximum doesn't fit"):
+    with pytest.raises(ValueError, match=why):
         sync_service_scores()
 
     assert not ServiceScore.objects.exists()
@@ -99,6 +108,7 @@ def test_a_maximum_too_large_to_store_refuses_the_sync(monkeypatch) -> None:
 @pytest.mark.parametrize("exported", [True, False])
 def test_the_sync_page_warns_only_when_the_maximum_was_not_updated(client, gold_team_user, monkeypatch, exported):
     Team.objects.create(team_number=3, team_name="Three")
+    ScoringTemplate.objects.create()
     if not exported:
         monkeypatch.delitem(EXPORT[0]["services"][0], "max_points")
     client.force_login(gold_team_user)
@@ -114,12 +124,12 @@ def test_a_second_sync_fetches_fresh_scores(monkeypatch) -> None:
     """Sync is an explicit fetch: the client's 5-minute cache must not hand back the previous numbers."""
     team3 = Team.objects.create(team_number=3, team_name="Three")
     sync_service_scores()
-    monkeypatch.setitem(EXPORT[0], "total_points", 80)
-    monkeypatch.setitem(EXPORT[0]["services"][0], "service_points", 85)
+    monkeypatch.setitem(EXPORT[0], "total_points", 38)
+    monkeypatch.setitem(EXPORT[0]["services"][0], "service_points", 43)
 
     sync_service_scores()
 
-    assert ServiceDetail.objects.get(team=team3).points == 85
+    assert ServiceDetail.objects.get(team=team3).points == 43
 
 
 @pytest.mark.django_db
