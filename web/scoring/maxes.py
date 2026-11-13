@@ -28,7 +28,7 @@ def inject_max_from_titles(injects: Sequence[Inject]) -> Decimal | None:
 
 
 def service_max_from_export(exports: Sequence[TeamServiceExport]) -> Decimal | None:
-    """Each service's highest max_points across the exported teams, summed; None unless every entry has one.
+    """Each service's highest max_points across these teams, summed; None unless every entry has one.
 
     The highest, since a team Quotient checked in fewer rounds reports less for the same service.
     """

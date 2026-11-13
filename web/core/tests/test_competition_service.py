@@ -147,14 +147,9 @@ def test_stop_keeps_the_note_that_the_service_maximum_was_not_updated(authentik,
     authentik.sync_scores.return_value = {"total": 3, "service_max_note": note}
     authentik.team_account.return_value = (False, "timed out")
 
-    steps = []
-    gen = run_competition(False, "gold_admin")
-    while True:
-        try:
-            steps.append(next(gen))
-        except StopIteration as done:
-            result = done.value
-            break
+    stepped = Stepped(run_competition(False, "gold_admin"))
+    steps = list(stepped)
+    result = stepped.result
 
     assert (steps[-1].message, steps[-1].ok) == (f"Quotient service scores synced. {note}", False)
     assert result.summary().index(note) < result.summary().index("Failed: team")

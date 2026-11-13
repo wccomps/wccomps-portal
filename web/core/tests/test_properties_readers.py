@@ -218,10 +218,10 @@ def check_export(result: object) -> None:
             and all(
                 isinstance(t, TeamServiceExport)
                 and is_str(t.team_name)
-                and all(is_int(n) for n in (t.team_number, t.gross_points, t.total_sla_penalty, t.total_points))
+                and all(is_int(n) for n in (t.team_number, t.gross_points, t.total_sla_penalty))
                 and all(
                     is_str(s.service_name)
-                    and all(is_int(n) for n in (s.service_points, s.sla_violations, s.sla_penalty))
+                    and all(is_int(n) for n in (s.service_points, s.sla_violations))
                     and (s.max_points is None or is_int(s.max_points))
                     for s in t.services
                 )

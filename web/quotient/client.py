@@ -162,7 +162,6 @@ class ServiceExportEntry:
     service_name: str
     service_points: int
     sla_violations: int
-    sla_penalty: int
     max_points: int | None  # what every check passing would have earned; None when the export doesn't say
 
 
@@ -173,7 +172,6 @@ class TeamServiceExport:
     services: list[ServiceExportEntry]
     gross_points: int
     total_sla_penalty: int
-    total_points: int
 
 
 @dataclass
@@ -373,7 +371,6 @@ def _service_entry(s: dict[str, object]) -> ServiceExportEntry:
         service_name=_text(_field(s, "service_name", "a service"), "a service's name"),
         service_points=points,
         sla_violations=_whole(s.get("sla_violations", 0), "a service's SLA violations"),
-        sla_penalty=_whole(s.get("sla_penalty", 0), "a service's SLA penalty"),
         max_points=max_points,
     )
 
@@ -390,7 +387,6 @@ def _service_export(data: object) -> list[TeamServiceExport]:
                 services=services,
                 gross_points=_whole(team_data.get("gross_points", 0), "a team's points"),
                 total_sla_penalty=_whole(team_data.get("total_sla_penalty", 0), "a team's SLA penalty"),
-                total_points=_whole(team_data.get("total_points", 0), "a team's total"),
             )
         )
     logger.info(f"Fetched service export for {len(exports)} teams")

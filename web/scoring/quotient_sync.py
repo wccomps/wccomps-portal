@@ -254,11 +254,12 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
 
     total = 0
 
+    # Only the portal's teams: one Quotient checks but the portal doesn't score must not set the service maximum.
+    teams = {t.team_number: t for t in Team.objects.filter(team_number__in={e.team_number for e in export_data} - {0})}
+    scored = [e for e in export_data if e.team_number in teams]
     rows: list[tuple[Team, ServiceScore, list[ServiceDetail]]] = []
-    for team_export in export_data:
-        team = Team.objects.filter(team_number=team_export.team_number).first() if team_export.team_number else None
-        if team is None:
-            continue
+    for team_export in scored:
+        team = teams[team_export.team_number]
         score = ServiceScore(
             team=team,
             service_points=Decimal(team_export.gross_points),
@@ -277,7 +278,7 @@ def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
         for row in (score, *details):
             _check_storable(row, f"team {team.team_number}")
         rows.append((team, score, details))
-    service_max = service_max_from_export(export_data)
+    service_max = service_max_from_export(scored)
     if service_max:
         _check_storable(ScoringTemplate(service_max=service_max), "the service maximum")
 

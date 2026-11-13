@@ -4,7 +4,7 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    """Forget ServiceDetail.uptime: the service maximum now comes from Quotient's export, and nothing else read it.
+    """Forget ServiceDetail.uptime: nothing reads it.
 
     The column stays for pods still on the previous release during a rolling deploy, with a database default so new
     code can insert a service detail without it. A later release drops it.

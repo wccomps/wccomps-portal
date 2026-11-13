@@ -71,7 +71,6 @@ def test_sync_stores_the_exported_service_max() -> None:
 
 @pytest.mark.django_db
 def test_sync_keeps_service_max_when_the_export_has_no_max_points(monkeypatch) -> None:
-    """An export with no max_points still syncs scores; the maximum stays as it was, and the result says so."""
     Team.objects.create(team_number=3, team_name="Three")
     ScoringTemplate.objects.create(service_max=Decimal("777"))
     monkeypatch.delitem(EXPORT[0]["services"][0], "max_points")
@@ -105,6 +104,23 @@ def test_a_maximum_too_large_or_below_the_points_earned_refuses_the_sync(monkeyp
 
 
 @pytest.mark.django_db
+def test_a_team_the_portal_does_not_score_does_not_set_the_service_maximum(monkeypatch) -> None:
+    """A Quotient team with no portal team (checked in more rounds, say) would otherwise raise every team's maximum."""
+    Team.objects.create(team_number=3, team_name="Three")
+    ScoringTemplate.objects.create()
+    outsider = {
+        "team_name": "team48",
+        "services": [{"service_name": "web", "service_points": 90, "max_points": 90}],
+        "gross_points": 90,
+    }
+    monkeypatch.setattr("scoring.tests.test_quotient_service_sync.EXPORT", [*EXPORT, outsider])
+
+    sync_service_scores()
+
+    assert ScoringTemplate.objects.get().service_max == Decimal("45")
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize("exported", [True, False])
 def test_the_sync_page_warns_only_when_the_maximum_was_not_updated(client, gold_team_user, monkeypatch, exported):
     Team.objects.create(team_number=3, team_name="Three")
@@ -124,7 +140,6 @@ def test_a_second_sync_fetches_fresh_scores(monkeypatch) -> None:
     """Sync is an explicit fetch: the client's 5-minute cache must not hand back the previous numbers."""
     team3 = Team.objects.create(team_number=3, team_name="Three")
     sync_service_scores()
-    monkeypatch.setitem(EXPORT[0], "total_points", 38)
     monkeypatch.setitem(EXPORT[0]["services"][0], "service_points", 43)
 
     sync_service_scores()
