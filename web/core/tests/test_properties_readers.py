@@ -83,7 +83,15 @@ INJECTS = [{"ID": 1, "Title": "Inject 01 - Web (100 pts)", "Description": "Build
 EXPORT = [
     {
         "team_name": "team01",
-        "services": [{"service_name": "web-http", "service_points": 100, "sla_violations": 1, "sla_penalty": 5}],
+        "services": [
+            {
+                "service_name": "web-http",
+                "service_points": 100,
+                "max_points": 120,
+                "sla_violations": 1,
+                "sla_penalty": 5,
+            }
+        ],
         "gross_points": 100,
         "total_sla_penalty": 5,
         "total_points": 95,
@@ -215,7 +223,7 @@ def check_export(result: object) -> None:
                 and all(is_int(n) for n in (t.team_number, t.gross_points, t.total_sla_penalty, t.total_points))
                 and all(
                     is_str(s.service_name)
-                    and all(is_int(n) for n in (s.service_points, s.sla_violations, s.sla_penalty))
+                    and all(is_int(n) for n in (s.service_points, s.max_points, s.sla_violations, s.sla_penalty))
                     for s in t.services
                 )
                 for t in r

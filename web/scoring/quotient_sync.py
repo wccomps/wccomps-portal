@@ -9,12 +9,12 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from quotient.client import QuotientClient, ServiceCheck
+from quotient.client import QuotientClient, ServiceCheck, TeamServiceExport
 
 from team.models import MAX_TEAMS, Team
 
-from .maxes import inject_max_from_titles, service_max_from_details, set_template_max
-from .models import QuotientMetadataCache, ServiceDetail, ServiceScore
+from .maxes import inject_max_from_titles, service_max_from_export, set_template_max
+from .models import QuotientMetadataCache, ScoringTemplate, ServiceDetail, ServiceScore
 
 logger = logging.getLogger(__name__)
 _DNS_RECORD_DOMAIN_RE = re.compile(r"^record\s+([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)\.?(?=[\s:\->]|$)")
@@ -259,6 +259,7 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
     details_synced = 0
 
     rows: list[tuple[Team, ServiceScore, list[ServiceDetail]]] = []
+    synced_exports: list[TeamServiceExport] = []
     for team_export in export_data:
         team = Team.objects.filter(team_number=team_export.team_number).first() if team_export.team_number else None
         if team is None:
@@ -283,6 +284,11 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
         for row in (score, *details):
             _check_storable(row, f"team {team.team_number}")
         rows.append((team, score, details))
+        if details:
+            synced_exports.append(team_export)
+    service_max = service_max_from_export(synced_exports)
+    if service_max is not None:
+        _check_storable(ScoringTemplate(service_max=service_max), "the service maximum")
 
     with transaction.atomic():
         for team, score, details in rows:
@@ -305,8 +311,8 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
             ServiceDetail.objects.bulk_create(details)
             details_synced += len(details)
 
-    # Keep the reactive service scaling current: the max service points at full uptime.
-    set_template_max("service_max", service_max_from_details())
+    # Keep the reactive service scaling current: the max possible service points.
+    set_template_max("service_max", service_max)
 
     return {
         "teams_created": teams_created,

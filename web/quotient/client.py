@@ -169,6 +169,7 @@ class ServiceExportEntry:
     service_points: int
     sla_violations: int
     sla_penalty: int
+    max_points: int = 0
 
 
 @dataclass
@@ -388,6 +389,7 @@ def _service_export(data: object) -> list[TeamServiceExport]:
                 service_points=_whole(_field(s, "service_points", "a service"), "a service's points"),
                 sla_violations=_whole(s.get("sla_violations", 0), "a service's SLA violations"),
                 sla_penalty=_whole(s.get("sla_penalty", 0), "a service's SLA penalty"),
+                max_points=_whole(s.get("max_points", 0), "a service's max points"),
             )
             for s in _objects(team_data.get("services", []), "a team's services")
         ]

@@ -14,7 +14,9 @@ EXPORT = [
         # Quotient's own team id, unrelated to the portal team number
         "team_id": 1,
         "team_name": "team03",
-        "services": [{"service_name": "web", "service_points": 40, "sla_violations": 1, "sla_penalty": 5}],
+        "services": [
+            {"service_name": "web", "service_points": 40, "max_points": 45, "sla_violations": 1, "sla_penalty": 5}
+        ],
         "gross_points": 40,
         "total_sla_penalty": 5,
         "total_points": 35,
@@ -79,8 +81,40 @@ def test_sync_derives_service_max() -> None:
 
     sync_service_scores()
 
-    # web: 40 points at 0.9 uptime -> 44.44 -> 44
-    assert ScoringTemplate.objects.first().service_max == Decimal("44")
+    assert ScoringTemplate.objects.first().service_max == Decimal("45")
+
+
+@pytest.mark.django_db
+def test_sync_keeps_service_max_when_quotient_exports_no_max_points(monkeypatch) -> None:
+    """A Quotient that predates max_points still syncs scores; the maximum stays as it was."""
+    from decimal import Decimal
+
+    from scoring.models import ScoringTemplate
+
+    Team.objects.create(team_number=3, team_name="Three")
+    ScoringTemplate.objects.create(service_max=Decimal("777"))
+    monkeypatch.delitem(EXPORT[0]["services"][0], "max_points")
+
+    assert sync_service_scores()["total"] == 1
+
+    assert ScoringTemplate.objects.get().service_max == Decimal("777")
+
+
+@pytest.mark.django_db
+def test_a_maximum_too_large_to_store_refuses_the_sync(monkeypatch) -> None:
+    from decimal import Decimal
+
+    from scoring.models import ScoringTemplate
+
+    Team.objects.create(team_number=3, team_name="Three")
+    ScoringTemplate.objects.create(service_max=Decimal("777"))
+    monkeypatch.setitem(EXPORT[0]["services"][0], "max_points", 10**30)
+
+    with pytest.raises(ValueError, match="the service maximum"):
+        sync_service_scores()
+
+    assert not ServiceScore.objects.exists()
+    assert ScoringTemplate.objects.get().service_max == Decimal("777")
 
 
 @pytest.mark.django_db
