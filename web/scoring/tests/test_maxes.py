@@ -2,15 +2,14 @@ from decimal import Decimal
 
 import pytest
 from orange_team.models import OrangeCheck, OrangeCheckCriterion
-from quotient.client import Inject, inject_points
+from quotient.client import Inject, ServiceExportEntry, TeamServiceExport, inject_points
 
 from scoring.maxes import (
     inject_max_from_titles,
-    service_max_from_details,
+    service_max_from_export,
     set_template_max,
 )
-from scoring.models import ScoringTemplate, ServiceDetail
-from team.models import Team
+from scoring.models import ScoringTemplate
 
 pytestmark = pytest.mark.django_db
 
@@ -48,37 +47,47 @@ def test_inject_max_none_without_any_values() -> None:
     assert inject_max_from_titles(_injects("A", "B")) is None
 
 
-def _detail(team: Team, name: str, points: str, uptime: str) -> None:
-    ServiceDetail.objects.create(team=team, service_name=name, points=Decimal(points), uptime=Decimal(uptime))
+def _team_export(team_number: int, *services: tuple[str, int, int | None]) -> TeamServiceExport:
+    entries = [
+        ServiceExportEntry(service_name=name, service_points=points, max_points=max_points, sla_violations=0)
+        for name, points, max_points in services
+    ]
+    gross = sum(e.service_points for e in entries)
+    return TeamServiceExport(team_number=team_number, services=entries, gross_points=gross, total_sla_penalty=0)
 
 
-def test_service_max_uses_highest_uptime_per_service() -> None:
-    t1 = Team.objects.create(team_number=1, team_name="T1")
-    t2 = Team.objects.create(team_number=2, team_name="T2")
-    # web: best uptime is t2 at 0.9 -> 1004/0.9 = 1115.56 -> 1116; a noisy low-uptime sample is ignored
-    _detail(t1, "web", "10", "0.01")  # 10/0.01 = 1000 (noisy, lower uptime -> ignored)
-    _detail(t2, "web", "1004", "0.9")  # 1004/0.9 = 1115.56
-    # ssh: single sample 558/0.5 = 1116
-    _detail(t1, "ssh", "558", "0.5")
-    result = service_max_from_details()
-    assert result == Decimal("2232")  # 1116 + 1116
+def test_service_max_sums_each_services_max_points_even_where_no_team_scored() -> None:
+    exports = [
+        _team_export(1, ("web", 10, 1115), ("ssh", 558, 1115), ("dns", 0, 1115)),
+        _team_export(2, ("web", 1004, 1115), ("ssh", 0, 1115), ("dns", 0, 1115)),
+    ]
+    assert service_max_from_export(exports) == Decimal("3345")
 
 
-def test_service_max_ignores_zero_point_best_sample() -> None:
-    # The highest-uptime team scored 0 (port up, content/auth check failed); it must not
-    # "cover" the service with a 0 contribution. The real scorer (lower uptime) sets the max.
-    t1 = Team.objects.create(team_number=1, team_name="T1")
-    t2 = Team.objects.create(team_number=2, team_name="T2")
-    _detail(t1, "web", "0", "0.95")  # best uptime, but 0 points -> must be ignored
-    _detail(t2, "web", "800", "0.80")  # real scorer -> 800/0.8 = 1000
-    _detail(t1, "ssh", "558", "0.50")  # -> 1116
-    assert service_max_from_details() == Decimal("2116")  # 1000 + 1116, not 1116
+def test_service_max_takes_each_services_highest_across_teams() -> None:
+    exports = [
+        _team_export(1, ("web", 900, 1000), ("ssh", 558, 1115)),
+        _team_export(2, ("web", 800, 1115), ("ssh", 558, 1115)),
+    ]
+    assert service_max_from_export(exports) == Decimal("2230")
 
 
-def test_service_max_none_without_uptime() -> None:
-    t1 = Team.objects.create(team_number=1, team_name="T1")
-    _detail(t1, "web", "1000", "0")  # uptime 0 -> excluded
-    assert service_max_from_details() is None
+def test_service_max_none_if_any_entry_has_no_max_points() -> None:
+    exports = [
+        _team_export(1, ("web", 1000, 1115), ("ssh", 500, None)),
+        _team_export(2, ("web", 1000, 1115), ("ssh", 500, 1115)),
+    ]
+    assert service_max_from_export(exports) is None
+
+
+def test_a_service_name_with_a_newline_cannot_forge_a_log_line(caplog) -> None:
+    """The name comes from Quotient: logged as-is, a newline would start a line that looks like the portal's own."""
+    exports = [_team_export(1, ("web\nERROR forged entry", 10, None))]
+
+    with caplog.at_level("WARNING", logger="scoring.maxes"):
+        service_max_from_export(exports)
+
+    assert "\n" not in caplog.records[0].getMessage()
 
 
 def test_set_template_max_writes_when_present() -> None:

@@ -31,7 +31,6 @@ from quotient.client import (
     QuotientService,
     ServiceCheck,
     TeamServiceExport,
-    TeamUptime,
 )
 
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
@@ -83,13 +82,20 @@ INJECTS = [{"ID": 1, "Title": "Inject 01 - Web (100 pts)", "Description": "Build
 EXPORT = [
     {
         "team_name": "team01",
-        "services": [{"service_name": "web-http", "service_points": 100, "sla_violations": 1, "sla_penalty": 5}],
+        "services": [
+            {
+                "service_name": "web-http",
+                "service_points": 100,
+                "max_points": 120,
+                "sla_violations": 1,
+                "sla_penalty": 5,
+            }
+        ],
         "gross_points": 100,
         "total_sla_penalty": 5,
         "total_points": 95,
     }
 ]
-UPTIMES = {"series": [{"Name": "team01", "Data": [{"Service": "web-http", "Uptime": 0.95}]}]}
 SERVICE_CHECKS = [
     {
         "Round": {"ID": 12, "StartTime": "2026-10-18T19:30:00Z"},
@@ -211,38 +217,18 @@ def check_export(result: object) -> None:
             isinstance(r, list)
             and all(
                 isinstance(t, TeamServiceExport)
-                and is_str(t.team_name)
-                and all(is_int(n) for n in (t.team_number, t.gross_points, t.total_sla_penalty, t.total_points))
+                and all(is_int(n) for n in (t.team_number, t.gross_points, t.total_sla_penalty))
                 and all(
                     is_str(s.service_name)
-                    and all(is_int(n) for n in (s.service_points, s.sla_violations, s.sla_penalty))
+                    and all(is_int(n) for n in (s.service_points, s.sla_violations))
+                    and (s.max_points is None or is_int(s.max_points))
                     for s in t.services
                 )
                 for t in r
             )
         )
 
-    outcome(result, ok, "None or teams' services with whole numbers")
-
-
-def check_uptimes(result: object) -> None:
-    outcome(
-        result,
-        lambda r: (
-            r is None
-            or (
-                isinstance(r, list)
-                and all(
-                    isinstance(t, TeamUptime)
-                    and is_str(t.team_name)
-                    and is_int(t.team_number)
-                    and all(is_str(k) and type(v) is float and 0 <= v <= 1 for k, v in t.uptimes.items())
-                    for t in r
-                )
-            )
-        ),
-        "None or teams' uptimes as fractions",
-    )
+    outcome(result, ok, "None or teams' services with whole numbers (max_points may be None)")
 
 
 def check_service_checks(result: object) -> None:
@@ -507,13 +493,6 @@ READERS = [
         (f"{QC}.get_service_export", f"{QC}._fetch", QJ),
     ),
     Reader(
-        "get_uptimes",
-        lambda: quotient().get_uptimes(),
-        (DONE, UPTIMES),
-        check_uptimes,
-        (f"{QC}.get_uptimes", f"{QC}._fetch", QJ),
-    ),
-    Reader(
         "get_service_checks",
         lambda: quotient().get_service_checks(1, "web:http", force_refresh=True),
         (DONE, SERVICE_CHECKS),
@@ -668,7 +647,7 @@ def _fix_groups() -> object:
 
 CALLERS = [
     Caller("sync_quotient_metadata", _sync_metadata, (DONE, METADATA, PROXMOX_POOL, INJECTS), (ValueError,)),
-    Caller("sync_service_scores", _sync_scores, (DONE, EXPORT, UPTIMES), (ValueError,)),
+    Caller("sync_service_scores", _sync_scores, (DONE, EXPORT), (ValueError,)),
     Caller("refresh_user_groups", _refresh_groups, (GROUPS, USERS), (Exception,)),
     Caller("reset_team_credentials", _reset_credentials, (USERS, SESSIONS, DONE, SESSIONS, DONE)),
     Caller("store_discord_id_in_authentik", _store_discord_id, (USERS, DONE)),
@@ -698,9 +677,7 @@ HUGE_EXPORT = [
 @pytest.mark.parametrize("caller", CALLERS, ids=repr)
 @views_profile()
 @given(data=st.data())
-@example(
-    data=[Answer(200, b"{}"), Answer(200, json.dumps(HUGE_EXPORT).encode()), Answer(200, json.dumps(UPTIMES).encode())]
-)
+@example(data=[Answer(200, b"{}"), Answer(200, json.dumps(HUGE_EXPORT).encode())])
 def test_callers_answer_or_log_whatever_the_service_says(caller: Caller, data: st.DataObject | list[Answer]) -> None:
     """The caller returns, or raises only its documented error (refresh_user_groups: anything, as its callers catch
     every error), and leaves the database usable: a database error it swallowed would break the transaction."""

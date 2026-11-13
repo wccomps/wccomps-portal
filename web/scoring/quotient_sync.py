@@ -13,8 +13,8 @@ from quotient.client import QuotientClient, ServiceCheck
 
 from team.models import MAX_TEAMS, Team
 
-from .maxes import inject_max_from_titles, service_max_from_details, set_template_max
-from .models import QuotientMetadataCache, ServiceDetail, ServiceScore
+from .maxes import inject_max_from_titles, service_max_from_export, set_template_max
+from .models import QuotientMetadataCache, ScoringTemplate, ServiceDetail, ServiceScore
 
 logger = logging.getLogger(__name__)
 _DNS_RECORD_DOMAIN_RE = re.compile(r"^record\s+([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)\.?(?=[\s:\->]|$)")
@@ -226,9 +226,6 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
     return metadata
 
 
-UPTIME_PLACES = Decimal(10) ** -ServiceDetail._meta.get_field("uptime").decimal_places
-
-
 def _check_storable(row: models.Model, where: str) -> None:
     """ValueError when a value Quotient sent doesn't fit its column (a name too long, points too large)."""
     try:
@@ -237,30 +234,30 @@ def _check_storable(row: models.Model, where: str) -> None:
         raise ValueError(f"Quotient's scores for {where} don't fit the portal's: {'; '.join(e.messages)}") from e
 
 
-def sync_service_scores(user: User | None = None) -> dict[str, int]:
+class ServiceSyncResult(TypedDict):
+    """How many teams a service score sync wrote, and what to tell whoever ran it when the service maximum was left
+    as it was (None when it was stored, or the export had no checks to add up)."""
+
+    total: int
+    service_max_note: str | None
+
+
+def sync_service_scores(user: User | None = None) -> ServiceSyncResult:
     """Sync each team's aggregate ServiceScore and per-service ServiceDetail records from Quotient, removing and
-    skipping teams with no services in the export. Raises ValueError, writing nothing, when Quotient's scores or
-    uptimes can't be read or don't fit the portal's columns."""
+    skipping teams with no services in the export, and store the service maximum the export gives. Raises
+    ValueError, writing nothing, when Quotient's scores can't be read or don't fit the portal's columns."""
     client = QuotientClient()
 
     export_data = client.get_service_export()
     if export_data is None:
         raise ValueError("Failed to retrieve service scores from Quotient")
-    if not export_data:
-        return {"teams_created": 0, "teams_updated": 0, "total": 0, "details_synced": 0}
 
-    uptimes_data = client.get_uptimes()
-    if uptimes_data is None:
-        raise ValueError("Failed to retrieve uptimes from Quotient")
-    uptimes_by_team = {tu.team_number: tu.uptimes for tu in uptimes_data}
+    total = 0
 
-    teams_updated = 0
-    teams_created = 0
-    details_synced = 0
-
+    teams = {t.team_number: t for t in Team.objects.filter(team_number__in={e.team_number for e in export_data})}
     rows: list[tuple[Team, ServiceScore, list[ServiceDetail]]] = []
     for team_export in export_data:
-        team = Team.objects.filter(team_number=team_export.team_number).first() if team_export.team_number else None
+        team = teams.get(team_export.team_number)
         if team is None:
             continue
         score = ServiceScore(
@@ -269,13 +266,11 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
             sla_violations=Decimal(-team_export.total_sla_penalty),
             synced_by=user,
         )
-        team_uptimes = uptimes_by_team.get(team_export.team_number, {})
         details = [
             ServiceDetail(
                 team=team,
                 service_name=svc.service_name,
                 points=Decimal(svc.service_points),
-                uptime=Decimal(str(team_uptimes.get(svc.service_name, 0))).quantize(UPTIME_PLACES),
                 sla_violations=svc.sla_violations,
             )
             for svc in team_export.services
@@ -283,6 +278,12 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
         for row in (score, *details):
             _check_storable(row, f"team {team.team_number}")
         rows.append((team, score, details))
+    # Only competing teams, the ones the calculator scores: a team slot Quotient checked in more rounds than any of
+    # them must not raise the maximum they are scaled by.
+    competing = [e for e in export_data if e.team_number in teams and teams[e.team_number].is_active]
+    service_max = service_max_from_export(competing)
+    if service_max:
+        _check_storable(ScoringTemplate(service_max=service_max), "the service maximum")
 
     with transaction.atomic():
         for team, score, details in rows:
@@ -290,7 +291,7 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
             if not details:
                 ServiceScore.objects.filter(team=team).delete()
                 continue
-            _service_score, created = ServiceScore.objects.update_or_create(
+            ServiceScore.objects.update_or_create(
                 team=team,
                 defaults={
                     "service_points": score.service_points,
@@ -298,22 +299,25 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
                     "synced_by": user,
                 },
             )
-            if created:
-                teams_created += 1
-            else:
-                teams_updated += 1
             ServiceDetail.objects.bulk_create(details)
-            details_synced += len(details)
+            total += 1
+        # With the scores, so nothing reading both (Close Out) sees new scores against the old maximum.
+        stored = bool(service_max) and set_template_max("service_max", service_max)
 
-    # Keep the reactive service scaling current: the max service points at full uptime.
-    set_template_max("service_max", service_max_from_details())
-
-    return {
-        "teams_created": teams_created,
-        "teams_updated": teams_updated,
-        "total": teams_created + teams_updated,
-        "details_synced": details_synced,
-    }
+    note = None
+    if service_max is None:
+        note = (
+            "The service maximum was not updated: Quotient's export gave no max points, so scores still scale by "
+            "the maximum already stored."
+        )
+    elif not competing and any(details for _, _, details in rows):
+        note = (
+            "The service maximum was not updated: no team Quotient scored is active in the portal, so scores still "
+            "scale by the maximum already stored."
+        )
+    elif service_max and not stored:
+        note = "The service maximum was not stored: no scoring setup is saved yet. Open Scoring setup, then sync again."
+    return {"total": total, "service_max_note": note}
 
 
 def get_box_metadata() -> dict[str, dict[str, object]]:
