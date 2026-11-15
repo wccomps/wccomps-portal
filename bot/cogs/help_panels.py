@@ -284,7 +284,7 @@ class HelpPanelsCog(commands.Cog):
         embed = discord.Embed(
             title="Link Your Discord Account",
             description=(
-                "**Welcome to WCComps!**\n\n"
+                f"**Welcome to {settings.ORG_SHORT_NAME or 'the competition'}!**\n\n"
                 "Before you can participate, you need to link your Discord account to your Authentik account.\n\n"
                 "**Click the button below to get started:**"
             ),

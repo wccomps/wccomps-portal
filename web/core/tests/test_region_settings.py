@@ -2,6 +2,7 @@
 Their defaults are neutral; WRCCDC's values live in its production configmap (WRCCDC_ENV), which the suite runs as."""
 
 import importlib
+import re
 import runpy
 from pathlib import Path
 from unittest.mock import patch
@@ -261,9 +262,13 @@ def test_legacy_host_paths_parse(monkeypatch):
     assert prod["SUBDOMAIN_REDIRECTS"] == {"a.example.org": "/register/", "b.example.org": "/x/?y=1"}
 
 
-def test_legacy_host_path_without_equals_is_refused_at_load(monkeypatch):
-    monkeypatch.setenv("LEGACY_HOST_PATHS", "a.example.org=/register/,b.example.org")
-    with pytest.raises(ImproperlyConfigured, match="LEGACY_HOST_PATHS"):
+@pytest.mark.parametrize(
+    "entry", ["b.example.org", "=/register/", " = /x/", "b.example.org=", "b.example.org=register/"]
+)
+def test_legacy_host_path_not_host_and_path_is_refused_at_load(monkeypatch, entry):
+    """Each entry needs a host, "=" and a path starting with "/"."""
+    monkeypatch.setenv("LEGACY_HOST_PATHS", f"a.example.org=/register/,{entry}")
+    with pytest.raises(ImproperlyConfigured, match=f"LEGACY_HOST_PATHS entry {re.escape(repr(entry.strip()))}"):
         runpy.run_path(SETTINGS_PATH)
 
 

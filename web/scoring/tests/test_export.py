@@ -2,6 +2,7 @@
 
 import csv
 import json
+import re
 from decimal import Decimal
 from io import StringIO
 
@@ -924,3 +925,16 @@ class TestExportDownloads:
         assert response["Content-Type"] == "application/zip"
         names = zipfile.ZipFile(io.BytesIO(response.content)).namelist()
         assert names == [f"{filename}.{ext}" for _, _, filename in EXPORT_DOWNLOADS for ext in ("csv", "json")]
+
+    @pytest.mark.parametrize(
+        ("short_name", "prefix"), [("WCComps", "wccomps"), ("Example League", "example-league"), ("", "portal")]
+    )
+    def test_zip_is_named_for_the_org(self, admin_user, settings, short_name, prefix):
+        settings.ORG_SHORT_NAME = short_name
+        client = Client()
+        client.force_login(admin_user)
+
+        response = client.get(reverse("scoring:export_all"))
+
+        disposition = response["Content-Disposition"]
+        assert re.fullmatch(rf'attachment; filename="{prefix}_export_\d{{8}}_\d{{6}}\.zip"', disposition)

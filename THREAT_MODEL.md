@@ -172,9 +172,10 @@ flowchart LR
    team cap and hosts: which Authentik groups grant admin and every role, which accounts a start, stop or reset
    touches, and which origins CSRF trusts, so changing one is a privilege change (`web/portal/settings.py`
    `PORTAL_GROUP_PREFIX`, `PORTAL_ADMIN_GROUP`, `TEAM_GROUP_PATTERN`, `TEAM_ACCOUNT_PATTERN`, `MAX_TEAMS`, `BASE_URL`,
-   `CANONICAL_HOST`, `LEGACY_HOSTS`, `SUBDOMAIN_REDIRECTS`). The repository's defaults are neutral (`Portal_` groups,
-   no canonical or legacy hosts), not WRCCDC's; the web server and the bot refuse to start while a required setting
-   is empty (`web/portal/required.py` `REQUIRED_SETTINGS`, checked in `web/portal/wsgi.py` and `main.py`).
+   `CANONICAL_HOST`, `LEGACY_HOSTS`, `SUBDOMAIN_REDIRECTS` (read from the `LEGACY_HOST_PATHS` variable)). The
+   repository's defaults are neutral (`Portal_` groups, no canonical or legacy hosts), not WRCCDC's; the web server
+   and the bot refuse to start while a required setting is empty (`web/portal/required.py` `REQUIRED_SETTINGS`,
+   checked in `web/portal/wsgi.py` and `main.py`).
 
 ## Owner and review trigger
 
@@ -188,6 +189,7 @@ The repository maintainers own this file. Update it in the same pull request whe
 - changes the build, the dependency policy or the deploy path;
 - changes the default or a deployment's value of a group, team account, team cap or host setting
   (`web/portal/settings.py` `PORTAL_GROUP_PREFIX`, `PORTAL_ADMIN_GROUP`, `TEAM_GROUP_PATTERN`, `TEAM_ACCOUNT_PATTERN`,
-  `MAX_TEAMS`, `BASE_URL`, `CANONICAL_HOST`, `LEGACY_HOSTS`, `SUBDOMAIN_REDIRECTS`).
+  `MAX_TEAMS`, `BASE_URL`, `CANONICAL_HOST`, `LEGACY_HOSTS`, `SUBDOMAIN_REDIRECTS` (read from the `LEGACY_HOST_PATHS`
+  variable)).
 
 Review it in full before each event, alongside the readiness checks.

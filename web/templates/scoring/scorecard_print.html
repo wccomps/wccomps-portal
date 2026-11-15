@@ -483,6 +483,8 @@
                 </tbody>
             </table>
         {% endif %}
-        <div class="footer">Generated on {% now "Y-m-d H:i" %} | WCComps Scoring System</div>
+        <div class="footer">
+            Generated on {% now "Y-m-d H:i" %} | {% if ORG_SHORT_NAME %}{{ ORG_SHORT_NAME }} {% endif %}Scoring System
+        </div>
     </body>
 </html>

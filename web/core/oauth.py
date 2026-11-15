@@ -51,8 +51,10 @@ def _get_oauth_config() -> dict[str, str]:
 def oauth_login(request: HttpRequest) -> HttpResponse:
     config = _get_oauth_config()
 
-    if not config["client_id"]:
-        logger.error("AUTHENTIK_CLIENT_ID not configured")
+    required = (("AUTHENTIK_CLIENT_ID", config["client_id"]), ("AUTHENTIK_OIDC_URL", settings.AUTHENTIK_OIDC_URL))
+    missing = [name for name, value in required if not value]
+    if missing:
+        logger.error(f"{', '.join(missing)} not configured")
         return render(
             request,
             "core/oauth_error.html",

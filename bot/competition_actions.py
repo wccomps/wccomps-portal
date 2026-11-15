@@ -21,6 +21,7 @@ from bot.utils import (
     TaskProgress,
     announcement,
     log_to_ops_channel,
+    room_judge_role_name,
     run_blocking,
     send_announcement,
     send_parts,
@@ -192,7 +193,7 @@ async def _tear_down_teams(
 
 
 async def _remove_room_judges(guild: discord.Guild) -> int:
-    room_judge_role = discord.utils.get(guild.roles, name="WCComps Room Judge")
+    room_judge_role = discord.utils.get(guild.roles, name=room_judge_role_name())
     if room_judge_role is None:
         return 0
     judges = 0

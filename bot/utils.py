@@ -47,6 +47,7 @@ def fit(text: str, limit: int) -> str:
 
 
 DISCORD_CHOICE_CHAR_LIMIT = 100
+DISCORD_COMMAND_DESCRIPTION_CHAR_LIMIT = 100
 DISCORD_CHOICE_COUNT_LIMIT = 25
 DISCORD_SELECT_OPTION_LIMIT = 25
 
@@ -283,6 +284,16 @@ async def find_team(team_number: int) -> Team | str:
         return f"Team number must be between 1 and {MAX_TEAMS}"
     team = await Team.objects.filter(team_number=team_number).afirst()
     return team or f"Team {team_number} not found"
+
+
+def org_named(text: str) -> str:
+    """text after the organization's short name ("WCComps Room Judge"), or text alone when it has none."""
+    return f"{settings.ORG_SHORT_NAME} {text}" if settings.ORG_SHORT_NAME else text
+
+
+def room_judge_role_name() -> str:
+    """The Discord role a close out takes away, which sees every team category."""
+    return org_named("Room Judge")
 
 
 def team_role_name(team_number: int) -> str:

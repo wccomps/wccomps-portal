@@ -18,6 +18,8 @@ from bot.utils import (
     category_chat_channel,
     find_team_category,
     find_team_role,
+    org_named,
+    room_judge_role_name,
     send_parts,
     team_category_name,
     team_role_name,
@@ -104,15 +106,19 @@ _TEAM_ROLE_NAME_PATTERN = re.compile(r"^Team (\d+)$")
 _TEAM_CATEGORY_NAME_PATTERN = re.compile(r"^team (\d+)$", re.IGNORECASE)
 
 _TALKS = {"read_messages": True, "send_messages": True, "connect": True, "speak": True}
-# Roles found by name that see every team category, and what they may do there
-GUEST_ROLE_PERMISSIONS: dict[str, dict[str, bool]] = {
-    "WCComps Observers": {"read_messages": True, "send_messages": False, "connect": False},
-    "Orange Team Guest": _TALKS,
-    "Black Team Guest": _TALKS,
-    "WCComps Room Judge": {"read_messages": True},
-    "WCComps Operations Team": _TALKS,
-    "WRCCDC Server Owners": _TALKS,
-}
+
+
+def guest_role_permissions() -> dict[str, dict[str, bool]]:
+    """Roles found by name that see every team category, and what they may do there."""
+    return {
+        org_named("Observers"): {"read_messages": True, "send_messages": False, "connect": False},
+        "Orange Team Guest": _TALKS,
+        "Black Team Guest": _TALKS,
+        room_judge_role_name(): {"read_messages": True},
+        org_named("Operations Team"): _TALKS,
+        "WRCCDC Server Owners": _TALKS,
+    }
+
 
 type Overwrites = dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]
 
@@ -174,7 +180,7 @@ async def setup_team_infrastructure(
         category = await step(
             "create the category",
             guild.create_category(
-                name=team_category_name(team_number), overwrites=overwrites, reason="WCComps team category"
+                name=team_category_name(team_number), overwrites=overwrites, reason=org_named("team category")
             ),
         )
     elif role not in category.overwrites and role != guild.default_role:
@@ -192,13 +198,13 @@ async def setup_team_infrastructure(
     if not chat_channel:
         chat_channel = await step(
             "create the chat channel",
-            category.create_text_channel(f"team{team_number:02d}-chat", reason="WCComps team text channel"),
+            category.create_text_channel(f"team{team_number:02d}-chat", reason=org_named("team text channel")),
         )
     await step("post the ticket panel", _post_ticket_panel(bot, team_number, chat_channel))
     if not any(isinstance(c, discord.VoiceChannel) for c in category.channels):
         await step(
             "create the voice channel",
-            category.create_voice_channel(f"team{team_number:02d}-voice", reason="WCComps team voice channel"),
+            category.create_voice_channel(f"team{team_number:02d}-voice", reason=org_named("team voice channel")),
         )
     logger.info(f"Set up infrastructure for {team.team_name}")
 
@@ -227,7 +233,7 @@ async def _create_role(guild: discord.Guild, team_number: int) -> discord.Role:
         name=team_role_name(team_number),
         color=template_role.color if template_role else discord.Color.default(),
         mentionable=True,
-        reason="WCComps team role",
+        reason=org_named("team role"),
     )
     logger.info(f"Created role {role.name}")
     return role
@@ -273,7 +279,7 @@ def _category_overwrites(guild: discord.Guild, role: discord.Role) -> Overwrites
         staff_role = guild.get_role(role_id)
         if staff_role and staff_role not in (guild.default_role, role):
             overwrites[staff_role] = discord.PermissionOverwrite(**permissions)
-    for name, permissions in GUEST_ROLE_PERMISSIONS.items():
+    for name, permissions in guest_role_permissions().items():
         if guest_role := discord.utils.get(guild.roles, name=name):
             overwrites[guest_role] = discord.PermissionOverwrite(**permissions)
     return overwrites

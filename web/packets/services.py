@@ -190,6 +190,7 @@ class PacketDistributionService:
             "team_extras": team_extras,
             "portal_url": team_packet_url(),
             "ORG_NAME": settings.ORG_NAME,
+            "ORG_SHORT_NAME": settings.ORG_SHORT_NAME,
             **competition_schedule_context(),
         }
 

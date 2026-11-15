@@ -523,6 +523,31 @@ class TestReusedCategory:
         assert overwrites[everyone].read_messages is False
 
 
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_org_named_guest_roles_and_reasons_follow_the_short_name(team, mock_guild_with_base_roles, monkeypatch):
+    """The org's guest roles are found by its short name; another region's names get nothing."""
+    guild = mock_guild_with_base_roles
+    monkeypatch.setattr(settings, "ORG_SHORT_NAME", "Example")
+    guests = {}
+    names = ["Example Observers", "Example Room Judge", "Example Operations Team", "WCComps Room Judge"]
+    for pk, name in enumerate(names):
+        guests[name] = MagicMock(spec=discord.Role, id=5800 + pk)
+        guests[name].name = name
+        guild.roles.append(guests[name])
+
+    await setup_team_infrastructure(guild, team)
+
+    kwargs = guild.create_category.await_args.kwargs
+    overwrites = kwargs["overwrites"]
+    assert overwrites[guests["Example Observers"]].send_messages is False
+    assert overwrites[guests["Example Room Judge"]].read_messages is True
+    assert overwrites[guests["Example Operations Team"]].speak is True
+    assert guests["WCComps Room Judge"] not in overwrites
+    assert kwargs["reason"] == "Example team category"
+    assert guild.create_role.await_args.kwargs["reason"] == "Example team role"
+
+
 @pytest_asyncio.fixture
 async def threaded_ticket(db):
     from ticketing.models import Ticket, TicketCategory

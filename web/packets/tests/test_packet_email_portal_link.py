@@ -144,6 +144,14 @@ def test_packet_email_uses_org_names(team, packet):
     (message,) = mail.outbox
     assert message.subject == "[TEST] Example: Rules"
     assert "Example Cyber League" in message.body
+    assert "<title>Packet Notification - Example</title>" in message.alternatives[0][0]
+
+
+@override_settings(ORG_SHORT_NAME="")
+def test_packet_email_title_without_a_short_name(team, packet):
+    PacketDistributionService().send_test_packet_email(packet, team, "gold@example.org")
+    (message,) = mail.outbox
+    assert "<title>Packet Notification</title>" in message.alternatives[0][0]
 
 
 @pytest.mark.parametrize(("reply_to", "expected"), [("", []), ("info@example.org", ["info@example.org"])])
