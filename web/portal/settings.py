@@ -279,6 +279,10 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@wccomps.org")
 DEFAULT_REPLY_TO_EMAIL = os.environ.get("DEFAULT_REPLY_TO_EMAIL", "info@wccomps.org")
 SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
+SITE_NAME = os.environ.get("SITE_NAME", "WCComps Portal")
+ORG_NAME = os.environ.get("ORG_NAME", "Western Cyber Competitions")
+ORG_SHORT_NAME = os.environ.get("ORG_SHORT_NAME", "WCComps")
+
 HTTPX_DEFAULT_TIMEOUT = int(os.environ.get("HTTPX_DEFAULT_TIMEOUT", "10"))
 DISCORD_WEBHOOK_TIMEOUT = int(os.environ.get("DISCORD_WEBHOOK_TIMEOUT", "5"))
 

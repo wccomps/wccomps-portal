@@ -2,6 +2,7 @@
 
 from typing import cast
 
+from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, User
 from django.http import HttpRequest
 
@@ -158,6 +159,11 @@ def _get_nav_active(request: HttpRequest) -> dict[str, str]:
     return {"nav": "", "subnav": ""}
 
 
+def site_names() -> dict[str, str]:
+    """The site and organization names every page and email shows."""
+    return {"SITE_NAME": settings.SITE_NAME, "ORG_NAME": settings.ORG_NAME, "ORG_SHORT_NAME": settings.ORG_SHORT_NAME}
+
+
 def permissions(request: HttpRequest) -> dict[str, bool | str]:
     """Add permission flags to all template contexts. A request with no user (an error answered before
     AuthenticationMiddleware ran) is shown as signed out."""
@@ -165,6 +171,7 @@ def permissions(request: HttpRequest) -> dict[str, bool | str]:
         ctx: dict[str, bool | str] = {f"is_{perm}": False for perm in PERMISSION_MAP}
         ctx.update(
             {
+                **site_names(),
                 "authentik_username": "",
                 "nav_active": "",
                 "subnav_active": "",
@@ -177,6 +184,7 @@ def permissions(request: HttpRequest) -> dict[str, bool | str]:
     nav_context = _get_nav_active(request)
     return {
         **perms,
+        **site_names(),
         "authentik_username": user.username,
         "nav_active": nav_context["nav"],
         "subnav_active": nav_context["subnav"],

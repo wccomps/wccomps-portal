@@ -172,3 +172,10 @@ def test_empty_legacy_hosts_turn_off_legacy_redirects(monkeypatch):
     assert prod["LEGACY_HOSTS"] == []
     assert prod["SUBDOMAIN_REDIRECTS"] == {}
     assert prod["CSRF_TRUSTED_ORIGINS"] == ["https://portal.example.org"]
+
+
+def test_site_name_reaches_pages(admin_client, settings):
+    settings.SITE_NAME = "Example Portal"
+    page = admin_client.get(reverse("admin_teams")).content.decode()
+    assert "Example Portal" in page
+    assert "WCComps Portal" not in page

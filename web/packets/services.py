@@ -13,6 +13,7 @@ from registration.models import Event
 from registration.stage import ACTIONS, Action
 
 from core.authentik_utils import set_team_password
+from core.context_processors import site_names
 from core.team_accounts import single_account
 from core.utils import ndjson_done
 from core.utils import ndjson_progress as _progress
@@ -190,6 +191,7 @@ class PacketDistributionService:
             "password": password,
             "team_extras": team_extras,
             "portal_url": team_packet_url(),
+            **site_names(),
             **competition_schedule_context(),
         }
 
@@ -220,7 +222,7 @@ class PacketDistributionService:
             packet,
             team,
             recipients,
-            f"WCComps: {packet.title}",
+            f"{settings.ORG_SHORT_NAME}: {packet.title}",
         )
         email.send(fail_silently=False)
 
@@ -258,7 +260,7 @@ class PacketDistributionService:
 
     def send_test_packet_email(self, packet: Packet, team: Team, email: str) -> None:
         """Send a test packet email to a specific address without creating distribution records."""
-        msg = self._build_packet_email(packet, team, [email], f"[TEST] WCComps: {packet.title}")
+        msg = self._build_packet_email(packet, team, [email], f"[TEST] {settings.ORG_SHORT_NAME}: {packet.title}")
         msg.send(fail_silently=False)
 
         logger.info(f"Sent test email for packet {packet.id} (team {team.team_number}) to {email}")

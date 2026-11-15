@@ -3,6 +3,7 @@ from functools import wraps
 from typing import TYPE_CHECKING, cast
 
 from django import forms
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.admin.exceptions import DisallowedModelAdminToField
 from django.contrib.admin.options import TO_FIELD_VAR
@@ -32,8 +33,8 @@ from .models import (
 class AuthentikAdminSite(admin.AdminSite):
     """Admin site that checks Authentik groups for access."""
 
-    site_header = "WCComps Portal Administration"
-    site_title = "WCComps Portal Admin"
+    site_header = f"{settings.SITE_NAME} Administration"
+    site_title = f"{settings.SITE_NAME} Admin"
     index_title = "Competition Management"
     site_url = "/ops/tickets/"
 

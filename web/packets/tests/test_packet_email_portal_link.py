@@ -136,3 +136,11 @@ def test_packet_email_and_portal_page_omit_schedule_when_not_configured(team, pa
 
     assert response.status_code == 200
     assert "Competition Schedule" not in response.content.decode()
+
+
+@override_settings(ORG_SHORT_NAME="Example", ORG_NAME="Example Cyber League")
+def test_packet_email_uses_org_names(team, packet):
+    PacketDistributionService().send_test_packet_email(packet, team, "gold@example.org")
+    (message,) = mail.outbox
+    assert message.subject == "[TEST] Example: Rules"
+    assert "Example Cyber League" in message.body

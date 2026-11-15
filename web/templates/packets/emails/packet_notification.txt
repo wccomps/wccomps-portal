@@ -26,4 +26,4 @@ Please review this packet before the competition begins.
 If you have any questions, please contact the competition organizers.
 
 ---
-Western Cyber Competitions{% endautoescape %}
+{{ ORG_NAME }}{% endautoescape %}
