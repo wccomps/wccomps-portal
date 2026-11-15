@@ -29,6 +29,7 @@ from core.services.competition import (
     set_max_members,
     set_schedule,
 )
+from core.team_accounts import SEVERAL_ACCOUNTS, single_account
 from core.utils import (
     DEFAULT_TIMEZONE,
     DEFAULT_TIMEZONE_NAME,
@@ -75,6 +76,10 @@ class AdminCompetitionCog(commands.Cog):
 
         if not settings.AUTHENTIK_TOKEN:
             await interaction.response.send_message("Error: AUTHENTIK_TOKEN not configured in settings", ephemeral=True)
+            return
+
+        if not single_account():
+            await interaction.response.send_message(f"Error: {SEVERAL_ACCOUNTS}", ephemeral=True)
             return
 
         if not team_numbers:

@@ -13,6 +13,7 @@ from registration.models import Event
 from registration.stage import ACTIONS, Action
 
 from core.authentik_utils import set_team_password
+from core.team_accounts import single_account
 from core.utils import ndjson_done
 from core.utils import ndjson_progress as _progress
 from team.models import SchoolInfo, Team, team_username
@@ -176,8 +177,10 @@ class PacketDistributionService:
     ) -> EmailMultiAlternatives:
         from core.services.competition import competition_schedule_context
 
-        password = self._team_password(team)
-        username = team_username(team.team_number)
+        # Only a single-account team's credentials go in the email; with several, the region hands them out itself
+        username, password = (
+            (team_username(team.team_number), self._team_password(team)) if single_account() else (None, None)
+        )
         raw_extras = packet.team_extras.get(str(team.team_number), {}) if packet.team_extras else {}
         team_extras = {k.replace("_", " ").title(): v for k, v in raw_extras.items()}
         context: dict[str, object] = {

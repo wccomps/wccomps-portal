@@ -22,6 +22,7 @@ from core.services.competition import (
     current_timer_plan,
     run_competition,
 )
+from core.team_accounts import TeamAccounts
 from core.utils import Stepped, drain
 from team.models import MAX_TEAMS, Team, team_username
 
@@ -34,8 +35,8 @@ def run_competition_to_completion(enable: bool, actor: str) -> CompetitionRunRes
 
 @pytest.fixture(autouse=True)
 def _team_accounts_through_the_manager():
-    def switch(manager: MagicMock, number: int, is_active: bool) -> None:
-        ok, why = manager.team_account(team_username(number), is_active=is_active)
+    def switch(manager: MagicMock, username: str, is_active: bool) -> None:
+        ok, why = manager.team_account(username, is_active=is_active)
         if not ok:
             raise AuthentikAPIError(why)
 
@@ -118,6 +119,39 @@ def test_stop_disables_every_team_account(authentik, config):
 
     assert authentik.team_account.call_count == result.accounts_total == MAX_TEAMS
     assert "Accounts disabled: 50/50" in result.summary()
+
+
+@pytest.mark.parametrize(("enable", "expected"), [(True, ACTIVE_TEAMS), (False, list(range(1, MAX_TEAMS + 1)))])
+def test_one_account_per_team_toggles_each_teams_account_without_listing(authentik, config, enable, expected):
+    """With the default pattern, a team's account is its team_username, in its group or not, as before team account
+    patterns: no listing of Authentik's users and groups first."""
+    CompetitionConfig.objects.filter(pk=1).update(applications_enabled=not enable)
+
+    run_competition_to_completion(enable, "timer")
+
+    authentik.team_accounts_by_team.assert_not_called()
+    assert [c.args[0] for c in authentik.team_account.call_args_list] == [team_username(n) for n in expected]
+
+
+def test_start_toggles_every_matched_account(authentik, config, settings):
+    settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
+    authentik.team_accounts_by_team.side_effect = lambda numbers: {
+        n: TeamAccounts([f"team{n:02d}a", f"team{n:02d}b"], ["blueteamadmin"]) for n in numbers
+    }
+    result = run_competition_to_completion(True, "timer")
+    enabled = [c.args[0] for c in authentik.team_account.call_args_list]
+    assert enabled == ["team01a", "team01b", "team02a", "team02b", "team03a", "team03b"]
+    assert result.accounts_ok == result.accounts_total == 6
+
+
+def test_start_fails_a_team_with_no_account(authentik, config, settings):
+    settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
+    authentik.team_accounts_by_team.side_effect = lambda numbers: {
+        n: TeamAccounts([] if n == 2 else [f"team{n:02d}a"], []) for n in numbers
+    }
+    result = run_competition_to_completion(True, "timer")
+    assert result.account_failures == [("team 02", "no team account in its group")]
+    assert result.outcome is RunOutcome.INCOMPLETE
 
 
 def test_stop_syncs_service_scores_and_records_actor_user(authentik, config, django_user_model):

@@ -29,6 +29,7 @@ from bot.utils import (
 from core.authentik_utils import Changed, Refused, parse_team_range, reset_team
 from core.models import AuditLog, CompetitionConfig
 from core.services.linking import ADMIN_UNLINK, TEAM_REMOVED, unlink_discord_links, unlink_teams
+from core.team_accounts import SEVERAL_ACCOUNTS, single_account
 from core.utils import shorten
 from team.models import DiscordLink, Team
 
@@ -241,6 +242,9 @@ class AdminTeamsCog(commands.Cog):
         team_number: int,
         recreate_channels: bool = True,
     ) -> None:
+        if not single_account():
+            await interaction.response.send_message(f"Error: {SEVERAL_ACCOUNTS}", ephemeral=True)
+            return
         team = await find_team(team_number)
         if isinstance(team, str):
             await interaction.response.send_message(team, ephemeral=True)

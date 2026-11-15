@@ -37,6 +37,7 @@ from quotient.client import (
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
 from core.nextcloud import NextcloudAPIError, NextcloudManager
 from core.proxmox import ProxmoxAPIError, ProxmoxClient, ProxmoxSnapshot, ProxmoxTaskStatus, ProxmoxVM
+from core.team_accounts import TeamAccounts
 from core.tests.external_json import Answer, answer_lists, deep, serving
 from core.tests.strategies import rolled_back
 from core.tests.views_harness import views_profile
@@ -163,6 +164,18 @@ def check_groups(result: object) -> None:
             )
         ),
         "groups with a pk, name and parent pks",
+    )
+
+
+def check_team_accounts(result: object) -> None:
+    outcome(
+        result,
+        lambda r: (
+            isinstance(r, dict)
+            and set(r) == {3}
+            and all(isinstance(a, TeamAccounts) and _strs(a.matched) and _strs(a.skipped) for a in r.values())
+        ),
+        "team 3's TeamAccounts, matched and skipped usernames",
     )
 
 
@@ -475,6 +488,14 @@ READERS = [
         (GROUPS,),
         check_groups,
         (f"{AM}.list_all_groups", f"{AM}._list_all", *READ),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "team_accounts_by_team",
+        lambda: authentik().team_accounts_by_team({3: "WCComps_BlueTeam03"}),
+        (USERS, GROUPS),
+        check_team_accounts,
+        (f"{AM}.team_accounts_by_team", f"{AM}.list_all_users", f"{AM}.list_all_groups", f"{AM}._list_all", *READ),
         raises=(AuthentikAPIError,),
     ),
     Reader(

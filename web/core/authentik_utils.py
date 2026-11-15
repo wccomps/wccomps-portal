@@ -18,13 +18,16 @@ from .authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikMana
 from .discord_tasks import LogToChannel, SetupTeamInfrastructure
 from .models import AuditLog, CredentialsReset, DiscordTask
 from .services.linking import CREDENTIALS_RESET, TEAM_RESET, unlink_teams
+from .team_accounts import require_single_account
 from .utils import shorten
 
 logger = logging.getLogger(__name__)
 
 
 def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser:
-    """The team's Authentik account; AuthentikAPIError saying why when there is none."""
+    """A single-account team's Authentik account; AuthentikAPIError saying why when there is none, BadRequest when
+    teams have several accounts."""
+    require_single_account()
     if team_number < 1 or team_number > MAX_TEAMS:
         raise AuthentikAPIError(f"Team number must be between 1 and {MAX_TEAMS}")
     username = team_username(team_number)
@@ -34,9 +37,13 @@ def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser:
     return user
 
 
-def set_team_account_active(manager: AuthentikManager, team_number: int, is_active: bool) -> None:
-    """Enable or disable the team's Authentik account; AuthentikAPIError when it can't."""
-    manager.set_user_active(_team_user(manager, team_number), is_active)
+def set_team_account_active(manager: AuthentikManager, username: str, is_active: bool) -> None:
+    """Enable or disable a team account (one of AuthentikManager.team_accounts_by_team's matched); AuthentikAPIError
+    when it can't."""
+    user = manager.find_user(username)
+    if user is None:
+        raise AuthentikAPIError(f"User {username} not found")
+    manager.set_user_active(user, is_active)
 
 
 # The portal refuses a sign-in from before the reset, but the team's other Authentik apps don't
@@ -472,6 +479,7 @@ def reset_teams_credentials(
     batches: list[BulkPasswordResetResult] = []
     handed_over = 0
     partial: list[tuple[int, str, str]] = []  # The batch under way's resets so far
+    require_single_account()
     try:
         for start in range(0, len(team_numbers), RESET_BATCH_SIZE):
             if batches and not room_for_another():

@@ -2,11 +2,14 @@
 
 import logging
 import uuid
+from collections.abc import Mapping
 from typing import TypedDict, cast
 from urllib.parse import quote
 
 import httpx
 from django.conf import settings
+
+from core.team_accounts import TeamAccounts, team_accounts
 
 
 class AuthentikApplication(TypedDict):
@@ -386,6 +389,11 @@ class AuthentikManager:
                 "/api/v3/core/groups/", {"include_users": "false"}, {"pk": str, "name": str, "parents": list}
             ),
         )
+
+    def team_accounts_by_team(self, group_names: Mapping[int, str]) -> dict[int, TeamAccounts]:
+        """Each team's accounts (core.team_accounts), given its group's name, from one listing of users and one of
+        groups."""
+        return team_accounts(group_names, self.list_all_users(), self.list_all_groups())
 
     def add_user_to_group(self, user_pk: int, group_pk: str) -> None:
         response = self._request(

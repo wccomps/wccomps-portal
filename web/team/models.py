@@ -1,7 +1,9 @@
 import logging
+import re
 from collections.abc import Iterable
 from typing import NamedTuple
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
@@ -11,17 +13,20 @@ from django.utils.functional import cached_property
 
 logger = logging.getLogger(__name__)
 
-MAX_TEAMS = 50
+MAX_TEAMS: int = settings.MAX_TEAMS
 
 
 def team_username(team_number: int) -> str:
-    """Username of a team's shared Authentik account."""
-    return f"team{team_number:02d}"
+    """Username of a single-account team's Authentik account (settings.TEAM_ACCOUNT_PATTERN, when it names one
+    username), and of every team's Nextcloud account (teamNN when teams have several Authentik accounts). Code acting
+    on a team's Authentik accounts uses core.team_accounts, which also covers teams with several."""
+    name = settings.TEAM_ACCOUNT_PATTERN.replace("{number}", f"{team_number:02d}")
+    return name if re.escape(name) == name else f"team{team_number:02d}"
 
 
 def team_group_name(team_number: int) -> str:
     """A new team's Authentik group; after that, Team.authentik_group is the one the portal and bot read."""
-    return f"WCComps_BlueTeam{team_number:02d}"
+    return settings.TEAM_GROUP_PATTERN.format(number=team_number)
 
 
 def active_team_numbers() -> list[int]:

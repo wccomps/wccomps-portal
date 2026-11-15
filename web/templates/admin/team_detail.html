@@ -67,9 +67,11 @@
                             Activate Team
                         </c-button>
                     {% endif %}
-                    <c-button variant="danger" @click="resetTeam" ::disabled="loading" data-confirm="Reset this team? This unlinks all members, generates a new Authentik password and ends the team account's Authentik and portal sessions. It cannot be undone.">
-                        Reset Team
-                    </c-button>
+                    {% if single_account %}
+                        <c-button variant="danger" @click="resetTeam" ::disabled="loading" data-confirm="Reset this team? This unlinks all members, generates a new Authentik password and ends the team account's Authentik and portal sessions. It cannot be undone.">
+                            Reset Team
+                        </c-button>
+                    {% endif %}
                     <c-button variant="default"
                               @click="teamAction"
                               data-action="recreate_channels"
@@ -77,7 +79,9 @@
                               ::disabled="loading">
                         Recreate Discord Channels
                     </c-button>
-                    {% include "admin/includes/team_password_reset.html" with team_number=team.team_number %}
+                    {% if single_account %}
+                        {% include "admin/includes/team_password_reset.html" with team_number=team.team_number %}
+                    {% endif %}
                 </c-button_row>
                 <template x-if="newPassword">
                     <c-action_box heading="New Password" variant="warning" class="mt-20">

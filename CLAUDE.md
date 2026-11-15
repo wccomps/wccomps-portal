@@ -71,7 +71,8 @@ the unparenthesized form is used intentionally throughout.
   with a message
 - A team's record (ticket, incident report, attachment) is looked up with `team_record_or_404`: another team's
   record is a 404, the same as a missing one, never a 403
-- `WCComps_Discord_Admin` grants access to everything
+- `PORTAL_ADMIN_GROUP` (default `WCComps_Discord_Admin`) grants access to everything; the other group names are
+  `PORTAL_GROUP_PREFIX` (default `WCComps_`) plus a fixed suffix
 
 ### Discord Task Queue
 - Web code queues work with `DiscordTask.enqueue(<payload>)`; the bot's `DiscordQueueProcessor` consumes it
@@ -103,5 +104,7 @@ the unparenthesized form is used intentionally throughout.
   starting once the caller's transaction commits
 
 ### Team Model
-- `MAX_TEAMS = 50` defined in `team/models.py`
-- Team accounts are shared (multiple Discord users per Authentik account)
+- `MAX_TEAMS` (setting, default 50) is read into `team/models.py`
+- A team's Authentik accounts are the members of its group matching `TEAM_ACCOUNT_PATTERN` (`core/team_accounts.py`);
+  by default one shared `teamNN` account (multiple Discord users per Authentik account). Password resets need that
+  one account (`single_account()`) and are refused when teams have several

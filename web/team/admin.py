@@ -6,6 +6,7 @@ from django.template.loader import render_to_string
 from django.utils.html import format_html
 
 from core.admin import PortalModelAdmin
+from core.team_accounts import single_account
 
 from .models import (
     DiscordLink,
@@ -18,7 +19,8 @@ from .models import (
 
 
 def _password_reset_button(team: Team) -> str:
-    if team._state.adding:  # the add page has no team yet
+    # The add page has no team yet; with several accounts per team, their passwords are managed in Authentik
+    if team._state.adding or not single_account():
         return ""
     return render_to_string("admin/includes/team_password_reset.html", {"team_number": team.team_number})
 

@@ -433,16 +433,16 @@ def test_web_bulk_reset_where_every_team_failed_is_an_error(admin_user):
 
 
 def test_set_team_account_active_switches_the_teams_account(manager):
-    set_team_account_active(manager, 7, True)
+    set_team_account_active(manager, "team07", True)
+    manager.find_user.assert_called_once_with("team07")
     manager.set_user_active.assert_called_once_with({"pk": 5, "username": "team07", "uid": "sub-07"}, True)
 
 
-@pytest.mark.parametrize(("number", "why"), [(7, "User team07 not found"), (0, "Team number must be between 1 and 50")])
-def test_set_team_account_active_raises_why_it_could_not(manager, number, why):
+def test_set_team_account_active_raises_why_it_could_not(manager):
     manager.find_user.return_value = None
 
-    with pytest.raises(AuthentikAPIError, match=f"^{why}$"):
-        set_team_account_active(manager, number, True)
+    with pytest.raises(AuthentikAPIError, match="^User team07 not found$"):
+        set_team_account_active(manager, "team07", True)
     manager.set_user_active.assert_not_called()
 
 

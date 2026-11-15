@@ -15,6 +15,7 @@ from core.errors import json_endpoint
 from core.forms import TeamActionForm, TeamsBulkActionForm
 from core.models import AuditLog, DiscordTask
 from core.services.linking import ADMIN_UNLINK, unlink_discord_links
+from core.team_accounts import require_single_account, single_account
 from core.utils import list_filters, optional_int, requested_sort, stable_order
 from team.models import DiscordLink, Team
 
@@ -68,6 +69,7 @@ def admin_team_detail(request: HttpRequest, team_number: int) -> HttpResponse:
     context = {
         "team": team,
         "members": members,
+        "single_account": single_account(),
     }
 
     return render(request, "admin/team_detail.html", context)
@@ -121,6 +123,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
         return JsonResponse({"success": True, "message": f"User {ended[0].discord_username} unlinked"})
 
     elif action == "reset":
+        require_single_account()
         reset = reset_team(team_number, actor=authentik_username, recreate_channels=True).credentials
         match reset:
             case Changed(password=password):
@@ -142,6 +145,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
                 )
 
     elif action == "reset_password":
+        require_single_account()
         reset = reset_team_credentials(team_number, actor=authentik_username)
         match reset:
             case Changed(password=password):

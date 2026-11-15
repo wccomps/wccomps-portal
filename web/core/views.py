@@ -44,6 +44,7 @@ from core.services.linking import (
     unlink_teams,
     validate_link_token,
 )
+from core.team_accounts import SEVERAL_ACCOUNTS, single_account
 from team.forms import (
     IMPORT_MODES,
     CSVUploadForm,
@@ -450,8 +451,11 @@ RESET_TEAM_INSTEAD = (
 def _report_new_school(request: HttpRequest, team_number: int, school_name: str, unlinked: int, actor: str) -> None:
     """Reset the team's credentials once the new school is saved, so the old school's members can't sign in or link
     again, and say what the change did."""
-    reset = reset_team_credentials(team_number, actor=actor)
     done = f"Team {team_number} now holds {school_name}: {unlinked} Discord member(s) unlinked"
+    if not single_account():
+        messages.warning(request, f"{done}. {SEVERAL_ACCOUNTS}.")
+        return
+    reset = reset_team_credentials(team_number, actor=actor)
     match reset:
         case Refused(error=error):
             messages.error(request, f"{done}, but the password reset failed: {error}. {RESET_TEAM_INSTEAD}")

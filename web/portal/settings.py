@@ -188,6 +188,16 @@ AUTHENTIK_OIDC_URL = os.environ.get(
     f"{AUTHENTIK_URL}/application/o/discord-bot/",
 )
 
+# Authentik group names: every portal group is this prefix plus a fixed suffix (core.permission_constants)
+PORTAL_GROUP_PREFIX = os.environ.get("PORTAL_GROUP_PREFIX", "WCComps_")
+PORTAL_ADMIN_GROUP = os.environ.get("PORTAL_ADMIN_GROUP", f"{PORTAL_GROUP_PREFIX}Discord_Admin")
+# A new team's default Authentik group, a str.format pattern given the team's number
+TEAM_GROUP_PATTERN = os.environ.get("TEAM_GROUP_PATTERN", f"{PORTAL_GROUP_PREFIX}BlueTeam{{number:02d}}")
+# A team's accounts: members of its group whose username fully matches this regular expression, with the literal
+# text {number} standing for the team's two-digit number ("team{number}[a-i]" gives each team nine accounts)
+TEAM_ACCOUNT_PATTERN = os.environ.get("TEAM_ACCOUNT_PATTERN", "team{number}")
+MAX_TEAMS = int(os.environ.get("MAX_TEAMS", "50"))
+
 # Session configuration (12-hour expiry for competitions)
 SESSION_COOKIE_AGE = 43200
 SESSION_SAVE_EVERY_REQUEST = True
@@ -211,11 +221,11 @@ REDTEAM_ROLE_ID = int(os.environ.get("REDTEAM_ROLE_ID", "0"))
 GOLDTEAM_ROLE_ID = int(os.environ.get("GOLDTEAM_ROLE_ID", "0"))
 
 GROUP_ROLE_MAPPING = {
-    "WCComps_BlackTeam": BLACKTEAM_ROLE_ID,
-    "WCComps_WhiteTeam": WHITETEAM_ROLE_ID,
-    "WCComps_OrangeTeam": ORANGETEAM_ROLE_ID,
-    "WCComps_RedTeam": REDTEAM_ROLE_ID,
-    "WCComps_GoldTeam": GOLDTEAM_ROLE_ID,
+    f"{PORTAL_GROUP_PREFIX}BlackTeam": BLACKTEAM_ROLE_ID,
+    f"{PORTAL_GROUP_PREFIX}WhiteTeam": WHITETEAM_ROLE_ID,
+    f"{PORTAL_GROUP_PREFIX}OrangeTeam": ORANGETEAM_ROLE_ID,
+    f"{PORTAL_GROUP_PREFIX}RedTeam": REDTEAM_ROLE_ID,
+    f"{PORTAL_GROUP_PREFIX}GoldTeam": GOLDTEAM_ROLE_ID,
 }
 
 # Staff link their accounts from the volunteer guild (/link only); roles live in the competition guild
