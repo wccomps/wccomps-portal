@@ -422,7 +422,7 @@ def school_info_edit(request: HttpRequest, team_number: int) -> HttpResponse:
             form.add_error(None, str(changed))
             return page(form)
         if new_school or unlinked:
-            _report_new_school(request, team_number, school_name, unlinked, authentik_username)
+            _report_new_school(request, team, school_name, unlinked, authentik_username)
 
         logger.info(f"School info updated for Team {team_number} by {authentik_username}")
 
@@ -464,12 +464,13 @@ def _sign_out_team_accounts(team: Team) -> int:
     return len(accounts)
 
 
-def _report_new_school(request: HttpRequest, team_number: int, school_name: str, unlinked: int, actor: str) -> None:
+def _report_new_school(request: HttpRequest, team: Team, school_name: str, unlinked: int, actor: str) -> None:
     """Reset the team's credentials once the new school is saved, so the old school's members can't sign in or link
-    again, and say what the change did."""
+    again (with several accounts per team, end their portal sessions instead), and say what the change did."""
+    team_number = team.team_number
     done = f"Team {team_number} now holds {school_name}: {unlinked} Discord member(s) unlinked"
     if not single_account():
-        signed_out = _sign_out_team_accounts(Team.objects.get(team_number=team_number))
+        signed_out = _sign_out_team_accounts(team)
         messages.warning(
             request,
             f"{done}; ended the portal sessions of {signed_out} team account(s). Teams have several accounts, so the "
