@@ -17,9 +17,9 @@ from scoring.models import IncidentReport, InjectScore, RedTeamScore
 from core.admin_views.places import SetupSection, setup_url
 from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, reason_for
 from core.models import AuditLog, CompetitionConfig
-from core.team_accounts import require_single_account, single_account, team_group_names
+from core.team_accounts import TeamAccounts, accounts_by_team, require_single_account
 from core.utils import ndjson_done
-from team.models import Team, team_username
+from team.models import Team, single_account, team_username
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,8 @@ def _check_team_accounts_exist() -> CheckResult:
 def _check_group_accounts_exist(numbers: list[int]) -> CheckResult:
     """With several accounts per team: every team has a member of its group matching its account pattern."""
     with AuthentikManager() as mgr:
-        accounts = mgr.team_accounts_by_team(team_group_names(numbers))
+        found = accounts_by_team(mgr, numbers)
+    accounts = {n: found.get(n, TeamAccounts([], [])) for n in numbers}
     missing = [n for n in numbers if not accounts[n].matched]
 
     if missing:
@@ -143,6 +144,8 @@ def _check_team_group_membership() -> CheckResult:
 
 def _check_session_access() -> CheckResult:
     """The portal's token must see sessions, or a credentials reset leaves the team's Authentik sessions open."""
+    if not single_account():
+        return ("pass", "Not needed: teams have several accounts, so the portal resets no team credentials", None)
     with AuthentikManager() as manager:
         visible = manager.sees_any_sessions()
     if visible:

@@ -8,14 +8,15 @@ from unittest.mock import patch
 
 import portal
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.urls import reverse
 from portal.hosts import trusted_origins
 
 from core import permission_constants
 from core.admin_views import readiness
 from core.authentik_manager import AuthentikGroupEntry, AuthentikUserEntry
-from core.team_accounts import TeamAccounts, account_pattern, single_account, team_accounts
-from team.models import MAX_TEAMS, Team, team_group_name, team_username
+from core.team_accounts import TeamAccounts, team_accounts
+from team.models import MAX_TEAMS, Team, single_account, team_group_name, team_username
 
 TODAY_PERMISSION_MAP = {  # permission_constants.py at f207dc23
     "admin": ["WCComps_Discord_Admin"],
@@ -79,9 +80,9 @@ def test_prefix_changes_every_group(settings, reload_permissions):
 
 def test_pattern_needs_whole_name_and_own_number(settings):
     settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
-    p = account_pattern(3)
-    assert p.fullmatch("team03a") and p.fullmatch("team03i")
-    assert not p.fullmatch("team30a") and not p.fullmatch("team03ab") and not p.fullmatch("blueteamadmin")
+    names = ["team03a", "team03i", "team30a", "team03ab", "blueteamadmin"]
+    accounts = team_accounts({3: "WCComps_BlueTeam03"}, [user(name, "g3") for name in names], [GROUP_3])
+    assert accounts[3].matched == ["team03a", "team03i"]
     assert not single_account()
 
 
@@ -92,6 +93,13 @@ def test_plain_pattern_names_the_single_account(settings):
     assert team_username(7) == "blue07"
     settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
     assert team_username(7) == "team07"  # several accounts: Nextcloud keeps today's name
+
+
+@pytest.mark.parametrize("pattern", ["blue-{number}", "team {number}", "team#{number}", "a&b~{number}", "t.{number}"])
+def test_pattern_without_regex_operators_is_one_account(settings, pattern):
+    settings.TEAM_ACCOUNT_PATTERN = pattern
+    assert single_account()
+    assert team_username(7) == pattern.replace("{number}", "07")
 
 
 def test_team_accounts_are_matching_group_members(settings):
@@ -109,18 +117,18 @@ def test_default_pattern_skips_blueteamadmin():
     }
 
 
-def test_team_without_a_group_has_no_accounts():
-    assert team_accounts({4: "WCComps_BlueTeam04"}, [user("team04")], [GROUP_3]) == {4: TeamAccounts([], [])}
+def test_team_without_a_group_has_no_entry():
+    assert team_accounts({4: "WCComps_BlueTeam04"}, [user("team04")], [GROUP_3]) == {}
 
 
 @pytest.mark.django_db
 def test_readiness_fails_a_team_with_no_account_and_names_skipped(settings):
     settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
-    Team.objects.create(team_number=4, team_name="Team 4", is_active=True)
+    Team.objects.create(team_number=4, team_name="Team 4", is_active=True, authentik_group="WCComps_BlueTeam04")
     with patch("core.admin_views.readiness.AuthentikManager") as manager:
-        manager.return_value.__enter__.return_value.team_accounts_by_team.return_value = {
-            4: TeamAccounts([], ["blueteamadmin"])
-        }
+        mgr = manager.return_value.__enter__.return_value
+        mgr.list_all_users.return_value = [user("blueteamadmin", "g4")]
+        mgr.list_all_groups.return_value = [{"pk": "g4", "name": "WCComps_BlueTeam04", "parents": []}]
         status, message, _ = readiness._check_team_accounts_exist()
     assert status == "fail"
     assert "04" in message and "blueteamadmin" in message
@@ -174,8 +182,31 @@ def test_empty_legacy_hosts_turn_off_legacy_redirects(monkeypatch):
     assert prod["CSRF_TRUSTED_ORIGINS"] == ["https://portal.example.org"]
 
 
+@pytest.mark.parametrize("name", ["TEAM_ACCOUNT_PATTERN", "TEAM_GROUP_PATTERN"])
+def test_pattern_without_number_is_refused_at_load(monkeypatch, name):
+    monkeypatch.setenv(name, "blueteam")
+    with pytest.raises(ImproperlyConfigured, match=name):
+        runpy.run_path(str(Path(portal.__file__).parent / "settings.py"))
+
+
 def test_site_name_reaches_pages(admin_client, settings):
     settings.SITE_NAME = "Example Portal"
     page = admin_client.get(reverse("admin_teams")).content.decode()
     assert "Example Portal" in page
     assert "WCComps Portal" not in page
+
+
+@pytest.mark.django_db
+def test_services_refuse_resets_with_several_accounts(settings):
+    """The services answer Refused, which the bot shows, and ask Authentik nothing."""
+    from core.authentik_utils import Refused, reset_team, reset_team_credentials, reset_teams_credentials
+    from core.team_accounts import SEVERAL_ACCOUNTS
+    from core.utils import drain
+
+    settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
+    with patch("core.authentik_utils.AuthentikManager") as manager:
+        assert reset_team_credentials(3, actor="admin") == Refused(SEVERAL_ACCOUNTS)
+        assert reset_team(3, actor="admin", recreate_channels=True).credentials == Refused(SEVERAL_ACCOUNTS)
+        bulk = drain(reset_teams_credentials([3, 4], "admin"))
+    manager.assert_not_called()
+    assert bulk.failed_resets == [("team03", SEVERAL_ACCOUNTS), ("team04", SEVERAL_ACCOUNTS)]

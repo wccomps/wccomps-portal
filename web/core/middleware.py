@@ -126,8 +126,8 @@ class SubdomainRedirectMiddleware:
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
         self.subdomain_redirects: dict[str, str] = settings.SUBDOMAIN_REDIRECTS
-        self.canonical_host: str = getattr(settings, "CANONICAL_HOST", "")
-        self.legacy_hosts: frozenset[str] = frozenset(getattr(settings, "LEGACY_HOSTS", []))
+        self.canonical_host: str = settings.CANONICAL_HOST
+        self.legacy_hosts: frozenset[str] = frozenset(settings.LEGACY_HOSTS)
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         host = request.get_host().split(":")[0]

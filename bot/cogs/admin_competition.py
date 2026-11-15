@@ -29,7 +29,7 @@ from core.services.competition import (
     set_max_members,
     set_schedule,
 )
-from core.team_accounts import SEVERAL_ACCOUNTS, single_account
+from core.team_accounts import SEVERAL_ACCOUNTS
 from core.utils import (
     DEFAULT_TIMEZONE,
     DEFAULT_TIMEZONE_NAME,
@@ -38,7 +38,7 @@ from core.utils import (
     parse_datetime_to_utc,
     shorten,
 )
-from team.models import active_team_numbers, team_username
+from team.models import active_team_numbers, single_account, team_username
 
 logger = logging.getLogger(__name__)
 

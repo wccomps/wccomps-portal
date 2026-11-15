@@ -3,6 +3,7 @@ import secrets
 from pathlib import Path
 
 import django_stubs_ext
+from django.core.exceptions import ImproperlyConfigured
 
 from portal.hosts import trusted_origins
 
@@ -31,15 +32,18 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 # check); CSRF_TRUSTED_ORIGINS holds them so their forms still work with it switched off.
 CANONICAL_HOST = os.environ.get("CANONICAL_HOST", "portal.wccomps.org")
 LEGACY_HOSTS = [
-    host.strip()
-    for host in os.environ.get(
-        "LEGACY_HOSTS",
-        "bot.wccomps.org,register.wccomps.org,team.wccomps.org,"
-        "teams.wccomps.org,ticket.wccomps.org,tickets.wccomps.org",
-    ).split(",")
-    if host.strip()
+    host
+    for host in (
+        raw.strip()
+        for raw in os.environ.get(
+            "LEGACY_HOSTS",
+            "bot.wccomps.org,register.wccomps.org,team.wccomps.org,"
+            "teams.wccomps.org,ticket.wccomps.org,tickets.wccomps.org",
+        ).split(",")
+    )
+    if host
 ]
-# A legacy host's root path goes to its app's page
+# The register legacy host's root path goes to the registration page
 SUBDOMAIN_REDIRECTS = {"register.wccomps.org": "/register/"} if "register.wccomps.org" in LEGACY_HOSTS else {}
 
 CSRF_TRUSTED_ORIGINS = trusted_origins(BASE_URL, CANONICAL_HOST, LEGACY_HOSTS)
@@ -187,14 +191,19 @@ AUTHENTIK_OIDC_URL = os.environ.get(
     f"{AUTHENTIK_URL}/application/o/discord-bot/",
 )
 
-# Authentik group names: every portal group is this prefix plus a fixed suffix (core.permission_constants)
+# Authentik group names: each role's group is this prefix plus a fixed suffix (core.permission_constants); the admin
+# group and the team groups are their own settings below
 PORTAL_GROUP_PREFIX = os.environ.get("PORTAL_GROUP_PREFIX", "WCComps_")
 PORTAL_ADMIN_GROUP = os.environ.get("PORTAL_ADMIN_GROUP", f"{PORTAL_GROUP_PREFIX}Discord_Admin")
 # A new team's default Authentik group, a str.format pattern given the team's number
 TEAM_GROUP_PATTERN = os.environ.get("TEAM_GROUP_PATTERN", f"{PORTAL_GROUP_PREFIX}BlueTeam{{number:02d}}")
-# A team's accounts: members of its group whose username fully matches this regular expression, with the literal
-# text {number} standing for the team's two-digit number ("team{number}[a-i]" gives each team nine accounts)
+# A team's accounts, with the literal text {number} standing for the team's two-digit number: a pattern with no regular
+# expression operator names the team's one account, by exact username; otherwise the team's accounts are the members
+# of its group whose username fully matches this regular expression ("team{number}[a-i]" gives each team nine)
 TEAM_ACCOUNT_PATTERN = os.environ.get("TEAM_ACCOUNT_PATTERN", "team{number}")
+for _name, _pattern in (("TEAM_GROUP_PATTERN", TEAM_GROUP_PATTERN), ("TEAM_ACCOUNT_PATTERN", TEAM_ACCOUNT_PATTERN)):
+    if "{number" not in _pattern:
+        raise ImproperlyConfigured(f"{_name} must contain {{number}}, or every team shares the same name")
 MAX_TEAMS = int(os.environ.get("MAX_TEAMS", "50"))
 
 # Session configuration (12-hour expiry for competitions)

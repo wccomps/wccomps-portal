@@ -29,9 +29,9 @@ from bot.utils import (
 from core.authentik_utils import Changed, Refused, parse_team_range, reset_team
 from core.models import AuditLog, CompetitionConfig
 from core.services.linking import ADMIN_UNLINK, TEAM_REMOVED, unlink_discord_links, unlink_teams
-from core.team_accounts import SEVERAL_ACCOUNTS, single_account
+from core.team_accounts import SEVERAL_ACCOUNTS
 from core.utils import shorten
-from team.models import DiscordLink, Team
+from team.models import MAX_TEAMS, DiscordLink, Team, single_account
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class AdminTeamsCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @teams_group.command(name="info", description="[ADMIN] Get detailed info about a specific team")
-    @app_commands.describe(team_number="Team number (1-50)")
+    @app_commands.describe(team_number=f"Team number (1-{MAX_TEAMS})")
     @app_commands.check(permission_check("admin"))
     async def admin_team_info(self, interaction: discord.Interaction, team_number: int) -> None:
         """Get detailed information about a team."""
@@ -175,7 +175,7 @@ class AdminTeamsCog(commands.Cog):
         name="remove",
         description="[ADMIN] Remove team infrastructure and unlink all members",
     )
-    @app_commands.describe(team_number="Team number (1-50)")
+    @app_commands.describe(team_number=f"Team number (1-{MAX_TEAMS})")
     @app_commands.check(permission_check("admin"))
     async def admin_remove_team(self, interaction: discord.Interaction, team_number: int) -> None:
         """Remove a team's Discord infrastructure and unlink all members."""
@@ -232,7 +232,7 @@ class AdminTeamsCog(commands.Cog):
         ),
     )
     @app_commands.describe(
-        team_number="Team number (1-50)",
+        team_number=f"Team number (1-{MAX_TEAMS})",
         recreate_channels="Whether to recreate Discord channels and role (default: True)",
     )
     @app_commands.check(permission_check("admin"))

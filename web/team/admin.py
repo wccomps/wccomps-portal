@@ -6,7 +6,6 @@ from django.template.loader import render_to_string
 from django.utils.html import format_html
 
 from core.admin import PortalModelAdmin
-from core.team_accounts import single_account
 
 from .models import (
     DiscordLink,
@@ -15,6 +14,7 @@ from .models import (
     LinkToken,
     SchoolInfo,
     Team,
+    single_account,
 )
 
 

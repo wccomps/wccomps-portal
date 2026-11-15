@@ -1,5 +1,4 @@
 import logging
-import re
 from collections.abc import Iterable
 from typing import NamedTuple
 
@@ -16,12 +15,25 @@ logger = logging.getLogger(__name__)
 MAX_TEAMS: int = settings.MAX_TEAMS
 
 
+_REGEX_METACHARACTERS = frozenset("^$*+?{}[]\\|()")
+
+
+def account_pattern_text(team_number: int) -> str:
+    """settings.TEAM_ACCOUNT_PATTERN for this team: {number} replaced by its two-digit number."""
+    return settings.TEAM_ACCOUNT_PATTERN.replace("{number}", f"{team_number:02d}")
+
+
+def single_account() -> bool:
+    """Whether each team has exactly one account: the pattern has no regular expression operator, so it names one
+    username (a "." in it is harmless: that account is looked up by exact username)."""
+    return _REGEX_METACHARACTERS.isdisjoint(account_pattern_text(1))
+
+
 def team_username(team_number: int) -> str:
-    """Username of a single-account team's Authentik account (settings.TEAM_ACCOUNT_PATTERN, when it names one
-    username), and of every team's Nextcloud account (teamNN when teams have several Authentik accounts). Code acting
-    on a team's Authentik accounts uses core.team_accounts, which also covers teams with several."""
-    name = settings.TEAM_ACCOUNT_PATTERN.replace("{number}", f"{team_number:02d}")
-    return name if re.escape(name) == name else f"team{team_number:02d}"
+    """Username of a single-account team's Authentik account, and of every team's Nextcloud account (teamNN when teams
+    have several Authentik accounts). Code acting on a team's Authentik accounts uses core.team_accounts, which also
+    covers teams with several."""
+    return account_pattern_text(team_number) if single_account() else f"team{team_number:02d}"
 
 
 def team_group_name(team_number: int) -> str:

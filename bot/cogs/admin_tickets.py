@@ -17,6 +17,7 @@ from bot.utils import (
     log_to_ops_channel,
     run_blocking,
 )
+from team.models import MAX_TEAMS
 from ticketing.access import TICKET_STAFF
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 
@@ -62,7 +63,7 @@ class AdminTicketsCog(commands.Cog):
 
     @tickets_group.command(name="create", description="[ADMIN] Create a ticket for a team")
     @app_commands.describe(
-        team_number="Team number (1-50)",
+        team_number=f"Team number (1-{MAX_TEAMS})",
         category="Ticket category",
         description="Description of the issue",
         hostname="Hostname/box name (required for box-reset, hands-on consultation)",

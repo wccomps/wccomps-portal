@@ -13,11 +13,9 @@ from registration.models import Event
 from registration.stage import ACTIONS, Action
 
 from core.authentik_utils import set_team_password
-from core.context_processors import site_names
-from core.team_accounts import single_account
 from core.utils import ndjson_done
 from core.utils import ndjson_progress as _progress
-from team.models import SchoolInfo, Team, team_username
+from team.models import SchoolInfo, Team, single_account, team_username
 
 from .models import Packet, PacketDistribution
 
@@ -191,7 +189,7 @@ class PacketDistributionService:
             "password": password,
             "team_extras": team_extras,
             "portal_url": team_packet_url(),
-            **site_names(),
+            "ORG_NAME": settings.ORG_NAME,
             **competition_schedule_context(),
         }
 

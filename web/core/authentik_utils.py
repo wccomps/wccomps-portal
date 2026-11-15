@@ -11,23 +11,24 @@ from django.contrib.auth.models import User
 from django.db import DatabaseError, transaction
 from django.utils import timezone
 
-from team.models import MAX_TEAMS, SchoolInfo, Team, team_username
+from team.models import MAX_TEAMS, SchoolInfo, Team, single_account, team_username
 
 from .auth_utils import lock_account, sign_out_everywhere
 from .authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, AuthentikUser, reason_for
 from .discord_tasks import LogToChannel, SetupTeamInfrastructure
 from .models import AuditLog, CredentialsReset, DiscordTask
 from .services.linking import CREDENTIALS_RESET, TEAM_RESET, unlink_teams
-from .team_accounts import require_single_account
+from .team_accounts import SEVERAL_ACCOUNTS
 from .utils import shorten
 
 logger = logging.getLogger(__name__)
 
 
 def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser:
-    """A single-account team's Authentik account; AuthentikAPIError saying why when there is none, BadRequest when
-    teams have several accounts."""
-    require_single_account()
+    """A single-account team's Authentik account; AuthentikAPIError saying why when there is none, or when teams have
+    several accounts."""
+    if not single_account():
+        raise AuthentikAPIError(SEVERAL_ACCOUNTS)
     if team_number < 1 or team_number > MAX_TEAMS:
         raise AuthentikAPIError(f"Team number must be between 1 and {MAX_TEAMS}")
     username = team_username(team_number)
@@ -38,8 +39,8 @@ def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser:
 
 
 def set_team_account_active(manager: AuthentikManager, username: str, is_active: bool) -> None:
-    """Enable or disable a team account (one of AuthentikManager.team_accounts_by_team's matched); AuthentikAPIError
-    when it can't."""
+    """Enable or disable a team account (one of core.team_accounts.accounts_by_team's matched); AuthentikAPIError when
+    it can't."""
     user = manager.find_user(username)
     if user is None:
         raise AuthentikAPIError(f"User {username} not found")
@@ -346,7 +347,10 @@ def _reset_credentials(
 
 def reset_team_credentials(team_number: int, actor: str) -> CredentialReset:
     """A new password, then the account's sessions and its members' Discord links ended once it took. The audit row
-    and ops note can't fail the reset: the new password must reach the caller."""
+    and ops note can't fail the reset: the new password must reach the caller. Refused, doing nothing, when teams have
+    several accounts."""
+    if not single_account():
+        return Refused(SEVERAL_ACCOUNTS)
     with AuthentikManager() as manager:
         reset = _reset_credentials(manager, team_number, actor, CREDENTIALS_RESET, unlink_on_failure=False)
 
@@ -372,7 +376,9 @@ class TeamReset(NamedTuple):
 
 def reset_team(team_number: int, actor: str, *, recreate_channels: bool) -> TeamReset:
     """Reset Team: unlinked even when the password change fails, channels recreated when asked (queued), audited and
-    told to ops once; the record can't fail the reset."""
+    told to ops once; the record can't fail the reset. Refused, doing nothing, when teams have several accounts."""
+    if not single_account():
+        return TeamReset(Refused(SEVERAL_ACCOUNTS), recreation_queued=False)
     team = Team.objects.get(team_number=team_number)
     with AuthentikManager() as manager:
         reset = _reset_credentials(manager, team_number, actor, TEAM_RESET, unlink_on_failure=True)
@@ -475,11 +481,15 @@ def reset_teams_credentials(
 ) -> Generator[BulkPasswordResetResult, None, BulkPasswordResetResult]:
     """Reset passwords and end sessions RESET_BATCH_SIZE teams at a time, yielding each audited batch; returns them
     combined when run to the end. A batch is handed over when the caller asks for the next (hand_over_each False: at
-    the end). Ops hears once of passwords never handed over, teams not reached and how many were reset."""
+    the end). Ops hears once of passwords never handed over, teams not reached and how many were reset. When teams
+    have several accounts, one batch refusing every team, changing nothing and telling ops nothing."""
+    if not single_account():
+        refused = BulkPasswordResetResult([(n, Refused(SEVERAL_ACCOUNTS)) for n in team_numbers])
+        yield refused
+        return refused
     batches: list[BulkPasswordResetResult] = []
     handed_over = 0
     partial: list[tuple[int, str, str]] = []  # The batch under way's resets so far
-    require_single_account()
     try:
         for start in range(0, len(team_numbers), RESET_BATCH_SIZE):
             if batches and not room_for_another():

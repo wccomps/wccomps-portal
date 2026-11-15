@@ -64,6 +64,7 @@ def _send_scorecard_email(
     recipients: list[str], context: dict[str, object], team_number: int, pdf_bytes: bytes
 ) -> bool:
     """Send a scorecard email using Django's email backend."""
+    context = {**context, "ORG_SHORT_NAME": settings.ORG_SHORT_NAME}
     try:
         subject = render_to_string("emails/scorecard_subject.txt", context).strip()
         text_content = render_to_string("emails/scorecard.txt", context)

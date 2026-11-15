@@ -27,7 +27,7 @@ COUNTDOWN_SENDER = "Gold Team"
 COMPETITION_STARTED = "competition_started"
 # The audit action a stop records, with the same details
 COMPETITION_STOPPED = "competition_stopped"
-# A start's or stop's reason for a team whose group holds no account matching its pattern (core.team_accounts)
+# A start's reason for an active team whose group has no account matching its pattern, or that has no group
 NO_TEAM_ACCOUNT = "no team account in its group"
 TIMER_GAVE_UP = "competition_timer_gave_up"
 COMPETITION_COUNTDOWN_QUEUED = "competition_countdown_queued"
@@ -294,8 +294,8 @@ def _run(
     numbers = active_team_numbers() if enable else list(range(1, MAX_TEAMS + 1))
     provision_nextcloud = enable and nextcloud_configured()
     with AuthentikManager() as manager:
-        # One step per team account; a team with none, or when Authentik couldn't list them, is one failed step. A
-        # single-account team's one account is a step without asking Authentik first.
+        # One step per team account; when Authentik couldn't list them, one failed step per team. On start, an active
+        # team with no account is one failed step; a stop skips it, having nothing to disable.
         account_steps: list[tuple[str, str | None]] = []  # (username, None) or (team, why it has no account)
         try:
             accounts = accounts_by_team(manager, numbers)
@@ -304,9 +304,9 @@ def _run(
             account_steps = [(f"team {n:02d}", reason_for(e)) for n in numbers]
         else:
             for number in numbers:
-                matched = accounts[number].matched
+                matched = accounts[number].matched if number in accounts else []
                 account_steps.extend((username, None) for username in matched)
-                if not matched:
+                if not matched and enable:
                     account_steps.append((f"team {number:02d}", NO_TEAM_ACCOUNT))
         result.accounts_total = len(account_steps)
         total = len(result.controlled_apps) + len(account_steps) + 2 + (1 if provision_nextcloud else 0)

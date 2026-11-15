@@ -15,9 +15,9 @@ from core.errors import json_endpoint
 from core.forms import TeamActionForm, TeamsBulkActionForm
 from core.models import AuditLog, DiscordTask
 from core.services.linking import ADMIN_UNLINK, unlink_discord_links
-from core.team_accounts import require_single_account, single_account
+from core.team_accounts import require_single_account
 from core.utils import list_filters, optional_int, requested_sort, stable_order
-from team.models import DiscordLink, Team
+from team.models import DiscordLink, Team, single_account
 
 
 @require_permission("admin", "gold_team")

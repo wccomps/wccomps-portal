@@ -63,10 +63,10 @@ from core.services.competition import (
     set_schedule,
     set_start_message,
 )
-from core.team_accounts import require_single_account, single_account
+from core.team_accounts import require_single_account
 from core.utils import Stepped, drain, ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
-from team.models import active_team_numbers
+from team.models import active_team_numbers, single_account
 
 from ..auth_utils import require_permission
 from ..utils import DEFAULT_TIMEZONE, TIMEZONE_CHOICES, UnknownTimezoneError, parse_datetime_to_utc
