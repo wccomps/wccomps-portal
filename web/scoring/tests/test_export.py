@@ -926,9 +926,7 @@ class TestExportDownloads:
         names = zipfile.ZipFile(io.BytesIO(response.content)).namelist()
         assert names == [f"{filename}.{ext}" for _, _, filename in EXPORT_DOWNLOADS for ext in ("csv", "json")]
 
-    @pytest.mark.parametrize(
-        ("short_name", "prefix"), [("WCComps", "wccomps"), ("Example League", "example-league"), ("", "portal")]
-    )
+    @pytest.mark.parametrize(("short_name", "prefix"), [("WCComps", "wccomps"), ("Example League", "example-league")])
     def test_zip_is_named_for_the_org(self, admin_user, settings, short_name, prefix):
         settings.ORG_SHORT_NAME = short_name
         client = Client()

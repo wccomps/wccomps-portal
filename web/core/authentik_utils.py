@@ -25,10 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser:
-    """A single-account team's Authentik account; AuthentikAPIError saying why when there is none, or when teams have
-    several accounts."""
-    if not single_account():
-        raise AuthentikAPIError(SEVERAL_ACCOUNTS)
+    """A single-account team's Authentik account; AuthentikAPIError saying why when there is none."""
     if team_number < 1 or team_number > MAX_TEAMS:
         raise AuthentikAPIError(f"Team number must be between 1 and {MAX_TEAMS}")
     username = team_username(team_number)
@@ -243,7 +240,10 @@ def _store_password(team_number: int, password: str) -> None:
 
 
 def set_team_password(team_number: int, actor: str) -> tuple[str | None, str]:
-    """A new random password for the team account, leaving its sessions alone; audited."""
+    """A new random password for the team account, leaving its sessions alone; audited. Refused, changing nothing,
+    when teams have several accounts."""
+    if not single_account():
+        return None, SEVERAL_ACCOUNTS
     with AuthentikManager() as manager:
         try:
             password, error = generate_blueteam_password(), ""
@@ -482,10 +482,12 @@ def reset_teams_credentials(
     """Reset passwords and end sessions RESET_BATCH_SIZE teams at a time, yielding each audited batch; returns them
     combined when run to the end. A batch is handed over when the caller asks for the next (hand_over_each False: at
     the end). Ops hears once of passwords never handed over, teams not reached and how many were reset. When teams
-    have several accounts, one batch refusing every team, changing nothing and telling ops nothing."""
+    have several accounts, one batch refusing every team (none for no teams, like a reset of none), changing nothing
+    and telling ops nothing."""
     if not single_account():
         refused = BulkPasswordResetResult([(n, Refused(SEVERAL_ACCOUNTS)) for n in team_numbers])
-        yield refused
+        if team_numbers:
+            yield refused
         return refused
     batches: list[BulkPasswordResetResult] = []
     handed_over = 0

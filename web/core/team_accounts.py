@@ -34,6 +34,12 @@ def require_single_account() -> None:
         raise BadRequest(SEVERAL_ACCOUNTS)
 
 
+def is_team_account(team_number: int, username: str) -> bool:
+    """Whether a member of the team's group is one of its accounts when teams have several: its username fully
+    matches the team's account pattern."""
+    return re.fullmatch(account_pattern_text(team_number), username) is not None
+
+
 def team_accounts(
     group_names: Mapping[int, str], users: list[AuthentikUserEntry], groups: list[AuthentikGroupEntry]
 ) -> dict[int, TeamAccounts]:
@@ -45,11 +51,10 @@ def team_accounts(
         if group_pk is None:
             result[number] = TeamAccounts([], [])
             continue
-        pattern = re.compile(account_pattern_text(number))
         members = sorted(user["username"] for user in users if group_pk in user["groups"])
         result[number] = TeamAccounts(
-            matched=[name for name in members if pattern.fullmatch(name)],
-            skipped=[name for name in members if not pattern.fullmatch(name)],
+            matched=[name for name in members if is_team_account(number, name)],
+            skipped=[name for name in members if not is_team_account(number, name)],
         )
     return result
 

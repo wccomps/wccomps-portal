@@ -11,7 +11,7 @@ from discord.ext import commands
 from django.conf import settings
 from django.utils import timezone
 
-from bot.utils import DISCORD_COMMAND_DESCRIPTION_CHAR_LIMIT, org_named
+from bot.utils import DISCORD_SHORT_TEXT_CHAR_LIMIT, fit, org_named
 from team.models import DiscordLink, LinkRateLimit, LinkToken
 
 logger = logging.getLogger(__name__)
@@ -19,12 +19,7 @@ logger = logging.getLogger(__name__)
 RATE_LIMIT_MAX = 5
 RATE_LIMIT_WINDOW_HOURS = 1
 TOKEN_EXPIRY_MINUTES = 15
-_LINK_DESCRIPTION = f"Link your Discord account to your {org_named('team')}"
-LINK_DESCRIPTION = (
-    _LINK_DESCRIPTION
-    if len(_LINK_DESCRIPTION) <= DISCORD_COMMAND_DESCRIPTION_CHAR_LIMIT
-    else "Link your Discord account to your team"
-)
+LINK_DESCRIPTION = fit(f"Link your Discord account to your {org_named('team')}", DISCORD_SHORT_TEXT_CHAR_LIMIT)
 
 
 @dataclass

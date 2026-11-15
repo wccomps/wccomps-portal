@@ -280,7 +280,7 @@ SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL or "root@localh
 # AUTHENTIK_URL, DEFAULT_FROM_EMAIL, ORG_NAME and ORG_SHORT_NAME are required to serve (portal.required)
 ORG_NAME = os.environ.get("ORG_NAME", "")
 ORG_SHORT_NAME = os.environ.get("ORG_SHORT_NAME", "")
-SITE_NAME = os.environ.get("SITE_NAME", f"{ORG_SHORT_NAME} Portal" if ORG_SHORT_NAME else "Portal")
+SITE_NAME = os.environ.get("SITE_NAME", f"{ORG_SHORT_NAME} Portal")
 
 HTTPX_DEFAULT_TIMEOUT = int(os.environ.get("HTTPX_DEFAULT_TIMEOUT", "10"))
 DISCORD_WEBHOOK_TIMEOUT = int(os.environ.get("DISCORD_WEBHOOK_TIMEOUT", "5"))

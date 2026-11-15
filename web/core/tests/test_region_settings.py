@@ -15,7 +15,8 @@ from portal.required import REQUIRED_SETTINGS, missing_settings
 from core import permission_constants
 from core.admin_views import readiness
 from core.authentik_manager import AuthentikGroupEntry, AuthentikUserEntry
-from core.team_accounts import TeamAccounts, team_accounts
+from core.models import AuditLog, DiscordTask
+from core.team_accounts import SEVERAL_ACCOUNTS, TeamAccounts, team_accounts
 from team.models import MAX_TEAMS, Team, single_account, team_group_name, team_username
 
 TODAY_PERMISSION_MAP = {  # permission_constants.py at f207dc23
@@ -153,13 +154,19 @@ def test_readiness_fails_a_team_with_no_account_and_names_skipped(settings):
 
 
 @pytest.mark.django_db
-def test_password_reset_refused_with_several_accounts(admin_client, settings):
+@pytest.mark.parametrize(
+    ("action", "message"),
+    [("reset_password", f"Password reset failed: {SEVERAL_ACCOUNTS}"), ("reset", SEVERAL_ACCOUNTS)],
+)
+def test_password_reset_refused_with_several_accounts(admin_client, settings, action, message):
     settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
     Team.objects.create(team_number=3, team_name="Team 3", is_active=True)
-    with patch("core.admin_views.teams.reset_team_credentials") as reset:
-        response = admin_client.post(reverse("admin_team_action", args=[3]), {"action": "reset_password"})
-    assert response.status_code == 400
-    reset.assert_not_called()
+    with patch("core.authentik_utils.AuthentikManager") as manager:
+        response = admin_client.post(reverse("admin_team_action", args=[3]), {"action": action})
+    assert response.json() == {"success": False, "message": message}
+    manager.assert_not_called()
+    assert not AuditLog.objects.exists()
+    assert not DiscordTask.objects.exists()
 
 
 @pytest.mark.parametrize(
@@ -192,7 +199,6 @@ def test_neutral_defaults(monkeypatch):
     assert prod["TEAM_ACCOUNT_PATTERN"] == "team{number}"
     assert prod["ORG_NAME"] == ""
     assert prod["ORG_SHORT_NAME"] == ""
-    assert prod["SITE_NAME"] == "Portal"
     assert prod["MAX_TEAMS"] == 50
     assert prod["BOX_RESET_CATEGORY_ID"] == 2
 
@@ -256,8 +262,13 @@ def test_site_name_reaches_pages(admin_client, settings):
 @pytest.mark.django_db
 def test_services_refuse_resets_with_several_accounts(settings):
     """The services answer Refused, which the bot shows, and ask Authentik nothing."""
-    from core.authentik_utils import Refused, reset_team, reset_team_credentials, reset_teams_credentials
-    from core.team_accounts import SEVERAL_ACCOUNTS
+    from core.authentik_utils import (
+        Refused,
+        reset_team,
+        reset_team_credentials,
+        reset_teams_credentials,
+        set_team_password,
+    )
     from core.utils import drain
 
     settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
@@ -265,5 +276,7 @@ def test_services_refuse_resets_with_several_accounts(settings):
         assert reset_team_credentials(3, actor="admin") == Refused(SEVERAL_ACCOUNTS)
         assert reset_team(3, actor="admin", recreate_channels=True).credentials == Refused(SEVERAL_ACCOUNTS)
         bulk = drain(reset_teams_credentials([3, 4], "admin"))
+        assert list(reset_teams_credentials([], "admin")) == []  # No empty batch for the bot to name
+        assert set_team_password(3, actor="packets") == (None, SEVERAL_ACCOUNTS)
     manager.assert_not_called()
     assert bulk.failed_resets == [("team03", SEVERAL_ACCOUNTS), ("team04", SEVERAL_ACCOUNTS)]

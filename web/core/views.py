@@ -1,5 +1,4 @@
 import logging
-import re
 import secrets
 from contextlib import suppress
 from dataclasses import asdict
@@ -53,7 +52,7 @@ from team.forms import (
     ImportMode,
     parse_csv_file,
 )
-from team.models import DiscordLink, SchoolInfo, Team, account_pattern_text, single_account
+from team.models import DiscordLink, SchoolInfo, Team, single_account
 
 from .auth_utils import (
     get_authentik_id,
@@ -67,6 +66,7 @@ from .auth_utils import (
 from .errors import json_endpoint
 from .form_errors import ask_for_the_file_again
 from .forms import LinkConfirmForm, SchoolInfoEditForm
+from .team_accounts import is_team_account
 from .utils import list_filters, optional_int, requested_sort, stable_order
 
 logger = logging.getLogger(__name__)
@@ -454,10 +454,9 @@ def _sign_out_team_accounts(team: Team) -> int:
     """End the portal sessions of every local account in the team's group whose username fully matches the team's
     account pattern, without asking Authentik (the groups are the ones stored at sign-in and each refresh); how many
     accounts."""
-    pattern = re.compile(account_pattern_text(team.team_number))
     with transaction.atomic():
         members = User.objects.filter(usergroups__groups__contains=[team.authentik_group]).select_related("usergroups")
-        accounts = [u for u in members if pattern.fullmatch(u.username)]
+        accounts = [u for u in members if is_team_account(team.team_number, u.username)]
         for account in accounts:
             lock_account(account.usergroups.authentik_id)
             sign_out_everywhere(account)

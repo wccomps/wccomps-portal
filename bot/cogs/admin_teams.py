@@ -31,7 +31,7 @@ from core.models import AuditLog, CompetitionConfig
 from core.services.linking import ADMIN_UNLINK, TEAM_REMOVED, unlink_discord_links, unlink_teams
 from core.team_accounts import SEVERAL_ACCOUNTS
 from core.utils import shorten
-from team.models import MAX_TEAMS, DiscordLink, Team, single_account
+from team.models import MAX_TEAMS, DiscordLink, Team
 
 logger = logging.getLogger(__name__)
 
@@ -242,9 +242,6 @@ class AdminTeamsCog(commands.Cog):
         team_number: int,
         recreate_channels: bool = True,
     ) -> None:
-        if not single_account():
-            await interaction.response.send_message(f"Error: {SEVERAL_ACCOUNTS}", ephemeral=True)
-            return
         team = await find_team(team_number)
         if isinstance(team, str):
             await interaction.response.send_message(team, ephemeral=True)
@@ -259,6 +256,9 @@ class AdminTeamsCog(commands.Cog):
         credentials, recreation_queued = await run_blocking(
             reset_team, team_number, actor=str(interaction.user), recreate_channels=recreate_channels
         )
+        if credentials == Refused(SEVERAL_ACCOUNTS):
+            await interaction.followup.send(f"Error: {SEVERAL_ACCOUNTS}", ephemeral=True)
+            return
         if not recreate_channels:
             channels = "the channels were kept"
         elif recreation_queued:

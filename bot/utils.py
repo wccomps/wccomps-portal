@@ -46,8 +46,8 @@ def fit(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-DISCORD_CHOICE_CHAR_LIMIT = 100
-DISCORD_COMMAND_DESCRIPTION_CHAR_LIMIT = 100
+# Discord's limit on a command's description and on a choice's name and value
+DISCORD_SHORT_TEXT_CHAR_LIMIT = 100
 DISCORD_CHOICE_COUNT_LIMIT = 25
 DISCORD_SELECT_OPTION_LIMIT = 25
 
@@ -56,9 +56,9 @@ def choices(options: list[tuple[str, str]]) -> list[app_commands.Choice[str]]:
     """Autocomplete choices from (name, value) pairs as Discord takes them: at most 25, each name cut to 100
     characters, and values past 100 characters omitted (Discord refuses a choice value over 100 characters)."""
     return [
-        app_commands.Choice(name=fit(name.strip() or value, DISCORD_CHOICE_CHAR_LIMIT), value=value)
+        app_commands.Choice(name=fit(name.strip() or value, DISCORD_SHORT_TEXT_CHAR_LIMIT), value=value)
         for name, value in options
-        if 0 < len(value) <= DISCORD_CHOICE_CHAR_LIMIT
+        if 0 < len(value) <= DISCORD_SHORT_TEXT_CHAR_LIMIT
     ][:DISCORD_CHOICE_COUNT_LIMIT]
 
 
@@ -287,8 +287,8 @@ async def find_team(team_number: int) -> Team | str:
 
 
 def org_named(text: str) -> str:
-    """text after the organization's short name ("WCComps Room Judge"), or text alone when it has none."""
-    return f"{settings.ORG_SHORT_NAME} {text}" if settings.ORG_SHORT_NAME else text
+    """text after the organization's short name ("WCComps Room Judge")."""
+    return f"{settings.ORG_SHORT_NAME} {text}"
 
 
 def room_judge_role_name() -> str:

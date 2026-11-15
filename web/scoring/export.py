@@ -283,7 +283,7 @@ def export_all_zip_bytes() -> bytes:
 
 def export_all_zip() -> HttpResponse:
     timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
-    prefix = slugify(settings.ORG_SHORT_NAME) or "portal"
+    prefix = slugify(settings.ORG_SHORT_NAME)
     response = HttpResponse(export_all_zip_bytes(), content_type="application/zip")
     response["Content-Disposition"] = f'attachment; filename="{prefix}_export_{timestamp}.zip"'
     return response

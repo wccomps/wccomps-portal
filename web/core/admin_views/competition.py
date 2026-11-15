@@ -63,7 +63,6 @@ from core.services.competition import (
     set_schedule,
     set_start_message,
 )
-from core.team_accounts import require_single_account
 from core.utils import Stepped, drain, ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
 from team.models import active_team_numbers, single_account
@@ -239,7 +238,6 @@ def _wiped_summary(wiped: WipedData) -> str:
 
 
 def _action_reset_passwords(request: HttpRequest, authentik_username: str) -> JsonResponse:
-    require_single_account()
     form = ResetPasswordsForm(request.POST)
     if not form.is_valid():
         error_msg = "; ".join(str(e) for errors in form.errors.values() for e in errors)
