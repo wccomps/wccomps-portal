@@ -201,9 +201,16 @@ TEAM_GROUP_PATTERN = os.environ.get("TEAM_GROUP_PATTERN", f"{PORTAL_GROUP_PREFIX
 # expression operator names the team's one account, by exact username; otherwise the team's accounts are the members
 # of its group whose username fully matches this regular expression ("team{number}[a-i]" gives each team nine)
 TEAM_ACCOUNT_PATTERN = os.environ.get("TEAM_ACCOUNT_PATTERN", "team{number}")
-for _name, _pattern in (("TEAM_GROUP_PATTERN", TEAM_GROUP_PATTERN), ("TEAM_ACCOUNT_PATTERN", TEAM_ACCOUNT_PATTERN)):
-    if "{number" not in _pattern:
-        raise ImproperlyConfigured(f"{_name} must contain {{number}}, or every team shares the same name")
+if "{number}" not in TEAM_ACCOUNT_PATTERN:
+    raise ImproperlyConfigured("TEAM_ACCOUNT_PATTERN must contain {number}, or every team shares the same accounts")
+try:
+    _distinct_groups = TEAM_GROUP_PATTERN.format(number=1) != TEAM_GROUP_PATTERN.format(number=2)
+except KeyError, IndexError, ValueError:
+    _distinct_groups = False
+if not _distinct_groups:
+    raise ImproperlyConfigured(
+        "TEAM_GROUP_PATTERN must be a str.format pattern using {number}, such as Team{number:02d}"
+    )
 MAX_TEAMS = int(os.environ.get("MAX_TEAMS", "50"))
 
 # Session configuration (12-hour expiry for competitions)

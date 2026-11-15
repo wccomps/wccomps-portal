@@ -17,7 +17,7 @@ from scoring.models import IncidentReport, InjectScore, RedTeamScore
 from core.admin_views.places import SetupSection, setup_url
 from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, reason_for
 from core.models import AuditLog, CompetitionConfig
-from core.team_accounts import TeamAccounts, accounts_by_team, require_single_account
+from core.team_accounts import accounts_by_team, require_single_account
 from core.utils import ndjson_done
 from team.models import Team, single_account, team_username
 from ticketing.models import Ticket
@@ -91,8 +91,7 @@ def _check_team_accounts_exist() -> CheckResult:
 def _check_group_accounts_exist(numbers: list[int]) -> CheckResult:
     """With several accounts per team: every team has a member of its group matching its account pattern."""
     with AuthentikManager() as mgr:
-        found = accounts_by_team(mgr, numbers)
-    accounts = {n: found.get(n, TeamAccounts([], [])) for n in numbers}
+        accounts = accounts_by_team(mgr, numbers)
     missing = [n for n in numbers if not accounts[n].matched]
 
     if missing:

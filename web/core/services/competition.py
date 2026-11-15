@@ -304,7 +304,7 @@ def _run(
             account_steps = [(f"team {n:02d}", reason_for(e)) for n in numbers]
         else:
             for number in numbers:
-                matched = accounts[number].matched if number in accounts else []
+                matched = accounts[number].matched
                 account_steps.extend((username, None) for username in matched)
                 if not matched and enable:
                     account_steps.append((f"team {number:02d}", NO_TEAM_ACCOUNT))

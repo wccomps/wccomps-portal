@@ -37,12 +37,13 @@ def require_single_account() -> None:
 def team_accounts(
     group_names: Mapping[int, str], users: list[AuthentikUserEntry], groups: list[AuthentikGroupEntry]
 ) -> dict[int, TeamAccounts]:
-    """Each team's accounts, given its group's name; a team whose group doesn't exist has no entry."""
+    """Each team's accounts, given its group's name; a team whose group doesn't exist has none."""
     group_pks = {group["name"]: group["pk"] for group in groups}
     result: dict[int, TeamAccounts] = {}
     for number, group_name in group_names.items():
         group_pk = group_pks.get(group_name)
         if group_pk is None:
+            result[number] = TeamAccounts([], [])
             continue
         pattern = re.compile(account_pattern_text(number))
         members = sorted(user["username"] for user in users if group_pk in user["groups"])
@@ -63,7 +64,7 @@ def team_group_names(numbers: list[int]) -> dict[int, str]:
 def accounts_by_team(manager: AuthentikManager, numbers: list[int]) -> dict[int, TeamAccounts]:
     """The accounts a start or stop toggles: a single-account team's team_username, asking Authentik nothing (found by
     exact username when toggled, in its group or not); with several, its group's matching members, from one listing of
-    users and one of groups. A team whose group doesn't exist has no entry."""
+    users and one of groups."""
     if single_account():
         return {n: TeamAccounts([team_username(n)], []) for n in numbers}
     return team_accounts(team_group_names(numbers), manager.list_all_users(), manager.list_all_groups())

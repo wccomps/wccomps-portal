@@ -450,15 +450,16 @@ RESET_TEAM_INSTEAD = (
 )
 
 
-def _sign_out_team_accounts(team_number: int) -> int:
-    """End the portal sessions of every local account whose username matches the team's account pattern, without
-    asking Authentik; how many accounts."""
-    pattern = re.compile(account_pattern_text(team_number))
+def _sign_out_team_accounts(team: Team) -> int:
+    """End the portal sessions of every local account in the team's group whose username fully matches the team's
+    account pattern, without asking Authentik (the groups are the ones stored at sign-in and each refresh); how many
+    accounts."""
+    pattern = re.compile(account_pattern_text(team.team_number))
     with transaction.atomic():
-        accounts = [u for u in User.objects.select_related("usergroups") if pattern.fullmatch(u.username)]
+        members = User.objects.filter(usergroups__groups__contains=[team.authentik_group]).select_related("usergroups")
+        accounts = [u for u in members if pattern.fullmatch(u.username)]
         for account in accounts:
-            if hasattr(account, "usergroups"):
-                lock_account(account.usergroups.authentik_id)
+            lock_account(account.usergroups.authentik_id)
             sign_out_everywhere(account)
     return len(accounts)
 
@@ -468,12 +469,12 @@ def _report_new_school(request: HttpRequest, team_number: int, school_name: str,
     again, and say what the change did."""
     done = f"Team {team_number} now holds {school_name}: {unlinked} Discord member(s) unlinked"
     if not single_account():
-        signed_out = _sign_out_team_accounts(team_number)
+        signed_out = _sign_out_team_accounts(Team.objects.get(team_number=team_number))
         messages.warning(
             request,
             f"{done}; ended the portal sessions of {signed_out} team account(s). Teams have several accounts, so the "
-            "portal changes no passwords: change the team's Authentik passwords in Authentik before the new school "
-            "gets them.",
+            "portal changes no passwords and can't end Authentik sessions: in Authentik, change the team's passwords "
+            "and end their sessions before the new school gets them.",
         )
         return
     reset = reset_team_credentials(team_number, actor=actor)

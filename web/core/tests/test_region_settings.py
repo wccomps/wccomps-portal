@@ -117,8 +117,8 @@ def test_default_pattern_skips_blueteamadmin():
     }
 
 
-def test_team_without_a_group_has_no_entry():
-    assert team_accounts({4: "WCComps_BlueTeam04"}, [user("team04")], [GROUP_3]) == {}
+def test_team_without_a_group_has_no_accounts():
+    assert team_accounts({4: "WCComps_BlueTeam04"}, [user("team04")], [GROUP_3]) == {4: TeamAccounts([], [])}
 
 
 @pytest.mark.django_db
@@ -182,9 +182,17 @@ def test_empty_legacy_hosts_turn_off_legacy_redirects(monkeypatch):
     assert prod["CSRF_TRUSTED_ORIGINS"] == ["https://portal.example.org"]
 
 
-@pytest.mark.parametrize("name", ["TEAM_ACCOUNT_PATTERN", "TEAM_GROUP_PATTERN"])
-def test_pattern_without_number_is_refused_at_load(monkeypatch, name):
-    monkeypatch.setenv(name, "blueteam")
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("TEAM_ACCOUNT_PATTERN", "blueteam"),
+        ("TEAM_ACCOUNT_PATTERN", "team{number:02d}"),  # only the exact {number} is replaced
+        ("TEAM_GROUP_PATTERN", "BlueTeam"),
+        ("TEAM_GROUP_PATTERN", "BlueTeam{numbers}"),
+    ],
+)
+def test_pattern_without_number_is_refused_at_load(monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
     with pytest.raises(ImproperlyConfigured, match=name):
         runpy.run_path(str(Path(portal.__file__).parent / "settings.py"))
 
