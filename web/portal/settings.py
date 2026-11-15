@@ -4,6 +4,8 @@ from pathlib import Path
 
 import django_stubs_ext
 
+from portal.hosts import trusted_origins
+
 django_stubs_ext.monkeypatch()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,29 +23,26 @@ ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(","
 
 TRUST_CF_CONNECTING_IP = os.environ.get("TRUST_CF_CONNECTING_IP", "").strip().lower() in {"1", "true", "yes"}
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://bot.wccomps.org",
-    "https://register.wccomps.org",
-    "https://team.wccomps.org",
-    "https://teams.wccomps.org",
-    "https://ticket.wccomps.org",
-    "https://tickets.wccomps.org",
-    "https://portal.wccomps.org",
-]
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 
-# Requests on LEGACY_HOSTS are permanently redirected to CANONICAL_HOST (path and query preserved).
-# Set CANONICAL_HOST= (empty) in the environment to disable the redirects without a code change.
-# Legacy hosts must stay in ALLOWED_HOSTS and the HTTPRoute to be redirected (the redirect runs
-# before the CSRF check), and in CSRF_TRUSTED_ORIGINS so their forms still work with it switched off.
+# Requests on LEGACY_HOSTS (a comma-separated list) are permanently redirected to CANONICAL_HOST (path and query
+# preserved). Set CANONICAL_HOST= (empty) in the environment to disable the redirects without a code change.
+# Legacy hosts must stay in ALLOWED_HOSTS and the HTTPRoute to be redirected (the redirect runs before the CSRF
+# check); CSRF_TRUSTED_ORIGINS holds them so their forms still work with it switched off.
 CANONICAL_HOST = os.environ.get("CANONICAL_HOST", "portal.wccomps.org")
 LEGACY_HOSTS = [
-    "bot.wccomps.org",
-    "register.wccomps.org",
-    "team.wccomps.org",
-    "teams.wccomps.org",
-    "ticket.wccomps.org",
-    "tickets.wccomps.org",
+    host.strip()
+    for host in os.environ.get(
+        "LEGACY_HOSTS",
+        "bot.wccomps.org,register.wccomps.org,team.wccomps.org,"
+        "teams.wccomps.org,ticket.wccomps.org,tickets.wccomps.org",
+    ).split(",")
+    if host.strip()
 ]
+# A legacy host's root path goes to its app's page
+SUBDOMAIN_REDIRECTS = {"register.wccomps.org": "/register/"} if "register.wccomps.org" in LEGACY_HOSTS else {}
+
+CSRF_TRUSTED_ORIGINS = trusted_origins(BASE_URL, CANONICAL_HOST, LEGACY_HOSTS)
 
 
 INSTALLED_APPS = [
@@ -204,7 +203,6 @@ SESSION_SAVE_EVERY_REQUEST = True
 SESSION_COOKIE_SAMESITE = "Lax"  # Allow cookies across OAuth redirects
 SESSION_COOKIE_HTTPONLY = True  # Explicit (Django default, but important for security audits)
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 DISCORD_LOG_CHANNEL_ID = int(os.environ.get("DISCORD_LOG_CHANNEL_ID", "0"))
 DISCORD_TICKET_QUEUE_CHANNEL_ID = int(os.environ.get("DISCORD_TICKET_QUEUE_CHANNEL_ID", "0"))
 DISCORD_ANNOUNCEMENT_CHANNEL_ID = int(os.environ.get("DISCORD_ANNOUNCEMENT_CHANNEL_ID", "0"))
@@ -245,6 +243,8 @@ PROXMOX_API_TOKEN = os.environ.get("PROXMOX_API_TOKEN", "")
 PROXMOX_CA_FILE = os.environ.get("PROXMOX_CA_FILE", "")
 PROXMOX_VERIFY_SSL = os.environ.get("PROXMOX_VERIFY_SSL", "True") == "True"
 PROXMOX_DEFAULT_SNAPSHOT = os.environ.get("PROXMOX_DEFAULT_SNAPSHOT", "clean")
+# The ticket category whose tickets get the Proxmox box reset (seeded in ticketing 0009 as "Box Reset / Scrub")
+BOX_RESET_CATEGORY_ID = int(os.environ.get("BOX_RESET_CATEGORY_ID", "2"))
 
 AWEFUL_PROXY_URL = os.environ.get("AWEFUL_PROXY_URL", "")
 AWEFUL_PROXY_TOKEN = os.environ.get("AWEFUL_PROXY_TOKEN", "")

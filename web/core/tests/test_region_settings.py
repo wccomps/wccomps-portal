@@ -1,10 +1,15 @@
-"""Authentik group names, team accounts and the team cap come from settings; their defaults are WRCCDC's names."""
+"""Authentik group names, team accounts, the team cap, hosts and the box-reset category come from settings; their
+defaults are WRCCDC's."""
 
 import importlib
+import runpy
+from pathlib import Path
 from unittest.mock import patch
 
+import portal
 import pytest
 from django.urls import reverse
+from portal.hosts import trusted_origins
 
 from core import permission_constants
 from core.admin_views import readiness
@@ -24,6 +29,23 @@ TODAY_PERMISSION_MAP = {  # permission_constants.py at f207dc23
     "red_team": ["WCComps_RedTeam", "WCComps_Discord_Admin"],
     "blue_team": ["WCComps_GoldTeam", "WCComps_Discord_Admin"],
 }
+TODAY_LEGACY_HOSTS = [  # settings.py:40-45 at f207dc23
+    "bot.wccomps.org",
+    "register.wccomps.org",
+    "team.wccomps.org",
+    "teams.wccomps.org",
+    "ticket.wccomps.org",
+    "tickets.wccomps.org",
+]
+TODAY_CSRF_TRUSTED_ORIGINS = [  # settings.py:24-31 at f207dc23
+    "https://bot.wccomps.org",
+    "https://register.wccomps.org",
+    "https://team.wccomps.org",
+    "https://teams.wccomps.org",
+    "https://ticket.wccomps.org",
+    "https://tickets.wccomps.org",
+    "https://portal.wccomps.org",
+]
 
 GROUP_3: AuthentikGroupEntry = {"pk": "g3", "name": "WCComps_BlueTeam03", "parents": []}
 
@@ -112,3 +134,41 @@ def test_password_reset_refused_with_several_accounts(admin_client, settings):
         response = admin_client.post(reverse("admin_team_action", args=[3]), {"action": "reset_password"})
     assert response.status_code == 400
     reset.assert_not_called()
+
+
+def test_trusted_origins_today():
+    assert trusted_origins("https://portal.wccomps.org", "portal.wccomps.org", TODAY_LEGACY_HOSTS) == sorted(
+        TODAY_CSRF_TRUSTED_ORIGINS
+    )
+
+
+def test_trusted_origins_self_hosted():
+    assert trusted_origins("https://portal.example.org", "", []) == ["https://portal.example.org"]
+
+
+@pytest.mark.parametrize("base_url", [None, "https://portal.wccomps.org"])
+def test_host_settings_default_to_today(monkeypatch, base_url):
+    """Unset, the new variables give today's hosts, origins and box-reset category (BASE_URL unset or production's)."""
+    for name in ("ALLOWED_HOSTS", "CANONICAL_HOST", "LEGACY_HOSTS", "BOX_RESET_CATEGORY_ID", "BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    if base_url:
+        monkeypatch.setenv("BASE_URL", base_url)
+    prod = runpy.run_path(str(Path(portal.__file__).parent / "settings.py"))
+
+    assert sorted(prod["CSRF_TRUSTED_ORIGINS"]) == sorted(TODAY_CSRF_TRUSTED_ORIGINS)
+    assert prod["ALLOWED_HOSTS"] == ["localhost", "127.0.0.1"]
+    assert prod["CANONICAL_HOST"] == "portal.wccomps.org"
+    assert prod["LEGACY_HOSTS"] == TODAY_LEGACY_HOSTS
+    assert prod["SUBDOMAIN_REDIRECTS"] == {"register.wccomps.org": "/register/"}
+    assert prod["BOX_RESET_CATEGORY_ID"] == 2
+
+
+def test_empty_legacy_hosts_turn_off_legacy_redirects(monkeypatch):
+    monkeypatch.setenv("LEGACY_HOSTS", "")
+    monkeypatch.setenv("CANONICAL_HOST", "portal.example.org")
+    monkeypatch.setenv("BASE_URL", "https://portal.example.org")
+    prod = runpy.run_path(str(Path(portal.__file__).parent / "settings.py"))
+
+    assert prod["LEGACY_HOSTS"] == []
+    assert prod["SUBDOMAIN_REDIRECTS"] == {}
+    assert prod["CSRF_TRUSTED_ORIGINS"] == ["https://portal.example.org"]

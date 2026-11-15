@@ -1,6 +1,7 @@
 import re
 from datetime import timedelta
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -26,8 +27,7 @@ def parse_playbook_steps(text: str) -> list[str]:
     return steps
 
 
-# Seeded in 0009_seed_ticket_categories.py ("Box Reset / Scrub")
-BOX_RESET_CATEGORY_ID = 2
+BOX_RESET_CATEGORY_ID: int = settings.BOX_RESET_CATEGORY_ID
 
 
 class TicketCategory(models.Model):
