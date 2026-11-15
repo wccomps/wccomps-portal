@@ -137,7 +137,7 @@ flowchart LR
 - **Authentik is the authority.** Its administrators and the portal's service account are trusted; group membership
   there is the only source of roles. The service token's own permissions bound what the portal can do.
 - **Gold team holds near-admin power by design**: credential resets, app and account toggles, broadcasts and packet
-  passwords. Only `PORTAL_ADMIN_GROUP` (default `WCComps_Discord_Admin`) reaches Django admin.
+  passwords. Only `PORTAL_ADMIN_GROUP` (default `Portal_Admin`, WRCCDC's `WCComps_Discord_Admin`) reaches Django admin.
 - **Upstream truth.** Quotient's scores and Proxmox's VM state are validated for shape, not for honesty.
 - **Cloudflare's client address is trusted only when configured.** A deployment behind Cloudflare sets
   `TRUST_CF_CONNECTING_IP=true`; the self-hosting `docker-compose.yml` leaves it off, so its limits key on the
@@ -172,7 +172,9 @@ flowchart LR
    team cap and hosts: which Authentik groups grant admin and every role, which accounts a start, stop or reset
    touches, and which origins CSRF trusts, so changing one is a privilege change (`web/portal/settings.py`
    `PORTAL_GROUP_PREFIX`, `PORTAL_ADMIN_GROUP`, `TEAM_GROUP_PATTERN`, `TEAM_ACCOUNT_PATTERN`, `MAX_TEAMS`, `BASE_URL`,
-   `CANONICAL_HOST`, `LEGACY_HOSTS`).
+   `CANONICAL_HOST`, `LEGACY_HOSTS`, `SUBDOMAIN_REDIRECTS`). The repository's defaults are neutral (`Portal_` groups,
+   no canonical or legacy hosts), not WRCCDC's; the web server and the bot refuse to start while a required setting
+   is empty (`web/portal/required.py` `REQUIRED_SETTINGS`, checked in `web/portal/wsgi.py` and `main.py`).
 
 ## Owner and review trigger
 
@@ -186,6 +188,6 @@ The repository maintainers own this file. Update it in the same pull request whe
 - changes the build, the dependency policy or the deploy path;
 - changes the default or a deployment's value of a group, team account, team cap or host setting
   (`web/portal/settings.py` `PORTAL_GROUP_PREFIX`, `PORTAL_ADMIN_GROUP`, `TEAM_GROUP_PATTERN`, `TEAM_ACCOUNT_PATTERN`,
-  `MAX_TEAMS`, `BASE_URL`, `CANONICAL_HOST`, `LEGACY_HOSTS`).
+  `MAX_TEAMS`, `BASE_URL`, `CANONICAL_HOST`, `LEGACY_HOSTS`, `SUBDOMAIN_REDIRECTS`).
 
 Review it in full before each event, alongside the readiness checks.

@@ -201,7 +201,7 @@ class PacketDistributionService:
             body=text_content,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=recipients,
-            reply_to=[settings.DEFAULT_REPLY_TO_EMAIL],
+            reply_to=[settings.DEFAULT_REPLY_TO_EMAIL] if settings.DEFAULT_REPLY_TO_EMAIL else None,
         )
         email.attach_alternative(html_content, "text/html")
         email.attach(packet.filename, bytes(packet.file_data), packet.mime_type)

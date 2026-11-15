@@ -144,3 +144,12 @@ def test_packet_email_uses_org_names(team, packet):
     (message,) = mail.outbox
     assert message.subject == "[TEST] Example: Rules"
     assert "Example Cyber League" in message.body
+
+
+@pytest.mark.parametrize(("reply_to", "expected"), [("", []), ("info@example.org", ["info@example.org"])])
+def test_packet_email_reply_to_only_when_configured(team, packet, settings, reply_to, expected):
+    settings.DEFAULT_REPLY_TO_EMAIL = reply_to
+    PacketDistributionService().send_test_packet_email(packet, team, "gold@example.org")
+    (message,) = mail.outbox
+    assert message.reply_to == expected
+    assert message.message()["Reply-To"] == (reply_to or None)

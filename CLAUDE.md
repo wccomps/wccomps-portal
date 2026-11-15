@@ -37,6 +37,10 @@ Runs on the deoxys Kubernetes cluster, deployed by Argo CD from `wccomps/wccomps
 - CI builds one image for web and bot on every merge to main: `ghcr.io/wccomps/wccomps-portal:sha-<short>`.
 - Deploy: PR to wccomps-argocd bumping `newTag` in `manifests/wccomps-portal/kustomization.yaml`.
 - After changing its `configmap.yaml` or `secrets.yaml`, restart the web and bot Deployments.
+- The configmap sets WRCCDC's names: group prefix and admin group, org names, hosts, Authentik, Quotient and email
+  addresses. `web/portal/settings.py` defaults them neutral (`Portal_`, empty); the web server (`portal/wsgi.py`) and
+  the bot (`main.py`) refuse to start while a setting in `portal.required.REQUIRED_SETTINGS` is empty. The test
+  suite runs as WRCCDC's deployment: `portal/test_settings.py` sets the configmap's values.
 - `docker-compose.yml` is for anyone self-hosting the public repo (Postgres + web + bot); it isn't
   how production runs.
 - Starts, stops and Close Out share the Postgres advisory lock `COMPETITION_RUN_LOCK_ID`. If a stuck run holds it,
@@ -71,9 +75,9 @@ the unparenthesized form is used intentionally throughout.
   with a message
 - A team's record (ticket, incident report, attachment) is looked up with `team_record_or_404`: another team's
   record is a 404, the same as a missing one, never a 403
-- `PORTAL_ADMIN_GROUP` (default `WCComps_Discord_Admin`) grants access to everything; each other role's group is
-  `PORTAL_GROUP_PREFIX` (default `WCComps_`) plus a fixed suffix, and a new team's group is `TEAM_GROUP_PATTERN`
-  (after that, `Team.authentik_group`)
+- `PORTAL_ADMIN_GROUP` (default `Portal_Admin`, WRCCDC's `WCComps_Discord_Admin`) grants access to everything; each
+  other role's group is `PORTAL_GROUP_PREFIX` (default `Portal_`, WRCCDC's `WCComps_`) plus a fixed suffix, and a new
+  team's group is `TEAM_GROUP_PATTERN` (after that, `Team.authentik_group`)
 
 ### Discord Task Queue
 - Web code queues work with `DiscordTask.enqueue(<payload>)`; the bot's `DiscordQueueProcessor` consumes it

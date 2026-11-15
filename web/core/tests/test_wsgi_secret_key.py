@@ -1,4 +1,4 @@
-"""The web server refuses to start without a fixed secret key."""
+"""The web server refuses to start without a fixed secret key or a required setting."""
 
 import importlib
 import sys
@@ -30,3 +30,11 @@ def test_wsgi_loads_with_a_key(monkeypatch):
     monkeypatch.setenv("DJANGO_SECRET_KEY", "a-real-key-for-this-test")
 
     assert _import_wsgi().application is not None
+
+
+def test_wsgi_refuses_missing_required_settings(monkeypatch, settings):
+    monkeypatch.setenv("DJANGO_SECRET_KEY", "a-real-key-for-this-test")
+    settings.ORG_NAME = settings.DEFAULT_FROM_EMAIL = ""
+
+    with pytest.raises(ImproperlyConfigured, match="^DEFAULT_FROM_EMAIL, ORG_NAME not set"):
+        _import_wsgi()

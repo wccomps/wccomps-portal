@@ -75,3 +75,19 @@ def test_endpoint_503_after_login_logs_single_warning(monkeypatch, caplog):
 
     assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
     assert not _tracebacks(caplog)
+
+
+def test_unconfigured_url_is_unavailable_without_a_request(monkeypatch, settings):
+    """QUOTIENT_API_URL defaults to empty: the client answers unavailable and never builds a relative request."""
+    settings.QUOTIENT_API_URL = ""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"requested {request.url}")
+
+    real_client = httpx.Client
+    monkeypatch.setattr(client_module.httpx, "Client", lambda: real_client(transport=httpx.MockTransport(refuse)))
+    client = QuotientClient()
+
+    assert client.get_infrastructure(force_refresh=True) is None
+    with pytest.raises(client_module.QuotientAPIError, match="QUOTIENT_API_URL is not configured"):
+        client._get_client()

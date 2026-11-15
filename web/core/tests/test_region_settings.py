@@ -1,5 +1,5 @@
-"""Authentik group names, team accounts, the team cap, hosts and the box-reset category come from settings; their
-defaults are WRCCDC's."""
+"""Authentik group names, team accounts, the team cap, hosts, names and the box-reset category come from settings.
+Their defaults are neutral; WRCCDC's values live in its production configmap (WRCCDC_ENV), which the suite runs as."""
 
 import importlib
 import runpy
@@ -11,6 +11,7 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.urls import reverse
 from portal.hosts import trusted_origins
+from portal.required import REQUIRED_SETTINGS, missing_settings
 
 from core import permission_constants
 from core.admin_views import readiness
@@ -47,6 +48,44 @@ TODAY_CSRF_TRUSTED_ORIGINS = [  # settings.py:24-31 at f207dc23
     "https://tickets.wccomps.org",
     "https://portal.wccomps.org",
 ]
+# WRCCDC's production configmap (and portal.test_settings)
+WRCCDC_ENV = {
+    "PORTAL_GROUP_PREFIX": "WCComps_",
+    "PORTAL_ADMIN_GROUP": "WCComps_Discord_Admin",
+    "ORG_NAME": "Western Cyber Competitions",
+    "ORG_SHORT_NAME": "WCComps",
+    "AUTHENTIK_URL": "https://auth.wccomps.org",
+    "QUOTIENT_API_URL": "https://scoring.wccomps.org",
+    "DEFAULT_FROM_EMAIL": "noreply@wccomps.org",
+    "DEFAULT_REPLY_TO_EMAIL": "info@wccomps.org",
+    "CANONICAL_HOST": "portal.wccomps.org",
+    "LEGACY_HOSTS": ",".join(TODAY_LEGACY_HOSTS),
+    "LEGACY_HOST_PATHS": "register.wccomps.org=/register/",
+}
+# Every variable the neutral defaults stand in for
+REGION_ENV = (
+    *WRCCDC_ENV,
+    "AUTHENTIK_OIDC_URL",
+    "SERVER_EMAIL",
+    "SITE_NAME",
+    "TEAM_ACCOUNT_PATTERN",
+    "TEAM_GROUP_PATTERN",
+    "MAX_TEAMS",
+    "BOX_RESET_CATEGORY_ID",
+    "ALLOWED_HOSTS",
+    "BASE_URL",
+)
+SETTINGS_PATH = str(Path(portal.__file__).parent / "settings.py")
+
+
+def load_settings(monkeypatch, env: dict[str, str]) -> dict[str, object]:
+    """settings.py run with only env among the region variables."""
+    for name in REGION_ENV:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    return runpy.run_path(SETTINGS_PATH)
+
 
 GROUP_3: AuthentikGroupEntry = {"pk": "g3", "name": "WCComps_BlueTeam03", "parents": []}
 
@@ -64,7 +103,7 @@ def reload_permissions(settings):
     permission_constants.PERMISSION_MAP = original
 
 
-def test_defaults_match_today():
+def test_suite_runs_as_wrccdc():
     assert permission_constants.PERMISSION_MAP == TODAY_PERMISSION_MAP
     assert team_username(7) == "team07"
     assert team_group_name(7) == "WCComps_BlueTeam07"
@@ -154,28 +193,84 @@ def test_trusted_origins_self_hosted():
     assert trusted_origins("https://portal.example.org", "", []) == ["https://portal.example.org"]
 
 
-@pytest.mark.parametrize("base_url", [None, "https://portal.wccomps.org"])
-def test_host_settings_default_to_today(monkeypatch, base_url):
-    """Unset, the new variables give today's hosts, origins and box-reset category (BASE_URL unset or production's)."""
-    for name in ("ALLOWED_HOSTS", "CANONICAL_HOST", "LEGACY_HOSTS", "BOX_RESET_CATEGORY_ID", "BASE_URL"):
-        monkeypatch.delenv(name, raising=False)
-    if base_url:
-        monkeypatch.setenv("BASE_URL", base_url)
-    prod = runpy.run_path(str(Path(portal.__file__).parent / "settings.py"))
+def test_neutral_defaults(monkeypatch):
+    prod = load_settings(monkeypatch, {})
 
-    assert sorted(prod["CSRF_TRUSTED_ORIGINS"]) == sorted(TODAY_CSRF_TRUSTED_ORIGINS)
+    assert prod["CANONICAL_HOST"] == ""
+    assert prod["LEGACY_HOSTS"] == []
+    assert prod["SUBDOMAIN_REDIRECTS"] == {}
+    assert prod["CSRF_TRUSTED_ORIGINS"] == []
     assert prod["ALLOWED_HOSTS"] == ["localhost", "127.0.0.1"]
-    assert prod["CANONICAL_HOST"] == "portal.wccomps.org"
-    assert prod["LEGACY_HOSTS"] == TODAY_LEGACY_HOSTS
-    assert prod["SUBDOMAIN_REDIRECTS"] == {"register.wccomps.org": "/register/"}
+    assert prod["AUTHENTIK_URL"] == ""
+    assert prod["AUTHENTIK_OIDC_URL"] == ""
+    assert prod["QUOTIENT_API_URL"] == ""
+    assert prod["DEFAULT_FROM_EMAIL"] == ""
+    assert prod["SERVER_EMAIL"] == "root@localhost"
+    assert prod["DEFAULT_REPLY_TO_EMAIL"] == ""
+    assert prod["PORTAL_GROUP_PREFIX"] == "Portal_"
+    assert prod["PORTAL_ADMIN_GROUP"] == "Portal_Admin"
+    assert prod["TEAM_GROUP_PATTERN"] == "Portal_BlueTeam{number:02d}"
+    assert prod["TEAM_ACCOUNT_PATTERN"] == "team{number}"
+    assert prod["ORG_NAME"] == ""
+    assert prod["ORG_SHORT_NAME"] == ""
+    assert prod["SITE_NAME"] == "Portal"
+    assert prod["MAX_TEAMS"] == 50
     assert prod["BOX_RESET_CATEGORY_ID"] == 2
 
 
+def test_short_name_names_the_site(monkeypatch):
+    prod = load_settings(monkeypatch, {"ORG_SHORT_NAME": "Example", "DEFAULT_FROM_EMAIL": "portal@example.org"})
+
+    assert prod["SITE_NAME"] == "Example Portal"
+    assert prod["SERVER_EMAIL"] == "portal@example.org"
+
+
+@pytest.mark.parametrize("base_url", [None, "https://portal.wccomps.org"])
+def test_wrccdc_configmap_gives_today(monkeypatch, settings, reload_permissions, base_url):
+    """WRCCDC's configmap gives today's hosts, origins, groups and names (BASE_URL unset or production's)."""
+    prod = load_settings(monkeypatch, WRCCDC_ENV | ({"BASE_URL": base_url} if base_url else {}))
+
+    assert sorted(prod["CSRF_TRUSTED_ORIGINS"]) == sorted(TODAY_CSRF_TRUSTED_ORIGINS)
+    assert prod["CANONICAL_HOST"] == "portal.wccomps.org"
+    assert prod["LEGACY_HOSTS"] == TODAY_LEGACY_HOSTS
+    assert prod["SUBDOMAIN_REDIRECTS"] == {"register.wccomps.org": "/register/"}
+    assert prod["SITE_NAME"] == "WCComps Portal"
+    assert prod["AUTHENTIK_OIDC_URL"] == "https://auth.wccomps.org/application/o/discord-bot/"
+    assert prod["SERVER_EMAIL"] == "noreply@wccomps.org"
+    assert prod["TEAM_GROUP_PATTERN"] == "WCComps_BlueTeam{number:02d}"
+    settings.PORTAL_GROUP_PREFIX, settings.PORTAL_ADMIN_GROUP = prod["PORTAL_GROUP_PREFIX"], prod["PORTAL_ADMIN_GROUP"]
+    reload_permissions()
+    assert permission_constants.PERMISSION_MAP == TODAY_PERMISSION_MAP
+
+
+@pytest.mark.parametrize("name", REQUIRED_SETTINGS)
+def test_missing_settings_names_each_empty_required_one(settings, name):
+    assert missing_settings() == []
+    setattr(settings, name, "")
+    assert missing_settings() == [name]
+
+
+def test_missing_settings_names_every_empty_one(settings):
+    for name in REQUIRED_SETTINGS:
+        setattr(settings, name, "")
+    assert missing_settings() == list(REQUIRED_SETTINGS)
+
+
+def test_legacy_host_paths_parse(monkeypatch):
+    prod = load_settings(monkeypatch, {"LEGACY_HOST_PATHS": " a.example.org = /register/ ,, b.example.org=/x/?y=1, "})
+    assert prod["SUBDOMAIN_REDIRECTS"] == {"a.example.org": "/register/", "b.example.org": "/x/?y=1"}
+
+
+def test_legacy_host_path_without_equals_is_refused_at_load(monkeypatch):
+    monkeypatch.setenv("LEGACY_HOST_PATHS", "a.example.org=/register/,b.example.org")
+    with pytest.raises(ImproperlyConfigured, match="LEGACY_HOST_PATHS"):
+        runpy.run_path(SETTINGS_PATH)
+
+
 def test_empty_legacy_hosts_turn_off_legacy_redirects(monkeypatch):
-    monkeypatch.setenv("LEGACY_HOSTS", "")
-    monkeypatch.setenv("CANONICAL_HOST", "portal.example.org")
-    monkeypatch.setenv("BASE_URL", "https://portal.example.org")
-    prod = runpy.run_path(str(Path(portal.__file__).parent / "settings.py"))
+    prod = load_settings(
+        monkeypatch, {"CANONICAL_HOST": "portal.example.org", "BASE_URL": "https://portal.example.org"}
+    )
 
     assert prod["LEGACY_HOSTS"] == []
     assert prod["SUBDOMAIN_REDIRECTS"] == {}
@@ -194,7 +289,7 @@ def test_empty_legacy_hosts_turn_off_legacy_redirects(monkeypatch):
 def test_pattern_without_number_is_refused_at_load(monkeypatch, name, value):
     monkeypatch.setenv(name, value)
     with pytest.raises(ImproperlyConfigured, match=name):
-        runpy.run_path(str(Path(portal.__file__).parent / "settings.py"))
+        runpy.run_path(SETTINGS_PATH)
 
 
 def test_site_name_reaches_pages(admin_client, settings):

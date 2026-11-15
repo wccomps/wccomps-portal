@@ -13,6 +13,11 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portal.settings")
 
 application = get_wsgi_application()
 
+from portal.required import missing_settings  # noqa: E402 - reads settings, which get_wsgi_application configured
+
+if missing := missing_settings():
+    raise ImproperlyConfigured(f"{', '.join(missing)} not set; the web server needs them")
+
 # Gunicorn's preload_app imports this module in the master before it binds the port, so workers fork warm
 from portal.warmup import warm  # noqa: E402 - needs the settings get_wsgi_application set up
 

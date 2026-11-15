@@ -10,6 +10,8 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portal.settings")
 django.setup()
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
+from portal.required import missing_settings
 
 from bot.command_tree import PortalCommandTree, command_hash, command_plan
 from bot.competition_timer import CompetitionTimer
@@ -153,6 +155,8 @@ def main() -> None:
     if not token:
         logger.error("DISCORD_BOT_TOKEN environment variable not set")
         sys.exit(1)
+    if missing := missing_settings():
+        raise ImproperlyConfigured(f"{', '.join(missing)} not set; the bot needs them")
 
     bot = PortalBot()
 

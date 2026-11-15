@@ -32,11 +32,7 @@ STATE_EXPIRY_SECONDS = 300
 def _get_oauth_config() -> dict[str, str]:
     client_id = getattr(settings, "AUTHENTIK_CLIENT_ID", None)
     client_secret = getattr(settings, "AUTHENTIK_SECRET", None)
-    server_url = getattr(
-        settings,
-        "AUTHENTIK_OIDC_URL",
-        "https://auth.wccomps.org/application/o/discord-bot/",
-    )
+    server_url: str = settings.AUTHENTIK_OIDC_URL
 
     # Authentik uses shared endpoints (not per-application)
     # The application slug is only in the issuer and end-session URLs

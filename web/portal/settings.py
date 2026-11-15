@@ -27,24 +27,20 @@ TRUST_CF_CONNECTING_IP = os.environ.get("TRUST_CF_CONNECTING_IP", "").strip().lo
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 
 # Requests on LEGACY_HOSTS (a comma-separated list) are permanently redirected to CANONICAL_HOST (path and query
-# preserved). Set CANONICAL_HOST= (empty) in the environment to disable the redirects without a code change.
+# preserved). CANONICAL_HOST empty (the default) turns the redirects off.
 # Legacy hosts must stay in ALLOWED_HOSTS and the HTTPRoute to be redirected (the redirect runs before the CSRF
 # check); CSRF_TRUSTED_ORIGINS holds them so their forms still work with it switched off.
-CANONICAL_HOST = os.environ.get("CANONICAL_HOST", "portal.wccomps.org")
-LEGACY_HOSTS = [
-    host
-    for host in (
-        raw.strip()
-        for raw in os.environ.get(
-            "LEGACY_HOSTS",
-            "bot.wccomps.org,register.wccomps.org,team.wccomps.org,"
-            "teams.wccomps.org,ticket.wccomps.org,tickets.wccomps.org",
-        ).split(",")
-    )
-    if host
-]
-# The register legacy host's root path goes to the registration page
-SUBDOMAIN_REDIRECTS = {"register.wccomps.org": "/register/"} if "register.wccomps.org" in LEGACY_HOSTS else {}
+CANONICAL_HOST = os.environ.get("CANONICAL_HOST", "")
+LEGACY_HOSTS = [host for host in (raw.strip() for raw in os.environ.get("LEGACY_HOSTS", "").split(",")) if host]
+# A legacy host's root path goes to this path instead (LEGACY_HOST_PATHS, comma-separated host=/path entries)
+SUBDOMAIN_REDIRECTS: dict[str, str] = {}
+for _entry in (raw.strip() for raw in os.environ.get("LEGACY_HOST_PATHS", "").split(",")):
+    if not _entry:
+        continue
+    if "=" not in _entry:
+        raise ImproperlyConfigured(f"LEGACY_HOST_PATHS entry {_entry!r} is not host=/path")
+    _host, _path = _entry.split("=", 1)
+    SUBDOMAIN_REDIRECTS[_host.strip()] = _path.strip()
 
 CSRF_TRUSTED_ORIGINS = trusted_origins(BASE_URL, CANONICAL_HOST, LEGACY_HOSTS)
 
@@ -183,18 +179,18 @@ AUTHENTICATION_BACKENDS = ["core.auth_backends.PortalBackend"]
 
 LOGIN_URL = "/auth/login/"
 
-AUTHENTIK_URL = os.environ.get("AUTHENTIK_URL", "https://auth.wccomps.org")
+AUTHENTIK_URL = os.environ.get("AUTHENTIK_URL", "")
 AUTHENTIK_CLIENT_ID = os.environ.get("AUTHENTIK_CLIENT_ID")
 AUTHENTIK_SECRET = os.environ.get("AUTHENTIK_SECRET")
 AUTHENTIK_OIDC_URL = os.environ.get(
     "AUTHENTIK_OIDC_URL",
-    f"{AUTHENTIK_URL}/application/o/discord-bot/",
+    f"{AUTHENTIK_URL}/application/o/discord-bot/" if AUTHENTIK_URL else "",
 )
 
 # Authentik group names: each role's group is this prefix plus a fixed suffix (core.permission_constants); the admin
 # group and the team groups are their own settings below
-PORTAL_GROUP_PREFIX = os.environ.get("PORTAL_GROUP_PREFIX", "WCComps_")
-PORTAL_ADMIN_GROUP = os.environ.get("PORTAL_ADMIN_GROUP", f"{PORTAL_GROUP_PREFIX}Discord_Admin")
+PORTAL_GROUP_PREFIX = os.environ.get("PORTAL_GROUP_PREFIX", "Portal_")
+PORTAL_ADMIN_GROUP = os.environ.get("PORTAL_ADMIN_GROUP", f"{PORTAL_GROUP_PREFIX}Admin")
 # A new team's default Authentik group, a str.format pattern given the team's number
 TEAM_GROUP_PATTERN = os.environ.get("TEAM_GROUP_PATTERN", f"{PORTAL_GROUP_PREFIX}BlueTeam{{number:02d}}")
 # A team's accounts, with the literal text {number} standing for the team's two-digit number: a pattern with no regular
@@ -248,7 +244,7 @@ COMPETITION_GUILD_ID = int(os.environ.get("DISCORD_GUILD_ID", "0"))
 
 AUTHENTIK_TOKEN = os.environ.get("AUTHENTIK_TOKEN", "")
 
-QUOTIENT_API_URL = os.environ.get("QUOTIENT_API_URL", "https://scoring.wccomps.org")
+QUOTIENT_API_URL = os.environ.get("QUOTIENT_API_URL", "")
 
 # Quotient login: an [[admin]] account from Quotient's event.conf
 QUOTIENT_USERNAME = os.environ.get("QUOTIENT_USERNAME", "")
@@ -291,13 +287,15 @@ MAILERS = {
         ),
     }
 }
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@wccomps.org")
-DEFAULT_REPLY_TO_EMAIL = os.environ.get("DEFAULT_REPLY_TO_EMAIL", "info@wccomps.org")
-SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "")
+# Packet emails carry this Reply-To when it is set
+DEFAULT_REPLY_TO_EMAIL = os.environ.get("DEFAULT_REPLY_TO_EMAIL", "")
+SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL or "root@localhost")
 
-SITE_NAME = os.environ.get("SITE_NAME", "WCComps Portal")
-ORG_NAME = os.environ.get("ORG_NAME", "Western Cyber Competitions")
-ORG_SHORT_NAME = os.environ.get("ORG_SHORT_NAME", "WCComps")
+# AUTHENTIK_URL, DEFAULT_FROM_EMAIL, ORG_NAME and ORG_SHORT_NAME are required to serve (portal.required)
+ORG_NAME = os.environ.get("ORG_NAME", "")
+ORG_SHORT_NAME = os.environ.get("ORG_SHORT_NAME", "")
+SITE_NAME = os.environ.get("SITE_NAME", f"{ORG_SHORT_NAME} Portal" if ORG_SHORT_NAME else "Portal")
 
 HTTPX_DEFAULT_TIMEOUT = int(os.environ.get("HTTPX_DEFAULT_TIMEOUT", "10"))
 DISCORD_WEBHOOK_TIMEOUT = int(os.environ.get("DISCORD_WEBHOOK_TIMEOUT", "5"))
