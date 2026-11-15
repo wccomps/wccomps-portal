@@ -1,4 +1,4 @@
-"""Request text can't forge a log line or a field: the access, error and legacy-host lines under any path and header."""
+"""Request text can't forge a log line or a field: the access and error lines under any path and header."""
 
 import logging
 
@@ -104,23 +104,6 @@ def test_an_access_log_line_is_one_line_whatever_the_path_and_host(
     request.user = AnonymousUser()
     # client_ip user host "method path" status duration [queries time], or (unhandled exception) at the end
     _assert_one_line_one_quoted_field(_logged(lambda: AccessLoggingMiddleware(view)(request)), fields=8)
-
-
-@given(path=FORGED, referer=FORGED)
-def test_a_legacy_host_log_line_is_one_line_whatever_the_path_and_referer(path: str, referer: str) -> None:
-    from django.http import HttpResponse
-    from django.test import RequestFactory, override_settings
-
-    from core.middleware import SubdomainRedirectMiddleware
-
-    request = RequestFactory().get("/", HTTP_HOST="ticket.example.org", HTTP_REFERER=referer)
-    request.path = "/" + path
-    with override_settings(
-        ALLOWED_HOSTS=["*"], CANONICAL_HOST="portal.example.org", LEGACY_HOSTS=["ticket.example.org"]
-    ):
-        middleware = SubdomainRedirectMiddleware(lambda r: HttpResponse())
-        # event host "method path" status referer
-        _assert_one_line_one_quoted_field(_logged(lambda: middleware(request)), fields=5)
 
 
 def test_a_logged_newline_and_a_literal_backslash_n_stay_distinct() -> None:

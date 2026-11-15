@@ -1,11 +1,10 @@
 import os
 import secrets
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import django_stubs_ext
 from django.core.exceptions import ImproperlyConfigured
-
-from portal.hosts import trusted_origins
 
 django_stubs_ext.monkeypatch()
 
@@ -26,23 +25,10 @@ TRUST_CF_CONNECTING_IP = os.environ.get("TRUST_CF_CONNECTING_IP", "").strip().lo
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 
-# Requests on LEGACY_HOSTS (a comma-separated list) are permanently redirected to CANONICAL_HOST (path and query
-# preserved). CANONICAL_HOST empty (the default) turns the redirects off.
-# Legacy hosts must stay in ALLOWED_HOSTS and the HTTPRoute to be redirected (the redirect runs before the CSRF
-# check); CSRF_TRUSTED_ORIGINS holds them so their forms still work with it switched off.
-CANONICAL_HOST = os.environ.get("CANONICAL_HOST", "")
-LEGACY_HOSTS = [host for host in (raw.strip() for raw in os.environ.get("LEGACY_HOSTS", "").split(",")) if host]
-# A host's root path redirects to this path (LEGACY_HOST_PATHS, comma-separated host=/path entries)
-SUBDOMAIN_REDIRECTS: dict[str, str] = {}
-for _entry in (raw.strip() for raw in os.environ.get("LEGACY_HOST_PATHS", "").split(",")):
-    if not _entry:
-        continue
-    _host, _equals, _path = (part.strip() for part in _entry.partition("="))
-    if not (_equals and _host and _path.startswith("/")):
-        raise ImproperlyConfigured(f"LEGACY_HOST_PATHS entry {_entry!r} is not host=/path")
-    SUBDOMAIN_REDIRECTS[_host] = _path
-
-CSRF_TRUSTED_ORIGINS = trusted_origins(BASE_URL, CANONICAL_HOST, LEGACY_HOSTS)
+# The https origin of the portal's address. An http BASE_URL (local development) adds nothing: production serves
+# https only, and a same-host form needs no trusted origin.
+_address = urlsplit(BASE_URL)
+CSRF_TRUSTED_ORIGINS = [f"https://{_address.netloc}"] if _address.scheme == "https" and _address.netloc else []
 
 
 INSTALLED_APPS = [
@@ -79,7 +65,6 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "core.middleware.SubdomainRedirectMiddleware",
     "core.middleware.AuthentikRequiredMiddleware",
     "core.middleware.RejectNulFieldsMiddleware",
     "core.middleware.UserTimezoneMiddleware",

@@ -13,10 +13,6 @@ for _name, _value in {
     "QUOTIENT_API_URL": "https://scoring.wccomps.org",
     "DEFAULT_FROM_EMAIL": "noreply@wccomps.org",
     "DEFAULT_REPLY_TO_EMAIL": "info@wccomps.org",
-    "CANONICAL_HOST": "portal.wccomps.org",
-    "LEGACY_HOSTS": "bot.wccomps.org,register.wccomps.org,team.wccomps.org,teams.wccomps.org,ticket.wccomps.org,"
-    "tickets.wccomps.org",
-    "LEGACY_HOST_PATHS": "register.wccomps.org=/register/",
 }.items():
     os.environ.setdefault(_name, _value)
 

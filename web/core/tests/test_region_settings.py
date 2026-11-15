@@ -2,7 +2,6 @@
 Their defaults are neutral; WRCCDC's values live in its production configmap (WRCCDC_ENV), which the suite runs as."""
 
 import importlib
-import re
 import runpy
 from pathlib import Path
 from unittest.mock import patch
@@ -11,7 +10,6 @@ import portal
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.urls import reverse
-from portal.hosts import trusted_origins
 from portal.required import REQUIRED_SETTINGS, missing_settings
 
 from core import permission_constants
@@ -32,23 +30,6 @@ TODAY_PERMISSION_MAP = {  # permission_constants.py at f207dc23
     "red_team": ["WCComps_RedTeam", "WCComps_Discord_Admin"],
     "blue_team": ["WCComps_GoldTeam", "WCComps_Discord_Admin"],
 }
-TODAY_LEGACY_HOSTS = [  # settings.py:40-45 at f207dc23
-    "bot.wccomps.org",
-    "register.wccomps.org",
-    "team.wccomps.org",
-    "teams.wccomps.org",
-    "ticket.wccomps.org",
-    "tickets.wccomps.org",
-]
-TODAY_CSRF_TRUSTED_ORIGINS = [  # settings.py:24-31 at f207dc23
-    "https://bot.wccomps.org",
-    "https://register.wccomps.org",
-    "https://team.wccomps.org",
-    "https://teams.wccomps.org",
-    "https://ticket.wccomps.org",
-    "https://tickets.wccomps.org",
-    "https://portal.wccomps.org",
-]
 # WRCCDC's production configmap (and portal.test_settings)
 WRCCDC_ENV = {
     "PORTAL_GROUP_PREFIX": "WCComps_",
@@ -59,9 +40,6 @@ WRCCDC_ENV = {
     "QUOTIENT_API_URL": "https://scoring.wccomps.org",
     "DEFAULT_FROM_EMAIL": "noreply@wccomps.org",
     "DEFAULT_REPLY_TO_EMAIL": "info@wccomps.org",
-    "CANONICAL_HOST": "portal.wccomps.org",
-    "LEGACY_HOSTS": ",".join(TODAY_LEGACY_HOSTS),
-    "LEGACY_HOST_PATHS": "register.wccomps.org=/register/",
 }
 # Every variable the neutral defaults stand in for
 REGION_ENV = (
@@ -184,22 +162,22 @@ def test_password_reset_refused_with_several_accounts(admin_client, settings):
     reset.assert_not_called()
 
 
-def test_trusted_origins_today():
-    assert trusted_origins("https://portal.wccomps.org", "portal.wccomps.org", TODAY_LEGACY_HOSTS) == sorted(
-        TODAY_CSRF_TRUSTED_ORIGINS
-    )
-
-
-def test_trusted_origins_self_hosted():
-    assert trusted_origins("https://portal.example.org", "", []) == ["https://portal.example.org"]
+@pytest.mark.parametrize(
+    ("base_url", "origins"),
+    [
+        ("https://portal.example.org", ["https://portal.example.org"]),
+        ("https://portal.example.org:8443/path", ["https://portal.example.org:8443"]),
+        ("http://localhost:5000", []),
+    ],
+)
+def test_csrf_trusted_origins_is_the_https_base_url_origin(monkeypatch, base_url, origins):
+    """An http BASE_URL (local development) trusts nothing: production serves https only."""
+    assert load_settings(monkeypatch, {"BASE_URL": base_url})["CSRF_TRUSTED_ORIGINS"] == origins
 
 
 def test_neutral_defaults(monkeypatch):
     prod = load_settings(monkeypatch, {})
 
-    assert prod["CANONICAL_HOST"] == ""
-    assert prod["LEGACY_HOSTS"] == []
-    assert prod["SUBDOMAIN_REDIRECTS"] == {}
     assert prod["CSRF_TRUSTED_ORIGINS"] == []
     assert prod["ALLOWED_HOSTS"] == ["localhost", "127.0.0.1"]
     assert prod["AUTHENTIK_URL"] == ""
@@ -226,15 +204,11 @@ def test_short_name_names_the_site(monkeypatch):
     assert prod["SERVER_EMAIL"] == "portal@example.org"
 
 
-@pytest.mark.parametrize("base_url", [None, "https://portal.wccomps.org"])
-def test_wrccdc_configmap_gives_today(monkeypatch, settings, reload_permissions, base_url):
-    """WRCCDC's configmap gives today's hosts, origins, groups and names (BASE_URL unset or production's)."""
-    prod = load_settings(monkeypatch, WRCCDC_ENV | ({"BASE_URL": base_url} if base_url else {}))
+def test_wrccdc_configmap_gives_today(monkeypatch, settings, reload_permissions):
+    """WRCCDC's configmap and production BASE_URL give today's origin, groups and names."""
+    prod = load_settings(monkeypatch, WRCCDC_ENV | {"BASE_URL": "https://portal.wccomps.org"})
 
-    assert sorted(prod["CSRF_TRUSTED_ORIGINS"]) == sorted(TODAY_CSRF_TRUSTED_ORIGINS)
-    assert prod["CANONICAL_HOST"] == "portal.wccomps.org"
-    assert prod["LEGACY_HOSTS"] == TODAY_LEGACY_HOSTS
-    assert prod["SUBDOMAIN_REDIRECTS"] == {"register.wccomps.org": "/register/"}
+    assert prod["CSRF_TRUSTED_ORIGINS"] == ["https://portal.wccomps.org"]
     assert prod["SITE_NAME"] == "WCComps Portal"
     assert prod["AUTHENTIK_OIDC_URL"] == "https://auth.wccomps.org/application/o/discord-bot/"
     assert prod["SERVER_EMAIL"] == "noreply@wccomps.org"
@@ -255,31 +229,6 @@ def test_missing_settings_names_every_empty_one(settings):
     for name in REQUIRED_SETTINGS:
         setattr(settings, name, "")
     assert missing_settings() == list(REQUIRED_SETTINGS)
-
-
-def test_legacy_host_paths_parse(monkeypatch):
-    prod = load_settings(monkeypatch, {"LEGACY_HOST_PATHS": " a.example.org = /register/ ,, b.example.org=/x/?y=1, "})
-    assert prod["SUBDOMAIN_REDIRECTS"] == {"a.example.org": "/register/", "b.example.org": "/x/?y=1"}
-
-
-@pytest.mark.parametrize(
-    "entry", ["b.example.org", "=/register/", " = /x/", "b.example.org=", "b.example.org=register/"]
-)
-def test_legacy_host_path_not_host_and_path_is_refused_at_load(monkeypatch, entry):
-    """Each entry needs a host, "=" and a path starting with "/"."""
-    monkeypatch.setenv("LEGACY_HOST_PATHS", f"a.example.org=/register/,{entry}")
-    with pytest.raises(ImproperlyConfigured, match=f"LEGACY_HOST_PATHS entry {re.escape(repr(entry.strip()))}"):
-        runpy.run_path(SETTINGS_PATH)
-
-
-def test_empty_legacy_hosts_turn_off_legacy_redirects(monkeypatch):
-    prod = load_settings(
-        monkeypatch, {"CANONICAL_HOST": "portal.example.org", "BASE_URL": "https://portal.example.org"}
-    )
-
-    assert prod["LEGACY_HOSTS"] == []
-    assert prod["SUBDOMAIN_REDIRECTS"] == {}
-    assert prod["CSRF_TRUSTED_ORIGINS"] == ["https://portal.example.org"]
 
 
 @pytest.mark.parametrize(

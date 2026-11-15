@@ -5,10 +5,8 @@ from collections.abc import Callable, Iterable
 from typing import Any
 from urllib.parse import unquote
 
-from django.conf import settings
 from django.db import connection
-from django.http import HttpRequest, HttpResponse, HttpResponsePermanentRedirect, JsonResponse
-from django.shortcuts import redirect
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 
 from .errors import sign_in_answer, wants_json_error
@@ -114,61 +112,6 @@ class UserTimezoneMiddleware:
         except KeyError, ValueError, zoneinfo.ZoneInfoNotFoundError:
             timezone.deactivate()
         return self.get_response(request)
-
-
-class SubdomainRedirectMiddleware:
-    """Redirect legacy hosts to the canonical host, and subdomain root paths to their app paths."""
-
-    # OAuth callbacks must complete on the host whose redirect_uri Authentik issued the code for,
-    # otherwise the token exchange fails for logins that were in flight on a legacy host.
-    CANONICAL_EXEMPT_PATHS = frozenset({"/auth/callback/"})
-
-    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
-        self.get_response = get_response
-        self.subdomain_redirects: dict[str, str] = settings.SUBDOMAIN_REDIRECTS
-        self.canonical_host: str = settings.CANONICAL_HOST
-        self.legacy_hosts: frozenset[str] = frozenset(settings.LEGACY_HOSTS)
-
-    def __call__(self, request: HttpRequest) -> HttpResponse:
-        host = request.get_host().split(":")[0]
-
-        if self.canonical_host and host in self.legacy_hosts:
-            if request.path in self.CANONICAL_EXEMPT_PATHS:
-                self._log_legacy_use("legacy-host-callback", host, request, "-")
-                return self.get_response(request)
-            if request.path == "/" and host in self.subdomain_redirects:
-                query = request.META.get("QUERY_STRING", "")
-                target = self.subdomain_redirects[host] + (f"?{query}" if query else "")
-            else:
-                target = request.get_full_path()
-            # 301 for GET/HEAD; 308 for everything else so the method and body survive
-            preserve = request.method not in ("GET", "HEAD")
-            response = HttpResponsePermanentRedirect(
-                f"https://{self.canonical_host}{target}", preserve_request=preserve
-            )
-            self._log_legacy_use("legacy-host-redirect", host, request, str(response.status_code))
-            return response
-
-        if request.path == "/" and host in self.subdomain_redirects:
-            return redirect(self.subdomain_redirects[host])
-        return self.get_response(request)
-
-    @staticmethod
-    def _log_legacy_use(event: str, host: str, request: HttpRequest, status: str) -> None:
-        """Record legacy-host traffic so retiring those hosts can be based on data.
-
-        Paths only: query strings on these URLs can carry link tokens and OAuth codes.
-        """
-        referer = request.META.get("HTTP_REFERER", "").split("?", 1)[0] or "-"
-        logger.info(
-            '%s %s "%s %s" %s %s',
-            event,
-            _field(host),
-            _field(request.method),
-            _field(request.path, quoted=True),
-            status,
-            _field(referer),
-        )
 
 
 class AuthentikRequiredMiddleware:

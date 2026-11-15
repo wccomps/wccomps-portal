@@ -74,9 +74,7 @@ UI_TEXT_EXCEPTIONS = {
     "web/core/csv_export.py:<module>:*:hyphen for no value": "a cell starting with it is a spreadsheet formula",
     "web/core/middleware.py:AccessLoggingMiddleware.__call__:*:hyphen for no value": "an empty field in the access "
     "log line",
-    "web/core/middleware.py:SubdomainRedirectMiddleware.*:*:hyphen for no value": "an empty field in the legacy-host "
-    "log line",
-    "web/core/middleware.py:_field:*:hyphen for no value": "an empty field in an access or legacy-host log line",
+    "web/core/middleware.py:_field:*:hyphen for no value": "an empty field in an access or error log line",
     "web/gunicorn.conf.py:<module>:*:hyphen for no value": "gunicorn's name for standard output",
     "bot/cogs/ticketing.py:TicketingCog.on_message:*:\U0001f4ce": "the reaction that marks a message whose attachment "
     "was saved: a reaction is an emoji",

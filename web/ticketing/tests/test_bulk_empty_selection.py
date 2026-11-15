@@ -76,7 +76,6 @@ REFERER_RE = re.compile(r"""HTTP_REFERER|["']referer["']""", re.IGNORECASE)
 # "file:line" -> why that code reads the Referer
 REFERER_EXCEPTIONS = {
     "web/ticketing/views/list.py:*": "back_to_list, the one way back to the page a POST came from",
-    "web/core/middleware.py:*": "the legacy-host log line names the page a request came from",
 }
 
 
