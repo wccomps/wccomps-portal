@@ -201,8 +201,8 @@ class QueuedTask(models.Model):
         return cls(**kwargs)
 
     @classmethod
-    def enqueue(cls, payload: queued_tasks.TaskPayload) -> list[QueuedTask]:
-        """One row per backend from backends_for.
+    def enqueue(cls, payload: queued_tasks.TaskPayload, origin: TaskBackend | None = None) -> list[QueuedTask]:
+        """One row per backend from backends_for, none for origin, the backend the payload came from.
 
         A payload's ticket_id also sets the ticket FK, so deleting a ticket drops its pending tasks.
         """
@@ -214,7 +214,7 @@ class QueuedTask(models.Model):
                 payload=asdict(payload),
                 status="pending",
             )
-            for backend in queued_tasks.backends_for(payload)
+            for backend in queued_tasks.backends_for(payload, origin)
         ]
 
 

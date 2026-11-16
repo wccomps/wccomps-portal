@@ -203,7 +203,12 @@ BACKEND_TASKS: dict[TaskBackend, tuple[type[TaskPayload], ...]] = {
 }
 
 
-def backends_for(payload: TaskPayload) -> list[TaskBackend]:
-    """The configured backends that run this payload's group."""
+def backends_for(payload: TaskPayload, origin: TaskBackend | None = None) -> list[TaskBackend]:
+    """The configured backends that run this payload's group, but not origin, the backend the payload came from (a
+    comment made in a Discord thread is already there)."""
     configured = {TaskBackend.DISCORD: discord_enabled(), TaskBackend.ZULIP: zulip_enabled(), TaskBackend.WORKER: True}
-    return [backend for backend, types in BACKEND_TASKS.items() if configured[backend] and isinstance(payload, types)]
+    return [
+        backend
+        for backend, types in BACKEND_TASKS.items()
+        if configured[backend] and backend != origin and isinstance(payload, types)
+    ]

@@ -3,7 +3,8 @@
 import pytest
 
 from core.models import QueuedTask
-from core.queued_tasks import LogToChannel, PostComment, ResetNextcloudTeam, SyncRoles
+from core.queued_tasks import LogToChannel, PostComment, ResetNextcloudTeam, SyncRoles, backends_for
+from core.task_backends import TaskBackend
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory, TicketComment
 
@@ -35,6 +36,18 @@ def test_enqueue_writes_nothing_without_chat(settings):
 def test_notice_one_row_per_chat_backend(zulip_configured, ticket, comment):
     rows = QueuedTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=comment.id))
     assert sorted(r.backend for r in rows) == ["discord", "zulip"]
+
+
+def test_backends_for_drops_the_origin(zulip_configured):
+    notice = LogToChannel(message="x")
+    assert backends_for(notice, TaskBackend.DISCORD) == [TaskBackend.ZULIP]
+    assert backends_for(notice, TaskBackend.ZULIP) == [TaskBackend.DISCORD]
+    assert backends_for(notice) == [TaskBackend.DISCORD, TaskBackend.ZULIP]
+
+
+def test_notice_from_discord_is_not_queued_back_to_discord(zulip_configured, ticket, comment):
+    rows = QueuedTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=comment.id), origin=TaskBackend.DISCORD)
+    assert [r.backend for r in rows] == ["zulip"]
 
 
 def test_discord_only_payload_skips_zulip(zulip_configured):

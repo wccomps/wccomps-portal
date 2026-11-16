@@ -15,7 +15,8 @@ from bot.thread_creator import ticket_thread
 from bot.ticket_input import file_ticket
 from bot.utils import add_field, choices, pinging
 from core.models import QueuedTask
-from core.queued_tasks import SyncMemberRoles
+from core.queued_tasks import PostComment, SyncMemberRoles
+from core.task_backends import TaskBackend
 from core.utils import run_blocking
 from team.models import DiscordLink
 from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
@@ -221,13 +222,17 @@ class TicketingCog(commands.Cog):
 
             if not existing:
                 author = await sync_to_async(get_user_for_ticket)(discord_id=message.author.id)
-                await TicketComment.objects.acreate(
+                comment = await TicketComment.objects.acreate(
                     ticket=ticket,
                     author=author,
                     comment_text=content,
                     discord_message_id=message.id,
                 )
                 logger.info(f"Saved Discord message as comment for ticket #{ticket.id}")
+                # The other chat backends post it; the thread already shows it
+                await sync_to_async(QueuedTask.enqueue)(
+                    PostComment(ticket_id=ticket.id, comment_id=comment.id), origin=TaskBackend.DISCORD
+                )
 
         if message.attachments:
             for attachment in message.attachments:
