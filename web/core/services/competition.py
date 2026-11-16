@@ -14,6 +14,7 @@ from django.db.models import Q
 from core.authentik_utils import set_team_account_active
 from core.discord_tasks import BroadcastMessage
 from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, DiscordTask
+from core.team_accounts import accounts_by_team
 from core.utils import advisory_lock, format_competition_time
 from team.models import MAX_TEAMS, active_team_numbers, team_username
 
@@ -26,6 +27,8 @@ COUNTDOWN_SENDER = "Gold Team"
 COMPETITION_STARTED = "competition_started"
 # The audit action a stop records, with the same details
 COMPETITION_STOPPED = "competition_stopped"
+# A start's reason for an active team whose group has no account matching its pattern, or that has no group
+NO_TEAM_ACCOUNT = "no team account in its group"
 TIMER_GAVE_UP = "competition_timer_gave_up"
 COMPETITION_COUNTDOWN_QUEUED = "competition_countdown_queued"
 
@@ -289,11 +292,25 @@ def _run(
     # Inactive teams' accounts stay in their groups between events, so start must not enable them. Stop
     # disables every team account, closing any that was left enabled.
     numbers = active_team_numbers() if enable else list(range(1, MAX_TEAMS + 1))
-    result.accounts_total = len(numbers)
     provision_nextcloud = enable and nextcloud_configured()
-    total = len(result.controlled_apps) + len(numbers) + 2 + (1 if provision_nextcloud else 0)
-    step = 0
     with AuthentikManager() as manager:
+        # One step per team account; when Authentik couldn't list them, one failed step per team. On start, an active
+        # team with no account is one failed step; a stop skips it, having nothing to disable.
+        account_steps: list[tuple[str, str | None]] = []  # (username, None) or (team, why it has no account)
+        try:
+            accounts = accounts_by_team(manager, numbers)
+        except AuthentikAPIError as e:
+            logger.warning(f"Failed to list the team accounts: {e}")
+            account_steps = [(f"team {n:02d}", reason_for(e)) for n in numbers]
+        else:
+            for number in numbers:
+                matched = accounts[number].matched
+                account_steps.extend((username, None) for username in matched)
+                if not matched and enable:
+                    account_steps.append((f"team {number:02d}", NO_TEAM_ACCOUNT))
+        result.accounts_total = len(account_steps)
+        total = len(result.controlled_apps) + len(account_steps) + 2 + (1 if provision_nextcloud else 0)
+        step = 0
         for slug in result.controlled_apps:
             step += 1
             try:
@@ -307,20 +324,21 @@ def _run(
                 result.apps_ok.append(slug)
                 yield CompetitionStep(f"{verb} {slug}", step, total)
 
-        for number in numbers:
-            username = team_username(number)
+        for name, problem in account_steps:
             step += 1
-            try:
-                set_team_account_active(manager, number, enable)
-            except AuthentikAPIError as e:
-                logger.warning(f"Failed to set {username} active={enable}: {e}")
-                why = reason_for(e)
+            if problem is None:
+                try:
+                    set_team_account_active(manager, name, enable)
+                except AuthentikAPIError as e:
+                    logger.warning(f"Failed to set {name} active={enable}: {e}")
+                    problem = reason_for(e)
+            if problem is not None:
                 result.accounts_failed += 1
-                result.account_failures.append((username, why))
-                yield CompetitionStep(f"Failed {username}: {why}", step, total, ok=False)
+                result.account_failures.append((name, problem))
+                yield CompetitionStep(f"Failed {name}: {problem}", step, total, ok=False)
             else:
                 result.accounts_ok += 1
-                yield CompetitionStep(f"{verb} {username}", step, total)
+                yield CompetitionStep(f"{verb} {name}", step, total)
 
         # Permissions follow each account's enabled state; don't make teams wait for the periodic refresh.
         step += 1

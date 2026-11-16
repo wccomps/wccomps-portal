@@ -124,6 +124,16 @@ class TestOAuthLogin:
         assert response.status_code == 500
         assert b"Configuration Error" in response.content
 
+    def test_login_without_oidc_url_shows_error(self, settings):
+        """AUTHENTIK_OIDC_URL defaults to empty without AUTHENTIK_URL: no redirect to a relative /authorize/."""
+        settings.AUTHENTIK_CLIENT_ID = "test-client-id"
+        settings.AUTHENTIK_OIDC_URL = ""
+
+        response = Client().get("/auth/login/")
+
+        assert response.status_code == 500
+        assert b"Configuration Error" in response.content
+
 
 @pytest.mark.django_db
 class TestOAuthCallback:

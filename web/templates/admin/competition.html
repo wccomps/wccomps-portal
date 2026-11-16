@@ -1,7 +1,7 @@
 {% extends "admin/ops_base.html" %}
 {% load cotton static %}
 {% block title %}
-    Competition - WCComps Portal
+    Competition - {{ SITE_NAME }}
 {% endblock title %}
 {% block admin_content %}
     <div x-data="competitionAdmin">
@@ -167,44 +167,46 @@
         {% endif %}
         <c-fieldset id="{{ anchors.ADVANCED }}"
                     class="mt-20"
-                    heading="Advanced: reset team passwords{% if panel.reopen_offered %}, start the competition again{% endif %}{% if can_cancel %}, cancel the event{% endif %}{% if can_clear %}, clear leftover data{% endif %}"
+                    heading="{{ advanced_heading }}"
                     collapsible="true"
                     collapsed="{{ panel.advanced_open|yesno:'false,true' }}">
             <p class="help">Tools outside the normal run of an event.</p>
-            <c-action_box heading="Reset Team Passwords">
-                <form @submit.prevent="resetPasswords" :data-confirm="resetQuestion">
-                    <c-form_field label="Team Numbers"
-                                  id="team_numbers"
-                                  help_text="Leave empty to reset every active team. Generates new passwords, ends the teams' Authentik and portal sessions and unlinks their Discord members.">
-                        <input type="text"
-                               name="team_numbers"
-                               id="team_numbers"
-                               :value="teamNumbers"
-                               @input="setField"
-                               data-field="teamNumbers"
-                               placeholder="1,3,5-10 (empty = all active)"
-                               class="vTextField">
-                    </c-form_field>
-                    <c-button_row class="mt-10 justify-end">
-                        <c-button type="submit" variant="warning" ::disabled="loading">
-                            Reset Passwords
-                        </c-button>
-                    </c-button_row>
-                </form>
-                <template x-if="csvContent">
-                    <c-action_box heading="Password CSV Generated" class="mt-20">
-                        <textarea readonly
-                                  aria-label="Generated password CSV"
-                                  class="w-full vTextField h-120 font-mono text-sm"
-                                  x-text="csvContent"></textarea>
-                        <c-button_row class="mt-10">
-                            <c-button type="button" variant="default" @click="downloadCsv">
-                                Download CSV
+            {% if can_reset %}
+                <c-action_box heading="Reset Team Passwords">
+                    <form @submit.prevent="resetPasswords" :data-confirm="resetQuestion">
+                        <c-form_field label="Team Numbers"
+                                      id="team_numbers"
+                                      help_text="Leave empty to reset every active team. Generates new passwords, ends the teams' Authentik and portal sessions and unlinks their Discord members.">
+                            <input type="text"
+                                   name="team_numbers"
+                                   id="team_numbers"
+                                   :value="teamNumbers"
+                                   @input="setField"
+                                   data-field="teamNumbers"
+                                   placeholder="1,3,5-10 (empty = all active)"
+                                   class="vTextField">
+                        </c-form_field>
+                        <c-button_row class="mt-10 justify-end">
+                            <c-button type="submit" variant="warning" ::disabled="loading">
+                                Reset Passwords
                             </c-button>
                         </c-button_row>
-                    </c-action_box>
-                </template>
-            </c-action_box>
+                    </form>
+                    <template x-if="csvContent">
+                        <c-action_box heading="Password CSV Generated" class="mt-20">
+                            <textarea readonly
+                                      aria-label="Generated password CSV"
+                                      class="w-full vTextField h-120 font-mono text-sm"
+                                      x-text="csvContent"></textarea>
+                            <c-button_row class="mt-10">
+                                <c-button type="button" variant="default" @click="downloadCsv">
+                                    Download CSV
+                                </c-button>
+                            </c-button_row>
+                        </c-action_box>
+                    </template>
+                </c-action_box>
+            {% endif %}
             {% if panel.reopen_offered %}
                 <c-action_box heading="Start Competition Again" variant="warning" class="mt-20">
                     <p class="help">

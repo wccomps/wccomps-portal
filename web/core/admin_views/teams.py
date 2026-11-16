@@ -15,8 +15,9 @@ from core.errors import json_endpoint
 from core.forms import TeamActionForm, TeamsBulkActionForm
 from core.models import AuditLog, DiscordTask
 from core.services.linking import ADMIN_UNLINK, unlink_discord_links
+from core.team_accounts import SEVERAL_ACCOUNTS
 from core.utils import list_filters, optional_int, requested_sort, stable_order
-from team.models import DiscordLink, Team
+from team.models import DiscordLink, Team, single_account
 
 
 @require_permission("admin", "gold_team")
@@ -68,6 +69,7 @@ def admin_team_detail(request: HttpRequest, team_number: int) -> HttpResponse:
     context = {
         "team": team,
         "members": members,
+        "single_account": single_account(),
     }
 
     return render(request, "admin/team_detail.html", context)
@@ -132,6 +134,8 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
                         "members_unlinked": reset.members_unlinked,
                     }
                 )
+            case Refused(error=error) if error == SEVERAL_ACCOUNTS:
+                return JsonResponse({"success": False, "message": SEVERAL_ACCOUNTS})
             case Refused():
                 return JsonResponse(
                     {

@@ -1,16 +1,21 @@
 """Which Authentik groups grant each permission."""
 
+from django.conf import settings
+
+_PREFIX = settings.PORTAL_GROUP_PREFIX
+_ADMIN = settings.PORTAL_ADMIN_GROUP
+
 PERMISSION_MAP: dict[str, list[str]] = {
-    "admin": ["WCComps_Discord_Admin"],
-    "ticketing_admin": ["WCComps_Ticketing_Admin", "WCComps_Discord_Admin"],
-    "ticketing_support": ["WCComps_Ticketing_Support", "WCComps_Ticketing_Admin", "WCComps_Discord_Admin"],
-    "gold_team": ["WCComps_GoldTeam", "WCComps_Discord_Admin"],
-    "white_team": ["WCComps_WhiteTeam", "WCComps_GoldTeam", "WCComps_Discord_Admin"],
-    "orange_team": ["WCComps_OrangeTeam", "WCComps_GoldTeam", "WCComps_Discord_Admin"],
-    "white_team_lead": ["WCComps_WhiteTeam_Lead", "WCComps_GoldTeam", "WCComps_Discord_Admin"],
-    "orange_team_lead": ["WCComps_OrangeTeam_Lead", "WCComps_GoldTeam", "WCComps_Discord_Admin"],
-    "red_team": ["WCComps_RedTeam", "WCComps_Discord_Admin"],
-    "blue_team": ["WCComps_GoldTeam", "WCComps_Discord_Admin"],
+    "admin": [_ADMIN],
+    "ticketing_admin": [f"{_PREFIX}Ticketing_Admin", _ADMIN],
+    "ticketing_support": [f"{_PREFIX}Ticketing_Support", f"{_PREFIX}Ticketing_Admin", _ADMIN],
+    "gold_team": [f"{_PREFIX}GoldTeam", _ADMIN],
+    "white_team": [f"{_PREFIX}WhiteTeam", f"{_PREFIX}GoldTeam", _ADMIN],
+    "orange_team": [f"{_PREFIX}OrangeTeam", f"{_PREFIX}GoldTeam", _ADMIN],
+    "white_team_lead": [f"{_PREFIX}WhiteTeam_Lead", f"{_PREFIX}GoldTeam", _ADMIN],
+    "orange_team_lead": [f"{_PREFIX}OrangeTeam_Lead", f"{_PREFIX}GoldTeam", _ADMIN],
+    "red_team": [f"{_PREFIX}RedTeam", _ADMIN],
+    "blue_team": [f"{_PREFIX}GoldTeam", _ADMIN],
 }
 
 # Permissions an active team's group grants as well (TeamQuerySet.held_by), which only the database knows

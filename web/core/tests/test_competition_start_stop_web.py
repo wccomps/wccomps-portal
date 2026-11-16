@@ -13,15 +13,14 @@ from django.utils import timezone
 from core.authentik_manager import AuthentikAPIError
 from core.models import CompetitionConfig, DiscordTask
 from core.tests.detached import join_detached_runs
-from team.models import team_username
 
 pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture(autouse=True)
 def _team_accounts_through_the_manager():
-    def switch(manager: MagicMock, number: int, is_active: bool) -> None:
-        ok, why = manager.team_account(team_username(number), is_active=is_active)
+    def switch(manager: MagicMock, username: str, is_active: bool) -> None:
+        ok, why = manager.team_account(username, is_active=is_active)
         if not ok:
             raise AuthentikAPIError(why)
 

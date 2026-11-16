@@ -32,11 +32,7 @@ STATE_EXPIRY_SECONDS = 300
 def _get_oauth_config() -> dict[str, str]:
     client_id = getattr(settings, "AUTHENTIK_CLIENT_ID", None)
     client_secret = getattr(settings, "AUTHENTIK_SECRET", None)
-    server_url = getattr(
-        settings,
-        "AUTHENTIK_OIDC_URL",
-        "https://auth.wccomps.org/application/o/discord-bot/",
-    )
+    server_url: str = settings.AUTHENTIK_OIDC_URL
 
     # Authentik uses shared endpoints (not per-application)
     # The application slug is only in the issuer and end-session URLs
@@ -55,8 +51,10 @@ def _get_oauth_config() -> dict[str, str]:
 def oauth_login(request: HttpRequest) -> HttpResponse:
     config = _get_oauth_config()
 
-    if not config["client_id"]:
-        logger.error("AUTHENTIK_CLIENT_ID not configured")
+    required = (("AUTHENTIK_CLIENT_ID", config["client_id"]), ("AUTHENTIK_OIDC_URL", settings.AUTHENTIK_OIDC_URL))
+    missing = [name for name, value in required if not value]
+    if missing:
+        logger.error(f"{', '.join(missing)} not configured")
         return render(
             request,
             "core/oauth_error.html",

@@ -1,8 +1,10 @@
 import os
 import secrets
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import django_stubs_ext
+from django.core.exceptions import ImproperlyConfigured
 
 django_stubs_ext.monkeypatch()
 
@@ -21,29 +23,12 @@ ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(","
 
 TRUST_CF_CONNECTING_IP = os.environ.get("TRUST_CF_CONNECTING_IP", "").strip().lower() in {"1", "true", "yes"}
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://bot.wccomps.org",
-    "https://register.wccomps.org",
-    "https://team.wccomps.org",
-    "https://teams.wccomps.org",
-    "https://ticket.wccomps.org",
-    "https://tickets.wccomps.org",
-    "https://portal.wccomps.org",
-]
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 
-# Requests on LEGACY_HOSTS are permanently redirected to CANONICAL_HOST (path and query preserved).
-# Set CANONICAL_HOST= (empty) in the environment to disable the redirects without a code change.
-# Legacy hosts must stay in ALLOWED_HOSTS and the HTTPRoute to be redirected (the redirect runs
-# before the CSRF check), and in CSRF_TRUSTED_ORIGINS so their forms still work with it switched off.
-CANONICAL_HOST = os.environ.get("CANONICAL_HOST", "portal.wccomps.org")
-LEGACY_HOSTS = [
-    "bot.wccomps.org",
-    "register.wccomps.org",
-    "team.wccomps.org",
-    "teams.wccomps.org",
-    "ticket.wccomps.org",
-    "tickets.wccomps.org",
-]
+# The https origin of the portal's address. An http BASE_URL (local development) adds nothing: production serves
+# https only, and a same-host form needs no trusted origin.
+_address = urlsplit(BASE_URL)
+CSRF_TRUSTED_ORIGINS = [f"https://{_address.netloc}"] if _address.scheme == "https" and _address.netloc else []
 
 
 INSTALLED_APPS = [
@@ -80,7 +65,6 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "core.middleware.SubdomainRedirectMiddleware",
     "core.middleware.AuthentikRequiredMiddleware",
     "core.middleware.RejectNulFieldsMiddleware",
     "core.middleware.UserTimezoneMiddleware",
@@ -180,13 +164,35 @@ AUTHENTICATION_BACKENDS = ["core.auth_backends.PortalBackend"]
 
 LOGIN_URL = "/auth/login/"
 
-AUTHENTIK_URL = os.environ.get("AUTHENTIK_URL", "https://auth.wccomps.org")
+AUTHENTIK_URL = os.environ.get("AUTHENTIK_URL", "")
 AUTHENTIK_CLIENT_ID = os.environ.get("AUTHENTIK_CLIENT_ID")
 AUTHENTIK_SECRET = os.environ.get("AUTHENTIK_SECRET")
 AUTHENTIK_OIDC_URL = os.environ.get(
     "AUTHENTIK_OIDC_URL",
-    f"{AUTHENTIK_URL}/application/o/discord-bot/",
+    f"{AUTHENTIK_URL}/application/o/discord-bot/" if AUTHENTIK_URL else "",
 )
+
+# Authentik group names: each role's group is this prefix plus a fixed suffix (core.permission_constants); the admin
+# group and the team groups are their own settings below
+PORTAL_GROUP_PREFIX = os.environ.get("PORTAL_GROUP_PREFIX", "Portal_")
+PORTAL_ADMIN_GROUP = os.environ.get("PORTAL_ADMIN_GROUP", f"{PORTAL_GROUP_PREFIX}Admin")
+# A new team's default Authentik group, a str.format pattern given the team's number
+TEAM_GROUP_PATTERN = os.environ.get("TEAM_GROUP_PATTERN", f"{PORTAL_GROUP_PREFIX}BlueTeam{{number:02d}}")
+# A team's accounts, with the literal text {number} standing for the team's two-digit number: a pattern with no regular
+# expression operator names the team's one account, by exact username; otherwise the team's accounts are the members
+# of its group whose username fully matches this regular expression ("team{number}[a-i]" gives each team nine)
+TEAM_ACCOUNT_PATTERN = os.environ.get("TEAM_ACCOUNT_PATTERN", "team{number}")
+if "{number}" not in TEAM_ACCOUNT_PATTERN:
+    raise ImproperlyConfigured("TEAM_ACCOUNT_PATTERN must contain {number}, or every team shares the same accounts")
+try:
+    _distinct_groups = TEAM_GROUP_PATTERN.format(number=1) != TEAM_GROUP_PATTERN.format(number=2)
+except KeyError, IndexError, ValueError:
+    _distinct_groups = False
+if not _distinct_groups:
+    raise ImproperlyConfigured(
+        "TEAM_GROUP_PATTERN must be a str.format pattern using {number}, such as Team{number:02d}"
+    )
+MAX_TEAMS = int(os.environ.get("MAX_TEAMS", "50"))
 
 # Session configuration (12-hour expiry for competitions)
 SESSION_COOKIE_AGE = 43200
@@ -194,7 +200,6 @@ SESSION_SAVE_EVERY_REQUEST = True
 SESSION_COOKIE_SAMESITE = "Lax"  # Allow cookies across OAuth redirects
 SESSION_COOKIE_HTTPONLY = True  # Explicit (Django default, but important for security audits)
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 DISCORD_LOG_CHANNEL_ID = int(os.environ.get("DISCORD_LOG_CHANNEL_ID", "0"))
 DISCORD_TICKET_QUEUE_CHANNEL_ID = int(os.environ.get("DISCORD_TICKET_QUEUE_CHANNEL_ID", "0"))
 DISCORD_ANNOUNCEMENT_CHANNEL_ID = int(os.environ.get("DISCORD_ANNOUNCEMENT_CHANNEL_ID", "0"))
@@ -211,11 +216,11 @@ REDTEAM_ROLE_ID = int(os.environ.get("REDTEAM_ROLE_ID", "0"))
 GOLDTEAM_ROLE_ID = int(os.environ.get("GOLDTEAM_ROLE_ID", "0"))
 
 GROUP_ROLE_MAPPING = {
-    "WCComps_BlackTeam": BLACKTEAM_ROLE_ID,
-    "WCComps_WhiteTeam": WHITETEAM_ROLE_ID,
-    "WCComps_OrangeTeam": ORANGETEAM_ROLE_ID,
-    "WCComps_RedTeam": REDTEAM_ROLE_ID,
-    "WCComps_GoldTeam": GOLDTEAM_ROLE_ID,
+    f"{PORTAL_GROUP_PREFIX}BlackTeam": BLACKTEAM_ROLE_ID,
+    f"{PORTAL_GROUP_PREFIX}WhiteTeam": WHITETEAM_ROLE_ID,
+    f"{PORTAL_GROUP_PREFIX}OrangeTeam": ORANGETEAM_ROLE_ID,
+    f"{PORTAL_GROUP_PREFIX}RedTeam": REDTEAM_ROLE_ID,
+    f"{PORTAL_GROUP_PREFIX}GoldTeam": GOLDTEAM_ROLE_ID,
 }
 
 # Staff link their accounts from the volunteer guild (/link only); roles live in the competition guild
@@ -224,7 +229,7 @@ COMPETITION_GUILD_ID = int(os.environ.get("DISCORD_GUILD_ID", "0"))
 
 AUTHENTIK_TOKEN = os.environ.get("AUTHENTIK_TOKEN", "")
 
-QUOTIENT_API_URL = os.environ.get("QUOTIENT_API_URL", "https://scoring.wccomps.org")
+QUOTIENT_API_URL = os.environ.get("QUOTIENT_API_URL", "")
 
 # Quotient login: an [[admin]] account from Quotient's event.conf
 QUOTIENT_USERNAME = os.environ.get("QUOTIENT_USERNAME", "")
@@ -235,6 +240,8 @@ PROXMOX_API_TOKEN = os.environ.get("PROXMOX_API_TOKEN", "")
 PROXMOX_CA_FILE = os.environ.get("PROXMOX_CA_FILE", "")
 PROXMOX_VERIFY_SSL = os.environ.get("PROXMOX_VERIFY_SSL", "True") == "True"
 PROXMOX_DEFAULT_SNAPSHOT = os.environ.get("PROXMOX_DEFAULT_SNAPSHOT", "clean")
+# The ticket category whose tickets get the Proxmox box reset (seeded in ticketing 0009 as "Box Reset / Scrub")
+BOX_RESET_CATEGORY_ID = int(os.environ.get("BOX_RESET_CATEGORY_ID", "2"))
 
 AWEFUL_PROXY_URL = os.environ.get("AWEFUL_PROXY_URL", "")
 AWEFUL_PROXY_TOKEN = os.environ.get("AWEFUL_PROXY_TOKEN", "")
@@ -265,9 +272,15 @@ MAILERS = {
         ),
     }
 }
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@wccomps.org")
-DEFAULT_REPLY_TO_EMAIL = os.environ.get("DEFAULT_REPLY_TO_EMAIL", "info@wccomps.org")
-SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "")
+# Packet emails carry this Reply-To when it is set
+DEFAULT_REPLY_TO_EMAIL = os.environ.get("DEFAULT_REPLY_TO_EMAIL", "")
+SERVER_EMAIL = os.environ.get("SERVER_EMAIL", DEFAULT_FROM_EMAIL or "root@localhost")
+
+# AUTHENTIK_URL, DEFAULT_FROM_EMAIL, ORG_NAME and ORG_SHORT_NAME are required to serve (portal.required)
+ORG_NAME = os.environ.get("ORG_NAME", "")
+ORG_SHORT_NAME = os.environ.get("ORG_SHORT_NAME", "")
+SITE_NAME = os.environ.get("SITE_NAME", f"{ORG_SHORT_NAME} Portal")
 
 HTTPX_DEFAULT_TIMEOUT = int(os.environ.get("HTTPX_DEFAULT_TIMEOUT", "10"))
 DISCORD_WEBHOOK_TIMEOUT = int(os.environ.get("DISCORD_WEBHOOK_TIMEOUT", "5"))

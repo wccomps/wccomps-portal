@@ -26,7 +26,7 @@ def test_packet_email_text_shows_the_password_as_typed():
 
 
 def test_scorecard_email_text_and_subject_show_names_as_typed():
-    context = {"school_name": "A & B <College>", "team_number": 7}
+    context = {"school_name": "A & B <College>", "team_number": 7, "ORG_SHORT_NAME": "WCComps"}
 
     subject = render_to_string("emails/scorecard_subject.txt", context).strip()
     text = render_to_string("emails/scorecard.txt", context)
@@ -38,7 +38,7 @@ def test_scorecard_email_text_and_subject_show_names_as_typed():
 
 def test_scorecard_email_has_no_blank_event_name():
     """Quotient never supplies an event name; the email used to read "participating in !" and "Card -  - "."""
-    context = {"school_name": "Example University", "team_number": 7}
+    context = {"school_name": "Example University", "team_number": 7, "ORG_SHORT_NAME": "WCComps"}
 
     subject = render_to_string("emails/scorecard_subject.txt", context).strip()
     text = render_to_string("emails/scorecard.txt", context)

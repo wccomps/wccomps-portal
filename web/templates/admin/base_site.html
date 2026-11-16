@@ -6,7 +6,7 @@
 {% endblock title %}
 {% block branding %}
     <div id="site-name">
-        <a href="{% url 'ticket_list' %}">WCComps Portal</a>
+        <a href="{% url 'ticket_list' %}">{{ SITE_NAME }}</a>
     </div>
 {% endblock branding %}
 {# A portal page titles itself with c-page_header; Django admin's own pages (site_header set) keep their headings #}

@@ -226,6 +226,8 @@ class QuotientClient:
 
     def _get_client(self, force_reauth: bool = False) -> httpx.Client:
         if self.client is None or force_reauth:
+            if not self.base_url:
+                raise QuotientAPIError("QUOTIENT_API_URL is not configured")
             self.client = httpx.Client()
 
             username = getattr(settings, "QUOTIENT_USERNAME", "")

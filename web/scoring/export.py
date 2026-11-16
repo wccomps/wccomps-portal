@@ -6,8 +6,10 @@ from decimal import Decimal
 from io import BytesIO, StringIO
 from typing import Protocol
 
+from django.conf import settings
 from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.text import slugify
 
 from core.csv_export import csv_writer
 from ticketing.models import Ticket
@@ -281,6 +283,7 @@ def export_all_zip_bytes() -> bytes:
 
 def export_all_zip() -> HttpResponse:
     timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+    prefix = slugify(settings.ORG_SHORT_NAME)
     response = HttpResponse(export_all_zip_bytes(), content_type="application/zip")
-    response["Content-Disposition"] = f'attachment; filename="wccomps_export_{timestamp}.zip"'
+    response["Content-Disposition"] = f'attachment; filename="{prefix}_export_{timestamp}.zip"'
     return response

@@ -17,8 +17,9 @@ from scoring.models import IncidentReport, InjectScore, RedTeamScore
 from core.admin_views.places import SetupSection, setup_url
 from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, reason_for
 from core.models import AuditLog, CompetitionConfig
+from core.team_accounts import accounts_by_team, require_single_account
 from core.utils import ndjson_done
-from team.models import Team, team_username
+from team.models import Team, single_account, team_username
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -64,10 +65,13 @@ def _check_discord_settings() -> CheckResult:
 
 
 def _check_team_accounts_exist() -> CheckResult:
-    """Verify all active team accounts exist in Authentik."""
+    """Verify all active team accounts exist in Authentik: each team's one account, or with several accounts per team,
+    at least one in the team's group (core.team_accounts)."""
     active_teams = Team.objects.filter(is_active=True)
     if not active_teams.exists():
         return ("warn", "No active teams", None)
+    if not single_account():
+        return _check_group_accounts_exist([team.team_number for team in active_teams.order_by("team_number")])
 
     with AuthentikManager() as mgr:
         existing = {u["username"] for u in mgr.list_all_users()}
@@ -84,8 +88,32 @@ def _check_team_accounts_exist() -> CheckResult:
     return ("pass", f"All {active_teams.count()} team accounts exist", None)
 
 
+def _check_group_accounts_exist(numbers: list[int]) -> CheckResult:
+    """With several accounts per team: every team has a member of its group matching its account pattern."""
+    with AuthentikManager() as mgr:
+        accounts = accounts_by_team(mgr, numbers)
+    missing = [n for n in numbers if not accounts[n].matched]
+
+    if missing:
+        names = ", ".join(
+            f"team {n:02d}" + (f" (other members: {', '.join(accounts[n].skipped)})" if accounts[n].skipped else "")
+            for n in missing[:5]
+        )
+        suffix = f"... (+{len(missing) - 5})" if len(missing) > 5 else ""
+        return (
+            "fail",
+            f"{len(missing)} without an account in their group: {names}{suffix}. Create them in Authentik; the "
+            "portal's token can't.",
+            None,
+        )
+    return ("pass", f"All {len(numbers)} teams have accounts", None)
+
+
 def _check_team_group_membership() -> CheckResult:
-    """Verify each active team's account is in the team's Authentik group (Team.authentik_group)."""
+    """Verify each active team's account is in the team's Authentik group (Team.authentik_group). Only a
+    single-account team's account can be outside it: with several, a team's accounts are its group's members."""
+    if not single_account():
+        return ("pass", "Team accounts are their groups' members", None)
     active_teams = Team.objects.filter(is_active=True)
     if not active_teams.exists():
         return ("warn", "No active teams", None)
@@ -115,6 +143,8 @@ def _check_team_group_membership() -> CheckResult:
 
 def _check_session_access() -> CheckResult:
     """The portal's token must see sessions, or a credentials reset leaves the team's Authentik sessions open."""
+    if not single_account():
+        return ("pass", "Not needed: teams have several accounts, so the portal resets no team credentials", None)
     with AuthentikManager() as manager:
         visible = manager.sees_any_sessions()
     if visible:
@@ -379,6 +409,7 @@ def stream_readiness_checks() -> Iterator[str]:
 
 def fix_group_membership(request: HttpRequest, authentik_username: str) -> JsonResponse:
     """Add team accounts to their correct Authentik groups, auditing the ones it changed."""
+    require_single_account()
     active_teams = Team.objects.filter(is_active=True)
     fixed: list[str] = []
     failed: list[str] = []

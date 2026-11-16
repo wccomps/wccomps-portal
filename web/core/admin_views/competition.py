@@ -65,7 +65,7 @@ from core.services.competition import (
 )
 from core.utils import Stepped, drain, ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
-from team.models import active_team_numbers
+from team.models import active_team_numbers, single_account
 
 from ..auth_utils import require_permission
 from ..utils import DEFAULT_TIMEZONE, TIMEZONE_CHOICES, UnknownTimezoneError, parse_datetime_to_utc
@@ -385,11 +385,26 @@ SECTION_CONTEXT: dict[Section, Callable[[EventStage], dict[str, object]]] = {
 def admin_competition(request: HttpRequest) -> HttpResponse:
     stage = event_stage()
     panel = event_panel(event_facts(stage))
+    can_cancel = not cancel_event_problem(stage)
     can_clear = not clear_leftovers_problem(stage)
+    # Resetting passwords needs a team's one account: with several, they're managed in Authentik
+    can_reset = single_account()
+    advanced = [
+        name
+        for name, shown in (
+            ("reset team passwords", can_reset),
+            ("start the competition again", panel.reopen_offered),
+            ("cancel the event", can_cancel),
+            ("clear leftover data", can_clear),
+        )
+        if shown
+    ]
     context: dict[str, object] = {
         "panel": panel,
         "anchors": ids(Anchor),
-        "can_cancel": not cancel_event_problem(stage),
+        "advanced_heading": f"Advanced: {', '.join(advanced)}" if advanced else "Advanced",
+        "can_reset": can_reset,
+        "can_cancel": can_cancel,
         "can_clear": can_clear,
         "leftovers": _wiped_summary(competition_data_counts()) if can_clear else "",
     }

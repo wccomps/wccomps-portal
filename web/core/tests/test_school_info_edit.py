@@ -313,6 +313,41 @@ def test_a_different_school_says_when_the_password_reset_failed(client, linked_t
     ]
 
 
+def test_a_different_school_with_several_accounts_ends_their_portal_sessions(client, linked_team, settings):
+    """The portal changes no password then, but the old school's portal sessions end: the accounts in the team's group
+    matching its pattern, no one else. Authentik is asked nothing."""
+    from django.contrib.auth.models import User
+
+    from core.tests.roles import make_user
+
+    settings.TEAM_ACCOUNT_PATTERN = "team{number}[a-i]"
+    group = linked_team.authentik_group
+    accounts = [
+        make_user("team04a", [group]),
+        make_user("team04b", [group]),
+        make_user("team40a", [group]),  # another number
+        make_user("team04c", []),  # matches, but not in the group
+    ]
+    hashes = {u.username: u.get_session_auth_hash() for u in accounts}
+
+    with (
+        patch("core.views.reset_team_credentials") as reset,
+        patch("core.authentik_manager.AuthentikManager") as manager,
+    ):
+        response = _edit(client, 4, "Other College", change="new_school")
+
+    reset.assert_not_called()
+    manager.assert_not_called()
+    after = User.objects.filter(username__in=hashes)
+    assert {u.username for u in after if u.get_session_auth_hash() != hashes[u.username]} == {"team04a", "team04b"}
+    shown = [str(m) for m in get_messages(response.wsgi_request)]
+    assert shown == [
+        "Team 4 now holds Other College: 1 Discord member(s) unlinked; ended the portal sessions of 2 team account(s). "
+        "Teams have several accounts, so the portal changes no passwords and can't end Authentik sessions: in "
+        "Authentik, change the team's passwords and end their sessions before the new school gets them."
+    ]
+
+
 def test_unlinking_one_team_locks_its_row_first(linked_team):
     """As a link does: a link that took the team lock first is unlinked; one landing after the edit's lock stays
     (until the link flow re-checks the team)."""

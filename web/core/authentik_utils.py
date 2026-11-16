@@ -11,20 +11,21 @@ from django.contrib.auth.models import User
 from django.db import DatabaseError, transaction
 from django.utils import timezone
 
-from team.models import MAX_TEAMS, SchoolInfo, Team, team_username
+from team.models import MAX_TEAMS, SchoolInfo, Team, single_account, team_username
 
 from .auth_utils import lock_account, sign_out_everywhere
 from .authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, AuthentikUser, reason_for
 from .discord_tasks import LogToChannel, SetupTeamInfrastructure
 from .models import AuditLog, CredentialsReset, DiscordTask
 from .services.linking import CREDENTIALS_RESET, TEAM_RESET, unlink_teams
+from .team_accounts import SEVERAL_ACCOUNTS
 from .utils import shorten
 
 logger = logging.getLogger(__name__)
 
 
 def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser:
-    """The team's Authentik account; AuthentikAPIError saying why when there is none."""
+    """A single-account team's Authentik account; AuthentikAPIError saying why when there is none."""
     if team_number < 1 or team_number > MAX_TEAMS:
         raise AuthentikAPIError(f"Team number must be between 1 and {MAX_TEAMS}")
     username = team_username(team_number)
@@ -34,9 +35,13 @@ def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser:
     return user
 
 
-def set_team_account_active(manager: AuthentikManager, team_number: int, is_active: bool) -> None:
-    """Enable or disable the team's Authentik account; AuthentikAPIError when it can't."""
-    manager.set_user_active(_team_user(manager, team_number), is_active)
+def set_team_account_active(manager: AuthentikManager, username: str, is_active: bool) -> None:
+    """Enable or disable a team account (one of core.team_accounts.accounts_by_team's matched); AuthentikAPIError when
+    it can't."""
+    user = manager.find_user(username)
+    if user is None:
+        raise AuthentikAPIError(f"User {username} not found")
+    manager.set_user_active(user, is_active)
 
 
 # The portal refuses a sign-in from before the reset, but the team's other Authentik apps don't
@@ -235,7 +240,10 @@ def _store_password(team_number: int, password: str) -> None:
 
 
 def set_team_password(team_number: int, actor: str) -> tuple[str | None, str]:
-    """A new random password for the team account, leaving its sessions alone; audited."""
+    """A new random password for the team account, leaving its sessions alone; audited. Refused, changing nothing,
+    when teams have several accounts."""
+    if not single_account():
+        return None, SEVERAL_ACCOUNTS
     with AuthentikManager() as manager:
         try:
             password, error = generate_blueteam_password(), ""
@@ -339,7 +347,10 @@ def _reset_credentials(
 
 def reset_team_credentials(team_number: int, actor: str) -> CredentialReset:
     """A new password, then the account's sessions and its members' Discord links ended once it took. The audit row
-    and ops note can't fail the reset: the new password must reach the caller."""
+    and ops note can't fail the reset: the new password must reach the caller. Refused, doing nothing, when teams have
+    several accounts."""
+    if not single_account():
+        return Refused(SEVERAL_ACCOUNTS)
     with AuthentikManager() as manager:
         reset = _reset_credentials(manager, team_number, actor, CREDENTIALS_RESET, unlink_on_failure=False)
 
@@ -365,7 +376,9 @@ class TeamReset(NamedTuple):
 
 def reset_team(team_number: int, actor: str, *, recreate_channels: bool) -> TeamReset:
     """Reset Team: unlinked even when the password change fails, channels recreated when asked (queued), audited and
-    told to ops once; the record can't fail the reset."""
+    told to ops once; the record can't fail the reset. Refused, doing nothing, when teams have several accounts."""
+    if not single_account():
+        return TeamReset(Refused(SEVERAL_ACCOUNTS), recreation_queued=False)
     team = Team.objects.get(team_number=team_number)
     with AuthentikManager() as manager:
         reset = _reset_credentials(manager, team_number, actor, TEAM_RESET, unlink_on_failure=True)
@@ -468,7 +481,14 @@ def reset_teams_credentials(
 ) -> Generator[BulkPasswordResetResult, None, BulkPasswordResetResult]:
     """Reset passwords and end sessions RESET_BATCH_SIZE teams at a time, yielding each audited batch; returns them
     combined when run to the end. A batch is handed over when the caller asks for the next (hand_over_each False: at
-    the end). Ops hears once of passwords never handed over, teams not reached and how many were reset."""
+    the end). Ops hears once of passwords never handed over, teams not reached and how many were reset. When teams
+    have several accounts, one batch refusing every team (none for no teams, like a reset of none), changing nothing
+    and telling ops nothing."""
+    if not single_account():
+        refused = BulkPasswordResetResult([(n, Refused(SEVERAL_ACCOUNTS)) for n in team_numbers])
+        if team_numbers:
+            yield refused
+        return refused
     batches: list[BulkPasswordResetResult] = []
     handed_over = 0
     partial: list[tuple[int, str, str]] = []  # The batch under way's resets so far

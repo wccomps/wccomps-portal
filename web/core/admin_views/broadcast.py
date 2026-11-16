@@ -1,5 +1,6 @@
 from typing import cast
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -54,7 +55,7 @@ def admin_broadcast_action(request: HttpRequest) -> HttpResponse:
 
 @require_permission("admin", "gold_team")
 def admin_sync_roles(request: HttpRequest) -> HttpResponse:
-    return render(request, "admin/sync_roles.html")
+    return render(request, "admin/sync_roles.html", {"example_group": f"{settings.PORTAL_GROUP_PREFIX}GoldTeam"})
 
 
 @json_endpoint
