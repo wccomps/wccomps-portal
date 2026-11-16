@@ -8,12 +8,10 @@ import discord
 import pytest
 from django.test import override_settings
 
-from bot.competition_actions import deliver_broadcast
 from bot.discord_queue import DiscordQueueProcessor
-from core.broadcast import Announcements
 from core.models import QueuedTask
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 
 
 def _guild(channel: Any) -> MagicMock:
@@ -23,36 +21,34 @@ def _guild(channel: Any) -> MagicMock:
     return guild
 
 
-@override_settings(DISCORD_ANNOUNCEMENT_CHANNEL_ID=31, BLUETEAM_ROLE_ID=0)
-async def test_a_refused_announcement_is_listed_as_failed() -> None:
-    channel = MagicMock(spec=discord.TextChannel)
-    channel.send = AsyncMock(side_effect=discord.Forbidden(MagicMock(status=403), "Missing Access"))
-
-    result = await deliver_broadcast(_guild(channel), Announcements(), "hello", "ops")
-
-    assert result.sent == 0
-    assert result.failed and result.failed[0].startswith("Announcements")
-
-
-@override_settings(DISCORD_ANNOUNCEMENT_CHANNEL_ID=31)
-async def test_a_missing_announcements_channel_is_listed_as_failed() -> None:
-    result = await deliver_broadcast(_guild(None), Announcements(), "hello", "ops")
-
-    assert "Announcements channel not found" in result.failed[0]
-
-
-@pytest.mark.django_db(transaction=True)
-@override_settings(DISCORD_ANNOUNCEMENT_CHANNEL_ID=31)
-async def test_a_missing_announcements_channel_fails_the_task_at_once() -> None:
+async def _announce(guild: MagicMock) -> QueuedTask:
+    """Run a broadcast to the announcements channel through the queue; its row once it ran."""
     processor = DiscordQueueProcessor(MagicMock(spec=discord.Client))
-    processor._guild = MagicMock(return_value=_guild(None))
+    processor._guild = MagicMock(return_value=guild)
     task = await QueuedTask.objects.acreate(
         task_type="broadcast_message", payload={"target": "announcements", "message": "hi", "sender": "ops"}
     )
-
     with patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock):
         await processor._process_task(task)
-
     await task.arefresh_from_db()
+    return task
+
+
+@override_settings(DISCORD_ANNOUNCEMENT_CHANNEL_ID=31, BLUETEAM_ROLE_ID=0)
+async def test_a_refused_announcement_fails_the_task_at_once() -> None:
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.send = AsyncMock(side_effect=discord.Forbidden(MagicMock(status=403), "Missing Access"))
+
+    task = await _announce(_guild(channel))
+
+    assert (task.status, task.retry_count) == ("failed", 0)
+    assert "• Sent: 0 channels" in task.error_message
+    assert "Failed: Announcements (" in task.error_message
+
+
+@override_settings(DISCORD_ANNOUNCEMENT_CHANNEL_ID=31)
+async def test_a_missing_announcements_channel_fails_the_task_at_once() -> None:
+    task = await _announce(_guild(None))
+
     assert (task.status, task.retry_count) == ("failed", 0)
     assert "Failed: Announcements (Announcements channel not found" in task.error_message

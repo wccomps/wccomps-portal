@@ -12,7 +12,7 @@ from discord import app_commands
 from django.conf import settings
 from django.db import connection
 
-from core.task_queue import TaskProgress
+from core.task_queue import StepsState, TaskProgress
 from core.utils import missing_discord_settings
 from team.models import MAX_TEAMS, Team
 
@@ -111,23 +111,22 @@ async def send_parts(
     channel: discord.abc.Messageable,
     text: str,
     *,
+    progress: TaskProgress[StepsState],
     allowed_mentions: discord.AllowedMentions = ALLOWED_MENTIONS,
-    progress: TaskProgress | None = None,
 ) -> None:
-    """Send text in as many messages as it takes (split_message), so none is past Discord's 2000 characters. Only
-    the first may ping what allowed_mentions allows: the rest is the sender's text. With progress, parts an earlier
-    attempt sent are skipped."""
-    done = progress.done if progress else 0
+    """Send text in as many messages as it takes (split_message), so none is past Discord's 2000 characters, skipping
+    the parts progress says an earlier attempt sent. Only the first may ping what allowed_mentions allows: the rest is
+    the sender's text."""
+    done = progress.done
     for n, part in enumerate(split_message(text)):
         if n < done:
             continue
         await channel.send(part, allowed_mentions=allowed_mentions if n == 0 else ALLOWED_MENTIONS)
-        if progress:
-            await progress.advance()
+        await progress.advance()
 
 
 async def send_announcement(
-    guild: discord.Guild, channel: discord.abc.Messageable, message: str, progress: TaskProgress | None = None
+    guild: discord.Guild, channel: discord.abc.Messageable, message: str, progress: TaskProgress[StepsState]
 ) -> None:
     """Send a broadcast to the announcements channel, pinging only the blue team role."""
     blueteam_role = guild.get_role(settings.BLUETEAM_ROLE_ID)
@@ -135,8 +134,8 @@ async def send_announcement(
     await send_parts(
         channel,
         f"{role_mention}\n\n{message}",
-        allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
         progress=progress,
+        allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
     )
 
 

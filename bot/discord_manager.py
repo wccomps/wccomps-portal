@@ -26,7 +26,7 @@ from bot.utils import (
 )
 from core.models import QueuedAnnouncement, QueuedTask
 from core.queued_tasks import SetupTeamInfrastructure
-from core.task_queue import TaskProgress
+from core.task_queue import StepsState, TaskProgress
 from team.models import Team
 from ticketing.models import Ticket
 
@@ -128,7 +128,7 @@ async def recreate_team_infrastructure(
     team: Team,
     reason: str,
     bot: discord.Client | None = None,
-    progress: TaskProgress | None = None,
+    progress: TaskProgress[StepsState] | None = None,
 ) -> tuple[list[str], discord.CategoryChannel]:
     """Delete what the team has in Discord and set it up again; returns what was deleted and the new category. With
     progress the delete counts as a step, so a retry keeps what the first attempt built."""
@@ -304,7 +304,9 @@ async def _deliver_queued_announcements(team: Team, channel: discord.TextChannel
     delivered = 0
     for queued in announcements:
         try:
-            await send_parts(channel, announcement_text(queued.sender_name, queued.message))
+            # No queued task runs this delivery: one that fails partway is sent whole again at the next setup
+            progress = TaskProgress.in_memory(StepsState())
+            await send_parts(channel, announcement_text(queued.sender_name, queued.message), progress=progress)
             queued.delivered_at = timezone.now()
             await queued.asave()
             delivered += 1

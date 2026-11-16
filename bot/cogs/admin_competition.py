@@ -9,7 +9,6 @@ from discord import app_commands
 from discord.ext import commands
 from django.conf import settings
 
-from bot.competition_actions import deliver_broadcast
 from bot.permissions import permission_check
 from bot.utils import BlockingSteps, ConfirmView, log_to_ops_channel, run_blocking, split_message
 from core.authentik_utils import (
@@ -18,9 +17,9 @@ from core.authentik_utils import (
     parse_team_range,
     reset_teams_credentials,
 )
-from core.broadcast import parse_broadcast_target
-from core.forms import AppSlugForm
-from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog
+from core.broadcast import queue_broadcast
+from core.forms import AppSlugForm, BroadcastForm
+from core.models import MAX_TEAM_MEMBERS_LIMIT
 from core.services.competition import (
     KEEP,
     ConfigEditError,
@@ -29,6 +28,7 @@ from core.services.competition import (
     set_max_members,
     set_schedule,
 )
+from core.services.ops import notify_ops
 from core.utils import (
     DEFAULT_TIMEZONE,
     DEFAULT_TIMEZONE_NAME,
@@ -217,12 +217,12 @@ class AdminCompetitionCog(commands.Cog):
             await interaction.followup.send(str(e), ephemeral=True)
             return
 
-        await log_to_ops_channel(
-            self.bot,
+        await sync_to_async(notify_ops)(
             f"Competition {label} Time Set by {interaction.user.mention}\n"
             f"• {label} Time: {discord.utils.format_dt(scheduled_time, style='F')}\n"
             f"• Controlled Apps: {', '.join(config.controlled_applications)}\n"
             f"• Applications will be {action_verb} automatically at {label_lower} time",
+            actor=str(interaction.user),
         )
 
         await interaction.followup.send(
@@ -278,7 +278,9 @@ class AdminCompetitionCog(commands.Cog):
     async def admin_clear_start_time(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         await run_blocking(set_schedule, str(interaction.user), start=None)
-        await log_to_ops_channel(self.bot, f"Scheduled start cleared by {interaction.user.mention}")
+        await sync_to_async(notify_ops)(
+            f"Scheduled start cleared by {interaction.user.mention}", actor=str(interaction.user)
+        )
         await interaction.followup.send(
             "Scheduled start cleared: the competition won't start on its own.", ephemeral=True
         )
@@ -319,7 +321,8 @@ class AdminCompetitionCog(commands.Cog):
             await interaction.followup.send(f"{action} cancelled.", ephemeral=True)
             return
 
-        result = await run_competition(enable, actor=f"discord:{interaction.user}")
+        actor = f"discord:{interaction.user}"
+        result = await run_competition(enable, actor=actor)
         match result.outcome:
             case RunOutcome.REFUSED | RunOutcome.ERRORED:
                 await interaction.followup.send(f"Error: {result.error}", ephemeral=True)
@@ -331,8 +334,8 @@ class AdminCompetitionCog(commands.Cog):
                 incomplete = note = ""
 
         verb = "Started" if enable else "Stopped"
-        await log_to_ops_channel(
-            self.bot, f"**Competition {verb}{incomplete}** by {interaction.user.mention}\n{result.summary()}"
+        await sync_to_async(notify_ops)(
+            f"**Competition {verb}{incomplete}** by {interaction.user.mention}\n{result.summary()}", actor=actor
         )
         await interaction.followup.send(
             f"**Competition {verb}{incomplete}!**\n\n{result.summary()}{note}", ephemeral=True
@@ -419,9 +422,9 @@ class AdminCompetitionCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         await run_blocking(set_controlled_apps, lambda _: slugs, str(interaction.user))
 
-        await log_to_ops_channel(
-            self.bot,
+        await sync_to_async(notify_ops)(
             f"Competition Applications Configured by {interaction.user.mention}\n• Applications: {', '.join(slugs)}",
+            actor=str(interaction.user),
         )
 
         await interaction.followup.send(f"Controlled applications set to: {', '.join(slugs)}", ephemeral=True)
@@ -440,16 +443,17 @@ class AdminCompetitionCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
 
-        guild = interaction.guild
-        if not guild:
+        if not interaction.guild:
             await interaction.followup.send("This command must be used in a guild", ephemeral=True)
             return
 
-        try:
-            parsed = parse_broadcast_target(target)
-        except ValueError as e:
+        # The portal's checks: a team range that names teams, and a message that isn't blank and has no NUL, which the
+        # queue can't store
+        form = BroadcastForm({"target": target, "message": message})
+        errors = {field: " ".join(str(e) for e in field_errors) for field, field_errors in form.errors.items()}
+        if "target" in errors:
             await interaction.followup.send(
-                f"Invalid team range format: {e}\n\n"
+                f"Invalid team range format: {errors['target']}\n\n"
                 f"Examples:\n"
                 f"• Single teams: `1,3,5`\n"
                 f"• Range: `1-10`\n"
@@ -459,37 +463,13 @@ class AdminCompetitionCog(commands.Cog):
                 ephemeral=True,
             )
             return
+        if errors:
+            await interaction.followup.send(f"Invalid message: {errors['message']}", ephemeral=True)
+            return
 
-        result = await deliver_broadcast(guild, parsed, message, interaction.user.name)
-        sent_count, queued_count, failed_channels = result.sent, result.queued, result.failed + result.missing
-
-        await AuditLog.objects.acreate(
-            action="broadcast_message",
-            admin_user=str(interaction.user),
-            target_entity="broadcast",
-            target_id=0,
-            details={
-                "target": target,
-                "message_preview": shorten(message, 200),
-                "sent_count": sent_count,
-                "queued_count": queued_count,
-                "failed_count": len(failed_channels),
-            },
-        )
-
-        await log_to_ops_channel(self.bot, result.ops_summary(interaction.user.mention, target, message))
-
-        result_msg = f"Broadcast complete\n• Sent: {sent_count} channels"
-        if queued_count > 0:
-            result_msg += f"\n• Queued: {queued_count} (will deliver when team channels are created)"
-        if failed_channels:
-            result_msg += f"\n• Failed: {len(failed_channels)}"
-            if len(failed_channels) <= 10:
-                result_msg += "\n\nFailed:\n" + "\n".join([f"• {fc}" for fc in failed_channels])
-            else:
-                result_msg += "\n\nFailed (first 10):\n" + "\n".join([f"• {fc}" for fc in failed_channels[:10]])
-
-        await interaction.followup.send(result_msg, ephemeral=True)
+        cleaned = form.cleaned_data
+        await sync_to_async(queue_broadcast)(cleaned["target"], cleaned["message"], interaction.user.name)
+        await interaction.followup.send("Broadcast queued; the ops channel gets its summary.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

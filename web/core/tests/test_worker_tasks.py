@@ -7,7 +7,6 @@ import pytest
 
 from core.models import AuditLog, QueuedTask
 from core.queued_tasks import ReconcileNextcloud, ResetNextcloudTeam
-from core.task_queue import TaskProgress
 from core.worker_tasks import WorkerQueueProcessor
 from team.models import Team
 
@@ -40,7 +39,7 @@ async def run(payload):
     task = await QueuedTask.objects.acreate(
         task_type=payload.task_type, backend="worker", payload=asdict(payload), status="processing"
     )
-    return await WorkerQueueProcessor().dispatch(payload, TaskProgress.of(task))
+    return await WorkerQueueProcessor().dispatch(payload, task)
 
 
 async def test_reconcile_nextcloud_tears_down_then_provisions(nextcloud):
@@ -114,6 +113,64 @@ async def test_a_retry_resumes_after_the_last_team_and_reports_once(nextcloud):
     assert [c.args[0] for c in nextcloud.provision_team_user.call_args_list] == [1, 2, 3]
     summary = await QueuedTask.objects.aget(task_type="log_to_channel")
     assert summary.payload["message"] == "Nextcloud: deleted 5 team accounts, provisioned 3"
+
+
+async def test_a_retry_refused_up_front_reports_what_earlier_attempts_did(nextcloud):
+    from core.nextcloud import NextcloudAPIError
+
+    nextcloud.delete_team_user.side_effect = [True, True, NextcloudAPIError("HTTP 502")]
+    payload = ReconcileNextcloud(requested_by="gold", open_event_id=7)
+    row = await QueuedTask.objects.acreate(task_type=payload.task_type, backend="worker", payload=asdict(payload))
+    processor = WorkerQueueProcessor()
+
+    await processor._process_task(row)
+    nextcloud.problem.return_value = "The event it was queued for is no longer open."
+    await processor._process_task(await QueuedTask.objects.aget(pk=row.pk))
+
+    await row.arefresh_from_db()
+    assert row.status == "completed"
+    assert nextcloud.__enter__.call_count == 1
+    audit = await AuditLog.objects.filter(action="nextcloud_reconciled").alatest("id")
+    assert (audit.details["deleted"], audit.details["stopped"], audit.details["finished"]) == (
+        2,
+        "The event it was queued for is no longer open.",
+        True,
+    )
+    summary = await QueuedTask.objects.aget(task_type="log_to_channel")
+    assert summary.payload["message"] == (
+        "Nextcloud: deleted 2 team accounts, provisioned 0; stopped before the end: "
+        "The event it was queued for is no longer open."
+    )
+
+
+async def test_a_failure_queueing_the_summary_leaves_no_audit_row_and_the_retry_writes_each_once(nextcloud):
+    from core.services.ops import notify_ops
+
+    calls = {"n": 0}
+
+    def notify_failing_once(message, *, actor="system"):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("queue down")
+        notify_ops(message, actor=actor)
+
+    payload = ReconcileNextcloud(requested_by="gold", open_event_id=7)
+    row = await QueuedTask.objects.acreate(task_type=payload.task_type, backend="worker", payload=asdict(payload))
+    processor = WorkerQueueProcessor()
+    reconciled = AuditLog.objects.filter(action="nextcloud_reconciled")
+    summaries = QueuedTask.objects.filter(task_type="log_to_channel")
+
+    with patch("core.worker_tasks.notify_ops", side_effect=notify_failing_once):
+        await processor._process_task(row)
+        row = await QueuedTask.objects.aget(pk=row.pk)
+        assert row.status == "pending"
+        assert (await reconciled.acount(), await summaries.acount()) == (0, 0)
+        await processor._process_task(row)
+
+    await row.arefresh_from_db()
+    assert row.status == "completed"
+    assert (await reconciled.acount(), await summaries.acount()) == (1, 1)
+    assert nextcloud.delete_team_user.call_count == 5
 
 
 async def test_a_reconcile_failing_for_good_reports_its_summary_once(nextcloud):

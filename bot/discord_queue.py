@@ -3,14 +3,11 @@
 import asyncio
 import logging
 from collections.abc import Mapping
-from functools import partial
 from typing import assert_never
 
 import discord
-from asgiref.sync import sync_to_async
-from django.db import transaction
 
-from bot.competition_actions import deliver_broadcast, update_status_channel
+from bot.competition_actions import BroadcastState, deliver_broadcast, update_status_channel
 from bot.discord_manager import recreate_team_infrastructure, setup_team_infrastructure
 from bot.heartbeat import beat, beat_for
 from bot.role_sync import competition_guild, sync_member_roles, sync_roles
@@ -18,10 +15,8 @@ from bot.thread_creator import add_to_team_threads, ensure_ticket_thread
 from bot.ticket_dashboard import trigger_dashboard
 from bot.utils import add_field, log_to_ops_channel, send_parts
 from core.broadcast import parse_broadcast_target
-from core.models import QueuedAnnouncement, QueuedTask
+from core.models import QueuedTask
 from core.queued_tasks import (
-    CHAT_NOTICES,
-    DISCORD_ONLY,
     AddUserToThread,
     BroadcastMessage,
     ChatNotice,
@@ -40,7 +35,7 @@ from core.queued_tasks import (
     TicketCreated,
 )
 from core.task_backends import TaskBackend
-from core.task_queue import QueueProcessor, TaskProgress, _target
+from core.task_queue import QueueProcessor, StepsState, TaskProgress, _target
 from core.utils import role_sync_summary
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketComment
@@ -48,26 +43,9 @@ from ticketing.models import Ticket, TicketComment
 logger = logging.getLogger(__name__)
 
 
-async def _queue_copy(progress: TaskProgress, team: Team, message: str, sender: str) -> bool:
-    """Queue the broadcast's copy for a team with no channel, only while its task is still processing: the task's row
-    is locked meanwhile, so a reset failing it waits, and the reset's on_commit delete catches the copy."""
-
-    @sync_to_async
-    def queue() -> bool:
-        with transaction.atomic():
-            running = QueuedTask.objects.select_for_update(no_key=True)
-            if not running.filter(pk=progress.task_id, status="processing").exists():
-                return False
-            QueuedAnnouncement.objects.create(team=team, message=message, sender_name=sender)
-            return True
-
-    return await queue()
-
-
 class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
     backend = TaskBackend.DISCORD
     heartbeat_name = "queue"
-    payload_types = CHAT_NOTICES + DISCORD_ONLY
 
     def __init__(self, bot: discord.Client) -> None:
         # on_start binds the loop's task to the heartbeat, so beat() in code a handler awaits (reconcile_teams,
@@ -88,12 +66,12 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
     def retry_after(self, error: Exception) -> float | None:
         return error.retry_after if isinstance(error, discord.RateLimited) else None
 
-    async def dispatch(self, payload: ChatNotice | DiscordOnly, progress: TaskProgress) -> Mapping[str, object] | None:
+    async def dispatch(self, payload: ChatNotice | DiscordOnly, task: QueuedTask) -> Mapping[str, object] | None:
         match payload:
             case SyncMemberRoles():
                 await self._handle_sync_member_roles(payload)
             case SetupTeamInfrastructure():
-                await self._handle_setup_team_infrastructure(payload, progress)
+                await self._handle_setup_team_infrastructure(payload, TaskProgress.of(task))
             case LogToChannel():
                 await self._handle_log_to_channel(payload)
             case TicketCreated():
@@ -103,15 +81,15 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
             case ClearTeamChannels():
                 await self._handle_clear_team_channels(payload)
             case PostComment():
-                await self._handle_post_comment(payload, progress)
+                await self._handle_post_comment(payload, TaskProgress.of(task))
             case PostTicketUpdate():
-                await self._handle_post_ticket_update(payload, progress)
+                await self._handle_post_ticket_update(payload, TaskProgress.of(task))
             case AddUserToThread():
                 await self._handle_add_user_to_thread(payload)
             case SyncRoles():
                 return await self._handle_sync_roles(payload)
             case BroadcastMessage():
-                return await self._handle_broadcast_message(payload, progress)
+                return await self._handle_broadcast_message(payload, TaskProgress.of(task))
             case CompetitionStatusChanged():
                 await update_status_channel(self.bot)
             case _:
@@ -160,7 +138,9 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
                 f"/teams recreate for team {number}."
             )
 
-    async def _handle_setup_team_infrastructure(self, payload: SetupTeamInfrastructure, progress: TaskProgress) -> None:
+    async def _handle_setup_team_infrastructure(
+        self, payload: SetupTeamInfrastructure, progress: TaskProgress[StepsState]
+    ) -> None:
         team = await _target(Team.objects.all(), team_number=payload.team_number)
         if payload.recreate:
             reason = f"Team {team.team_number} infrastructure recreate"
@@ -181,7 +161,7 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
         finally:
             trigger_dashboard(self.bot)
 
-    async def _handle_post_comment(self, payload: PostComment, progress: TaskProgress) -> None:
+    async def _handle_post_comment(self, payload: PostComment, progress: TaskProgress[StepsState]) -> None:
         ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
         comment = await _target(TicketComment.objects.select_related("author"), id=payload.comment_id)
 
@@ -195,7 +175,7 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
         await send_parts(thread, f"**{author_display}**\n{comment.comment_text}", progress=progress)
         logger.info(f"Posted comment {comment.id} to thread {thread.id}")
 
-    async def _handle_post_ticket_update(self, payload: PostTicketUpdate, progress: TaskProgress) -> None:
+    async def _handle_post_ticket_update(self, payload: PostTicketUpdate, progress: TaskProgress[StepsState]) -> None:
         action = payload.action
         actor = payload.actor
 
@@ -281,7 +261,9 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
         logger.info(f"Role sync completed: {summary}")
         return stats
 
-    async def _handle_broadcast_message(self, payload: BroadcastMessage, progress: TaskProgress) -> dict[str, object]:
+    async def _handle_broadcast_message(
+        self, payload: BroadcastMessage, progress: TaskProgress[BroadcastState]
+    ) -> dict[str, object]:
         if not payload.target or not payload.message:
             raise PermanentTaskError("Missing target or message in payload")
         try:
@@ -289,15 +271,7 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
         except ValueError as e:
             raise PermanentTaskError(f"Invalid team range: {e}") from e
 
-        result = await deliver_broadcast(
-            self._guild(),
-            target,
-            payload.message,
-            payload.sender,
-            progress,
-            wanted=progress.still_processing,
-            queue_copy=partial(_queue_copy, progress),
-        )
+        result = await deliver_broadcast(self._guild(), target, payload.message, payload.sender, progress)
         summary = result.ops_summary(payload.sender, payload.target, payload.message)
         if result.failed:
             # A retry tries only the recipients that may yet succeed; the last failure posts this summary

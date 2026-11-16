@@ -1,17 +1,17 @@
 """The work the portal queues: one payload dataclass per QueuedTask type.
 
 TaskPayload is the registry. QueuedTask.task_type's choices come from it, QueuedTask.enqueue
-takes one of its members and writes one row per backend from backends_for, which reads the
-payload's group (ChatNotice, DiscordOnly, WorkerTask). Each backend's processor
-(core.task_queue.QueueProcessor) is generic over the groups that backend runs and matches on
-them exhaustively, so mypy rejects a member of those groups it can't handle; a row of any other
-type fails at once.
+takes one of its members and writes one row per configured backend whose groups (ChatNotice,
+DiscordOnly, WorkerTask) BACKEND_TASKS says include it. Each backend's processor
+(core.task_queue.QueueProcessor) is generic over the groups BACKEND_TASKS gives that backend and
+matches on them exhaustively, so mypy rejects a member of those groups it can't handle; a row of
+any other type fails at once.
 """
 
 from dataclasses import dataclass
 from typing import ClassVar, TypedDict, get_args
 
-from core.task_backends import TaskBackend, chat_backends, discord_enabled
+from core.task_backends import TaskBackend, discord_enabled, zulip_enabled
 
 
 class PermanentTaskError(Exception):
@@ -185,10 +185,15 @@ WORKER_TASKS: tuple[type[WorkerTask], ...] = get_args(WorkerTask.__value__)
 PAYLOAD_TYPES: dict[str, type[TaskPayload]] = {cls.task_type: cls for cls in CHAT_NOTICES + DISCORD_ONLY + WORKER_TASKS}
 
 
+# The payload groups each backend runs
+BACKEND_TASKS: dict[TaskBackend, tuple[type[TaskPayload], ...]] = {
+    TaskBackend.DISCORD: CHAT_NOTICES + DISCORD_ONLY,
+    TaskBackend.ZULIP: CHAT_NOTICES,
+    TaskBackend.WORKER: WORKER_TASKS,
+}
+
+
 def backends_for(payload: TaskPayload) -> list[TaskBackend]:
-    """The backends that get a row of this payload, from its group."""
-    if isinstance(payload, CHAT_NOTICES):
-        return chat_backends()
-    if isinstance(payload, WORKER_TASKS):
-        return [TaskBackend.WORKER]
-    return [TaskBackend.DISCORD] if discord_enabled() else []
+    """The configured backends that run this payload's group."""
+    configured = {TaskBackend.DISCORD: discord_enabled(), TaskBackend.ZULIP: zulip_enabled(), TaskBackend.WORKER: True}
+    return [backend for backend, types in BACKEND_TASKS.items() if configured[backend] and isinstance(payload, types)]

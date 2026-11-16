@@ -6,69 +6,91 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
-from typing import ClassVar, TypedDict
+from typing import ClassVar, TypedDict, cast
 
 from asgiref.sync import sync_to_async
 from django.core.exceptions import ObjectDoesNotExist
+from django.db import transaction
 from django.db.models import Model, Q, QuerySet
 from django.utils import timezone
 
 from core.models import QueuedTask
-from core.queued_tasks import PermanentTaskError, TaskPayload
+from core.queued_tasks import BACKEND_TASKS, PermanentTaskError, TaskPayload
 from core.task_backends import TaskBackend
 from core.utils import recycle_db_connection
 
 logger = logging.getLogger(__name__)
 
 
-class ProgressState(TypedDict, total=False):
-    done: int  # steps done, for a task that counts them
-    # A broadcast's: recipients reached, refused for good (with why), counts, and parts sent to each it failed on
-    reached: list[int]
-    refused: dict[str, str]
-    sent: int
-    queued: int
-    parts: dict[str, int]
-    # A Nextcloud reconcile's: accounts deleted and provisioned, and the last team number each pass finished
-    deleted: int
-    provisioned: int
-    deleted_through: int
-    provisioned_through: int
+class StepsState(TypedDict, total=False):
+    """The state of a task that counts its steps: a message's parts sent, or a recreate's delete."""
+
+    done: int
+
+
+def _running(task_id: int) -> QuerySet[QueuedTask]:
+    """The task's row while it still runs: empty once it was deleted, or a reset failed or scrubbed it."""
+    return QueuedTask.objects.filter(pk=task_id, status="processing")
 
 
 @dataclass
-class TaskProgress:
-    """What a queued task already did, saved with the task so a retry does only the rest."""
+class TaskProgress[S: Mapping[str, object]]:
+    """What a queued task already did, its handler's state S, saved with the task so a retry does only the rest."""
 
     task_id: int
-    save: Callable[[ProgressState], Awaitable[None]]
-    state: ProgressState = field(default_factory=ProgressState)
+    save: Callable[[S], Awaitable[None]]
+    state: S
 
     @classmethod
-    def of(cls, task: QueuedTask) -> TaskProgress:
-        """The progress of a claimed task, saved to its row while the row is still processing."""
+    def of(cls, task: QueuedTask) -> TaskProgress[S]:
+        """The progress of a claimed task, saved to its row while the task still runs."""
 
-        async def save(state: ProgressState) -> None:
-            await QueuedTask.objects.filter(pk=task.pk, status="processing").aupdate(progress=state)
+        async def save(state: S) -> None:
+            await _running(task.pk).aupdate(progress=state)
 
         return cls(task.pk, save, task.progress)
 
+    @classmethod
+    def in_memory(cls, state: S) -> TaskProgress[S]:
+        """Progress of work no queued task runs: saving keeps it in state only. Its task_id, 0, names no row, so it is
+        only for counting steps (send_parts), not for still_running or while_running."""
+
+        async def save(_state: S) -> None:
+            pass
+
+        return cls(0, save, state)
+
     @property
-    def done(self) -> int:
+    def done(self: TaskProgress[StepsState]) -> int:
         return self.state.get("done", 0)
 
-    async def advance(self) -> None:
+    async def advance(self: TaskProgress[StepsState]) -> None:
         self.state["done"] = self.done + 1
         await self.saved()
 
     async def saved(self) -> None:
         await self.save(self.state)
 
-    async def still_processing(self) -> bool:
-        """Whether the task is still running: False once it was deleted, or a reset failed or scrubbed it."""
-        return await QueuedTask.objects.filter(pk=self.task_id, status="processing").aexists()
+    async def still_running(self) -> bool:
+        """Whether the task still runs: False once it was deleted, or a reset failed or scrubbed it."""
+        return await _running(self.task_id).aexists()
+
+    async def while_running(self, work: Callable[[], object]) -> bool:
+        """Do work (sync ORM writes) in one transaction holding the task's row lock, only while the task still runs:
+        False, with nothing done, once it doesn't. A reset failing the task waits on the lock meanwhile."""
+        task_id = self.task_id
+
+        @sync_to_async
+        def run() -> bool:
+            with transaction.atomic():
+                if not _running(task_id).select_for_update(no_key=True).exists():
+                    return False
+                work()
+                return True
+
+        return await run()
 
 
 async def _target[M: Model](queryset: QuerySet[M], **lookup: object) -> M:
@@ -86,12 +108,11 @@ def _nothing(*_args: object) -> None:
 class QueueProcessor[P: TaskPayload](ABC):
     """Runs the pending rows of one backend. on_start is called with heartbeat_name in the loop's own asyncio task
     before its first poll, and on_pass after each poll and each task, so the process hosting the loop can tie them to
-    its liveness heartbeat. P is the payload group the backend handles, payload_types its classes: a row of any other
-    type fails at once."""
+    its liveness heartbeat. P is the payload groups core.queued_tasks.BACKEND_TASKS gives the backend: a row of any
+    other type fails at once."""
 
     backend: ClassVar[TaskBackend]
     heartbeat_name: ClassVar[str]
-    payload_types: tuple[type[P], ...]
 
     QUEUE_POLL_INTERVAL_SECONDS = 2
     QUEUE_BATCH_SIZE = 10
@@ -106,9 +127,9 @@ class QueueProcessor[P: TaskPayload](ABC):
         self.task: asyncio.Task[None] | None = None
 
     @abstractmethod
-    async def dispatch(self, payload: P, progress: TaskProgress) -> Mapping[str, object] | None:
-        """Run the handler for payload; what it returns is stored as the task's result. A handler given progress
-        records there what it did, so a retry skips it."""
+    async def dispatch(self, payload: P, task: QueuedTask) -> Mapping[str, object] | None:
+        """Run the handler for payload; what it returns is stored as the task's result. A handler that resumes takes
+        TaskProgress.of(task) and records there what it did, so a retry skips it."""
 
     @abstractmethod
     async def report(self, message: str) -> None:
@@ -188,9 +209,10 @@ class QueueProcessor[P: TaskPayload](ABC):
 
     def _payload(self, task: QueuedTask) -> P:
         payload = task.typed_payload()
-        if not isinstance(payload, self.payload_types):
+        if not isinstance(payload, BACKEND_TASKS[self.backend]):
             raise PermanentTaskError(f"{task.task_type} is not a {self.backend.label} task")
-        return payload
+        # P is the backend's groups in BACKEND_TASKS, which mypy can't tie to the map's entry
+        return cast(P, payload)
 
     async def _process_task(self, task: QueuedTask) -> None:
 
@@ -201,7 +223,7 @@ class QueueProcessor[P: TaskPayload](ABC):
         task.status = "processing"
 
         try:
-            task_result = await self.dispatch(self._payload(task), TaskProgress.of(task))
+            task_result = await self.dispatch(self._payload(task), task)
         except PermanentTaskError as error:
             if await self._record(task, status="failed", error_message=str(error)):
                 logger.error(f"Task {task.id} ({task.task_type}) can never succeed: {error}")
@@ -233,7 +255,7 @@ class QueueProcessor[P: TaskPayload](ABC):
     async def _record(task: QueuedTask, **outcome: object) -> bool:
         """Write the task's outcome only while the row is still this processor's to finish: False when deleted or when
         a reset failed or scrubbed it meanwhile."""
-        if not await QueuedTask.objects.filter(pk=task.pk, status="processing").aupdate(**outcome):
+        if not await _running(task.pk).aupdate(**outcome):
             logger.info(f"Task {task.id} ({task.task_type}) was deleted or ended while it ran")
             return False
         for name, value in outcome.items():

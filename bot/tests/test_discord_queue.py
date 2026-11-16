@@ -996,10 +996,7 @@ async def test_a_removal_whose_re_setup_fails_is_retried(test_team: Team, mock_b
 async def test_a_copy_is_queued_only_while_the_broadcast_is_processing(
     mock_bot_with_guild: Any, status: str, copies: int
 ) -> None:
-    from functools import partial
-
     from bot.competition_actions import deliver_broadcast
-    from bot.discord_queue import _queue_copy
     from core.broadcast import parse_broadcast_target
     from core.models import QueuedAnnouncement
     from core.task_queue import TaskProgress
@@ -1010,13 +1007,17 @@ async def test_a_copy_is_queued_only_while_the_broadcast_is_processing(
     )
     await QueuedTask.objects.filter(pk=task.pk).aupdate(status=status)
 
-    with patch("bot.competition_actions.team_chat_channel", return_value=None):
+    # Past the check before the team, so the copy's own check under the row lock decides
+    with (
+        patch("bot.competition_actions.team_chat_channel", return_value=None),
+        patch.object(TaskProgress, "still_running", AsyncMock(return_value=True)),
+    ):
         result = await deliver_broadcast(
             mock_bot_with_guild.guilds[0],
             parse_broadcast_target("41"),
             "Default login",
             "gold",
-            queue_copy=partial(_queue_copy, TaskProgress.of(task)),
+            TaskProgress.of(task),
         )
 
     assert (result.sent, result.queued, await QueuedAnnouncement.objects.acount()) == (0, copies, copies)

@@ -138,7 +138,7 @@ def set_team_school(
         # transaction, so nothing is reset for a hand-over that rolls back
         QueuedAnnouncement.objects.filter(team=team).delete()
         _clear_old_channels(team)
-        _reset_nextcloud(team)
+        _enqueue_unless_pending(ResetNextcloudTeam(team_number=team.team_number))
     if info is None:
         info = SchoolInfo.objects.create(team=team, **fields)
     else:
@@ -198,12 +198,6 @@ def _clear_old_channels(team: Team) -> None:
     if not left.update(channels_need_clearing=True):
         return
     _enqueue_unless_pending(ClearTeamChannels(team_number=team.team_number))
-
-
-def _reset_nextcloud(team: Team) -> None:
-    """Queue the reset of the team's Nextcloud account and files, unless one is already pending, whether or not it
-    has Discord leftovers or linked members."""
-    _enqueue_unless_pending(ResetNextcloudTeam(team_number=team.team_number))
 
 
 def _enqueue_unless_pending(payload: ClearTeamChannels | ResetNextcloudTeam) -> None:

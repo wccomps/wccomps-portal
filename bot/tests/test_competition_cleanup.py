@@ -343,14 +343,13 @@ async def test_the_command_resets_and_says_what_it_did(competition: Team, mock_i
 )
 async def test_each_queued_cleanup_runs_its_job(payload: dict[str, object], open_event_id: int | None) -> None:
     from bot.heartbeat import beat
-    from core.task_queue import TaskProgress
 
     task = await QueuedTask.objects.acreate(task_type="reconcile_teams", payload=payload)
     processor = DiscordQueueProcessor(MagicMock())
     guild = MagicMock()
     processor._guild = MagicMock(return_value=guild)
     with patch("bot.competition_actions.reconcile_teams", new_callable=AsyncMock) as run:
-        await processor.dispatch(task.typed_payload(), TaskProgress.of(task))
+        await processor.dispatch(task.typed_payload(), task)
 
     run.assert_awaited_once_with(processor.bot, guild, "gold", open_event_id, beat)
 
@@ -448,6 +447,8 @@ async def test_opening_an_event_tears_down_what_the_last_event_left(competition:
     judge_role.name = "WCComps Room Judge"
     judge_role.members = [judge]
     guild.roles.append(judge_role)
+    status_refreshes = QueuedTask.objects.filter(task_type="competition_status_changed")
+    refreshes_before = await status_refreshes.acount()
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
@@ -461,7 +462,8 @@ async def test_opening_an_event_tears_down_what_the_last_event_left(competition:
     assert [call.args[1].team_number for call in _setup_offline_mock().await_args_list] == [3]
     assert sync.await_args_list[-1].args == (guild,)
     judge.remove_roles.assert_awaited_once_with(judge_role, reason="Competition cleanup")
-    assert await QueuedTask.objects.filter(task_type="competition_status_changed").acount() == 1
+    # The teardown changes nothing the status shows, so it queues no status refresh
+    assert await status_refreshes.acount() == refreshes_before
     assert await DiscordLink.objects.filter(discord_id=1, is_active=True).aexists()
     config = await CompetitionConfig.objects.aget(pk=1)
     assert (config.start_message, config.competition_start_time is not None) == ("Default VM login", True)
@@ -622,8 +624,6 @@ async def test_clear_team_channels_clears_a_handed_over_team_without_nextcloud(
     competition: Team, settings: Any
 ) -> None:
     """ResetNextcloudTeam, queued beside it, resets the team's Nextcloud account."""
-    from core.task_queue import TaskProgress
-
     settings.NEXTCLOUD_URL = "https://files.test"
     settings.NEXTCLOUD_USERNAME = "admin"
     settings.NEXTCLOUD_PASSWORD = "secret"
@@ -638,7 +638,7 @@ async def test_clear_team_channels_clears_a_handed_over_team_without_nextcloud(
     processor._guild = MagicMock(return_value=guild)
 
     with patch("core.nextcloud.NextcloudManager") as nextcloud:
-        await processor.dispatch(task.typed_payload(), TaskProgress.of(task))
+        await processor.dispatch(task.typed_payload(), task)
 
     nextcloud.assert_not_called()
     assert not await Team.objects.filter(pk=competition.pk, channels_need_clearing=True).aexists()
