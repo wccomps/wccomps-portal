@@ -12,7 +12,6 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.urls import reverse
 
-from bot.utils import announcement, split_message
 from chat.zulip.client import ZulipClient, ZulipError
 from chat.zulip.markup import quiet, to_zulip
 from chat.zulip.naming import team_stream, ticket_topic
@@ -31,6 +30,7 @@ from core.queued_tasks import (
 )
 from core.task_backends import TaskBackend
 from core.task_queue import QueueProcessor, StepsState, TaskProgress, _target
+from core.utils import announcement, split_message
 from team.models import MAX_TEAMS, Team
 from ticketing.models import Ticket, TicketComment
 
@@ -136,9 +136,8 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
     async def _post_comment(self, payload: PostComment, progress: TaskProgress[StepsState]) -> None:
         ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
         comment = await _target(TicketComment.objects.select_related("author"), id=payload.comment_id)
-        author = (comment.author.username if comment.author else "") or "Unknown"
         # A web comment has no length limit; send all of it, in as many messages as it takes
-        text = f"**{author}**\n{quiet(comment.comment_text)}"
+        text = f"**{quiet(comment.author_name)}**\n{quiet(comment.comment_text)}"
         await self._send_parts(team_stream(ticket.team.team_number), ticket_topic(ticket), text, progress)
 
     async def _post_ticket_update(self, payload: PostTicketUpdate, progress: TaskProgress[StepsState]) -> None:

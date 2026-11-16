@@ -755,7 +755,7 @@ class TestRateLimiting:
 
         # Create 5 rate limit entries for this ticket (at the limit)
         for i in range(5):
-            await CommentRateLimit.objects.acreate(ticket=ticket, discord_id=111222333 + i)
+            await CommentRateLimit.objects.acreate(ticket=ticket, actor_key=f"discord:{111222333 + i}")
 
         # Create message from a user
         message = AsyncMock(spec=discord.Message)
@@ -787,7 +787,7 @@ class TestRateLimiting:
         # Create 10 rate limit entries for same user (user-level limit is 10/min)
         user_id = 555444333
         for _i in range(10):
-            await CommentRateLimit.objects.acreate(ticket=ticket, discord_id=user_id)
+            await CommentRateLimit.objects.acreate(ticket=ticket, actor_key=f"discord:{user_id}")
 
         # Try to comment on the original ticket
         message = AsyncMock(spec=discord.Message)

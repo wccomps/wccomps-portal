@@ -32,7 +32,7 @@ cp .env.example .env   # then fill in credentials; DB_* pointing at the Postgres
 set -a; . ./.env; set +a
 cd web && uv run python manage.py prepare_database && uv run python manage.py runserver
 uv run python -m worker  # the worker, from the repo root, in another shell
-uv run python -m chat    # the chat process (the Discord bot), from the repo root, in another shell
+uv run python -m chat    # the chat process (Discord bot, Zulip runner, or both), from the repo root, in another shell
 ```
 
 ## Production

@@ -25,11 +25,13 @@ QUEUE_WORKER = "queue-worker"
 QUEUE_DISCORD = "queue-discord"
 DASHBOARD = "dashboard"
 QUEUE_ZULIP = "queue-zulip"
+EVENTS_ZULIP = "events-zulip"
 
 # Allowed age per heartbeat, several missed passes each. The worker: competition timer every 60s, group refresh every
 # 5 min, Quotient sync every 5 min (every 15 min while backing off, so two backed-off passes), its queue polls every
 # 2s. The chat process's Discord runner: its queue polls every 2s, the dashboard every 10s. Its Zulip runner: its
-# queue polls every 2s.
+# queue polls every 2s, and its event long-poll answers within about a minute (Zulip sends a heartbeat event when
+# nothing happened; the client gives up after 120s), so several missed polls.
 BUDGETS: dict[str, int] = {
     TIMER: 300,
     GROUPS: 900,
@@ -38,15 +40,23 @@ BUDGETS: dict[str, int] = {
     QUEUE_DISCORD: 60,
     DASHBOARD: 120,
     QUEUE_ZULIP: 60,
+    EVENTS_ZULIP: 600,
 }
 WORKER_HEARTBEATS: tuple[str, ...] = (TIMER, GROUPS, QUOTIENT, QUEUE_WORKER)
 DISCORD_HEARTBEATS: tuple[str, ...] = (QUEUE_DISCORD, DASHBOARD)
+ZULIP_HEARTBEATS: tuple[str, ...] = (QUEUE_ZULIP, EVENTS_ZULIP)
 
 
 def discord_configured(token: str | None) -> bool:
     """Whether Discord is configured, from DISCORD_BOT_TOKEN: the one rule core.task_backends.discord_enabled (through
     settings) and budgets (through the environment, as this module can't import Django) both apply."""
     return bool(token)
+
+
+def zulip_configured(site: str | None, email: str | None, api_key: str | None) -> bool:
+    """Whether Zulip is configured, from ZULIP_SITE, ZULIP_BOT_EMAIL and ZULIP_API_KEY: the one rule
+    core.task_backends.zulip_enabled (through settings) and budgets (through the environment) both apply."""
+    return bool(site and email and api_key)
 
 
 def _always() -> bool:
@@ -66,7 +76,10 @@ def budgets(process: str) -> dict[str, int]:
         case "worker":
             names = WORKER_HEARTBEATS
         case "chat":
-            names = DISCORD_HEARTBEATS if discord_configured(os.environ.get("DISCORD_BOT_TOKEN")) else ()
+            env = os.environ.get
+            discord = DISCORD_HEARTBEATS if discord_configured(env("DISCORD_BOT_TOKEN")) else ()
+            zulip = zulip_configured(env("ZULIP_SITE"), env("ZULIP_BOT_EMAIL"), env("ZULIP_API_KEY"))
+            names = (*discord, *(ZULIP_HEARTBEATS if zulip else ()))
         case _:
             raise ValueError(f"Unknown process {process!r}, expected 'worker' or 'chat'")
     return {name: BUDGETS[name] for name in names}

@@ -3,7 +3,7 @@
 from django.conf import settings
 from django.db import models
 
-from core.heartbeat import discord_configured
+from core.heartbeat import discord_configured, zulip_configured
 
 
 class TaskBackend(models.TextChoices):
@@ -17,4 +17,4 @@ def discord_enabled() -> bool:
 
 
 def zulip_enabled() -> bool:
-    return bool(settings.ZULIP_SITE and settings.ZULIP_BOT_EMAIL and settings.ZULIP_API_KEY)
+    return zulip_configured(settings.ZULIP_SITE, settings.ZULIP_BOT_EMAIL, settings.ZULIP_API_KEY)

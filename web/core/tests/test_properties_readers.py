@@ -36,6 +36,7 @@ from quotient.client import (
 )
 
 from chat.zulip.client import ZulipClient, ZulipError
+from chat.zulip.incoming import IncomingMessage, deleted_message_ids, edited_message, parse_message_event
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
 from core.nextcloud import NextcloudAPIError, NextcloudManager
 from core.proxmox import ProxmoxAPIError, ProxmoxClient, ProxmoxSnapshot, ProxmoxTaskStatus, ProxmoxVM
@@ -125,8 +126,20 @@ ZULIP_EVENTS = {
         {
             "type": "message",
             "id": 0,
-            "message": {"id": 77, "type": "stream", "display_recipient": "team03", "subject": "T003-001 Web"},
-        }
+            "message": {
+                "id": 77,
+                "type": "stream",
+                "display_recipient": "team03",
+                "subject": "T003-001 Web",
+                "sender_id": 9,
+                "sender_email": "member@example.org",
+                "sender_full_name": "Member",
+                "content": "hi",
+            },
+        },
+        {"type": "update_message", "id": 1, "message_id": 77, "content": "edited"},
+        {"type": "delete_message", "id": 2, "message_id": 77, "message_ids": [77, 78]},
+        {"type": "heartbeat", "id": 3},
     ],
 }
 
@@ -383,6 +396,37 @@ def check_bool(result: object) -> None:
     outcome(result, lambda r: type(r) is bool, "a bool")
 
 
+def zulip_events_read() -> object:
+    """A poll's events, each through the readers chat.zulip.incoming handles it with."""
+    events = zulip(lambda c: c.get_events("1517975029:0", -1))()
+    return [(parse_message_event(e), edited_message(e), deleted_message_ids(e)) for e in events]
+
+
+def _zulip_id(value: object) -> bool:
+    return type(value) is int and 0 < value < 2**63
+
+
+def check_zulip_events_read(result: object) -> None:
+    def message_ok(m: object) -> bool:
+        return m is None or (
+            isinstance(m, IncomingMessage)
+            and _zulip_id(m.message_id)
+            and _zulip_id(m.sender_id)
+            and all(is_str(v) for v in (m.stream, m.topic, m.sender_email, m.sender_name, m.content))
+        )
+
+    def ok(r: object) -> bool:
+        return isinstance(r, list) and all(
+            message_ok(message)
+            and (edit is None or (_zulip_id(edit[0]) and is_str(edit[1])))
+            and isinstance(deleted, list)
+            and all(_zulip_id(i) for i in deleted)
+            for message, edit, deleted in r
+        )
+
+    outcome(result, ok, "each event's message, edit and deleted ids, or None")
+
+
 AM = "web/core/authentik_manager.py:AuthentikManager"
 NC = "web/core/nextcloud.py:NextcloudManager"
 QC = "web/quotient/client.py:QuotientClient"
@@ -636,6 +680,14 @@ READERS = [
         zulip(lambda c: c.get_events("1517975029:0", -1)),
         (ZULIP_EVENTS,),
         lambda r: outcome(r, lambda e: isinstance(e, list) and all(isinstance(v, dict) for v in e), "a list of events"),
+        (f"{ZC}.get_events", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_events_read",
+        zulip_events_read,
+        (ZULIP_EVENTS,),
+        check_zulip_events_read,
         (f"{ZC}.get_events", f"{ZC}._call"),
         raises=(ZulipError,),
     ),

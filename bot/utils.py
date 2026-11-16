@@ -8,7 +8,7 @@ from discord import app_commands
 from django.conf import settings
 
 from core.task_queue import StepsState, TaskProgress
-from core.utils import missing_discord_settings
+from core.utils import missing_discord_settings, split_message
 from team.models import MAX_TEAMS, Team
 
 logger = logging.getLogger(__name__)
@@ -85,23 +85,6 @@ def add_field(embed: discord.Embed, name: str, value: str, *, inline: bool = Fal
     return True
 
 
-def split_message(text: str, limit: int = DISCORD_MESSAGE_CHAR_LIMIT) -> list[str]:
-    """text in Discord-sized messages, broken at line ends where possible, so nothing is lost."""
-    chunks = []
-    while len(text) > limit:
-        cut = text.rfind("\n", 0, limit)
-        if cut <= 0:
-            cut = limit
-        chunks.append(text[:cut])
-        text = text[cut:].lstrip("\n")
-    return [*chunks, text] if text or not chunks else chunks
-
-
-def announcement(sender: str, message: str) -> str:
-    """A broadcast as a team's channel shows it."""
-    return f"**Announcement from {sender}:**\n\n{message}"
-
-
 async def send_parts(
     channel: discord.abc.Messageable,
     text: str,
@@ -113,7 +96,7 @@ async def send_parts(
     the parts progress says an earlier attempt sent. Only the first may ping what allowed_mentions allows: the rest is
     the sender's text."""
     done = progress.done
-    for n, part in enumerate(split_message(text)):
+    for n, part in enumerate(split_message(text, DISCORD_MESSAGE_CHAR_LIMIT)):
         if n < done:
             continue
         await channel.send(part, allowed_mentions=allowed_mentions if n == 0 else ALLOWED_MENTIONS)

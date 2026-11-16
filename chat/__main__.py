@@ -1,9 +1,11 @@
-"""The chat process, `python -m chat`: the Discord runner, consuming the Discord backend's queued tasks
-(core.task_backends). `python -m core.health chat` is its liveness check.
+"""The chat process, `python -m chat`: a runner per configured chat backend (Discord, Zulip), together in one event
+loop, each consuming its backend's queued tasks (core.task_backends). `python -m core.health chat` is its liveness
+check.
 
-A crash ends the process, and its container restarts.
+A crash in either runner ends the process, and its container restarts.
 """
 
+import asyncio
 import logging
 import os
 import sys
@@ -18,31 +20,58 @@ from django.core.exceptions import ImproperlyConfigured
 from portal.required import missing_settings
 
 from bot.client import PortalBot
+from chat.zulip import runner as zulip_runner
+from chat.zulip.client import ZulipClient
 from core.task_backends import discord_enabled, zulip_enabled
 
 logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    # Zulip's settings exist ahead of its runner; refused rather than run with nothing consuming Zulip's queued tasks
-    if zulip_enabled():
-        logger.error("Zulip is configured, but this release has no Zulip runner yet; unset ZULIP_* to start")
-        sys.exit(1)
-    if not discord_enabled():
-        logger.error("No chat backend configured: set DISCORD_BOT_TOKEN")
+    discord, zulip = discord_enabled(), zulip_enabled()
+    if not discord and not zulip:
+        logger.error(
+            "No chat backend configured: set DISCORD_BOT_TOKEN for Discord, or ZULIP_SITE, ZULIP_BOT_EMAIL and "
+            "ZULIP_API_KEY for Zulip"
+        )
         sys.exit(1)
     if missing := missing_settings():
         raise ImproperlyConfigured(f"{', '.join(missing)} not set; the chat process needs them")
 
-    logger.info("Chat process starting")
+    backends = [name for name, on in (("Discord", discord), ("Zulip", zulip)) if on]
+    logger.info(f"Chat process starting: {', '.join(backends)}")
     try:
-        # log_handler=None: discord.py's logs go through Django's console handler instead of a handler of its own
-        PortalBot().run(settings.DISCORD_BOT_TOKEN, log_handler=None)
+        asyncio.run(run(discord=discord, zulip=zulip))
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt")
     except Exception as e:
         logger.exception(f"Fatal error: {e}")
         sys.exit(1)
+
+
+async def run(*, discord: bool, zulip: bool) -> None:
+    """The configured runners, until one of them crashes (which stops the other)."""
+    async with asyncio.TaskGroup() as group:
+        if discord:
+            group.create_task(_run_discord())
+        if zulip:
+            group.create_task(_run_zulip())
+
+
+async def _run_discord() -> None:
+    # As discord.py's Client.run does, without the log handler of its own run() would add: its logs go through
+    # Django's console handler instead
+    bot = PortalBot()
+    async with bot:
+        await bot.start(settings.DISCORD_BOT_TOKEN)
+
+
+async def _run_zulip() -> None:
+    client = ZulipClient(settings.ZULIP_SITE, settings.ZULIP_BOT_EMAIL, settings.ZULIP_API_KEY)
+    try:
+        await zulip_runner.run(client)
+    finally:
+        await client.aclose()
 
 
 if __name__ == "__main__":

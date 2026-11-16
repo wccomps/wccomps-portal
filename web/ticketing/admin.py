@@ -29,8 +29,8 @@ class TicketAttachmentInline(PortalTabularInline[TicketAttachment, Ticket]):
 class TicketCommentInline(PortalTabularInline[TicketComment, Ticket]):
     model = TicketComment
     extra = 0
-    readonly_fields = ["posted_at", "author"]
-    fields = ["author", "comment_text", "posted_at"]
+    readonly_fields = ["posted_at", "author_name"]
+    fields = ["author_name", "comment_text", "posted_at"]
 
 
 class TicketHistoryInline(PortalTabularInline[TicketHistory, Ticket]):
@@ -230,7 +230,7 @@ class TicketAttachmentAdmin(PortalModelAdmin[TicketAttachment]):
 
 @admin.register(TicketComment)
 class TicketCommentAdmin(PortalModelAdmin[TicketComment]):
-    list_display = ["ticket", "author", "posted_at"]
+    list_display = ["ticket", "author_name", "posted_at"]
     list_filter = ["posted_at"]
     search_fields = ["ticket__ticket_number", "comment_text"]
     ordering = ["-posted_at"]
@@ -248,9 +248,9 @@ class TicketHistoryAdmin(PortalModelAdmin[TicketHistory]):
 
 @admin.register(CommentRateLimit)
 class CommentRateLimitAdmin(PortalModelAdmin[CommentRateLimit]):
-    list_display = ["ticket", "discord_id", "posted_at"]
+    list_display = ["ticket", "actor_key", "posted_at"]
     list_filter = ["posted_at"]
-    search_fields = ["ticket__ticket_number", "discord_id"]
+    search_fields = ["ticket__ticket_number", "actor_key"]
     ordering = ["-posted_at"]
     readonly_fields = ["posted_at"]
 

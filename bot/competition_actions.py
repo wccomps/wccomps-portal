@@ -14,7 +14,6 @@ from registration.stage import event_stage
 
 from bot.discord_manager import delete_team_infrastructure, setup_team_infrastructure
 from bot.utils import (
-    announcement,
     log_to_ops_channel,
     room_judge_role_name,
     send_announcement,
@@ -27,7 +26,7 @@ from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.queued_tasks import PermanentTaskError
 from core.services.competition import START_MESSAGE_SENDER
 from core.task_queue import StepsState, TaskProgress
-from core.utils import shorten
+from core.utils import announcement, shorten
 from team.models import MAX_TEAMS, Team
 
 logger = logging.getLogger(__name__)

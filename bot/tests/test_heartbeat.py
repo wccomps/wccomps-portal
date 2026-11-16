@@ -32,6 +32,8 @@ def _open_bot() -> MagicMock:
 @pytest.fixture
 def discord_only(monkeypatch):
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "token")
+    for name in ("ZULIP_SITE", "ZULIP_BOT_EMAIL", "ZULIP_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def test_the_chat_check_covers_the_loops_the_bot_runs(discord_only):

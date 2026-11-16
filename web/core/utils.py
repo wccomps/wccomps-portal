@@ -130,6 +130,23 @@ def open_parentheses(text: str) -> int:
     return depth
 
 
+def split_message(text: str, limit: int) -> list[str]:
+    """text in messages of at most limit characters, broken at line ends where possible, so nothing is lost."""
+    chunks = []
+    while len(text) > limit:
+        cut = text.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip("\n")
+    return [*chunks, text] if text or not chunks else chunks
+
+
+def announcement(sender: str, message: str) -> str:
+    """A broadcast as a team's chat channel or stream shows it."""
+    return f"**Announcement from {sender}:**\n\n{message}"
+
+
 def ndjson_progress(step: str, current: int, total: int, ok: bool = True) -> str:
     """Encode a single progress line as newline-delimited JSON for streaming views."""
     return json.dumps({"step": step, "current": current, "total": total, "ok": ok}) + "\n"

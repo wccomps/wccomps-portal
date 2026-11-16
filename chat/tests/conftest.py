@@ -6,6 +6,7 @@ import pytest_asyncio
 from asgiref.sync import sync_to_async
 
 from chat.zulip.client import ZulipError
+from chat.zulip.incoming import IncomingMessage
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory, TicketComment
 from ticketing.utils import create_ticket_atomic
@@ -61,6 +62,20 @@ class FakeZulip:
     async def fetch_upload(self, path: str, max_bytes: int) -> bytes | None:
         data = self.uploads[path]
         return None if len(data) > max_bytes else data
+
+
+def message(
+    *,
+    topic: str,
+    stream: str = "team03",
+    content: str = "hi",
+    message_id: int = 77,
+    sender_id: int = 9,
+    sender_email: str = "member@example.org",
+    sender_name: str = "Member",
+) -> IncomingMessage:
+    """A message in a Zulip topic, as parse_message_event gives it: by default a member's in team 3's stream."""
+    return IncomingMessage(message_id, stream, topic, sender_id, sender_email, sender_name, content)
 
 
 @pytest.fixture

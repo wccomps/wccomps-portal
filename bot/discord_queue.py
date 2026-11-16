@@ -170,9 +170,8 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
             logger.info(f"Ticket {ticket.ticket_number} has no Discord thread; comment {comment.id} not mirrored")
             return
 
-        author_display = (comment.author.username if comment.author else "") or "Unknown"
         # A web comment has no length limit; send all of it, in as many messages as it takes
-        await send_parts(thread, f"**{author_display}**\n{comment.comment_text}", progress=progress)
+        await send_parts(thread, f"**{comment.author_name}**\n{comment.comment_text}", progress=progress)
         logger.info(f"Posted comment {comment.id} to thread {thread.id}")
 
     async def _handle_post_ticket_update(self, payload: PostTicketUpdate, progress: TaskProgress[StepsState]) -> None:

@@ -24,6 +24,12 @@ from ticketing.models import Ticket, TicketCategory, TicketHistory
 TICKET_NUMBER_RE = re.compile(r"T\d{3,}-\d{3,}")
 
 
+def storable(text: str) -> str:
+    """A chat message's text as a comment stores it: without NUL characters, which PostgreSQL text can't hold. The
+    message is already in chat, so it is kept rather than refused."""
+    return text.replace("\x00", "")
+
+
 def _make_async[**P, T](fn: Callable[P, T]) -> Callable[P, Awaitable[T]]:
 
     @functools.wraps(fn)

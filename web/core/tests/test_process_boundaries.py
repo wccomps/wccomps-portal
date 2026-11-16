@@ -37,3 +37,10 @@ def test_the_worker_imports_nothing_from_chat() -> None:
     worker_files = _python_files("worker")
     assert worker_files
     assert {path: found for path in worker_files if (found := _imports_of(path, CHAT_PACKAGES))} == {}
+
+
+def test_the_zulip_backend_imports_nothing_from_discord() -> None:
+    """A Zulip-only deployment never loads discord.py or the Discord bot's code."""
+    zulip_files = [p for p in _python_files("chat") if p.startswith("chat/zulip/")]
+    assert zulip_files
+    assert {path: found for path in zulip_files if (found := _imports_of(path, ("bot", "discord")))} == {}

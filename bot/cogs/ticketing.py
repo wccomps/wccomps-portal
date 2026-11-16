@@ -20,15 +20,9 @@ from core.task_backends import TaskBackend
 from core.utils import run_blocking
 from team.models import DiscordLink
 from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
-from ticketing.utils import get_user_for_ticket
+from ticketing.utils import get_user_for_ticket, storable
 
 logger = logging.getLogger(__name__)
-
-
-def storable(text: str) -> str:
-    """A message's text as a comment stores it: without NUL characters, which PostgreSQL text can't hold. The
-    message is already in Discord, so it is kept rather than refused."""
-    return text.replace("\x00", "")
 
 
 class TicketingCog(commands.Cog):
@@ -199,7 +193,8 @@ class TicketingCog(commands.Cog):
         if not ticket or not await may_write_to_ticket(ticket, message.author.id):
             return
 
-        is_allowed, reason = await sync_to_async(CommentRateLimit.check_rate_limit)(ticket.id, message.author.id)
+        actor_key = f"discord:{message.author.id}"
+        is_allowed, reason = await sync_to_async(CommentRateLimit.check_rate_limit)(ticket.id, actor_key)
 
         if not is_allowed:
             try:
@@ -215,7 +210,7 @@ class TicketingCog(commands.Cog):
                 logger.warning("Cannot delete message due to permissions")
                 return
 
-        await CommentRateLimit.objects.acreate(ticket=ticket, discord_id=message.author.id)
+        await CommentRateLimit.objects.acreate(ticket=ticket, actor_key=actor_key)
 
         if content := storable(message.content):
             existing = await TicketComment.objects.filter(discord_message_id=message.id).afirst()

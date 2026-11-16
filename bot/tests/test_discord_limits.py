@@ -11,13 +11,14 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from bot.tests.discord_fakes import competition_thread
-from bot.utils import DISCORD_MESSAGE_CHAR_LIMIT, fit, split_message
+from bot.utils import DISCORD_MESSAGE_CHAR_LIMIT, fit
 from core.task_queue import TaskProgress
+from core.utils import split_message
 
 
 @given(st.text(alphabet=st.characters(codec="utf-8") | st.just("\n"), max_size=7000))
 def test_split_message_keeps_the_text_in_discord_sized_parts(text: str) -> None:
-    parts = split_message(text)
+    parts = split_message(text, DISCORD_MESSAGE_CHAR_LIMIT)
 
     assert parts
     assert all(len(part) <= DISCORD_MESSAGE_CHAR_LIMIT for part in parts)
@@ -28,7 +29,7 @@ def test_split_message_keeps_the_text_in_discord_sized_parts(text: str) -> None:
 def test_split_message_breaks_at_line_ends() -> None:
     text = "\n".join(f"line {n:04d} " + "x" * 90 for n in range(40))
 
-    parts = split_message(text)
+    parts = split_message(text, DISCORD_MESSAGE_CHAR_LIMIT)
 
     assert len(parts) == 3
     assert all(part.startswith("line ") for part in parts)
