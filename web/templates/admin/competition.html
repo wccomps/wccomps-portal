@@ -26,9 +26,11 @@
                     <c-detail_row label="Schools">
                         {{ panel.facts.schools }}
                     </c-detail_row>
-                    <c-detail_row label="Team members linked">
-                        {{ panel.facts.members_linked }}
-                    </c-detail_row>
+                    {% if discord_enabled %}
+                        <c-detail_row label="Team members linked">
+                            {{ panel.facts.members_linked }}
+                        </c-detail_row>
+                    {% endif %}
                     <c-detail_row label="Date">
                         {{ panel.stage.event.date|date:"M j, Y" }}
                     </c-detail_row>

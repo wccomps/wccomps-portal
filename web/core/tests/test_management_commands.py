@@ -134,7 +134,7 @@ class TestWipeCompetitionData:
     def test_clears_orange_assignments_so_readiness_passes(self, populated_database, gold_team_user):
         from orange_team.models import OrangeAssignment, OrangeCheck, OrangeCheckIn
 
-        from core.admin_views.readiness import ALL_CHECKS
+        from core.admin_views.readiness import checks
 
         check = OrangeCheck.objects.create(title="Phones", description="", created_by=gold_team_user)
         OrangeAssignment.objects.create(orange_check=check, user=gold_team_user, team=populated_database)
@@ -142,7 +142,7 @@ class TestWipeCompetitionData:
 
         wipe_competition_data()
 
-        assert dict(ALL_CHECKS)["No existing orange assignments"]()[0] == "pass"
+        assert dict(checks())["No existing orange assignments"]()[0] == "pass"
         assert not OrangeCheckIn.objects.exists()
         assert OrangeCheck.objects.filter(pk=check.pk).exists()  # rubrics are reusable setup
 

@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from core.admin_views.readiness import ALL_CHECKS, _check_session_access
+from core.admin_views.readiness import _check_session_access, checks
 from core.authentik_manager import SESSIONS_HIDDEN
 
 
@@ -22,4 +22,4 @@ def test_fails_when_the_token_sees_no_sessions():
 
 
 def test_readiness_runs_the_check():
-    assert any(fn is _check_session_access for _, fn in ALL_CHECKS)
+    assert any(fn is _check_session_access for _, fn in checks())

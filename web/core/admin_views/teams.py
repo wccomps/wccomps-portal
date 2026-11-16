@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest
 from django.db import transaction
 from django.db.models import Q
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_POST
 
@@ -15,6 +15,7 @@ from core.forms import TeamActionForm, TeamsBulkActionForm
 from core.models import AuditLog, QueuedTask
 from core.queued_tasks import SetupTeamInfrastructure, SyncMemberRoles
 from core.services.linking import ADMIN_UNLINK, unlink_discord_links
+from core.task_backends import discord_enabled
 from core.team_accounts import SEVERAL_ACCOUNTS
 from core.utils import list_filters, optional_int, requested_sort, stable_order
 from team.models import DiscordLink, Team, single_account
@@ -88,6 +89,8 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
         raise BadRequest("Invalid action")
 
     action = form.cleaned_data["action"]
+    if action == "recreate_channels" and not discord_enabled():
+        raise Http404("Discord is not configured")
 
     if action in ("activate", "deactivate"):
         target_active = action == "activate"
@@ -190,6 +193,8 @@ def admin_teams_bulk_action(request: HttpRequest) -> HttpResponse:
 
     action = form.cleaned_data["action"]
     team_numbers = form.cleaned_data["team_numbers"]
+    if action == "recreate" and not discord_enabled():
+        raise Http404("Discord is not configured")
 
     if action in ("activate", "deactivate"):
         target_active = action == "activate"

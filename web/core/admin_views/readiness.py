@@ -17,6 +17,7 @@ from scoring.models import IncidentReport, InjectScore, RedTeamScore
 from core.admin_views.places import SetupSection, setup_url
 from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, reason_for
 from core.models import AuditLog, CompetitionConfig
+from core.task_backends import discord_enabled
 from core.team_accounts import accounts_by_team, require_single_account
 from core.utils import ndjson_done
 from team.models import Team, single_account, team_username
@@ -357,8 +358,13 @@ def _check_multiple_teams() -> CheckResult:
     return ("pass", f"{active_count} teams registered", None)
 
 
-ALL_CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
-    ("Discord IDs configured", _check_discord_settings),
+def checks() -> list[tuple[str, Callable[[], CheckResult]]]:
+    """The readiness checks to run; the Discord one only when Discord is configured."""
+    discord = [("Discord IDs configured", _check_discord_settings)] if discord_enabled() else []
+    return [*discord, *_CHECKS]
+
+
+_CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
     ("Team accounts exist", _check_team_accounts_exist),
     ("Group membership correct", _check_team_group_membership),
     ("Authentik sessions visible", _check_session_access),
@@ -375,11 +381,12 @@ ALL_CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
 
 def stream_readiness_checks() -> Iterator[str]:
     """Run all readiness checks and yield NDJSON progress lines."""
-    total = len(ALL_CHECKS)
+    all_checks = checks()
+    total = len(all_checks)
     fail_count = 0
     warn_count = 0
 
-    for i, (name, check_fn) in enumerate(ALL_CHECKS, 1):
+    for i, (name, check_fn) in enumerate(all_checks, 1):
         try:
             severity, detail, action = check_fn()
         except AuthentikAPIError as e:

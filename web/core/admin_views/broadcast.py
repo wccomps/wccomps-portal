@@ -3,7 +3,7 @@ from typing import cast
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import BadRequest
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_POST
 
@@ -12,6 +12,7 @@ from core.errors import json_endpoint
 from core.forms import BroadcastForm, SyncRolesForm
 from core.models import AuditLog, QueuedTask
 from core.queued_tasks import BroadcastMessage, SyncRoles, SyncRolesResult
+from core.task_backends import discord_enabled
 from core.utils import role_sync_summary
 from team.models import Team
 
@@ -55,6 +56,8 @@ def admin_broadcast_action(request: HttpRequest) -> HttpResponse:
 
 @require_permission("admin", "gold_team")
 def admin_sync_roles(request: HttpRequest) -> HttpResponse:
+    if not discord_enabled():
+        raise Http404("Discord is not configured")
     return render(request, "admin/sync_roles.html", {"example_group": f"{settings.PORTAL_GROUP_PREFIX}GoldTeam"})
 
 
@@ -62,6 +65,8 @@ def admin_sync_roles(request: HttpRequest) -> HttpResponse:
 @require_POST
 @require_permission("admin", "gold_team")
 def admin_sync_roles_action(request: HttpRequest) -> HttpResponse:
+    if not discord_enabled():
+        raise Http404("Discord is not configured")
     user = cast(User, request.user)
     authentik_username = user.username
 
