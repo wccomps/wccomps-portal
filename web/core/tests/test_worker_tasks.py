@@ -1,12 +1,14 @@
-"""The worker's Nextcloud tasks: the team accounts a ReconcileNextcloud or ResetNextcloudTeam deletes and provisions."""
+"""The worker's tasks: the team accounts a ReconcileNextcloud or ResetNextcloudTeam deletes and provisions, and the
+Quotient metadata sync a start queues."""
 
 from dataclasses import asdict
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.contrib.auth.models import User
 
 from core.models import AuditLog, QueuedTask
-from core.queued_tasks import ReconcileNextcloud, ResetNextcloudTeam
+from core.queued_tasks import ReconcileNextcloud, ResetNextcloudTeam, SyncQuotientMetadata
 from core.worker_tasks import WorkerQueueProcessor
 from team.models import Team
 
@@ -203,6 +205,23 @@ async def test_worker_tasks_noop_without_nextcloud(nextcloud):
         await run(ReconcileNextcloud(requested_by="gold", open_event_id=7))
         await run(ResetNextcloudTeam(team_number=2))
     nextcloud.__enter__.assert_not_called()
+
+
+async def test_sync_quotient_metadata_runs_the_sync_as_the_requesting_user():
+    user = await User.objects.acreate(username="gold_admin")
+    with patch("core.worker_tasks.sync_quotient_metadata") as sync:
+        await run(SyncQuotientMetadata(requested_by="gold_admin"))
+        await run(SyncQuotientMetadata(requested_by="timer"))
+    assert [c.args for c in sync.call_args_list] == [(user,), (None,)]
+
+
+async def test_sync_quotient_metadata_retries_while_quotient_is_down():
+    payload = SyncQuotientMetadata(requested_by="timer")
+    row = await QueuedTask.objects.acreate(task_type=payload.task_type, backend="worker", payload=asdict(payload))
+    with patch("core.worker_tasks.sync_quotient_metadata", side_effect=ValueError("Quotient down")):
+        await WorkerQueueProcessor().process_pending()
+    await row.arefresh_from_db()
+    assert (row.status, row.retry_count, row.error_message) == ("pending", 1, "Quotient down")
 
 
 async def test_the_worker_queue_runs_only_worker_rows(nextcloud):

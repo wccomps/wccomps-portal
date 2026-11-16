@@ -163,6 +163,16 @@ class ResetNextcloudTeam:
     team_number: int
 
 
+@dataclass(frozen=True, kw_only=True)
+class SyncQuotientMetadata:
+    """Sync the Quotient metadata (Proxmox IPs, aweful-proxy config) as requested_by; queued by a start so the chat
+    process needs no Proxmox or aweful-proxy credentials."""
+
+    task_type: ClassVar = "sync_quotient_metadata"
+    label: ClassVar = "Sync Quotient Metadata"
+    requested_by: str
+
+
 # Every configured chat backend gets its own row of these
 type ChatNotice = (
     PostComment | BroadcastMessage | LogToChannel | PostTicketUpdate | TicketCreated | CompetitionStatusChanged
@@ -174,7 +184,7 @@ type DiscordOnly = (
 )
 
 # The worker handles these, whatever chat systems are configured
-type WorkerTask = ReconcileNextcloud | ResetNextcloudTeam
+type WorkerTask = ReconcileNextcloud | ResetNextcloudTeam | SyncQuotientMetadata
 
 type TaskPayload = ChatNotice | DiscordOnly | WorkerTask
 

@@ -14,7 +14,7 @@ from django.db.models import Q
 from core.authentik_utils import set_team_account_active
 from core.heartbeat import beat
 from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, QueuedTask
-from core.queued_tasks import BroadcastMessage, CompetitionStatusChanged
+from core.queued_tasks import BroadcastMessage, CompetitionStatusChanged, SyncQuotientMetadata
 from core.team_accounts import accounts_by_team
 from core.utils import BlockingSteps, advisory_lock, format_competition_time
 from team.models import MAX_TEAMS, active_team_numbers, team_username
@@ -106,7 +106,8 @@ class CompetitionRunResult:
     account_failures: list[tuple[str, str]] = field(default_factory=list)
     nextcloud_ok: int = 0
     nextcloud_failed: list[tuple[str, str]] = field(default_factory=list)
-    quotient_synced: bool | None = None
+    scores_synced: bool | None = None  # The stop's Quotient service score sync; None on a start
+    metadata_sync_queued: bool = False  # The start queued the worker's Quotient metadata sync
     start_message_queued: bool = False
     error: str | None = None
     refused: bool = False
@@ -141,9 +142,10 @@ class CompetitionRunResult:
             nc_total = self.nextcloud_ok + len(self.nextcloud_failed)
             lines.append(f"Nextcloud accounts provisioned: {self.nextcloud_ok}/{nc_total}")
             lines.extend(f"Failed Nextcloud: {username}: {error}" for username, error in self.nextcloud_failed)
-        if self.quotient_synced is not None:
-            what = "Quotient metadata" if self.enable else "Quotient service scores"
-            lines.append(f"{what}: {'synced' if self.quotient_synced else 'sync failed'}")
+        if self.scores_synced is not None:
+            lines.append(f"Quotient service scores: {'synced' if self.scores_synced else 'sync failed'}")
+        if self.metadata_sync_queued:
+            lines.append("Quotient metadata sync queued")
         if self.start_message_queued:
             lines.append("Start message queued for every active team")
         return "\n".join(lines)
@@ -279,13 +281,13 @@ def _run(
 
     Toggles each controlled application's BlueTeam binding and the team accounts (start enables the
     active teams' accounts; stop disables every team account), refreshes stored groups so permissions
-    follow at once, syncs Quotient metadata on start or final service scores on stop, then records the
-    new state and an audit entry, queueing a status refresh with them. The first start of an event also queues the
-    start message to every active team. Blocking (Authentik, Nextcloud and Quotient HTTP): async callers run it in a
-    thread.
+    follow at once, syncs final service scores from Quotient on stop, then records the new state and an audit entry,
+    queueing a status refresh with them and, on start, the worker's Quotient metadata sync (which reads Proxmox and
+    pushes to aweful-proxy, so a start needs neither). The first start of an event also queues the start message to
+    every active team. Blocking (Authentik, Nextcloud and Quotient HTTP): async callers run it in a thread.
     """
     from django.contrib.auth.models import User
-    from scoring.quotient_sync import sync_quotient_metadata, sync_service_scores
+    from scoring.quotient_sync import sync_service_scores
 
     from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
     from core.nextcloud import NextcloudAPIError, NextcloudManager, nextcloud_configured
@@ -385,24 +387,14 @@ def _run(
             yield CompetitionStep(f"Nextcloud provisioned ({result.nextcloud_ok} teams)", step, total)
 
     step += 1
-    actor_user = User.objects.filter(username=actor).first()
-    if enable:
+    if not enable:
         try:
-            sync_quotient_metadata(actor_user)
-            result.quotient_synced = True
-            yield CompetitionStep("Quotient metadata synced", step, total)
-        except Exception as e:
-            logger.warning(f"Failed to sync Quotient metadata: {e}")
-            result.quotient_synced = False
-            yield CompetitionStep(f"Quotient sync failed: {e}", step, total, ok=False)
-    else:
-        try:
-            sync_service_scores(actor_user)
-            result.quotient_synced = True
+            sync_service_scores(User.objects.filter(username=actor).first())
+            result.scores_synced = True
             yield CompetitionStep("Quotient service scores synced", step, total)
         except Exception as e:
             logger.warning(f"Failed to sync Quotient service scores: {e}")
-            result.quotient_synced = False
+            result.scores_synced = False
             yield CompetitionStep(f"Quotient score sync failed: {e}", step, total, ok=False)
 
     # Only the fields this run owns and the schedule times it consumes: other edits made meanwhile survive
@@ -438,6 +430,8 @@ def _run(
             result.start_message_queued = bool(tasks)
         CompetitionConfig.objects.filter(pk=locked.pk).update(**changes)
         QueuedTask.enqueue(CompetitionStatusChanged())
+        if enable:
+            result.metadata_sync_queued = bool(QueuedTask.enqueue(SyncQuotientMetadata(requested_by=actor)))
 
         AuditLog.objects.create(
             action=COMPETITION_STARTED if enable else COMPETITION_STOPPED,
@@ -450,7 +444,11 @@ def _run(
                 "accounts_ok": result.accounts_ok,
                 "accounts_failed": result.accounts_failed,
                 "account_failures": dict(result.account_failures),
-                "quotient_synced": result.quotient_synced,
+                **(
+                    {"metadata_sync_queued": result.metadata_sync_queued}
+                    if enable
+                    else {"scores_synced": result.scores_synced}
+                ),
                 "start_message_queued": result.start_message_queued,
                 **(
                     {"nextcloud_ok": result.nextcloud_ok, "nextcloud_failed": dict(result.nextcloud_failed)}
@@ -460,6 +458,8 @@ def _run(
                 **({"timer_attempt": timer.number} if timer is not None else {}),
             },
         )
+    if enable:
+        yield CompetitionStep("Quotient metadata sync queued", step, total)
     return result
 
 

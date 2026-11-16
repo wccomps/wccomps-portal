@@ -73,20 +73,23 @@ flowchart LR
     W -- "4 rows, QueuedTask payloads" --> Q
     Q --> K & C
     W & K & C -- "5 service token" --> A
-    W & K & C -- "6 API token, team pool only" --> P
+    W & K -- "6 API token, team pool only" --> P
     W & K & C -- "7 login session" --> S
     W -- "8 packet emails with passwords" --> M
     C -- "9 bot token" --> G
     W & K & C -- "10 admin credentials, team accounts only" --> N
-    W & K & C -- "11 competition network config" --> X
+    W & K -- "11 competition network config" --> X
 ```
 
 The worker (`worker/__main__.py`) runs the competition timer, the group refresh, the Quotient sync (which reads team
-VMs from Proxmox and pushes the network config to aweful-proxy) and the worker queue (Nextcloud), so it holds the
+VMs from Proxmox and pushes the network config to aweful-proxy) and the worker queue (Nextcloud, and the Quotient sync
+a competition start queues: `web/core/worker_tasks.py` `WorkerQueueProcessor._sync_quotient_metadata`), so it holds the
 Authentik token, the Quotient login, the Proxmox token, the Nextcloud credentials and the aweful-proxy token. The chat
-process (`chat/__main__.py`) holds the Discord token, and the same Authentik, Nextcloud, Quotient, Proxmox and
-aweful-proxy credentials for its `/competition` and reset commands: `/competition start` runs the competition service,
-which syncs Quotient (`web/core/services/competition.py` `run_competition`).
+process (`chat/__main__.py`) holds the Discord token, and the same Authentik, Nextcloud and Quotient credentials for its
+`/competition` and reset commands: `/competition start` runs the competition service, which provisions Nextcloud and
+queues the Quotient metadata sync to the worker rather than running it, and `/competition stop` syncs the final scores
+from Quotient (`web/core/services/competition.py` `_run`). It holds no Proxmox or aweful-proxy credentials and never
+reaches either.
 
 ## Threats per boundary (STRIDE) and their mitigations
 
