@@ -14,8 +14,8 @@ from scoring.scorecard import build_peer_context, build_scorecard_context
 from scoring.snapshot import SNAPSHOT_VERSION, serialize_scorecard
 
 from core.competition_utils import WipedData, wipe_competition_data
-from core.discord_tasks import ClearTeamChannels, ReconcileTeams
-from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnouncement
+from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement, QueuedTask
+from core.queued_tasks import ClearTeamChannels, ReconcileTeams
 from core.services.competition import run_lock
 from core.services.linking import COMPETITION_CLEANUP, unlink_teams
 from team.models import DiscordLink, SchoolInfo, Team, default_team_name
@@ -189,11 +189,11 @@ def _clear_old_channels(team: Team) -> None:
     )
     if not left.update(channels_need_clearing=True):
         return
-    pending = DiscordTask.objects.filter(
+    pending = QueuedTask.objects.filter(
         task_type=ClearTeamChannels.task_type, status="pending", payload__team_number=team.team_number
     )
     if not pending.exists():
-        DiscordTask.enqueue(ClearTeamChannels(team_number=team.team_number))
+        QueuedTask.enqueue(ClearTeamChannels(team_number=team.team_number))
 
 
 def activate_teams(teams: list[Team]) -> int:
@@ -389,7 +389,7 @@ def import_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
     opening = not event.is_active
     event.open()
     if opening:
-        DiscordTask.enqueue(ReconcileTeams(requested_by=updated_by, open_event_id=event.pk))
+        QueuedTask.enqueue(ReconcileTeams(requested_by=updated_by, open_event_id=event.pk))
         # Queued for team numbers whose channels the teardown removed; a new school would get them on linking
         QueuedAnnouncement.objects.all().delete()
     # So a team keeping its school in an event already open keeps its Discord channels and announcements
@@ -616,7 +616,7 @@ def _close_out(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
         event.close()
         _reset_for_next_event(config)
         # Committed with the close-out, so the bot never tears Discord down for a close-out that rolled back
-        DiscordTask.enqueue(ReconcileTeams(requested_by=actor))
+        QueuedTask.enqueue(ReconcileTeams(requested_by=actor))
         AuditLog.objects.create(
             action=EVENT_CLOSED_OUT,
             admin_user=actor,
@@ -814,7 +814,7 @@ def _reset_for_next_event(config: CompetitionConfig) -> int:
     """Clear the schedule, start message, Quotient box list and queued announcements (again after commit), and
     scrub the start broadcasts, failing any not yet sent. Call with the config row locked; returns how many
     announcements it deleted."""
-    broadcasts = DiscordTask.objects.filter(pk__in=config.start_broadcasts)
+    broadcasts = QueuedTask.objects.filter(pk__in=config.start_broadcasts)
     broadcasts.filter(status="pending").update(status="failed", error_message=START_BROADCAST_STOPPED)
     broadcasts.filter(status="processing").update(status="failed", error_message=START_BROADCAST_CUT_OFF)
     for task in broadcasts:
@@ -870,7 +870,7 @@ def reset_for_discord_cleanup(actor: str) -> DiscordCleanupReset:
             target_id=config.pk,
             details={"unlinked": reset.unlinked, "queued_announcements_deleted": reset.announcements},
         )
-        DiscordTask.enqueue(ReconcileTeams(requested_by=actor))
+        QueuedTask.enqueue(ReconcileTeams(requested_by=actor))
     return reset
 
 

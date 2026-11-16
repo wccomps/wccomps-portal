@@ -12,7 +12,7 @@ from django.db import connection
 from django.db.utils import Error as DjangoDBError
 
 from bot.utils import recycle_db_connection
-from core.models import DiscordTask
+from core.models import QueuedTask
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 
@@ -27,7 +27,7 @@ async def _fresh_connection_each_test():
 
 @sync_to_async
 def _count_tasks() -> int:
-    return DiscordTask.objects.count()
+    return QueuedTask.objects.count()
 
 
 @sync_to_async

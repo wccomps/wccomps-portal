@@ -79,16 +79,20 @@ the unparenthesized form is used intentionally throughout.
   other role's group is `PORTAL_GROUP_PREFIX` (default `Portal_`, WRCCDC's `WCComps_`) plus a fixed suffix, and a new
   team's group is `TEAM_GROUP_PATTERN` (after that, `Team.authentik_group`)
 
-### Discord Task Queue
-- Web code queues work with `DiscordTask.enqueue(<payload>)`; the bot's `DiscordQueueProcessor` consumes it
-- Each task type is a payload dataclass in `core/discord_tasks.py` (the `TaskPayload` union); a new
-  one also needs a `case` in `DiscordQueueProcessor._dispatch`, which mypy checks is exhaustive, and a
-  migration, since `DiscordTask.task_type`'s choices come from the union
+### Task Queue
+- Web code queues work with `QueuedTask.enqueue(<payload>)`, which writes one row per backend
+  (`core.task_backends.TaskBackend`) and returns them; the bot's `DiscordQueueProcessor` consumes the `discord` rows
+- Each task type is a payload dataclass in `core/queued_tasks.py`, in one group of the `TaskPayload` union:
+  `ChatNotice` (a row for every configured chat backend, `chat_backends()`) or `DiscordOnly` (a row only when Discord
+  is configured, `DISCORD_BOT_TOKEN`); so no configured backend means no row. A new one also needs a `case` in
+  `DiscordQueueProcessor._dispatch`, which mypy checks is exhaustive, and a migration, since `QueuedTask.task_type`'s
+  choices come from the union
+- `enqueue(..., origin=...)` skips the chat system an event came from
 - A payload's `ticket_id` also sets the task's ticket FK, so deleting a ticket drops its pending tasks
-- A handler's return value is stored in `DiscordTask.result`; the payload is input only
-- A handler raises `PermanentTaskError` (`core.discord_tasks`) to fail without retrying, and looks up the record it
+- A handler's return value is stored in `QueuedTask.result`; the payload is input only
+- A handler raises `PermanentTaskError` (`core.queued_tasks`) to fail without retrying, and looks up the record it
   is about with `_target`, which raises it; a handler whose retry would repeat a send or a destructive step takes a
-  `TaskProgress`, so a retry resumes from what `DiscordTask.progress` records; the rest are written to be rerun
+  `TaskProgress`, so a retry resumes from what `QueuedTask.progress` records; the rest are written to be rerun
 
 ### UI Components
 - Pages extend `admin/base_site.html`, directly or through a section base (`admin/ops_base.html`,

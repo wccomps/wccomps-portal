@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
 
-from core.models import DiscordTask
+from core.models import QueuedTask
 from ticketing.lifecycle import assign_ticket
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 
@@ -49,7 +49,7 @@ def test_assigning_open_ticket_claims_it_for_that_person(ticketing_support_user,
     assert ticket.status == Ticket.STATUS_CLAIMED
     assert ticket.assigned_to == helper
     assert TicketHistory.objects.filter(ticket=ticket, action="claimed").exists()
-    assert DiscordTask.objects.filter(task_type="post_ticket_update").exists()
+    assert QueuedTask.objects.filter(task_type="post_ticket_update").exists()
 
 
 def test_reassigning_claimed_ticket_still_works(ticketing_support_user, helper, team):

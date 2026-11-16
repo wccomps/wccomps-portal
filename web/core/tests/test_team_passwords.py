@@ -24,7 +24,7 @@ from core.authentik_utils import (
     sessions_failure_summary,
     set_team_account_active,
 )
-from core.models import CredentialsReset, DiscordTask, UserGroups
+from core.models import CredentialsReset, QueuedTask, UserGroups
 from core.utils import drain
 from team.models import DiscordLink, SchoolInfo, Team, team_username
 
@@ -78,7 +78,7 @@ def test_web_unlink_queues_a_role_sync_for_the_member(admin_user, manager, actio
 
     client.post(reverse("admin_team_action", args=[8]), {"action": action, "discord_id": 4242})
 
-    task = DiscordTask.objects.get(task_type="sync_member_roles")
+    task = QueuedTask.objects.get(task_type="sync_member_roles")
     assert task.payload == {"discord_id": 4242}
     assert not DiscordLink.objects.filter(discord_id=4242, is_active=True).exists()
 
@@ -135,7 +135,7 @@ def test_a_transient_count_error_does_not_fail_the_end_step_but_tells_ops(manage
 
     assert isinstance(reset, Changed)
     assert (reset.sessions_found, reset.sessions_error) == (None, None)
-    note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    note = QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
     assert note.endswith(
         "ended the team's Authentik sessions, but could not count them first; signed the team account out of the portal"
     )
@@ -176,7 +176,7 @@ def test_sessions_listed_after_a_failed_count_do_not_pass_for_a_count(manager):
 
     assert isinstance(reset, Changed)
     assert (reset.sessions_found, reset.sessions_listed_after) == (None, 1)
-    note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    note = QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
     assert "but could not count them first" in note
 
 
@@ -200,7 +200,7 @@ def test_reset_team_credentials_audits_and_tells_ops(manager):
         "discord_unlinked": 0,
         "followup_error": None,
     }
-    note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    note = QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
     assert note == (
         "Credentials reset for team 7 by gold-admin: ended the team's Authentik sessions; "
         "signed the team account out of the portal"
@@ -224,7 +224,7 @@ def test_reset_team_credentials_failed_password_tells_ops(school_info, manager):
     )
     school_info.refresh_from_db()
     assert school_info.password == "old"
-    note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    note = QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
     assert note == (
         "Credentials reset for team 7 by gold-admin: the password reset failed: Set the password of team07: "
         "Server error"
@@ -329,7 +329,7 @@ def test_team_page_password_reset_answers_with_the_new_password_and_the_outcome(
         "members_unlinked": True,
     }
     assert DiscordLink.objects.filter(discord_id=4343, is_active=True).exists()
-    assert not DiscordTask.objects.filter(task_type="sync_member_roles").exists()
+    assert not QueuedTask.objects.filter(task_type="sync_member_roles").exists()
     assert not AuditLog.objects.filter(action="team_password_reset").exists(), "the shared reset writes that row"
 
 
@@ -374,7 +374,7 @@ def test_bulk_audit_names_the_teams_it_could_not_count(manager):
     row = AuditLog.objects.get(action="blueteam_passwords_reset")
     team01 = row.details["teams"]["team01"]
     assert (team01["sessions_found"], team01["sessions_listed_after"]) == (None, 1)
-    note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    note = QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
     assert note.endswith("; could not count the sessions of team01")
 
 
@@ -454,7 +454,7 @@ def test_bulk_reset_tells_ops_once(manager):
         cls.return_value.__enter__.return_value = manager
         drain(reset_teams_credentials([1, 2], "gold-admin"))
 
-    notes = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    notes = [t.payload["message"] for t in QueuedTask.objects.filter(task_type="log_to_channel")]
     assert notes == ["Credentials reset by gold-admin: Reset 1/2 passwords; failed team02: User team02 not found"]
 
 
@@ -530,7 +530,7 @@ def test_sessions_that_could_not_end_say_other_authentik_apps_stay_open(manager)
     reset = reset_team_credentials(7, actor="gold-admin")
 
     assert "an open Authentik session still reaches the team's other Authentik apps" in reset.describe()
-    note = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    note = QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
     assert "an open Authentik session still reaches the team's other Authentik apps" in note
 
 
@@ -565,7 +565,7 @@ def test_a_credentials_reset_ends_the_teams_discord_links(manager, bulk):
 
     assert list(DiscordLink.objects.filter(is_active=True).values_list("discord_id", flat=True)) == [808]
     assert AuditLog.objects.get(action="user_unlinked").details["reason"] == "credentials_reset"
-    assert DiscordTask.objects.get(task_type="sync_member_roles").payload == {"discord_id": 707}
+    assert QueuedTask.objects.get(task_type="sync_member_roles").payload == {"discord_id": 707}
 
 
 def test_a_failed_password_change_keeps_the_discord_links(manager):
@@ -630,8 +630,8 @@ def test_reset_team_unlinks_even_when_the_password_change_fails(manager):
     reset = reset_team(7, actor="gold-admin", recreate_channels=False).credentials
 
     assert reset == Refused("Set the password of team07: Server error", sessions_found=0, followup=Unlinked(1))
-    assert not DiscordTask.objects.filter(task_type="setup_team_infrastructure").exists()
-    assert DiscordTask.objects.filter(task_type="log_to_channel").count() == 1
+    assert not QueuedTask.objects.filter(task_type="setup_team_infrastructure").exists()
+    assert QueuedTask.objects.filter(task_type="log_to_channel").count() == 1
 
 
 def test_a_database_failure_after_a_password_change_keeps_every_password_and_the_audit_row(manager):
@@ -754,7 +754,7 @@ def test_a_team_reset_whose_record_failed_says_the_recreation_was_not_queued(man
 
     assert isinstance(result.credentials, Changed)
     assert result.recreation_queued is False
-    assert not DiscordTask.objects.filter(task_type="setup_team_infrastructure").exists()
+    assert not QueuedTask.objects.filter(task_type="setup_team_infrastructure").exists()
 
 
 def test_a_bulk_reset_yields_and_audits_each_batch_before_starting_the_next_and_tells_ops_at_the_end(manager):
@@ -773,14 +773,14 @@ def test_a_bulk_reset_yields_and_audits_each_batch_before_starting_the_next_and_
         assert [n for n, _u, _p in first.password_list] == list(range(1, 11))
         assert AuditLog.objects.filter(action="blueteam_passwords_reset").count() == 1
         assert manager.set_password.call_count == 10
-        assert not DiscordTask.objects.filter(task_type="log_to_channel").exists()
+        assert not QueuedTask.objects.filter(task_type="log_to_channel").exists()
 
         rest = list(batches)
 
     assert [b.team_numbers for b in rest] == [list(range(11, 21)), list(range(21, 26))]
     rows = AuditLog.objects.filter(action="blueteam_passwords_reset").order_by("id")
     assert [r.details["team_numbers"] for r in rows] == [list(range(1, 11)), list(range(11, 21)), list(range(21, 26))]
-    notes = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    notes = [t.payload["message"] for t in QueuedTask.objects.filter(task_type="log_to_channel")]
     assert notes == ["Credentials reset by gold-admin: Reset 25/25 passwords"]
 
 
@@ -797,7 +797,7 @@ def test_draining_a_bulk_reset_gives_every_batch_and_tells_ops_once(manager):
     assert result.team_numbers == list(range(1, 13))
     assert len(result.password_list) == 11
     assert result.failed_resets == [("team12", "User team12 not found")]
-    notes = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    notes = [t.payload["message"] for t in QueuedTask.objects.filter(task_type="log_to_channel")]
     assert notes == ["Credentials reset by gold-admin: Reset 11/12 passwords; failed team12: User team12 not found"]
 
 
@@ -820,7 +820,7 @@ def test_a_drained_bulk_reset_that_raises_still_tells_ops_of_the_batches_done(ma
         cls.return_value.__enter__.return_value = manager
         drain(reset_teams_credentials(list(range(1, 13)), "gold-admin"))
 
-    notes = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    notes = [t.payload["message"] for t in QueuedTask.objects.filter(task_type="log_to_channel")]
     assert notes == ["Credentials reset by gold-admin: not reached: team11, team12; Reset 10/10 passwords"]
 
 
@@ -850,7 +850,7 @@ def test_a_batch_that_raises_partway_reports_the_teams_it_reset_as_lost(manager,
         for _batch in steps:
             pass
 
-    (note,) = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    (note,) = [t.payload["message"] for t in QueuedTask.objects.filter(task_type="log_to_channel")]
     assert note.startswith(f"Credentials reset by gold-admin: the new passwords of {', '.join(lost)} were never")
     assert f"not reached: {team_username(fails_at)};" in note
 
@@ -870,7 +870,7 @@ def test_a_reset_that_raises_after_the_password_changed_reports_it_lost(manager,
     with fault, pytest.raises(Exception, match="went away"):
         drain(reset_teams_credentials([1, 2], "gold-admin"))
 
-    (note,) = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    (note,) = [t.payload["message"] for t in QueuedTask.objects.filter(task_type="log_to_channel")]
     assert note.startswith("Credentials reset by gold-admin: the new passwords of team01 were never handed over")
 
 
@@ -913,7 +913,7 @@ def test_a_reset_that_changes_nothing_still_tells_ops(manager, teams):
         else:
             drain(reset_teams_credentials(teams, "gold-admin"))
 
-    (note,) = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    (note,) = [t.payload["message"] for t in QueuedTask.objects.filter(task_type="log_to_channel")]
     assert "nothing was changed" in note
 
 
@@ -938,6 +938,6 @@ def test_a_web_reset_that_raises_lists_every_earlier_batch_as_never_handed_over(
     ):
         client.post(reverse("admin_competition_action"), {"action": "reset_passwords", "team_numbers": ""})
 
-    (note,) = [t.payload["message"] for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+    (note,) = [t.payload["message"] for t in QueuedTask.objects.filter(task_type="log_to_channel")]
     lost = ", ".join(f"team{n:02d}" for n in range(1, 11))
     assert note.startswith(f"Credentials reset by {admin_user.username}: the new passwords of {lost} were never")

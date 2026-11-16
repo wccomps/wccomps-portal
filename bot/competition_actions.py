@@ -28,9 +28,9 @@ from bot.utils import (
     team_chat_channel,
 )
 from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams
-from core.discord_tasks import PermanentTaskError
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.nextcloud import NextcloudManager, nextcloud_configured
+from core.queued_tasks import PermanentTaskError
 from core.services.competition import START_MESSAGE_SENDER, Attempt, CompetitionRunResult
 from core.services.competition import run_competition as competition_steps
 from core.utils import shorten

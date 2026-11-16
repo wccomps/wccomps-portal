@@ -10,10 +10,10 @@ from django.views.decorators.http import require_POST
 
 from core.auth_utils import require_permission
 from core.authentik_utils import Changed, Refused, reset_team, reset_team_credentials
-from core.discord_tasks import SetupTeamInfrastructure, SyncMemberRoles
 from core.errors import json_endpoint
 from core.forms import TeamActionForm, TeamsBulkActionForm
-from core.models import AuditLog, DiscordTask
+from core.models import AuditLog, QueuedTask
+from core.queued_tasks import SetupTeamInfrastructure, SyncMemberRoles
 from core.services.linking import ADMIN_UNLINK, unlink_discord_links
 from core.team_accounts import SEVERAL_ACCOUNTS
 from core.utils import list_filters, optional_int, requested_sort, stable_order
@@ -96,7 +96,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
         for member_discord_id in DiscordLink.objects.filter(team=team, is_active=True).values_list(
             "discord_id", flat=True
         ):
-            DiscordTask.enqueue(SyncMemberRoles(discord_id=member_discord_id))
+            QueuedTask.enqueue(SyncMemberRoles(discord_id=member_discord_id))
         AuditLog.objects.create(
             action="team_activated" if target_active else "team_deactivated",
             admin_user=authentik_username,
@@ -161,7 +161,7 @@ def admin_team_action(request: HttpRequest, team_number: int) -> HttpResponse:
                 return JsonResponse({"success": False, "message": f"Password reset failed: {error}"})
 
     elif action == "recreate_channels":
-        DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
+        QueuedTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
 
         AuditLog.objects.create(
             action="team_channels_recreate_requested",
@@ -199,7 +199,7 @@ def admin_teams_bulk_action(request: HttpRequest) -> HttpResponse:
         for discord_id in DiscordLink.objects.filter(team__team_number__in=team_numbers, is_active=True).values_list(
             "discord_id", flat=True
         ):
-            DiscordTask.enqueue(SyncMemberRoles(discord_id=discord_id))
+            QueuedTask.enqueue(SyncMemberRoles(discord_id=discord_id))
         AuditLog.objects.create(
             action="teams_activated" if target_active else "teams_deactivated",
             admin_user=authentik_username,
@@ -216,7 +216,7 @@ def admin_teams_bulk_action(request: HttpRequest) -> HttpResponse:
 
     elif action == "recreate":
         for team_number in team_numbers:
-            DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
+            QueuedTask.enqueue(SetupTeamInfrastructure(team_number=team_number, recreate=True))
 
         AuditLog.objects.create(
             action="teams_recreate_requested",

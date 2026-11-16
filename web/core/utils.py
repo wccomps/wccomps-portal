@@ -20,7 +20,7 @@ from django.db.models import Model, QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 
-from core.discord_tasks import SyncRolesResult
+from core.queued_tasks import SyncRolesResult
 
 if TYPE_CHECKING:
     from team.models import Team

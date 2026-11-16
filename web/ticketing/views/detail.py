@@ -12,8 +12,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from core.auth_utils import get_user_team, has_permission, require_permission
-from core.discord_tasks import PostComment
-from core.models import DiscordTask
+from core.models import QueuedTask
+from core.queued_tasks import PostComment
 from ticketing.access import TICKET_STAFF, ticket_actions, ticket_open_to
 from ticketing.forms import TicketCommentForm
 from ticketing.models import (
@@ -121,7 +121,7 @@ def ticket_comment(request: HttpRequest, ticket_number: str) -> HttpResponse:
         comment_text=comment_text,
     )
 
-    DiscordTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=comment.id))
+    QueuedTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=comment.id))
 
     logger.info(f"Comment posted on ticket {ticket.ticket_number} by {authentik_username} (web)")
 

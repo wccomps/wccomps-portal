@@ -8,10 +8,10 @@ from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_POST
 
 from core.auth_utils import require_permission
-from core.discord_tasks import BroadcastMessage, SyncRoles, SyncRolesResult
 from core.errors import json_endpoint
 from core.forms import BroadcastForm, SyncRolesForm
-from core.models import AuditLog, DiscordTask
+from core.models import AuditLog, QueuedTask
+from core.queued_tasks import BroadcastMessage, SyncRoles, SyncRolesResult
 from core.utils import role_sync_summary
 from team.models import Team
 
@@ -37,7 +37,7 @@ def admin_broadcast_action(request: HttpRequest) -> HttpResponse:
     target = form.cleaned_data["target"]
     message = form.cleaned_data["message"]
 
-    DiscordTask.enqueue(BroadcastMessage(target=target, message=message, sender=authentik_username))
+    QueuedTask.enqueue(BroadcastMessage(target=target, message=message, sender=authentik_username))
 
     AuditLog.objects.create(
         action="broadcast_message",
@@ -68,7 +68,7 @@ def admin_sync_roles_action(request: HttpRequest) -> HttpResponse:
     form = SyncRolesForm(request.POST)
     dry_run = form.cleaned_data["dry_run"] if form.is_valid() else True
 
-    task = DiscordTask.enqueue(SyncRoles(requested_by=authentik_username, dry_run=dry_run))
+    [task] = QueuedTask.enqueue(SyncRoles(requested_by=authentik_username, dry_run=dry_run))
 
     AuditLog.objects.create(
         action="role_sync_started",
@@ -90,7 +90,7 @@ def admin_sync_roles_action(request: HttpRequest) -> HttpResponse:
 @json_endpoint
 @require_permission("admin", "gold_team")
 def admin_task_status(request: HttpRequest, task_id: int) -> HttpResponse:
-    task = get_object_or_404(DiscordTask, id=task_id)
+    task = get_object_or_404(QueuedTask, id=task_id)
 
     response: dict[str, object] = {
         "status": task.status,

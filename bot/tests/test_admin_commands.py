@@ -12,7 +12,7 @@ from bot.cogs.admin_competition import AdminCompetitionCog
 from bot.cogs.admin_teams import AdminTeamsCog
 from bot.cogs.admin_tickets import AdminTicketsCog
 from core.authentik_utils import Changed, CredentialReset, Refused, SignedOut
-from core.models import AuditLog, DiscordTask
+from core.models import AuditLog, QueuedTask
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
@@ -35,7 +35,7 @@ def patch_globals(callback: Any, overrides: dict[str, Any]):
 
 
 async def _queued_role_syncs() -> list[int]:
-    tasks = DiscordTask.objects.filter(task_type="sync_member_roles", status="pending")
+    tasks = QueuedTask.objects.filter(task_type="sync_member_roles", status="pending")
     return sorted([task.payload["discord_id"] async for task in tasks])
 
 
@@ -244,7 +244,7 @@ class TestAdminCommands:
         assert "not reset" in last
         assert all(f"team{n:02d}" in last for n in not_reset)
         assert not any(f"team{n:02d}" in last for n in reset)
-        notes = [t.payload["message"] async for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+        notes = [t.payload["message"] async for t in QueuedTask.objects.filter(task_type="log_to_channel")]
         unreached = ", ".join(f"team{n:02d}" for n in not_reset)
         assert notes == [
             f"Credentials reset by {mock_interaction.user}: not reached: {unreached}; Reset 20/20 passwords"
@@ -272,7 +272,7 @@ class TestAdminCommands:
             cog = AdminCompetitionCog(mock_bot)
             await callback(cog, mock_interaction, team_numbers="1-12")
 
-        notes = [t.payload["message"] async for t in DiscordTask.objects.filter(task_type="log_to_channel")]
+        notes = [t.payload["message"] async for t in QueuedTask.objects.filter(task_type="log_to_channel")]
         lost = ", ".join(f"team{n:02d}" for n in range(1, 11))
         assert notes == [
             f"Credentials reset by {mock_interaction.user}: the new passwords of {lost} were never handed over: "
@@ -305,7 +305,7 @@ class TestAdminCommands:
         assert mock_interaction.mock_calls[0] == call.response.defer(ephemeral=True)
         mock_interaction.response.send_message.assert_not_called()
         ticket = await Ticket.objects.aget(team=team)
-        thread_tasks = DiscordTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
+        thread_tasks = QueuedTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
         assert await thread_tasks.acount() == 1
 
     async def test_admin_ticket_create_for_a_missing_team_answers_after_deferring(

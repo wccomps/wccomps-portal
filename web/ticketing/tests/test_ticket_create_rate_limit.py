@@ -8,8 +8,8 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from core.discord_tasks import TicketCreatedWeb
-from core.models import DiscordTask
+from core.models import QueuedTask
+from core.queued_tasks import TicketCreated
 from team.models import Team
 from ticketing.lifecycle import cancel_ticket
 from ticketing.models import Ticket, TicketCategory
@@ -39,18 +39,18 @@ def test_a_new_ticket_and_its_thread_task_commit_together(team, category):
     """Every ticket, from the web or the bot, gets its Discord thread from the queue."""
     ticket = create_ticket_atomic(team=team, category=category, title="t")
 
-    task = DiscordTask.objects.get(task_type="ticket_created_web")
-    assert (task.status, task.typed_payload()) == ("pending", TicketCreatedWeb(ticket_id=ticket.pk))
+    task = QueuedTask.objects.get(task_type="ticket_created_web")
+    assert (task.status, task.typed_payload()) == ("pending", TicketCreated(ticket_id=ticket.pk))
 
 
 def test_a_refused_ticket_queues_nothing(team, category):
     _fill(team, category)
-    queued = DiscordTask.objects.count()
+    queued = QueuedTask.objects.count()
 
     with pytest.raises(TicketRateLimitError):
         create_ticket_atomic(team=team, category=category, title="t")
 
-    assert DiscordTask.objects.count() == queued
+    assert QueuedTask.objects.count() == queued
 
 
 def _fill(team, category, n=TEAM_TICKET_LIMIT):

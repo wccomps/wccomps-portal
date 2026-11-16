@@ -6,8 +6,7 @@ from unittest.mock import patch
 import main
 
 
-def test_the_bot_runs_without_a_log_handler_of_its_own(monkeypatch) -> None:
-    monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
+def test_the_bot_runs_without_a_log_handler_of_its_own() -> None:
     with patch.object(main, "PortalBot") as bot_class:
         main.main()
 

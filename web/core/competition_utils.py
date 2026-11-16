@@ -60,7 +60,7 @@ class WipedData:
 def wipe_competition_data() -> WipedData:
     """Wipe competition data for a fresh start.
 
-    Preserves teams, orange checks (reusable rubrics), AuditLog, BotState, DiscordTask and LinkToken/LinkAttempt.
+    Preserves teams, orange checks (reusable rubrics), AuditLog, BotState, QueuedTask and LinkToken/LinkAttempt.
     Each team's ticket counter is reset with its tickets, so the next event's numbering starts at T0NN-001.
     """
     Team.objects.all().lock()

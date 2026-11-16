@@ -9,8 +9,8 @@ import pytest
 from django.utils import timezone
 
 from core.authentik_manager import AuthentikAPIError
-from core.discord_tasks import BroadcastMessage
-from core.models import AuditLog, CompetitionConfig, DiscordTask
+from core.models import AuditLog, CompetitionConfig, QueuedTask
+from core.queued_tasks import BroadcastMessage
 from core.services.competition import (
     COMPETITION_RUN_LOCK_ID,
     RUN_IN_PROGRESS,
@@ -360,7 +360,7 @@ def test_no_controlled_apps_changes_nothing(authentik, config):
 
 def _queued_broadcasts() -> list[BroadcastMessage]:
     return [
-        payload for task in DiscordTask.objects.all() if isinstance(payload := task.typed_payload(), BroadcastMessage)
+        payload for task in QueuedTask.objects.all() if isinstance(payload := task.typed_payload(), BroadcastMessage)
     ]
 
 
@@ -407,6 +407,19 @@ def test_blank_start_message_sends_nothing(authentik, config):
 
     assert _queued_broadcasts() == []
     assert not result.start_message_queued
+
+
+def test_start_message_is_not_reported_queued_without_a_chat_backend(authentik, config, settings):
+    settings.DISCORD_BOT_TOKEN = ""
+    CompetitionConfig.objects.filter(pk=1).update(start_message="Default login: admin / changeme")
+
+    result = run_competition_to_completion(True, "timer")
+
+    assert _queued_broadcasts() == []
+    assert not result.start_message_queued
+    assert "Start message queued" not in result.summary()
+    assert AuditLog.objects.get(action="competition_started").details["start_message_queued"] is False
+    assert CompetitionConfig.objects.get(pk=1).start_broadcasts == []
 
 
 def test_stop_never_sends_the_start_message(authentik, config):
@@ -882,7 +895,19 @@ def test_a_start_records_the_broadcast_it_queued(authentik, config):
     run_competition_to_completion(True, "timer")
 
     config.refresh_from_db()
-    assert config.start_broadcasts == [DiscordTask.objects.get(task_type="broadcast_message").pk]
+    assert config.start_broadcasts == [QueuedTask.objects.get(task_type="broadcast_message").pk]
+
+
+def test_start_records_every_copy_of_the_start_message(zulip_configured, authentik, config):
+    """With Discord and Zulip both configured, the cancel scrub covers each chat system's copy of the credentials."""
+    CompetitionConfig.objects.filter(pk=1).update(start_message="Your credentials: x")
+
+    run_competition_to_completion(True, "timer")
+
+    config.refresh_from_db()
+    copies = QueuedTask.objects.filter(task_type="broadcast_message")
+    assert sorted(copies.values_list("backend", flat=True)) == ["discord", "zulip"]
+    assert sorted(config.start_broadcasts) == sorted(copies.values_list("pk", flat=True))
 
 
 def test_a_start_marks_its_window_until_a_new_start_time_is_set(authentik, config):

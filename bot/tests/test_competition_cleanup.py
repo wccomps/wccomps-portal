@@ -14,7 +14,7 @@ from scoring.models import QuotientMetadataCache
 from bot.competition_actions import reconcile_teams
 from bot.discord_queue import DiscordQueueProcessor
 from bot.utils import run_blocking
-from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnouncement
+from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement, QueuedTask
 from team.models import DiscordLink, Team
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
@@ -114,7 +114,7 @@ async def test_the_full_cleanup_resets_then_queues_the_discord_teardown(competit
         return {"roles_added": 0, "roles_removed": 4, "errors": 0, "changes": []}
 
     reset = await _reset()
-    task = await DiscordTask.objects.aget(task_type="reconcile_teams")
+    task = await QueuedTask.objects.aget(task_type="reconcile_teams")
     assert task.payload == {"requested_by": "web:admin", "open_event_id": None}
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock),
@@ -196,7 +196,7 @@ async def test_the_full_reset_refuses_writing_nothing(competition: Team, event_o
     config = await CompetitionConfig.objects.aget(pk=1)
     assert (config.start_message, config.competition_start_time is not None) == ("Default VM login", True)
     assert await QuotientMetadataCache.objects.aexists()
-    assert not await DiscordTask.objects.aexists()
+    assert not await QueuedTask.objects.aexists()
 
 
 async def test_the_full_teardown_skips_while_the_competition_runs(competition: Team) -> None:
@@ -333,7 +333,7 @@ async def test_the_command_resets_and_says_what_it_did(competition: Team, mock_i
     assert reply.startswith("Deactivated 1 team member links")
     assert "teardown is queued" in reply
     assert "Deactivated 1 team member links" in ops.await_args.args[1]
-    assert await DiscordTask.objects.filter(task_type="reconcile_teams").aexists()
+    assert await QueuedTask.objects.filter(task_type="reconcile_teams").aexists()
 
 
 @pytest.mark.parametrize(
@@ -348,7 +348,7 @@ async def test_each_queued_cleanup_runs_its_job(payload: dict[str, object], open
     from bot.heartbeat import beat
     from bot.utils import TaskProgress
 
-    task = await DiscordTask.objects.acreate(task_type="reconcile_teams", payload=payload)
+    task = await QueuedTask.objects.acreate(task_type="reconcile_teams", payload=payload)
     processor = DiscordQueueProcessor(MagicMock())
     guild = MagicMock()
     processor._guild = MagicMock(return_value=guild)
@@ -375,14 +375,19 @@ async def test_the_migration_moves_rows_queued_before_it(
     """An old bot would read a new row as its full cleanup with a database reset, so the reconcile has a type of its
     own. A close-out's old row becomes one; an older full-cleanup row also asked for a reset, so it fails."""
     import importlib
+    from types import SimpleNamespace
 
     from asgiref.sync import sync_to_async
     from django.apps import apps
 
-    task = await DiscordTask.objects.acreate(task_type="cleanup_competition", payload=payload)
+    task = await QueuedTask.objects.acreate(task_type="cleanup_competition", payload=payload)
     migration = importlib.import_module("core.migrations.0023_discordtask_cleanup_jobs")
 
-    await sync_to_async(migration.move_queued_cleanups)(apps, None)
+    # The migration names the model as it was then; DiscordTask is QueuedTask since 0025
+    renamed = SimpleNamespace(
+        get_model=lambda app, name: apps.get_model(app, {"DiscordTask": "QueuedTask"}.get(name, name))
+    )
+    await sync_to_async(migration.move_queued_cleanups)(renamed, None)
 
     await task.arefresh_from_db()
     assert (task.task_type, task.status, task.payload) == expected
@@ -636,7 +641,7 @@ async def test_clear_team_channels_resets_nextcloud_for_handed_over_team(competi
     await Team.objects.filter(pk=competition.pk).aupdate(
         channels_need_clearing=True, discord_role_id=None, discord_category_id=None
     )
-    task = await DiscordTask.objects.acreate(task_type="clear_team_channels", payload={"team_number": 3})
+    task = await QueuedTask.objects.acreate(task_type="clear_team_channels", payload={"team_number": 3})
     processor = DiscordQueueProcessor(MagicMock())
     guild = _guild("Staff")
     guild.roles = []

@@ -12,7 +12,7 @@ from bot.discord_queue import DiscordQueueProcessor
 from bot.tests.discord_fakes import competition_thread
 from bot.ticket_dashboard import ResolveTicketModal, TicketActionView
 from bot.utils import TaskProgress
-from core.models import DiscordTask
+from core.models import QueuedTask
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory
 
@@ -93,7 +93,7 @@ async def test_updates_for_threadless_ticket_complete_and_refresh_dashboard(clai
     guild.categories = []
     processor._guild = MagicMock(return_value=guild)
 
-    update = await DiscordTask.objects.acreate(
+    update = await QueuedTask.objects.acreate(
         task_type="post_ticket_update",
         ticket=claimed_ticket,
         payload={"ticket_id": claimed_ticket.id, "action": "claimed", "actor": "v"},
@@ -102,7 +102,7 @@ async def test_updates_for_threadless_ticket_complete_and_refresh_dashboard(clai
     bot.unified_dashboard.trigger_update.assert_called_once()
 
     comment = await claimed_ticket.comments.acreate(comment_text="hi")
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="post_comment", payload={"ticket_id": claimed_ticket.id, "comment_id": comment.id}
     )
     await processor._handle_post_comment(task.typed_payload(), TaskProgress())
@@ -124,7 +124,7 @@ async def test_reopen_unlocks_the_archived_thread(claimed_ticket: Ticket, action
     bot.get_channel.return_value = thread
     processor = DiscordQueueProcessor(bot)
 
-    task = await DiscordTask.objects.acreate(
+    task = await QueuedTask.objects.acreate(
         task_type="post_ticket_update",
         ticket=claimed_ticket,
         payload={"ticket_id": claimed_ticket.id, "action": action, "actor": "v"},

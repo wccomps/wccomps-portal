@@ -25,8 +25,8 @@ from bot.utils import (
     team_role_name,
 )
 from bot.utils import announcement as announcement_text
-from core.discord_tasks import SetupTeamInfrastructure
-from core.models import DiscordTask, QueuedAnnouncement
+from core.models import QueuedAnnouncement, QueuedTask
+from core.queued_tasks import SetupTeamInfrastructure
 from team.models import Team
 from ticketing.models import Ticket
 
@@ -95,7 +95,7 @@ def _record_teardown(team: Team, cleared: list[str], then_setup: bool) -> None:
     with transaction.atomic():
         team.save(update_fields=[*cleared, "channels_need_clearing"])
         if then_setup and not team.channels_need_clearing and team.members.filter(is_active=True).exists():
-            DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team.team_number))
+            QueuedTask.enqueue(SetupTeamInfrastructure(team_number=team.team_number))
 
 
 class TeamInfrastructureError(Exception):

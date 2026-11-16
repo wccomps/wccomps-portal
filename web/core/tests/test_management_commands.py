@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 from django.core.management import call_command
 
 from core.competition_utils import wipe_competition_data
-from core.models import DiscordTask
+from core.models import QueuedTask
 from team.models import DiscordLink, LinkAttempt, LinkToken, Team
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 
@@ -107,7 +107,7 @@ class TestWipeCompetitionData:
             discord_username="testuser",
             expires_at="2099-01-01T00:00:00Z",
         )
-        DiscordTask.objects.create(task_type="log_to_channel", payload={"message": "hi"}, status="pending")
+        QueuedTask.objects.create(task_type="log_to_channel", payload={"message": "hi"}, status="pending")
         return team
 
     def test_deletes_all_data_with_confirm(self, populated_database):
@@ -129,7 +129,7 @@ class TestWipeCompetitionData:
         assert Team.objects.count() == 1  # Teams are static config
         assert LinkAttempt.objects.count() == 1  # Harmless history
         assert LinkToken.objects.count() == 1  # Harmless
-        assert DiscordTask.objects.count() == 1  # Task history
+        assert QueuedTask.objects.count() == 1  # Task history
 
     def test_clears_orange_assignments_so_readiness_passes(self, populated_database, gold_team_user):
         from orange_team.models import OrangeAssignment, OrangeCheck, OrangeCheckIn

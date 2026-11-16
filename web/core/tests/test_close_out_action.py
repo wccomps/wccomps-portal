@@ -13,7 +13,7 @@ from registration.services import close_out_event, set_team_school
 from scoring.models import InjectScore, ServiceScore
 
 from core.admin_views.competition import CLOSE_OUT_CHECK_FAILED
-from core.models import CompetitionConfig, DiscordTask
+from core.models import CompetitionConfig, QueuedTask
 from core.tests.detached import join_detached_runs
 from team.models import Team
 
@@ -57,7 +57,7 @@ def _open_event():
 
 def _assert_nothing_happened(event=None):
     assert not EventResult.objects.exists()
-    assert not DiscordTask.objects.exists()
+    assert not QueuedTask.objects.exists()
     assert ServiceScore.objects.exists()
     if event is not None:
         event.refresh_from_db()
@@ -82,7 +82,7 @@ def test_close_out_streams_each_step_and_closes_the_open_event(client):
     }
     event.refresh_from_db()
     assert not event.is_active and event.is_finalized
-    assert DiscordTask.objects.filter(task_type="reconcile_teams").count() == 1
+    assert QueuedTask.objects.filter(task_type="reconcile_teams").count() == 1
 
 
 @pytest.mark.parametrize("typed", [None, "", "no"])

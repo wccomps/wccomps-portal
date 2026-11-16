@@ -13,7 +13,7 @@ from django.db import transaction
 from django.db.models import Model, Q, QuerySet
 from django.utils import timezone
 
-from bot.competition_actions import deliver_broadcast
+from bot.competition_actions import deliver_broadcast, update_status_channel
 from bot.discord_manager import recreate_team_infrastructure, setup_team_infrastructure
 from bot.heartbeat import beat, beat_for
 from bot.role_sync import competition_guild, sync_member_roles, sync_roles
@@ -29,10 +29,12 @@ from bot.utils import (
     send_parts,
 )
 from core.broadcast import parse_broadcast_target
-from core.discord_tasks import (
+from core.models import QueuedAnnouncement, QueuedTask
+from core.queued_tasks import (
     AddUserToThread,
     BroadcastMessage,
     ClearTeamChannels,
+    CompetitionStatusChanged,
     LogToChannel,
     PermanentTaskError,
     PostComment,
@@ -43,9 +45,9 @@ from core.discord_tasks import (
     SyncRoles,
     SyncRolesResult,
     TaskPayload,
-    TicketCreatedWeb,
+    TicketCreated,
 )
-from core.models import DiscordTask, QueuedAnnouncement
+from core.task_backends import TaskBackend
 from core.utils import role_sync_summary
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketComment
@@ -117,7 +119,7 @@ class DiscordQueueProcessor:
         strategy, so no other processor can be working on these rows.
         """
         cutoff = timezone.now() - DiscordQueueProcessor.STRANDED_TASK_MAX_AGE
-        stranded = DiscordTask.objects.filter(status="processing")
+        stranded = QueuedTask.objects.filter(backend=TaskBackend.DISCORD, status="processing")
         requeued = stranded.filter(created_at__gte=cutoff).update(status="pending", next_retry_at=None)
         failed = stranded.filter(created_at__lt=cutoff).update(
             status="failed", error_message="Left in processing by a bot restart; too old to retry"
@@ -128,10 +130,10 @@ class DiscordQueueProcessor:
     async def _process_pending_tasks(self) -> None:
 
         @sync_to_async
-        def get_pending_tasks() -> list[DiscordTask]:
+        def get_pending_tasks() -> list[QueuedTask]:
             now = timezone.now()
             return list(
-                DiscordTask.objects.filter(status="pending")
+                QueuedTask.objects.filter(backend=TaskBackend.DISCORD, status="pending")
                 .filter(Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now))
                 .order_by("created_at")[: DiscordQueueProcessor.QUEUE_BATCH_SIZE]
             )
@@ -145,7 +147,7 @@ class DiscordQueueProcessor:
 
     async def _still_processing(self) -> bool:
         current = self._current_task
-        return current is None or await DiscordTask.objects.filter(pk=current, status="processing").aexists()
+        return current is None or await QueuedTask.objects.filter(pk=current, status="processing").aexists()
 
     async def _queue_copy(self, team: Team, message: str, sender: str) -> bool:
         """Queue the broadcast's copy for a team with no channel, only while the running task is still processing: its
@@ -156,7 +158,7 @@ class DiscordQueueProcessor:
         @sync_to_async
         def queue() -> bool:
             with transaction.atomic():
-                running = DiscordTask.objects.select_for_update(no_key=True)
+                running = QueuedTask.objects.select_for_update(no_key=True)
                 if current is not None and not running.filter(pk=current, status="processing").exists():
                     return False
                 QueuedAnnouncement.objects.create(team=team, message=message, sender_name=sender)
@@ -164,17 +166,17 @@ class DiscordQueueProcessor:
 
         return await queue()
 
-    async def _process_task(self, task: DiscordTask) -> None:
+    async def _process_task(self, task: QueuedTask) -> None:
 
         # Claim with a conditional UPDATE so a task is never handled twice.
-        claimed = await DiscordTask.objects.filter(pk=task.pk, status="pending").aupdate(status="processing")
+        claimed = await QueuedTask.objects.filter(pk=task.pk, status="pending").aupdate(status="processing")
         if not claimed:
             return
         task.status = "processing"
         self._current_task = task.pk
 
         async def save_progress(state: ProgressState) -> None:
-            await DiscordTask.objects.filter(pk=task.pk, status="processing").aupdate(progress=state)
+            await QueuedTask.objects.filter(pk=task.pk, status="processing").aupdate(progress=state)
 
         try:
             task_result = await self._dispatch(task.typed_payload(), TaskProgress(task.progress, save_progress))
@@ -208,10 +210,10 @@ class DiscordQueueProcessor:
                 logger.info(f"Completed task {task.id}: {task.task_type}")
 
     @staticmethod
-    async def _record(task: DiscordTask, **outcome: object) -> bool:
+    async def _record(task: QueuedTask, **outcome: object) -> bool:
         """Write the task's outcome only while the row is still this bot's to finish: False when deleted or when a
         reset failed or scrubbed it meanwhile."""
-        if not await DiscordTask.objects.filter(pk=task.pk, status="processing").aupdate(**outcome):
+        if not await QueuedTask.objects.filter(pk=task.pk, status="processing").aupdate(**outcome):
             logger.info(f"Task {task.id} ({task.task_type}) was deleted or ended while it ran")
             return False
         for name, value in outcome.items():
@@ -228,7 +230,7 @@ class DiscordQueueProcessor:
                 await self._handle_setup_team_infrastructure(payload, progress)
             case LogToChannel():
                 await self._handle_log_to_channel(payload)
-            case TicketCreatedWeb():
+            case TicketCreated():
                 await self._handle_ticket_created_web(payload)
             case ReconcileTeams():
                 await self._handle_reconcile_teams(payload)
@@ -244,6 +246,8 @@ class DiscordQueueProcessor:
                 return await self._handle_sync_roles(payload)
             case BroadcastMessage():
                 return await self._handle_broadcast_message(payload, progress)
+            case CompetitionStatusChanged():
+                await update_status_channel(self.bot)
             case _:
                 assert_never(payload)
         return None
@@ -313,7 +317,7 @@ class DiscordQueueProcessor:
 
         await log_to_ops_channel(self.bot, payload.message)
 
-    async def _handle_ticket_created_web(self, payload: TicketCreatedWeb) -> None:
+    async def _handle_ticket_created_web(self, payload: TicketCreated) -> None:
         ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
         try:
             await ensure_ticket_thread(self.bot, self._guild(), ticket)

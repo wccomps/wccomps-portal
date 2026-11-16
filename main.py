@@ -151,7 +151,7 @@ class PortalBot(commands.Bot):
 
 
 def main() -> None:
-    token = os.environ.get("DISCORD_BOT_TOKEN")
+    token = settings.DISCORD_BOT_TOKEN
     if not token:
         logger.error("DISCORD_BOT_TOKEN environment variable not set")
         sys.exit(1)

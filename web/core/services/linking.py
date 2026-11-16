@@ -9,8 +9,8 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from core.auth_utils import signed_out_since
-from core.discord_tasks import LogToChannel, SetupTeamInfrastructure, SyncMemberRoles
-from core.models import AuditLog, DiscordTask
+from core.models import AuditLog, QueuedTask
+from core.queued_tasks import LogToChannel, SetupTeamInfrastructure, SyncMemberRoles
 from team.models import DiscordLink, LinkAttempt, LinkToken, Team, TeamQuerySet
 
 logger = logging.getLogger(__name__)
@@ -252,7 +252,7 @@ def unlink_discord_links(
         )
         if sync_roles:
             for link in ended:
-                DiscordTask.enqueue(SyncMemberRoles(discord_id=link.discord_id))
+                QueuedTask.enqueue(SyncMemberRoles(discord_id=link.discord_id))
     return ended
 
 
@@ -292,16 +292,16 @@ def finalize_link(
     # Queued in this order so the team's role usually exists by the time the member sync runs; if the setup is
     # retried, the member gets Blueteam now and the team role from the periodic role sync within 5 minutes
     if team and team.is_active:
-        DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team.team_number))
-    DiscordTask.enqueue(SyncMemberRoles(discord_id=discord_id))
+        QueuedTask.enqueue(SetupTeamInfrastructure(team_number=team.team_number))
+    QueuedTask.enqueue(SyncMemberRoles(discord_id=discord_id))
 
     if team:
-        DiscordTask.enqueue(
+        QueuedTask.enqueue(
             LogToChannel(message=f"User Linked: <@{discord_id}> ({discord_username}) to **{team.team_name}**")
         )
         logger.info(f"Successfully linked {discord_username} ({discord_id}) to {team.team_name}")
     else:
-        DiscordTask.enqueue(
+        QueuedTask.enqueue(
             LogToChannel(
                 message=f"User Linked: <@{discord_id}> ({discord_username}) to **{authentik_username}** (non-team)"
             )

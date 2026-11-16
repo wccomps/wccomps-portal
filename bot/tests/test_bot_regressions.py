@@ -269,7 +269,7 @@ def test_a_long_web_broadcast_is_sent_in_parts(bot_world: World, target: str, me
 
     from bot.discord_queue import DiscordQueueProcessor
     from bot.utils import TaskProgress
-    from core.discord_tasks import BroadcastMessage
+    from core.queued_tasks import BroadcastMessage
 
     with rolled_back(), discord_world(bot_world, confirm=True) as fakes:
         processor = DiscordQueueProcessor(fakes.bot)

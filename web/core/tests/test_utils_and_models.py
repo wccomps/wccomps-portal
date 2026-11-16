@@ -10,8 +10,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from core.auth_utils import get_authentik_id, permission_groups_of, team_for_groups
-from core.discord_tasks import PostTicketUpdate, ReconcileTeams, SyncRoles
-from core.models import AuditLog, CompetitionConfig, DiscordTask, InvalidPayloadError
+from core.models import AuditLog, CompetitionConfig, InvalidPayloadError, QueuedTask
+from core.queued_tasks import PostTicketUpdate, ReconcileTeams, SyncRoles
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
@@ -91,17 +91,17 @@ class TestAuditLogModel:
         assert logs[1] == log1
 
 
-class TestDiscordTaskModel:
-    """Tests for DiscordTask model."""
+class TestQueuedTaskModel:
+    """Tests for QueuedTask model."""
 
     def test_str_representation(self):
         """__str__ should return task_type and status."""
-        task = DiscordTask.objects.create(task_type="log_to_channel", payload={"message": "hi"}, status="pending")
+        task = QueuedTask.objects.create(task_type="log_to_channel", payload={"message": "hi"}, status="pending")
         assert str(task) == "log_to_channel (pending)"
 
     def test_default_values(self):
         """Should have correct default values."""
-        task = DiscordTask.objects.create(task_type="log_to_channel", payload={"message": "hi"})
+        task = QueuedTask.objects.create(task_type="log_to_channel", payload={"message": "hi"})
         assert task.status == "pending"
         assert task.retry_count == 0
         assert task.max_retries == 5
@@ -113,14 +113,15 @@ class TestDiscordTaskModel:
         ticket = Ticket.objects.create(ticket_number="T003-001", team=team, category=box_reset_category, title="t")
         update = PostTicketUpdate(ticket_id=ticket.id, action="reopened", actor="ops", reason="again")
 
-        task = DiscordTask.enqueue(update)
+        [task] = QueuedTask.enqueue(update)
 
         task.refresh_from_db()
         assert (task.task_type, task.status, task.ticket_id) == ("post_ticket_update", "pending", ticket.id)
         assert task.typed_payload() == update
 
     def test_enqueue_leaves_the_ticket_unset_for_payloads_without_one(self):
-        assert DiscordTask.enqueue(SyncRoles(requested_by="ops", dry_run=True)).ticket_id is None
+        [task] = QueuedTask.enqueue(SyncRoles(requested_by="ops", dry_run=True))
+        assert task.ticket_id is None
 
     def test_typed_payload_takes_a_missing_ticket_id_from_the_ticket_fk(self, box_reset_category):
         """The previous release's web left post_ticket_update's ticket on the FK only."""
@@ -128,19 +129,19 @@ class TestDiscordTaskModel:
 
         team = Team.objects.create(team_number=3, team_name="Team 03")
         ticket = Ticket.objects.create(ticket_number="T003-001", team=team, category=box_reset_category, title="t")
-        task = DiscordTask(task_type="post_ticket_update", ticket=ticket, payload={"action": "claimed", "actor": "ops"})
+        task = QueuedTask(task_type="post_ticket_update", ticket=ticket, payload={"action": "claimed", "actor": "ops"})
 
         assert task.typed_payload() == PostTicketUpdate(ticket_id=ticket.id, action="claimed", actor="ops")
 
     def test_typed_payload_ignores_keys_the_type_does_not_declare(self):
-        task = DiscordTask(task_type="sync_roles", payload={"requested_by": "ops", "dry_run": True, "progress": {}})
+        task = QueuedTask(task_type="sync_roles", payload={"requested_by": "ops", "dry_run": True, "progress": {}})
 
         assert task.typed_payload() == SyncRoles(requested_by="ops", dry_run=True)
 
     @pytest.mark.parametrize("payload", [[], "team_number", None, 5])
     def test_typed_payload_rejects_a_payload_that_is_not_an_object(self, payload):
         with pytest.raises(InvalidPayloadError, match="not a JSON object"):
-            DiscordTask(task_type="setup_team_infrastructure", payload=payload).typed_payload()
+            QueuedTask(task_type="setup_team_infrastructure", payload=payload).typed_payload()
 
     @pytest.mark.parametrize(
         ("task_type", "payload"),
@@ -154,38 +155,38 @@ class TestDiscordTaskModel:
     )
     def test_typed_payload_rejects_a_field_of_the_wrong_type(self, task_type, payload):
         with pytest.raises(InvalidPayloadError, match="should be"):
-            DiscordTask(task_type=task_type, payload=payload).typed_payload()
+            QueuedTask(task_type=task_type, payload=payload).typed_payload()
 
     def test_every_payload_type_survives_a_round_trip_through_its_row(self):
         """A field type typed_payload can't check would fail every row of that type as invalid."""
         from dataclasses import MISSING, asdict, fields
 
-        from core.discord_tasks import PAYLOAD_TYPES
+        from core.queued_tasks import PAYLOAD_TYPES
 
         samples = {int: 7, str: "x", bool: True, int | None: None}
         for task_type, cls in PAYLOAD_TYPES.items():
             unsupported = [f"{f.name}: {f.type}" for f in fields(cls) if f.type not in samples]
             assert not unsupported, f"{task_type} has fields typed_payload can't check: {unsupported}"
             payload = cls(**{f.name: samples[f.type] for f in fields(cls) if f.default is MISSING})
-            assert DiscordTask(task_type=task_type, payload=asdict(payload)).typed_payload() == payload
+            assert QueuedTask(task_type=task_type, payload=asdict(payload)).typed_payload() == payload
 
     def test_typed_payload_leaves_out_a_field_with_a_default_factory(self, monkeypatch):
         from dataclasses import dataclass, field
         from typing import ClassVar
 
-        from core import discord_tasks
+        from core import queued_tasks
 
         @dataclass(frozen=True, kw_only=True)
         class Tagged:
             task_type: ClassVar = "tagged"
             note: str = field(default_factory=str)
 
-        monkeypatch.setitem(discord_tasks.PAYLOAD_TYPES, "tagged", Tagged)
+        monkeypatch.setitem(queued_tasks.PAYLOAD_TYPES, "tagged", Tagged)
 
-        assert DiscordTask(task_type="tagged", payload={}).typed_payload() == Tagged()
+        assert QueuedTask(task_type="tagged", payload={}).typed_payload() == Tagged()
 
     def test_typed_payload_accepts_none_for_an_optional_field(self):
-        task = DiscordTask(task_type="reconcile_teams", payload={"requested_by": "ops", "open_event_id": None})
+        task = QueuedTask(task_type="reconcile_teams", payload={"requested_by": "ops", "open_event_id": None})
 
         assert task.typed_payload() == ReconcileTeams(requested_by="ops")
 
@@ -193,7 +194,7 @@ class TestDiscordTaskModel:
         from django.core.exceptions import ValidationError
 
         with pytest.raises(ValidationError, match="team_number"):
-            DiscordTask(task_type="setup_team_infrastructure", payload={}).clean()
+            QueuedTask(task_type="setup_team_infrastructure", payload={}).clean()
 
 
 class TestCompetitionConfigModel:
@@ -411,7 +412,7 @@ class TestAdvisoryLock:
 
 @pytest.mark.django_db
 def test_a_task_row_written_by_the_previous_release_starts_with_no_progress():
-    """During a rolling deploy the old web pods insert tasks without progress; the column's default fills it."""
+    """A row inserted without progress or backend (an older release's columns) gets the columns' defaults."""
     from django.db import connection
 
     with connection.cursor() as cursor:
@@ -421,4 +422,5 @@ def test_a_task_row_written_by_the_previous_release_starts_with_no_progress():
         )
         task_id = cursor.fetchone()[0]
 
-    assert DiscordTask.objects.get(pk=task_id).progress == {}
+    task = QueuedTask.objects.get(pk=task_id)
+    assert (task.progress, task.backend) == ({}, "discord")

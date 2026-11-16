@@ -548,8 +548,8 @@ async def test_the_start_and_stop_commands_ask_for_confirmation_before_running(
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
 async def test_timer_queues_1h_and_30m_countdown_announcements_once_each() -> None:
-    from core.discord_tasks import BroadcastMessage
-    from core.models import DiscordTask
+    from core.models import QueuedTask
+    from core.queued_tasks import BroadcastMessage
     from core.services.competition import COMPETITION_COUNTDOWN_QUEUED, COUNTDOWN_SENDER
 
     now = datetime(2026, 10, 3, 23, 0, tzinfo=timezone.UTC)
@@ -568,23 +568,23 @@ async def test_timer_queues_1h_and_30m_countdown_announcements_once_each() -> No
         patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
     ):
         await timer._check_competition_times()
-        assert await DiscordTask.objects.acount() == 0
+        assert await QueuedTask.objects.acount() == 0
 
         mock_now.return_value = end_time - timedelta(minutes=59)
         await timer._check_competition_times()
         await timer._check_competition_times()
-        assert await DiscordTask.objects.acount() == 1
+        assert await QueuedTask.objects.acount() == 1
 
         mock_now.return_value = end_time - timedelta(minutes=45)
         await timer._check_competition_times()
-        assert await DiscordTask.objects.acount() == 1
+        assert await QueuedTask.objects.acount() == 1
 
         mock_now.return_value = end_time - timedelta(minutes=29)
         await timer._check_competition_times()
         await timer._check_competition_times()
-        assert await DiscordTask.objects.acount() == 2
+        assert await QueuedTask.objects.acount() == 2
 
-    broadcasts = [t.typed_payload() async for t in DiscordTask.objects.order_by("pk")]
+    broadcasts = [t.typed_payload() async for t in QueuedTask.objects.order_by("pk")]
     assert len(broadcasts) == 2
     assert all(
         isinstance(b, BroadcastMessage) and b.target == "all-teams" and b.sender == COUNTDOWN_SENDER for b in broadcasts

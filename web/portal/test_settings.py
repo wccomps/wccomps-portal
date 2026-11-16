@@ -13,6 +13,7 @@ for _name, _value in {
     "QUOTIENT_API_URL": "https://scoring.wccomps.org",
     "DEFAULT_FROM_EMAIL": "noreply@wccomps.org",
     "DEFAULT_REPLY_TO_EMAIL": "info@wccomps.org",
+    "DISCORD_BOT_TOKEN": "test-token",
 }.items():
     os.environ.setdefault(_name, _value)
 

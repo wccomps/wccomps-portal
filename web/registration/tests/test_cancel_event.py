@@ -172,18 +172,18 @@ def test_cancelling_resets_for_the_next_event(event):
 def test_cancelling_removes_the_start_broadcasts_copies(event):
     """The broadcasts the starts recorded keep the credentials in their payloads (admin, backups, retries), whatever the
     message says now: each is scrubbed, and an unsent one failed so it never goes out. Other broadcasts stay."""
-    from core.models import DiscordTask
+    from core.models import QueuedTask
     from registration.services import START_MESSAGE_SCRUBBED
 
     start = {"target": "all-teams", "message": "Default login", "sender": "Black Team"}
-    unsent = DiscordTask.objects.create(task_type="broadcast_message", payload=start, status="pending")
-    sent = DiscordTask.objects.create(
+    unsent = QueuedTask.objects.create(task_type="broadcast_message", payload=start, status="pending")
+    sent = QueuedTask.objects.create(
         task_type="broadcast_message",
         payload=start,
         status="completed",
         error_message="Broadcast by Black Team\n• Failed: Team 01\nMessage: Default login",
     )
-    other = DiscordTask.objects.create(
+    other = QueuedTask.objects.create(
         task_type="broadcast_message", payload={**start, "message": "Lunch at noon"}, status="pending"
     )
     CompetitionConfig.objects.update_or_create(
@@ -205,15 +205,16 @@ def test_start_broadcasts_queued_before_the_start_recorded_them_are_scrubbed_or_
     """By the stored start message or the start's sender and target: sent ones are scrubbed now, an unsent one is left
     for the next reset to scrub and fail. A broadcast someone else sent stays."""
     import importlib
+    from types import SimpleNamespace
 
     from django.apps import apps
 
-    from core.models import DiscordTask
+    from core.models import QueuedTask
     from registration.services import START_MESSAGE_SCRUBBED
 
     def broadcast(message, status, sender="Black Team", target="all-teams"):
         payload = {"target": target, "message": message, "sender": sender}
-        return DiscordTask.objects.create(task_type="broadcast_message", payload=payload, status=status)
+        return QueuedTask.objects.create(task_type="broadcast_message", payload=payload, status=status)
 
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"start_message": "Default login"})
     edited_since = broadcast("Old login", "completed")
@@ -221,9 +222,13 @@ def test_start_broadcasts_queued_before_the_start_recorded_them_are_scrubbed_or_
     running = broadcast("Default login", "pending")
     other = broadcast("Lunch at noon", "completed", sender="gold")
 
-    importlib.import_module("core.migrations.0024_scrub_start_broadcasts").scrub_start_broadcasts(apps, None)
+    # The migration names the model as it was then; DiscordTask is QueuedTask since 0025
+    renamed = SimpleNamespace(
+        get_model=lambda app, name: apps.get_model(app, {"DiscordTask": "QueuedTask"}.get(name, name))
+    )
+    importlib.import_module("core.migrations.0024_scrub_start_broadcasts").scrub_start_broadcasts(renamed, None)
 
-    messages = {task.pk: task.payload["message"] for task in DiscordTask.objects.all()}
+    messages = {task.pk: task.payload["message"] for task in QueuedTask.objects.all()}
     assert messages == {
         edited_since.pk: START_MESSAGE_SCRUBBED,
         by_text.pk: START_MESSAGE_SCRUBBED,

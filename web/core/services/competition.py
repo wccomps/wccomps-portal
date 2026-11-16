@@ -12,8 +12,8 @@ from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import Q
 
 from core.authentik_utils import set_team_account_active
-from core.discord_tasks import BroadcastMessage
-from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, DiscordTask
+from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, QueuedTask
+from core.queued_tasks import BroadcastMessage
 from core.team_accounts import accounts_by_team
 from core.utils import advisory_lock, format_competition_time
 from team.models import MAX_TEAMS, active_team_numbers, team_username
@@ -420,11 +420,11 @@ def _run(
         elif locked.end_passed() or locked.competition_end_time is None or "competition_end_time" in changes:
             changes["started_this_window"] = False
         if enable and not locked.applications_enabled and not locked.start_broadcasts and locked.start_message.strip():
-            task = DiscordTask.enqueue(
+            tasks = QueuedTask.enqueue(
                 BroadcastMessage(target="all-teams", message=locked.start_message, sender=START_MESSAGE_SENDER)
             )
-            changes["start_broadcasts"] = [task.pk]
-            result.start_message_queued = True
+            changes["start_broadcasts"] = [t.pk for t in tasks]
+            result.start_message_queued = bool(tasks)
         CompetitionConfig.objects.filter(pk=locked.pk).update(**changes)
 
         AuditLog.objects.create(
@@ -541,7 +541,7 @@ def queue_due_countdown(now: datetime) -> str | None:
             f"There {verb} {label} remaining in the competition. "
             f"The competition ends at {end_display} (<t:{int(end_time.timestamp())}:t>)."
         )
-        task = DiscordTask.enqueue(BroadcastMessage(target="all-teams", message=message, sender=COUNTDOWN_SENDER))
+        tasks = QueuedTask.enqueue(BroadcastMessage(target="all-teams", message=message, sender=COUNTDOWN_SENDER))
         AuditLog.objects.create(
             action=COMPETITION_COUNTDOWN_QUEUED,
             admin_user=TIMER_ACTOR,
@@ -550,7 +550,7 @@ def queue_due_countdown(now: datetime) -> str | None:
             details={
                 "end_time": end_iso,
                 "minutes_remaining": minutes,
-                "task_id": task.pk,
+                "task_ids": [t.pk for t in tasks],
             },
         )
         return label

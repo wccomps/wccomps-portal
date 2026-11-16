@@ -15,7 +15,7 @@ from portal.required import REQUIRED_SETTINGS, missing_settings
 from core import permission_constants
 from core.admin_views import readiness
 from core.authentik_manager import AuthentikGroupEntry, AuthentikUserEntry
-from core.models import AuditLog, DiscordTask
+from core.models import AuditLog, QueuedTask
 from core.team_accounts import SEVERAL_ACCOUNTS, TeamAccounts, team_accounts
 from team.models import MAX_TEAMS, Team, single_account, team_group_name, team_username
 
@@ -166,7 +166,7 @@ def test_password_reset_refused_with_several_accounts(admin_client, settings, ac
     assert response.json() == {"success": False, "message": message}
     manager.assert_not_called()
     assert not AuditLog.objects.exists()
-    assert not DiscordTask.objects.exists()
+    assert not QueuedTask.objects.exists()
 
 
 @pytest.mark.parametrize(

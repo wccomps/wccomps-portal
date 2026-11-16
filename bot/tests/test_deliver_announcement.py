@@ -12,7 +12,7 @@ from bot.competition_actions import deliver_broadcast
 from bot.discord_queue import DiscordQueueProcessor
 from bot.utils import TaskProgress
 from core.broadcast import Announcements
-from core.discord_tasks import BroadcastMessage, PermanentTaskError
+from core.queued_tasks import BroadcastMessage, PermanentTaskError
 
 pytestmark = pytest.mark.asyncio
 

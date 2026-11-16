@@ -180,40 +180,40 @@ def test_held_schools_are_those_on_the_list_or_at_the_event(event, teams):
 def test_handing_over_a_team_with_old_channels_queues_their_removal_ahead_of_a_link(event, teams):
     """The last school's role and category outlived its teardown (the bot was down, or a delete failed): the team is
     still free, and handing it over queues their removal before any setup a new member's link queues."""
-    from core.discord_tasks import SetupTeamInfrastructure
-    from core.models import DiscordTask
+    from core.models import QueuedTask
+    from core.queued_tasks import SetupTeamInfrastructure
 
     Team.objects.filter(pk=teams[1].pk).update(discord_role_id=5, discord_category_id=6)
     assert 2 in set(free_teams(event).values_list("team_number", flat=True))
 
     add_to_school_list(event, [_row(2, "School Two")], "gold")
-    DiscordTask.enqueue(SetupTeamInfrastructure(team_number=2))
+    QueuedTask.enqueue(SetupTeamInfrastructure(team_number=2))
 
-    queued = DiscordTask.objects.order_by("created_at", "pk").values_list("task_type", "payload__team_number")
+    queued = QueuedTask.objects.order_by("created_at", "pk").values_list("task_type", "payload__team_number")
     assert list(queued) == [("clear_team_channels", 2), ("setup_team_infrastructure", 2)]
     assert Team.objects.get(pk=teams[1].pk).channels_need_clearing
 
 
 def test_two_hand_overs_queue_one_removal(event, teams):
-    from core.models import DiscordTask
+    from core.models import QueuedTask
     from registration.services import set_team_school
 
     Team.objects.filter(pk=teams[1].pk).update(discord_role_id=5, discord_category_id=6)
     set_team_school(teams[1], "School Two", contact_email="a@example.com")
     set_team_school(teams[1], "School Three", contact_email="a@example.com")
 
-    assert list(DiscordTask.objects.values_list("task_type", flat=True)) == ["clear_team_channels"]
+    assert list(QueuedTask.objects.values_list("task_type", flat=True)) == ["clear_team_channels"]
 
 
 def test_the_same_school_keeping_its_team_queues_no_removal(event, teams):
-    from core.models import DiscordTask
+    from core.models import QueuedTask
     from registration.services import set_team_school
 
     set_team_school(teams[1], "School Two", contact_email="a@example.com")
     Team.objects.filter(pk=teams[1].pk).update(discord_role_id=5, discord_category_id=6)
     set_team_school(teams[1], "School Two", contact_email="b@example.com")
 
-    assert not DiscordTask.objects.exists()
+    assert not QueuedTask.objects.exists()
     assert not Team.objects.get(pk=teams[1].pk).channels_need_clearing
 
 

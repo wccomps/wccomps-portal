@@ -44,7 +44,7 @@ async def test_web_comment_over_the_message_limit_is_sent_in_parts() -> None:
     from django.contrib.auth.models import User
 
     from bot.discord_queue import DiscordQueueProcessor
-    from core.discord_tasks import PostComment
+    from core.queued_tasks import PostComment
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory, TicketComment
 

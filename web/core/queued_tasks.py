@@ -1,12 +1,14 @@
-"""The work the portal queues for the bot: one payload dataclass per DiscordTask type.
+"""The work the portal queues: one payload dataclass per QueuedTask type.
 
-TaskPayload is the registry. DiscordTask.task_type's choices come from it, DiscordTask.enqueue
-takes one of its members, and the bot's dispatch matches on it exhaustively, so mypy rejects a
-payload type the bot cannot handle.
+TaskPayload is the registry. QueuedTask.task_type's choices come from it, QueuedTask.enqueue
+takes one of its members and writes one row per backend from backends_for, and the bot's
+dispatch matches on it exhaustively, so mypy rejects a payload type the bot cannot handle.
 """
 
 from dataclasses import dataclass
 from typing import ClassVar, TypedDict, get_args
+
+from core.task_backends import TaskBackend, chat_backends, discord_enabled
 
 
 class PermanentTaskError(Exception):
@@ -70,10 +72,20 @@ class PostTicketUpdate:
 
 
 @dataclass(frozen=True, kw_only=True)
-class TicketCreatedWeb:
+class TicketCreated:
+    """A new ticket, from the web or from chat. task_type keeps its old name so rows queued before the rename parse."""
+
     task_type: ClassVar = "ticket_created_web"
-    label: ClassVar = "Ticket Created via Web"
+    label: ClassVar = "Ticket Created"
     ticket_id: int
+
+
+@dataclass(frozen=True, kw_only=True)
+class CompetitionStatusChanged:
+    """The competition started, stopped or changed its schedule: chat status displays refresh."""
+
+    task_type: ClassVar = "competition_status_changed"
+    label: ClassVar = "Competition Status Changed"
 
 
 class SyncRolesResult(TypedDict):
@@ -87,7 +99,7 @@ class SyncRolesResult(TypedDict):
 
 @dataclass(frozen=True, kw_only=True)
 class SyncRoles:
-    """The SyncRolesResult lands in DiscordTask.result."""
+    """The SyncRolesResult lands in QueuedTask.result."""
 
     task_type: ClassVar = "sync_roles"
     label: ClassVar = "Sync Roles from Authentik Groups"
@@ -127,18 +139,26 @@ class ClearTeamChannels:
     team_number: int
 
 
-type TaskPayload = (
-    PostComment
-    | BroadcastMessage
-    | SyncMemberRoles
-    | SetupTeamInfrastructure
-    | LogToChannel
-    | PostTicketUpdate
-    | TicketCreatedWeb
-    | SyncRoles
-    | AddUserToThread
-    | ReconcileTeams
-    | ClearTeamChannels
+# Every configured chat backend gets its own row of these
+type ChatNotice = (
+    PostComment | BroadcastMessage | LogToChannel | PostTicketUpdate | TicketCreated | CompetitionStatusChanged
 )
 
-PAYLOAD_TYPES: dict[str, type[TaskPayload]] = {cls.task_type: cls for cls in get_args(TaskPayload.__value__)}
+# Only the Discord backend handles these, and only when Discord is configured
+type DiscordOnly = (
+    SyncMemberRoles | SetupTeamInfrastructure | SyncRoles | AddUserToThread | ReconcileTeams | ClearTeamChannels
+)
+
+type TaskPayload = ChatNotice | DiscordOnly
+
+_CHAT_NOTICES: tuple[type[ChatNotice], ...] = get_args(ChatNotice.__value__)
+_DISCORD_ONLY: tuple[type[DiscordOnly], ...] = get_args(DiscordOnly.__value__)
+
+PAYLOAD_TYPES: dict[str, type[TaskPayload]] = {cls.task_type: cls for cls in _CHAT_NOTICES + _DISCORD_ONLY}
+
+
+def backends_for(payload: TaskPayload) -> list[TaskBackend]:
+    """The backends that get a row of this payload, from its group."""
+    if isinstance(payload, _CHAT_NOTICES):
+        return chat_backends()
+    return [TaskBackend.DISCORD] if discord_enabled() else []

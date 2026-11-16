@@ -34,7 +34,7 @@ def _open_event_with_a_score():
 
 @pytest.mark.parametrize("typed", ["nope", "yolo"])
 def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_browser, typed):
-    from core.models import DiscordTask
+    from core.models import QueuedTask
 
     event = _open_event_with_a_score()
     user = role_user("admin")
@@ -60,7 +60,7 @@ def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_bro
                 page.wait_for_timeout(500)
                 event.refresh_from_db()
                 assert event.is_active
-                assert not DiscordTask.objects.exists()
+                assert not QueuedTask.objects.exists()
                 return
 
             with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):
@@ -69,7 +69,7 @@ def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_bro
 
         event.refresh_from_db()
         assert not event.is_active and event.is_finalized
-        assert DiscordTask.objects.filter(task_type="reconcile_teams").count() == 1
+        assert QueuedTask.objects.filter(task_type="reconcile_teams").count() == 1
     finally:
         context.close()
 

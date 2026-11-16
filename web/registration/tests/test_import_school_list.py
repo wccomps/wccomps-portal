@@ -64,13 +64,13 @@ def test_a_new_event_is_created_and_opened(season):
 
 def test_opening_an_event_queues_the_teardown_of_what_earlier_events_left_in_discord(season):
     """Once, when the import opens the event: a second import into the open event opens nothing."""
-    from core.models import DiscordTask
+    from core.models import QueuedTask
 
     import_school_list(new_event("New", date(2026, 11, 7), "qualifier"), _rows(), "gold")
     opened = Event.objects.get(name="New")
     import_school_list(opened, [SchoolListRow(1, "Example University", "c@example.edu")], "gold")
 
-    tasks = [task.payload for task in DiscordTask.objects.filter(task_type="reconcile_teams")]
+    tasks = [task.payload for task in QueuedTask.objects.filter(task_type="reconcile_teams")]
     assert tasks == [{"requested_by": "gold", "open_event_id": opened.pk}]
 
 
@@ -126,7 +126,7 @@ def test_opening_an_event_drops_announcements_queued_for_the_last_one(season):
 
 def test_re_importing_the_list_keeps_a_teams_channels_while_its_school_stays(season):
     """Only a team given another school has its Discord role and category removed."""
-    from core.models import DiscordTask
+    from core.models import QueuedTask
 
     event = _event(season, "Open", active=True)
     rows = _rows()
@@ -140,7 +140,7 @@ def test_re_importing_the_list_keeps_a_teams_channels_while_its_school_stays(sea
 
     marked = Team.objects.filter(channels_need_clearing=True).values_list("team_number", flat=True)
     assert list(marked) == [2]
-    assert list(DiscordTask.objects.values_list("payload__team_number", flat=True)) == [2]
+    assert list(QueuedTask.objects.values_list("payload__team_number", flat=True)) == [2]
 
 
 def test_re_importing_the_list_drops_the_announcements_queued_for_a_team_given_another_school(season):

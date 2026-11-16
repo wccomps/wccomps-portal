@@ -10,7 +10,7 @@ from django.db import connection
 from django.test import Client, override_settings
 from django.urls import reverse
 
-from core.models import AuditLog, DiscordTask
+from core.models import AuditLog, QueuedTask
 from core.proxmox import (
     ProxmoxAPIError,
     ProxmoxClient,
@@ -440,7 +440,7 @@ class TestTicketBoxResetViews:
         assert len(comments) == 2
         assert comments[0].comment_text == "Starting box reset of team01-web to snapshot 'clean'."
         assert comments[1].comment_text == "Box reset of team01-web to snapshot 'clean' complete; VM is started."
-        assert DiscordTask.objects.filter(ticket=box_ticket, task_type="post_comment").count() == 2
+        assert QueuedTask.objects.filter(ticket=box_ticket, task_type="post_comment").count() == 2
 
         history = TicketHistory.objects.filter(ticket=box_ticket, action="box_reset").first()
         assert history is not None

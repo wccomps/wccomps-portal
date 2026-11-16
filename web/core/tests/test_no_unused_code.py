@@ -21,7 +21,7 @@ from django.conf import global_settings
 from django.db import models
 from django.urls import URLPattern, URLResolver, get_resolver
 
-from core import discord_tasks
+from core import queued_tasks
 from core.tests import guards
 
 REPO_DIR = guards.REPO_DIR
@@ -233,6 +233,8 @@ CODE_EXCEPTIONS = {
     "*:option_template_name": "Django's choice widgets read it for each option",
     "*:use_required_attribute": "Django calls a widget's use_required_attribute as it renders the field",
     "main.py:message_content": "discord.py reads the intent when the bot connects",
+    "web/core/task_backends.py:WORKER": "A QueuedTask.backend choice; the Nextcloud worker tasks queue it (next in "
+    "this PR)",
     # Django
     "@admin.register": "Django admin registers the class through its decorator",
     "@*.register_lookup": "Django registers a field lookup through its decorator",
@@ -450,11 +452,13 @@ def test_every_setting_is_read() -> None:
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# 6. Discord task payloads
+# 6. Task payloads
 # ---------------------------------------------------------------------------------------------------------------
 
 # payload class -> why it stays although nothing enqueues it
-PAYLOAD_EXCEPTIONS: dict[str, str] = {}
+PAYLOAD_EXCEPTIONS: dict[str, str] = {
+    "CompetitionStatusChanged": "the status-change notices that queue it land in the next task of this PR",
+}
 
 
 def test_every_task_payload_is_enqueued() -> None:
@@ -465,8 +469,8 @@ def test_every_task_payload_is_enqueued() -> None:
     """
     called = {call_name(n) for tree in python_trees().values() for n in ast.walk(tree) if isinstance(n, ast.Call)}
     unused = [
-        Unused(cls.__name__, "web/core/discord_tasks.py")
-        for cls in discord_tasks.PAYLOAD_TYPES.values()
+        Unused(cls.__name__, "web/core/queued_tasks.py")
+        for cls in queued_tasks.PAYLOAD_TYPES.values()
         if cls.__name__ not in called
     ]
-    fail_with("Discord task payloads nothing enqueues", unused, PAYLOAD_EXCEPTIONS)
+    fail_with("Task payloads nothing enqueues", unused, PAYLOAD_EXCEPTIONS)

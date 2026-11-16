@@ -16,7 +16,7 @@ from packets.models import Packet
 from scoring.export import DATASETS
 from scoring.models import InjectScore, QuotientMetadataCache, RedTeamScore, ServiceScore
 
-from core.models import AuditLog, CompetitionConfig, DiscordTask, QueuedAnnouncement
+from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement, QueuedTask
 from registration.models import Event, EventArchive, EventResult, School, Season
 from registration.services import (
     CloseOutError,
@@ -54,7 +54,7 @@ def event():
 
 
 def _cleanups():
-    return list(DiscordTask.objects.filter(task_type="reconcile_teams"))
+    return list(QueuedTask.objects.filter(task_type="reconcile_teams"))
 
 
 def _assert_nothing_written(event=None, scores=2):
@@ -237,7 +237,7 @@ def test_a_new_event_is_refused_once_an_event_is_open(event):
     _assert_nothing_written(event)
 
 
-@pytest.mark.parametrize("failing", ["registration.services.wipe_competition_data", "core.models.DiscordTask.enqueue"])
+@pytest.mark.parametrize("failing", ["registration.services.wipe_competition_data", "core.models.QueuedTask.enqueue"])
 def test_a_failure_after_the_freeze_writes_nothing(event, failing):
     with patch(failing, side_effect=RuntimeError("boom")), pytest.raises(RuntimeError):
         close_out_event(event, "gold")

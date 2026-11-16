@@ -25,7 +25,7 @@ from .models import (
     AuditLog,
     BotState,
     CompetitionConfig,
-    DiscordTask,
+    QueuedTask,
     UserGroups,
 )
 
@@ -134,8 +134,8 @@ class AuditLogAdmin(PortalModelAdmin[AuditLog]):
         return False
 
 
-@admin.register(DiscordTask)
-class DiscordTaskAdmin(PortalModelAdmin[DiscordTask]):
+@admin.register(QueuedTask)
+class QueuedTaskAdmin(PortalModelAdmin[QueuedTask]):
     list_display = ["task_type", "status", "retry_count", "created_at", "completed_at"]
     list_filter = ["status", "task_type"]
     search_fields = ["task_type", "error_message"]
@@ -145,7 +145,7 @@ class DiscordTaskAdmin(PortalModelAdmin[DiscordTask]):
     actions = ["retry_failed_tasks"]
 
     @admin.action(description="Retry failed tasks")
-    def retry_failed_tasks(self, request: HttpRequest, queryset: QuerySet[DiscordTask]) -> None:
+    def retry_failed_tasks(self, request: HttpRequest, queryset: QuerySet[QueuedTask]) -> None:
         from django.utils import timezone
         from registration.services import START_MESSAGE_SCRUBBED
 

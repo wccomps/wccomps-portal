@@ -200,6 +200,13 @@ SESSION_SAVE_EVERY_REQUEST = True
 SESSION_COOKIE_SAMESITE = "Lax"  # Allow cookies across OAuth redirects
 SESSION_COOKIE_HTTPONLY = True  # Explicit (Django default, but important for security audits)
 
+# The Discord bot's token; without one the portal queues no Discord work (core.task_backends)
+DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
+# Zulip bot credentials; the portal queues Zulip notices only when all three are set
+ZULIP_SITE = os.environ.get("ZULIP_SITE", "")
+ZULIP_BOT_EMAIL = os.environ.get("ZULIP_BOT_EMAIL", "")
+ZULIP_API_KEY = os.environ.get("ZULIP_API_KEY", "")
+
 DISCORD_LOG_CHANNEL_ID = int(os.environ.get("DISCORD_LOG_CHANNEL_ID", "0"))
 DISCORD_TICKET_QUEUE_CHANNEL_ID = int(os.environ.get("DISCORD_TICKET_QUEUE_CHANNEL_ID", "0"))
 DISCORD_ANNOUNCEMENT_CHANNEL_ID = int(os.environ.get("DISCORD_ANNOUNCEMENT_CHANNEL_ID", "0"))

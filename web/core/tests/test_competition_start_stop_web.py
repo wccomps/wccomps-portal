@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.authentik_manager import AuthentikAPIError
-from core.models import CompetitionConfig, DiscordTask
+from core.models import CompetitionConfig, QueuedTask
 from core.tests.detached import join_detached_runs
 
 pytestmark = pytest.mark.django_db
@@ -56,7 +56,7 @@ def test_start_streams_progress_and_posts_to_ops(admin_client):
     assert lines[-1]["done"] and lines[-1]["success"]
     refresh.assert_called_once()
     assert CompetitionConfig.get_config().applications_enabled
-    assert "Competition Started" in DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    assert "Competition Started" in QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
 
 
 def test_stop_streams_progress_syncs_scores_and_posts_to_ops(admin_client, admin_user):
@@ -80,7 +80,7 @@ def test_stop_streams_progress_syncs_scores_and_posts_to_ops(admin_client, admin
     refresh.assert_called_once()
     sync_scores.assert_called_once_with(admin_user)
     assert not CompetitionConfig.get_config().applications_enabled
-    log = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    log = QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
     assert "Competition Stopped" in log
     assert "Quotient service scores: synced" in log
 
@@ -165,7 +165,7 @@ def test_the_replaced_actions_are_gone(admin_client, action):
 
     assert response.status_code == 400
     assert "Unknown action" in response.json()["error"]
-    assert not DiscordTask.objects.exists()
+    assert not QueuedTask.objects.exists()
 
 
 def test_a_partial_start_is_reported_incomplete_not_success(admin_client):
@@ -190,7 +190,7 @@ def test_a_partial_start_is_reported_incomplete_not_success(admin_client):
     assert done["success"] is False
     assert done["message"].startswith("Incomplete: run Start again.")
     assert "Failed: scoring: HTTP 502" in done["message"]
-    log = DiscordTask.objects.get(task_type="log_to_channel").payload["message"]
+    log = QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
     assert log.startswith("**Competition Started (incomplete)**")
 
 
