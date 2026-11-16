@@ -4,7 +4,6 @@
 A crash ends the process, and its container restarts.
 """
 
-import asyncio
 import logging
 import os
 import sys
@@ -24,14 +23,6 @@ from core.task_backends import discord_enabled, zulip_enabled
 logger = logging.getLogger(__name__)
 
 
-async def run_discord() -> None:
-    # start(), not run(): run() calls asyncio.run, which can't run inside an event loop. Leaving the context closes
-    # the client, as run() does.
-    bot = PortalBot()
-    async with bot:
-        await bot.start(settings.DISCORD_BOT_TOKEN)
-
-
 def main() -> None:
     # Zulip's settings exist ahead of its runner; refused rather than run with nothing consuming Zulip's queued tasks
     if zulip_enabled():
@@ -45,7 +36,8 @@ def main() -> None:
 
     logger.info("Chat process starting")
     try:
-        asyncio.run(run_discord())
+        # log_handler=None: discord.py's logs go through Django's console handler instead of a handler of its own
+        PortalBot().run(settings.DISCORD_BOT_TOKEN, log_handler=None)
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt")
     except Exception as e:

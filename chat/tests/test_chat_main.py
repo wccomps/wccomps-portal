@@ -17,7 +17,7 @@ def no_zulip(settings):
 
 @pytest.fixture
 def not_started(monkeypatch):
-    monkeypatch.setattr(chat_main.asyncio, "run", lambda _coro: pytest.fail("the chat process started"))
+    monkeypatch.setattr(chat_main, "PortalBot", lambda: pytest.fail("the chat process started"))
 
 
 def test_chat_exits_without_backends(settings, no_zulip, not_started):
@@ -52,38 +52,32 @@ def test_chat_refuses_to_start_without_required_settings(settings, no_zulip, not
 
 
 class _Bot:
-    started_with: list[str] = []
+    runs: list[tuple[str, object]] = []
 
-    async def __aenter__(self) -> _Bot:
-        return self
-
-    async def __aexit__(self, *_exc: object) -> None:
-        pass
-
-    async def start(self, token: str) -> None:
-        self.started_with.append(token)
+    def run(self, token: str, *, log_handler: object) -> None:
+        self.runs.append((token, log_handler))
 
 
 def test_discord_runs_without_a_log_handler_of_its_own(settings, no_zulip, monkeypatch):
-    """start(), not run(): discord.py's logs go through the Django console handler and its line-safe formatter."""
+    """discord.py's logs go through the Django console handler and its line-safe formatter."""
     settings.DISCORD_BOT_TOKEN = "token"
-    _Bot.started_with = []
+    _Bot.runs = []
     monkeypatch.setattr(chat_main, "PortalBot", _Bot)
 
     chat_main.main()
 
-    assert _Bot.started_with == ["token"]
-    assert all(isinstance(h, logging.NullHandler) for h in logging.getLogger("discord").handlers)
+    assert _Bot.runs == [("token", None)]
 
 
 def test_a_crashing_runner_ends_the_chat_process(settings, no_zulip, monkeypatch, caplog):
     """The process exits, and its container restarts."""
     settings.DISCORD_BOT_TOKEN = "token"
 
-    async def crash() -> None:
-        raise RuntimeError("runner crashed")
+    class Crashing:
+        def run(self, token: str, *, log_handler: object) -> None:
+            raise RuntimeError("runner crashed")
 
-    monkeypatch.setattr(chat_main, "run_discord", crash)
+    monkeypatch.setattr(chat_main, "PortalBot", Crashing)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exit_:
         chat_main.main()

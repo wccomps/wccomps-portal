@@ -267,7 +267,7 @@ async def test_syncing_one_member_after_unlinking_takes_every_synced_role(teams)
 def _cog() -> role_sync_cog.RoleSyncCog:
     cog = role_sync_cog.RoleSyncCog.__new__(role_sync_cog.RoleSyncCog)
     cog.bot = MagicMock()
-    cog.synced_groups, cog.synced_at = None, float("-inf")
+    cog.synced_groups_hash, cog.synced_at = None, float("-inf")
     return cog
 
 

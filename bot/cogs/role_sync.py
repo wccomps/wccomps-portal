@@ -16,7 +16,7 @@ POLL_SECONDS = 30
 FULL_SYNC_MINUTES = 5
 
 
-def stored_groups() -> int:
+def stored_groups_hash() -> int:
     """A hash of every stored account's groups and enabled state, which changes when any of them does. Not
     groups_updated_at: every refresh and sign-in advances it, whether the groups changed or not."""
     rows = UserGroups.objects.order_by("pk").values_list("pk", "account_active", "groups")
@@ -28,8 +28,7 @@ class RoleSyncCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        # stored_groups() and time.monotonic() at the last sync
-        self.synced_groups: int | None = None
+        self.synced_groups_hash: int | None = None
         self.synced_at = float("-inf")
         self.sync_task.start()
 
@@ -41,11 +40,11 @@ class RoleSyncCog(commands.Cog):
         """Sync the roles if the stored groups changed since the last sync or it was FULL_SYNC_MINUTES ago. Never
         raises, as an exception would end the loop; a sync that fails is tried again at the next change or full sync."""
         try:
-            groups = await sync_to_async(stored_groups)()
+            groups = await sync_to_async(stored_groups_hash)()
             now = time.monotonic()
-            if groups == self.synced_groups and now - self.synced_at < FULL_SYNC_MINUTES * 60:
+            if groups == self.synced_groups_hash and now - self.synced_at < FULL_SYNC_MINUTES * 60:
                 return
-            self.synced_groups, self.synced_at = groups, now
+            self.synced_groups_hash, self.synced_at = groups, now
             if guild := competition_guild(self.bot):
                 await sync_roles(guild)
         except Exception as e:
