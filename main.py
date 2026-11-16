@@ -16,9 +16,9 @@ from portal.required import missing_settings
 from bot.command_tree import PortalCommandTree, command_hash, command_plan
 from bot.competition_timer import CompetitionTimer
 from bot.discord_queue import DiscordQueueProcessor
-from bot.heartbeat import beat, beat_for
 from bot.unified_dashboard import UnifiedDashboard
 from bot.utils import ALLOWED_MENTIONS
+from core.heartbeat import beat, beat_for
 from core.worker_tasks import WorkerQueueProcessor
 
 logging.basicConfig(
@@ -135,7 +135,9 @@ class PortalBot(commands.Bot):
             self.queue_processor = DiscordQueueProcessor(self)
             self.queue_processor.start()
             # Until the worker process exists, the bot also runs the worker's queue (the Nextcloud tasks)
-            self.worker_processor = WorkerQueueProcessor(on_start=lambda name: beat_for(name, self), on_pass=beat)
+            self.worker_processor = WorkerQueueProcessor(
+                on_start=lambda name: beat_for(name, lambda: not self.is_closed()), on_pass=beat
+            )
             self.worker_processor.start()
 
             # First ready only (on_ready also fires on reconnects): flag unset Discord IDs

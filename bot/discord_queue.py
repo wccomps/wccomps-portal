@@ -9,12 +9,12 @@ import discord
 
 from bot.competition_actions import BroadcastState, deliver_broadcast, update_status_channel
 from bot.discord_manager import recreate_team_infrastructure, setup_team_infrastructure
-from bot.heartbeat import beat, beat_for
 from bot.role_sync import competition_guild, sync_member_roles, sync_roles
 from bot.thread_creator import add_to_team_threads, ensure_ticket_thread
 from bot.ticket_dashboard import trigger_dashboard
 from bot.utils import add_field, log_to_ops_channel, send_parts
 from core.broadcast import parse_broadcast_target
+from core.heartbeat import beat, beat_for
 from core.models import QueuedTask
 from core.queued_tasks import (
     AddUserToThread,
@@ -45,12 +45,12 @@ logger = logging.getLogger(__name__)
 
 class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
     backend = TaskBackend.DISCORD
-    heartbeat_name = "queue"
+    heartbeat_name = "queue-discord"
 
     def __init__(self, bot: discord.Client) -> None:
         # on_start binds the loop's task to the heartbeat, so beat() in code a handler awaits (reconcile_teams,
         # sync_roles) advances it too
-        super().__init__(on_start=lambda name: beat_for(name, bot), on_pass=lambda: beat())
+        super().__init__(on_start=lambda name: beat_for(name, lambda: not bot.is_closed()), on_pass=lambda: beat())
         self.bot = bot
 
     def _guild(self) -> discord.Guild:

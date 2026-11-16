@@ -14,7 +14,6 @@ from registration.services import teardown_problem
 from registration.stage import event_stage
 
 from bot.discord_manager import delete_team_infrastructure, setup_team_infrastructure
-from bot.heartbeat import beat
 from bot.utils import (
     BlockingSteps,
     announcement,
@@ -25,6 +24,7 @@ from bot.utils import (
     team_chat_channel,
 )
 from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams
+from core.heartbeat import beat
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.queued_tasks import PermanentTaskError
 from core.services.competition import START_MESSAGE_SENDER, Attempt, CompetitionRunResult

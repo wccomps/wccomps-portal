@@ -875,7 +875,7 @@ class TestDashboardMessage:
             dashboard.running = False
 
         monkeypatch.setattr(module, "recycle_db_connection", AsyncMock())
-        monkeypatch.setattr("bot.heartbeat.record", lambda name, _bot: beats.append(name))
+        monkeypatch.setattr("core.heartbeat.record", lambda name, _alive: beats.append(name))
         monkeypatch.setattr(module, "log_to_ops_channel", AsyncMock())
         monkeypatch.setattr(module.asyncio, "sleep", one_pass)
         dashboard.running = True

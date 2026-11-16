@@ -110,7 +110,8 @@ class TestCompetitionTimer:
 @pytest.mark.parametrize("work_fails", [False, True])
 async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeypatch) -> None:
     """A pass never raises (tasks.loop would stop), and a failed one skips the liveness heartbeat."""
-    from bot import competition_timer, heartbeat
+    from bot import competition_timer
+    from core import heartbeat
 
     timer = CompetitionTimer(AsyncMock(spec=discord.Client))
     calls: list[str] = []
@@ -124,7 +125,7 @@ async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeyp
         calls.append("recycle")
 
     monkeypatch.setattr(competition_timer, "recycle_db_connection", recycle)
-    monkeypatch.setattr(heartbeat, "record", lambda name, bot: calls.append(f"beat:{name}"))
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: calls.append(f"beat:{name}"))
     monkeypatch.setattr(timer, "_check_competition_times", work)
 
     await timer.check_loop()
@@ -135,12 +136,13 @@ async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeyp
 @pytest.mark.asyncio
 async def test_config_read_failing_on_the_db_skips_the_beat(monkeypatch) -> None:
     """The real work must let a DB error through, or the liveness probe never sees it."""
-    from bot import competition_timer, heartbeat
+    from bot import competition_timer
+    from core import heartbeat
 
     timer = CompetitionTimer(AsyncMock(spec=discord.Client))
     beats: list[str] = []
     monkeypatch.setattr(competition_timer, "recycle_db_connection", AsyncMock())
-    monkeypatch.setattr(heartbeat, "record", lambda name, bot: beats.append(name))
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: beats.append(name))
 
     with patch("core.models.CompetitionConfig.get_config", side_effect=RuntimeError("db down")):
         await timer.check_loop()
@@ -379,10 +381,11 @@ async def test_a_complete_auto_start_runs_once_even_when_reporting_it_fails() ->
 @pytest.mark.asyncio
 async def test_a_run_of_many_quick_steps_keeps_the_timer_alive(monkeypatch) -> None:
     """A start can take longer than the timer's budget when Authentik is slow; each finished step beats."""
-    from bot import competition_actions, competition_timer, heartbeat
+    from bot import competition_actions, competition_timer
+    from core import heartbeat
 
     beats: list[str] = []
-    monkeypatch.setattr(heartbeat, "record", lambda name, bot: beats.append(name))
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: beats.append(name))
     monkeypatch.setattr(competition_timer, "recycle_db_connection", AsyncMock())
     during: list[int] = []
 
@@ -411,10 +414,11 @@ async def test_a_wedged_step_stops_the_timer_heartbeat(monkeypatch) -> None:
     """A step stuck on a half-open socket must let the timer go stale, not keep it looking alive."""
     import threading
 
-    from bot import competition_actions, competition_timer, heartbeat
+    from bot import competition_actions, competition_timer
+    from core import heartbeat
 
     beats: list[str] = []
-    monkeypatch.setattr(heartbeat, "record", lambda name, bot: beats.append(name))
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: beats.append(name))
     monkeypatch.setattr(competition_timer, "recycle_db_connection", AsyncMock())
     release = threading.Event()
 

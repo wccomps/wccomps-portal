@@ -8,8 +8,8 @@ from discord.ext import commands, tasks
 from django.utils import timezone
 
 from bot.competition_actions import run_competition
-from bot.heartbeat import beat, beat_for
 from bot.utils import run_blocking
+from core.heartbeat import beat, beat_for
 from core.models import CompetitionConfig
 from core.services.competition import (
     END_AFTER_STOP,
@@ -49,7 +49,7 @@ class CompetitionTimer(commands.Cog):
 
     @tasks.loop(seconds=60)
     async def check_loop(self) -> None:
-        beat_for("timer", self.bot)
+        beat_for("timer", lambda: not self.bot.is_closed())
         try:
             await recycle_db_connection()
             await self._check_competition_times()
