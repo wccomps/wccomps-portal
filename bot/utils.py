@@ -2,17 +2,17 @@ import asyncio
 import functools
 import io
 import logging
-from collections.abc import Awaitable, Callable, Collection, Generator, Sequence
+from collections.abc import Callable, Collection, Generator, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from typing import Final, Literal, TypedDict
+from typing import Final, Literal
 
 import discord
 from asgiref.sync import sync_to_async
 from discord import app_commands
 from django.conf import settings
-from django.db import close_old_connections, connection
+from django.db import connection
 
+from core.task_queue import StepsState, TaskProgress
 from core.utils import missing_discord_settings
 from team.models import MAX_TEAMS, Team
 
@@ -107,56 +107,26 @@ def announcement(sender: str, message: str) -> str:
     return f"**Announcement from {sender}:**\n\n{message}"
 
 
-class ProgressState(TypedDict, total=False):
-    done: int  # steps done, for a task that counts them
-    # A broadcast's: recipients reached, refused for good (with why), counts, and parts sent to each it failed on
-    reached: list[int]
-    refused: dict[str, str]
-    sent: int
-    queued: int
-    parts: dict[str, int]
-
-
-@dataclass
-class TaskProgress:
-    """What a queued task already did, saved with the task so a retry does only the rest."""
-
-    state: ProgressState = field(default_factory=ProgressState)
-    save: Callable[[ProgressState], Awaitable[None]] | None = None
-
-    @property
-    def done(self) -> int:
-        return self.state.get("done", 0)
-
-    async def advance(self) -> None:
-        self.state["done"] = self.done + 1
-        await self.saved()
-
-    async def saved(self) -> None:
-        if self.save:
-            await self.save(self.state)
-
-
 async def send_parts(
     channel: discord.abc.Messageable,
     text: str,
     *,
+    progress: TaskProgress[StepsState],
     allowed_mentions: discord.AllowedMentions = ALLOWED_MENTIONS,
-    progress: TaskProgress | None = None,
 ) -> None:
-    """Send text in as many messages as it takes (split_message), so none is past Discord's 2000 characters. Only
-    the first may ping what allowed_mentions allows: the rest is the sender's text. With progress, parts an earlier
-    attempt sent are skipped."""
-    progress = progress or TaskProgress()
+    """Send text in as many messages as it takes (split_message), so none is past Discord's 2000 characters, skipping
+    the parts progress says an earlier attempt sent. Only the first may ping what allowed_mentions allows: the rest is
+    the sender's text."""
+    done = progress.done
     for n, part in enumerate(split_message(text)):
-        if n < progress.done:
+        if n < done:
             continue
         await channel.send(part, allowed_mentions=allowed_mentions if n == 0 else ALLOWED_MENTIONS)
         await progress.advance()
 
 
 async def send_announcement(
-    guild: discord.Guild, channel: discord.abc.Messageable, message: str, progress: TaskProgress | None = None
+    guild: discord.Guild, channel: discord.abc.Messageable, message: str, progress: TaskProgress[StepsState]
 ) -> None:
     """Send a broadcast to the announcements channel, pinging only the blue team role."""
     blueteam_role = guild.get_role(settings.BLUETEAM_ROLE_ID)
@@ -164,8 +134,8 @@ async def send_announcement(
     await send_parts(
         channel,
         f"{role_mention}\n\n{message}",
-        allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
         progress=progress,
+        allowed_mentions=pinging(roles=[blueteam_role] if blueteam_role else []),
     )
 
 
@@ -192,17 +162,6 @@ async def log_to_ops_channel(bot: discord.Client, message: str) -> bool:
     except Exception as e:
         logger.exception(f"Failed to log to ops channel: {e}")
         return False
-
-
-async def recycle_db_connection() -> None:
-    """Drop the bot's DB connection if it is broken or past CONN_MAX_AGE; the next query reconnects.
-
-    Django only does this on request_started/request_finished, and the bot serves no requests,
-    so after a Postgres restart its single connection stayed dead and every loop failed forever.
-    Must run via sync_to_async's default (thread_sensitive=True) executor: that one thread owns
-    the connection the bot's ordinary ORM calls use.
-    """
-    await sync_to_async(close_old_connections)()
 
 
 async def run_blocking[**P, R](func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:

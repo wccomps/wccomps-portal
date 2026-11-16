@@ -16,9 +16,11 @@
                 <c-table_header sortable="false">
                     Status
                 </c-table_header>
-                <c-table_header sortable="false">
-                    Discord
-                </c-table_header>
+                {% if discord_enabled %}
+                    <c-table_header sortable="false">
+                        Discord
+                    </c-table_header>
+                {% endif %}
             </tr>
         </c-slot>
         {% for team in teams %}
@@ -39,21 +41,23 @@
                         </c-badge>
                     {% endif %}
                 </td>
-                <td>
-                    {% if team.discord_role_id %}
-                        <c-badge variant="success">
-                            Configured
-                        </c-badge>
-                    {% else %}
-                        <c-badge variant="neutral">
-                            Not set
-                        </c-badge>
-                    {% endif %}
-                </td>
+                {% if discord_enabled %}
+                    <td>
+                        {% if team.discord_role_id %}
+                            <c-badge variant="success">
+                                Configured
+                            </c-badge>
+                        {% else %}
+                            <c-badge variant="neutral">
+                                Not set
+                            </c-badge>
+                        {% endif %}
+                    </td>
+                {% endif %}
             </tr>
         {% empty %}
             <tr>
-                <td colspan="5">
+                <td colspan="{% if discord_enabled %}5{% else %}4{% endif %}">
                     {% if filtered %}
                         <c-no_matches items="teams" href="{% url 'admin_teams' %}" />
                     {% else %}

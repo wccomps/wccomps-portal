@@ -6,7 +6,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.utils import timezone
 
-from core.models import DiscordTask
+from core.models import QueuedTask
 from core.services.linking import finalize_link
 from team.models import LinkToken, Team
 
@@ -21,7 +21,7 @@ def _link(team: Team | None) -> list[tuple[str, dict[str, object]]]:
     finalize_link(token, 4242, "linker", "linker", team)
     return [
         (t.task_type, t.payload)
-        for t in DiscordTask.objects.order_by("created_at", "id")
+        for t in QueuedTask.objects.order_by("created_at", "id")
         if t.task_type != "log_to_channel"
     ]
 

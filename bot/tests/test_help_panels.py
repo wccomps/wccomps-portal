@@ -15,7 +15,7 @@ from bot.cogs.help_panels import (
     create_ticket,
 )
 from bot.discord_queue import DiscordQueueProcessor
-from core.models import DiscordTask, UserGroups
+from core.models import QueuedTask, UserGroups
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory
 
@@ -113,7 +113,7 @@ async def test_help_panel_ticket_queues_its_thread_and_the_queue_makes_it(
     assert "created" in mock_interaction.followup.send.await_args.args[0]
     ticket = await Ticket.objects.aget(team=team)
     assert ticket.discord_thread_id is None
-    task = await DiscordTask.objects.aget(task_type="ticket_created_web")
+    task = await QueuedTask.objects.aget(task_type="ticket_created_web")
     assert task.ticket_id == ticket.pk
 
     with patch("bot.discord_queue.trigger_dashboard") as dashboard:

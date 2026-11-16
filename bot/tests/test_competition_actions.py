@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from bot.competition_actions import run_competition
+from core.models import QueuedTask
 from core.services.competition import CompetitionRunResult
 
 
@@ -203,6 +204,9 @@ async def test_clear_start_time_cancels_the_scheduled_start(mock_interaction, mo
     assert (config.competition_start_time, config.competition_end_time) == (None, end)
     assert (await AuditLog.objects.aget(action="competition_schedule_set")).details["start_time"] is None
     mock_interaction.followup.send.assert_awaited_once()
+    notice = await AuditLog.objects.aget(action="ops_notice")
+    assert notice.details["message"] == f"Scheduled start cleared by {mock_interaction.user.mention}"
+    assert await QueuedTask.objects.filter(task_type="log_to_channel").aexists()
 
 
 @pytest.mark.asyncio
@@ -228,3 +232,32 @@ async def test_clear_start_time_works_on_a_stored_schedule_that_ends_before_it_s
 
     assert (await CompetitionConfig.objects.aget(pk=1)).competition_start_time is None
     mock_interaction.followup.send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_the_broadcast_command_queues_the_broadcast_as_the_portal_does(mock_interaction, mock_bot) -> None:
+    from bot.cogs.admin_competition import AdminCompetitionCog
+    from core.models import AuditLog
+
+    cog = AdminCompetitionCog(mock_bot)
+    await cog.admin_broadcast.callback(cog, mock_interaction, target="1,3", message="Lunch is served")
+
+    task = await QueuedTask.objects.aget(task_type="broadcast_message")
+    assert task.payload == {"target": "1,3", "message": "Lunch is served", "sender": "testuser"}
+    audit = await AuditLog.objects.aget(action="broadcast_message")
+    assert (audit.admin_user, audit.details) == ("testuser", {"target": "1,3", "message_preview": "Lunch is served"})
+    assert "queued" in mock_interaction.followup.send.await_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_the_broadcast_command_refuses_a_message_the_portal_refuses(mock_interaction, mock_bot) -> None:
+    """A NUL can't be stored in the queued row; the portal's form refuses it, and so does the command."""
+    from bot.cogs.admin_competition import AdminCompetitionCog
+
+    cog = AdminCompetitionCog(mock_bot)
+    await cog.admin_broadcast.callback(cog, mock_interaction, target="announcements", message="\x00")
+
+    assert not await QueuedTask.objects.filter(task_type="broadcast_message").aexists()
+    assert mock_interaction.followup.send.await_args.args[0].startswith("Invalid message:")

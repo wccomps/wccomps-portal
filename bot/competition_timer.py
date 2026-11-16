@@ -7,9 +7,9 @@ from asgiref.sync import sync_to_async
 from discord.ext import commands, tasks
 from django.utils import timezone
 
-from bot.competition_actions import run_competition, update_status_channel
+from bot.competition_actions import run_competition
 from bot.heartbeat import beat, beat_for
-from bot.utils import log_to_ops_channel, recycle_db_connection, run_blocking
+from bot.utils import run_blocking
 from core.models import CompetitionConfig
 from core.services.competition import (
     END_AFTER_STOP,
@@ -23,8 +23,16 @@ from core.services.competition import (
     give_up_timer_series,
     queue_due_countdown,
 )
+from core.services.ops import notify_ops
+from core.utils import recycle_db_connection
 
 logger = logging.getLogger(__name__)
+
+
+async def notify(message: str) -> None:
+    """Queue an ops notice, so the timer never waits on chat. The competition service queued any status refresh with
+    the change itself."""
+    await sync_to_async(notify_ops)(message, actor=TIMER_ACTOR)
 
 
 class CompetitionTimer(commands.Cog):
@@ -62,9 +70,8 @@ class CompetitionTimer(commands.Cog):
                 if await sync_to_async(lambda: CompetitionConfig.get_config().stale_end())():
                     await self._clear_missed_window()
                 elif label := await sync_to_async(queue_due_countdown)(now):
-                    await log_to_ops_channel(
-                        self.bot,
-                        f"**Competition Countdown:** queued the {label} remaining announcement for all active teams.",
+                    await notify(
+                        f"**Competition Countdown:** queued the {label} remaining announcement for all active teams."
                     )
             case GiveUp() as plan:
                 await self._give_up(plan)
@@ -79,26 +86,21 @@ class CompetitionTimer(commands.Cog):
             logger.exception("Could not clear a missed competition window")
             return
         if cleared == END_AFTER_STOP:
-            await log_to_ops_channel(self.bot, "**Schedule cleared:** the scheduled end passed after a manual stop.")
-            await update_status_channel(self.bot)
+            await notify("**Schedule cleared:** the scheduled end passed after a manual stop.")
         elif cleared:
-            await log_to_ops_channel(
-                self.bot,
+            await notify(
                 "**Schedule cleared:** its end passed while the competition was stopped and would have refused "
-                "a new start time. Set a new schedule on the Competition setup page.",
+                "a new start time. Set a new schedule on the Competition setup page."
             )
-            await update_status_channel(self.bot)
 
     async def _give_up(self, plan: GiveUp) -> None:
         action = "Start" if plan.enable else "Stop"
         if not await sync_to_async(give_up_timer_series)(plan):
             return
-        await log_to_ops_channel(
-            self.bot,
+        await notify(
             f"**Competition Auto-{action} Incomplete:** the timer stopped retrying, as {plan.reason}. "
-            f"Run {action} again from the competition page.",
+            f"Run {action} again from the competition page."
         )
-        await update_status_channel(self.bot)
 
     async def _attempt(self, attempt: Attempt) -> None:
         action, done = ("Start", "Started") if attempt.enable else ("Stop", "Stopped")
@@ -109,25 +111,22 @@ class CompetitionTimer(commands.Cog):
             logger.exception(f"Competition {action.lower()} attempt {attempt.number} failed: {e}")
             if attempt.number == 1:
                 with contextlib.suppress(Exception):
-                    await log_to_ops_channel(self.bot, f"**Error in competition timer:** {e}")
+                    await notify(f"**Error in competition timer:** {e}")
             return
         match result.outcome:
             case RunOutcome.REFUSED:
                 logger.info(f"Competition {action.lower()} attempt skipped: {result.error}")
             case RunOutcome.ERRORED:
                 if attempt.number == 1:
-                    await log_to_ops_channel(self.bot, f"**Competition Auto-{action} Failed:** {result.error}")
+                    await notify(f"**Competition Auto-{action} Failed:** {result.error}")
             case RunOutcome.INCOMPLETE:
                 if attempt.number == 1:
-                    await log_to_ops_channel(
-                        self.bot,
+                    await notify(
                         f"**Competition Auto-{done}, Incomplete:** retrying each minute, up to {TIMER_ATTEMPTS} "
-                        f"attempts.\n\n{result.summary()}",
+                        f"attempts.\n\n{result.summary()}"
                     )
-                    await update_status_channel(self.bot)
             case RunOutcome.COMPLETE:
                 message = f"**Competition Auto-{done}!**\n\n{result.summary()}"
                 if attempt.number > 1:
                     message += f"\n\nCompleted on attempt {attempt.number}."
-                await log_to_ops_channel(self.bot, message)
-                await update_status_channel(self.bot)
+                await notify(message)

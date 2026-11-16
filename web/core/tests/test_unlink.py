@@ -5,7 +5,7 @@ import re
 import pytest
 from django.contrib.auth.models import User
 
-from core.models import AuditLog, DiscordTask
+from core.models import AuditLog, QueuedTask
 from core.services.linking import unlink_discord_links
 from core.tests.guards import REPO_DIR, fail_with, tracked_files
 from team.models import DiscordLink, Team
@@ -46,7 +46,7 @@ def test_unlinking_ends_each_link_audits_it_and_queues_its_role_sync():
         )
         for n in (31, 32)
     ]
-    syncs = DiscordTask.objects.filter(task_type="sync_member_roles").order_by("id")
+    syncs = QueuedTask.objects.filter(task_type="sync_member_roles").order_by("id")
     assert [t.payload for t in syncs] == [{"discord_id": 31}, {"discord_id": 32}]
 
 
@@ -55,7 +55,7 @@ def test_ended_links_are_left_alone():
 
     assert unlink_discord_links(DiscordLink.objects.all(), actor="gold-admin", reason="admin_unlink") == []
     assert not AuditLog.objects.exists()
-    assert not DiscordTask.objects.exists()
+    assert not QueuedTask.objects.exists()
 
 
 def test_a_caller_syncing_the_whole_guild_after_can_skip_the_per_member_syncs():
@@ -63,7 +63,7 @@ def test_a_caller_syncing_the_whole_guild_after_can_skip_the_per_member_syncs():
 
     unlink_discord_links(DiscordLink.objects.all(), actor="ops", reason="competition_cleanup", sync_roles=False)
 
-    assert not DiscordTask.objects.filter(task_type="sync_member_roles").exists()
+    assert not QueuedTask.objects.filter(task_type="sync_member_roles").exists()
     assert AuditLog.objects.filter(action="user_unlinked").count() == 1
 
 

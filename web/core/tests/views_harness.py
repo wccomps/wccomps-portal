@@ -80,7 +80,7 @@ from scoring.models import (
 )
 
 from core.errors import is_json_endpoint, wants_json_error
-from core.models import AuditLog, BotState, CompetitionConfig, DiscordTask
+from core.models import AuditLog, BotState, CompetitionConfig, QueuedTask
 from core.tests.roles import ROLE_GROUPS, grants, role_user
 from core.tests.strategies import PAYLOADS, field_values, request_text, rolled_back, uploaded_files, valid_values
 from team.models import LinkAttempt, LinkRateLimit, LinkToken, Team
@@ -202,13 +202,13 @@ def build_world() -> World:
     ]
     TicketComment.objects.create(ticket=tickets[0], author=users["blue_team"], comment_text="Hello")
 
-    from core.discord_tasks import SyncRoles
+    from core.queued_tasks import SyncRoles
 
-    sync = DiscordTask.enqueue(SyncRoles(requested_by="prop-admin", dry_run=True))
-    DiscordTask.objects.filter(pk=sync.pk).update(
+    [sync] = QueuedTask.enqueue(SyncRoles(requested_by="prop-admin", dry_run=True))
+    QueuedTask.objects.filter(pk=sync.pk).update(
         status="completed", result={"roles_added": 1, "roles_removed": 0, "errors": 0, "changes": []}
     )
-    pending_task = DiscordTask.enqueue(SyncRoles(requested_by="prop-admin", dry_run=False))
+    [pending_task] = QueuedTask.enqueue(SyncRoles(requested_by="prop-admin", dry_run=False))
 
     # Red team: findings by red (pending and approved), one by admin that red contributes to, a pool, screenshots
     attack = AttackType.objects.filter(is_active=True).first()

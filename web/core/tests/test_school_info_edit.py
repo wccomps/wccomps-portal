@@ -244,10 +244,12 @@ def linked_team():
     from django.contrib.auth.models import User
     from registration.services import set_team_school
 
+    from core.models import QueuedTask
     from team.models import DiscordLink
 
     team = Team.objects.create(team_number=4, team_name="Team 04")
     set_team_school(team, "Example University", contact_email="coach@example.edu")
+    QueuedTask.objects.all().delete()  # the first school's Nextcloud reset, so tests see only what the edit queues
     Team.objects.filter(pk=team.pk).update(discord_role_id=5, discord_category_id=6)
     user = User.objects.create(username="member04")
     DiscordLink.objects.create(discord_id=44, discord_username="m", user=user, team=team, is_active=True)
@@ -267,7 +269,7 @@ def test_a_changed_name_asks_whether_it_is_a_rename_or_a_different_school(client
 
 
 def test_a_rename_keeps_the_members_and_channels(client, linked_team):
-    from core.models import DiscordTask
+    from core.models import QueuedTask
     from team.models import DiscordLink
 
     _edit(client, 4, "Example State University", change="rename")
@@ -275,11 +277,11 @@ def test_a_rename_keeps_the_members_and_channels(client, linked_team):
     assert SchoolInfo.objects.get(team=linked_team).school_name == "Example State University"
     assert DiscordLink.objects.get(discord_id=44).is_active
     assert not Team.objects.get(pk=linked_team.pk).channels_need_clearing
-    assert not DiscordTask.objects.exists()
+    assert not QueuedTask.objects.exists()
 
 
 def test_a_different_school_unlinks_the_members_and_clears_the_channels(client, linked_team):
-    from core.models import AuditLog, DiscordTask
+    from core.models import AuditLog, QueuedTask
     from team.models import DiscordLink
 
     with patch("core.views.reset_team_credentials", return_value=_reset()) as reset:
@@ -296,8 +298,8 @@ def test_a_different_school_unlinks_the_members_and_clears_the_channels(client, 
     audit = AuditLog.objects.get(action="user_unlinked")
     assert (audit.target_id, audit.details["reason"]) == (44, "school_changed")
     assert Team.objects.get(pk=linked_team.pk).channels_need_clearing
-    queued = sorted(DiscordTask.objects.values_list("task_type", flat=True))
-    assert queued == ["clear_team_channels", "sync_member_roles"]
+    queued = sorted(QueuedTask.objects.values_list("task_type", flat=True))
+    assert queued == ["clear_team_channels", "reset_nextcloud_team", "sync_member_roles"]
 
 
 def test_a_different_school_says_when_the_password_reset_failed(client, linked_team):

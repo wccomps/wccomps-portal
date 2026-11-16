@@ -8,11 +8,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 import pytest
+from asgiref.sync import sync_to_async
 from django.utils import timezone
 
 from bot.competition_timer import CompetitionTimer
-from core.models import AuditLog, CompetitionConfig
+from core.models import AuditLog, CompetitionConfig, QueuedTask
+from core.queued_tasks import CompetitionStatusChanged, LogToChannel
 from core.services.competition import Attempt, CompetitionRunResult
+
+
+async def _queued() -> tuple[list[str], int]:
+    """The ops notices queued, in order, each beside its audit row, and how many status refreshes were queued."""
+    payloads = [t.typed_payload() async for t in QueuedTask.objects.order_by("pk")]
+    posts = [p.message for p in payloads if isinstance(p, LogToChannel)]
+    audited = [a.details["message"] async for a in AuditLog.objects.filter(action="ops_notice").order_by("pk")]
+    assert audited == posts
+    return posts, sum(isinstance(p, CompetitionStatusChanged) for p in payloads)
 
 
 @pytest.mark.asyncio
@@ -57,11 +68,7 @@ class TestCompetitionTimer:
 
         with patch("bot.competition_timer.run_competition", new_callable=AsyncMock) as mock_start:
             mock_start.return_value = CompetitionRunResult(enable=True, controlled_apps=["app1"], apps_ok=["app1"])
-            with (
-                patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock),
-                patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
-            ):
-                await timer._check_competition_times()
+            await timer._check_competition_times()
 
             mock_start.assert_called_once()
             assert mock_start.call_args.args == (True,)
@@ -85,9 +92,10 @@ class TestCompetitionTimer:
         with patch("bot.competition_timer.run_competition", new_callable=AsyncMock) as mock_start:
             mock_start.side_effect = Exception("Start error")
 
-            with patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock):
-                # Should not raise exception
-                await timer._check_competition_times()
+            # Should not raise exception
+            await timer._check_competition_times()
+
+        assert await _queued() == (["**Error in competition timer:** Start error"], 0)
 
     async def test_check_competition_times_with_no_config(self) -> None:
         """Test _check_competition_times handles missing config."""
@@ -182,8 +190,8 @@ async def _series(
 
 
 def _fake_runs(outcomes: list[int | None | str]):
-    """Stand-in for run_competition that leaves the config as the real one does: a count of accounts left unchanged,
-    None for a run that errors, "raise" for one that raises."""
+    """Stand-in for run_competition that leaves the config as the real one does, status refresh included: a count of
+    accounts left unchanged, None for a run that errors, "raise" for one that raises."""
     calls = iter(outcomes)
 
     async def run(enable: bool, actor: str, timer: Attempt | None = None) -> CompetitionRunResult:
@@ -195,6 +203,7 @@ def _fake_runs(outcomes: list[int | None | str]):
             return _run(None)
         assert not isinstance(outcome, str)
         await CompetitionConfig.objects.filter(pk=1).aupdate(applications_enabled=enable, competition_start_time=None)
+        await sync_to_async(QueuedTask.enqueue)(CompetitionStatusChanged())
         if outcome:
             await _series(enable, timer.number, timer.first_started, timer.schedule)
         else:
@@ -205,20 +214,22 @@ def _fake_runs(outcomes: list[int | None | str]):
 
 
 async def _ticks(count: int, runs: list[int | None | str], *, restart_after: int | None = None, ops_raise=False):
-    """Tick a timer count times (a new timer after restart_after ticks); the run mock and the ops posts."""
+    """Tick a timer count times (a new timer after restart_after ticks); the run mock, the ops notices queued and the
+    status refreshes queued."""
     timer = CompetitionTimer(AsyncMock(spec=discord.Client))
-    ops_side_effect = RuntimeError("Discord down") if ops_raise else None
     with (
         patch("bot.competition_timer.run_competition", new=AsyncMock(side_effect=_fake_runs(runs))) as start,
-        patch("bot.competition_timer.log_to_ops_channel", new=AsyncMock(side_effect=ops_side_effect)) as ops,
-        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock) as status,
+        patch("bot.competition_timer.notify_ops", side_effect=RuntimeError("queue down"))
+        if ops_raise
+        else contextlib.nullcontext(),
     ):
         for tick in range(count):
             if tick == restart_after:
                 timer = CompetitionTimer(AsyncMock(spec=discord.Client))
             with contextlib.suppress(RuntimeError):
                 await timer._check_competition_times()
-    return start, [call.args[1] for call in ops.await_args_list], status
+    posts, status = await _queued()
+    return start, posts, status
 
 
 GAVE_UP = (
@@ -237,7 +248,7 @@ async def test_an_incomplete_first_attempt_is_announced_and_a_later_one_complete
     assert start.await_count == 2
     assert [p.split("**")[1] for p in posts] == ["Competition Auto-Started, Incomplete:", "Competition Auto-Started!"]
     assert posts[1].endswith("Completed on attempt 2.")
-    assert status.await_count == 2
+    assert status == 2
 
 
 @pytest.mark.asyncio
@@ -249,7 +260,8 @@ async def test_giving_up_is_reported_once_with_a_status_update() -> None:
 
     assert start.await_count == 4
     assert posts[1:] == [GAVE_UP]
-    assert status.await_count == 2
+    # One refresh for each run's change and one for giving up
+    assert status == 5
     config = await CompetitionConfig.objects.aget(pk=1)
     assert (config.timer_series_enable, config.timer_series_attempt) == (None, 0)
     assert await AuditLog.objects.filter(action="competition_timer_gave_up").acount() == 1
@@ -329,7 +341,7 @@ async def test_giving_up_on_a_series_ended_meanwhile_reports_nothing() -> None:
 
     start.assert_not_awaited()
     assert posts == []
-    status.assert_not_awaited()
+    assert status == 0
     assert not await AuditLog.objects.filter(action="competition_timer_gave_up").aexists()
 
 
@@ -340,6 +352,9 @@ async def test_a_run_by_hand_after_an_incomplete_auto_start_ends_the_retries() -
     await _start_due()
     await _ticks(1, [2])
     await _series(None)
+    # Only what the second run queues counts
+    await QueuedTask.objects.all().adelete()
+    await AuditLog.objects.filter(action="ops_notice").adelete()
 
     start, posts, _status = await _ticks(3, [2])
 
@@ -352,7 +367,9 @@ async def test_a_run_by_hand_after_an_incomplete_auto_start_ends_the_retries() -
 async def test_a_complete_auto_start_runs_once_even_when_reporting_it_fails() -> None:
     await _start_due()
 
-    start, _posts, _status = await _ticks(3, [0], ops_raise=True)
+    start, posts, _status = await _ticks(3, [0], ops_raise=True)
+
+    assert posts == []
 
     start.assert_awaited_once()
     config = await CompetitionConfig.objects.aget(pk=1)
@@ -436,19 +453,17 @@ async def test_the_timer_clears_a_missed_window_and_says_so() -> None:
         },
     )
     timer = CompetitionTimer(AsyncMock(spec=discord.Client))
-    with (
-        patch("bot.competition_timer.run_competition", new_callable=AsyncMock) as run,
-        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
-    ):
+    with patch("bot.competition_timer.run_competition", new_callable=AsyncMock) as run:
         await timer._check_competition_times()
         await timer._check_competition_times()
 
     run.assert_not_awaited()
     config = await CompetitionConfig.objects.aget(pk=1)
     assert (config.competition_start_time, config.competition_end_time) == (None, None)
-    ops.assert_awaited_once()
-    assert "Schedule cleared" in ops.await_args.args[1]
+    posts, status = await _queued()
+    assert len(posts) == 1
+    assert "Schedule cleared" in posts[0]
+    assert status == 1
 
 
 @pytest.mark.asyncio
@@ -465,11 +480,7 @@ async def test_the_timer_clears_a_missed_window_that_ends_before_it_starts() -> 
         },
     )
     timer = CompetitionTimer(AsyncMock(spec=discord.Client))
-    with (
-        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock),
-        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
-    ):
-        await timer._check_competition_times()
+    await timer._check_competition_times()
 
     config = await CompetitionConfig.objects.aget(pk=1)
     assert (config.competition_start_time, config.competition_end_time) == (None, None)
@@ -489,14 +500,9 @@ async def test_an_end_passing_after_a_manual_stop_is_not_called_a_missed_window(
         },
     )
     timer = CompetitionTimer(AsyncMock(spec=discord.Client))
-    with (
-        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock) as status,
-    ):
-        await timer._check_competition_times()
+    await timer._check_competition_times()
 
-    assert ops.await_args.args[1] == "**Schedule cleared:** the scheduled end passed after a manual stop."
-    status.assert_awaited_once()
+    assert await _queued() == (["**Schedule cleared:** the scheduled end passed after a manual stop."], 1)
 
 
 @pytest.mark.asyncio
@@ -511,13 +517,10 @@ async def test_an_end_with_no_start_that_passed_is_a_missed_window() -> None:
         },
     )
     timer = CompetitionTimer(AsyncMock(spec=discord.Client))
-    with (
-        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_timer.update_status_channel", new_callable=AsyncMock),
-    ):
-        await timer._check_competition_times()
+    await timer._check_competition_times()
 
-    assert "would have refused a new start time" in ops.await_args.args[1]
+    [post], _status = await _queued()
+    assert "would have refused a new start time" in post
 
 
 @pytest.mark.asyncio
@@ -535,7 +538,6 @@ async def test_the_start_and_stop_commands_ask_for_confirmation_before_running(
         patch("bot.cogs.admin_competition.ConfirmView") as view,
         patch("bot.competition_actions.run_competition", new=AsyncMock(return_value=_run(0))) as run,
         patch("bot.cogs.admin_competition.log_to_ops_channel", new_callable=AsyncMock),
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
     ):
         view.return_value.wait = AsyncMock()
         view.return_value.confirmed = confirmed
@@ -548,8 +550,7 @@ async def test_the_start_and_stop_commands_ask_for_confirmation_before_running(
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
 async def test_timer_queues_1h_and_30m_countdown_announcements_once_each() -> None:
-    from core.discord_tasks import BroadcastMessage
-    from core.models import DiscordTask
+    from core.queued_tasks import BroadcastMessage
     from core.services.competition import COMPETITION_COUNTDOWN_QUEUED, COUNTDOWN_SENDER
 
     now = datetime(2026, 10, 3, 23, 0, tzinfo=timezone.UTC)
@@ -563,34 +564,35 @@ async def test_timer_queues_1h_and_30m_countdown_announcements_once_each() -> No
         },
     )
     timer = CompetitionTimer(AsyncMock(spec=discord.Client))
-    with (
-        patch("bot.competition_timer.timezone.now", return_value=now - timedelta(seconds=30)) as mock_now,
-        patch("bot.competition_timer.log_to_ops_channel", new_callable=AsyncMock) as ops,
-    ):
+    broadcasts = QueuedTask.objects.filter(task_type="broadcast_message")
+    with patch("bot.competition_timer.timezone.now", return_value=now - timedelta(seconds=30)) as mock_now:
         await timer._check_competition_times()
-        assert await DiscordTask.objects.acount() == 0
+        assert await broadcasts.acount() == 0
 
         mock_now.return_value = end_time - timedelta(minutes=59)
         await timer._check_competition_times()
         await timer._check_competition_times()
-        assert await DiscordTask.objects.acount() == 1
+        assert await broadcasts.acount() == 1
 
         mock_now.return_value = end_time - timedelta(minutes=45)
         await timer._check_competition_times()
-        assert await DiscordTask.objects.acount() == 1
+        assert await broadcasts.acount() == 1
 
         mock_now.return_value = end_time - timedelta(minutes=29)
         await timer._check_competition_times()
         await timer._check_competition_times()
-        assert await DiscordTask.objects.acount() == 2
+        assert await broadcasts.acount() == 2
 
-    broadcasts = [t.typed_payload() async for t in DiscordTask.objects.order_by("pk")]
-    assert len(broadcasts) == 2
+    payloads = [t.typed_payload() async for t in broadcasts.order_by("pk")]
+    assert len(payloads) == 2
     assert all(
-        isinstance(b, BroadcastMessage) and b.target == "all-teams" and b.sender == COUNTDOWN_SENDER for b in broadcasts
+        isinstance(b, BroadcastMessage) and b.target == "all-teams" and b.sender == COUNTDOWN_SENDER for b in payloads
     )
-    assert isinstance(broadcasts[0], BroadcastMessage) and "1 hour remaining" in broadcasts[0].message
-    assert "Oct 3, 2026, 5:00 PM PDT" in broadcasts[0].message
-    assert isinstance(broadcasts[1], BroadcastMessage) and "30 minutes remaining" in broadcasts[1].message
+    assert isinstance(payloads[0], BroadcastMessage) and "1 hour remaining" in payloads[0].message
+    assert "Oct 3, 2026, 5:00 PM PDT" in payloads[0].message
+    assert isinstance(payloads[1], BroadcastMessage) and "30 minutes remaining" in payloads[1].message
     assert await AuditLog.objects.filter(action=COMPETITION_COUNTDOWN_QUEUED).acount() == 2
-    assert ops.await_count == 2
+    posts, status = await _queued()
+    assert len(posts) == 2
+    assert all(p.startswith("**Competition Countdown:** queued the ") for p in posts)
+    assert status == 0

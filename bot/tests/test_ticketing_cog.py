@@ -12,7 +12,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 from bot.cogs.ticketing import TicketingCog
-from core.models import DiscordTask, UserGroups
+from core.models import QueuedTask, UserGroups
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory, TicketComment, TicketHistory
 
@@ -605,7 +605,7 @@ class TestTicketCommand:
         assert ticket.ip_address == "10.0.0.5"
 
         # The queue gives it its thread
-        thread_tasks = DiscordTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
+        thread_tasks = QueuedTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
         assert await thread_tasks.acount() == 1
 
     async def test_create_ticket_defers_first_and_queues_the_thread_even_if_the_reply_fails(
@@ -628,7 +628,7 @@ class TestTicketCommand:
         assert interaction.mock_calls[0] == call.response.defer(ephemeral=True)
         interaction.response.send_message.assert_not_called()
         ticket = await Ticket.objects.aget(team=team)
-        thread_tasks = DiscordTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
+        thread_tasks = QueuedTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
         assert await thread_tasks.acount() == 1
 
     async def test_create_ticket_auto_populates_ip_from_hostname(

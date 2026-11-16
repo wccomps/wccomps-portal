@@ -11,16 +11,17 @@ from datetime import datetime
 from typing import TYPE_CHECKING, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Page, Paginator
-from django.db import DatabaseError, InterfaceError, connection, transaction
+from django.db import DatabaseError, InterfaceError, close_old_connections, connection, transaction
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import Model, QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 
-from core.discord_tasks import SyncRolesResult
+from core.queued_tasks import SyncRolesResult
 
 if TYPE_CHECKING:
     from team.models import Team
@@ -410,3 +411,14 @@ def drain[R](steps: Generator[object, None, R]) -> R:
     for _ in stepped:
         pass
     return stepped.result
+
+
+async def recycle_db_connection() -> None:
+    """Drop a long-running process's DB connection if it is broken or past CONN_MAX_AGE; the next query reconnects.
+
+    Django only does this on request_started/request_finished, and the bot and the queues serve no requests,
+    so after a Postgres restart their single connection stayed dead and every loop failed forever.
+    Must run via sync_to_async's default (thread_sensitive=True) executor: that one thread owns
+    the connection the process's ordinary ORM calls use.
+    """
+    await sync_to_async(close_old_connections)()

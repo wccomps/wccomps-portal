@@ -11,7 +11,7 @@ from bot.cogs.admin_tickets import AdminTicketsCog
 from bot.cogs.ticketing import TicketingCog
 from bot.tests.discord_fakes import competition_thread
 from bot.ticket_dashboard import ResolveTicketModal, TicketActionView
-from core.models import DiscordTask
+from core.models import QueuedTask
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 
@@ -88,7 +88,7 @@ def _bot_client() -> tuple[MagicMock, MagicMock]:
 async def _effects(ticket: Ticket) -> tuple[list[str], list[str], list[int]]:
     """(history actions, post_ticket_update actions, discord ids invited to the thread)."""
     history = [h.action async for h in TicketHistory.objects.filter(ticket=ticket).order_by("pk")]
-    tasks = [t async for t in DiscordTask.objects.filter(ticket=ticket).order_by("pk")]
+    tasks = [t async for t in QueuedTask.objects.filter(ticket=ticket).order_by("pk")]
     return (
         history,
         [t.payload["action"] for t in tasks if t.task_type == "post_ticket_update"],

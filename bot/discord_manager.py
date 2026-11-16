@@ -13,8 +13,8 @@ from django.utils import timezone
 
 from bot.cogs.help_panels import HelpPanelsCog, TicketButton, _has_button
 from bot.role_sync import sync_member_roles
+from bot.utils import announcement as announcement_text
 from bot.utils import (
-    TaskProgress,
     category_chat_channel,
     find_team_category,
     find_team_role,
@@ -24,9 +24,9 @@ from bot.utils import (
     team_category_name,
     team_role_name,
 )
-from bot.utils import announcement as announcement_text
-from core.discord_tasks import SetupTeamInfrastructure
-from core.models import DiscordTask, QueuedAnnouncement
+from core.models import QueuedAnnouncement, QueuedTask
+from core.queued_tasks import SetupTeamInfrastructure
+from core.task_queue import StepsState, TaskProgress
 from team.models import Team
 from ticketing.models import Ticket
 
@@ -95,7 +95,7 @@ def _record_teardown(team: Team, cleared: list[str], then_setup: bool) -> None:
     with transaction.atomic():
         team.save(update_fields=[*cleared, "channels_need_clearing"])
         if then_setup and not team.channels_need_clearing and team.members.filter(is_active=True).exists():
-            DiscordTask.enqueue(SetupTeamInfrastructure(team_number=team.team_number))
+            QueuedTask.enqueue(SetupTeamInfrastructure(team_number=team.team_number))
 
 
 class TeamInfrastructureError(Exception):
@@ -128,7 +128,7 @@ async def recreate_team_infrastructure(
     team: Team,
     reason: str,
     bot: discord.Client | None = None,
-    progress: TaskProgress | None = None,
+    progress: TaskProgress[StepsState] | None = None,
 ) -> tuple[list[str], discord.CategoryChannel]:
     """Delete what the team has in Discord and set it up again; returns what was deleted and the new category. With
     progress the delete counts as a step, so a retry keeps what the first attempt built."""
@@ -304,7 +304,9 @@ async def _deliver_queued_announcements(team: Team, channel: discord.TextChannel
     delivered = 0
     for queued in announcements:
         try:
-            await send_parts(channel, announcement_text(queued.sender_name, queued.message))
+            # No queued task runs this delivery: one that fails partway is sent whole again at the next setup
+            progress = TaskProgress.in_memory(StepsState())
+            await send_parts(channel, announcement_text(queued.sender_name, queued.message), progress=progress)
             queued.delivered_at = timezone.now()
             await queued.asave()
             delivered += 1

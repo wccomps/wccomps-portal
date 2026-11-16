@@ -40,7 +40,6 @@ from core.admin_views.readiness import READINESS_FIXES, action_readiness_check, 
 from core.authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
 from core.authentik_utils import credentials_csv, reset_teams_credentials
 from core.competition_utils import WipedData, competition_data_counts
-from core.discord_tasks import LogToChannel
 from core.errors import json_endpoint
 from core.forms import (
     ActionForm,
@@ -52,7 +51,7 @@ from core.forms import (
     StartMessageForm,
     TypedConfirmForm,
 )
-from core.models import MAX_TEAM_MEMBERS_LIMIT, CompetitionConfig, DiscordTask
+from core.models import MAX_TEAM_MEMBERS_LIMIT, CompetitionConfig
 from core.services.competition import (
     KEEP,
     ConfigEditError,
@@ -63,6 +62,7 @@ from core.services.competition import (
     set_schedule,
     set_start_message,
 )
+from core.services.ops import notify_ops
 from core.utils import Stepped, drain, ndjson_done, run_detached
 from core.utils import ndjson_progress as _progress
 from team.models import active_team_numbers, single_account
@@ -174,11 +174,11 @@ def _stream_competition_run(enable: bool, authentik_username: str) -> Iterator[s
             message, complete = result.summary(), False
         case RunOutcome.INCOMPLETE:
             ops = f"**Competition {verb} (incomplete)** by {authentik_username} (web)\n{result.summary()}"
-            DiscordTask.enqueue(LogToChannel(message=ops))
+            notify_ops(ops, actor=authentik_username)
             message, complete = f"Incomplete: run {'Start' if enable else 'Stop'} again.\n{result.summary()}", False
         case RunOutcome.COMPLETE:
             ops = f"**Competition {verb}** by {authentik_username} (web)\n{result.summary()}"
-            DiscordTask.enqueue(LogToChannel(message=ops))
+            notify_ops(ops, actor=authentik_username)
             message, complete = result.summary(), True
     yield ndjson_done(message, success=complete)
 

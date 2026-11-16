@@ -38,7 +38,6 @@ from bot.unified_dashboard import DashboardControlView
 from core.tests.strategies import file_bytes, file_names, rolled_back
 from core.tests.views_harness import views_profile
 
-BROADCAST = Command(AdminCompetitionCog, AdminCompetitionCog.admin_broadcast.callback, may("admin"))
 RESOLVE = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_resolve.callback, may("ticketing_support"))
 REASSIGN = Command(AdminTicketsCog, AdminTicketsCog.admin_ticket_reassign.callback, may("ticketing_admin"))
 TICKET = Command(TicketingCog, TicketingCog.create_ticket.callback, frozenset({"blue_team", "other_team"}))
@@ -58,13 +57,39 @@ def in_a_ticket_thread(world: World, content: str, **more: object) -> Chosen:
     return Chosen({"role": "blue_team", "channel": "ticket thread", "thread": thread, "content": content, **more})
 
 
+def send_queued_broadcast(world: World, target: str, message: str) -> None:
+    """Run a broadcast the portal's form accepts (the command checks with it too) as the queue does, checking each
+    message sent is one Discord takes and pings nothing past what the bot allows."""
+    from asgiref.sync import async_to_sync
+
+    from bot.discord_queue import DiscordQueueProcessor
+    from core.forms import BroadcastForm
+    from core.models import QueuedTask
+
+    form = BroadcastForm({"target": target, "message": message})
+    if not form.is_valid():
+        return  # never queued: the command and the portal refuse it
+    with rolled_back(), discord_world(world, confirm=True) as fakes:
+        processor = DiscordQueueProcessor(fakes.bot)
+        task = QueuedTask.objects.create(
+            task_type="broadcast_message",
+            payload={**form.cleaned_data, "sender": "g"},
+            status="processing",
+        )
+        async_to_sync(processor.dispatch)(task.typed_payload(), task)
+        assert fakes.sent
+        for sent in fakes.sent:
+            assert not sent_problems(sent), sent_problems(sent)
+            assert not mention_problems(sent, fakes.bot.allowed_mentions)
+
+
 @example(message="@everyone the scoring engine is back")
 @views_profile()
 @given(message=option_text(1, 1000))
 def test_an_announcement_pings_only_the_blueteam_role(bot_world: World, message: str) -> None:
     """The bot set no default allowed mentions, so any message it sent pinged everything it named: @everyone in a
     broadcast, and every user an ops log line mentioned."""
-    drive(BROADCAST, bot_world, Chosen({"role": "admin", "target": "announcements", "message": message}))
+    send_queued_broadcast(bot_world, "announcements", message)
 
 
 @example(ticket_number="T001-001\x00")
@@ -257,29 +282,7 @@ def test_a_reopen_reply_repeats_only_the_start_of_the_reason(bot_world: World, r
 @given(target=st.sampled_from(("announcements", "1", "all-teams")), message=option_text(1900, 6000))
 def test_a_long_broadcast_is_sent_in_parts(bot_world: World, target: str, message: str) -> None:
     """A broadcast over 2000 characters (with its header) went out as one message, which Discord refuses."""
-    drive(BROADCAST, bot_world, Chosen({"role": "admin", "target": target, "message": message}))
-
-
-@example(target="1", message="m" * 3000)
-@views_profile()
-@given(target=st.sampled_from(("announcements", "1")), message=option_text(1900, 6000))
-def test_a_long_web_broadcast_is_sent_in_parts(bot_world: World, target: str, message: str) -> None:
-    """The queue sent a broadcast from the portal as one message too, and Discord refused one over 2000."""
-    from asgiref.sync import async_to_sync
-
-    from bot.discord_queue import DiscordQueueProcessor
-    from bot.utils import TaskProgress
-    from core.discord_tasks import BroadcastMessage
-
-    with rolled_back(), discord_world(bot_world, confirm=True) as fakes:
-        processor = DiscordQueueProcessor(fakes.bot)
-        async_to_sync(processor._handle_broadcast_message)(
-            BroadcastMessage(target=target, message=message, sender="g"), TaskProgress()
-        )
-        assert fakes.sent
-        for sent in fakes.sent:
-            assert not sent_problems(sent), sent_problems(sent)
-            assert not mention_problems(sent, fakes.bot.allowed_mentions)
+    send_queued_broadcast(bot_world, target, message)
 
 
 @example(filename="shot\x00.png", content_type="image/png" + "x" * 200, data=b"<svg onload=alert(1)>")

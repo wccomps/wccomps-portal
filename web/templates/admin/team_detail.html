@@ -34,12 +34,14 @@
                     <c-detail_row label="Current Members">
                         {{ members|length }}/{{ team.max_members }}
                     </c-detail_row>
-                    <c-detail_row label="Discord Category">
-                        {{ team.discord_category_id|default:"Not set" }}
-                    </c-detail_row>
-                    <c-detail_row label="Discord Role">
-                        {{ team.discord_role_id|default:"Not set" }}
-                    </c-detail_row>
+                    {% if discord_enabled %}
+                        <c-detail_row label="Discord Category">
+                            {{ team.discord_category_id|default:"Not set" }}
+                        </c-detail_row>
+                        <c-detail_row label="Discord Role">
+                            {{ team.discord_role_id|default:"Not set" }}
+                        </c-detail_row>
+                    {% endif %}
                     <c-detail_row label="Authentik Group">
                         {{ team.authentik_group }}
                     </c-detail_row>
@@ -72,13 +74,15 @@
                             Reset Team
                         </c-button>
                     {% endif %}
-                    <c-button variant="default"
-                              @click="teamAction"
-                              data-action="recreate_channels"
-                              data-confirm="Are you sure you want to recreate Discord channels for this team?"
-                              ::disabled="loading">
-                        Recreate Discord Channels
-                    </c-button>
+                    {% if discord_enabled %}
+                        <c-button variant="default"
+                                  @click="teamAction"
+                                  data-action="recreate_channels"
+                                  data-confirm="Are you sure you want to recreate Discord channels for this team?"
+                                  ::disabled="loading">
+                            Recreate Discord Channels
+                        </c-button>
+                    {% endif %}
                     {% if single_account %}
                         {% include "admin/includes/team_password_reset.html" with team_number=team.team_number %}
                     {% endif %}
@@ -91,55 +95,57 @@
                 </template>
             </c-module>
         </div>
-        <c-module class="mt-20">
-            <c-slot name="title">
-                Linked Members ({{ members|length }})
-            </c-slot>
-            <p x-show="membersUnlinked" class="help-text">All members were unlinked. Each one runs /link again to rejoin.</p>
-            {% if members %}
-                <c-table id="members_list" class="w-full" aria_label="Team members" x-show="membersShown">
-                    <c-slot name="headers">
-                        <tr>
-                            <c-table_header sortable="false">
-                                Discord Username
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Authentik Username
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Discord ID
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Linked At
-                            </c-table_header>
-                            <c-table_header sortable="false">
-                                Action
-                            </c-table_header>
-                        </tr>
-                    </c-slot>
-                    {% for member in members %}
-                        <tr>
-                            <td>{{ member.discord_username }}</td>
-                            <td>{{ member.user.username }}</td>
-                            <td>{{ member.discord_id }}</td>
-                            <td>{{ member.linked_at|timesince }} ago</td>
-                            <td>
-                                <c-button variant="danger"
-                                          @click="unlinkUser"
-                                          data-discord-id="{{ member.discord_id }}"
-                                          data-confirm="Unlink {{ member.discord_username }} from this team?"
-                                          ::disabled="loading">
-                                    Unlink
-                                </c-button>
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </c-table>
-            {% else %}
-                <c-empty_state title="No members linked"
-                               description="Members will appear here when they link their Discord accounts." />
-            {% endif %}
-        </c-module>
+        {% if discord_enabled %}
+            <c-module class="mt-20">
+                <c-slot name="title">
+                    Linked Members ({{ members|length }})
+                </c-slot>
+                <p x-show="membersUnlinked" class="help-text">All members were unlinked. Each one runs /link again to rejoin.</p>
+                {% if members %}
+                    <c-table id="members_list" class="w-full" aria_label="Team members" x-show="membersShown">
+                        <c-slot name="headers">
+                            <tr>
+                                <c-table_header sortable="false">
+                                    Discord Username
+                                </c-table_header>
+                                <c-table_header sortable="false">
+                                    Authentik Username
+                                </c-table_header>
+                                <c-table_header sortable="false">
+                                    Discord ID
+                                </c-table_header>
+                                <c-table_header sortable="false">
+                                    Linked At
+                                </c-table_header>
+                                <c-table_header sortable="false">
+                                    Action
+                                </c-table_header>
+                            </tr>
+                        </c-slot>
+                        {% for member in members %}
+                            <tr>
+                                <td>{{ member.discord_username }}</td>
+                                <td>{{ member.user.username }}</td>
+                                <td>{{ member.discord_id }}</td>
+                                <td>{{ member.linked_at|timesince }} ago</td>
+                                <td>
+                                    <c-button variant="danger"
+                                              @click="unlinkUser"
+                                              data-discord-id="{{ member.discord_id }}"
+                                              data-confirm="Unlink {{ member.discord_username }} from this team?"
+                                              ::disabled="loading">
+                                        Unlink
+                                    </c-button>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </c-table>
+                {% else %}
+                    <c-empty_state title="No members linked"
+                                   description="Members will appear here when they link their Discord accounts." />
+                {% endif %}
+            </c-module>
+        {% endif %}
         <c-toast />
     </div>
     <script>

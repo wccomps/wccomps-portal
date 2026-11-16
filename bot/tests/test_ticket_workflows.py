@@ -9,8 +9,8 @@ from asgiref.sync import sync_to_async
 
 from bot.discord_queue import DiscordQueueProcessor
 from bot.tests.discord_fakes import BOT_USER, recording_thread, ticket_message
-from core.discord_tasks import TicketCreatedWeb
-from core.models import DiscordTask
+from core.models import QueuedTask
+from core.queued_tasks import TicketCreated
 from team.models import Team
 from ticketing.models import Ticket
 
@@ -39,7 +39,7 @@ class TestTicketCreationWorkflow:
         )
 
         # Create Discord task (simulating web UI)
-        task = await DiscordTask.objects.acreate(
+        task = await QueuedTask.objects.acreate(
             task_type="ticket_created_web",
             payload={
                 "ticket_id": ticket.id,
@@ -119,7 +119,7 @@ class TestTicketCreationWorkflow:
             status="open",
             discord_thread_id=9999,
         )
-        task = await sync_to_async(DiscordTask.enqueue)(TicketCreatedWeb(ticket_id=ticket.id))
+        [task] = await sync_to_async(QueuedTask.enqueue)(TicketCreated(ticket_id=ticket.id))
 
         thread = recording_thread(9999, pinned_text=ticket_message(ticket.ticket_number))
         bot = MagicMock(spec=discord.Client)
@@ -260,7 +260,7 @@ class TestTicketResolutionWorkflow:
                 points=0,
             )
 
-        tasks = [t async for t in DiscordTask.objects.filter(ticket=ticket)]
+        tasks = [t async for t in QueuedTask.objects.filter(ticket=ticket)]
         assert [(t.task_type, t.payload["action"]) for t in tasks] == [("post_ticket_update", "resolved")]
 
     async def test_cannot_resolve_already_resolved_ticket(

@@ -14,8 +14,8 @@ from bot.permissions import check_blue_team, linked_team_member, may_write_to_ti
 from bot.thread_creator import ticket_thread
 from bot.ticket_input import file_ticket
 from bot.utils import add_field, choices, pinging, run_blocking
-from core.discord_tasks import SyncMemberRoles
-from core.models import DiscordTask
+from core.models import QueuedTask
+from core.queued_tasks import SyncMemberRoles
 from team.models import DiscordLink
 from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
 from ticketing.utils import get_user_for_ticket
@@ -182,7 +182,7 @@ class TicketingCog(commands.Cog):
         if member.guild.id != settings.COMPETITION_GUILD_ID:
             return
         if await DiscordLink.objects.filter(discord_id=member.id, is_active=True).aexists():
-            await sync_to_async(DiscordTask.enqueue)(SyncMemberRoles(discord_id=member.id))
+            await sync_to_async(QueuedTask.enqueue)(SyncMemberRoles(discord_id=member.id))
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:

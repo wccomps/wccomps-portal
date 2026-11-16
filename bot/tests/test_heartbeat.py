@@ -132,15 +132,16 @@ async def test_the_dashboard_beats_only_after_a_successful_pass(work_fails, beat
 
 def _queue(monkeypatch, pending: list[object], handle) -> object:
     from bot import discord_queue
+    from core import task_queue
 
     processor = discord_queue.DiscordQueueProcessor(_open_bot())
-    monkeypatch.setattr(discord_queue, "recycle_db_connection", AsyncMock())
-    monkeypatch.setattr(processor, "_recover_stranded_tasks", AsyncMock())
+    monkeypatch.setattr(task_queue, "recycle_db_connection", AsyncMock())
+    monkeypatch.setattr(processor, "recover_stranded", AsyncMock())
     monkeypatch.setattr(processor, "_process_task", handle)
 
     batches = iter([pending])
     monkeypatch.setattr(
-        discord_queue,
+        task_queue,
         "sync_to_async",
         lambda func: (lambda: _first(batches)) if func.__name__ == "get_pending_tasks" else func,
     )
@@ -203,3 +204,23 @@ async def test_a_cancelled_loop_stops_beating(beats, monkeypatch):
     await asyncio.sleep(0.1)
 
     assert len(beats) == after_stop
+
+
+@pytest.mark.asyncio
+async def test_the_worker_queue_the_bot_hosts_beats_its_own_heartbeat(beats, monkeypatch):
+    """Wired as main.py wires it, so the bot's health check also covers the worker queue it runs."""
+    from core import task_queue
+    from core.worker_tasks import WorkerQueueProcessor
+
+    bot = _open_bot()
+    processor = WorkerQueueProcessor(on_start=lambda name: heartbeat.beat_for(name, bot), on_pass=heartbeat.beat)
+    monkeypatch.setattr(task_queue, "recycle_db_connection", AsyncMock())
+    monkeypatch.setattr(processor, "recover_stranded", AsyncMock())
+    monkeypatch.setattr(task_queue, "sync_to_async", lambda func: lambda: _first(iter([])))
+    processor.QUEUE_POLL_INTERVAL_SECONDS = 0.01
+
+    processor.start()
+    await asyncio.sleep(0.05)
+    processor.stop()
+
+    assert beats and set(beats) == {"queue-worker"}

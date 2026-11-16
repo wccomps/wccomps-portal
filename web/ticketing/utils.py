@@ -14,8 +14,8 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
-from core.discord_tasks import TicketCreatedWeb
-from core.models import DiscordTask
+from core.models import QueuedTask
+from core.queued_tasks import TicketCreated
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory, TicketHistory
 
@@ -116,7 +116,7 @@ def create_ticket_atomic(
             action="created",
             details={"created_by": actor_username},
         )
-        DiscordTask.enqueue(TicketCreatedWeb(ticket_id=ticket.id))
+        QueuedTask.enqueue(TicketCreated(ticket_id=ticket.id))
 
     return ticket
 

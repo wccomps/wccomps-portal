@@ -11,7 +11,8 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
-from core import discord_tasks
+from core import queued_tasks
+from core.task_backends import TaskBackend
 
 
 class Approvable(models.Model):
@@ -102,8 +103,8 @@ class AuditLog(models.Model):
         return f"{self.action} by {self.admin_user}"
 
 
-class InvalidPayloadError(discord_tasks.PermanentTaskError):
-    """A DiscordTask row no payload type can be built from."""
+class InvalidPayloadError(queued_tasks.PermanentTaskError):
+    """A QueuedTask row no payload type can be built from."""
 
 
 def _matches(value: object, annotation: object) -> bool:
@@ -117,8 +118,9 @@ def _matches(value: object, annotation: object) -> bool:
     )
 
 
-class DiscordTask(models.Model):
-    """Work queued for the bot (bot/discord_queue.py); the task types are core/discord_tasks.py's payloads."""
+class QueuedTask(models.Model):
+    """Work queued for one backend (its core.task_queue.QueueProcessor runs it); the task types are
+    core/queued_tasks.py's payloads."""
 
     STATUS_CHOICES = [
         ("pending", "Pending"),
@@ -128,10 +130,13 @@ class DiscordTask(models.Model):
     ]
 
     task_type = models.CharField(
-        max_length=50, choices=[(t, cls.label) for t, cls in discord_tasks.PAYLOAD_TYPES.items()]
+        max_length=50, choices=[(t, cls.label) for t, cls in queued_tasks.PAYLOAD_TYPES.items()]
     )
     ticket = models.ForeignKey("ticketing.Ticket", null=True, blank=True, on_delete=models.CASCADE)
     payload = models.JSONField(default=dict)
+    backend = models.CharField(
+        max_length=20, choices=TaskBackend.choices, default=TaskBackend.DISCORD, db_default=TaskBackend.DISCORD
+    )
     result = models.JSONField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     retry_count = models.IntegerField(default=0)
@@ -143,9 +148,11 @@ class DiscordTask(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        # Kept so pods on the previous release keep reading and writing the same table while a deploy rolls
+        db_table = "core_discordtask"
         ordering = ["created_at"]
         indexes = [
-            models.Index(fields=["status", "next_retry_at"]),
+            models.Index(fields=["backend", "status", "next_retry_at"]),
             models.Index(fields=["task_type", "status"]),
         ]
 
@@ -155,20 +162,20 @@ class DiscordTask(models.Model):
     def clean(self) -> None:
         from django.core.exceptions import ValidationError
 
-        if self.task_type not in discord_tasks.PAYLOAD_TYPES:
+        if self.task_type not in queued_tasks.PAYLOAD_TYPES:
             return  # task_type's choices report it
         try:
             self.typed_payload()
         except InvalidPayloadError as e:
             raise ValidationError(f"Payload for {self.task_type} is invalid: {e}") from e
 
-    def typed_payload(self) -> discord_tasks.TaskPayload:
+    def typed_payload(self) -> queued_tasks.TaskPayload:
         """The payload built from the stored row; raises InvalidPayloadError when it can't be.
 
         Keys the type doesn't declare are dropped: rows outlive the code that wrote them. A missing ticket_id comes
         from the ticket FK.
         """
-        cls = discord_tasks.PAYLOAD_TYPES.get(self.task_type)
+        cls = queued_tasks.PAYLOAD_TYPES.get(self.task_type)
         if cls is None:
             remedy = (
                 "The next event's import tears the team channels down, or run /competition cleanup-competition "
@@ -194,14 +201,21 @@ class DiscordTask(models.Model):
         return cls(**kwargs)
 
     @classmethod
-    def enqueue(cls, payload: discord_tasks.TaskPayload) -> DiscordTask:
-        """A payload's ticket_id also sets the ticket FK, so deleting a ticket drops its pending tasks."""
-        return cls.objects.create(
-            task_type=payload.task_type,
-            ticket_id=getattr(payload, "ticket_id", None),
-            payload=asdict(payload),
-            status="pending",
-        )
+    def enqueue(cls, payload: queued_tasks.TaskPayload) -> list[QueuedTask]:
+        """One row per backend from backends_for.
+
+        A payload's ticket_id also sets the ticket FK, so deleting a ticket drops its pending tasks.
+        """
+        return [
+            cls.objects.create(
+                task_type=payload.task_type,
+                backend=backend,
+                ticket_id=getattr(payload, "ticket_id", None),
+                payload=asdict(payload),
+                status="pending",
+            )
+            for backend in queued_tasks.backends_for(payload)
+        ]
 
 
 class BotState(models.Model):
@@ -267,7 +281,9 @@ class CompetitionConfig(models.Model):
         null=True, blank=True, help_text="Team accounts the last start tried to turn on"
     )
     start_broadcasts = models.JSONField(
-        default=list, blank=True, help_text="The DiscordTasks a start queued to post the start message"
+        default=list,
+        blank=True,
+        help_text="The QueuedTasks (one per chat backend) a start queued to post the start message",
     )
     started_this_window = models.BooleanField(
         default=False,

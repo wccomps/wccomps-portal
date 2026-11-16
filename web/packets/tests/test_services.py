@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 from registration.models import School
 
-from core.models import AuditLog, DiscordTask
+from core.models import AuditLog, QueuedTask
 from team.models import SchoolInfo, Team
 
 from ..models import Packet, PacketDistribution
@@ -180,7 +180,7 @@ class PacketDistributionServiceTestCase(TestCase):
 
         manager.user_sessions.assert_not_called()
         manager.end_sessions.assert_not_called()
-        self.assertFalse(DiscordTask.objects.filter(task_type="log_to_channel").exists())
+        self.assertFalse(QueuedTask.objects.filter(task_type="log_to_channel").exists())
 
     @patch("packets.services.EmailMultiAlternatives")
     def test_failed_password_set_sends_nothing(self, mock_email_class):

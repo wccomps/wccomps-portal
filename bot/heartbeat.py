@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DIR = "/app/run/heartbeat"
 
-# Allowed age per loop, several missed passes each: queue polls every 2s, dashboard every 10s,
-# competition timer every 60s.
-BUDGET_SECONDS: dict[str, int] = {"queue": 60, "dashboard": 120, "timer": 300}
+# Allowed age per loop, several missed passes each: the Discord and worker queues poll every 2s (the bot hosts the
+# worker queue until the worker process exists), dashboard every 10s, competition timer every 60s.
+BUDGET_SECONDS: dict[str, int] = {"queue": 60, "queue-worker": 60, "dashboard": 120, "timer": 300}
 
 
 class _ClosableBot(Protocol):
