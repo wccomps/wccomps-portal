@@ -1,15 +1,18 @@
 """Messages in a ticket's Zulip topic become its comments: only the stream's own team's tickets, each message once,
-under the same rate limit as the web and Discord; edits and deletes carry over and go no further. The runner's event
-loop re-registers a lost queue and rides out Zulip being unreachable."""
+under the same rate limit as the web and Discord; edits and deletes carry over and go no further. Uploaded files
+become the ticket's attachments, each message's once. The runner's event loop re-registers a lost queue and rides
+out Zulip being unreachable."""
 
 import asyncio
 
 import httpx
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from chat.tests.conftest import FakeZulip, message
 from chat.zulip import runner
-from chat.zulip.client import ZulipError
+from chat.zulip.client import LONG_POLL_READ_TIMEOUT, UPLOAD_PREFIX, ZulipError
 from chat.zulip.incoming import (
     IncomingMessage,
     apply_delete,
@@ -18,11 +21,15 @@ from chat.zulip.incoming import (
     edited_message,
     parse_message_event,
     save_message,
+    upload_links,
 )
 from chat.zulip.naming import ticket_topic
-from core.heartbeat import EVENTS_ZULIP
+from core.heartbeat import BUDGETS, EVENTS_ZULIP
 from core.models import QueuedTask
-from ticketing.models import Ticket, TicketComment
+from ticketing.models import Ticket, TicketAttachment, TicketComment
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+PDF = b"%PDF-1.7\n" + b"\x00" * 16
 
 # The async ORM runs on another thread's connection, which sees only committed rows
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -193,6 +200,98 @@ async def test_edit_and_delete_carry_over(fake_zulip, ticket):
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# Attachments
+# ---------------------------------------------------------------------------------------------------------------
+
+
+def test_upload_links_finds_the_sites_uploads_only():
+    content = (
+        "logs [a.txt](/user_uploads/2/ab/a.txt) and [site](https://example.org/x.png) "
+        "[b](/user_uploads/2/../../api/v1/users) [again](/user_uploads/2/ab/a.txt) [](/user_uploads/2/cd/c.png)"
+    )
+
+    assert upload_links(content) == [("a.txt", "/user_uploads/2/ab/a.txt"), ("", "/user_uploads/2/cd/c.png")]
+
+
+_LINK_PARTS = st.sampled_from(["[", "]", "(", ")", UPLOAD_PREFIX, "..", "/", " ", "\n", "a.png", "https://x/"])
+
+
+@given(st.lists(st.one_of(st.text(), _LINK_PARTS)).map("".join))
+def test_upload_links_reads_any_text(content):
+    for name, path in upload_links(content):
+        assert isinstance(name, str)
+        assert path.startswith(UPLOAD_PREFIX) and ".." not in path.split("/")
+
+
+async def test_uploads_become_attachments_with_clean_names_and_sniffed_types(fake_zulip, ticket):
+    fake_zulip.uploads = {"/user_uploads/2/ab/shot.bin": PNG, "/user_uploads/2/cd/report.pdf": PDF}
+    content = "[shot.bin](/user_uploads/2/ab/shot.bin)\n[re\u202eport.pdf](/user_uploads/2/cd/report.pdf)"
+
+    await save_message(fake_zulip, message(topic=ticket_topic(ticket), content=content, sender_name="Member"))
+
+    stored = [(a.filename, a.mime_type, a.uploaded_by, a.ticket_id) async for a in TicketAttachment.objects.all()]
+    assert stored == [
+        ("shot.bin", "image/png", "Member", ticket.id),
+        ("report.pdf", "application/pdf", "Member", ticket.id),
+    ]
+    assert fake_zulip.reactions == [(77, "paperclip")]
+    # Only files, as a Discord message with only attachments: no comment
+    assert not await TicketComment.objects.aexists()
+
+
+async def test_text_beside_an_upload_is_the_comment(fake_zulip, ticket):
+    fake_zulip.uploads = {"/user_uploads/2/ab/a.txt": b"log"}
+
+    await save_message(fake_zulip, message(topic=ticket_topic(ticket), content="see [a.txt](/user_uploads/2/ab/a.txt)"))
+
+    assert (await TicketComment.objects.aget()).comment_text == "see"
+    assert await TicketAttachment.objects.acount() == 1
+
+
+async def test_an_oversize_upload_is_not_stored_and_replied_to(fake_zulip, ticket):
+    fake_zulip.uploads = {"/user_uploads/2/ab/big.iso": b"x" * (TicketAttachment.MAX_SIZE + 1)}
+
+    await save_message(fake_zulip, message(topic=ticket_topic(ticket), content="[big.iso](/user_uploads/2/ab/big.iso)"))
+
+    assert not await TicketAttachment.objects.aexists()
+    assert fake_zulip.sent_to("team03") == ["Member: File too large (max 10MB). Please use a file sharing service."]
+    assert fake_zulip.reactions == []
+
+
+async def test_an_upload_that_cant_be_fetched_is_replied_to(fake_zulip, ticket, monkeypatch):
+    async def gone(path: str, max_bytes: int) -> bytes | None:
+        raise ZulipError("HTTP_404")
+
+    monkeypatch.setattr(fake_zulip, "fetch_upload", gone)
+
+    await save_message(fake_zulip, message(topic=ticket_topic(ticket), content="[a](/user_uploads/2/ab/a.txt)"))
+
+    assert not await TicketAttachment.objects.aexists()
+    assert fake_zulip.sent_to("team03") == ["Member: Failed to store an attachment. Please try again."]
+
+
+async def test_a_link_outside_user_uploads_is_ignored(fake_zulip, ticket):
+    content = "[x.png](https://example.org/user_uploads/x.png) [y](/static/y.png)"
+
+    await save_message(fake_zulip, message(topic=ticket_topic(ticket), content=content))
+
+    assert not await TicketAttachment.objects.aexists()
+    assert fake_zulip.reactions == []
+    assert (await TicketComment.objects.aget()).comment_text == content
+
+
+async def test_a_redelivered_upload_is_stored_once(fake_zulip, ticket):  # Review Focus 4
+    fake_zulip.uploads = {"/user_uploads/2/ab/a.txt": b"log"}
+    msg = message(topic=ticket_topic(ticket), content="[a.txt](/user_uploads/2/ab/a.txt)", message_id=77)
+
+    await save_message(fake_zulip, msg)
+    await save_message(fake_zulip, msg)
+
+    assert [a.zulip_message_id async for a in TicketAttachment.objects.all()] == [77]
+    assert fake_zulip.reactions == [(77, "paperclip")]
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # The event loop
 # ---------------------------------------------------------------------------------------------------------------
 
@@ -217,7 +316,7 @@ async def test_lost_queue_reregisters(fake_zulip, ticket, beats):  # Review Focu
 
 
 @pytest.mark.parametrize("error", [ZulipError("HTTP_502"), httpx.ConnectError("refused")])
-async def test_an_unreachable_zulip_is_waited_out_without_beating(fake_zulip, beats, monkeypatch, error):
+async def test_an_unreachable_zulip_is_waited_out_beating_after_each_wait(fake_zulip, beats, monkeypatch, error):
     monkeypatch.setattr(runner, "FIRST_BACKOFF_SECONDS", 0)
     fake_zulip.get_events_errors = [error, error]
     fake_zulip.events = [[]]
@@ -234,8 +333,14 @@ async def test_an_unreachable_zulip_is_waited_out_without_beating(fake_zulip, be
         await runner.event_loop(fake_zulip)
 
     assert fake_zulip.registered == 1  # the same queue, polled again
-    assert polls_beaten == [0, 0, 0, 1]  # no beat until a poll is answered
-    assert beats == [EVENTS_ZULIP]
+    # A beat after each failed poll's wait and after the answered one: an outage alone never goes stale
+    assert polls_beaten == [0, 1, 2, 3]
+    assert beats == [EVENTS_ZULIP] * 3
+
+
+def test_a_backed_off_loop_beats_well_within_its_budget():
+    """The longest gap between beats while Zulip is down: a poll that times out, then the longest wait."""
+    assert BUDGETS[EVENTS_ZULIP] >= 2 * (LONG_POLL_READ_TIMEOUT + runner.MAX_BACKOFF_SECONDS)
 
 
 async def test_a_failing_event_doesnt_stop_the_rest(fake_zulip, ticket, beats, monkeypatch):

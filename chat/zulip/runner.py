@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # Zulip forgets a queue nobody polled for a while, or all of them when it restarts
 BAD_EVENT_QUEUE_ID = "BAD_EVENT_QUEUE_ID"
 FIRST_BACKOFF_SECONDS = 5
+# Well under the events-zulip budget (core.heartbeat), which a backed-off loop beats after each wait
 MAX_BACKOFF_SECONDS = 120
 
 
@@ -30,7 +31,8 @@ async def run(client: ZulipClient) -> None:
 async def event_loop(client: ZulipClient) -> None:
     """Poll the event queue and handle each event, until cancelled. A lost queue is registered again at once; any
     other failure to register or poll is logged and retried after a wait that doubles up to MAX_BACKOFF_SECONDS.
-    events-zulip advances after each poll Zulip answered, so a Zulip that stays unreachable lets it go stale."""
+    events-zulip advances after each poll attempt the loop handled, answered or failed and waited out (as the worker's
+    group refresh and Quotient loops do), so a Zulip outage leaves it fresh and only a stuck loop lets it go stale."""
     queue: tuple[str, int] | None = None
     backoff = FIRST_BACKOFF_SECONDS
     while True:
@@ -49,12 +51,13 @@ async def event_loop(client: ZulipClient) -> None:
         except httpx.HTTPError as e:
             logger.warning(f"Could not reach Zulip for events ({e!r}); retrying in {backoff}s")
         else:
-            record(EVENTS_ZULIP)
             backoff = FIRST_BACKOFF_SECONDS
             queue = queue_id, await _handle(client, events, last_event_id)
+            record(EVENTS_ZULIP)
             continue
         await asyncio.sleep(backoff)
         backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
+        record(EVENTS_ZULIP)
 
 
 async def _handle(client: ZulipClient, events: list[dict[str, object]], last_event_id: int) -> int:

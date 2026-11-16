@@ -215,8 +215,6 @@ VULTURE_CONFIDENCE = 60
 DJANGO_MODEL_OPTION = "Django reads this model Meta option by name"
 DJANGO_ADMIN_OPTION = "Django admin reads this ModelAdmin or inline option by name"
 DJANGO_FORM_OPTION = "Django reads this form option by name"
-
-ZULIP_RUNNER = "Zulip attachments (chat.zulip.incoming), the next commit of this PR, call it"
 # fnmatch pattern over "path:name", or "@decorator" for anything with that decorator -> why it stays
 CODE_EXCEPTIONS = {
     "web/portal/urls.py:handler*": "Django reads the root URLconf's error handlers by name",
@@ -283,7 +281,6 @@ CODE_EXCEPTIONS = {
     "can go once that migration is squashed",
     "web/scoring/snapshot.py:context_from_snapshot": "Reads back the scorecard snapshots Close Out stores in "
     "EventResult; no page shows a stored result yet",
-    "chat/zulip/client.py:fetch_upload": ZULIP_RUNNER,
 }
 
 

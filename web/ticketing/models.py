@@ -149,12 +149,14 @@ class Ticket(Approvable):
 
 
 class TicketAttachment(StoredFile):
-    MAX_SIZE = 10 * 1024 * 1024  # 10MB, from the web or a ticket's Discord thread
+    MAX_SIZE = 10 * 1024 * 1024  # 10MB, from the web or a ticket's chat topic
     DEFAULT_NAME = "attachment"
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="attachments")
     uploaded_by = models.CharField(max_length=100)
     uploaded_at = models.DateTimeField(auto_now_add=True)
+    # The Zulip message it came with, so a redelivered message stores it once
+    zulip_message_id = models.BigIntegerField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ["uploaded_at"]

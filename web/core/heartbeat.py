@@ -31,7 +31,8 @@ EVENTS_ZULIP = "events-zulip"
 # 5 min, Quotient sync every 5 min (every 15 min while backing off, so two backed-off passes), its queue polls every
 # 2s. The chat process's Discord runner: its queue polls every 2s, the dashboard every 10s. Its Zulip runner: its
 # queue polls every 2s, and its event long-poll answers within about a minute (Zulip sends a heartbeat event when
-# nothing happened; the client gives up after 120s), so several missed polls.
+# nothing happened; the client gives up after 120s), so several missed polls; while Zulip is unreachable the event
+# loop beats after each retry wait (at most 120s), so an outage alone never lets it go stale.
 BUDGETS: dict[str, int] = {
     TIMER: 300,
     GROUPS: 900,
