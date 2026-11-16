@@ -15,8 +15,8 @@ from bot.utils import (
     find_team,
     fit,
     log_to_ops_channel,
-    run_blocking,
 )
+from core.utils import run_blocking
 from team.models import MAX_TEAMS
 from ticketing.access import TICKET_STAFF
 from ticketing.models import Ticket, TicketCategory, TicketHistory

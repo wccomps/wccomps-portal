@@ -140,8 +140,8 @@ class QueueProcessor[P: TaskPayload](ABC):
         return None
 
     def start(self) -> None:
-        self.running = True
-        self.task = asyncio.create_task(self._process_loop())
+        """Run the queue in a task of its own, until stop()."""
+        self.task = asyncio.create_task(self.run())
         logger.info(f"{self.backend.label} queue processor started")
 
     def stop(self) -> None:
@@ -150,7 +150,9 @@ class QueueProcessor[P: TaskPayload](ABC):
             self.task.cancel()
         logger.info(f"{self.backend.label} queue processor stopped")
 
-    async def _process_loop(self) -> None:
+    async def run(self) -> None:
+        """Recover stranded rows, then poll until stop(); a failed poll is logged and the next one tried."""
+        self.running = True
         self.on_start(self.heartbeat_name)
         try:
             await self.recover_stranded()

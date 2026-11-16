@@ -46,7 +46,7 @@ plugins = ["mypy_django_plugin.main"]
 mypy_path = "web"
 # mypy 2 defaults to a SQLite cache, which fails with "disk I/O error" on virtiofs (no WAL shared memory)
 sqlite_cache = false
-files = ["bot", "web/core", "web/team", "web/ticketing", "web/quotient", "web/portal", "web/scoring", "web/orange_team", "web/packets", "web/registration"]
+files = ["bot", "worker", "web/core", "web/team", "web/ticketing", "web/quotient", "web/portal", "web/scoring", "web/orange_team", "web/packets", "web/registration"]
 exclude = "(/tests/|/test_|tests\\.py|conftest\\.py)"
 
 # Strict type checking
@@ -111,7 +111,7 @@ asyncio_default_fixture_loop_scope = "function"
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-testpaths = ["bot/tests", "web/core/tests", "web/scoring/tests", "web/team/tests", "web/packets/tests", "web/registration/tests", "web/orange_team/tests", "web/ticketing/tests", "web/browser_tests"]
+testpaths = ["bot/tests", "worker/tests", "web/core/tests", "web/scoring/tests", "web/team/tests", "web/packets/tests", "web/registration/tests", "web/orange_team/tests", "web/ticketing/tests", "web/browser_tests"]
 addopts = ["--tb=short", "-n", "6", "--dist", "worksteal"]
 markers = [
     "browser: Browser-based UI tests using Playwright",
@@ -181,5 +181,5 @@ ignore = [
 "**/conftest.py" = ["S101", "S105", "S106", "S110", "S311"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["bot", "web", "core", "team", "ticketing"]
+known-first-party = ["bot", "worker", "web", "core", "team", "ticketing"]
 

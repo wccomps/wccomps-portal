@@ -17,6 +17,7 @@ from core.broadcast import parse_broadcast_target
 from core.heartbeat import beat, beat_for
 from core.models import QueuedTask
 from core.queued_tasks import (
+    WORKER_REQUESTER,
     AddUserToThread,
     BroadcastMessage,
     ChatNotice,
@@ -245,7 +246,8 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
         logger.info(f"Added user {discord_id} to thread {thread.id}")
 
     async def _handle_sync_roles(self, payload: SyncRoles) -> SyncRolesResult:
-        """Run the Authentik role sync; its result is what the web Sync Roles page shows."""
+        """Run the Authentik role sync; its result is what the web Sync Roles page shows. A person's sync posts its
+        summary to the ops channel; the worker's, after a group refresh, posts nothing, as the periodic sync doesn't."""
         dry_run = payload.dry_run
         guild = self._guild()
 
@@ -256,7 +258,8 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
             raise RuntimeError("Role sync timed out after 5 minutes") from None
 
         summary = role_sync_summary(stats, dry_run=dry_run)
-        await log_to_ops_channel(self.bot, summary)
+        if payload.requested_by != WORKER_REQUESTER:
+            await log_to_ops_channel(self.bot, summary)
 
         logger.info(f"Role sync completed: {summary}")
         return stats

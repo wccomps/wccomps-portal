@@ -29,8 +29,8 @@ def _open_bot() -> MagicMock:
 
 
 def test_the_bot_checks_the_loops_it_runs():
-    """The Discord loops, plus the worker queue and timer main.py hosts until the worker process exists."""
-    assert BOT_BUDGETS == {"queue-discord": 60, "dashboard": 120, "queue-worker": 60, "timer": 300}
+    """The Discord loops main.py runs; the worker process runs the queue-worker, timer, groups and quotient ones."""
+    assert BOT_BUDGETS == {"queue-discord": 60, "dashboard": 120}
 
 
 def test_check_passes_when_all_fresh(hb_dir):
@@ -41,16 +41,14 @@ def test_check_passes_when_all_fresh(hb_dir):
 
 
 def test_check_reports_stale_and_missing(hb_dir):
-    heartbeat.record("dashboard")
-    heartbeat.record("timer")
-    old = time.time() - BOT_BUDGETS["timer"] - 10
-    (hb_dir / "timer").write_text(str(old))
+    heartbeat.record("queue-discord")
+    old = time.time() - BOT_BUDGETS["queue-discord"] - 10
+    (hb_dir / "queue-discord").write_text(str(old))
 
     problems = check()
 
-    assert any(p.startswith("queue-discord:") and "missing" in p for p in problems)
-    assert any(p.startswith("timer:") and "stale" in p for p in problems)
-    assert not any(p.startswith("dashboard:") for p in problems)
+    assert any(p.startswith("dashboard:") and "missing" in p for p in problems)
+    assert any(p.startswith("queue-discord:") and "stale" in p for p in problems)
 
 
 def test_bot_health_module_exit_codes(hb_dir):
@@ -139,8 +137,7 @@ async def test_the_queue_beats_after_each_poll_and_each_task(beats, monkeypatch)
         during.append(len(beats))
 
     processor = _queue(monkeypatch, ["a", "b", "c"], handle)
-    processor.running = True
-    loop = asyncio.ensure_future(processor._process_loop())
+    loop = asyncio.ensure_future(processor.run())
     await asyncio.sleep(0.2)
     processor.running = False
     await loop
@@ -157,8 +154,7 @@ async def test_a_wedged_task_stops_the_queue_heartbeat(beats, monkeypatch):
         await release.wait()
 
     processor = _queue(monkeypatch, ["stuck"], handle)
-    processor.running = True
-    loop = asyncio.ensure_future(processor._process_loop())
+    loop = asyncio.ensure_future(processor.run())
     await asyncio.sleep(0.3)
     wedged = list(beats)
     processor.running = False
@@ -181,25 +177,3 @@ async def test_a_cancelled_loop_stops_beating(beats, monkeypatch):
     await asyncio.sleep(0.1)
 
     assert len(beats) == after_stop
-
-
-@pytest.mark.asyncio
-async def test_the_worker_queue_the_bot_hosts_beats_its_own_heartbeat(beats, monkeypatch):
-    """Wired as main.py wires it, so the bot's health check also covers the worker queue it runs."""
-    from core import task_queue
-    from core.worker_tasks import WorkerQueueProcessor
-
-    bot = _open_bot()
-    processor = WorkerQueueProcessor(
-        on_start=lambda name: heartbeat.beat_for(name, lambda: not bot.is_closed()), on_pass=heartbeat.beat
-    )
-    monkeypatch.setattr(task_queue, "recycle_db_connection", AsyncMock())
-    monkeypatch.setattr(processor, "recover_stranded", AsyncMock())
-    monkeypatch.setattr(task_queue, "sync_to_async", lambda func: lambda: _first(iter([])))
-    processor.QUEUE_POLL_INTERVAL_SECONDS = 0.01
-
-    processor.start()
-    await asyncio.sleep(0.05)
-    processor.stop()
-
-    assert beats and set(beats) == {"queue-worker"}

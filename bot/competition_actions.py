@@ -1,8 +1,7 @@
-"""Shared competition actions for commands and timer."""
+"""The Discord side of competition actions: the status message, team channel teardown and broadcasts."""
 
 import logging
 from collections.abc import Awaitable, Callable
-from contextlib import aclosing
 from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 
@@ -15,7 +14,6 @@ from registration.stage import event_stage
 
 from bot.discord_manager import delete_team_infrastructure, setup_team_infrastructure
 from bot.utils import (
-    BlockingSteps,
     announcement,
     log_to_ops_channel,
     room_judge_role_name,
@@ -27,21 +25,12 @@ from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams
 from core.heartbeat import beat
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.queued_tasks import PermanentTaskError
-from core.services.competition import START_MESSAGE_SENDER, Attempt, CompetitionRunResult
-from core.services.competition import run_competition as competition_steps
+from core.services.competition import START_MESSAGE_SENDER
 from core.task_queue import StepsState, TaskProgress
 from core.utils import shorten
 from team.models import MAX_TEAMS, Team
 
 logger = logging.getLogger(__name__)
-
-
-async def run_competition(enable: bool, actor: str, timer: Attempt | None = None) -> CompetitionRunResult:
-    """Start (enable=True) or stop the competition, a step at a time on a pool thread of its own, beating after each."""
-    async with aclosing(BlockingSteps(competition_steps(enable, actor, timer))) as steps:
-        async for _step in steps:
-            beat()
-        return steps.result
 
 
 async def update_status_channel(bot: discord.Client) -> bool:

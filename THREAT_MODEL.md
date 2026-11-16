@@ -97,7 +97,7 @@ flowchart LR
 | 1 | Browser to web | T: an autosave or reassignment changes an orange score already submitted or approved | Each change locks the assignment row and checks the status table (`web/orange_team/models.py` `OrangeAssignmentQuerySet.locked_for`, `OrangeAssignment.STATUSES`), and a volunteer reaches only their own assignments (`web/orange_team/views.py` `assignment_save`, `assignment_submit`); concurrent edits of one check take their locks in one order (`web/orange_team/tests/test_lock_order.py`) |
 | 1 | Browser to web | T: a refusal that still changes something | A refused or 4xx request writes no row, sends no mail and calls no service (the views harness rules, `web/core/tests/views_harness.py`) |
 | 2 | OIDC | S: login CSRF or state replay | State is signed with a 300 s lifetime and its nonce is compared in constant time against the session (`web/core/oauth.py` `oauth_callback`) |
-| 2 | OIDC | E: stale groups after a role is removed | The bot refreshes groups from Authentik every 5 minutes (`bot/cogs/authentik_groups.py` `AuthentikGroupsCog`), and a refresh aborts on an implausible answer rather than stripping everyone (`web/core/services/user_groups.py` `refresh_user_groups`); refreshes run one at a time, and none writes over a sign-in that read Authentik after it did (`web/core/services/user_groups.py` `_refresh`) |
+| 2 | OIDC | E: stale groups after a role is removed | The worker refreshes groups from Authentik every 5 minutes (`worker/jobs.py` `group_refresh_loop`), and a refresh aborts on an implausible answer rather than stripping everyone (`web/core/services/user_groups.py` `refresh_user_groups`); refreshes run one at a time, and none writes over a sign-in that read Authentik after it did (`web/core/services/user_groups.py` `_refresh`) |
 | 2 | OIDC | E: a disabled account keeps its powers | A disabled account keeps its stored groups (they decide its team's Discord roles) but they grant nothing, on the web or the bot; a row Authentik hasn't been asked about yet counts as enabled (`web/core/models.py` `UserGroups.permission_groups`) |
 | 2 | OIDC | S: a sign-in from before a credentials reset comes back in | Once Authentik has taken the new password, a reset records the time by the account's Authentik uid, in a transaction of its own, so neither an account that never signed in to the portal nor a failed unlink loses it; the callback reads it under the account lock the reset also takes, refuses a sign-in whose ID token `auth_time` is earlier, and offers a fresh sign-in. The check relies on Authentik returning `auth_time`: without it the sign-in counts from when it began at the portal, which is weaker when an Authentik session survived the reset (`web/core/models.py` `CredentialsReset`; `web/core/oauth.py` `oauth_callback`, `_signed_in_at`; `web/core/auth_utils.py` `lock_account`) |
 | 2 | OIDC | S: a reused username inherits an old account | Portal identity is the Authentik `sub`, never the username (`web/core/oauth.py` `oauth_callback`) |
@@ -174,8 +174,8 @@ flowchart LR
    touches, and which origins CSRF trusts, so changing one is a privilege change (`web/portal/settings.py`
    `PORTAL_GROUP_PREFIX`, `PORTAL_ADMIN_GROUP`, `TEAM_GROUP_PATTERN`, `TEAM_ACCOUNT_PATTERN`, `MAX_TEAMS`, `BASE_URL`).
    The repository's defaults are neutral (`Portal_` groups, a local `BASE_URL` that CSRF trusts no origin for), not
-   WRCCDC's; the web server and the bot refuse to start while a required setting is empty (`web/portal/required.py`
-   `REQUIRED_SETTINGS`, checked in `web/portal/wsgi.py` and `main.py`).
+   WRCCDC's; the web server, the worker and the bot refuse to start while a required setting is empty
+   (`web/portal/required.py` `REQUIRED_SETTINGS`, checked in `web/portal/wsgi.py`, `worker/__main__.py` and `main.py`).
 
 ## Owner and review trigger
 

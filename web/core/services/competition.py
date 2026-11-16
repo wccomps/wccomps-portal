@@ -3,7 +3,7 @@
 import logging
 import threading
 from collections.abc import Callable, Generator, Iterator
-from contextlib import contextmanager
+from contextlib import aclosing, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum, StrEnum
@@ -12,10 +12,11 @@ from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import Q
 
 from core.authentik_utils import set_team_account_active
+from core.heartbeat import beat
 from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, QueuedTask
 from core.queued_tasks import BroadcastMessage, CompetitionStatusChanged
 from core.team_accounts import accounts_by_team
-from core.utils import advisory_lock, format_competition_time
+from core.utils import BlockingSteps, advisory_lock, format_competition_time
 from team.models import MAX_TEAMS, active_team_numbers, team_username
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,15 @@ def run_competition(
         if not locked:
             return CompetitionRunResult(enable=enable, error=RUN_IN_PROGRESS, refused=True)
         return (yield from _locked_run(enable, actor, timer))
+
+
+async def arun_competition(enable: bool, actor: str, timer: Attempt | None = None) -> CompetitionRunResult:
+    """run_competition from async code (the timer, the bot's commands): a step at a time on a pool thread of its own,
+    beating the caller's heartbeat after each."""
+    async with aclosing(BlockingSteps(run_competition(enable, actor, timer))) as steps:
+        async for _step in steps:
+            beat()
+        return steps.result
 
 
 def _locked_run(

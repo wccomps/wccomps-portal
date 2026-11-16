@@ -34,25 +34,6 @@ async def _shared_thread_answers_while(start: Callable[[Callable[..., Any]], Awa
         await asyncio.gather(work, return_exceptions=True)
 
 
-async def _group_refresh(blocked: Callable[..., Any]) -> None:
-    from bot.cogs import authentik_groups
-
-    with (
-        patch.object(authentik_groups, "AuthentikManager"),
-        patch.object(authentik_groups, "refresh_user_groups_unless_running", blocked),
-    ):
-        await authentik_groups.refresh_groups_now()
-
-
-async def _quotient_sync(blocked: Callable[..., Any]) -> None:
-    from bot.cogs import quotient_sync
-
-    cog = quotient_sync.QuotientSyncCog.__new__(quotient_sync.QuotientSyncCog)
-    cog.quotient_unavailable = False
-    with patch.object(quotient_sync, "sync_quotient_metadata", blocked):
-        await cog.run_sync()
-
-
 def _interaction() -> AsyncMock:
     interaction = AsyncMock(spec=discord.Interaction)
     interaction.response, interaction.followup = AsyncMock(), AsyncMock()
@@ -126,7 +107,7 @@ async def _team_reset(blocked: Callable[..., Any]) -> None:
 
 @pytest.mark.asyncio
 async def test_run_blocking_runs_on_a_pool_thread_and_closes_its_connection() -> None:
-    from bot import utils
+    from core import utils
 
     flags: list[bool] = []
 
@@ -147,8 +128,6 @@ async def test_run_blocking_runs_on_a_pool_thread_and_closes_its_connection() ->
 @pytest.mark.parametrize(
     "start",
     [
-        _group_refresh,
-        _quotient_sync,
         _bulk_reset,
         _ticket_command,
         _help_panel_ticket,
@@ -156,8 +135,6 @@ async def test_run_blocking_runs_on_a_pool_thread_and_closes_its_connection() ->
         _team_reset,
     ],
     ids=[
-        "group-refresh",
-        "quotient-sync",
         "bulk-reset",
         "ticket",
         "help-panel-ticket",

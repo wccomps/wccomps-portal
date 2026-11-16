@@ -13,8 +13,8 @@ from scoring.models import QuotientMetadataCache
 
 from bot.competition_actions import reconcile_teams
 from bot.discord_queue import DiscordQueueProcessor
-from bot.utils import run_blocking
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement, QueuedTask
+from core.utils import run_blocking
 from team.models import DiscordLink, Team
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]

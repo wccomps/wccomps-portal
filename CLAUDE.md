@@ -83,7 +83,8 @@ the unparenthesized form is used intentionally throughout.
 - Web code queues work with `QueuedTask.enqueue(<payload>)`, which writes one row per backend
   (`core.task_backends.TaskBackend`) and returns them; each backend's `core.task_queue.QueueProcessor` subclass
   consumes its own rows: the bot's `DiscordQueueProcessor` the `discord` ones, `core.worker_tasks.WorkerQueueProcessor`
-  the `worker` ones (the bot runs it too, until the worker process exists)
+  the `worker` ones, in the worker process (`python -m worker`, beside the timer, group refresh and Quotient sync in
+  `worker/jobs.py`)
 - Each task type is a payload dataclass in `core/queued_tasks.py`, in one group of the `TaskPayload` union:
   `ChatNotice` (a row for every configured chat backend, `chat_backends()`), `DiscordOnly` (a row only when Discord
   is configured, `DISCORD_BOT_TOKEN`) or `WorkerTask` (always a `worker` row); so no configured chat backend means

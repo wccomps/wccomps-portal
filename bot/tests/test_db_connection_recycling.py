@@ -119,7 +119,7 @@ async def test_each_loop_recycles_before_its_work(module, make, work_attr, monke
     monkeypatch.setattr(mod.asyncio, "sleep", AsyncMock())
     obj.running = True
 
-    loop_method = next(getattr(obj, n) for n in ("_process_loop", "_dashboard_loop") if hasattr(obj, n))
+    loop_method = next(getattr(obj, n) for n in ("run", "_dashboard_loop") if hasattr(obj, n))
     await loop_method()
 
     assert calls == ["recycle", "work"]

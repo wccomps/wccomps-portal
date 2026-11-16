@@ -10,7 +10,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from bot import role_sync
-from bot.cogs import authentik_groups
+from bot.cogs import role_sync as role_sync_cog
 from core.models import UserGroups
 from team.models import DiscordLink, Team
 
@@ -263,34 +263,28 @@ async def test_syncing_one_member_after_unlinking_takes_every_synced_role(teams)
     assert _ids(member.remove_roles) == {OPS, TEAM_A, BLUETEAM}
 
 
-async def test_refresh_loop_syncs_roles_after_refreshing_groups() -> None:
-    calls: list[str] = []
-    cog = authentik_groups.AuthentikGroupsCog.__new__(authentik_groups.AuthentikGroupsCog)
+async def test_the_loop_syncs_roles() -> None:
+    """The worker refreshes the stored groups; the bot's loop only syncs roles from them."""
+    calls: list[Any] = []
+    cog = role_sync_cog.RoleSyncCog.__new__(role_sync_cog.RoleSyncCog)
     cog.bot = MagicMock()
 
-    async def refresh() -> bool:
-        calls.append("refresh")
-        return True
-
     async def sync(bot: Any) -> None:
-        calls.append("sync")
+        calls.append(bot)
 
-    with (
-        patch.object(authentik_groups, "refresh_groups_now", refresh),
-        patch.object(authentik_groups, "sync_roles_now", sync),
-    ):
-        await authentik_groups.AuthentikGroupsCog.refresh_task.coro(cog)
+    with patch.object(role_sync_cog, "sync_roles_now", sync):
+        await role_sync_cog.RoleSyncCog.sync_task.coro(cog)
 
-    assert calls == ["refresh", "sync"]
+    assert calls == [cog.bot]
 
 
 async def test_role_sync_failure_is_logged_not_raised(caplog: pytest.LogCaptureFixture) -> None:
     with (
-        caplog.at_level(logging.WARNING, logger="bot.cogs.authentik_groups"),
-        patch.object(authentik_groups, "competition_guild", return_value=MagicMock()),
-        patch.object(authentik_groups, "sync_roles", AsyncMock(side_effect=RuntimeError("discord down"))),
+        caplog.at_level(logging.WARNING, logger="bot.cogs.role_sync"),
+        patch.object(role_sync_cog, "competition_guild", return_value=MagicMock()),
+        patch.object(role_sync_cog, "sync_roles", AsyncMock(side_effect=RuntimeError("discord down"))),
     ):
-        await authentik_groups.sync_roles_now(MagicMock())
+        await role_sync_cog.sync_roles_now(MagicMock())
 
     assert "Role sync failed: discord down" in caplog.text
 

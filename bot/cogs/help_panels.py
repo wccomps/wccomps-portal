@@ -15,8 +15,8 @@ from bot.utils import (
     DISCORD_SELECT_OPTION_LIMIT,
     fit,
     fit_lines,
-    run_blocking,
 )
+from core.utils import run_blocking
 from ticketing.models import TicketCategory
 
 logger = logging.getLogger(__name__)

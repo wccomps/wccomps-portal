@@ -14,12 +14,9 @@ from django.core.exceptions import ImproperlyConfigured
 from portal.required import missing_settings
 
 from bot.command_tree import PortalCommandTree, command_hash, command_plan
-from bot.competition_timer import CompetitionTimer
 from bot.discord_queue import DiscordQueueProcessor
 from bot.unified_dashboard import UnifiedDashboard
 from bot.utils import ALLOWED_MENTIONS
-from core.heartbeat import beat, beat_for
-from core.worker_tasks import WorkerQueueProcessor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,7 +40,6 @@ class PortalBot(commands.Bot):
         )
 
         self.queue_processor: DiscordQueueProcessor | None = None
-        self.worker_processor: WorkerQueueProcessor | None = None
         self.unified_dashboard: UnifiedDashboard | None = None
 
     async def _should_sync_commands(self, current_hash: str) -> bool:
@@ -77,9 +73,7 @@ class PortalBot(commands.Bot):
         await self.load_extension("bot.cogs.admin_teams")
         await self.load_extension("bot.cogs.admin_tickets")
         await self.load_extension("bot.cogs.admin_competition")
-        await self.load_extension("bot.cogs.quotient_sync")
-        await self.load_extension("bot.cogs.authentik_groups")
-        await self.add_cog(CompetitionTimer(self))
+        await self.load_extension("bot.cogs.role_sync")
 
         logger.info("Cogs loaded")
 
@@ -134,11 +128,6 @@ class PortalBot(commands.Bot):
         if not self.queue_processor:
             self.queue_processor = DiscordQueueProcessor(self)
             self.queue_processor.start()
-            # Until the worker process exists, the bot also runs the worker's queue (the Nextcloud tasks)
-            self.worker_processor = WorkerQueueProcessor(
-                on_start=lambda name: beat_for(name, lambda: not self.is_closed()), on_pass=beat
-            )
-            self.worker_processor.start()
 
             # First ready only (on_ready also fires on reconnects): flag unset Discord IDs
             from bot.utils import report_missing_discord_settings
@@ -153,8 +142,6 @@ class PortalBot(commands.Bot):
         logger.info("Shutting down bot...")
         if self.queue_processor:
             self.queue_processor.stop()
-        if self.worker_processor:
-            self.worker_processor.stop()
         if self.unified_dashboard:
             self.unified_dashboard.stop()
         await super().close()

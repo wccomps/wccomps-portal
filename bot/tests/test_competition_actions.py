@@ -1,64 +1,37 @@
-"""The bot's entry point to starting and stopping the competition."""
+"""The bot's /competition commands."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.competition_actions import run_competition
 from core.models import QueuedTask
 from core.services.competition import CompetitionRunResult
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("enable", [True, False])
-async def test_runs_the_shared_service(enable: bool) -> None:
-    done = CompetitionRunResult(enable=enable)
-    calls: list[tuple[bool, str]] = []
-
-    def steps(enable: bool, actor: str, timer: object = None):
-        calls.append((enable, actor))
-        yield "step"
-        return done
-
-    with patch("bot.competition_actions.competition_steps", steps):
-        result = await run_competition(enable, actor="discord:admin")
-
-    assert result is done
-    assert calls == [(enable, "discord:admin")]
-
-
-@pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
-async def test_a_connection_broken_between_runs_does_not_fail_the_next() -> None:
-    """The run's pool thread keeps no connection across runs, so a database restart between start and stop
-    can't leave every later timer run failing on a dead one."""
-    from asgiref.sync import sync_to_async
-    from django.db import connection
+@pytest.mark.parametrize("enable", [True, False], ids=["start", "stop"])
+@pytest.mark.parametrize("confirmed", [False, True], ids=["cancelled", "confirmed"])
+async def test_the_start_and_stop_commands_ask_for_confirmation_before_running(
+    mock_interaction, enable: bool, confirmed: bool
+) -> None:
+    from bot.cogs.admin_competition import AdminCompetitionCog
 
-    from core.models import CompetitionConfig
+    done = CompetitionRunResult(enable=True, controlled_apps=["scoring"], apps_ok=["scoring"], accounts_total=3)
+    done.accounts_ok = 3
+    cog = AdminCompetitionCog(MagicMock())
+    command = cog.admin_start_competition if enable else cog.admin_stop_competition
+    with (
+        patch("bot.cogs.admin_competition.ConfirmView") as view,
+        patch("bot.cogs.admin_competition.arun_competition", new=AsyncMock(return_value=done)) as run,
+        patch("bot.cogs.admin_competition.log_to_ops_channel", new_callable=AsyncMock),
+    ):
+        view.return_value.wait = AsyncMock()
+        view.return_value.confirmed = confirmed
+        await command.callback(cog, mock_interaction)
 
-    backends: list[int] = []
-
-    def read_config_and_backend(enable: bool, actor: str, timer: object = None):
-        yield "step"
-        CompetitionConfig.get_config()
-        with connection.cursor() as cursor:
-            cursor.execute("select pg_backend_pid()")
-            backends.append(cursor.fetchone()[0])
-        return CompetitionRunResult(enable=enable)
-
-    with patch("bot.competition_actions.competition_steps", read_config_and_backend):
-        await run_competition(True, actor="timer")
-        backend = backends[0]
-
-        def terminate() -> None:
-            with connection.cursor() as cursor:
-                cursor.execute("select pg_terminate_backend(%s)", [backend])
-
-        await sync_to_async(terminate)()
-
-        for _ in range(3):
-            await run_competition(False, actor="timer")
+    mock_interaction.response.send_message.assert_awaited_once()
+    assert run.await_count == (1 if confirmed else 0)
 
 
 @pytest.mark.asyncio
