@@ -71,7 +71,9 @@ def test_stop_streams_progress_syncs_scores_and_posts_to_ops(admin_client, admin
     with (
         patch("core.authentik_manager.AuthentikManager", return_value=manager),
         patch("core.services.user_groups.refresh_user_groups") as refresh,
-        patch("scoring.quotient_sync.sync_service_scores") as sync_scores,
+        patch(
+            "scoring.quotient_sync.sync_service_scores", return_value={"total": 0, "service_max_note": None}
+        ) as sync_scores,
     ):
         response = _post(admin_client, "stop_competition")
         lines = [json.loads(line) for line in b"".join(response.streaming_content).decode().splitlines()]

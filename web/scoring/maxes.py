@@ -5,15 +5,11 @@ from collections.abc import Sequence
 from decimal import Decimal
 from typing import Literal
 
-from quotient.client import Inject
+from quotient.client import Inject, TeamServiceExport
 
-from scoring.models import ScoringTemplate, ServiceDetail
+from scoring.models import ScoringTemplate
 
 logger = logging.getLogger(__name__)
-
-# Below this uptime a single sample extrapolates too far via points/uptime to trust.
-_MIN_RELIABLE_UPTIME = Decimal("0.1")
-
 TemplateMaxField = Literal["service_max", "inject_max"]
 
 
@@ -31,43 +27,33 @@ def inject_max_from_titles(injects: Sequence[Inject]) -> Decimal | None:
     return Decimal(total) if total > 0 else None
 
 
-def service_max_from_details() -> Decimal | None:
-    """Service points at full uptime summed over services, or None if coverage is incomplete."""
-    best: dict[str, tuple[Decimal, Decimal]] = {}  # service_name -> (uptime, points) of the best sample
-    scored: set[str] = set()  # services that carry points at all
-    for detail in ServiceDetail.objects.only("service_name", "uptime", "points"):
-        if detail.points <= 0:
-            continue  # a 0-point sample must not "cover" a service — it would contribute 0 to the sum
-        scored.add(detail.service_name)
-        if detail.uptime >= _MIN_RELIABLE_UPTIME:
-            current = best.get(detail.service_name)
-            if current is None or detail.uptime > current[0]:
-                best[detail.service_name] = (detail.uptime, detail.points)
-    uncovered = scored - set(best)
-    if uncovered:
-        logger.warning(
-            "service_max not derived: %d scored service(s) lack a reliable uptime sample: %s",
-            len(uncovered),
-            sorted(uncovered),
-        )
-        return None
-    if not best:
-        return None
-    total = sum((points / uptime for uptime, points in best.values()), Decimal("0")).quantize(Decimal("1"))
-    return total if total > 0 else None
+def service_max_from_export(exports: Sequence[TeamServiceExport]) -> Decimal | None:
+    """Each service's highest max_points across these teams, summed; None unless every entry has one.
+
+    The highest, since a team Quotient checked in fewer rounds reports less for the same service.
+    """
+    best: dict[str, int] = {}
+    for team in exports:
+        for svc in team.services:
+            if svc.max_points is None:
+                logger.warning("service_max not derived: Quotient's export has no max_points for %r", svc.service_name)
+                return None
+            best[svc.service_name] = max(best.get(svc.service_name, 0), svc.max_points)
+    return Decimal(sum(best.values()))
 
 
-def set_template_max(field: TemplateMaxField, value: Decimal | None) -> None:
-    """Set one raw-max field on the ScoringTemplate when a value was derived.
+def set_template_max(field: TemplateMaxField, value: Decimal | None) -> bool:
+    """Set one raw-max field on the ScoringTemplate when a value was derived, and say whether it was stored.
 
     No-op when the value is missing (never clobbers a good max with a stale one) or when
     no template exists yet (the config page owns creating it).
     """
     if value is None:
-        return
+        return False
     template = ScoringTemplate.objects.first()
     if template is None:
-        return
+        return False
     setattr(template, field, value)
     template.updated_by = None  # a derived write, not a human edit — keep the audit trail honest
     template.save(update_fields=[field, "updated_by", "updated_at"])
+    return True
