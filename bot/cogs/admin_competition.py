@@ -20,7 +20,8 @@ from core.authentik_utils import (
 )
 from core.broadcast import parse_broadcast_target
 from core.forms import AppSlugForm
-from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog
+from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, QueuedTask
+from core.queued_tasks import CompetitionStatusChanged
 from core.services.competition import (
     KEEP,
     ConfigEditError,
@@ -302,7 +303,7 @@ class AdminCompetitionCog(commands.Cog):
         await self._run_competition(interaction, enable=False)
 
     async def _run_competition(self, interaction: discord.Interaction, enable: bool) -> None:
-        from bot.competition_actions import run_competition, update_status_channel
+        from bot.competition_actions import run_competition
 
         action = "Start" if enable else "Stop"
         prompt = (
@@ -334,7 +335,7 @@ class AdminCompetitionCog(commands.Cog):
         await log_to_ops_channel(
             self.bot, f"**Competition {verb}{incomplete}** by {interaction.user.mention}\n{result.summary()}"
         )
-        await update_status_channel(self.bot)
+        await sync_to_async(QueuedTask.enqueue)(CompetitionStatusChanged())
         await interaction.followup.send(
             f"**Competition {verb}{incomplete}!**\n\n{result.summary()}{note}", ephemeral=True
         )

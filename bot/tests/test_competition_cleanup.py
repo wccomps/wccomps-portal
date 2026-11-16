@@ -118,7 +118,6 @@ async def test_the_full_cleanup_resets_then_queues_the_discord_teardown(competit
     assert task.payload == {"requested_by": "web:admin", "open_event_id": None}
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock),
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", side_effect=record_sync) as sync,
     ):
         await reconcile_teams(MagicMock(), guild, "web:admin", None, _no_beat)
@@ -157,7 +156,6 @@ async def test_tears_down_discord_by_name_when_db_ids_are_null(competition: Team
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock),
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(0)),
     ):
         await reconcile_teams(MagicMock(), guild, "web:admin", None, _no_beat)
@@ -173,7 +171,6 @@ async def test_each_teardown_beats_once_per_team(competition: Team) -> None:
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock),
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(0)),
     ):
         await reconcile_teams(MagicMock(), _guild("Team 03"), "web:admin", None, beat)
@@ -404,7 +401,6 @@ async def test_after_a_close_out_it_does_only_the_discord_side(competition: Team
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(4)),
     ):
         await reconcile_teams(MagicMock(), guild, "web:admin", None, _no_beat)
@@ -455,7 +451,6 @@ async def test_opening_an_event_tears_down_what_the_last_event_left(competition:
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock) as status,
         patch("bot.role_sync.sync_roles", _sync_removing(0)) as sync,
     ):
         await reconcile_teams(MagicMock(), guild, "gold", opened, _no_beat)
@@ -466,7 +461,7 @@ async def test_opening_an_event_tears_down_what_the_last_event_left(competition:
     assert [call.args[1].team_number for call in _setup_offline_mock().await_args_list] == [3]
     assert sync.await_args_list[-1].args == (guild,)
     judge.remove_roles.assert_awaited_once_with(judge_role, reason="Competition cleanup")
-    status.assert_awaited_once()
+    assert await QueuedTask.objects.filter(task_type="competition_status_changed").acount() == 1
     assert await DiscordLink.objects.filter(discord_id=1, is_active=True).aexists()
     config = await CompetitionConfig.objects.aget(pk=1)
     assert (config.start_message, config.competition_start_time is not None) == ("Default VM login", True)
@@ -540,7 +535,6 @@ async def test_the_opening_teardown_stops_when_the_competition_starts_midway(com
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(0)),
         patch("bot.competition_actions.delete_team_infrastructure", side_effect=delete_then_start),
     ):
@@ -593,7 +587,6 @@ async def test_a_failing_teardown_reports_the_teams_left_before_it_raises(compet
 
     with (
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(0)),
         patch("bot.competition_actions.delete_team_infrastructure", side_effect=left),
         pytest.raises(discord.HTTPException),
@@ -615,7 +608,6 @@ async def test_the_discord_teardown_leaves_nextcloud_to_the_worker(competition: 
     with (
         patch("core.nextcloud.NextcloudManager") as nextcloud,
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
-        patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(0)),
     ):
         await reconcile_teams(MagicMock(), _guild("Team 03"), "gold", opened, _no_beat)

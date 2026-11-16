@@ -25,8 +25,8 @@ from bot.utils import (
     team_chat_channel,
 )
 from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams
-from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
-from core.queued_tasks import PermanentTaskError
+from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement, QueuedTask
+from core.queued_tasks import CompetitionStatusChanged, PermanentTaskError
 from core.services.competition import START_MESSAGE_SENDER, Attempt, CompetitionRunResult
 from core.services.competition import run_competition as competition_steps
 from core.task_queue import ProgressState, TaskProgress
@@ -261,7 +261,7 @@ async def _report_teardown(bot: discord.Client, event: Event | None, done: Teard
     if done.stopped:
         lines.append(f"Stopped before the end: {done.stopped}")
     await log_to_ops_channel(bot, "\n".join(lines))
-    await update_status_channel(bot)
+    await sync_to_async(QueuedTask.enqueue)(CompetitionStatusChanged())
 
 
 @dataclass

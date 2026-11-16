@@ -454,9 +454,7 @@ def test_every_setting_is_read() -> None:
 # ---------------------------------------------------------------------------------------------------------------
 
 # payload class -> why it stays although nothing enqueues it
-PAYLOAD_EXCEPTIONS: dict[str, str] = {
-    "CompetitionStatusChanged": "the status-change notices that queue it land in the next task of this PR",
-}
+PAYLOAD_EXCEPTIONS: dict[str, str] = {}
 
 
 def test_every_task_payload_is_enqueued() -> None:
