@@ -14,10 +14,9 @@ from bot.thread_creator import add_to_team_threads, ensure_ticket_thread
 from bot.ticket_dashboard import trigger_dashboard
 from bot.utils import add_field, log_to_ops_channel, send_parts
 from core.broadcast import parse_broadcast_target
-from core.heartbeat import beat, beat_for
+from core.heartbeat import QUEUE_DISCORD, beat, beat_for
 from core.models import QueuedTask
 from core.queued_tasks import (
-    WORKER_REQUESTER,
     AddUserToThread,
     BroadcastMessage,
     ChatNotice,
@@ -46,12 +45,12 @@ logger = logging.getLogger(__name__)
 
 class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
     backend = TaskBackend.DISCORD
-    heartbeat_name = "queue-discord"
+    heartbeat_name = QUEUE_DISCORD
 
     def __init__(self, bot: discord.Client) -> None:
         # on_start binds the loop's task to the heartbeat, so beat() in code a handler awaits (reconcile_teams,
         # sync_roles) advances it too
-        super().__init__(on_start=lambda name: beat_for(name, lambda: not bot.is_closed()), on_pass=lambda: beat())
+        super().__init__(on_start=lambda name: beat_for(name, lambda: not bot.is_closed()), on_pass=beat)
         self.bot = bot
 
     def _guild(self) -> discord.Guild:
@@ -246,8 +245,7 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
         logger.info(f"Added user {discord_id} to thread {thread.id}")
 
     async def _handle_sync_roles(self, payload: SyncRoles) -> SyncRolesResult:
-        """Run the Authentik role sync; its result is what the web Sync Roles page shows. A person's sync posts its
-        summary to the ops channel; the worker's, after a group refresh, posts nothing, as the periodic sync doesn't."""
+        """Run the Authentik role sync; its result is what the web Sync Roles page shows."""
         dry_run = payload.dry_run
         guild = self._guild()
 
@@ -258,8 +256,7 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
             raise RuntimeError("Role sync timed out after 5 minutes") from None
 
         summary = role_sync_summary(stats, dry_run=dry_run)
-        if payload.requested_by != WORKER_REQUESTER:
-            await log_to_ops_channel(self.bot, summary)
+        await log_to_ops_channel(self.bot, summary)
 
         logger.info(f"Role sync completed: {summary}")
         return stats

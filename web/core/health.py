@@ -7,18 +7,16 @@ Imports nothing from Django, so it can't hang on the database.
 
 import sys
 import time
-from collections.abc import Mapping
 
 from core.heartbeat import budgets, heartbeat_dir
 
-PROCESSES = ("worker", "chat")
 
-
-def problems(allowed: Mapping[str, int]) -> list[str]:
-    """One problem per stale or missing heartbeat among allowed (name to budget in seconds). Empty means healthy."""
+def check(process: str) -> list[str]:
+    """One problem per stale or missing heartbeat of process ("worker" or "chat"). Empty means healthy; ValueError
+    for an unknown process."""
     found = []
     now = time.time()
-    for name, budget in allowed.items():
+    for name, budget in budgets(process).items():
         path = heartbeat_dir() / name
         try:
             age = now - float(path.read_text())
@@ -30,25 +28,21 @@ def problems(allowed: Mapping[str, int]) -> list[str]:
     return found
 
 
-def check(process: str) -> list[str]:
-    """Problems with process's heartbeats. Empty means healthy."""
-    return problems(budgets(process))
-
-
-def report(found: list[str]) -> int:
-    """Print found (or "ok") and return the probe's exit code."""
+def main(argv: list[str]) -> int:
+    usage = "usage: python -m core.health worker|chat"
+    if len(argv) != 1:
+        print(usage)
+        return 2
+    try:
+        found = check(argv[0])
+    except ValueError as e:
+        print(f"{usage}: {e}")
+        return 2
     for problem in found:
         print(problem)
     if not found:
         print("ok")
     return 1 if found else 0
-
-
-def main(argv: list[str]) -> int:
-    if len(argv) != 1 or argv[0] not in PROCESSES:
-        print(f"usage: python -m core.health {'|'.join(PROCESSES)}")
-        return 2
-    return report(check(argv[0]))
 
 
 if __name__ == "__main__":

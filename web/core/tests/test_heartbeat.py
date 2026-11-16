@@ -13,25 +13,12 @@ import pytest
 from core import health, heartbeat
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CHAT_ENV = ("DISCORD_BOT_TOKEN", "ZULIP_SITE", "ZULIP_BOT_EMAIL", "ZULIP_API_KEY")
 
 
 @pytest.fixture
 def hb_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("BOT_HEARTBEAT_DIR", str(tmp_path / "hb"))
     return tmp_path / "hb"
-
-
-@pytest.fixture
-def no_chat(monkeypatch):
-    for name in CHAT_ENV:
-        monkeypatch.delenv(name, raising=False)
-
-
-def _zulip(monkeypatch) -> None:
-    monkeypatch.setenv("ZULIP_SITE", "https://chat.example.org")
-    monkeypatch.setenv("ZULIP_BOT_EMAIL", "bot@example.org")
-    monkeypatch.setenv("ZULIP_API_KEY", "k")
 
 
 def test_record_writes_timestamp(hb_dir):
@@ -98,36 +85,25 @@ def test_worker_health_reports_a_missing_loop(hb_dir):
 
 def test_worker_budgets_ignore_chat_settings(monkeypatch):
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "t")
-    _zulip(monkeypatch)
 
     assert heartbeat.budgets("worker") == {"timer": 300, "groups": 900, "quotient": 1800, "queue-worker": 60}
 
 
-def test_chat_health_only_checks_configured_backends(no_chat, monkeypatch):
-    _zulip(monkeypatch)
-    assert sorted(heartbeat.budgets("chat")) == ["events-zulip", "queue-zulip"]
-
-
-def test_chat_budgets_for_discord(no_chat, monkeypatch):
+def test_chat_budgets_for_discord(monkeypatch):
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "t")
 
     assert heartbeat.budgets("chat") == {"queue-discord": 60, "dashboard": 120}
 
 
-def test_chat_budgets_for_both_backends(no_chat, monkeypatch):
-    monkeypatch.setenv("DISCORD_BOT_TOKEN", "t")
-    _zulip(monkeypatch)
+@pytest.mark.parametrize("token", ["", "t"])
+def test_chat_budgets_follow_the_rule_that_decides_queueing(settings, monkeypatch, token):
+    """The probe expects the Discord heartbeats exactly when core.task_backends queues Discord rows."""
+    from core.task_backends import discord_enabled
 
-    assert sorted(heartbeat.budgets("chat")) == ["dashboard", "events-zulip", "queue-discord", "queue-zulip"]
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", token)
+    settings.DISCORD_BOT_TOKEN = token
 
-
-@pytest.mark.parametrize("missing", ["ZULIP_SITE", "ZULIP_BOT_EMAIL", "ZULIP_API_KEY"])
-def test_a_partly_configured_zulip_is_not_checked(no_chat, monkeypatch, missing):
-    """Zulip runs only with all three credentials (core.task_backends.zulip_enabled), so only then does it beat."""
-    _zulip(monkeypatch)
-    monkeypatch.setenv(missing, "")
-
-    assert heartbeat.budgets("chat") == {}
+    assert bool(heartbeat.budgets("chat")) == discord_enabled() == bool(token)
 
 
 def test_unknown_process_is_refused():

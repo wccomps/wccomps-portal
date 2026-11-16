@@ -1,6 +1,5 @@
 """`python -m chat`: runs a runner per configured chat backend, and refuses to start with none it can run."""
 
-import asyncio
 import logging
 
 import pytest
@@ -77,15 +76,17 @@ def test_discord_runs_without_a_log_handler_of_its_own(settings, no_zulip, monke
     assert all(isinstance(h, logging.NullHandler) for h in logging.getLogger("discord").handlers)
 
 
-async def test_a_crashing_runner_ends_the_chat_process(monkeypatch):
-    """The liveness probe restarts a chat process that exited."""
+def test_a_crashing_runner_ends_the_chat_process(settings, no_zulip, monkeypatch, caplog):
+    """The process exits, and its container restarts."""
+    settings.DISCORD_BOT_TOKEN = "token"
 
     async def crash() -> None:
         raise RuntimeError("runner crashed")
 
     monkeypatch.setattr(chat_main, "run_discord", crash)
 
-    with pytest.raises(ExceptionGroup) as ended:
-        await asyncio.wait_for(chat_main.run(), timeout=5)
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exit_:
+        chat_main.main()
 
-    assert ended.group_contains(RuntimeError, match="runner crashed")
+    assert exit_.value.code == 1
+    assert "runner crashed" in caplog.text

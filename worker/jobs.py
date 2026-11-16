@@ -1,8 +1,8 @@
 """The worker's periodic jobs: the competition timer, the Authentik group refresh and the Quotient sync.
 
 None of them talks to a chat system: what they announce is queued (notify_ops, the competition service's status
-refreshes, a role sync). Each loop runs a pass at once, then one each interval from the start of the last, and
-advances its heartbeat (core.heartbeat) after every pass; a pass never raises, so a loop only ends with the process.
+refreshes). Each loop runs a pass at once, then one each interval from the start of the last, and advances its
+heartbeat (core.heartbeat) after each pass that completes; a pass that raises is logged and skips the beat.
 """
 
 import asyncio
@@ -15,9 +15,8 @@ from django.utils import timezone
 from scoring.quotient_sync import sync_quotient_metadata
 
 from core.authentik_manager import AuthentikManager
-from core.heartbeat import beat, beat_for, record
-from core.models import CompetitionConfig, QueuedTask
-from core.queued_tasks import WORKER_REQUESTER, SyncRoles
+from core.heartbeat import GROUPS, QUOTIENT, TIMER, beat, beat_for
+from core.models import CompetitionConfig
 from core.services.competition import (
     END_AFTER_STOP,
     TIMER_ACTOR,
@@ -48,12 +47,20 @@ SYNC_MINUTES = 5
 BACKOFF_MINUTES = 15
 
 
-async def _every(seconds: Callable[[], float], run_pass: Callable[[], Awaitable[None]]) -> None:
-    """Run a pass now, then each seconds() from the start of the last one (at once after a pass that overran)."""
+async def _every(name: str, seconds: Callable[[], float], run_pass: Callable[[], Awaitable[None]]) -> None:
+    """Run a pass now, then each seconds() from the start of the last one (at once after a pass that overran). Each
+    pass that completes advances the heartbeat name, as does code it awaits that calls beat(); one that raises is
+    logged and skips the beat, and the loop goes on."""
+    beat_for(name)
     loop = asyncio.get_running_loop()
     while True:
         started = loop.time()
-        await run_pass()
+        try:
+            await run_pass()
+        except Exception as e:
+            logger.exception(f"Error in the {name} pass: {e}")
+        else:
+            beat()
         await asyncio.sleep(max(0.0, started + seconds() - loop.time()))
 
 
@@ -69,23 +76,17 @@ async def notify(message: str) -> None:
 
 
 async def competition_timer_loop() -> None:
-    await _every(lambda: TIMER_SECONDS, timer_pass)
+    await _every(TIMER, lambda: TIMER_SECONDS, timer_pass)
 
 
 async def timer_pass() -> None:
-    """Check the schedule once; never raises. Only a pass that completes advances the timer heartbeat, as do the
-    steps of a run in progress."""
-    beat_for("timer")
-    try:
-        await recycle_db_connection()
-        await check_competition_times()
-        beat()
-    except Exception as e:
-        logger.exception(f"Error in competition timer check: {e}")
+    """Check the schedule once. The steps of a run in progress advance the timer heartbeat too."""
+    await recycle_db_connection()
+    await check_competition_times()
 
 
 async def check_competition_times() -> None:
-    # Errors here propagate so timer_pass skips its heartbeat: a timer that can't read the
+    # Errors here propagate so the pass skips its heartbeat: a timer that can't read the
     # config is not alive in any useful sense.
     now = timezone.now()
     match await sync_to_async(current_timer_plan)(now):
@@ -169,12 +170,12 @@ def refresh_groups() -> GroupRefreshResult | None:
 
 
 async def group_refresh_loop() -> None:
-    await _every(lambda: REFRESH_MINUTES * 60, group_refresh_pass)
+    await _every(GROUPS, lambda: REFRESH_MINUTES * 60, group_refresh_pass)
 
 
 async def group_refresh_pass() -> None:
-    """Refresh once, then queue a role sync (when Discord is configured) if any user's groups changed, so Discord
-    roles follow without waiting for the bot's own periodic sync. Never raises; advances the groups heartbeat."""
+    """Refresh once. Authentik failing is logged, not raised: the loop is alive, and restarting the worker would not
+    bring Authentik back. The chat process's role sync follows the groups that changed (bot.cogs.role_sync)."""
     try:
         result = await run_blocking(refresh_groups)
     except GroupRefreshAbortedError as e:
@@ -186,12 +187,6 @@ async def group_refresh_pass() -> None:
             logger.info("Authentik group refresh skipped: another refresh is running")
         elif result.changed:
             logger.info(f"Authentik group refresh: {result.changed} of {result.checked} users changed")
-            try:
-                # QueuedTask.enqueue writes no row when Discord isn't configured
-                await run_blocking(QueuedTask.enqueue, SyncRoles(requested_by=WORKER_REQUESTER, dry_run=False))
-            except Exception:
-                logger.exception("Could not queue the role sync after the group refresh")
-    record("groups")
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -209,16 +204,9 @@ class QuotientSync:
     def interval_minutes(self) -> int:
         return BACKOFF_MINUTES if self.quotient_unavailable else SYNC_MINUTES
 
-    async def run_forever(self) -> None:
-        await _every(lambda: self.interval_minutes * 60, self.run_pass)
-
     async def run_pass(self) -> None:
-        """Sync once and advance the quotient heartbeat, a pass that found Quotient unavailable included: the loop is
-        alive and backing off, and restarting the worker would not bring Quotient back."""
-        await self._sync()
-        record("quotient")
-
-    async def _sync(self) -> None:
+        """Sync once. Quotient being unavailable is logged, not raised: the loop is alive and backing off, and
+        restarting the worker would not bring Quotient back."""
         try:
             await run_blocking(sync_quotient_metadata)
         except ValueError as e:
@@ -239,4 +227,5 @@ class QuotientSync:
 
 
 async def quotient_sync_loop() -> None:
-    await QuotientSync().run_forever()
+    sync = QuotientSync()
+    await _every(QUOTIENT, lambda: sync.interval_minutes * 60, sync.run_pass)

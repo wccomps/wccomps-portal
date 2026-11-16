@@ -123,7 +123,6 @@ class QueueProcessor[P: TaskPayload](ABC):
     def __init__(self, *, on_start: Callable[[str], None] = _nothing, on_pass: Callable[[], None] = _nothing) -> None:
         self.on_start = on_start
         self.on_pass = on_pass
-        self.running = False
         self.task: asyncio.Task[None] | None = None
 
     @abstractmethod
@@ -140,26 +139,23 @@ class QueueProcessor[P: TaskPayload](ABC):
         return None
 
     def start(self) -> None:
-        """Run the queue in a task of its own, until stop()."""
         self.task = asyncio.create_task(self.run())
         logger.info(f"{self.backend.label} queue processor started")
 
     def stop(self) -> None:
-        self.running = False
         if self.task:
             self.task.cancel()
         logger.info(f"{self.backend.label} queue processor stopped")
 
     async def run(self) -> None:
-        """Recover stranded rows, then poll until stop(); a failed poll is logged and the next one tried."""
-        self.running = True
+        """Recover stranded rows, then poll until cancelled; a failed poll is logged and the next one tried."""
         self.on_start(self.heartbeat_name)
         try:
             await self.recover_stranded()
         except Exception:
             logger.exception(f"Failed to recover stranded {self.backend} queue tasks")
 
-        while self.running:
+        while True:
             try:
                 await recycle_db_connection()
                 await self.process_pending()

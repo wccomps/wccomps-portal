@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 import pytest
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 from bot import role_sync
 from bot.cogs import role_sync as role_sync_cog
@@ -263,19 +264,37 @@ async def test_syncing_one_member_after_unlinking_takes_every_synced_role(teams)
     assert _ids(member.remove_roles) == {OPS, TEAM_A, BLUETEAM}
 
 
-async def test_the_loop_syncs_roles() -> None:
-    """The worker refreshes the stored groups; the bot's loop only syncs roles from them."""
-    calls: list[Any] = []
+def _cog() -> role_sync_cog.RoleSyncCog:
     cog = role_sync_cog.RoleSyncCog.__new__(role_sync_cog.RoleSyncCog)
     cog.bot = MagicMock()
+    cog.synced_groups, cog.synced_at = None, float("-inf")
+    return cog
 
-    async def sync(bot: Any) -> None:
-        calls.append(bot)
 
-    with patch.object(role_sync_cog, "sync_roles_now", sync):
+async def test_the_loop_syncs_when_the_stored_groups_change(teams, monkeypatch) -> None:
+    """The worker refreshes the stored groups; the chat process's loop syncs roles soon after they change, and on
+    every pass FULL_SYNC_MINUTES after the last sync."""
+    link = await _link(1, ["WCComps_Ops"], team=teams[0])
+    cog = _cog()
+    sync = AsyncMock()
+    clock = [1000.0]
+    monkeypatch.setattr(role_sync_cog, "competition_guild", lambda bot: bot.guild)
+    monkeypatch.setattr(role_sync_cog, "sync_roles", sync)
+    monkeypatch.setattr(role_sync_cog.time, "monotonic", lambda: clock[0])
+
+    async def passes() -> int:
         await role_sync_cog.RoleSyncCog.sync_task.coro(cog)
+        return sync.await_count
 
-    assert calls == [cog.bot]
+    assert await passes() == 1  # the first pass
+    assert await passes() == 1
+    await UserGroups.objects.filter(user_id=link.user_id).aupdate(groups_updated_at=timezone.now())
+    assert await passes() == 1  # read again, unchanged
+    await UserGroups.objects.filter(user_id=link.user_id).aupdate(groups=[teams[0].authentik_group])
+    assert await passes() == 2
+    clock[0] += role_sync_cog.FULL_SYNC_MINUTES * 60
+    assert await passes() == 3
+    sync.assert_awaited_with(cog.bot.guild)
 
 
 async def test_role_sync_failure_is_logged_not_raised(caplog: pytest.LogCaptureFixture) -> None:
@@ -284,7 +303,7 @@ async def test_role_sync_failure_is_logged_not_raised(caplog: pytest.LogCaptureF
         patch.object(role_sync_cog, "competition_guild", return_value=MagicMock()),
         patch.object(role_sync_cog, "sync_roles", AsyncMock(side_effect=RuntimeError("discord down"))),
     ):
-        await role_sync_cog.sync_roles_now(MagicMock())
+        await role_sync_cog.RoleSyncCog.sync_task.coro(_cog())
 
     assert "Role sync failed: discord down" in caplog.text
 

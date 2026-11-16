@@ -5,6 +5,7 @@ request_finished) never ran for it: after a Postgres restart its one connection 
 every loop logged errors forever while the process looked healthy.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -87,6 +88,7 @@ def _dashboard() -> object:
     dashboard = UnifiedDashboard.__new__(UnifiedDashboard)
     dashboard.bot = MagicMock()
     dashboard.bot.wait_until_ready = AsyncMock()
+    dashboard.running = True
     return dashboard
 
 
@@ -112,14 +114,13 @@ async def test_each_loop_recycles_before_its_work(module, make, work_attr, monke
 
     async def fake_work(*_args: object) -> None:
         calls.append("work")
-        obj.running = False  # one pass only
+        raise asyncio.CancelledError  # one pass only
 
     monkeypatch.setattr(mod, "recycle_db_connection", fake_recycle)
     monkeypatch.setattr(obj, work_attr, fake_work)
     monkeypatch.setattr(mod.asyncio, "sleep", AsyncMock())
-    obj.running = True
-
     loop_method = next(getattr(obj, n) for n in ("run", "_dashboard_loop") if hasattr(obj, n))
-    await loop_method()
+    with pytest.raises(asyncio.CancelledError):
+        await loop_method()
 
     assert calls == ["recycle", "work"]

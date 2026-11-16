@@ -17,12 +17,26 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DIR = "/app/run/heartbeat"
 
-# Allowed age per loop, several missed passes each. The worker: competition timer every 60s, group refresh every
-# 5 min, Quotient sync every 5 min (every 15 min while backing off, so two backed-off passes), queue polls every 2s.
-WORKER_BUDGETS: dict[str, int] = {"timer": 300, "groups": 900, "quotient": 1800, "queue-worker": 60}
-# The chat backends: each queue polls every 2s, the Discord dashboard every 10s, Zulip's event queue long-polls.
-DISCORD_BUDGETS: dict[str, int] = {"queue-discord": 60, "dashboard": 120}
-ZULIP_BUDGETS: dict[str, int] = {"queue-zulip": 60, "events-zulip": 300}
+# The heartbeat each loop writes
+TIMER = "timer"
+GROUPS = "groups"
+QUOTIENT = "quotient"
+QUEUE_WORKER = "queue-worker"
+QUEUE_DISCORD = "queue-discord"
+DASHBOARD = "dashboard"
+
+# Allowed age per heartbeat, several missed passes each. The worker: competition timer every 60s, group refresh every
+# 5 min, Quotient sync every 5 min (every 15 min while backing off, so two backed-off passes), its queue polls every
+# 2s. The chat process's Discord runner: its queue polls every 2s, the dashboard every 10s.
+BUDGETS: dict[str, int] = {TIMER: 300, GROUPS: 900, QUOTIENT: 1800, QUEUE_WORKER: 60, QUEUE_DISCORD: 60, DASHBOARD: 120}
+WORKER_HEARTBEATS: tuple[str, ...] = (TIMER, GROUPS, QUOTIENT, QUEUE_WORKER)
+DISCORD_HEARTBEATS: tuple[str, ...] = (QUEUE_DISCORD, DASHBOARD)
+
+
+def discord_configured(token: str | None) -> bool:
+    """Whether Discord is configured, from DISCORD_BOT_TOKEN: the one rule core.task_backends.discord_enabled (through
+    settings) and budgets (through the environment, as this module can't import Django) both apply."""
+    return bool(token)
 
 
 def _always() -> bool:
@@ -37,22 +51,15 @@ def heartbeat_dir() -> Path:
 
 
 def budgets(process: str) -> dict[str, int]:
-    """The heartbeats process ("worker" or "chat") writes, with their allowed age in seconds.
-
-    A chat backend counts when its credentials are in the environment, as core.task_backends decides from the same
-    variables through settings (read here from the environment, since this module can't import Django).
-    """
+    """The heartbeats process ("worker" or "chat") writes, with their allowed age in seconds."""
     match process:
         case "worker":
-            return dict(WORKER_BUDGETS)
+            names = WORKER_HEARTBEATS
         case "chat":
-            found: dict[str, int] = {}
-            if os.environ.get("DISCORD_BOT_TOKEN"):
-                found |= DISCORD_BUDGETS
-            if all(os.environ.get(name) for name in ("ZULIP_SITE", "ZULIP_BOT_EMAIL", "ZULIP_API_KEY")):
-                found |= ZULIP_BUDGETS
-            return found
-    raise ValueError(f"Unknown process {process!r}, expected 'worker' or 'chat'")
+            names = DISCORD_HEARTBEATS if discord_configured(os.environ.get("DISCORD_BOT_TOKEN")) else ()
+        case _:
+            raise ValueError(f"Unknown process {process!r}, expected 'worker' or 'chat'")
+    return {name: BUDGETS[name] for name in names}
 
 
 def record(name: str, alive: Callable[[], bool] = _always) -> None:

@@ -161,8 +161,8 @@ def run_competition(
 
 
 async def arun_competition(enable: bool, actor: str, timer: Attempt | None = None) -> CompetitionRunResult:
-    """run_competition from async code (the timer, the bot's commands): a step at a time on a pool thread of its own,
-    beating the caller's heartbeat after each."""
+    """run_competition from async code: a step at a time on a pool thread of its own, beating the caller's heartbeat
+    after each."""
     async with aclosing(BlockingSteps(run_competition(enable, actor, timer))) as steps:
         async for _step in steps:
             beat()

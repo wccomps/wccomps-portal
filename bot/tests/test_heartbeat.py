@@ -1,6 +1,7 @@
 """The bot's loops beat their core.heartbeat heartbeats, and `python -m core.health chat` checks them."""
 
 import asyncio
+import contextlib
 import os
 import subprocess
 import sys
@@ -31,13 +32,11 @@ def _open_bot() -> MagicMock:
 @pytest.fixture
 def discord_only(monkeypatch):
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "token")
-    for name in ("ZULIP_SITE", "ZULIP_BOT_EMAIL", "ZULIP_API_KEY"):
-        monkeypatch.delenv(name, raising=False)
 
 
 def test_the_chat_check_covers_the_loops_the_bot_runs(discord_only):
     """The worker process runs the queue-worker, timer, groups and quotient loops."""
-    assert heartbeat.budgets("chat") == {"queue-discord": 60, "dashboard": 120}
+    assert heartbeat.budgets("chat") == {heartbeat.QUEUE_DISCORD: 60, heartbeat.DASHBOARD: 120}
 
 
 def test_check_passes_when_all_fresh(hb_dir, discord_only):
@@ -146,8 +145,9 @@ async def test_the_queue_beats_after_each_poll_and_each_task(beats, monkeypatch)
     processor = _queue(monkeypatch, ["a", "b", "c"], handle)
     loop = asyncio.ensure_future(processor.run())
     await asyncio.sleep(0.2)
-    processor.running = False
-    await loop
+    loop.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await loop
 
     assert during == [1, 2, 3]
 
@@ -164,9 +164,10 @@ async def test_a_wedged_task_stops_the_queue_heartbeat(beats, monkeypatch):
     loop = asyncio.ensure_future(processor.run())
     await asyncio.sleep(0.3)
     wedged = list(beats)
-    processor.running = False
+    loop.cancel()
     release.set()
-    await loop
+    with contextlib.suppress(asyncio.CancelledError):
+        await loop
 
     assert wedged == ["queue-discord"]
 

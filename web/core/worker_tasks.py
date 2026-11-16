@@ -10,6 +10,7 @@ from django.db import transaction
 from registration.services import teardown_problem
 from registration.stage import event_stage
 
+from core.heartbeat import QUEUE_WORKER
 from core.models import AuditLog, QueuedTask
 from core.nextcloud import NextcloudManager, nextcloud_configured
 from core.queued_tasks import ReconcileNextcloud, ResetNextcloudTeam, WorkerTask
@@ -34,7 +35,7 @@ class ReconcileState(TypedDict, total=False):
 
 class WorkerQueueProcessor(QueueProcessor[WorkerTask]):
     backend = TaskBackend.WORKER
-    heartbeat_name = "queue-worker"
+    heartbeat_name = QUEUE_WORKER
 
     async def dispatch(self, payload: WorkerTask, task: QueuedTask) -> Mapping[str, object] | None:
         match payload:

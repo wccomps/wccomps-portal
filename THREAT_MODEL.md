@@ -22,7 +22,9 @@ during an event.
 1. **Authentik service token** (`web/portal/settings.py` `AUTHENTIK_TOKEN`): sets any team's password, ends sessions,
    toggles app bindings and group membership.
 2. **Proxmox API token and Nextcloud admin credentials** (`web/portal/settings.py` `PROXMOX_API_TOKEN`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_PASSWORD`): roll back and start team VMs, and provision or delete blue team Nextcloud accounts and files.
-3. **Discord bot token**: posts as the bot, manages roles and channels in the event server.
+3. **Discord bot token**: posts as the bot, manages roles and channels in the event server. The chat process acts with
+   it; web and the worker carry `DISCORD_BOT_TOKEN` only so `discord_enabled()` decides whether to queue Discord rows
+   (`web/core/task_backends.py` `discord_enabled`).
 4. **Team account passwords**: in Authentik, mirrored in `SchoolInfo.password` for packet emails
    (`web/core/authentik_utils.py` `_store_password`), in the bulk reset CSV (only to whoever ran the reset) and in
    packet emails.
@@ -54,7 +56,8 @@ flowchart LR
     subgraph Portal
         W[Web: Django under gunicorn]
         Q[(Postgres: rows, QueuedTask queue, uploaded files)]
-        T[Bot: discord.py, timers, queue processor]
+        K[Worker: competition timer, group refresh, Quotient sync, worker queue]
+        C[Chat: discord.py, Discord queue, role sync]
     end
     A[Authentik: OIDC and admin API]
     P[Proxmox API]
@@ -66,17 +69,24 @@ flowchart LR
     B -- "1 HTTPS, session cookie, CSRF" --> W
     B -- "2 OIDC redirect" --> A
     A -- "2 callback, userinfo with groups" --> W
-    D -- "3 slash commands, buttons, thread messages" --> G --> T
+    D -- "3 slash commands, buttons, thread messages" --> G --> C
     W -- "4 rows, QueuedTask payloads" --> Q
-    Q --> T
-    W & T -- "5 service token" --> A
-    W & T -- "6 API token, team pool only" --> P
-    W & T -- "7 login session" --> S
+    Q --> K & C
+    W & K & C -- "5 service token" --> A
+    W & K & C -- "6 API token, team pool only" --> P
+    W & K & C -- "7 login session" --> S
     W -- "8 packet emails with passwords" --> M
-    T -- "9 bot token" --> G
-    W & T -- "10 admin credentials, team accounts only" --> N
-    W & T -- "11 competition network config" --> X
+    C -- "9 bot token" --> G
+    W & K & C -- "10 admin credentials, team accounts only" --> N
+    W & K & C -- "11 competition network config" --> X
 ```
+
+The worker (`worker/__main__.py`) runs the competition timer, the group refresh, the Quotient sync (which reads team
+VMs from Proxmox and pushes the network config to aweful-proxy) and the worker queue (Nextcloud), so it holds the
+Authentik token, the Quotient login, the Proxmox token, the Nextcloud credentials and the aweful-proxy token. The chat
+process (`chat/__main__.py`) holds the Discord token, and the same Authentik, Nextcloud, Quotient, Proxmox and
+aweful-proxy credentials for its `/competition` and reset commands: `/competition start` runs the competition service,
+which syncs Quotient (`web/core/services/competition.py` `run_competition`).
 
 ## Threats per boundary (STRIDE) and their mitigations
 
@@ -164,7 +174,9 @@ flowchart LR
    check and the test suite (`.github/workflows/tests.yml`).
 2. Dependencies come from `uv.lock`, installed `--frozen` (`Dockerfile`); updates arrive only as Dependabot pull
    requests (`.github/dependabot.yml`).
-3. CI on `main` builds one image for web and bot and pushes it to GHCR as `sha-<commit>` (`.github/workflows/ci.yml`).
+3. CI on `main` builds one image for web, the worker and the chat process and pushes it to GHCR as `sha-<commit>`
+   (`.github/workflows/ci.yml`); production runs the worker Deployment beside the bot one (the chat process), each with an
+   exec liveness probe, `python -m core.health worker` or `chat` (`web/core/health.py` `check`).
    Third-party actions are pinned to commit SHAs and base images to digests (`web/core/tests/test_python_pin.py`), and
    the image runs as uid 1001, not root (`Dockerfile`). Each web container migrates under a Postgres advisory lock, so
    replicas take turns (`web/core/management/commands/prepare_database.py` `Command.handle`).

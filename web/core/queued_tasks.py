@@ -100,11 +100,6 @@ class SyncRolesResult(TypedDict):
     changes: list[str]
 
 
-# SyncRoles.requested_by of the sync the worker queues after a group refresh changed users; like the bot's periodic
-# sync, it posts no ops summary
-WORKER_REQUESTER = "worker"
-
-
 @dataclass(frozen=True, kw_only=True)
 class SyncRoles:
     """The SyncRolesResult lands in QueuedTask.result."""

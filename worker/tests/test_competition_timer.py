@@ -14,6 +14,7 @@ from core.queued_tasks import CompetitionStatusChanged, LogToChannel
 from core.services import competition
 from core.services.competition import Attempt, CompetitionRunResult
 from worker import jobs
+from worker.tests.loops import one_pass
 
 
 async def _queued() -> tuple[list[str], int]:
@@ -96,7 +97,7 @@ class TestCompetitionTimer:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("work_fails", [False, True])
 async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeypatch) -> None:
-    """A pass never raises (the loop would end), and a failed one skips the liveness heartbeat."""
+    """A failed pass is logged and skips the liveness heartbeat; the loop goes on."""
     from core import heartbeat
 
     calls: list[str] = []
@@ -113,7 +114,7 @@ async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeyp
     monkeypatch.setattr(heartbeat, "record", lambda name, alive: calls.append(f"beat:{name}"))
     monkeypatch.setattr(jobs, "check_competition_times", work)
 
-    await jobs.timer_pass()
+    await one_pass(jobs.competition_timer_loop, monkeypatch)
 
     assert calls == ["recycle", "work"] if work_fails else ["recycle", "work", "beat:timer"]
 
@@ -128,7 +129,7 @@ async def test_config_read_failing_on_the_db_skips_the_beat(monkeypatch) -> None
     monkeypatch.setattr(heartbeat, "record", lambda name, alive: beats.append(name))
 
     with patch("core.models.CompetitionConfig.get_config", side_effect=RuntimeError("db down")):
-        await jobs.timer_pass()
+        await one_pass(jobs.competition_timer_loop, monkeypatch)
 
     assert beats == []
 
@@ -138,7 +139,7 @@ async def test_the_loop_checks_at_once_then_every_minute(monkeypatch) -> None:
     passes: list[str] = []
     sleeps: list[float] = []
 
-    async def one_pass() -> None:
+    async def timer_pass() -> None:
         passes.append("pass")
 
     async def sleep(seconds: float) -> None:
@@ -146,7 +147,7 @@ async def test_the_loop_checks_at_once_then_every_minute(monkeypatch) -> None:
         if len(sleeps) == 2:
             raise asyncio.CancelledError
 
-    monkeypatch.setattr(jobs, "timer_pass", one_pass)
+    monkeypatch.setattr(jobs, "timer_pass", timer_pass)
     monkeypatch.setattr(jobs.asyncio, "sleep", sleep)
 
     with pytest.raises(asyncio.CancelledError):
@@ -389,7 +390,7 @@ async def test_a_run_of_many_quick_steps_keeps_the_timer_alive(monkeypatch) -> N
 
     monkeypatch.setattr(jobs, "check_competition_times", check)
 
-    await jobs.timer_pass()
+    await one_pass(jobs.competition_timer_loop, monkeypatch)
 
     assert during == [0, 1, 2, 3, 4]
     assert beats == ["timer"] * 6
@@ -418,8 +419,9 @@ async def test_a_wedged_step_stops_the_timer_heartbeat(monkeypatch) -> None:
         await competition.arun_competition(True, "timer")
 
     monkeypatch.setattr(jobs, "check_competition_times", check)
-    loop = asyncio.ensure_future(jobs.timer_pass())
-    await asyncio.sleep(0.5)
+    wait = asyncio.sleep  # one_pass patches asyncio.sleep once the loop starts
+    loop = asyncio.ensure_future(one_pass(jobs.competition_timer_loop, monkeypatch))
+    await wait(0.5)
     wedged = list(beats)
     release.set()
     await loop

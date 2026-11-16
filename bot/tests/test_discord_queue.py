@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from bot.discord_queue import DiscordQueueProcessor, PermanentTaskError
 from core.models import QueuedTask
-from core.queued_tasks import WORKER_REQUESTER, PostTicketUpdate, SyncMemberRoles, SyncRoles
+from core.queued_tasks import PostTicketUpdate, SyncMemberRoles, SyncRoles
 from team.models import Team
 
 
@@ -522,7 +522,7 @@ class TestDiscordQueueOrdering:
 
         with (
             patch("bot.discord_queue.log_to_ops_channel", side_effect=slow),
-            patch("bot.discord_queue.beat", side_effect=lambda: beats.append(len(handled))),
+            patch.object(processor, "on_pass", side_effect=lambda: beats.append(len(handled))),
         ):
             await processor.process_pending()
 
@@ -729,26 +729,6 @@ async def test_handler_return_is_stored_as_result_and_payload_is_left_alone() ->
     assert task.payload == {"requested_by": "ops", "dry_run": True}
     assert task.result["roles_added"] == 2
     assert task.result["changes"] == ["+ alice"]
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize(("requested_by", "posts"), [(WORKER_REQUESTER, 0), ("ops", 1)])
-async def test_only_a_person_requested_role_sync_posts_its_summary(requested_by: str, posts: int) -> None:
-    """The worker queues a sync after each group refresh that changed users; like the periodic sync, it stays quiet."""
-    [task] = await sync_to_async(QueuedTask.enqueue)(SyncRoles(requested_by=requested_by, dry_run=False))
-    stats = {"roles_added": 1, "roles_removed": 0, "errors": 0, "changes": ["+ alice"]}
-
-    with (
-        patch("bot.role_sync.competition_guild", return_value=MagicMock()),
-        patch("bot.discord_queue.sync_roles", new=AsyncMock(return_value=stats)),
-        patch("bot.discord_queue.log_to_ops_channel", new=AsyncMock()) as ops,
-    ):
-        await DiscordQueueProcessor(MagicMock())._process_task(task)
-
-    await task.arefresh_from_db()
-    assert (task.status, task.result["roles_added"]) == ("completed", 1)
-    assert ops.await_count == posts
 
 
 class TestCompetitionGuildLookup:

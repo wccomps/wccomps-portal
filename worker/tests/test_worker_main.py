@@ -46,7 +46,7 @@ async def _forever() -> None:
 
 
 async def test_a_crashing_loop_ends_the_worker(monkeypatch):
-    """The liveness probe restarts a worker that exited; one left running without its group refresh never would."""
+    """A worker that exits restarts with its container; one left running without its group refresh never would."""
     from worker import __main__ as worker_main
 
     async def crash() -> None:

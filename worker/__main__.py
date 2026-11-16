@@ -2,14 +2,13 @@
 worker queue (core.worker_tasks), none of which talks to a chat system. `python -m core.health worker` is its
 liveness check.
 
-The loops run under one TaskGroup, so a loop that crashes ends the process and the liveness probe's restart brings
-every loop back.
+The loops run under one TaskGroup, so a loop that crashes ends the process, and its container restarts with every
+loop.
 """
 
 import asyncio
 import logging
 import os
-import sys
 
 import django
 
@@ -23,13 +22,6 @@ from core.heartbeat import beat, beat_for
 from core.worker_tasks import WorkerQueueProcessor
 from worker.jobs import competition_timer_loop, group_refresh_loop, quotient_sync_loop
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ],
-)
 logger = logging.getLogger(__name__)
 
 

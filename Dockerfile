@@ -53,7 +53,7 @@ WORKDIR /app/web
 RUN python manage.py collectstatic --noinput
 
 # Production's pod spec sets this uid too (runAsUser 1001). The app writes only to /tmp (uploads, gunicorn
-# heartbeats, fontconfig) and the bot's heartbeat directory under /app/run.
+# heartbeats, fontconfig) and the worker's and chat process's heartbeat directory under /app/run.
 RUN groupadd --system --gid 1001 app \
     && useradd --system --uid 1001 --gid 1001 --home-dir /tmp --no-create-home --shell /usr/sbin/nologin app \
     && mkdir -p /app/run \

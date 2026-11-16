@@ -7,6 +7,7 @@ import pytest
 
 from worker import jobs
 from worker.jobs import BACKOFF_MINUTES, SYNC_MINUTES
+from worker.tests.loops import one_pass
 
 
 @pytest.fixture(autouse=True)
@@ -39,9 +40,7 @@ async def test_first_failure_warns_once_and_backs_off(caplog):
 @pytest.mark.asyncio
 async def test_quotient_unreachable_still_beats(hb_dir, monkeypatch):
     monkeypatch.setattr("worker.jobs.sync_quotient_metadata", Mock(side_effect=ValueError("Quotient down")))
-    sync = jobs.QuotientSync()
-    await sync.run_pass()
-    assert sync.interval_minutes == BACKOFF_MINUTES
+    await one_pass(jobs.quotient_sync_loop, monkeypatch)
     assert (hb_dir / "quotient").exists()
 
 
@@ -60,13 +59,12 @@ async def test_recovery_logs_once_and_restores_interval(caplog):
 
 
 @pytest.mark.asyncio
-async def test_success_while_up_keeps_the_interval(hb_dir):
+async def test_success_while_up_keeps_the_interval():
     sync = jobs.QuotientSync()
     with patch.object(jobs, "sync_quotient_metadata", lambda: None):
         await sync.run_pass()
 
     assert sync.interval_minutes == SYNC_MINUTES
-    assert (hb_dir / "quotient").exists()
 
 
 @pytest.mark.asyncio
