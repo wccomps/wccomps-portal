@@ -216,6 +216,7 @@ DJANGO_MODEL_OPTION = "Django reads this model Meta option by name"
 DJANGO_ADMIN_OPTION = "Django admin reads this ModelAdmin or inline option by name"
 DJANGO_FORM_OPTION = "Django reads this form option by name"
 
+ZULIP_RUNNER = "the Zulip notices and runner (chat.zulip), the next commits of this PR, call it"
 # fnmatch pattern over "path:name", or "@decorator" for anything with that decorator -> why it stays
 CODE_EXCEPTIONS = {
     "web/portal/urls.py:handler*": "Django reads the root URLconf's error handlers by name",
@@ -240,7 +241,6 @@ CODE_EXCEPTIONS = {
     "*:lookup_name": "Django reads a lookup's lookup_name to match field__name in a filter",
     "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",
     "web/core/cotton.py:__str__": "str() calls it when a component writes {{ attrs }}",
-    "web/core/utils.py:aclose": "contextlib.aclosing calls it",
     "*/management/commands/*:Command": "manage.py runs a command by its file name",
     "*/management/commands/*:handle": "manage.py calls Command.handle",
     "*/management/commands/*:help": "manage.py help prints a command's help text",
@@ -283,6 +283,11 @@ CODE_EXCEPTIONS = {
     "can go once that migration is squashed",
     "web/scoring/snapshot.py:context_from_snapshot": "Reads back the scorecard snapshots Close Out stores in "
     "EventResult; no page shows a stored result yet",
+    "chat/zulip/client.py:ZulipClient": ZULIP_RUNNER,
+    "chat/zulip/client.py:send_stream_message": ZULIP_RUNNER,
+    "chat/zulip/client.py:register_queue": ZULIP_RUNNER,
+    "chat/zulip/client.py:get_events": ZULIP_RUNNER,
+    "chat/zulip/client.py:fetch_upload": ZULIP_RUNNER,
 }
 
 
@@ -433,7 +438,19 @@ def test_every_url_name_is_linked() -> None:
 DJANGO_SETTINGS = {name for name in dir(global_settings) if name.isupper()} | {"ROOT_URLCONF", "MAILERS"}
 
 # setting -> why it stays although nothing reads it
-SETTING_EXCEPTIONS: dict[str, str] = {}
+_ZULIP_NOTICES = "read by the Zulip notices (chat.zulip.outgoing), the next commit of this PR"
+SETTING_EXCEPTIONS: dict[str, str] = dict.fromkeys(
+    (
+        "ZULIP_TEAM_STREAM",
+        "ZULIP_STAFF_STREAM",
+        "ZULIP_ANNOUNCEMENTS_STREAM",
+        "ZULIP_OPS_STREAM",
+        "ZULIP_OPS_TOPIC",
+        "ZULIP_TEAM_MENTION",
+        "ZULIP_STAFF_MENTION",
+    ),
+    _ZULIP_NOTICES,
+)
 
 
 def test_every_setting_is_read() -> None:

@@ -206,6 +206,17 @@ DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 ZULIP_SITE = os.environ.get("ZULIP_SITE", "")
 ZULIP_BOT_EMAIL = os.environ.get("ZULIP_BOT_EMAIL", "")
 ZULIP_API_KEY = os.environ.get("ZULIP_API_KEY", "")
+# Where Zulip notices go: each team's stream (a str.format pattern using {number}), the staff ticket stream, the
+# announcements stream, and the stream and topic for ops log lines
+ZULIP_TEAM_STREAM = os.environ.get("ZULIP_TEAM_STREAM", "team{number:02d}")
+ZULIP_STAFF_STREAM = os.environ.get("ZULIP_STAFF_STREAM", "tickets")
+ZULIP_ANNOUNCEMENTS_STREAM = os.environ.get("ZULIP_ANNOUNCEMENTS_STREAM", "announcements")
+ZULIP_OPS_STREAM = os.environ.get("ZULIP_OPS_STREAM", "ops")
+ZULIP_OPS_TOPIC = os.environ.get("ZULIP_OPS_TOPIC", "ops")
+# User groups a notice mentions: a team's (a pattern using {number}, such as "Team {number:02d}") and staff's; empty
+# mentions no one
+ZULIP_TEAM_MENTION = os.environ.get("ZULIP_TEAM_MENTION", "")
+ZULIP_STAFF_MENTION = os.environ.get("ZULIP_STAFF_MENTION", "")
 
 DISCORD_LOG_CHANNEL_ID = int(os.environ.get("DISCORD_LOG_CHANNEL_ID", "0"))
 DISCORD_TICKET_QUEUE_CHANNEL_ID = int(os.environ.get("DISCORD_TICKET_QUEUE_CHANNEL_ID", "0"))

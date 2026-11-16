@@ -7,10 +7,11 @@ fails on one without a case in READERS. A case serves each of the reader's reque
 that request gets (external_json), calls the reader, and checks what comes back.
 """
 
+import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -34,6 +35,7 @@ from quotient.client import (
     TeamUptime,
 )
 
+from chat.zulip.client import ZulipClient, ZulipError
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
 from core.nextcloud import NextcloudAPIError, NextcloudManager
 from core.proxmox import ProxmoxAPIError, ProxmoxClient, ProxmoxSnapshot, ProxmoxTaskStatus, ProxmoxVM
@@ -114,6 +116,19 @@ PROXMOX_SNAPSHOTS = {
 PROXMOX_UPID = {"data": "UPID:pve01:00001A2B:00000001:65000000:qmrollback:10105:user@pam!token:"}
 PROXMOX_TASK_STATUS = {"data": {"status": "stopped", "exitstatus": "OK"}}
 NEXTCLOUD_USER = {"ocs": {"meta": {"status": "ok", "statuscode": 200}, "data": {"user_id": "team01"}}}
+ZULIP_DONE = {"result": "success", "msg": ""}
+ZULIP_SENT = {**ZULIP_DONE, "id": 42}
+ZULIP_QUEUE = {**ZULIP_DONE, "queue_id": "1517975029:0", "last_event_id": -1}
+ZULIP_EVENTS = {
+    **ZULIP_DONE,
+    "events": [
+        {
+            "type": "message",
+            "id": 0,
+            "message": {"id": 77, "type": "stream", "display_recipient": "team03", "subject": "T003-001 Web"},
+        }
+    ],
+}
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -344,6 +359,19 @@ def nextcloud() -> NextcloudManager:
     return NextcloudManager(base_url="https://nextcloud.test", username="admin", password="secret")
 
 
+def zulip[T](method: Callable[[ZulipClient], Awaitable[T]]) -> Callable[[], T]:
+    """Calls a ZulipClient method with a client of its own, outside any event loop (as the reader tests run)."""
+
+    async def run() -> T:
+        client = ZulipClient("https://zulip.test", "portal-bot@zulip.test", "key")
+        try:
+            return await method(client)
+        finally:
+            await client.aclose()
+
+    return lambda: asyncio.run(run())
+
+
 def error_from_answer() -> object:
     """_handle_response_error reads an error answer's body: it gets the first answer served, as is."""
 
@@ -362,6 +390,7 @@ QJ = "web/quotient/client.py:_json"
 PX = "web/core/proxmox.py:ProxmoxClient"
 PJ = "web/core/proxmox.py:_json"
 READ = (f"{AM}._results", f"{AM}._json")
+ZC = "chat/zulip/client.py:ZulipClient"
 USER = (f"{AM}.find_user", *READ)
 NC_USER = (f"{NC}._user_id", f"{NC}._json")
 READERS = [
@@ -573,6 +602,42 @@ READERS = [
         check_bool,
         (f"{NC}.delete_team_user", *NC_USER),
         raises=(NextcloudAPIError,),
+    ),
+    Reader(
+        "zulip_send_stream_message",
+        zulip(lambda c: c.send_stream_message("team03", "T003-001 Web", "hi")),
+        (ZULIP_SENT,),
+        lambda r: outcome(r, is_int, "a message id"),
+        (f"{ZC}.send_stream_message", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_add_reaction",
+        zulip(lambda c: c.add_reaction(77, "paperclip")),
+        (ZULIP_DONE,),
+        lambda r: outcome(r, lambda v: v is None, "None"),
+        (f"{ZC}.add_reaction", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_register_queue",
+        zulip(lambda c: c.register_queue()),
+        (ZULIP_QUEUE,),
+        lambda r: outcome(
+            r,
+            lambda q: isinstance(q, tuple) and is_str(q[0]) and bool(q[0]) and is_int(q[1]),
+            "a queue id and event id",
+        ),
+        (f"{ZC}.register_queue", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_get_events",
+        zulip(lambda c: c.get_events("1517975029:0", -1)),
+        (ZULIP_EVENTS,),
+        lambda r: outcome(r, lambda e: isinstance(e, list) and all(isinstance(v, dict) for v in e), "a list of events"),
+        (f"{ZC}.get_events", f"{ZC}._call"),
+        raises=(ZulipError,),
     ),
 ]
 
