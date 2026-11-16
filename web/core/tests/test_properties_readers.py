@@ -692,6 +692,15 @@ SERVICES = {
 HUGE_EXPORT = [
     {**EXPORT[0], "gross_points": 10**30, "services": [{**EXPORT[0]["services"][0], "service_points": 10**30}]}
 ]
+# PostgreSQL's jsonb can't hold a NUL character or a lone surrogate
+NUL_METADATA = {"boxes": [{"name": "\x00", "ip": "10.0.0.5", "services": []}]}
+SURROGATE_METADATA = {"boxes": [{"name": "web", "ip": "10.0.0.5", "services": ["\ud800"]}]}
+# Each fits its own column, but the maximum worked out from it doesn't fit ScoringTemplate's
+HUGE_INJECTS = [{**INJECTS[0], "Title": "Inject 01 - Web (100,000,000 pts)"}]
+STRETCHED_EXPORT = [
+    {**EXPORT[0], "gross_points": 99_999_999, "services": [{**EXPORT[0]["services"][0], "service_points": 99_999_999}]}
+]
+LOW_UPTIMES = {"series": [{"Name": "team01", "Data": [{"Service": "web-http", "Uptime": 0.1}]}]}
 
 
 @pytest.mark.django_db
@@ -701,13 +710,34 @@ HUGE_EXPORT = [
 @example(
     data=[Answer(200, b"{}"), Answer(200, json.dumps(HUGE_EXPORT).encode()), Answer(200, json.dumps(UPTIMES).encode())]
 )
+@example(data=[Answer(200, b"{}"), Answer(200, json.dumps(NUL_METADATA).encode())])
+@example(data=[Answer(200, b"{}"), Answer(200, json.dumps(SURROGATE_METADATA).encode())])
+@example(
+    data=[
+        Answer(200, b"{}"),
+        Answer(200, json.dumps(METADATA).encode()),
+        Answer(200, json.dumps(PROXMOX_POOL).encode()),
+        Answer(200, json.dumps(HUGE_INJECTS).encode()),
+    ]
+)
+@example(
+    data=[
+        Answer(200, b"{}"),
+        Answer(200, json.dumps(STRETCHED_EXPORT).encode()),
+        Answer(200, json.dumps(LOW_UPTIMES).encode()),
+    ]
+)
 def test_callers_answer_or_log_whatever_the_service_says(caller: Caller, data: st.DataObject | list[Answer]) -> None:
     """The caller returns, or raises only its documented error (refresh_user_groups: anything, as its callers catch
     every error), and leaves the database usable: a database error it swallowed would break the transaction."""
+    from scoring.models import ScoringTemplate
+
     from team.models import Team
 
     if not Team.objects.filter(team_number=1).exists():
         Team.objects.create(team_number=1, team_name="Team 01", authentik_group="WCComps_BlueTeam01")
+    if not ScoringTemplate.objects.exists():
+        ScoringTemplate.objects.create()  # the syncs store the maximums they work out only on a template
     answers = data if isinstance(data, list) else data.draw(answer_lists(*caller.examples), label="answers")
     with rolled_back(), override_settings(**SERVICES), serving(answers):
         cache.clear()
