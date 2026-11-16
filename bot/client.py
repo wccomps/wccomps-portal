@@ -1,30 +1,20 @@
+"""The Discord client the chat process runs: its cogs, its slash-command sync, the Discord queue and the dashboard."""
+
 import logging
 import os
-import sys
 
 import discord
-import django
+from asgiref.sync import sync_to_async
 from discord.ext import commands
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portal.settings")
-django.setup()
-
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
-from portal.required import missing_settings
 
 from bot.command_tree import PortalCommandTree, command_hash, command_plan
 from bot.discord_queue import DiscordQueueProcessor
+from bot.ticket_dashboard import TicketActionView
 from bot.unified_dashboard import UnifiedDashboard
-from bot.utils import ALLOWED_MENTIONS
+from bot.utils import ALLOWED_MENTIONS, report_missing_discord_settings
+from core.models import BotState
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ],
-)
 logger = logging.getLogger(__name__)
 
 
@@ -43,10 +33,6 @@ class PortalBot(commands.Bot):
         self.unified_dashboard: UnifiedDashboard | None = None
 
     async def _should_sync_commands(self, current_hash: str) -> bool:
-        from asgiref.sync import sync_to_async
-
-        from core.models import BotState
-
         if os.environ.get("SYNC_COMMANDS", "").lower() in ("true", "1", "yes"):
             logger.info(f"SYNC_COMMANDS=true, forcing sync (hash: {current_hash})")
             return True
@@ -76,8 +62,6 @@ class PortalBot(commands.Bot):
         await self.load_extension("bot.cogs.role_sync")
 
         logger.info("Cogs loaded")
-
-        from bot.ticket_dashboard import TicketActionView
 
         self.add_view(TicketActionView(ticket_id=0))
         logger.info("Registered persistent ticket action view")
@@ -111,8 +95,6 @@ class PortalBot(commands.Bot):
 
         # Only a complete sync is recorded, so a failed one is retried on the next start.
         if synced:
-            from core.models import BotState
-
             await BotState.objects.aupdate_or_create(key="command_hash", defaults={"value": current_hash})
 
     async def on_ready(self) -> None:
@@ -130,8 +112,6 @@ class PortalBot(commands.Bot):
             self.queue_processor.start()
 
             # First ready only (on_ready also fires on reconnects): flag unset Discord IDs
-            from bot.utils import report_missing_discord_settings
-
             await report_missing_discord_settings(self)
 
         if not self.unified_dashboard:
@@ -145,26 +125,3 @@ class PortalBot(commands.Bot):
         if self.unified_dashboard:
             self.unified_dashboard.stop()
         await super().close()
-
-
-def main() -> None:
-    token = settings.DISCORD_BOT_TOKEN
-    if not token:
-        logger.error("DISCORD_BOT_TOKEN environment variable not set")
-        sys.exit(1)
-    if missing := missing_settings():
-        raise ImproperlyConfigured(f"{', '.join(missing)} not set; the bot needs them")
-
-    bot = PortalBot()
-
-    try:
-        bot.run(token, log_handler=None)  # its logs propagate to the Django console handler
-    except KeyboardInterrupt:
-        logger.info("Received keyboard interrupt")
-    except Exception as e:
-        logger.exception(f"Fatal error: {e}")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

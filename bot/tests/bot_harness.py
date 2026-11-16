@@ -55,9 +55,9 @@ class Draws(Protocol):
 
 @cache
 def portal_bot() -> commands.Bot:
-    """The bot as main.py makes it: the fakes take its default allowed mentions and its command tree's class.
-    Imported when first needed, as main.py sets up Django and logging when imported."""
-    from main import PortalBot
+    """The bot as the chat process makes it: the fakes take its default allowed mentions and its command tree's
+    class. Imported when first needed, as bot.client needs Django set up."""
+    from bot.client import PortalBot
 
     return PortalBot()
 

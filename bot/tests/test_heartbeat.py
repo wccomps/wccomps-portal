@@ -1,4 +1,4 @@
-"""The bot's loops beat their core.heartbeat heartbeats, and `python -m bot.health` checks the ones the bot runs."""
+"""The bot's loops beat their core.heartbeat heartbeats, and `python -m core.health chat` checks them."""
 
 import asyncio
 import os
@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from bot.health import BOT_BUDGETS, check
 from core import heartbeat
+from core.health import check
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,37 +28,44 @@ def _open_bot() -> MagicMock:
     return bot
 
 
-def test_the_bot_checks_the_loops_it_runs():
-    """The Discord loops main.py runs; the worker process runs the queue-worker, timer, groups and quotient ones."""
-    assert BOT_BUDGETS == {"queue-discord": 60, "dashboard": 120}
+@pytest.fixture
+def discord_only(monkeypatch):
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "token")
+    for name in ("ZULIP_SITE", "ZULIP_BOT_EMAIL", "ZULIP_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
 
 
-def test_check_passes_when_all_fresh(hb_dir):
-    for name in BOT_BUDGETS:
+def test_the_chat_check_covers_the_loops_the_bot_runs(discord_only):
+    """The worker process runs the queue-worker, timer, groups and quotient loops."""
+    assert heartbeat.budgets("chat") == {"queue-discord": 60, "dashboard": 120}
+
+
+def test_check_passes_when_all_fresh(hb_dir, discord_only):
+    for name in heartbeat.budgets("chat"):
         heartbeat.record(name)
 
-    assert check() == []
+    assert check("chat") == []
 
 
-def test_check_reports_stale_and_missing(hb_dir):
+def test_check_reports_stale_and_missing(hb_dir, discord_only):
     heartbeat.record("queue-discord")
-    old = time.time() - BOT_BUDGETS["queue-discord"] - 10
+    old = time.time() - heartbeat.budgets("chat")["queue-discord"] - 10
     (hb_dir / "queue-discord").write_text(str(old))
 
-    problems = check()
+    problems = check("chat")
 
     assert any(p.startswith("dashboard:") and "missing" in p for p in problems)
     assert any(p.startswith("queue-discord:") and "stale" in p for p in problems)
 
 
-def test_bot_health_module_exit_codes(hb_dir):
+def test_chat_health_module_exit_codes(hb_dir, discord_only):
     env = {**os.environ, "BOT_HEARTBEAT_DIR": str(hb_dir), "PYTHONPATH": str(REPO_ROOT / "web")}
     env.pop("DJANGO_SETTINGS_MODULE", None)
-    probe = [sys.executable, "-m", "bot.health"]
+    probe = [sys.executable, "-m", "core.health", "chat"]
 
     # Fixed command running this interpreter, not untrusted input
     missing = subprocess.run(probe, env=env, capture_output=True, text=True, cwd=REPO_ROOT)  # noqa: S603
-    for name in BOT_BUDGETS:
+    for name in heartbeat.budgets("chat"):
         heartbeat.record(name)
     fresh = subprocess.run(probe, env=env, capture_output=True, text=True, cwd=REPO_ROOT)  # noqa: S603
 

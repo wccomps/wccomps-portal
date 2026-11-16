@@ -160,8 +160,8 @@ def test_health_module_exit_codes(hb_dir):
 
 
 def test_health_imports_no_django(hb_dir):
-    """The probes must never hang on the database they observe."""
-    out = _python("-c", "import sys, core.health, bot.health; print('django' in sys.modules)", hb_dir=hb_dir)
+    """The probe must never hang on the database it observes."""
+    out = _python("-c", "import sys, core.health; print('django' in sys.modules)", hb_dir=hb_dir)
 
     assert out.stdout.strip() == "False", out.stdout + out.stderr
 

@@ -1,7 +1,7 @@
 # One image for every process: they share the Django models and must run the same version.
 #   web (default): entrypoint.sh applies migrations under a lock, then gunicorn (web/gunicorn.conf.py)
 #   worker: entrypoint cleared, run from /app: `python -m worker`
-#   bot: entrypoint cleared, run from /app: `python main.py`
+#   chat: entrypoint cleared, run from /app: `python -m chat` (the Discord bot)
 # The Python .python-version pins (local uv and CI read it too): a test that passes on one patch can fail on another.
 # uv sync below reads the file and, with downloads off, refuses an image whose Python differs; test_python_pin checks
 # this tag against it.
@@ -33,8 +33,8 @@ RUN --mount=from=uv,source=/uv,target=/bin/uv \
 COPY web/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-COPY main.py ./main.py
 COPY bot/ ./bot/
+COPY chat/ ./chat/
 COPY worker/ ./worker/
 COPY web/ ./web/
 

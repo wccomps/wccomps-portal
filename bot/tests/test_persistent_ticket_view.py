@@ -19,7 +19,7 @@ def _custom_ids(view: discord.ui.View) -> set[str]:
 
 
 async def test_posted_buttons_are_routed_to_the_registered_view() -> None:
-    """Discord routes a click by custom_id, so the view main.py registers must cover every posted button."""
+    """Discord routes a click by custom_id, so the view PortalBot registers must cover every posted button."""
     registered = TicketActionView(ticket_id=0)
     posted = TicketActionView(ticket_id=123)
 

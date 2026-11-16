@@ -1,18 +1,7 @@
-"""The bot's discord.py logs go through the Django console handler and its line-safe formatter, not their own."""
+"""The bot's discord.py logs go through the Django console handler and its line-safe formatter, not their own
+(chat/tests/test_chat_main.py checks the chat process starts the bot without one)."""
 
 import logging
-from unittest.mock import patch
-
-import main
-
-
-def test_the_bot_runs_without_a_log_handler_of_its_own() -> None:
-    with patch.object(main, "PortalBot") as bot_class:
-        main.main()
-
-    (call,) = bot_class.return_value.run.call_args_list
-    assert "log_handler" in call.kwargs
-    assert call.kwargs["log_handler"] is None
 
 
 def test_discord_logs_reach_the_root_handlers() -> None:

@@ -174,8 +174,9 @@ flowchart LR
    touches, and which origins CSRF trusts, so changing one is a privilege change (`web/portal/settings.py`
    `PORTAL_GROUP_PREFIX`, `PORTAL_ADMIN_GROUP`, `TEAM_GROUP_PATTERN`, `TEAM_ACCOUNT_PATTERN`, `MAX_TEAMS`, `BASE_URL`).
    The repository's defaults are neutral (`Portal_` groups, a local `BASE_URL` that CSRF trusts no origin for), not
-   WRCCDC's; the web server, the worker and the bot refuse to start while a required setting is empty
-   (`web/portal/required.py` `REQUIRED_SETTINGS`, checked in `web/portal/wsgi.py`, `worker/__main__.py` and `main.py`).
+   WRCCDC's; the web server, the worker and the chat process refuse to start while a required setting is empty
+   (`web/portal/required.py` `REQUIRED_SETTINGS`, checked in `web/portal/wsgi.py`, `worker/__main__.py` and
+   `chat/__main__.py`).
 
 ## Owner and review trigger
 

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from bot.tests.test_blocking_work import _shared_thread_answers_while
+from core.tests.shared_thread import shared_thread_answers_while
 from worker import jobs
 
 
@@ -29,4 +29,4 @@ async def _quotient_sync(blocked: Callable[..., Any]) -> None:
 @pytest.mark.parametrize("start", [_group_refresh, _quotient_sync], ids=["group-refresh", "quotient-sync"])
 async def test_slow_sync_work_leaves_the_shared_thread_free(start, tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("BOT_HEARTBEAT_DIR", str(tmp_path))
-    assert await _shared_thread_answers_while(start)
+    assert await shared_thread_answers_while(start)
