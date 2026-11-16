@@ -56,11 +56,13 @@ def test_close_out_needs_the_typed_word_then_streams_to_done(live_server, pw_bro
             ).is_visible()
 
             if typed != "yolo":
+                # Setup queues tasks of its own (a team given a school gets its Nextcloud account reset)
+                queued = set(QueuedTask.objects.values_list("pk", flat=True))
                 page.get_by_role("button", name="Close Out Event").click()
                 page.wait_for_timeout(500)
                 event.refresh_from_db()
                 assert event.is_active
-                assert not QueuedTask.objects.exists()
+                assert set(QueuedTask.objects.values_list("pk", flat=True)) == queued
                 return
 
             with page.expect_response(lambda r: r.url.endswith("/ops/admin/competition/action/")):

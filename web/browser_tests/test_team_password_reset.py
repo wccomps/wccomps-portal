@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 from django.urls import reverse
+from playwright.sync_api import expect
 
 from core.authentik_utils import Changed, Refused, SignedOut, TeamReset
 from core.tests.roles import role_user
@@ -98,8 +99,9 @@ def test_reset_password_hides_the_members_it_unlinked(live_server, pw_browser):
             with page.expect_response(lambda r: r.url.endswith("/action/")):
                 page.get_by_role("button", name="Reset Password").click()
             page.get_by_text("New-Pass-8!").wait_for()
-            assert not page.get_by_text("memberlinked").is_visible()
-            assert page.get_by_text("All members were unlinked").is_visible()
+            # x-show hides the list on the next animation frame, after the password has rendered
+            expect(page.get_by_text("memberlinked")).to_be_hidden()
+            expect(page.get_by_text("All members were unlinked")).to_be_visible()
     finally:
         context.close()
 
