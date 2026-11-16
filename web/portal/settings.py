@@ -214,6 +214,8 @@ DISCORD_ANNOUNCEMENT_CHANNEL_ID = int(os.environ.get("DISCORD_ANNOUNCEMENT_CHANN
 DISCORD_WELCOME_CHANNEL_ID = int(os.environ.get("DISCORD_WELCOME_CHANNEL_ID", "0"))
 # Channel where link-only panel is posted (#link - hidden after linking)
 DISCORD_LINK_CHANNEL_ID = int(os.environ.get("DISCORD_LINK_CHANNEL_ID", "0"))
+# Name of a competition guild role that may talk in every team category beside the guest roles; empty: none
+DISCORD_SERVER_OWNER_ROLE = os.environ.get("DISCORD_SERVER_OWNER_ROLE", "")
 BLUETEAM_ROLE_ID = int(os.environ.get("BLUETEAM_ROLE_ID", "0"))
 
 BLACKTEAM_ROLE_ID = int(os.environ.get("BLACKTEAM_ROLE_ID", "0"))

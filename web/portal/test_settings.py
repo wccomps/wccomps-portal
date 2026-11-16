@@ -14,6 +14,7 @@ for _name, _value in {
     "DEFAULT_FROM_EMAIL": "noreply@wccomps.org",
     "DEFAULT_REPLY_TO_EMAIL": "info@wccomps.org",
     "DISCORD_BOT_TOKEN": "test-token",
+    "DISCORD_SERVER_OWNER_ROLE": "WRCCDC Server Owners",
 }.items():
     os.environ.setdefault(_name, _value)
 

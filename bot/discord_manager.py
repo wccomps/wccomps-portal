@@ -110,14 +110,16 @@ _TALKS = {"read_messages": True, "send_messages": True, "connect": True, "speak"
 
 def guest_role_permissions() -> dict[str, dict[str, bool]]:
     """Roles found by name that see every team category, and what they may do there."""
-    return {
+    roles = {
         org_named("Observers"): {"read_messages": True, "send_messages": False, "connect": False},
         "Orange Team Guest": _TALKS,
         "Black Team Guest": _TALKS,
         room_judge_role_name(): {"read_messages": True},
         org_named("Operations Team"): _TALKS,
-        "WRCCDC Server Owners": _TALKS,
     }
+    if settings.DISCORD_SERVER_OWNER_ROLE:
+        roles[settings.DISCORD_SERVER_OWNER_ROLE] = _TALKS
+    return roles
 
 
 type Overwrites = dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]
