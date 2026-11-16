@@ -3,6 +3,8 @@
 from django.conf import settings
 from django.db import models
 
+from core.heartbeat import discord_configured
+
 
 class TaskBackend(models.TextChoices):
     DISCORD = "discord", "Discord"
@@ -11,7 +13,7 @@ class TaskBackend(models.TextChoices):
 
 
 def discord_enabled() -> bool:
-    return bool(settings.DISCORD_BOT_TOKEN)
+    return discord_configured(settings.DISCORD_BOT_TOKEN)
 
 
 def zulip_enabled() -> bool:

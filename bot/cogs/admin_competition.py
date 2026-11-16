@@ -10,7 +10,7 @@ from discord.ext import commands
 from django.conf import settings
 
 from bot.permissions import permission_check
-from bot.utils import BlockingSteps, ConfirmView, log_to_ops_channel, run_blocking, split_message
+from bot.utils import ConfirmView, log_to_ops_channel, split_message
 from core.authentik_utils import (
     BulkPasswordResetResult,
     credentials_csv,
@@ -24,6 +24,7 @@ from core.services.competition import (
     KEEP,
     ConfigEditError,
     RunOutcome,
+    arun_competition,
     set_controlled_apps,
     set_max_members,
     set_schedule,
@@ -33,8 +34,10 @@ from core.utils import (
     DEFAULT_TIMEZONE,
     DEFAULT_TIMEZONE_NAME,
     TIMEZONE_CHOICES,
+    BlockingSteps,
     UnknownTimezoneError,
     parse_datetime_to_utc,
+    run_blocking,
     shorten,
 )
 from team.models import active_team_numbers, team_username
@@ -304,8 +307,6 @@ class AdminCompetitionCog(commands.Cog):
         await self._run_competition(interaction, enable=False)
 
     async def _run_competition(self, interaction: discord.Interaction, enable: bool) -> None:
-        from bot.competition_actions import run_competition
-
         action = "Start" if enable else "Stop"
         prompt = (
             "Start the competition? This opens the competition apps to the blue teams and turns on the active teams' "
@@ -322,7 +323,7 @@ class AdminCompetitionCog(commands.Cog):
             return
 
         actor = f"discord:{interaction.user}"
-        result = await run_competition(enable, actor=actor)
+        result = await arun_competition(enable, actor=actor)
         match result.outcome:
             case RunOutcome.REFUSED | RunOutcome.ERRORED:
                 await interaction.followup.send(f"Error: {result.error}", ephemeral=True)

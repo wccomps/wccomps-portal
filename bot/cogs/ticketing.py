@@ -13,9 +13,10 @@ from scoring.quotient_sync import ticket_infrastructure
 from bot.permissions import check_blue_team, linked_team_member, may_write_to_ticket
 from bot.thread_creator import ticket_thread
 from bot.ticket_input import file_ticket
-from bot.utils import add_field, choices, pinging, run_blocking
+from bot.utils import add_field, choices, pinging
 from core.models import QueuedTask
 from core.queued_tasks import SyncMemberRoles
+from core.utils import run_blocking
 from team.models import DiscordLink
 from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
 from ticketing.utils import get_user_for_ticket

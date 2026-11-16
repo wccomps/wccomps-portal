@@ -13,8 +13,8 @@ from scoring.models import QuotientMetadataCache
 
 from bot.competition_actions import reconcile_teams
 from bot.discord_queue import DiscordQueueProcessor
-from bot.utils import run_blocking
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement, QueuedTask
+from core.utils import run_blocking
 from team.models import DiscordLink, Team
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
@@ -342,7 +342,7 @@ async def test_the_command_resets_and_says_what_it_did(competition: Team, mock_i
     ids=["no-event-open", "event-opened"],
 )
 async def test_each_queued_cleanup_runs_its_job(payload: dict[str, object], open_event_id: int | None) -> None:
-    from bot.heartbeat import beat
+    from core.heartbeat import beat
 
     task = await QueuedTask.objects.acreate(task_type="reconcile_teams", payload=payload)
     processor = DiscordQueueProcessor(MagicMock())

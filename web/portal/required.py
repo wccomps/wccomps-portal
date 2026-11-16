@@ -1,7 +1,8 @@
 """Settings a server needs and settings.py leaves empty by default.
 
 Importing settings never refuses a missing one: mypy, makemigrations and collectstatic load it with no environment.
-The web server (portal.wsgi) and the bot (main.py) refuse to start without them.
+The web server (portal.wsgi), the worker (worker.__main__) and the chat process (chat.__main__) refuse to start
+without them.
 """
 
 from django.conf import settings

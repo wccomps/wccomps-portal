@@ -1,4 +1,5 @@
-"""The worker's queue: tasks no chat system takes part in, today the Nextcloud account resets."""
+"""The worker's queue: tasks no chat system takes part in, today the Nextcloud account resets and the Quotient metadata
+sync a competition start queues."""
 
 import asyncio
 import logging
@@ -6,17 +7,20 @@ from collections.abc import Callable, Mapping
 from typing import TypedDict, assert_never
 
 from asgiref.sync import sync_to_async
+from django.contrib.auth.models import User
 from django.db import transaction
 from registration.services import teardown_problem
 from registration.stage import event_stage
+from scoring.quotient_sync import sync_quotient_metadata
 
+from core.heartbeat import QUEUE_WORKER
 from core.models import AuditLog, QueuedTask
 from core.nextcloud import NextcloudManager, nextcloud_configured
-from core.queued_tasks import ReconcileNextcloud, ResetNextcloudTeam, WorkerTask
+from core.queued_tasks import ReconcileNextcloud, ResetNextcloudTeam, SyncQuotientMetadata, WorkerTask
 from core.services.ops import notify_ops
 from core.task_backends import TaskBackend
 from core.task_queue import QueueProcessor, TaskProgress, _target
-from core.utils import shorten
+from core.utils import run_blocking, shorten
 from team.models import Team
 
 logger = logging.getLogger(__name__)
@@ -34,7 +38,7 @@ class ReconcileState(TypedDict, total=False):
 
 class WorkerQueueProcessor(QueueProcessor[WorkerTask]):
     backend = TaskBackend.WORKER
-    heartbeat_name = "queue-worker"
+    heartbeat_name = QUEUE_WORKER
 
     async def dispatch(self, payload: WorkerTask, task: QueuedTask) -> Mapping[str, object] | None:
         match payload:
@@ -42,6 +46,8 @@ class WorkerQueueProcessor(QueueProcessor[WorkerTask]):
                 return await self._reconcile_nextcloud(payload, TaskProgress.of(task))
             case ResetNextcloudTeam():
                 await self._reset_nextcloud_team(payload)
+            case SyncQuotientMetadata():
+                await self._sync_quotient_metadata(payload)
             case _:
                 assert_never(payload)
         return None
@@ -136,6 +142,15 @@ class WorkerQueueProcessor(QueueProcessor[WorkerTask]):
                     manager.provision_team_user(team.team_number)
 
         await asyncio.to_thread(reset)
+
+    async def _sync_quotient_metadata(self, payload: SyncQuotientMetadata) -> None:
+        """Quotient being down (ValueError) fails the attempt like any error, so it is retried with backoff and reported
+        to ops once the retries run out; a retry is harmless, the sync writing the same snapshot again."""
+
+        def sync() -> None:
+            sync_quotient_metadata(User.objects.filter(username=payload.requested_by).first())
+
+        await run_blocking(sync)
 
 
 def _summary(deleted: int, provisioned: int, stopped: str, failure: Exception | None) -> str:

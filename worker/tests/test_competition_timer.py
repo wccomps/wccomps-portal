@@ -1,20 +1,20 @@
-"""Tests for competition timer background task."""
+"""The worker's competition timer: enables and disables the competition at its scheduled times."""
 
 import asyncio
 import contextlib
 from datetime import datetime, timedelta
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import discord
 import pytest
 from asgiref.sync import sync_to_async
 from django.utils import timezone
 
-from bot.competition_timer import CompetitionTimer
 from core.models import AuditLog, CompetitionConfig, QueuedTask
 from core.queued_tasks import CompetitionStatusChanged, LogToChannel
+from core.services import competition
 from core.services.competition import Attempt, CompetitionRunResult
+from worker import jobs
+from worker.tests.loops import one_pass
 
 
 async def _queued() -> tuple[list[str], int]:
@@ -32,10 +32,7 @@ class TestCompetitionTimer:
     """Test competition timer functionality."""
 
     async def test_check_competition_times_no_enable_needed(self) -> None:
-        """Test _check_competition_times when applications should not be enabled."""
-        bot = AsyncMock(spec=discord.Client)
-        timer = CompetitionTimer(bot)
-
+        """Test check_competition_times when applications should not be enabled."""
         # Use update_or_create with pk=1 to match get_config() singleton pattern
         config, _ = await CompetitionConfig.objects.aupdate_or_create(
             pk=1,
@@ -46,16 +43,13 @@ class TestCompetitionTimer:
             },
         )
 
-        await timer._check_competition_times()
+        await jobs.check_competition_times()
 
         await config.arefresh_from_db()
         assert config.applications_enabled is False
 
     async def test_check_competition_times_calls_start_competition(self) -> None:
-        """Test _check_competition_times calls start_competition when scheduled."""
-        bot = AsyncMock(spec=discord.Client)
-        timer = CompetitionTimer(bot)
-
+        """Test check_competition_times calls start_competition when scheduled."""
         # Use update_or_create with pk=1 to match get_config() singleton pattern
         await CompetitionConfig.objects.aupdate_or_create(
             pk=1,
@@ -66,19 +60,16 @@ class TestCompetitionTimer:
             },
         )
 
-        with patch("bot.competition_timer.run_competition", new_callable=AsyncMock) as mock_start:
+        with patch("worker.jobs.arun_competition", new_callable=AsyncMock) as mock_start:
             mock_start.return_value = CompetitionRunResult(enable=True, controlled_apps=["app1"], apps_ok=["app1"])
-            await timer._check_competition_times()
+            await jobs.check_competition_times()
 
             mock_start.assert_called_once()
             assert mock_start.call_args.args == (True,)
             assert mock_start.call_args.kwargs["actor"] == "timer"
 
     async def test_check_competition_times_exception_handling(self) -> None:
-        """Test _check_competition_times handles exceptions."""
-        bot = AsyncMock(spec=discord.Client)
-        timer = CompetitionTimer(bot)
-
+        """Test check_competition_times handles exceptions."""
         # Use update_or_create with pk=1 to match get_config() singleton pattern
         await CompetitionConfig.objects.aupdate_or_create(
             pk=1,
@@ -89,30 +80,26 @@ class TestCompetitionTimer:
             },
         )
 
-        with patch("bot.competition_timer.run_competition", new_callable=AsyncMock) as mock_start:
+        with patch("worker.jobs.arun_competition", new_callable=AsyncMock) as mock_start:
             mock_start.side_effect = Exception("Start error")
 
             # Should not raise exception
-            await timer._check_competition_times()
+            await jobs.check_competition_times()
 
         assert await _queued() == (["**Error in competition timer:** Start error"], 0)
 
     async def test_check_competition_times_with_no_config(self) -> None:
-        """Test _check_competition_times handles missing config."""
-        bot = AsyncMock(spec=discord.Client)
-        timer = CompetitionTimer(bot)
-
+        """Test check_competition_times handles missing config."""
         # Should not raise exception - get_config creates if missing
-        await timer._check_competition_times()
+        await jobs.check_competition_times()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("work_fails", [False, True])
 async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeypatch) -> None:
-    """A pass never raises (tasks.loop would stop), and a failed one skips the liveness heartbeat."""
-    from bot import competition_timer, heartbeat
+    """A failed pass is logged and skips the liveness heartbeat; the loop goes on."""
+    from core import heartbeat
 
-    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
     calls: list[str] = []
 
     async def work() -> None:
@@ -123,11 +110,11 @@ async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeyp
     async def recycle() -> None:
         calls.append("recycle")
 
-    monkeypatch.setattr(competition_timer, "recycle_db_connection", recycle)
-    monkeypatch.setattr(heartbeat, "record", lambda name, bot: calls.append(f"beat:{name}"))
-    monkeypatch.setattr(timer, "_check_competition_times", work)
+    monkeypatch.setattr(jobs, "recycle_db_connection", recycle)
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: calls.append(f"beat:{name}"))
+    monkeypatch.setattr(jobs, "check_competition_times", work)
 
-    await timer.check_loop()
+    await one_pass(jobs.competition_timer_loop, monkeypatch)
 
     assert calls == ["recycle", "work"] if work_fails else ["recycle", "work", "beat:timer"]
 
@@ -135,32 +122,39 @@ async def test_each_pass_recycles_then_beats_only_on_success(work_fails, monkeyp
 @pytest.mark.asyncio
 async def test_config_read_failing_on_the_db_skips_the_beat(monkeypatch) -> None:
     """The real work must let a DB error through, or the liveness probe never sees it."""
-    from bot import competition_timer, heartbeat
+    from core import heartbeat
 
-    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
     beats: list[str] = []
-    monkeypatch.setattr(competition_timer, "recycle_db_connection", AsyncMock())
-    monkeypatch.setattr(heartbeat, "record", lambda name, bot: beats.append(name))
+    monkeypatch.setattr(jobs, "recycle_db_connection", AsyncMock())
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: beats.append(name))
 
     with patch("core.models.CompetitionConfig.get_config", side_effect=RuntimeError("db down")):
-        await timer.check_loop()
+        await one_pass(jobs.competition_timer_loop, monkeypatch)
 
     assert beats == []
 
 
 @pytest.mark.asyncio
-async def test_loop_waits_for_ready_and_stops_with_the_bot() -> None:
-    """Loaded like production: nothing runs before the gateway is ready, and closing the bot cancels the loop."""
-    from discord.ext import commands
+async def test_the_loop_checks_at_once_then_every_minute(monkeypatch) -> None:
+    passes: list[str] = []
+    sleeps: list[float] = []
 
-    async with commands.Bot(command_prefix="!", intents=discord.Intents.default()) as bot:
-        timer = CompetitionTimer(bot)
-        with patch.object(timer, "_check_competition_times", new_callable=AsyncMock) as work:
-            await bot.add_cog(timer)
-            assert timer.check_loop.is_running()
-            await asyncio.sleep(0.1)
-            work.assert_not_awaited()
-    assert not timer.check_loop.is_running()
+    async def timer_pass() -> None:
+        passes.append("pass")
+
+    async def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        if len(sleeps) == 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(jobs, "timer_pass", timer_pass)
+    monkeypatch.setattr(jobs.asyncio, "sleep", sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await jobs.competition_timer_loop()
+
+    assert passes == ["pass", "pass"]
+    assert all(59 < s <= jobs.TIMER_SECONDS for s in sleeps)
 
 
 def _run(failed_accounts: int | None) -> CompetitionRunResult:
@@ -213,21 +207,18 @@ def _fake_runs(outcomes: list[int | None | str]):
     return run
 
 
-async def _ticks(count: int, runs: list[int | None | str], *, restart_after: int | None = None, ops_raise=False):
-    """Tick a timer count times (a new timer after restart_after ticks); the run mock, the ops notices queued and the
-    status refreshes queued."""
-    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+async def _ticks(count: int, runs: list[int | None | str], *, ops_raise=False):
+    """Tick the timer count times; the run mock, the ops notices queued and the status refreshes queued. The timer
+    keeps nothing between ticks but what the database holds, so these ticks stand for any number of restarts."""
     with (
-        patch("bot.competition_timer.run_competition", new=AsyncMock(side_effect=_fake_runs(runs))) as start,
-        patch("bot.competition_timer.notify_ops", side_effect=RuntimeError("queue down"))
+        patch("worker.jobs.arun_competition", new=AsyncMock(side_effect=_fake_runs(runs))) as start,
+        patch("worker.jobs.notify_ops", side_effect=RuntimeError("queue down"))
         if ops_raise
         else contextlib.nullcontext(),
     ):
-        for tick in range(count):
-            if tick == restart_after:
-                timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+        for _tick in range(count):
             with contextlib.suppress(RuntimeError):
-                await timer._check_competition_times()
+                await jobs.check_competition_times()
     posts, status = await _queued()
     return start, posts, status
 
@@ -256,7 +247,7 @@ async def test_an_incomplete_first_attempt_is_announced_and_a_later_one_complete
 async def test_giving_up_is_reported_once_with_a_status_update() -> None:
     await _start_due()
 
-    start, posts, status = await _ticks(8, [2, 2, 1, 1], restart_after=6)
+    start, posts, status = await _ticks(8, [2, 2, 1, 1])
 
     assert start.await_count == 4
     assert posts[1:] == [GAVE_UP]
@@ -273,7 +264,7 @@ async def test_giving_up_is_reported_once_with_a_status_update() -> None:
 async def test_a_retry_that_errors_counts_as_an_attempt(failure) -> None:
     await _start_due()
 
-    start, posts, _status = await _ticks(9, [2, failure, failure, failure, 0], restart_after=3)
+    start, posts, _status = await _ticks(9, [2, failure, failure, failure, 0])
 
     assert start.await_count == 4
     assert posts[1:] == [GAVE_UP]
@@ -285,7 +276,7 @@ async def test_a_retry_that_errors_counts_as_an_attempt(failure) -> None:
 async def test_a_first_attempt_that_keeps_failing_is_reported_once_and_given_up_after_four(failure) -> None:
     await _start_due()
 
-    start, posts, _status = await _ticks(9, [failure] * 4 + [0], restart_after=5)
+    start, posts, _status = await _ticks(9, [failure] * 4 + [0])
 
     assert start.await_count == 4
     first = (
@@ -336,7 +327,7 @@ async def test_giving_up_on_a_series_ended_meanwhile_reports_nothing() -> None:
         end_timer_series(True)
         return give_up_timer_series(plan)
 
-    with patch("bot.competition_timer.give_up_timer_series", ended_first):
+    with patch("worker.jobs.give_up_timer_series", ended_first):
         start, posts, status = await _ticks(1, [])
 
     start.assert_not_awaited()
@@ -379,11 +370,11 @@ async def test_a_complete_auto_start_runs_once_even_when_reporting_it_fails() ->
 @pytest.mark.asyncio
 async def test_a_run_of_many_quick_steps_keeps_the_timer_alive(monkeypatch) -> None:
     """A start can take longer than the timer's budget when Authentik is slow; each finished step beats."""
-    from bot import competition_actions, competition_timer, heartbeat
+    from core import heartbeat
 
     beats: list[str] = []
-    monkeypatch.setattr(heartbeat, "record", lambda name, bot: beats.append(name))
-    monkeypatch.setattr(competition_timer, "recycle_db_connection", AsyncMock())
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: beats.append(name))
+    monkeypatch.setattr(jobs, "recycle_db_connection", AsyncMock())
     during: list[int] = []
 
     def steps(enable: bool, actor: str, timer: object = None):
@@ -392,15 +383,14 @@ async def test_a_run_of_many_quick_steps_keeps_the_timer_alive(monkeypatch) -> N
             yield n
         return CompetitionRunResult(enable=enable)
 
-    monkeypatch.setattr(competition_actions, "competition_steps", steps)
-    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+    monkeypatch.setattr(competition, "run_competition", steps)
 
     async def check() -> None:
-        await competition_actions.run_competition(True, "timer")
+        await competition.arun_competition(True, "timer")
 
-    monkeypatch.setattr(timer, "_check_competition_times", check)
+    monkeypatch.setattr(jobs, "check_competition_times", check)
 
-    await timer.check_loop()
+    await one_pass(jobs.competition_timer_loop, monkeypatch)
 
     assert during == [0, 1, 2, 3, 4]
     assert beats == ["timer"] * 6
@@ -411,11 +401,11 @@ async def test_a_wedged_step_stops_the_timer_heartbeat(monkeypatch) -> None:
     """A step stuck on a half-open socket must let the timer go stale, not keep it looking alive."""
     import threading
 
-    from bot import competition_actions, competition_timer, heartbeat
+    from core import heartbeat
 
     beats: list[str] = []
-    monkeypatch.setattr(heartbeat, "record", lambda name, bot: beats.append(name))
-    monkeypatch.setattr(competition_timer, "recycle_db_connection", AsyncMock())
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: beats.append(name))
+    monkeypatch.setattr(jobs, "recycle_db_connection", AsyncMock())
     release = threading.Event()
 
     def steps(enable: bool, actor: str, timer: object = None):
@@ -423,15 +413,15 @@ async def test_a_wedged_step_stops_the_timer_heartbeat(monkeypatch) -> None:
         release.wait(5)
         return CompetitionRunResult(enable=enable)
 
-    monkeypatch.setattr(competition_actions, "competition_steps", steps)
-    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
+    monkeypatch.setattr(competition, "run_competition", steps)
 
     async def check() -> None:
-        await competition_actions.run_competition(True, "timer")
+        await competition.arun_competition(True, "timer")
 
-    monkeypatch.setattr(timer, "_check_competition_times", check)
-    loop = asyncio.ensure_future(timer.check_loop())
-    await asyncio.sleep(0.5)
+    monkeypatch.setattr(jobs, "check_competition_times", check)
+    wait = asyncio.sleep  # one_pass patches asyncio.sleep once the loop starts
+    loop = asyncio.ensure_future(one_pass(jobs.competition_timer_loop, monkeypatch))
+    await wait(0.5)
     wedged = list(beats)
     release.set()
     await loop
@@ -442,7 +432,7 @@ async def test_a_wedged_step_stops_the_timer_heartbeat(monkeypatch) -> None:
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
 async def test_the_timer_clears_a_missed_window_and_says_so() -> None:
-    """The bot was down through the whole window: the start can never fire, so the timer drops the schedule."""
+    """The worker was down through the whole window: the start can never fire, so the timer drops the schedule."""
     now = timezone.now()
     await CompetitionConfig.objects.aupdate_or_create(
         pk=1,
@@ -452,10 +442,9 @@ async def test_the_timer_clears_a_missed_window_and_says_so() -> None:
             "competition_end_time": now - timedelta(hours=1),
         },
     )
-    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
-    with patch("bot.competition_timer.run_competition", new_callable=AsyncMock) as run:
-        await timer._check_competition_times()
-        await timer._check_competition_times()
+    with patch("worker.jobs.arun_competition", new_callable=AsyncMock) as run:
+        await jobs.check_competition_times()
+        await jobs.check_competition_times()
 
     run.assert_not_awaited()
     config = await CompetitionConfig.objects.aget(pk=1)
@@ -479,8 +468,7 @@ async def test_the_timer_clears_a_missed_window_that_ends_before_it_starts() -> 
             "competition_end_time": now - timedelta(hours=2),
         },
     )
-    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
-    await timer._check_competition_times()
+    await jobs.check_competition_times()
 
     config = await CompetitionConfig.objects.aget(pk=1)
     assert (config.competition_start_time, config.competition_end_time) == (None, None)
@@ -499,8 +487,7 @@ async def test_an_end_passing_after_a_manual_stop_is_not_called_a_missed_window(
             "started_this_window": True,
         },
     )
-    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
-    await timer._check_competition_times()
+    await jobs.check_competition_times()
 
     assert await _queued() == (["**Schedule cleared:** the scheduled end passed after a manual stop."], 1)
 
@@ -516,35 +503,10 @@ async def test_an_end_with_no_start_that_passed_is_a_missed_window() -> None:
             "competition_end_time": timezone.now() - timedelta(hours=1),
         },
     )
-    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
-    await timer._check_competition_times()
+    await jobs.check_competition_times()
 
     [post], _status = await _queued()
     assert "would have refused a new start time" in post
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize("enable", [True, False], ids=["start", "stop"])
-@pytest.mark.parametrize("confirmed", [False, True], ids=["cancelled", "confirmed"])
-async def test_the_start_and_stop_commands_ask_for_confirmation_before_running(
-    mock_interaction: Any, enable: bool, confirmed: bool
-) -> None:
-    from bot.cogs.admin_competition import AdminCompetitionCog
-
-    cog = AdminCompetitionCog(MagicMock())
-    command = cog.admin_start_competition if enable else cog.admin_stop_competition
-    with (
-        patch("bot.cogs.admin_competition.ConfirmView") as view,
-        patch("bot.competition_actions.run_competition", new=AsyncMock(return_value=_run(0))) as run,
-        patch("bot.cogs.admin_competition.log_to_ops_channel", new_callable=AsyncMock),
-    ):
-        view.return_value.wait = AsyncMock()
-        view.return_value.confirmed = confirmed
-        await command.callback(cog, mock_interaction)
-
-    mock_interaction.response.send_message.assert_awaited_once()
-    assert run.await_count == (1 if confirmed else 0)
 
 
 @pytest.mark.asyncio
@@ -563,24 +525,23 @@ async def test_timer_queues_1h_and_30m_countdown_announcements_once_each() -> No
             "competition_end_time": end_time,
         },
     )
-    timer = CompetitionTimer(AsyncMock(spec=discord.Client))
     broadcasts = QueuedTask.objects.filter(task_type="broadcast_message")
-    with patch("bot.competition_timer.timezone.now", return_value=now - timedelta(seconds=30)) as mock_now:
-        await timer._check_competition_times()
+    with patch("worker.jobs.timezone.now", return_value=now - timedelta(seconds=30)) as mock_now:
+        await jobs.check_competition_times()
         assert await broadcasts.acount() == 0
 
         mock_now.return_value = end_time - timedelta(minutes=59)
-        await timer._check_competition_times()
-        await timer._check_competition_times()
+        await jobs.check_competition_times()
+        await jobs.check_competition_times()
         assert await broadcasts.acount() == 1
 
         mock_now.return_value = end_time - timedelta(minutes=45)
-        await timer._check_competition_times()
+        await jobs.check_competition_times()
         assert await broadcasts.acount() == 1
 
         mock_now.return_value = end_time - timedelta(minutes=29)
-        await timer._check_competition_times()
-        await timer._check_competition_times()
+        await jobs.check_competition_times()
+        await jobs.check_competition_times()
         assert await broadcasts.acount() == 2
 
     payloads = [t.typed_payload() async for t in broadcasts.order_by("pk")]

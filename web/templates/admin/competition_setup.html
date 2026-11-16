@@ -221,7 +221,8 @@
             </c-slot>
             <p class="help">
                 Quotient is the scoring engine: it checks each team's services on its boxes (servers). The portal keeps
-                a copy of that list. Start syncs it, and the bot syncs it on its own while Quotient is up.
+                a copy of that list. Start queues a sync for the worker, which also syncs it on its own while Quotient
+                is up.
             </p>
             {% if quotient_metadata %}
                 <c-detail_grid>

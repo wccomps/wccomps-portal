@@ -11,7 +11,6 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.utils import timezone
 
-from bot.heartbeat import beat, beat_for
 from bot.permissions import has_permission
 from bot.utils import (
     DISCORD_EMBED_FIELD_CHAR_LIMIT,
@@ -20,6 +19,7 @@ from bot.utils import (
     fit_lines,
     log_to_ops_channel,
 )
+from core.heartbeat import DASHBOARD, beat, beat_for
 from core.models import BotState
 from core.utils import recycle_db_connection, shorten
 from ticketing.models import Ticket
@@ -63,7 +63,7 @@ class UnifiedDashboard:
         """Main dashboard loop - checks for updates every 10 seconds."""
         await self.bot.wait_until_ready()
 
-        beat_for("dashboard", self.bot)
+        beat_for(DASHBOARD, lambda: not self.bot.is_closed())
         while self.running:
             try:
                 await recycle_db_connection()

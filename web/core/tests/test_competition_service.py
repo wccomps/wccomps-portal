@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from core.authentik_manager import AuthentikAPIError
 from core.models import AuditLog, CompetitionConfig, QueuedTask
-from core.queued_tasks import BroadcastMessage
+from core.queued_tasks import BroadcastMessage, SyncQuotientMetadata
 from core.services.competition import (
     COMPETITION_RUN_LOCK_ID,
     RUN_IN_PROGRESS,
@@ -93,7 +93,7 @@ def test_start_enables_apps_and_accounts_refreshes_groups_and_audits(authentik, 
     assert result.apps_ok == ["scoring", "netbird"]
     assert result.accounts_ok == result.accounts_total == len(ACTIVE_TEAMS)
     authentik.refresh.assert_called_once()
-    authentik.sync_metadata.assert_called_once_with(None)
+    authentik.sync_metadata.assert_not_called()
     authentik.sync_scores.assert_not_called()
     config.refresh_from_db()
     assert config.applications_enabled
@@ -101,6 +101,23 @@ def test_start_enables_apps_and_accounts_refreshes_groups_and_audits(authentik, 
     assert config.competition_end_time is not None
     assert AuditLog.objects.get(action="competition_started").admin_user == "timer"
     assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
+
+
+def test_start_queues_the_quotient_metadata_sync_for_the_worker(authentik, config):
+    """The worker runs it: the start reaches neither Quotient nor Proxmox, so the chat process needs no Proxmox or
+    aweful-proxy credentials."""
+    steps = list(run_competition(True, "gold_admin"))
+
+    authentik.sync_metadata.assert_not_called()
+    authentik.sync_scores.assert_not_called()
+    queued = QueuedTask.objects.get(task_type=SyncQuotientMetadata.task_type)
+    assert (queued.backend, queued.typed_payload()) == ("worker", SyncQuotientMetadata(requested_by="gold_admin"))
+    assert (steps[-1].message, steps[-1].ok) == ("Quotient metadata sync queued", True)
+    result = run_competition_to_completion(False, "gold_admin")
+    assert not result.metadata_sync_queued
+    assert QueuedTask.objects.filter(task_type=SyncQuotientMetadata.task_type).count() == 1
+    audit = AuditLog.objects.get(action="competition_started")
+    assert audit.details["metadata_sync_queued"] is True and "scores_synced" not in audit.details
 
 
 def test_start_enables_only_the_active_teams_accounts(authentik, config):
@@ -192,10 +209,10 @@ def test_stop_syncs_service_scores_and_records_actor_user(authentik, config, dja
     assert steps[-1].ok is True
     authentik.sync_scores.assert_called_with(user)
     authentik.sync_metadata.assert_not_called()
-    assert result.quotient_synced is True
+    assert result.scores_synced is True and not result.metadata_sync_queued
     assert "Quotient service scores: synced" in result.summary()
     audit = AuditLog.objects.filter(action="competition_stopped").order_by("-pk").first()
-    assert audit is not None and audit.details["quotient_synced"] is True
+    assert audit is not None and audit.details["scores_synced"] is True
 
 
 def test_stop_records_failed_score_sync_without_aborting(authentik, config):
@@ -214,11 +231,11 @@ def test_stop_records_failed_score_sync_without_aborting(authentik, config):
     assert steps[-1].message == "Quotient score sync failed: Failed to retrieve service scores from Quotient"
     assert steps[-1].ok is False
     assert result.outcome is RunOutcome.COMPLETE
-    assert result.quotient_synced is False
+    assert result.scores_synced is False
     assert "Quotient service scores: sync failed" in result.summary()
     config.refresh_from_db()
     assert not config.applications_enabled
-    assert AuditLog.objects.get(action="competition_stopped").details["quotient_synced"] is False
+    assert AuditLog.objects.get(action="competition_stopped").details["scores_synced"] is False
 
 
 def test_stop_after_the_scheduled_stop_clears_it(authentik, config):
@@ -344,7 +361,7 @@ def test_schedule_edited_during_a_run_survives(authentik, config):
 @pytest.mark.parametrize(("enable", "expected_accounts"), [(True, len(ACTIVE_TEAMS)), (False, MAX_TEAMS)])
 def test_progress_counts_every_step(authentik, config, enable, expected_accounts):
     steps = list(run_competition(enable, "web:admin"))
-    total = 2 + expected_accounts + 2  # apps, accounts, group refresh, Quotient sync
+    total = 2 + expected_accounts + 2  # apps, accounts, group refresh, Quotient score sync or metadata sync queued
     assert [s.current for s in steps] == list(range(1, total + 1))
     assert {s.total for s in steps} == {total}
 

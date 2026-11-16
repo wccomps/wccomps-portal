@@ -522,7 +522,7 @@ class TestDiscordQueueOrdering:
 
         with (
             patch("bot.discord_queue.log_to_ops_channel", side_effect=slow),
-            patch("bot.discord_queue.beat", side_effect=lambda: beats.append(len(handled))),
+            patch.object(processor, "on_pass", side_effect=lambda: beats.append(len(handled))),
         ):
             await processor.process_pending()
 

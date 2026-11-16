@@ -2,16 +2,17 @@
 
 ## Project Overview
 
-WCComps Portal is a competition management platform for WRCCDC. Three components:
-- **Discord Bot** (`main.py` + `bot/`) — Team ticketing, role sync, competition commands
-- **Django Web** (`web/`) — Scoring portal, inject grading, packet distribution, ops dashboard
-- **Authentik Integration** — SSO, team provisioning, permission sync via `core/authentik_manager.py`
+WCComps Portal is a competition management platform for WRCCDC. Four components:
+- **Discord Bot** (`bot/`, run by the chat process `python -m chat`): team ticketing, role sync, competition commands
+- **Worker** (`worker/`, `python -m worker`): competition timer, Authentik group refresh, Quotient sync, worker queue
+- **Django Web** (`web/`): scoring portal, inject grading, packet distribution, ops dashboard
+- **Authentik Integration**: SSO, team provisioning, permission sync via `core/authentik_manager.py`
 
 ## Quick Commands
 
 ```bash
 # Run tests from the repo root (requires test DB: docker compose -f docker-compose.test.yml up -d --wait).
-# From web/ pytest ignores testpaths and skips bot/tests.
+# From web/ pytest ignores testpaths and skips bot/tests, chat/tests and worker/tests.
 PYTHONPATH="$(pwd)/web:$(pwd)" DB_HOST=localhost DB_PORT=5433 DB_USER=test_user DB_PASSWORD=test_password DB_NAME=wccomps_test uv run pytest -m "not browser"
 # Browser tests (Playwright): same env, `-m browser -n0`. CI doesn't run them (nightly-browser.yml does, on main after
 # the merge), so run them by hand before a template or JS PR.
@@ -34,15 +35,18 @@ uv run ruff check . && uv run djlint web/templates --lint && DJANGO_SETTINGS_MOD
 
 Runs on the deoxys Kubernetes cluster, deployed by Argo CD from `wccomps/wccomps-argocd`
 (`manifests/wccomps-portal/`; its README covers operations).
-- CI builds one image for web and bot on every merge to main: `ghcr.io/wccomps/wccomps-portal:sha-<short>`.
+- CI builds one image for web, worker and chat on every merge to main: `ghcr.io/wccomps/wccomps-portal:sha-<short>`.
 - Deploy: PR to wccomps-argocd bumping `newTag` in `manifests/wccomps-portal/kustomization.yaml`.
-- After changing its `configmap.yaml` or `secrets.yaml`, restart the web and bot Deployments.
+- After changing its `configmap.yaml` or `secrets.yaml`, restart the web, worker and bot (chat) Deployments.
+- The worker and chat pods have no HTTP listener; their liveness probe is `python -m core.health worker|chat`, which
+  checks the heartbeats that process writes (`core.heartbeat.budgets`).
 - The configmap sets WRCCDC's names: group prefix and admin group, org names, hosts, Authentik, Quotient and email
-  addresses. `web/portal/settings.py` defaults them neutral (`Portal_`, empty); the web server (`portal/wsgi.py`) and
-  the bot (`main.py`) refuse to start while a setting in `portal.required.REQUIRED_SETTINGS` is empty. The test
-  suite runs as WRCCDC's deployment: `portal/test_settings.py` sets the configmap's values.
-- `docker-compose.yml` is for anyone self-hosting the public repo (Postgres + web + bot); it isn't
-  how production runs.
+  addresses. `web/portal/settings.py` defaults them neutral (`Portal_`, empty); the web server (`portal/wsgi.py`),
+  the worker (`worker/__main__.py`) and the chat process (`chat/__main__.py`) refuse to start while a setting in
+  `portal.required.REQUIRED_SETTINGS` is empty. The test suite runs as WRCCDC's deployment:
+  `portal/test_settings.py` sets the configmap's values.
+- `docker-compose.yml` is for anyone self-hosting the public repo (Postgres + web + worker, and chat under the
+  `chat` profile); it isn't how production runs.
 - Starts, stops and Close Out share the Postgres advisory lock `COMPETITION_RUN_LOCK_ID`. If a stuck run holds it,
   find the holder with `SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND classid = 1 AND objid = 2966672707`
   and end it with `pg_terminate_backend(pid)`.
@@ -83,13 +87,15 @@ the unparenthesized form is used intentionally throughout.
 - Web code queues work with `QueuedTask.enqueue(<payload>)`, which writes one row per backend
   (`core.task_backends.TaskBackend`) and returns them; each backend's `core.task_queue.QueueProcessor` subclass
   consumes its own rows: the bot's `DiscordQueueProcessor` the `discord` ones, `core.worker_tasks.WorkerQueueProcessor`
-  the `worker` ones (the bot runs it too, until the worker process exists)
+  the `worker` ones, in the worker process (`python -m worker`, beside the timer, group refresh and Quotient sync in
+  `worker/jobs.py`)
 - Each task type is a payload dataclass in `core/queued_tasks.py`, in one group of the `TaskPayload` union:
-  `ChatNotice` (a row for every configured chat backend, `chat_backends()`), `DiscordOnly` (a row only when Discord
-  is configured, `DISCORD_BOT_TOKEN`) or `WorkerTask` (always a `worker` row); so no configured chat backend means
-  no chat row. A new one also needs a `case` in its backends' `dispatch` (each processor is a `QueueProcessor[P]`
-  over its groups, `payload_types` their classes, and mypy checks its match exhaustive over them; a row outside them
-  fails at once), and a migration, since `QueuedTask.task_type`'s choices come from the union
+  `ChatNotice` (a row for every configured chat backend: Discord when `DISCORD_BOT_TOKEN` is set, Zulip when its
+  `ZULIP_*` settings are), `DiscordOnly` (a row only when Discord is configured) or `WorkerTask` (always a `worker`
+  row); so no configured chat backend means no chat row. `BACKEND_TASKS` maps each backend to its groups. A new one
+  also needs a `case` in its backends' `dispatch` (each processor is a `QueueProcessor[P]` over its groups, and mypy
+  checks its match exhaustive over them; a row outside them fails at once), and a migration, since
+  `QueuedTask.task_type`'s choices come from the union
 - An ops notice goes through `core.services.ops.notify_ops` (audited, then a `LogToChannel` row), never a direct
   `LogToChannel` enqueue
 - A payload's `ticket_id` also sets the task's ticket FK, so deleting a ticket drops its pending tasks

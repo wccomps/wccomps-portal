@@ -23,14 +23,13 @@ from bot.utils import (
     find_team,
     fit_lines,
     log_to_ops_channel,
-    run_blocking,
     send_lines,
 )
 from core.authentik_utils import Changed, Refused, parse_team_range, reset_team
 from core.models import AuditLog, CompetitionConfig
 from core.services.linking import ADMIN_UNLINK, TEAM_REMOVED, unlink_discord_links, unlink_teams
 from core.team_accounts import SEVERAL_ACCOUNTS
-from core.utils import shorten
+from core.utils import run_blocking, shorten
 from team.models import MAX_TEAMS, DiscordLink, Team
 
 logger = logging.getLogger(__name__)

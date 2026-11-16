@@ -1,6 +1,7 @@
-"""Heartbeat files and the `python -m bot.health` liveness check (k8s prep, W1 detection half)."""
+"""The bot's loops beat their core.heartbeat heartbeats, and `python -m core.health chat` checks them."""
 
 import asyncio
+import contextlib
 import os
 import subprocess
 import sys
@@ -10,8 +11,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from bot import heartbeat
-from bot.health import check
+from core import heartbeat
+from core.health import check
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,83 +29,63 @@ def _open_bot() -> MagicMock:
     return bot
 
 
-def test_record_writes_timestamp(hb_dir):
-    heartbeat.record("queue", _open_bot())
-
-    assert abs(float((hb_dir / "queue").read_text()) - time.time()) < 5
-
-
-def test_record_skipped_when_bot_closed(hb_dir):
-    bot = _open_bot()
-    bot.is_closed.return_value = True
-
-    heartbeat.record("queue", bot)
-
-    assert not (hb_dir / "queue").exists()
+@pytest.fixture
+def discord_only(monkeypatch):
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "token")
 
 
-def test_record_never_raises(tmp_path, monkeypatch):
-    blocker = tmp_path / "not-a-dir"
-    blocker.write_text("")
-    monkeypatch.setenv("BOT_HEARTBEAT_DIR", str(blocker / "hb"))  # can't create a dir under a file
-
-    heartbeat.record("queue", _open_bot())  # must not raise
+def test_the_chat_check_covers_the_loops_the_bot_runs(discord_only):
+    """The worker process runs the queue-worker, timer, groups and quotient loops."""
+    assert heartbeat.budgets("chat") == {heartbeat.QUEUE_DISCORD: 60, heartbeat.DASHBOARD: 120}
 
 
-def test_check_passes_when_all_fresh(hb_dir):
-    for name in heartbeat.BUDGET_SECONDS:
-        heartbeat.record(name, _open_bot())
+def test_check_passes_when_all_fresh(hb_dir, discord_only):
+    for name in heartbeat.budgets("chat"):
+        heartbeat.record(name)
 
-    assert check() == []
-
-
-def test_check_reports_stale_and_missing(hb_dir):
-    heartbeat.record("dashboard", _open_bot())
-    heartbeat.record("timer", _open_bot())
-    old = time.time() - heartbeat.BUDGET_SECONDS["timer"] - 10
-    (hb_dir / "timer").write_text(str(old))
-
-    problems = check()
-
-    assert any(p.startswith("queue:") and "missing" in p for p in problems)
-    assert any(p.startswith("timer:") and "stale" in p for p in problems)
-    assert not any(p.startswith("dashboard:") for p in problems)
+    assert check("chat") == []
 
 
-def test_health_module_exit_codes_and_no_django(hb_dir):
-    env = {**os.environ, "BOT_HEARTBEAT_DIR": str(hb_dir), "PYTHONPATH": str(REPO_ROOT)}
+def test_check_reports_stale_and_missing(hb_dir, discord_only):
+    heartbeat.record("queue-discord")
+    old = time.time() - heartbeat.budgets("chat")["queue-discord"] - 10
+    (hb_dir / "queue-discord").write_text(str(old))
+
+    problems = check("chat")
+
+    assert any(p.startswith("dashboard:") and "missing" in p for p in problems)
+    assert any(p.startswith("queue-discord:") and "stale" in p for p in problems)
+
+
+def test_chat_health_module_exit_codes(hb_dir, discord_only):
+    env = {**os.environ, "BOT_HEARTBEAT_DIR": str(hb_dir), "PYTHONPATH": str(REPO_ROOT / "web")}
     env.pop("DJANGO_SETTINGS_MODULE", None)
-    probe = [sys.executable, "-c", "import runpy,sys; runpy.run_module('bot.health', run_name='__main__')"]
+    probe = [sys.executable, "-m", "core.health", "chat"]
 
     # Fixed command running this interpreter, not untrusted input
     missing = subprocess.run(probe, env=env, capture_output=True, text=True, cwd=REPO_ROOT)  # noqa: S603
-    for name in heartbeat.BUDGET_SECONDS:
-        heartbeat.record(name, _open_bot())
-    fresh = subprocess.run(  # noqa: S603
-        [*probe[:2], probe[2] + "; import sys; assert 'django' not in sys.modules"],
-        env=env,
-        capture_output=True,
-        text=True,
-        cwd=REPO_ROOT,
-    )
+    for name in heartbeat.budgets("chat"):
+        heartbeat.record(name)
+    fresh = subprocess.run(probe, env=env, capture_output=True, text=True, cwd=REPO_ROOT)  # noqa: S603
 
     assert missing.returncode == 1 and "missing" in missing.stdout
     assert fresh.returncode == 0, fresh.stdout + fresh.stderr
 
 
+def test_a_closed_bot_stops_its_loops_beating(hb_dir):
+    bot = _open_bot()
+    bot.is_closed.return_value = True
+
+    heartbeat.record("queue-discord", lambda: not bot.is_closed())
+
+    assert not (hb_dir / "queue-discord").exists()
+
+
 @pytest.fixture
 def beats(monkeypatch) -> list[str]:
     recorded: list[str] = []
-    monkeypatch.setattr(heartbeat, "record", lambda name, bot: recorded.append(name))
+    monkeypatch.setattr(heartbeat, "record", lambda name, alive: recorded.append(name))
     return recorded
-
-
-@pytest.mark.asyncio
-async def test_beat_outside_a_loop_records_nothing(beats):
-    """sync_roles also runs from the group refresh, which has no heartbeat."""
-    heartbeat.beat()
-
-    assert beats == []
 
 
 @pytest.mark.asyncio
@@ -162,11 +143,11 @@ async def test_the_queue_beats_after_each_poll_and_each_task(beats, monkeypatch)
         during.append(len(beats))
 
     processor = _queue(monkeypatch, ["a", "b", "c"], handle)
-    processor.running = True
-    loop = asyncio.ensure_future(processor._process_loop())
+    loop = asyncio.ensure_future(processor.run())
     await asyncio.sleep(0.2)
-    processor.running = False
-    await loop
+    loop.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await loop
 
     assert during == [1, 2, 3]
 
@@ -180,15 +161,15 @@ async def test_a_wedged_task_stops_the_queue_heartbeat(beats, monkeypatch):
         await release.wait()
 
     processor = _queue(monkeypatch, ["stuck"], handle)
-    processor.running = True
-    loop = asyncio.ensure_future(processor._process_loop())
+    loop = asyncio.ensure_future(processor.run())
     await asyncio.sleep(0.3)
     wedged = list(beats)
-    processor.running = False
+    loop.cancel()
     release.set()
-    await loop
+    with contextlib.suppress(asyncio.CancelledError):
+        await loop
 
-    assert wedged == ["queue"]
+    assert wedged == ["queue-discord"]
 
 
 @pytest.mark.asyncio
@@ -204,23 +185,3 @@ async def test_a_cancelled_loop_stops_beating(beats, monkeypatch):
     await asyncio.sleep(0.1)
 
     assert len(beats) == after_stop
-
-
-@pytest.mark.asyncio
-async def test_the_worker_queue_the_bot_hosts_beats_its_own_heartbeat(beats, monkeypatch):
-    """Wired as main.py wires it, so the bot's health check also covers the worker queue it runs."""
-    from core import task_queue
-    from core.worker_tasks import WorkerQueueProcessor
-
-    bot = _open_bot()
-    processor = WorkerQueueProcessor(on_start=lambda name: heartbeat.beat_for(name, bot), on_pass=heartbeat.beat)
-    monkeypatch.setattr(task_queue, "recycle_db_connection", AsyncMock())
-    monkeypatch.setattr(processor, "recover_stranded", AsyncMock())
-    monkeypatch.setattr(task_queue, "sync_to_async", lambda func: lambda: _first(iter([])))
-    processor.QUEUE_POLL_INTERVAL_SECONDS = 0.01
-
-    processor.start()
-    await asyncio.sleep(0.05)
-    processor.stop()
-
-    assert beats and set(beats) == {"queue-worker"}

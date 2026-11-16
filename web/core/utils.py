@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import ipaddress
 import json
@@ -6,6 +7,7 @@ import queue
 import re
 import threading
 from collections.abc import Callable, Collection, Generator, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, TypedDict
@@ -422,3 +424,63 @@ async def recycle_db_connection() -> None:
     the connection the process's ordinary ORM calls use.
     """
     await sync_to_async(close_old_connections)()
+
+
+async def run_blocking[**P, R](func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:
+    """Run slow sync work (Authentik, Quotient) on a pool thread, not the one thread every other
+    sync_to_async call in the process queues on, so interactions and loops keep answering meanwhile.
+    """
+    return await _hop(functools.partial(func, *args, **kwargs), None, release=True)
+
+
+async def _hop[T](step: Callable[[], T], thread: ThreadPoolExecutor | None, *, release: bool) -> T:
+    """Run step off the event loop, on thread or a pool thread when None. release closes that thread's connection
+    after, which recycle_db_connection never reaches."""
+
+    def run() -> T:
+        try:
+            return step()
+        finally:
+            if release:
+                connection.close()
+
+    if thread is None:
+        return await sync_to_async(run, thread_sensitive=False)()
+    return await asyncio.get_running_loop().run_in_executor(thread, run)
+
+
+class BlockingSteps[Y, R]:
+    """Step a sync generator on a pool thread of its own, an await per item, so a lock it takes stays on one
+    connection. Use it under contextlib.aclosing, which closes the generator on that thread; .result is its return."""
+
+    def __init__(self, steps: Generator[Y, None, R]) -> None:
+        self._steps = steps
+        self._returned: tuple[R] | None = None
+        self._thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="blocking-steps")
+
+    def __aiter__(self) -> BlockingSteps[Y, R]:
+        return self
+
+    async def __anext__(self) -> Y:
+        for item in await _hop(self._advance, self._thread, release=False):
+            return item
+        raise StopAsyncIteration
+
+    async def aclose(self) -> None:
+        try:
+            await _hop(self._steps.close, self._thread, release=True)
+        finally:
+            self._thread.shutdown(wait=False)
+
+    def _advance(self) -> list[Y]:
+        try:
+            return [next(self._steps)]
+        except StopIteration as finished:
+            self._returned = (finished.value,)
+            return []
+
+    @property
+    def result(self) -> R:
+        if self._returned is None:
+            raise RuntimeError("The generator has not finished")
+        return self._returned[0]

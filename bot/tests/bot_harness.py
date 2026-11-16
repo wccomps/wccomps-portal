@@ -55,9 +55,9 @@ class Draws(Protocol):
 
 @cache
 def portal_bot() -> commands.Bot:
-    """The bot as main.py makes it: the fakes take its default allowed mentions and its command tree's class.
-    Imported when first needed, as main.py sets up Django and logging when imported."""
-    from main import PortalBot
+    """The bot as the chat process makes it: the fakes take its default allowed mentions and its command tree's
+    class. Imported when first needed, as bot.client needs Django set up."""
+    from bot.client import PortalBot
 
     return PortalBot()
 
@@ -775,7 +775,7 @@ def _load_cogs(discord_: Discord) -> None:
 
 
 async def _hop_inline(step: Callable[[], Any], thread: object, *, release: bool) -> Any:
-    """bot.utils._hop on the example's own connection: in production a hop runs on a pool thread with one of its own,
+    """core.utils._hop on the example's own connection: in production a hop runs on a pool thread with one of its own,
     which would see none of the example's rows (and closing it would end the example's)."""
     from asgiref.sync import sync_to_async
 
@@ -786,8 +786,8 @@ async def _hop_inline(step: Callable[[], Any], thread: object, *, release: bool)
 def discord_world(world: World, confirm: bool | None) -> Iterator[Discord]:
     """The fakes, every other service offline, the bot's Discord settings, and every confirmation answered with
     `confirm` (True, False, or None for a timeout)."""
-    from bot import utils as bot_utils
     from bot.utils import ConfirmView
+    from core import utils as core_utils
 
     async def answered_confirmation(self: ConfirmView) -> bool:
         self.confirmed = confirm
@@ -808,7 +808,7 @@ def discord_world(world: World, confirm: bool | None) -> Iterator[Discord]:
         )
         stack.enter_context(patch.object(tasks.Loop, "start"))
         stack.enter_context(patch.object(ConfirmView, "wait", answered_confirmation))
-        stack.enter_context(patch.object(bot_utils, "_hop", _hop_inline))
+        stack.enter_context(patch.object(core_utils, "_hop", _hop_inline))
         stack.enter_context(patch("quotient.client.get_quotient_client.cache_clear"))
         yield discord_
 

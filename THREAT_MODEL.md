@@ -22,7 +22,9 @@ during an event.
 1. **Authentik service token** (`web/portal/settings.py` `AUTHENTIK_TOKEN`): sets any team's password, ends sessions,
    toggles app bindings and group membership.
 2. **Proxmox API token and Nextcloud admin credentials** (`web/portal/settings.py` `PROXMOX_API_TOKEN`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_PASSWORD`): roll back and start team VMs, and provision or delete blue team Nextcloud accounts and files.
-3. **Discord bot token**: posts as the bot, manages roles and channels in the event server.
+3. **Discord bot token**: posts as the bot, manages roles and channels in the event server. The chat process acts with
+   it; web and the worker carry `DISCORD_BOT_TOKEN` only so `discord_enabled()` decides whether to queue Discord rows
+   (`web/core/task_backends.py` `discord_enabled`).
 4. **Team account passwords**: in Authentik, mirrored in `SchoolInfo.password` for packet emails
    (`web/core/authentik_utils.py` `_store_password`), in the bulk reset CSV (only to whoever ran the reset) and in
    packet emails.
@@ -54,7 +56,8 @@ flowchart LR
     subgraph Portal
         W[Web: Django under gunicorn]
         Q[(Postgres: rows, QueuedTask queue, uploaded files)]
-        T[Bot: discord.py, timers, queue processor]
+        K[Worker: competition timer, group refresh, Quotient sync, worker queue]
+        C[Chat: discord.py, Discord queue, role sync]
     end
     A[Authentik: OIDC and admin API]
     P[Proxmox API]
@@ -66,17 +69,27 @@ flowchart LR
     B -- "1 HTTPS, session cookie, CSRF" --> W
     B -- "2 OIDC redirect" --> A
     A -- "2 callback, userinfo with groups" --> W
-    D -- "3 slash commands, buttons, thread messages" --> G --> T
+    D -- "3 slash commands, buttons, thread messages" --> G --> C
     W -- "4 rows, QueuedTask payloads" --> Q
-    Q --> T
-    W & T -- "5 service token" --> A
-    W & T -- "6 API token, team pool only" --> P
-    W & T -- "7 login session" --> S
+    Q --> K & C
+    W & K & C -- "5 service token" --> A
+    W & K -- "6 API token, team pool only" --> P
+    W & K & C -- "7 login session" --> S
     W -- "8 packet emails with passwords" --> M
-    T -- "9 bot token" --> G
-    W & T -- "10 admin credentials, team accounts only" --> N
-    W & T -- "11 competition network config" --> X
+    C -- "9 bot token" --> G
+    W & K & C -- "10 admin credentials, team accounts only" --> N
+    W & K -- "11 competition network config" --> X
 ```
+
+The worker (`worker/__main__.py`) runs the competition timer, the group refresh, the Quotient sync (which reads team
+VMs from Proxmox and pushes the network config to aweful-proxy) and the worker queue (Nextcloud, and the Quotient sync
+a competition start queues: `web/core/worker_tasks.py` `WorkerQueueProcessor._sync_quotient_metadata`), so it holds the
+Authentik token, the Quotient login, the Proxmox token, the Nextcloud credentials and the aweful-proxy token. The chat
+process (`chat/__main__.py`) holds the Discord token, and the same Authentik, Nextcloud and Quotient credentials for its
+`/competition` and reset commands: `/competition start` runs the competition service, which provisions Nextcloud and
+queues the Quotient metadata sync to the worker rather than running it, and `/competition stop` syncs the final scores
+from Quotient (`web/core/services/competition.py` `_run`). It holds no Proxmox or aweful-proxy credentials and never
+reaches either.
 
 ## Threats per boundary (STRIDE) and their mitigations
 
@@ -97,7 +110,7 @@ flowchart LR
 | 1 | Browser to web | T: an autosave or reassignment changes an orange score already submitted or approved | Each change locks the assignment row and checks the status table (`web/orange_team/models.py` `OrangeAssignmentQuerySet.locked_for`, `OrangeAssignment.STATUSES`), and a volunteer reaches only their own assignments (`web/orange_team/views.py` `assignment_save`, `assignment_submit`); concurrent edits of one check take their locks in one order (`web/orange_team/tests/test_lock_order.py`) |
 | 1 | Browser to web | T: a refusal that still changes something | A refused or 4xx request writes no row, sends no mail and calls no service (the views harness rules, `web/core/tests/views_harness.py`) |
 | 2 | OIDC | S: login CSRF or state replay | State is signed with a 300 s lifetime and its nonce is compared in constant time against the session (`web/core/oauth.py` `oauth_callback`) |
-| 2 | OIDC | E: stale groups after a role is removed | The bot refreshes groups from Authentik every 5 minutes (`bot/cogs/authentik_groups.py` `AuthentikGroupsCog`), and a refresh aborts on an implausible answer rather than stripping everyone (`web/core/services/user_groups.py` `refresh_user_groups`); refreshes run one at a time, and none writes over a sign-in that read Authentik after it did (`web/core/services/user_groups.py` `_refresh`) |
+| 2 | OIDC | E: stale groups after a role is removed | The worker refreshes groups from Authentik every 5 minutes (`worker/jobs.py` `group_refresh_loop`), and a refresh aborts on an implausible answer rather than stripping everyone (`web/core/services/user_groups.py` `refresh_user_groups`); refreshes run one at a time, and none writes over a sign-in that read Authentik after it did (`web/core/services/user_groups.py` `_refresh`) |
 | 2 | OIDC | E: a disabled account keeps its powers | A disabled account keeps its stored groups (they decide its team's Discord roles) but they grant nothing, on the web or the bot; a row Authentik hasn't been asked about yet counts as enabled (`web/core/models.py` `UserGroups.permission_groups`) |
 | 2 | OIDC | S: a sign-in from before a credentials reset comes back in | Once Authentik has taken the new password, a reset records the time by the account's Authentik uid, in a transaction of its own, so neither an account that never signed in to the portal nor a failed unlink loses it; the callback reads it under the account lock the reset also takes, refuses a sign-in whose ID token `auth_time` is earlier, and offers a fresh sign-in. The check relies on Authentik returning `auth_time`: without it the sign-in counts from when it began at the portal, which is weaker when an Authentik session survived the reset (`web/core/models.py` `CredentialsReset`; `web/core/oauth.py` `oauth_callback`, `_signed_in_at`; `web/core/auth_utils.py` `lock_account`) |
 | 2 | OIDC | S: a reused username inherits an old account | Portal identity is the Authentik `sub`, never the username (`web/core/oauth.py` `oauth_callback`) |
@@ -165,7 +178,9 @@ flowchart LR
    check and the test suite (`.github/workflows/tests.yml`).
 2. Dependencies come from `uv.lock`, installed `--frozen` (`Dockerfile`); updates arrive only as Dependabot pull
    requests (`.github/dependabot.yml`).
-3. CI on `main` builds one image for web and bot and pushes it to GHCR as `sha-<commit>` (`.github/workflows/ci.yml`).
+3. CI on `main` builds one image for web, the worker and the chat process and pushes it to GHCR as `sha-<commit>`
+   (`.github/workflows/ci.yml`); production runs the worker Deployment beside the bot one (the chat process), each with an
+   exec liveness probe, `python -m core.health worker` or `chat` (`web/core/health.py` `check`).
    Third-party actions are pinned to commit SHAs and base images to digests (`web/core/tests/test_python_pin.py`), and
    the image runs as uid 1001, not root (`Dockerfile`). Each web container migrates under a Postgres advisory lock, so
    replicas take turns (`web/core/management/commands/prepare_database.py` `Command.handle`).
@@ -175,8 +190,9 @@ flowchart LR
    touches, and which origins CSRF trusts, so changing one is a privilege change (`web/portal/settings.py`
    `PORTAL_GROUP_PREFIX`, `PORTAL_ADMIN_GROUP`, `TEAM_GROUP_PATTERN`, `TEAM_ACCOUNT_PATTERN`, `MAX_TEAMS`, `BASE_URL`).
    The repository's defaults are neutral (`Portal_` groups, a local `BASE_URL` that CSRF trusts no origin for), not
-   WRCCDC's; the web server and the bot refuse to start while a required setting is empty (`web/portal/required.py`
-   `REQUIRED_SETTINGS`, checked in `web/portal/wsgi.py` and `main.py`).
+   WRCCDC's; the web server, the worker and the chat process refuse to start while a required setting is empty
+   (`web/portal/required.py` `REQUIRED_SETTINGS`, checked in `web/portal/wsgi.py`, `worker/__main__.py` and
+   `chat/__main__.py`).
 
 ## Owner and review trigger
 
