@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Mapping
+from functools import partial
 from typing import assert_never
 
 import discord
@@ -19,22 +20,23 @@ from bot.utils import add_field, log_to_ops_channel, send_parts
 from core.broadcast import parse_broadcast_target
 from core.models import QueuedAnnouncement, QueuedTask
 from core.queued_tasks import (
+    CHAT_NOTICES,
+    DISCORD_ONLY,
     AddUserToThread,
     BroadcastMessage,
+    ChatNotice,
     ClearTeamChannels,
     CompetitionStatusChanged,
+    DiscordOnly,
     LogToChannel,
     PermanentTaskError,
     PostComment,
     PostTicketUpdate,
-    ReconcileNextcloud,
     ReconcileTeams,
-    ResetNextcloudTeam,
     SetupTeamInfrastructure,
     SyncMemberRoles,
     SyncRoles,
     SyncRolesResult,
-    TaskPayload,
     TicketCreated,
 )
 from core.task_backends import TaskBackend
@@ -46,9 +48,26 @@ from ticketing.models import Ticket, TicketComment
 logger = logging.getLogger(__name__)
 
 
-class DiscordQueueProcessor(QueueProcessor):
+async def _queue_copy(progress: TaskProgress, team: Team, message: str, sender: str) -> bool:
+    """Queue the broadcast's copy for a team with no channel, only while its task is still processing: the task's row
+    is locked meanwhile, so a reset failing it waits, and the reset's on_commit delete catches the copy."""
+
+    @sync_to_async
+    def queue() -> bool:
+        with transaction.atomic():
+            running = QueuedTask.objects.select_for_update(no_key=True)
+            if not running.filter(pk=progress.task_id, status="processing").exists():
+                return False
+            QueuedAnnouncement.objects.create(team=team, message=message, sender_name=sender)
+            return True
+
+    return await queue()
+
+
+class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
     backend = TaskBackend.DISCORD
     heartbeat_name = "queue"
+    payload_types = CHAT_NOTICES + DISCORD_ONLY
 
     def __init__(self, bot: discord.Client) -> None:
         # on_start binds the loop's task to the heartbeat, so beat() in code a handler awaits (reconcile_teams,
@@ -69,24 +88,7 @@ class DiscordQueueProcessor(QueueProcessor):
     def retry_after(self, error: Exception) -> float | None:
         return error.retry_after if isinstance(error, discord.RateLimited) else None
 
-    async def _queue_copy(self, team: Team, message: str, sender: str) -> bool:
-        """Queue the broadcast's copy for a team with no channel, only while the running task is still processing: its
-        row is locked meanwhile, so a reset failing it waits, and the reset's on_commit delete catches the copy."""
-
-        current = self._current_task
-
-        @sync_to_async
-        def queue() -> bool:
-            with transaction.atomic():
-                running = QueuedTask.objects.select_for_update(no_key=True)
-                if current is not None and not running.filter(pk=current, status="processing").exists():
-                    return False
-                QueuedAnnouncement.objects.create(team=team, message=message, sender_name=sender)
-                return True
-
-        return await queue()
-
-    async def dispatch(self, payload: TaskPayload, progress: TaskProgress) -> Mapping[str, object] | None:
+    async def dispatch(self, payload: ChatNotice | DiscordOnly, progress: TaskProgress) -> Mapping[str, object] | None:
         match payload:
             case SyncMemberRoles():
                 await self._handle_sync_member_roles(payload)
@@ -112,8 +114,6 @@ class DiscordQueueProcessor(QueueProcessor):
                 return await self._handle_broadcast_message(payload, progress)
             case CompetitionStatusChanged():
                 await update_status_channel(self.bot)
-            case ReconcileNextcloud() | ResetNextcloudTeam():
-                raise PermanentTaskError(f"{payload.task_type} is the worker's, not Discord's")
             case _:
                 assert_never(payload)
         return None
@@ -295,8 +295,8 @@ class DiscordQueueProcessor(QueueProcessor):
             payload.message,
             payload.sender,
             progress,
-            wanted=self._still_processing,
-            queue_copy=self._queue_copy,
+            wanted=progress.still_processing,
+            queue_copy=partial(_queue_copy, progress),
         )
         summary = result.ops_summary(payload.sender, payload.target, payload.message)
         if result.failed:

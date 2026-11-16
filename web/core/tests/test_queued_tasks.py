@@ -4,7 +4,6 @@ import pytest
 
 from core.models import QueuedTask
 from core.queued_tasks import LogToChannel, PostComment, ResetNextcloudTeam, SyncRoles
-from core.task_backends import TaskBackend
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory, TicketComment
 
@@ -50,8 +49,3 @@ def test_discord_only_payload_writes_nothing_without_discord(zulip_configured, s
 def test_worker_task_queued_without_chat(settings):
     settings.DISCORD_BOT_TOKEN = ""
     assert [r.backend for r in QueuedTask.enqueue(ResetNextcloudTeam(team_number=3))] == ["worker"]
-
-
-def test_origin_is_skipped(zulip_configured, ticket, comment):
-    rows = QueuedTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=comment.id), origin=TaskBackend.DISCORD)
-    assert [r.backend for r in rows] == ["zulip"]

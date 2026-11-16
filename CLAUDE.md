@@ -87,14 +87,17 @@ the unparenthesized form is used intentionally throughout.
 - Each task type is a payload dataclass in `core/queued_tasks.py`, in one group of the `TaskPayload` union:
   `ChatNotice` (a row for every configured chat backend, `chat_backends()`), `DiscordOnly` (a row only when Discord
   is configured, `DISCORD_BOT_TOKEN`) or `WorkerTask` (always a `worker` row); so no configured chat backend means
-  no chat row. A new one also needs a `case` in its backends' `dispatch` (`DiscordQueueProcessor.dispatch` is checked
-  exhaustive by mypy), and a migration, since `QueuedTask.task_type`'s choices come from the union
-- `enqueue(..., origin=...)` skips the chat system an event came from
+  no chat row. A new one also needs a `case` in its backends' `dispatch` (each processor is a `QueueProcessor[P]`
+  over its groups, `payload_types` their classes, and mypy checks its match exhaustive over them; a row outside them
+  fails at once), and a migration, since `QueuedTask.task_type`'s choices come from the union
+- An ops notice goes through `core.services.ops.notify_ops` (audited, then a `LogToChannel` row), never a direct
+  `LogToChannel` enqueue
 - A payload's `ticket_id` also sets the task's ticket FK, so deleting a ticket drops its pending tasks
 - A handler's return value is stored in `QueuedTask.result`; the payload is input only
 - A handler raises `PermanentTaskError` (`core.queued_tasks`) to fail without retrying, and looks up the record it
   is about with `_target`, which raises it; a handler whose retry would repeat a send or a destructive step takes a
-  `TaskProgress`, so a retry resumes from what `QueuedTask.progress` records; the rest are written to be rerun
+  `TaskProgress` (bound to its task: `still_processing()` says whether a reset ended it meanwhile), so a retry resumes
+  from what `QueuedTask.progress` records; the rest are written to be rerun
 
 ### UI Components
 - Pages extend `admin/base_site.html`, directly or through a section base (`admin/ops_base.html`,

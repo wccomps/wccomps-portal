@@ -45,7 +45,7 @@ async def test_web_comment_over_the_message_limit_is_sent_in_parts() -> None:
     from django.contrib.auth.models import User
 
     from bot.discord_queue import DiscordQueueProcessor
-    from core.queued_tasks import PostComment
+    from core.models import QueuedTask
     from team.models import Team
     from ticketing.models import Ticket, TicketCategory, TicketComment
 
@@ -57,6 +57,9 @@ async def test_web_comment_over_the_message_limit_is_sent_in_parts() -> None:
     author = await User.objects.acreate(username="volunteer")
     text = "\n".join("y" * 99 for _ in range(45))
     comment = await TicketComment.objects.acreate(ticket=ticket, author=author, comment_text=text)
+    task = await QueuedTask.objects.acreate(
+        task_type="post_comment", ticket=ticket, payload={"comment_id": comment.id}, status="processing"
+    )
 
     thread = competition_thread()
     thread.send = AsyncMock(side_effect=lambda content, **_kwargs: SimpleNamespace(id=1000 + len(content)))
@@ -64,9 +67,7 @@ async def test_web_comment_over_the_message_limit_is_sent_in_parts() -> None:
     bot.get_channel.return_value = thread
 
     with patch("bot.discord_queue.ensure_ticket_thread", new=AsyncMock(return_value=thread)):
-        await DiscordQueueProcessor(bot)._handle_post_comment(
-            PostComment(ticket_id=ticket.id, comment_id=comment.id), TaskProgress()
-        )
+        await DiscordQueueProcessor(bot)._handle_post_comment(task.typed_payload(), TaskProgress.of(task))
 
     sent = [call.args[0] for call in thread.send.call_args_list]
     assert len(sent) == 3

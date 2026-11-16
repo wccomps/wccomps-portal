@@ -996,16 +996,18 @@ async def test_a_removal_whose_re_setup_fails_is_retried(test_team: Team, mock_b
 async def test_a_copy_is_queued_only_while_the_broadcast_is_processing(
     mock_bot_with_guild: Any, status: str, copies: int
 ) -> None:
+    from functools import partial
+
     from bot.competition_actions import deliver_broadcast
+    from bot.discord_queue import _queue_copy
     from core.broadcast import parse_broadcast_target
     from core.models import QueuedAnnouncement
+    from core.task_queue import TaskProgress
 
     await Team.objects.acreate(team_number=41, team_name="Team 41")
     task = await QueuedTask.objects.acreate(
         task_type="broadcast_message", payload={"target": "41", "message": "Default login", "sender": "gold"}
     )
-    processor = DiscordQueueProcessor(mock_bot_with_guild)
-    processor._current_task = task.pk
     await QueuedTask.objects.filter(pk=task.pk).aupdate(status=status)
 
     with patch("bot.competition_actions.team_chat_channel", return_value=None):
@@ -1014,7 +1016,7 @@ async def test_a_copy_is_queued_only_while_the_broadcast_is_processing(
             parse_broadcast_target("41"),
             "Default login",
             "gold",
-            queue_copy=processor._queue_copy,
+            queue_copy=partial(_queue_copy, TaskProgress.of(task)),
         )
 
     assert (result.sent, result.queued, await QueuedAnnouncement.objects.acount()) == (0, copies, copies)

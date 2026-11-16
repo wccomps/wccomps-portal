@@ -268,14 +268,17 @@ def test_a_long_web_broadcast_is_sent_in_parts(bot_world: World, target: str, me
     from asgiref.sync import async_to_sync
 
     from bot.discord_queue import DiscordQueueProcessor
-    from core.queued_tasks import BroadcastMessage
+    from core.models import QueuedTask
     from core.task_queue import TaskProgress
 
     with rolled_back(), discord_world(bot_world, confirm=True) as fakes:
         processor = DiscordQueueProcessor(fakes.bot)
-        async_to_sync(processor._handle_broadcast_message)(
-            BroadcastMessage(target=target, message=message, sender="g"), TaskProgress()
+        task = QueuedTask.objects.create(
+            task_type="broadcast_message",
+            payload={"target": target, "message": message, "sender": "g"},
+            status="processing",
         )
+        async_to_sync(processor._handle_broadcast_message)(task.typed_payload(), TaskProgress.of(task))
         assert fakes.sent
         for sent in fakes.sent:
             assert not sent_problems(sent), sent_problems(sent)

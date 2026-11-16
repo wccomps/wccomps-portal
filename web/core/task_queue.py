@@ -31,14 +31,29 @@ class ProgressState(TypedDict, total=False):
     sent: int
     queued: int
     parts: dict[str, int]
+    # A Nextcloud reconcile's: accounts deleted and provisioned, and the last team number each pass finished
+    deleted: int
+    provisioned: int
+    deleted_through: int
+    provisioned_through: int
 
 
 @dataclass
 class TaskProgress:
     """What a queued task already did, saved with the task so a retry does only the rest."""
 
+    task_id: int
+    save: Callable[[ProgressState], Awaitable[None]]
     state: ProgressState = field(default_factory=ProgressState)
-    save: Callable[[ProgressState], Awaitable[None]] | None = None
+
+    @classmethod
+    def of(cls, task: QueuedTask) -> TaskProgress:
+        """The progress of a claimed task, saved to its row while the row is still processing."""
+
+        async def save(state: ProgressState) -> None:
+            await QueuedTask.objects.filter(pk=task.pk, status="processing").aupdate(progress=state)
+
+        return cls(task.pk, save, task.progress)
 
     @property
     def done(self) -> int:
@@ -49,8 +64,11 @@ class TaskProgress:
         await self.saved()
 
     async def saved(self) -> None:
-        if self.save:
-            await self.save(self.state)
+        await self.save(self.state)
+
+    async def still_processing(self) -> bool:
+        """Whether the task is still running: False once it was deleted, or a reset failed or scrubbed it."""
+        return await QueuedTask.objects.filter(pk=self.task_id, status="processing").aexists()
 
 
 async def _target[M: Model](queryset: QuerySet[M], **lookup: object) -> M:
@@ -65,13 +83,15 @@ def _nothing(*_args: object) -> None:
     pass
 
 
-class QueueProcessor(ABC):
+class QueueProcessor[P: TaskPayload](ABC):
     """Runs the pending rows of one backend. on_start is called with heartbeat_name in the loop's own asyncio task
     before its first poll, and on_pass after each poll and each task, so the process hosting the loop can tie them to
-    its liveness heartbeat."""
+    its liveness heartbeat. P is the payload group the backend handles, payload_types its classes: a row of any other
+    type fails at once."""
 
     backend: ClassVar[TaskBackend]
     heartbeat_name: ClassVar[str]
+    payload_types: tuple[type[P], ...]
 
     QUEUE_POLL_INTERVAL_SECONDS = 2
     QUEUE_BATCH_SIZE = 10
@@ -84,10 +104,9 @@ class QueueProcessor(ABC):
         self.on_pass = on_pass
         self.running = False
         self.task: asyncio.Task[None] | None = None
-        self._current_task: int | None = None
 
     @abstractmethod
-    async def dispatch(self, payload: TaskPayload, progress: TaskProgress) -> Mapping[str, object] | None:
+    async def dispatch(self, payload: P, progress: TaskProgress) -> Mapping[str, object] | None:
         """Run the handler for payload; what it returns is stored as the task's result. A handler given progress
         records there what it did, so a retry skips it."""
 
@@ -167,9 +186,11 @@ class QueueProcessor(ABC):
             await self._process_task(task)
             self.on_pass()
 
-    async def _still_processing(self) -> bool:
-        current = self._current_task
-        return current is None or await QueuedTask.objects.filter(pk=current, status="processing").aexists()
+    def _payload(self, task: QueuedTask) -> P:
+        payload = task.typed_payload()
+        if not isinstance(payload, self.payload_types):
+            raise PermanentTaskError(f"{task.task_type} is not a {self.backend.label} task")
+        return payload
 
     async def _process_task(self, task: QueuedTask) -> None:
 
@@ -178,13 +199,9 @@ class QueueProcessor(ABC):
         if not claimed:
             return
         task.status = "processing"
-        self._current_task = task.pk
-
-        async def save_progress(state: ProgressState) -> None:
-            await QueuedTask.objects.filter(pk=task.pk, status="processing").aupdate(progress=state)
 
         try:
-            task_result = await self.dispatch(task.typed_payload(), TaskProgress(task.progress, save_progress))
+            task_result = await self.dispatch(self._payload(task), TaskProgress.of(task))
         except PermanentTaskError as error:
             if await self._record(task, status="failed", error_message=str(error)):
                 logger.error(f"Task {task.id} ({task.task_type}) can never succeed: {error}")

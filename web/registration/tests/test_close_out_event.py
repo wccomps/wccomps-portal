@@ -103,6 +103,8 @@ def test_close_out_freezes_wipes_closes_and_queues_the_cleanup(event):
     assert log.details["results"] == 2
     assert log.details["deleted_counts"] == {"ServiceScore": 2, "BlueTeamDiscordLink": 1, "QueuedAnnouncement": 1}
     assert not AuditLog.objects.filter(action__in=["event_finalized", "event_cleared"]).exists()
+    # The cleared schedule shows at once: the teardown report queues its own refresh later
+    assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
 
 
 def test_the_archive_is_taken_before_the_wipe(event):

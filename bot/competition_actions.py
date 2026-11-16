@@ -291,8 +291,9 @@ class _BroadcastStoppedError(Exception):
 
 
 type Delivery = Literal["sent", "queued"]
-# (the recipient's key: 0, or a team's number; its label; its delivery, given its sent parts' progress)
-type Recipient = tuple[int, str, Callable[[TaskProgress], Awaitable[Delivery]]]
+# (the recipient's key: 0, or a team's number; its label; its delivery, given its sent parts' progress, None when the
+# broadcast is no queued task)
+type Recipient = tuple[int, str, Callable[[TaskProgress | None], Awaitable[Delivery]]]
 
 
 async def deliver_broadcast(
@@ -308,20 +309,27 @@ async def deliver_broadcast(
     """Send a broadcast to each recipient, listing those it fails for; progress lets a retry try only the rest.
     wanted, asked before each team, stops it: the teams not reached are listed as failed. queue_copy, when given,
     queues a team's copy and returns False instead when the broadcast was stopped."""
-    progress = progress or TaskProgress()
-    state = progress.state
+    state = progress.state if progress else ProgressState()
     reached, refused, parts = (
         state.setdefault("reached", []),
         state.setdefault("refused", {}),
         state.setdefault("parts", {}),
     )
 
-    def parts_sent(key: str) -> TaskProgress:
-        async def save(part: ProgressState) -> None:
-            parts[key] = part.get("done", 0)
+    async def saved() -> None:
+        if progress:
             await progress.saved()
 
-        return TaskProgress(ProgressState(done=parts.get(key, 0)), save)
+    def parts_sent(key: str) -> TaskProgress | None:
+        if progress is None:
+            return None
+        whole = progress
+
+        async def save(part: ProgressState) -> None:
+            parts[key] = part.get("done", 0)
+            await whole.saved()
+
+        return TaskProgress(whole.task_id, save, ProgressState(done=parts.get(key, 0)))
 
     result = BroadcastResult()
     recipients = await _recipients(guild, target, message, sender, result, queue_copy)
@@ -350,7 +358,7 @@ async def deliver_broadcast(
             # NotFound is retried: a recreate may be replacing the team's channel
             if isinstance(e, discord.Forbidden | PermanentTaskError):
                 refused[str(key)] = reason
-                await progress.saved()
+                await saved()
             else:
                 result.failed.append(reason)
                 result.retryable = True
@@ -358,7 +366,7 @@ async def deliver_broadcast(
             parts.pop(str(key), None)
             reached.append(key)
             state[delivery] = state.get(delivery, 0) + 1
-            await progress.saved()
+            await saved()
         beat()
     result.sent, result.queued = state.get("sent", 0), state.get("queued", 0)
     result.failed += refused.values()
@@ -373,7 +381,7 @@ async def _recipients(
     result: BroadcastResult,
     queue_copy: Callable[[Team, str, str], Awaitable[bool]] | None = None,
 ) -> list[Recipient]:
-    async def to_announcements(parts: TaskProgress) -> Delivery:
+    async def to_announcements(parts: TaskProgress | None) -> Delivery:
         channel = guild.get_channel(settings.DISCORD_ANNOUNCEMENT_CHANNEL_ID)
         if not isinstance(channel, discord.TextChannel):
             raise PermanentTaskError(
@@ -382,8 +390,8 @@ async def _recipients(
         await send_announcement(guild, channel, message, progress=parts)
         return "sent"
 
-    def to_team(team: Team) -> Callable[[TaskProgress], Awaitable[Delivery]]:
-        async def deliver(parts: TaskProgress) -> Delivery:
+    def to_team(team: Team) -> Callable[[TaskProgress | None], Awaitable[Delivery]]:
+        async def deliver(parts: TaskProgress | None) -> Delivery:
             chat_channel = team_chat_channel(guild, team)
             if chat_channel:
                 await send_parts(chat_channel, announcement(sender, message), progress=parts)

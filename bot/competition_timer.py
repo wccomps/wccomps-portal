@@ -10,8 +10,7 @@ from django.utils import timezone
 from bot.competition_actions import run_competition
 from bot.heartbeat import beat, beat_for
 from bot.utils import run_blocking
-from core.models import CompetitionConfig, QueuedTask
-from core.queued_tasks import CompetitionStatusChanged
+from core.models import CompetitionConfig
 from core.services.competition import (
     END_AFTER_STOP,
     TIMER_ACTOR,
@@ -30,16 +29,10 @@ from core.utils import recycle_db_connection
 logger = logging.getLogger(__name__)
 
 
-async def notify(message: str, *, status_changed: bool = False) -> None:
-    """Queue an ops notice, then (the competition changed) a status refresh: the queue delivers them in that order,
-    so the timer never waits on chat."""
-
-    def queue() -> None:
-        notify_ops(message, actor=TIMER_ACTOR)
-        if status_changed:
-            QueuedTask.enqueue(CompetitionStatusChanged())
-
-    await sync_to_async(queue)()
+async def notify(message: str) -> None:
+    """Queue an ops notice, so the timer never waits on chat. The competition service queued any status refresh with
+    the change itself."""
+    await sync_to_async(notify_ops)(message, actor=TIMER_ACTOR)
 
 
 class CompetitionTimer(commands.Cog):
@@ -93,12 +86,11 @@ class CompetitionTimer(commands.Cog):
             logger.exception("Could not clear a missed competition window")
             return
         if cleared == END_AFTER_STOP:
-            await notify("**Schedule cleared:** the scheduled end passed after a manual stop.", status_changed=True)
+            await notify("**Schedule cleared:** the scheduled end passed after a manual stop.")
         elif cleared:
             await notify(
                 "**Schedule cleared:** its end passed while the competition was stopped and would have refused "
-                "a new start time. Set a new schedule on the Competition setup page.",
-                status_changed=True,
+                "a new start time. Set a new schedule on the Competition setup page."
             )
 
     async def _give_up(self, plan: GiveUp) -> None:
@@ -107,8 +99,7 @@ class CompetitionTimer(commands.Cog):
             return
         await notify(
             f"**Competition Auto-{action} Incomplete:** the timer stopped retrying, as {plan.reason}. "
-            f"Run {action} again from the competition page.",
-            status_changed=True,
+            f"Run {action} again from the competition page."
         )
 
     async def _attempt(self, attempt: Attempt) -> None:
@@ -132,11 +123,10 @@ class CompetitionTimer(commands.Cog):
                 if attempt.number == 1:
                     await notify(
                         f"**Competition Auto-{done}, Incomplete:** retrying each minute, up to {TIMER_ATTEMPTS} "
-                        f"attempts.\n\n{result.summary()}",
-                        status_changed=True,
+                        f"attempts.\n\n{result.summary()}"
                     )
             case RunOutcome.COMPLETE:
                 message = f"**Competition Auto-{done}!**\n\n{result.summary()}"
                 if attempt.number > 1:
                     message += f"\n\nCompleted on attempt {attempt.number}."
-                await notify(message, status_changed=True)
+                await notify(message)

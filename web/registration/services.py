@@ -15,7 +15,13 @@ from scoring.snapshot import SNAPSHOT_VERSION, serialize_scorecard
 
 from core.competition_utils import WipedData, wipe_competition_data
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement, QueuedTask
-from core.queued_tasks import ClearTeamChannels, ReconcileNextcloud, ReconcileTeams, ResetNextcloudTeam
+from core.queued_tasks import (
+    ClearTeamChannels,
+    CompetitionStatusChanged,
+    ReconcileNextcloud,
+    ReconcileTeams,
+    ResetNextcloudTeam,
+)
 from core.services.competition import run_lock
 from core.services.linking import COMPETITION_CLEANUP, unlink_teams
 from team.models import DiscordLink, SchoolInfo, Team, default_team_name
@@ -191,21 +197,22 @@ def _clear_old_channels(team: Team) -> None:
     )
     if not left.update(channels_need_clearing=True):
         return
-    pending = QueuedTask.objects.filter(
-        task_type=ClearTeamChannels.task_type, status="pending", payload__team_number=team.team_number
-    )
-    if not pending.exists():
-        QueuedTask.enqueue(ClearTeamChannels(team_number=team.team_number))
+    _enqueue_unless_pending(ClearTeamChannels(team_number=team.team_number))
 
 
 def _reset_nextcloud(team: Team) -> None:
     """Queue the reset of the team's Nextcloud account and files, unless one is already pending, whether or not it
     has Discord leftovers or linked members."""
+    _enqueue_unless_pending(ResetNextcloudTeam(team_number=team.team_number))
+
+
+def _enqueue_unless_pending(payload: ClearTeamChannels | ResetNextcloudTeam) -> None:
+    """Queue payload unless a row of its type for its team is already pending."""
     pending = QueuedTask.objects.filter(
-        task_type=ResetNextcloudTeam.task_type, status="pending", payload__team_number=team.team_number
+        task_type=payload.task_type, status="pending", payload__team_number=payload.team_number
     )
     if not pending.exists():
-        QueuedTask.enqueue(ResetNextcloudTeam(team_number=team.team_number))
+        QueuedTask.enqueue(payload)
 
 
 def queue_team_reconcile(actor: str, open_event_id: int | None) -> None:
@@ -830,9 +837,9 @@ def teardown_problem(stage: EventStage, open_event_id: int | None) -> str:
 
 
 def _reset_for_next_event(config: CompetitionConfig) -> int:
-    """Clear the schedule, start message, Quotient box list and queued announcements (again after commit), and
-    scrub the start broadcasts, failing any not yet sent. Call with the config row locked; returns how many
-    announcements it deleted."""
+    """Clear the schedule, start message, Quotient box list and queued announcements (again after commit), scrub the
+    start broadcasts, failing any not yet sent, and queue a status refresh. Call with the config row locked; returns
+    how many announcements it deleted."""
     broadcasts = QueuedTask.objects.filter(pk__in=config.start_broadcasts)
     broadcasts.filter(status="pending").update(status="failed", error_message=START_BROADCAST_STOPPED)
     broadcasts.filter(status="processing").update(status="failed", error_message=START_BROADCAST_CUT_OFF)
@@ -861,6 +868,7 @@ def _reset_for_next_event(config: CompetitionConfig) -> int:
             "updated_at",
         ]
     )
+    QueuedTask.enqueue(CompetitionStatusChanged())
     QuotientMetadataCache.objects.all().delete()
     announcements, _ = QueuedAnnouncement.objects.all().delete()
     # Again once committed: the bot may queue one the transaction's snapshot didn't see

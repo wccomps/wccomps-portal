@@ -201,8 +201,8 @@ class QueuedTask(models.Model):
         return cls(**kwargs)
 
     @classmethod
-    def enqueue(cls, payload: queued_tasks.TaskPayload, *, origin: TaskBackend | None = None) -> list[QueuedTask]:
-        """One row per backend from backends_for, skipping origin (the chat system the event came from).
+    def enqueue(cls, payload: queued_tasks.TaskPayload) -> list[QueuedTask]:
+        """One row per backend from backends_for.
 
         A payload's ticket_id also sets the ticket FK, so deleting a ticket drops its pending tasks.
         """
@@ -215,7 +215,6 @@ class QueuedTask(models.Model):
                 status="pending",
             )
             for backend in queued_tasks.backends_for(payload)
-            if backend != origin
         ]
 
 

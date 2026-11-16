@@ -117,12 +117,13 @@ async def send_parts(
     """Send text in as many messages as it takes (split_message), so none is past Discord's 2000 characters. Only
     the first may ping what allowed_mentions allows: the rest is the sender's text. With progress, parts an earlier
     attempt sent are skipped."""
-    progress = progress or TaskProgress()
+    done = progress.done if progress else 0
     for n, part in enumerate(split_message(text)):
-        if n < progress.done:
+        if n < done:
             continue
         await channel.send(part, allowed_mentions=allowed_mentions if n == 0 else ALLOWED_MENTIONS)
-        await progress.advance()
+        if progress:
+            await progress.advance()
 
 
 async def send_announcement(

@@ -10,7 +10,8 @@ from django.utils import timezone
 
 from core.auth_utils import signed_out_since
 from core.models import AuditLog, QueuedTask
-from core.queued_tasks import LogToChannel, SetupTeamInfrastructure, SyncMemberRoles
+from core.queued_tasks import SetupTeamInfrastructure, SyncMemberRoles
+from core.services.ops import notify_ops
 from team.models import DiscordLink, LinkAttempt, LinkToken, Team, TeamQuerySet
 
 logger = logging.getLogger(__name__)
@@ -296,14 +297,13 @@ def finalize_link(
     QueuedTask.enqueue(SyncMemberRoles(discord_id=discord_id))
 
     if team:
-        QueuedTask.enqueue(
-            LogToChannel(message=f"User Linked: <@{discord_id}> ({discord_username}) to **{team.team_name}**")
+        notify_ops(
+            f"User Linked: <@{discord_id}> ({discord_username}) to **{team.team_name}**", actor=authentik_username
         )
         logger.info(f"Successfully linked {discord_username} ({discord_id}) to {team.team_name}")
     else:
-        QueuedTask.enqueue(
-            LogToChannel(
-                message=f"User Linked: <@{discord_id}> ({discord_username}) to **{authentik_username}** (non-team)"
-            )
+        notify_ops(
+            f"User Linked: <@{discord_id}> ({discord_username}) to **{authentik_username}** (non-team)",
+            actor=authentik_username,
         )
         logger.info(f"Successfully linked {discord_username} ({discord_id}) to {authentik_username}")

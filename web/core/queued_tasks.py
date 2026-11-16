@@ -1,9 +1,11 @@
 """The work the portal queues: one payload dataclass per QueuedTask type.
 
 TaskPayload is the registry. QueuedTask.task_type's choices come from it, QueuedTask.enqueue
-takes one of its members and writes one row per backend from backends_for, and each backend's
-dispatch (core.task_queue.QueueProcessor) matches on it exhaustively, so mypy rejects a payload
-type a backend cannot handle.
+takes one of its members and writes one row per backend from backends_for, which reads the
+payload's group (ChatNotice, DiscordOnly, WorkerTask). Each backend's processor
+(core.task_queue.QueueProcessor) is generic over the groups that backend runs and matches on
+them exhaustively, so mypy rejects a member of those groups it can't handle; a row of any other
+type fails at once.
 """
 
 from dataclasses import dataclass
@@ -176,19 +178,17 @@ type WorkerTask = ReconcileNextcloud | ResetNextcloudTeam
 
 type TaskPayload = ChatNotice | DiscordOnly | WorkerTask
 
-_CHAT_NOTICES: tuple[type[ChatNotice], ...] = get_args(ChatNotice.__value__)
-_DISCORD_ONLY: tuple[type[DiscordOnly], ...] = get_args(DiscordOnly.__value__)
-_WORKER_TASKS: tuple[type[WorkerTask], ...] = get_args(WorkerTask.__value__)
+CHAT_NOTICES: tuple[type[ChatNotice], ...] = get_args(ChatNotice.__value__)
+DISCORD_ONLY: tuple[type[DiscordOnly], ...] = get_args(DiscordOnly.__value__)
+WORKER_TASKS: tuple[type[WorkerTask], ...] = get_args(WorkerTask.__value__)
 
-PAYLOAD_TYPES: dict[str, type[TaskPayload]] = {
-    cls.task_type: cls for cls in _CHAT_NOTICES + _DISCORD_ONLY + _WORKER_TASKS
-}
+PAYLOAD_TYPES: dict[str, type[TaskPayload]] = {cls.task_type: cls for cls in CHAT_NOTICES + DISCORD_ONLY + WORKER_TASKS}
 
 
 def backends_for(payload: TaskPayload) -> list[TaskBackend]:
     """The backends that get a row of this payload, from its group."""
-    if isinstance(payload, _CHAT_NOTICES):
+    if isinstance(payload, CHAT_NOTICES):
         return chat_backends()
-    if isinstance(payload, _WORKER_TASKS):
+    if isinstance(payload, WORKER_TASKS):
         return [TaskBackend.WORKER]
     return [TaskBackend.DISCORD] if discord_enabled() else []

@@ -350,7 +350,7 @@ async def test_each_queued_cleanup_runs_its_job(payload: dict[str, object], open
     guild = MagicMock()
     processor._guild = MagicMock(return_value=guild)
     with patch("bot.competition_actions.reconcile_teams", new_callable=AsyncMock) as run:
-        await processor.dispatch(task.typed_payload(), TaskProgress())
+        await processor.dispatch(task.typed_payload(), TaskProgress.of(task))
 
     run.assert_awaited_once_with(processor.bot, guild, "gold", open_event_id, beat)
 
@@ -638,7 +638,7 @@ async def test_clear_team_channels_clears_a_handed_over_team_without_nextcloud(
     processor._guild = MagicMock(return_value=guild)
 
     with patch("core.nextcloud.NextcloudManager") as nextcloud:
-        await processor.dispatch(task.typed_payload(), TaskProgress())
+        await processor.dispatch(task.typed_payload(), TaskProgress.of(task))
 
     nextcloud.assert_not_called()
     assert not await Team.objects.filter(pk=competition.pk, channels_need_clearing=True).aexists()

@@ -1,5 +1,6 @@
 """The worker's Nextcloud tasks: the team accounts a ReconcileNextcloud or ResetNextcloudTeam deletes and provisions."""
 
+from dataclasses import asdict
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -35,7 +36,11 @@ def nextcloud():
 
 
 async def run(payload):
-    return await WorkerQueueProcessor().dispatch(payload, TaskProgress())
+    """Run payload's handler as the worker does, given its claimed row's progress."""
+    task = await QueuedTask.objects.acreate(
+        task_type=payload.task_type, backend="worker", payload=asdict(payload), status="processing"
+    )
+    return await WorkerQueueProcessor().dispatch(payload, TaskProgress.of(task))
 
 
 async def test_reconcile_nextcloud_tears_down_then_provisions(nextcloud):
@@ -81,10 +86,52 @@ async def test_a_failure_is_audited_and_raised_for_a_retry(nextcloud):
     from core.nextcloud import NextcloudAPIError
 
     nextcloud.delete_team_user.side_effect = [True, NextcloudAPIError("HTTP 502")]
-    with pytest.raises(NextcloudAPIError):
+    with pytest.raises(RuntimeError, match="deleted 1 team accounts.*failed partway: HTTP 502") as raised:
         await run(ReconcileNextcloud(requested_by="gold", open_event_id=7))
+    assert isinstance(raised.value.__cause__, NextcloudAPIError)
     audit = await AuditLog.objects.aget(action="nextcloud_reconciled")
     assert (audit.details["deleted"], audit.details["finished"]) == (1, False)
+    assert not await QueuedTask.objects.filter(task_type="log_to_channel").aexists()
+
+
+async def test_a_retry_resumes_after_the_last_team_and_reports_once(nextcloud):
+    from core.nextcloud import NextcloudAPIError
+
+    nextcloud.delete_team_user.side_effect = [True, True, NextcloudAPIError("HTTP 502"), True, True, True]
+    payload = ReconcileNextcloud(requested_by="gold", open_event_id=7)
+    row = await QueuedTask.objects.acreate(task_type=payload.task_type, backend="worker", payload=asdict(payload))
+    processor = WorkerQueueProcessor()
+
+    await processor._process_task(row)
+    row = await QueuedTask.objects.aget(pk=row.pk)
+    assert (row.status, row.progress["deleted_through"]) == ("pending", 2)
+    assert not await QueuedTask.objects.filter(task_type="log_to_channel").aexists()
+    await processor._process_task(row)
+
+    await row.arefresh_from_db()
+    assert row.status == "completed"
+    assert [c.args[0] for c in nextcloud.delete_team_user.call_args_list] == [1, 2, 3, 3, 4, 5]
+    assert [c.args[0] for c in nextcloud.provision_team_user.call_args_list] == [1, 2, 3]
+    summary = await QueuedTask.objects.aget(task_type="log_to_channel")
+    assert summary.payload["message"] == "Nextcloud: deleted 5 team accounts, provisioned 3"
+
+
+async def test_a_reconcile_failing_for_good_reports_its_summary_once(nextcloud):
+    from core.nextcloud import NextcloudAPIError
+
+    nextcloud.delete_team_user.side_effect = NextcloudAPIError("HTTP 502")
+    payload = ReconcileNextcloud(requested_by="gold", open_event_id=7)
+    row = await QueuedTask.objects.acreate(
+        task_type=payload.task_type, backend="worker", payload=asdict(payload), max_retries=2
+    )
+    processor = WorkerQueueProcessor()
+    for _ in range(2):
+        await processor._process_task(await QueuedTask.objects.aget(pk=row.pk))
+
+    await row.arefresh_from_db()
+    assert row.status == "failed"
+    (report,) = [t.payload["message"] async for t in QueuedTask.objects.filter(task_type="log_to_channel")]
+    assert report.startswith(f"Task {row.pk} (reconcile_nextcloud) failed after 2 retries: Nextcloud: deleted 0")
 
 
 async def test_reset_nextcloud_team_reprovisions_only_active(nextcloud):
@@ -110,3 +157,10 @@ async def test_the_worker_queue_runs_only_worker_rows(nextcloud):
     await worker_row.arefresh_from_db()
     await discord_row.arefresh_from_db()
     assert (worker_row.status, discord_row.status) == ("completed", "pending")
+
+
+async def test_a_row_outside_the_worker_group_fails_at_once(nextcloud):
+    row = await QueuedTask.objects.acreate(task_type="log_to_channel", backend="worker", payload={"message": "hi"})
+    await WorkerQueueProcessor().process_pending()
+    await row.arefresh_from_db()
+    assert (row.status, row.retry_count, row.error_message) == ("failed", 0, "log_to_channel is not a Worker task")

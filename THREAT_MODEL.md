@@ -31,14 +31,14 @@ during an event.
 7. **Registrant contact details**: school contact names and email addresses.
 8. **Availability during an event**: ticketing, box resets and scoring must keep working for every team.
 9. **The start message**: the default VM credentials posted to every team at the start, in
-   `CompetitionConfig.start_message`, in queued copies (`QueuedAnnouncement`) and in the payload of each broadcast a
-   start queues, whose task id the start records in `CompetitionConfig.start_broadcasts`
+   `CompetitionConfig.start_message`, in queued copies (`QueuedAnnouncement`) and in the payload of each broadcast row a
+   start queues (one per chat backend), whose task ids the start records in `CompetitionConfig.start_broadcasts`
    (`web/core/services/competition.py` `run_competition`). Its audit row stores only its length (`set_start_message`), and its broadcast summary omits the message (`bot/competition_actions.py` `BroadcastResult.ops_summary`).
    When the event is closed out or cancelled, or the bot's cleanup resets for the next event, the message and every
    queued announcement are cleared and each recorded broadcast is scrubbed and, if not finished, failed: a pending one
    is never sent, one being sent stops before the next team once the reset commits, and neither is retried, by the queue or by the
    admin's Retry failed tasks (`web/registration/services.py` `_reset_for_next_event`; `web/core/task_queue.py`
-   `QueueProcessor._record`, `QueueProcessor._still_processing`; `web/core/admin.py`
+   `QueueProcessor._record`, `TaskProgress.still_processing`; `web/core/admin.py`
    `QueuedTaskAdmin.retry_failed_tasks`). For broadcasts queued before starts recorded them,
    `web/core/migrations/0024_scrub_start_broadcasts.py` scrubs the finished ones and hands unfinished ones to the next reset.
 

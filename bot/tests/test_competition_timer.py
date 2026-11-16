@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 import pytest
+from asgiref.sync import sync_to_async
 from django.utils import timezone
 
 from bot.competition_timer import CompetitionTimer
@@ -189,8 +190,8 @@ async def _series(
 
 
 def _fake_runs(outcomes: list[int | None | str]):
-    """Stand-in for run_competition that leaves the config as the real one does: a count of accounts left unchanged,
-    None for a run that errors, "raise" for one that raises."""
+    """Stand-in for run_competition that leaves the config as the real one does, status refresh included: a count of
+    accounts left unchanged, None for a run that errors, "raise" for one that raises."""
     calls = iter(outcomes)
 
     async def run(enable: bool, actor: str, timer: Attempt | None = None) -> CompetitionRunResult:
@@ -202,6 +203,7 @@ def _fake_runs(outcomes: list[int | None | str]):
             return _run(None)
         assert not isinstance(outcome, str)
         await CompetitionConfig.objects.filter(pk=1).aupdate(applications_enabled=enable, competition_start_time=None)
+        await sync_to_async(QueuedTask.enqueue)(CompetitionStatusChanged())
         if outcome:
             await _series(enable, timer.number, timer.first_started, timer.schedule)
         else:
@@ -247,9 +249,6 @@ async def test_an_incomplete_first_attempt_is_announced_and_a_later_one_complete
     assert [p.split("**")[1] for p in posts] == ["Competition Auto-Started, Incomplete:", "Competition Auto-Started!"]
     assert posts[1].endswith("Completed on attempt 2.")
     assert status == 2
-    # Each notice is queued ahead of its status refresh, so chat shows them in the order the timer did
-    kinds = [t async for t in QueuedTask.objects.order_by("pk").values_list("task_type", flat=True)]
-    assert kinds == ["log_to_channel", "competition_status_changed"] * 2
 
 
 @pytest.mark.asyncio
@@ -261,7 +260,8 @@ async def test_giving_up_is_reported_once_with_a_status_update() -> None:
 
     assert start.await_count == 4
     assert posts[1:] == [GAVE_UP]
-    assert status == 2
+    # One refresh for each run's change and one for giving up
+    assert status == 5
     config = await CompetitionConfig.objects.aget(pk=1)
     assert (config.timer_series_enable, config.timer_series_attempt) == (None, 0)
     assert await AuditLog.objects.filter(action="competition_timer_gave_up").acount() == 1
@@ -545,7 +545,6 @@ async def test_the_start_and_stop_commands_ask_for_confirmation_before_running(
 
     mock_interaction.response.send_message.assert_awaited_once()
     assert run.await_count == (1 if confirmed else 0)
-    assert await QueuedTask.objects.filter(task_type="competition_status_changed").acount() == (1 if confirmed else 0)
 
 
 @pytest.mark.asyncio

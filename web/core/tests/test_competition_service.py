@@ -100,6 +100,7 @@ def test_start_enables_apps_and_accounts_refreshes_groups_and_audits(authentik, 
     assert config.competition_start_time is None
     assert config.competition_end_time is not None
     assert AuditLog.objects.get(action="competition_started").admin_user == "timer"
+    assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
 
 
 def test_start_enables_only_the_active_teams_accounts(authentik, config):
@@ -826,6 +827,21 @@ def test_giving_up_drops_only_the_schedule_its_series_carried_out(config, resche
     config = CompetitionConfig.get_config()
     assert config.timer_series_enable is None
     assert config.competition_start_time == (later if rescheduled else None)
+    assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
+
+
+def test_a_schedule_change_queues_one_status_refresh(config):
+    from core.services.competition import set_schedule
+
+    set_schedule("gold", start=timezone.now() + timedelta(hours=1))
+    assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
+
+
+def test_a_controlled_apps_change_queues_one_status_refresh(config):
+    from core.services.competition import set_controlled_apps
+
+    set_controlled_apps(lambda apps: [*apps, "quotient2"], "gold")
+    assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
 
 
 def test_setting_a_schedule_ends_a_live_series_for_its_direction_only(config):

@@ -57,6 +57,7 @@ def test_start_streams_progress_and_posts_to_ops(admin_client):
     refresh.assert_called_once()
     assert CompetitionConfig.get_config().applications_enabled
     assert "Competition Started" in QueuedTask.objects.get(task_type="log_to_channel").payload["message"]
+    assert QueuedTask.objects.filter(task_type="competition_status_changed").count() == 1
 
 
 def test_stop_streams_progress_syncs_scores_and_posts_to_ops(admin_client, admin_user):

@@ -13,7 +13,7 @@ from django.db.models import Q
 
 from core.authentik_utils import set_team_account_active
 from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, QueuedTask
-from core.queued_tasks import BroadcastMessage
+from core.queued_tasks import BroadcastMessage, CompetitionStatusChanged
 from core.team_accounts import accounts_by_team
 from core.utils import advisory_lock, format_competition_time
 from team.models import MAX_TEAMS, active_team_numbers, team_username
@@ -270,8 +270,9 @@ def _run(
     Toggles each controlled application's BlueTeam binding and the team accounts (start enables the
     active teams' accounts; stop disables every team account), refreshes stored groups so permissions
     follow at once, syncs Quotient metadata on start or final service scores on stop, then records the
-    new state and an audit entry. The first start of an event also queues the start message to every
-    active team. Blocking (Authentik, Nextcloud and Quotient HTTP): async callers run it in a thread.
+    new state and an audit entry, queueing a status refresh with them. The first start of an event also queues the
+    start message to every active team. Blocking (Authentik, Nextcloud and Quotient HTTP): async callers run it in a
+    thread.
     """
     from django.contrib.auth.models import User
     from scoring.quotient_sync import sync_quotient_metadata, sync_service_scores
@@ -426,6 +427,7 @@ def _run(
             changes["start_broadcasts"] = [t.pk for t in tasks]
             result.start_message_queued = bool(tasks)
         CompetitionConfig.objects.filter(pk=locked.pk).update(**changes)
+        QueuedTask.enqueue(CompetitionStatusChanged())
 
         AuditLog.objects.create(
             action=COMPETITION_STARTED if enable else COMPETITION_STOPPED,
@@ -485,6 +487,7 @@ def give_up_timer_series(plan: GiveUp) -> bool:
         ).update(**no_timer_series())
         if ended:
             CompetitionConfig.objects.filter(pk=pk, **{schedule: plan.schedule}).update(**{schedule: None})
+            QueuedTask.enqueue(CompetitionStatusChanged())
             AuditLog.objects.create(
                 action=TIMER_GAVE_UP,
                 admin_user=TIMER_ACTOR,
@@ -601,7 +604,8 @@ KEEP = Keep.KEEP
 def set_schedule(
     actor: str = "", *, start: datetime | None | Keep = KEEP, end: datetime | None | Keep = KEEP
 ) -> CompetitionConfig:
-    """Set the start and/or end time, None clearing one (or both); a time not given stays. Returns the saved config."""
+    """Set the start and/or end time, None clearing one (or both); a time not given stays; queues a status refresh.
+    Returns the saved config."""
     config = CompetitionConfig.locked()
     new_start = config.competition_start_time if isinstance(start, Keep) else start
     new_end = config.competition_end_time if isinstance(end, Keep) else end
@@ -626,6 +630,7 @@ def set_schedule(
     _audit_config(
         "competition_schedule_set", actor, config, {**details, "controlled_apps": config.controlled_applications}
     )
+    QueuedTask.enqueue(CompetitionStatusChanged())
     return config
 
 
@@ -647,10 +652,12 @@ END_AFTER_STOP = "end_after_stop"
 
 @transaction.atomic
 def set_controlled_apps(change: Callable[[list[str]], list[str]], actor: str, **details: object) -> list[str]:
-    """Store change(the stored list of controlled app slugs), read under the row lock; returns the new list."""
+    """Store change(the stored list of controlled app slugs), read under the row lock, and queue a status refresh;
+    returns the new list."""
     config = CompetitionConfig.locked()
     apps = change(list(config.controlled_applications or []))
     config.controlled_applications = apps
     config.save(update_fields=["controlled_applications", "updated_at"])
     _audit_config("competition_apps_configured", actor, config, {"controlled_apps": apps, **details})
+    QueuedTask.enqueue(CompetitionStatusChanged())
     return apps

@@ -16,8 +16,9 @@ from team.models import MAX_TEAMS, SchoolInfo, Team, single_account, team_userna
 from .auth_utils import lock_account, sign_out_everywhere
 from .authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, AuthentikUser, reason_for
 from .models import AuditLog, CredentialsReset, QueuedTask
-from .queued_tasks import LogToChannel, SetupTeamInfrastructure
+from .queued_tasks import SetupTeamInfrastructure
 from .services.linking import CREDENTIALS_RESET, TEAM_RESET, unlink_teams
+from .services.ops import notify_ops
 from .team_accounts import SEVERAL_ACCOUNTS
 from .utils import shorten
 
@@ -363,7 +364,7 @@ def reset_team_credentials(team_number: int, actor: str) -> CredentialReset:
             details=reset.audit_details(),
         )
         message = f"Credentials reset for team {team_number} by {actor}: {reset.describe()}"
-        QueuedTask.enqueue(LogToChannel(message=message))
+        notify_ops(message, actor=actor)
 
     _in_own_transaction(f"Recording the credentials reset of team {team_number}", record)
     return reset
@@ -400,7 +401,7 @@ def reset_team(team_number: int, actor: str, *, recreate_channels: bool) -> Team
         )
         channels = "the role and channels are being recreated" if recreate_channels else "channels kept"
         message = f"Team reset of {team.team_name} by {actor}: {reset.describe()}; {channels}"
-        QueuedTask.enqueue(LogToChannel(message=message))
+        notify_ops(message, actor=actor)
 
     recorded = _in_own_transaction(f"Recording the reset of team {team_number}", record) is None
     return TeamReset(reset, recreate_channels and recorded)
@@ -507,9 +508,7 @@ def reset_teams_credentials(
         if partial:
             batches.append(_partial_batch(partial, actor))
         note = _bulk_reset_note(actor, team_numbers, batches, handed_over)
-        _in_own_transaction(
-            "Queueing the bulk credentials reset note", lambda: QueuedTask.enqueue(LogToChannel(message=note))
-        )
+        _in_own_transaction("Queueing the bulk credentials reset note", lambda: notify_ops(note, actor=actor))
     return _combined(batches)
 
 
