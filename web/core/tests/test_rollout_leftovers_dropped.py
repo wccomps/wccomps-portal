@@ -23,6 +23,8 @@ EXCEPTIONS: dict[str, str] = {
     "scoring_template.orange_max": "scoring 0048 forgot it: the scoring sums the orange checks instead; when it "
     "is dropped, orange_team.models.MAX_TOTAL_POINTS (kept for the old release's writes) goes, and only the per-check "
     "MAX_POINTS remains",
+    "ticketing_commentratelimit.discord_id": "ticketing 0020 replaced it with actor_key and made it nullable; the "
+    "previous release still writes it mid-rollout",
 }
 
 

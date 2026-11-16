@@ -11,6 +11,7 @@ import os
 import time
 from collections.abc import Callable
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -30,9 +31,7 @@ EVENTS_ZULIP = "events-zulip"
 # Allowed age per heartbeat, several missed passes each. The worker: competition timer every 60s, group refresh every
 # 5 min, Quotient sync every 5 min (every 15 min while backing off, so two backed-off passes), its queue polls every
 # 2s. The chat process's Discord runner: its queue polls every 2s, the dashboard every 10s. Its Zulip runner: its
-# queue polls every 2s, and its event long-poll answers within about a minute (Zulip sends a heartbeat event when
-# nothing happened; the client gives up after 120s), so several missed polls; while Zulip is unreachable the event
-# loop beats after each retry wait (at most 120s), so an outage alone never lets it go stale.
+# queue polls every 2s; its event loop beats at least every 2x120s (long-poll timeout, then the longest retry wait).
 BUDGETS: dict[str, int] = {
     TIMER: 300,
     GROUPS: 900,
@@ -44,20 +43,27 @@ BUDGETS: dict[str, int] = {
     EVENTS_ZULIP: 600,
 }
 WORKER_HEARTBEATS: tuple[str, ...] = (TIMER, GROUPS, QUOTIENT, QUEUE_WORKER)
-DISCORD_HEARTBEATS: tuple[str, ...] = (QUEUE_DISCORD, DASHBOARD)
-ZULIP_HEARTBEATS: tuple[str, ...] = (QUEUE_ZULIP, EVENTS_ZULIP)
 
 
-def discord_configured(token: str | None) -> bool:
-    """Whether Discord is configured, from DISCORD_BOT_TOKEN: the one rule core.task_backends.discord_enabled (through
-    settings) and budgets (through the environment, as this module can't import Django) both apply."""
-    return bool(token)
+@dataclass(frozen=True)
+class ChatBackend:
+    """A chat backend: configured when each of its settings is set (the environment variable of the same name), and
+    the heartbeats its runner in the chat process writes."""
+
+    name: str  # its core.task_backends.TaskBackend value
+    settings: tuple[str, ...]
+    heartbeats: tuple[str, ...]
+
+    def configured(self, value: Callable[[str], str | None]) -> bool:
+        return all(value(key) for key in self.settings)
 
 
-def zulip_configured(site: str | None, email: str | None, api_key: str | None) -> bool:
-    """Whether Zulip is configured, from ZULIP_SITE, ZULIP_BOT_EMAIL and ZULIP_API_KEY: the one rule
-    core.task_backends.zulip_enabled (through settings) and budgets (through the environment) both apply."""
-    return bool(site and email and api_key)
+# The one rule core.task_backends (through Django settings) and budgets (through the environment, as this module can't
+# import Django) both apply
+CHAT_BACKENDS: tuple[ChatBackend, ...] = (
+    ChatBackend("discord", ("DISCORD_BOT_TOKEN",), (QUEUE_DISCORD, DASHBOARD)),
+    ChatBackend("zulip", ("ZULIP_SITE", "ZULIP_BOT_EMAIL", "ZULIP_API_KEY"), (QUEUE_ZULIP, EVENTS_ZULIP)),
+)
 
 
 def _always() -> bool:
@@ -77,10 +83,7 @@ def budgets(process: str) -> dict[str, int]:
         case "worker":
             names = WORKER_HEARTBEATS
         case "chat":
-            env = os.environ.get
-            discord = DISCORD_HEARTBEATS if discord_configured(env("DISCORD_BOT_TOKEN")) else ()
-            zulip = zulip_configured(env("ZULIP_SITE"), env("ZULIP_BOT_EMAIL"), env("ZULIP_API_KEY"))
-            names = (*discord, *(ZULIP_HEARTBEATS if zulip else ()))
+            names = tuple(name for b in CHAT_BACKENDS if b.configured(os.environ.get) for name in b.heartbeats)
         case _:
             raise ValueError(f"Unknown process {process!r}, expected 'worker' or 'chat'")
     return {name: BUDGETS[name] for name in names}

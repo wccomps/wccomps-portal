@@ -15,12 +15,13 @@ from bot.thread_creator import ticket_thread
 from bot.ticket_input import file_ticket
 from bot.utils import add_field, choices, pinging
 from core.models import QueuedTask
-from core.queued_tasks import PostComment, SyncMemberRoles
+from core.queued_tasks import SyncMemberRoles
 from core.task_backends import TaskBackend
 from core.utils import run_blocking
 from team.models import DiscordLink
-from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketComment, TicketHistory
-from ticketing.utils import get_user_for_ticket, storable
+from ticketing import chat_comments
+from ticketing.models import Ticket, TicketAttachment, TicketCategory, TicketHistory
+from ticketing.utils import get_user_for_ticket
 
 logger = logging.getLogger(__name__)
 
@@ -193,43 +194,31 @@ class TicketingCog(commands.Cog):
         if not ticket or not await may_write_to_ticket(ticket, message.author.id):
             return
 
-        actor_key = f"discord:{message.author.id}"
-        is_allowed, reason = await sync_to_async(CommentRateLimit.check_rate_limit)(ticket.id, actor_key)
+        author = await sync_to_async(get_user_for_ticket)(discord_id=message.author.id)
+        recorded = await sync_to_async(chat_comments.record_message)(
+            ticket,
+            TaskBackend.DISCORD,
+            message_id=message.id,
+            actor_key=f"discord:{message.author.id}",
+            author=author,
+            text=message.content,
+            has_files=bool(message.attachments),
+        )
 
-        if not is_allowed:
+        if recorded.refused:
             try:
                 await message.delete()
                 await message.channel.send(
-                    f"{message.author.mention} {reason}. Please slow down.",
+                    f"{message.author.mention} {recorded.refused}. Please slow down.",
                     delete_after=10,
                     allowed_mentions=pinging(users=[message.author]),
                 )
                 logger.warning(f"Rate limit exceeded for user {message.author.id} on ticket #{ticket.id}")
-                return
             except discord.Forbidden:
                 logger.warning("Cannot delete message due to permissions")
-                return
+            return
 
-        await CommentRateLimit.objects.acreate(ticket=ticket, actor_key=actor_key)
-
-        if content := storable(message.content):
-            existing = await TicketComment.objects.filter(discord_message_id=message.id).afirst()
-
-            if not existing:
-                author = await sync_to_async(get_user_for_ticket)(discord_id=message.author.id)
-                comment = await TicketComment.objects.acreate(
-                    ticket=ticket,
-                    author=author,
-                    comment_text=content,
-                    discord_message_id=message.id,
-                )
-                logger.info(f"Saved Discord message as comment for ticket #{ticket.id}")
-                # The other chat backends post it; the thread already shows it
-                await sync_to_async(QueuedTask.enqueue)(
-                    PostComment(ticket_id=ticket.id, comment_id=comment.id), origin=TaskBackend.DISCORD
-                )
-
-        if message.attachments:
+        if recorded.store_files:
             for attachment in message.attachments:
                 if problem := TicketAttachment.too_big(attachment.size):
                     await message.channel.send(
@@ -271,13 +260,7 @@ class TicketingCog(commands.Cog):
         if not ticket or not await may_write_to_ticket(ticket, after.author.id):
             return
 
-        comment = await TicketComment.objects.filter(ticket=ticket, discord_message_id=after.id).afirst()
-
-        if comment:
-            comment.comment_text = storable(after.content)
-            await comment.asave()
-
-            logger.info(f"Synced edit to comment {comment.id} for ticket #{ticket.id}")
+        await sync_to_async(chat_comments.apply_edit)(TaskBackend.DISCORD, after.id, after.content)
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message) -> None:
@@ -288,17 +271,8 @@ class TicketingCog(commands.Cog):
         if not isinstance(message.channel, discord.Thread):
             return
 
-        ticket = await Ticket.objects.filter(discord_thread_id=message.channel.id).afirst()
-        if not ticket:
-            return
-
-        comment = await TicketComment.objects.filter(ticket=ticket, discord_message_id=message.id).afirst()
-
-        if comment:
-            comment.comment_text = "[Message deleted]"
-            await comment.asave()
-
-            logger.info(f"Marked comment {comment.id} as deleted for ticket #{ticket.id}")
+        if await Ticket.objects.filter(discord_thread_id=message.channel.id).aexists():
+            await sync_to_async(chat_comments.apply_delete)(TaskBackend.DISCORD, [message.id])
 
 
 async def setup(bot: commands.Bot) -> None:

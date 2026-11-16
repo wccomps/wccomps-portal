@@ -4,9 +4,11 @@ from collections.abc import Awaitable, Callable
 import pytest
 import pytest_asyncio
 from asgiref.sync import sync_to_async
+from django.contrib.auth.models import User
 
 from chat.zulip.client import ZulipError
 from chat.zulip.incoming import IncomingMessage
+from core.models import UserGroups
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory, TicketComment
 from ticketing.utils import create_ticket_atomic
@@ -26,6 +28,7 @@ class FakeZulip:
         self.get_events_errors: list[ZulipError] = []
         self.registered = 0
         self.uploads: dict[str, bytes] = {}
+        self.fetched: list[str] = []
         self._message_id = 1000
 
     @property
@@ -59,9 +62,9 @@ class FakeZulip:
             raise asyncio.CancelledError  # ends the runner under test
         return self.events.pop(0)
 
-    async def fetch_upload(self, path: str, max_bytes: int) -> bytes | None:
-        data = self.uploads[path]
-        return None if len(data) > max_bytes else data
+    async def fetch_upload(self, path: str, limit: int) -> bytes:
+        self.fetched.append(path)
+        return self.uploads[path][:limit]
 
 
 def message(
@@ -74,8 +77,16 @@ def message(
     sender_email: str = "member@example.org",
     sender_name: str = "Member",
 ) -> IncomingMessage:
-    """A message in a Zulip topic, as parse_message_event gives it: by default a member's in team 3's stream."""
+    """A message in a Zulip topic, as parse_message_event gives it: by default from team 3's member (the ticket
+    fixture's portal account) in team 3's stream."""
     return IncomingMessage(message_id, stream, topic, sender_id, sender_email, sender_name, content)
+
+
+async def portal_account(username: str, email: str, groups: list[str], *, active: bool = True) -> User:
+    """A portal account holding these Authentik groups, as signing in records them."""
+    user = await User.objects.acreate(username=username, email=email)
+    await UserGroups.objects.acreate(user=user, authentik_id=f"uid-{username}", groups=groups, account_active=active)
+    return user
 
 
 @pytest.fixture
@@ -94,10 +105,11 @@ async def make_teams(db: None) -> MakeTeams:
 
 @pytest_asyncio.fixture
 async def ticket(make_teams: MakeTeams) -> Ticket:
-    """Team 3's first ticket, T003-001 (teams 3 and 5 active). Creating it queues its ticket_created_web rows: a test
-    that counts rows clears them first."""
+    """Team 3's first ticket, T003-001 (teams 3 and 5 active), with the portal account of team 3's member
+    member@example.org. Creating it queues its ticket_created_web rows: a test that counts rows clears them first."""
     await make_teams(active=[3, 5])
     team = await Team.objects.aget(team_number=3)
+    await portal_account("member03", "member@example.org", [team.authentik_group])
     category = await TicketCategory.objects.afirst()  # the seeded categories (the root conftest restores them)
     assert category is not None
     return await sync_to_async(create_ticket_atomic)(team, category, "Web server down")

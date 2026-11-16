@@ -8,6 +8,8 @@ from django.core.exceptions import ImproperlyConfigured
 
 from chat import __main__ as chat_main
 from chat.zulip import runner as zulip_runner
+from core.heartbeat import CHAT_BACKENDS
+from core.task_backends import TaskBackend
 
 
 @pytest.fixture
@@ -24,7 +26,7 @@ def zulip_only(settings, zulip_configured):
 
 @pytest.fixture
 def not_started(monkeypatch):
-    monkeypatch.setattr(chat_main, "PortalBot", lambda: pytest.fail("the Discord runner started"))
+    monkeypatch.setattr("bot.client.PortalBot", lambda: pytest.fail("the Discord runner started"))
 
 
 @pytest.fixture
@@ -97,6 +99,22 @@ def test_chat_refuses_to_start_without_required_settings(settings, no_zulip, not
         chat_main.main()
 
 
+def test_a_refused_zulip_site_stops_the_process_before_any_runner(
+    settings, zulip_configured, not_started, zulip_not_started, caplog
+):
+    settings.ZULIP_SITE = "http://zulip.example.org"
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exit_:
+        chat_main.main()
+
+    assert exit_.value.code == 1
+    assert "ZULIP_SITE" in caplog.text
+
+
+def test_every_chat_backend_has_a_runner():
+    assert set(chat_main.RUNNERS) == {TaskBackend(backend.name) for backend in CHAT_BACKENDS}
+
+
 def test_discord_only_starts_the_bot_without_a_log_handler_of_its_own(
     settings, no_zulip, zulip_not_started, monkeypatch
 ):
@@ -104,7 +122,7 @@ def test_discord_only_starts_the_bot_without_a_log_handler_of_its_own(
     closed when its runner ends."""
     settings.DISCORD_BOT_TOKEN = "token"
     bot = _Bot(crash=True)
-    monkeypatch.setattr(chat_main, "PortalBot", lambda: bot)
+    monkeypatch.setattr("bot.client.PortalBot", lambda: bot)
 
     with pytest.raises(SystemExit):
         chat_main.main()
@@ -133,9 +151,9 @@ def test_both_backends_run_together_and_a_crash_ends_the_chat_process(
     settings, zulip_configured, client, monkeypatch, caplog
 ):
     """The Zulip runner sees the bot running: one event loop runs both. Its crash stops the bot (closed on the way
-    out) and ends the process, and its container restarts."""
+    out) and ends the process."""
     bot = _Bot()
-    monkeypatch.setattr(chat_main, "PortalBot", lambda: bot)
+    monkeypatch.setattr("bot.client.PortalBot", lambda: bot)
 
     async def run(zulip_client: object) -> None:
         await asyncio.wait_for(bot.started.wait(), timeout=5)

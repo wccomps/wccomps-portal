@@ -1,7 +1,8 @@
-# Run the portal with Docker: Postgres, the web app, the worker and (with the chat profile) the Discord bot.
+# Run the portal with Docker: Postgres, the web app, the worker and (with the chat profile) the chat process: the
+# Discord bot, the Zulip runner, or both.
 #   cp .env.example .env    # fill it in
 #   docker compose up -d     # published image; `docker compose up -d --build` runs this checkout
-#   docker compose --profile chat up -d   # also the chat process, once DISCORD_BOT_TOKEN is set
+#   docker compose --profile chat up -d   # also the chat process, once DISCORD_BOT_TOKEN or the ZULIP_* settings are set
 # The web app listens on http://localhost:${WEB_PORT:-8000}; put it behind an HTTPS reverse proxy
 # (with DJANGO_DEBUG=False the session and CSRF cookies are HTTPS-only).
 
@@ -79,8 +80,8 @@ services:
       start_period: 60s
 
   chat:
-    # Same image; skip its entrypoint and run the chat backends configured in .env (Discord: DISCORD_BOT_TOKEN).
-    # Exactly one chat process may run per Discord token.
+    # Same image; skip its entrypoint and run the chat backends configured in .env (Discord: DISCORD_BOT_TOKEN; Zulip:
+    # ZULIP_SITE, ZULIP_BOT_EMAIL and ZULIP_API_KEY). Run exactly one chat process per deployment.
     profiles: [chat]
     image: ghcr.io/wccomps/wccomps-portal:${PORTAL_TAG:-main}
     entrypoint: []

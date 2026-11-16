@@ -125,6 +125,9 @@ class Ticket(Approvable):
         null=True, blank=True, help_text="The bot's ticket message with action buttons in the thread"
     )
     thread_archive_scheduled_at = models.DateTimeField(null=True, blank=True)
+    # The topic in the team's Zulip stream that the ticket-created notice opened; every later notice goes to it.
+    # Blank until then
+    zulip_topic = models.CharField(max_length=60, blank=True, db_default="", default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -181,17 +184,14 @@ class TicketComment(models.Model):
     posted_at = models.DateTimeField(auto_now_add=True)
     discord_message_id = models.BigIntegerField(null=True, blank=True)
     zulip_message_id = models.BigIntegerField(null=True, blank=True, db_index=True)
-    external_author = models.CharField(
-        max_length=255, blank=True, help_text="The chat display name of an author with no portal account"
-    )
 
     class Meta:
         ordering = ["posted_at"]
 
     @property
     def author_name(self) -> str:
-        """Who wrote it: the portal user's username, else the name chat showed for them, else "Unknown"."""
-        return (self.author.username if self.author else self.external_author) or "Unknown"
+        """Who wrote it, as chat shows it: the portal user's username, else "Unknown"."""
+        return (self.author.username if self.author else "") or "Unknown"
 
     def __str__(self) -> str:
         return f"Comment by {self.author_name} on {self.ticket.ticket_number}"
@@ -225,7 +225,8 @@ class CommentRateLimit(models.Model):
     """
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, null=True, blank=True)
-    actor_key = models.CharField(max_length=64)
+    # db_default: the previous release's pods insert rows without it while a deploy rolls out
+    actor_key = models.CharField(max_length=64, db_default="")
     posted_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

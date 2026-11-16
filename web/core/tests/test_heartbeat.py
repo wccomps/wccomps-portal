@@ -125,12 +125,13 @@ def test_chat_budgets_for_both(no_chat_env, monkeypatch):
 @pytest.mark.parametrize("token", ["", "t"])
 def test_chat_budgets_follow_the_rule_that_decides_queueing(settings, no_chat_env, monkeypatch, token):
     """The probe expects the Discord heartbeats exactly when core.task_backends queues Discord rows."""
-    from core.task_backends import discord_enabled
+    from core.task_backends import TaskBackend, configured_chat_backends
 
     monkeypatch.setenv("DISCORD_BOT_TOKEN", token)
     settings.DISCORD_BOT_TOKEN = token
+    settings.ZULIP_SITE = ""
 
-    assert bool(heartbeat.budgets("chat")) == discord_enabled() == bool(token)
+    assert bool(heartbeat.budgets("chat")) == (TaskBackend.DISCORD in configured_chat_backends()) == bool(token)
 
 
 @pytest.mark.parametrize(
@@ -138,12 +139,13 @@ def test_chat_budgets_follow_the_rule_that_decides_queueing(settings, no_chat_en
 )
 def test_zulip_budgets_follow_the_rule_that_decides_queueing(settings, no_chat_env, monkeypatch, values):
     """The probe expects the Zulip heartbeats exactly when core.task_backends queues Zulip rows."""
-    from core.task_backends import zulip_enabled
+    from core.task_backends import TaskBackend, configured_chat_backends
 
     _set_zulip_env(monkeypatch, values)
     settings.ZULIP_SITE, settings.ZULIP_BOT_EMAIL, settings.ZULIP_API_KEY = values
+    settings.DISCORD_BOT_TOKEN = ""
 
-    assert bool(heartbeat.budgets("chat")) == zulip_enabled() == all(values)
+    assert bool(heartbeat.budgets("chat")) == (TaskBackend.ZULIP in configured_chat_backends()) == all(values)
 
 
 def test_unknown_process_is_refused():

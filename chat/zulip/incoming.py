@@ -1,7 +1,8 @@
-"""Messages in a ticket's Zulip topic become the ticket's comments, and their edits and deletes carry over to the
-comment. A comment goes on to the other chat backends; an edit or delete doesn't (the copy there keeps its text).
-Files uploaded with a message are stored on the ticket as its attachments, as a Discord thread's are; they stay out of
-the comment and aren't posted to the other chat backends.
+"""Messages in a ticket's Zulip topic become the ticket's comments (ticketing.chat_comments, as a Discord thread's
+do), and their edits and deletes carry over to the comment. Only a sender whose Zulip email is the portal account of
+one of the ticket's team or of ticket staff writes to a ticket; anyone else is told so in the topic. Files uploaded
+with a message are stored on the ticket as its attachments, as a Discord thread's are; they stay out of the comment
+and aren't posted to the other chat backends.
 
 The event fields read here are Zulip's JSON: anything can be missing or of another type, so each reader checks what it
 uses and passes over an event it can't read."""
@@ -10,29 +11,34 @@ import logging
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import TypeGuard
 
 import httpx
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.db import transaction
 
 from chat.zulip.client import UPLOAD_PREFIX, ZulipClient, ZulipError
 from chat.zulip.markup import quiet
 from chat.zulip.naming import team_for_stream, ticket_number_from_topic
-from core.models import QueuedTask
-from core.queued_tasks import PostComment
 from core.task_backends import TaskBackend
-from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketComment
+from ticketing import chat_comments
+from ticketing.access import ticket_open_to_user
+from ticketing.models import Ticket, TicketAttachment
 from ticketing.utils import storable
 
 logger = logging.getLogger(__name__)
 
-DELETED_TEXT = "[Message deleted]"
 # Zulip's ids fit a BigIntegerField; anything else in an event isn't one
 _ID_LIMIT = 2**63
 # [name](/user_uploads/...): how Zulip's raw Markdown links a file uploaded with the message
 _UPLOAD_LINK = re.compile(r"\[([^\]\n]*)\]\((" + re.escape(UPLOAD_PREFIX) + r"[^)\s]+)\)")
+# Discord's cap on a message's attachments: a Zulip message stores no more files than a Discord one can carry
+MAX_UPLOADS = 10
+NOT_LINKED = (
+    "only the team's members and staff linked to the portal by their Zulip email can add to a ticket; this message "
+    "was not added to it."
+)
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,10 @@ def _id(value: object) -> int | None:
     return value if type(value) is int and 0 < value < _ID_LIMIT else None
 
 
+def _all_text(values: tuple[object, ...]) -> TypeGuard[tuple[str, ...]]:
+    return all(isinstance(value, str) for value in values)
+
+
 def parse_message_event(event: Mapping[str, object]) -> IncomingMessage | None:
     """The stream message a "message" event carries; None for a direct message, an event it can't read, or the bot's
     own message (a notice it posted)."""
@@ -58,12 +68,11 @@ def parse_message_event(event: Mapping[str, object]) -> IncomingMessage | None:
         return None
     message_id, sender_id = _id(message.get("id")), _id(message.get("sender_id"))
     fields = ("display_recipient", "subject", "sender_email", "sender_full_name", "content")
-    texts = [message.get(key) for key in fields]
-    if message_id is None or sender_id is None or not all(isinstance(text, str) for text in texts):
+    texts = tuple(message.get(key) for key in fields)
+    if message_id is None or sender_id is None or not _all_text(texts):
         return None
-    stream, topic, email, name, content = (str(text) for text in texts)
-    bot_email = settings.ZULIP_BOT_EMAIL
-    if bot_email and email.lower() == bot_email.lower():
+    stream, topic, email, name, content = texts
+    if email.lower() == settings.ZULIP_BOT_EMAIL.lower():
         return None
     return IncomingMessage(message_id, stream, topic, sender_id, email, name, content)
 
@@ -101,16 +110,18 @@ def _portal_user(email: str) -> User | None:
     there is none, or more than one to tell apart."""
     if not email:
         return None
-    users = list(User.objects.filter(email__iexact=email)[:2])
+    users = list(User.objects.select_related("usergroups").filter(email__iexact=email)[:2])
     return users[0] if len(users) == 1 else None
 
 
 def upload_links(content: str) -> list[tuple[str, str]]:
-    """(name, path) of each file a message's text links as uploaded to this Zulip, once per path; a link anywhere
-    else, or one whose path climbs out of /user_uploads/, is passed over."""
+    """(name, path) of each file a message's text links as uploaded to this Zulip, once per path (without a query or
+    fragment, which fetch the same file); a link anywhere else, or one whose path climbs out of /user_uploads/, is
+    passed over."""
     found: dict[str, str] = {}
     for match in _UPLOAD_LINK.finditer(content):
-        name, path = match.groups()
+        name, link = match.groups()
+        path = re.split(r"[?#]", link, maxsplit=1)[0]
         if ".." not in path.split("/"):
             found.setdefault(path, name)
     return [(name, path) for path, name in found.items()]
@@ -119,48 +130,38 @@ def upload_links(content: str) -> list[tuple[str, str]]:
 def comment_text(content: str) -> str:
     """A message's text as its comment stores it: without its upload links (the files are the ticket's attachments),
     so a message that only carries files has none, as a Discord message with only attachments has none."""
-    return storable(_UPLOAD_LINK.sub("", content)).strip()
+    return _UPLOAD_LINK.sub("", content).strip()
 
 
 @dataclass(frozen=True)
 class _Recorded:
-    refused: str = ""  # why the rate limit refused the message
+    refused: str = ""  # what to tell the sender: nothing was saved
     ticket: Ticket | None = None  # the ticket to store the message's uploads on; None when there are none to store
 
 
 def _record(msg: IncomingMessage, has_uploads: bool) -> _Recorded:
-    """Save the message's text as its ticket's comment and queue it for the other chat backends, under the rate limit
-    (one message, one count, text and files together). A message outside a ticket's topic is passed over, as is each
-    half (the comment, the files) already saved: an event Zulip delivers again finds its zulip_message_id on the
-    comment or on an attachment."""
-    text = comment_text(msg.content)
+    """Record a message in a ticket's topic through ticketing.chat_comments, when its sender may write to the ticket;
+    a message outside a ticket's topic is passed over."""
     ticket = find_ticket(msg.stream, msg.topic)
     if ticket is None:
         return _Recorded()
-    new_comment = bool(text) and not TicketComment.objects.filter(zulip_message_id=msg.message_id).exists()
-    new_files = has_uploads and not TicketAttachment.objects.filter(zulip_message_id=msg.message_id).exists()
-    if not (new_comment or new_files):
-        return _Recorded()
-    actor_key = f"zulip:{msg.sender_id}"
-    allowed, reason = CommentRateLimit.check_rate_limit(ticket.id, actor_key)
-    if not allowed:
-        return _Recorded(refused=reason)
-    with transaction.atomic():
-        CommentRateLimit.objects.create(ticket=ticket, actor_key=actor_key)
-        if new_comment:
-            author = _portal_user(msg.sender_email)
-            comment = TicketComment.objects.create(
-                ticket=ticket,
-                author=author,
-                external_author="" if author else storable(msg.sender_name)[:255],
-                comment_text=text,
-                zulip_message_id=msg.message_id,
-            )
-            # The other chat backends post it; the topic already shows it
-            QueuedTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=comment.id), origin=TaskBackend.ZULIP)
-    if new_comment:
-        logger.info(f"Saved Zulip message {msg.message_id} as comment {comment.id} on ticket {ticket.ticket_number}")
-    return _Recorded(ticket=ticket if new_files else None)
+    author = _portal_user(msg.sender_email)
+    if author is None or not ticket_open_to_user(ticket, author):
+        logger.warning(f"Zulip message {msg.message_id} from {msg.sender_id} not added: no portal account may write")
+        return _Recorded(refused=NOT_LINKED)
+    recorded = chat_comments.record_message(
+        ticket,
+        TaskBackend.ZULIP,
+        message_id=msg.message_id,
+        actor_key=f"zulip:{msg.sender_id}",
+        author=author,
+        text=comment_text(msg.content),
+        has_files=has_uploads,
+    )
+    if recorded.refused:
+        logger.warning(f"Rate limit refused Zulip message {msg.message_id} from {msg.sender_id}: {recorded.refused}")
+        return _Recorded(refused=f"{recorded.refused}; this message was not added to the ticket. Please slow down.")
+    return _Recorded(ticket=ticket if recorded.store_files else None)
 
 
 async def _reply(msg: IncomingMessage, client: ZulipClient, text: str, about: str) -> None:
@@ -180,9 +181,8 @@ async def _store_uploads(
     stored = False
     for name, path in uploads:
         try:
-            data = await client.fetch_upload(path, TicketAttachment.MAX_SIZE)
-            if data is None:
-                problem = TicketAttachment.too_big(TicketAttachment.MAX_SIZE + 1)
+            data = await client.fetch_upload(path, TicketAttachment.MAX_SIZE + 1)
+            if problem := TicketAttachment.too_big(len(data)):
                 await _reply(msg, client, f"{problem}. Please use a file sharing service.", "a file was too big")
                 continue
             attachment = TicketAttachment.with_file(
@@ -207,33 +207,31 @@ async def _store_uploads(
 
 
 async def save_message(client: ZulipClient, msg: IncomingMessage) -> None:
-    """Turn a message in a ticket's topic into the ticket's comment and its uploads into the ticket's attachments.
-    Over the rate limit, nothing is saved and the topic is told (Zulip keeps the message: the bot can't delete it)."""
+    """Turn a message in a ticket's topic into the ticket's comment and its first MAX_UPLOADS uploads into the
+    ticket's attachments. A sender who may not write to the ticket, or one over the rate limit, gets nothing saved
+    and is told in the topic (the message stays in Zulip)."""
     uploads = upload_links(msg.content)
     recorded = await sync_to_async(_record)(msg, bool(uploads))
     if recorded.refused:
-        logger.warning(f"Rate limit refused Zulip message {msg.message_id} from {msg.sender_id}: {recorded.refused}")
-        text = f"{recorded.refused}; this message was not added to the ticket. Please slow down."
-        await _reply(msg, client, text, "a message was refused")
+        await _reply(msg, client, recorded.refused, "a message was refused")
     elif recorded.ticket is not None:
-        await _store_uploads(client, msg, recorded.ticket, uploads)
+        if len(uploads) > MAX_UPLOADS:
+            text = f"only a message's first {MAX_UPLOADS} files are added to the ticket; post the rest in another one."
+            await _reply(msg, client, text, "files were left out")
+        await _store_uploads(client, msg, recorded.ticket, uploads[:MAX_UPLOADS])
 
 
 async def apply_edit(event: Mapping[str, object]) -> None:
     """A message's new text onto its comment. Not passed on to the other chat backends."""
-    if (edit := edited_message(event)) is None:
-        return
-    message_id, content = edit
-    if await TicketComment.objects.filter(zulip_message_id=message_id).aupdate(comment_text=comment_text(content)):
-        logger.info(f"Synced the edit of Zulip message {message_id} to its comment")
+    if (edit := edited_message(event)) is not None:
+        message_id, content = edit
+        await sync_to_async(chat_comments.apply_edit)(TaskBackend.ZULIP, message_id, comment_text(content))
 
 
 async def apply_delete(event: Mapping[str, object]) -> None:
     """Mark the deleted messages' comments deleted. Not passed on to the other chat backends."""
-    if not (message_ids := deleted_message_ids(event)):
-        return
-    if await TicketComment.objects.filter(zulip_message_id__in=message_ids).aupdate(comment_text=DELETED_TEXT):
-        logger.info(f"Marked the comments of deleted Zulip messages {message_ids} deleted")
+    if message_ids := deleted_message_ids(event):
+        await sync_to_async(chat_comments.apply_delete)(TaskBackend.ZULIP, message_ids)
 
 
 async def handle_event(client: ZulipClient, event: Mapping[str, object]) -> None:

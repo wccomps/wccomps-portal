@@ -1,19 +1,23 @@
-"""Messages in a ticket's Zulip topic become its comments: only the stream's own team's tickets, each message once,
-under the same rate limit as the web and Discord; edits and deletes carry over and go no further. Uploaded files
-become the ticket's attachments, each message's once. The runner's event loop re-registers a lost queue and rides
-out Zulip being unreachable."""
+"""Messages in a ticket's Zulip topic become its comments: only the stream's own team's tickets, only from a sender
+whose Zulip email is the portal account of the team's member or ticket staff, each message once, under the same rate
+limit as the web and Discord; edits and deletes carry over and go no further. Uploaded files become the ticket's
+attachments, each message's once. The runner's event loop re-registers a lost queue and rides out Zulip being
+unreachable."""
 
 import asyncio
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from chat.tests.conftest import FakeZulip, message
+from chat.tests.conftest import FakeZulip, message, portal_account
 from chat.zulip import runner
 from chat.zulip.client import LONG_POLL_READ_TIMEOUT, UPLOAD_PREFIX, ZulipError
 from chat.zulip.incoming import (
+    MAX_UPLOADS,
+    NOT_LINKED,
     IncomingMessage,
     apply_delete,
     apply_edit,
@@ -26,7 +30,9 @@ from chat.zulip.incoming import (
 from chat.zulip.naming import ticket_topic
 from core.heartbeat import BUDGETS, EVENTS_ZULIP
 from core.models import QueuedTask
-from ticketing.models import Ticket, TicketAttachment, TicketComment
+from core.permission_constants import PERMISSION_MAP
+from team.models import Team
+from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketComment
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 PDF = b"%PDF-1.7\n" + b"\x00" * 16
@@ -103,7 +109,7 @@ async def test_reply_in_topic_becomes_comment(fake_zulip, ticket):
     assert comment.zulip_message_id == 77
 
 
-async def test_other_teams_ticket_number_is_ignored(fake_zulip, team5_ticket):  # Review Focus 3
+async def test_other_teams_ticket_number_is_ignored(fake_zulip, team5_ticket):
     await save_message(fake_zulip, message(stream="team03", topic=f"{team5_ticket.ticket_number}: x"))
 
     assert not await TicketComment.objects.aexists()
@@ -120,44 +126,69 @@ async def test_a_topic_naming_no_ticket_is_ignored(fake_zulip, ticket):
     await save_message(fake_zulip, message(topic="lunch"))
 
     assert not await TicketComment.objects.aexists()
+    assert fake_zulip.sent == []
 
 
-async def test_unknown_sender_recorded_by_name(fake_zulip, ticket):
-    msg = message(topic=ticket_topic(ticket), sender_email="nobody@example.org", sender_name="Sender Name")
+async def test_sender_matched_by_email_writes_as_that_account(fake_zulip, ticket, django_user_model):
+    member = await django_user_model.objects.aget(email="member@example.org")
 
-    await save_message(fake_zulip, msg)
+    await save_message(fake_zulip, message(topic=ticket_topic(ticket), sender_email="MEMBER@example.org"))
 
-    comment = await TicketComment.objects.aget()
-    assert comment.author_id is None and comment.external_author == "Sender Name"
-    assert comment.author_name == "Sender Name"
+    assert (await TicketComment.objects.aget()).author_id == member.id
 
 
-async def test_sender_matched_by_email(fake_zulip, ticket, django_user_model):
-    user = await django_user_model.objects.acreate(username="team03", email="Team03@Example.org")
+async def test_ticket_staff_may_write_to_any_teams_ticket(fake_zulip, ticket):
+    staff = await portal_account("support", "support@example.org", [PERMISSION_MAP["ticketing_support"][0]])
 
-    await save_message(fake_zulip, message(topic=ticket_topic(ticket), sender_email="team03@example.org"))
+    await save_message(fake_zulip, message(topic=ticket_topic(ticket), sender_email="support@example.org"))
 
-    assert (await TicketComment.objects.aget()).author_id == user.id
-
-
-@pytest.mark.parametrize("email", ["", "shared@example.org"])
-async def test_a_blank_or_shared_email_names_no_user(fake_zulip, ticket, django_user_model, email):
-    await django_user_model.objects.acreate(username="one", email=email)
-    await django_user_model.objects.acreate(username="two", email=email)
-
-    await save_message(fake_zulip, message(topic=ticket_topic(ticket), sender_email=email, sender_name="Member"))
-
-    comment = await TicketComment.objects.aget()
-    assert comment.author_id is None and comment.external_author == "Member"
+    assert (await TicketComment.objects.aget()).author_id == staff.id
 
 
-async def test_redelivered_message_saved_once(fake_zulip, ticket):  # Review Focus 4
+async def _refused(fake_zulip: FakeZulip, ticket: Ticket, email: str) -> None:
+    fake_zulip.uploads = {"/user_uploads/2/ab/a.txt": b"log"}
+    content = "hello [a.txt](/user_uploads/2/ab/a.txt)"
+    await save_message(fake_zulip, message(topic=ticket_topic(ticket), sender_email=email, content=content))
+
+    assert not await TicketComment.objects.aexists()
+    assert not await TicketAttachment.objects.aexists()
+    assert not await CommentRateLimit.objects.aexists()
+    assert fake_zulip.sent_to("team03") == [f"Member: {NOT_LINKED}"]
+
+
+@pytest.mark.parametrize("email", ["nobody@example.org", ""])
+async def test_a_sender_with_no_portal_account_is_told_and_nothing_is_saved(fake_zulip, ticket, email):
+    await _refused(fake_zulip, ticket, email)
+
+
+async def test_an_email_shared_by_two_accounts_names_no_one(fake_zulip, ticket, django_user_model):
+    await django_user_model.objects.acreate(username="other", email="Member@Example.org")
+
+    await _refused(fake_zulip, ticket, "member@example.org")
+
+
+async def test_another_teams_member_is_refused(fake_zulip, ticket):
+    team5 = await Team.objects.aget(team_number=5)
+    await portal_account("member05", "five@example.org", [team5.authentik_group])
+
+    await _refused(fake_zulip, ticket, "five@example.org")
+
+
+async def test_a_disabled_account_is_refused(fake_zulip, ticket):
+    team = await Team.objects.aget(team_number=3)
+    await portal_account("off03", "off@example.org", [team.authentik_group], active=False)
+
+    await _refused(fake_zulip, ticket, "off@example.org")
+
+
+async def test_redelivered_message_saved_once(fake_zulip, ticket):
     msg = message(topic=ticket_topic(ticket), message_id=77)
 
     await save_message(fake_zulip, msg)
     await save_message(fake_zulip, msg)
 
     assert await TicketComment.objects.acount() == 1
+    assert await CommentRateLimit.objects.acount() == 1
 
 
 async def test_rate_limit_blocks_and_replies(fake_zulip, ticket):
@@ -191,7 +222,7 @@ async def test_edit_and_delete_carry_over(fake_zulip, ticket):
     await save_message(fake_zulip, message(topic=ticket_topic(ticket), message_id=77, content="first"))
     await QueuedTask.objects.all().adelete()
 
-    await apply_edit({"type": "update_message", "message_id": 77, "content": "second"})
+    await apply_edit({"type": "update_message", "message_id": 77, "content": "second\x00"})
     assert (await TicketComment.objects.aget()).comment_text == "second"
 
     await apply_delete({"type": "delete_message", "message_id": 77})
@@ -213,14 +244,24 @@ def test_upload_links_finds_the_sites_uploads_only():
     assert upload_links(content) == [("a.txt", "/user_uploads/2/ab/a.txt"), ("", "/user_uploads/2/cd/c.png")]
 
 
-_LINK_PARTS = st.sampled_from(["[", "]", "(", ")", UPLOAD_PREFIX, "..", "/", " ", "\n", "a.png", "https://x/"])
+def test_upload_links_counts_a_file_once_whatever_its_fragment_or_query():
+    content = "".join(f"[f](/user_uploads/2/ab/f.bin#{n}) [f](/user_uploads/2/ab/f.bin?v={n})" for n in range(50))
+
+    assert upload_links(content) == [("f", "/user_uploads/2/ab/f.bin")]
+
+
+_LINK_PARTS = st.sampled_from(
+    ["[", "]", "(", ")", UPLOAD_PREFIX, "..", "/", " ", "\n", "#", "?", "a.png", "https://x/"]
+)
 
 
 @given(st.lists(st.one_of(st.text(), _LINK_PARTS)).map("".join))
 def test_upload_links_reads_any_text(content):
-    for name, path in upload_links(content):
-        assert isinstance(name, str)
+    paths = [path for _, path in upload_links(content)]
+    assert len(paths) == len(set(paths))
+    for path in paths:
         assert path.startswith(UPLOAD_PREFIX) and ".." not in path.split("/")
+        assert "#" not in path and "?" not in path
 
 
 async def test_uploads_become_attachments_with_clean_names_and_sniffed_types(fake_zulip, ticket):
@@ -246,10 +287,24 @@ async def test_text_beside_an_upload_is_the_comment(fake_zulip, ticket):
 
     assert (await TicketComment.objects.aget()).comment_text == "see"
     assert await TicketAttachment.objects.acount() == 1
+    assert await CommentRateLimit.objects.acount() == 1  # one message, one count
+
+
+async def test_a_message_stores_at_most_discords_attachment_cap(fake_zulip, ticket):
+    paths = [f"/user_uploads/2/ab/{n}.txt" for n in range(MAX_UPLOADS + 2)]
+    fake_zulip.uploads = dict.fromkeys(paths, b"log")
+
+    await save_message(fake_zulip, message(topic=ticket_topic(ticket), content=" ".join(f"[f]({p})" for p in paths)))
+
+    assert fake_zulip.fetched == paths[:MAX_UPLOADS]
+    assert await TicketAttachment.objects.acount() == MAX_UPLOADS
+    assert fake_zulip.sent_to("team03") == [
+        f"Member: only a message's first {MAX_UPLOADS} files are added to the ticket; post the rest in another one."
+    ]
 
 
 async def test_an_oversize_upload_is_not_stored_and_replied_to(fake_zulip, ticket):
-    fake_zulip.uploads = {"/user_uploads/2/ab/big.iso": b"x" * (TicketAttachment.MAX_SIZE + 1)}
+    fake_zulip.uploads = {"/user_uploads/2/ab/big.iso": b"x" * (TicketAttachment.MAX_SIZE + 5)}
 
     await save_message(fake_zulip, message(topic=ticket_topic(ticket), content="[big.iso](/user_uploads/2/ab/big.iso)"))
 
@@ -258,8 +313,16 @@ async def test_an_oversize_upload_is_not_stored_and_replied_to(fake_zulip, ticke
     assert fake_zulip.reactions == []
 
 
+async def test_an_upload_at_the_size_limit_is_stored(fake_zulip, ticket):
+    fake_zulip.uploads = {"/user_uploads/2/ab/max.bin": b"x" * TicketAttachment.MAX_SIZE}
+
+    await save_message(fake_zulip, message(topic=ticket_topic(ticket), content="[max.bin](/user_uploads/2/ab/max.bin)"))
+
+    assert await TicketAttachment.objects.acount() == 1
+
+
 async def test_an_upload_that_cant_be_fetched_is_replied_to(fake_zulip, ticket, monkeypatch):
-    async def gone(path: str, max_bytes: int) -> bytes | None:
+    async def gone(path: str, limit: int) -> bytes:
         raise ZulipError("HTTP_404")
 
     monkeypatch.setattr(fake_zulip, "fetch_upload", gone)
@@ -280,7 +343,7 @@ async def test_a_link_outside_user_uploads_is_ignored(fake_zulip, ticket):
     assert (await TicketComment.objects.aget()).comment_text == content
 
 
-async def test_a_redelivered_upload_is_stored_once(fake_zulip, ticket):  # Review Focus 4
+async def test_a_redelivered_upload_is_stored_once(fake_zulip, ticket):
     fake_zulip.uploads = {"/user_uploads/2/ab/a.txt": b"log"}
     msg = message(topic=ticket_topic(ticket), content="[a.txt](/user_uploads/2/ab/a.txt)", message_id=77)
 
@@ -303,7 +366,18 @@ def beats(monkeypatch) -> list[str]:
     return recorded
 
 
-async def test_lost_queue_reregisters(fake_zulip, ticket, beats):  # Review Focus 4
+@pytest.fixture
+def waits(monkeypatch) -> list[float]:
+    slept: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(runner, "asyncio", SimpleNamespace(sleep=sleep))
+    return slept
+
+
+async def test_lost_queue_reregisters_at_once(fake_zulip, ticket, beats, waits):
     fake_zulip.get_events_errors = [ZulipError("BAD_EVENT_QUEUE_ID")]
     fake_zulip.events = [[event(ticket_topic(ticket))]]
 
@@ -311,13 +385,26 @@ async def test_lost_queue_reregisters(fake_zulip, ticket, beats):  # Review Focu
         await runner.event_loop(fake_zulip)
 
     assert fake_zulip.registered == 2
+    assert waits == []
     assert await TicketComment.objects.filter(zulip_message_id=77).aexists()
     assert beats == [EVENTS_ZULIP]
 
 
+async def test_a_queue_lost_again_before_a_poll_is_answered_waits_first(fake_zulip, beats, waits):
+    lost = ZulipError("BAD_EVENT_QUEUE_ID")
+    fake_zulip.get_events_errors = [lost, lost, lost]
+    fake_zulip.events = [[]]
+
+    with pytest.raises(asyncio.CancelledError):
+        await runner.event_loop(fake_zulip)
+
+    assert fake_zulip.registered == 4
+    assert waits == [runner.FIRST_BACKOFF_SECONDS, 2 * runner.FIRST_BACKOFF_SECONDS]
+    assert beats == [EVENTS_ZULIP] * 3
+
+
 @pytest.mark.parametrize("error", [ZulipError("HTTP_502"), httpx.ConnectError("refused")])
-async def test_an_unreachable_zulip_is_waited_out_beating_after_each_wait(fake_zulip, beats, monkeypatch, error):
-    monkeypatch.setattr(runner, "FIRST_BACKOFF_SECONDS", 0)
+async def test_an_unreachable_zulip_is_waited_out_beating_after_each_wait(fake_zulip, beats, waits, monkeypatch, error):
     fake_zulip.get_events_errors = [error, error]
     fake_zulip.events = [[]]
     polls_beaten: list[int] = []
@@ -333,6 +420,7 @@ async def test_an_unreachable_zulip_is_waited_out_beating_after_each_wait(fake_z
         await runner.event_loop(fake_zulip)
 
     assert fake_zulip.registered == 1  # the same queue, polled again
+    assert waits == [runner.FIRST_BACKOFF_SECONDS, 2 * runner.FIRST_BACKOFF_SECONDS]
     # A beat after each failed poll's wait and after the answered one: an outage alone never goes stale
     assert polls_beaten == [0, 1, 2, 3]
     assert beats == [EVENTS_ZULIP] * 3
@@ -362,7 +450,7 @@ async def test_a_failing_event_doesnt_stop_the_rest(fake_zulip, ticket, beats, m
 
 
 async def test_the_runner_is_scoped_to_its_teams_ticket(fake_zulip, ticket, team5_ticket: Ticket, beats):
-    """Review Focus 3 through the whole loop: team 3's stream, team 5's ticket number."""
+    """Through the whole loop: team 3's stream, team 5's ticket number."""
     fake_zulip.events = [[event(f"{team5_ticket.ticket_number}: DNS")]]
 
     with pytest.raises(asyncio.CancelledError):

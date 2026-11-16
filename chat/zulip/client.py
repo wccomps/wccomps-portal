@@ -19,14 +19,15 @@ class ZulipError(Exception):
     def __init__(self, code: str, message: str = "") -> None:
         super().__init__(f"{code}: {message}" if message else code)
         self.code = code
-        self.message = message
 
 
 class ZulipClient:
     def __init__(self, site: str, email: str, api_key: str, transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self._site = site.rstrip("/")
+        """ValueError for a site that isn't https: every request carries the API key."""
+        if not site.lower().startswith("https://"):
+            raise ValueError(f"ZULIP_SITE must be an https:// URL, not {site!r}: every request carries the API key")
         self._http = httpx.AsyncClient(
-            base_url=self._site,
+            base_url=site.rstrip("/"),
             auth=httpx.BasicAuth(email, api_key),
             timeout=httpx.Timeout(settings.HTTPX_DEFAULT_TIMEOUT),
             transport=transport,
@@ -75,7 +76,8 @@ class ZulipClient:
         await self._call("POST", f"messages/{message_id}/reactions", emoji_name=emoji_name)
 
     async def register_queue(self) -> tuple[str, int]:
-        """A new event queue for messages and their edits and deletes, with raw Markdown: (queue_id, last_event_id)."""
+        """A new event queue for messages and their edits and deletes, with raw Markdown: (queue_id, last_event_id).
+        Zulip puts on it only messages in the streams the bot is subscribed to."""
         answer = await self._call("POST", "register", event_types=json.dumps(EVENT_TYPES), apply_markdown="false")
         queue_id, last_event_id = answer.get("queue_id"), answer.get("last_event_id")
         if not isinstance(queue_id, str) or not queue_id or type(last_event_id) is not int:
@@ -90,21 +92,18 @@ class ZulipClient:
             raise ZulipError("BAD_ANSWER", "no list of events")
         return events
 
-    async def fetch_upload(self, path: str, max_bytes: int) -> bytes | None:
-        """An uploaded file's bytes (path as a message links it, /user_uploads/...), or None when it is larger than
-        max_bytes, found without downloading the rest. Only the site's own uploads: the request carries the bot's
-        credentials."""
+    async def fetch_upload(self, path: str, limit: int) -> bytes:
+        """An uploaded file's first limit bytes (path as a message links it, /user_uploads/...), read no further: ask
+        for one byte past a size cap to tell a file over it. Only the site's own uploads: the request carries the
+        bot's credentials."""
         if not path.startswith(UPLOAD_PREFIX) or ".." in path.split("/"):
             raise ZulipError("NOT_AN_UPLOAD", path)
         async with self._http.stream("GET", path) as response:
             if not response.is_success:
                 raise ZulipError(f"HTTP_{response.status_code}")
-            declared = response.headers.get("content-length", "")
-            if declared.isdigit() and int(declared) > max_bytes:
-                return None
             data = bytearray()
             async for chunk in response.aiter_bytes():
                 data += chunk
-                if len(data) > max_bytes:
-                    return None
-            return bytes(data)
+                if len(data) >= limit:
+                    break
+            return bytes(data[:limit])

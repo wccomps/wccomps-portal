@@ -762,6 +762,7 @@ class TestRateLimiting:
         message.author = Mock()
         message.author.bot = False
         message.author.id = 999888777  # Different user
+        message.id = 444555666888
         message.author.mention = "<@999888777>"
         message.channel = Mock(spec=discord.Thread)
         message.channel.id = ticket.discord_thread_id
@@ -903,6 +904,7 @@ class TestAttachmentHandling:
         message.author.bot = False
         message.author.id = 123456789
         message.author.mention = "<@123456789>"
+        message.id = 777888999111
         message.channel = AsyncMock(spec=discord.Thread)
         message.channel.id = ticket.discord_thread_id
         message.content = ""

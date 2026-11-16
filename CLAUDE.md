@@ -3,7 +3,9 @@
 ## Project Overview
 
 WCComps Portal is a competition management platform for WRCCDC. Four components:
-- **Discord Bot** (`bot/`, run by the chat process `python -m chat`): team ticketing, role sync, competition commands
+- **Chat process** (`python -m chat`, `chat/__main__.py`): a runner per configured chat backend
+  (`core.heartbeat.CHAT_BACKENDS`) in one event loop: the Discord bot (`bot/`: team ticketing, role sync, competition
+  commands) and the Zulip runner (`chat/zulip/`: ticket topics, notices, replies as comments)
 - **Worker** (`worker/`, `python -m worker`): competition timer, Authentik group refresh, Quotient sync, worker queue
 - **Django Web** (`web/`): scoring portal, inject grading, packet distribution, ops dashboard
 - **Authentik Integration**: SSO, team provisioning, permission sync via `core/authentik_manager.py`
@@ -85,24 +87,28 @@ the unparenthesized form is used intentionally throughout.
 
 ### Task Queue
 - Web code queues work with `QueuedTask.enqueue(<payload>)`, which writes one row per backend
-  (`core.task_backends.TaskBackend`) and returns them; each backend's `core.task_queue.QueueProcessor` subclass
-  consumes its own rows: the bot's `DiscordQueueProcessor` the `discord` ones, `core.worker_tasks.WorkerQueueProcessor`
-  the `worker` ones, in the worker process (`python -m worker`, beside the timer, group refresh and Quotient sync in
-  `worker/jobs.py`)
+  (`core.task_backends.TaskBackend`) and returns them; `enqueue(payload, origin=...)` skips the backend the payload
+  came from (a comment made in a Discord thread is already there). Each backend's `core.task_queue.QueueProcessor`
+  subclass consumes its own rows: the bot's `DiscordQueueProcessor` the `discord` ones,
+  `chat.zulip.outgoing.ZulipQueueProcessor` the `zulip` ones (both in the chat process),
+  `core.worker_tasks.WorkerQueueProcessor` the `worker` ones, in the worker process (`python -m worker`, beside the
+  timer, group refresh and Quotient sync in `worker/jobs.py`)
 - Each task type is a payload dataclass in `core/queued_tasks.py`, in one group of the `TaskPayload` union:
-  `ChatNotice` (a row for every configured chat backend: Discord when `DISCORD_BOT_TOKEN` is set, Zulip when its
-  `ZULIP_*` settings are), `DiscordOnly` (a row only when Discord is configured) or `WorkerTask` (always a `worker`
-  row); so no configured chat backend means no chat row. `BACKEND_TASKS` maps each backend to its groups. A new one
-  also needs a `case` in its backends' `dispatch` (each processor is a `QueueProcessor[P]` over its groups, and mypy
-  checks its match exhaustive over them; a row outside them fails at once), and a migration, since
-  `QueuedTask.task_type`'s choices come from the union
+  `ChatNotice` (a row for every configured chat backend, `core.task_backends.configured_chat_backends`: each one in
+  `core.heartbeat.CHAT_BACKENDS` whose settings are all set, on the process that queues), `DiscordOnly` (a row only
+  when Discord is configured) or `WorkerTask` (always a `worker` row); so no configured chat backend means no chat row.
+  `BACKEND_TASKS` maps each backend to its groups. A new one also needs a `case` in its backends' `dispatch` (each
+  processor is a `QueueProcessor[P]` over its groups, and mypy checks its match exhaustive over them; a row outside
+  them fails at once), and a migration, since `QueuedTask.task_type`'s choices come from the union
+- What a chat notice says (a ticket update, a ticket's facts, the competition status) lives in `core.chat_notices`;
+  each chat backend only renders it (Discord as embeds, Zulip as Markdown)
 - An ops notice goes through `core.services.ops.notify_ops` (audited, then a `LogToChannel` row), never a direct
   `LogToChannel` enqueue
 - A payload's `ticket_id` also sets the task's ticket FK, so deleting a ticket drops its pending tasks
 - A handler's return value is stored in `QueuedTask.result`; the payload is input only
 - A handler raises `PermanentTaskError` (`core.queued_tasks`) to fail without retrying, and looks up the record it
   is about with `_target`, which raises it; a handler whose retry would repeat a send or a destructive step takes a
-  `TaskProgress` (bound to its task: `still_processing()` says whether a reset ended it meanwhile), so a retry resumes
+  `TaskProgress` (bound to its task: `still_running()` says whether a reset ended it meanwhile), so a retry resumes
   from what `QueuedTask.progress` records; the rest are written to be rerun
 
 ### UI Components

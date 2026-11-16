@@ -50,7 +50,7 @@ async def run(processor: ZulipQueueProcessor, payload: TaskPayload, task: Queued
     return await processor.dispatch(payload, task)
 
 
-def test_ticket_topic_long_title_fits_and_maps_back(ticket: Ticket) -> None:  # Review Focus 6
+def test_ticket_topic_long_title_fits_and_maps_back(ticket: Ticket) -> None:
     ticket.title = "x" * 200 + " **bold** `code`"
     assert len(ticket_topic(ticket)) <= 60
     assert ticket_number_from_topic(ticket_topic(ticket)) == ticket.ticket_number
@@ -61,10 +61,17 @@ def test_ticket_topic_is_one_line(ticket: Ticket) -> None:
     assert ticket_topic(ticket) == "T003-001: Web server down"
 
 
-def test_team_stream_maps_back_to_its_team() -> None:
+def test_a_topic_resolved_in_zulip_still_maps_back(ticket: Ticket) -> None:
+    assert ticket_number_from_topic(f"✔ {ticket_topic(ticket)}") == ticket.ticket_number
+
+
+def test_team_stream_maps_back_to_its_team(settings) -> None:
     assert team_stream(7) == "team07"
     assert team_for_stream("team07") == 7
     assert team_for_stream("tickets") is None
+    settings.ZULIP_TEAM_STREAM = "blue-{number}"
+    assert team_for_stream("blue-7") == 7
+    assert team_for_stream("team07") is None
 
 
 def test_discord_timestamp_becomes_zulip_time() -> None:
@@ -76,16 +83,26 @@ def test_out_of_range_timestamp_left_as_written() -> None:
     assert to_zulip("<t:99999999999999999999>") == "<t:99999999999999999999>"
 
 
-async def test_broadcast_all_teams_skips_missing_stream(processor, fake_zulip, make_teams):  # Review Focus 5
+async def test_broadcast_all_teams_skips_missing_stream(processor, fake_zulip, make_teams):
     await make_teams(active=[1, 2, 3])
     fake_zulip.missing_streams = {"team02"}
     result = await run(processor, BroadcastMessage(target="all-teams", message="m", sender="gold"))
     assert [s for s in fake_zulip.sent_streams if s != "ops"] == ["team01", "team03"]
-    assert fake_zulip.sent_to("ops") == [MISSING_STREAMS.format(sender="gold", target="all-teams", teams="02")]
-    assert result == {"delivered": [1, 3], "missing": [2]}
+    assert fake_zulip.sent_to("ops") == [f"Broadcast from gold to all-teams:\n{MISSING_STREAMS.format(teams='02')}"]
+    assert result == {"delivered": [1, 3], "missing": [2], "not_found": []}
 
 
-async def test_broadcast_retry_skips_teams_reached(processor, fake_zulip, make_teams):  # Review Focus 5
+async def test_ranged_broadcast_reports_numbers_without_a_team(processor, fake_zulip, make_teams):
+    """As the Discord broadcast does (core.broadcast.target_teams): the range's teams that exist get it, and the rest
+    are reported."""
+    await make_teams(active=[3], total=6)
+    result = await run(processor, BroadcastMessage(target="5-8", message="m", sender="gold"))
+    assert [s for s in fake_zulip.sent_streams if s != "ops"] == ["team05", "team06"]
+    assert fake_zulip.sent_to("ops") == ["Broadcast from gold to 5-8:\nNot found: Team 07, Team 08"]
+    assert result == {"delivered": [5, 6], "missing": [], "not_found": [7, 8]}
+
+
+async def test_broadcast_retry_skips_teams_reached(processor, fake_zulip, make_teams):
     await make_teams(active=[1, 2, 3])
     fake_zulip.fail_once_on = "team03"
     payload = BroadcastMessage(target="all-teams", message="m", sender="gold")
@@ -112,7 +129,7 @@ async def test_broadcast_retries_a_lost_connection(processor, fake_zulip, make_t
     task = await claimed(payload)
     with pytest.raises(httpx.ConnectError):
         await run(processor, payload, task)
-    assert await run(processor, payload, task) == {"delivered": [1, 2], "missing": []}
+    assert await run(processor, payload, task) == {"delivered": [1, 2], "missing": [], "not_found": []}
     assert fake_zulip.sent_streams == ["team01", "team02"]
 
 
@@ -151,7 +168,21 @@ async def test_ticket_created_posts_topic_and_staff_alert(processor, fake_zulip,
 
 async def test_ticket_created_without_mentions(processor, fake_zulip, ticket):
     await run(processor, TicketCreated(ticket_id=ticket.id))
-    assert fake_zulip.sent[0][2].splitlines()[0] == "New ticket T003-001: Web server down"
+    lines = fake_zulip.sent[0][2].splitlines()
+    assert lines[0] == "New ticket T003-001: Web server down"
+    assert "**Status:** Open" in lines
+
+
+async def test_the_topic_stays_put_when_the_title_changes(processor, fake_zulip, ticket_with_comment):
+    """TicketCreated stores the topic it posted to; a later title edit doesn't split the ticket over two topics."""
+    ticket, comment = ticket_with_comment
+    await run(processor, TicketCreated(ticket_id=ticket.id))
+    await Ticket.objects.filter(pk=ticket.pk).aupdate(title="Renamed")
+    await run(processor, PostComment(ticket_id=ticket.id, comment_id=comment.id))
+    await run(processor, PostTicketUpdate(ticket_id=ticket.id, action="claimed", actor="support1"))
+
+    assert {topic for _, topic, _ in fake_zulip.sent} == {"T003-001: Web server down"}
+    assert (await Ticket.objects.aget(pk=ticket.pk)).zulip_topic == "T003-001: Web server down"
 
 
 async def test_ticket_created_retry_skips_the_post_already_made(processor, fake_zulip, ticket):
@@ -201,18 +232,28 @@ async def test_long_comment_sent_in_parts_and_resumed(processor, fake_zulip, tic
     assert "\n".join(parts).count("x" * 999) == 25
 
 
+async def test_times_are_converted_before_the_text_is_split(processor, fake_zulip, ticket_with_comment):
+    """A Discord time grows as Zulip's, so the text is measured against Zulip's limit after converting it."""
+    ticket, comment = ticket_with_comment
+    await TicketComment.objects.filter(pk=comment.pk).aupdate(comment_text=" ".join(["<t:1794772800>"] * 700))
+    await run(processor, PostComment(ticket_id=ticket.id, comment_id=comment.id))
+    parts = fake_zulip.sent_to("team03")
+    assert len(parts) > 1 and all(len(part) <= 10000 for part in parts)
+    assert "<t:" not in "".join(parts)
+
+
 async def test_ticket_update_wording(processor, fake_zulip, ticket):
     await run(processor, PostTicketUpdate(ticket_id=ticket.id, action="claimed", actor="support1"))
     await run(
         processor,
         PostTicketUpdate(
-            ticket_id=ticket.id, action="resolved", actor="support1", points_charged=5, resolution_notes="Fixed"
+            ticket_id=ticket.id, action="resolved", actor="support1", points_charged=5, resolution_notes="Fix @**all**"
         ),
     )
     await run(processor, PostTicketUpdate(ticket_id=ticket.id, action="reopened", actor="team", reason="Still down"))
     assert fake_zulip.sent_to("team03") == [
         "Ticket claimed by **support1**",
-        "**Ticket Resolved**\nResolved By: support1\nPoints Charged: 5\nResolution Notes: Fixed",
+        "**Ticket Resolved**\n**Resolved By:** support1\n**Points Charged:** 5\n**Resolution Notes:** Fix @_**all**",
         "Ticket reopened by **team**\nReason: Still down",
     ]
     assert {topic for _, topic, _ in fake_zulip.sent} == {ticket_topic(ticket)}
@@ -239,12 +280,17 @@ async def test_competition_status_shows_the_status_facts(processor, fake_zulip, 
     assert (stream, topic) == ("ops", "competition status")
     assert content.splitlines() == [
         "**Competition Status: RUNNING**",
-        "Scheduled Start: <time:2026-11-15T17:00:00+00:00>",
-        "Controlled Applications: netbird",
-        f"Team Accounts: Enabled ({settings.MAX_TEAMS} teams)",
+        "**Scheduled Start:** <time:2026-11-15T17:00:00+00:00>",
+        "**Controlled Applications:** netbird",
+        f"**Team Accounts:** Enabled ({settings.MAX_TEAMS} teams)",
     ]
 
 
 async def test_discord_only_payload_fails_permanently(processor):
-    with pytest.raises(PermanentTaskError):
-        await run(processor, SyncRoles(requested_by="a", dry_run=True))
+    payload = SyncRoles(requested_by="a", dry_run=True)
+    task = await QueuedTask.objects.acreate(
+        task_type=payload.task_type, backend="zulip", payload=asdict(payload), status="pending"
+    )
+    await processor._process_task(task)
+    await task.arefresh_from_db()
+    assert (task.status, task.retry_count) == ("failed", 0)

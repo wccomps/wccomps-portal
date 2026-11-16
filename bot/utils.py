@@ -1,12 +1,14 @@
 import io
 import logging
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Iterable, Sequence
+from datetime import datetime
 from typing import Final, Literal
 
 import discord
 from discord import app_commands
 from django.conf import settings
 
+from core.chat_notices import Field
 from core.task_queue import StepsState, TaskProgress
 from core.utils import missing_discord_settings, split_message
 from team.models import MAX_TEAMS, Team
@@ -83,6 +85,14 @@ def add_field(embed: discord.Embed, name: str, value: str, *, inline: bool = Fal
         return False
     embed.add_field(name=name, value=value, inline=inline)
     return True
+
+
+def add_fields(embed: discord.Embed, fields: Iterable[Field], *, time_style: discord.utils.TimestampStyle) -> None:
+    """Add a notice's fields (core.chat_notices) with add_field, a wide one on a row of its own and a time in Discord's
+    markup."""
+    for name, value, wide in fields:
+        shown = discord.utils.format_dt(value, style=time_style) if isinstance(value, datetime) else value or ""
+        add_field(embed, name, shown, inline=not wide)
 
 
 async def send_parts(

@@ -11,8 +11,9 @@ a cited file or name no longer exists); a change that moves a trust boundary upd
 | Blue team competitor | The team's shared Authentik account, a linked Discord account | Another team's tickets, reports, scores or credentials; staff powers (scoring, resets, broadcasts); to slow or break a rival's boxes |
 | Anonymous visitor | The public site | The registration form as a spam or script injection channel; any page or file without signing in |
 | Discord server member | A Discord account in the server, unlinked or linked | Staff bot commands; a link to someone else's portal account; mass pings through the bot |
+| Zulip realm member | A Zulip account in the realm, whose email and display name Zulip reports and the portal doesn't verify | To write to a ticket that isn't theirs, or as someone else; mass pings through the bot; files from streams they can't read |
 | Staff member over reach | One staff role (red, orange, white, ticketing) | Another role's powers: changing scores, reading team credentials, resetting accounts |
-| Hostile upstream answer | A malformed or spoofed Authentik, Quotient, Proxmox or Nextcloud response | A crash, a wrong grant, or a write made from bad data |
+| Hostile upstream answer | A malformed or spoofed Authentik, Quotient, Proxmox, Nextcloud or Zulip response | A crash, a wrong grant, or a write made from bad data |
 
 Competitors are adversarial and score points for disruption, so every blue team member is assumed to probe the portal
 during an event.
@@ -25,14 +26,19 @@ during an event.
 3. **Discord bot token**: posts as the bot, manages roles and channels in the event server. The chat process acts with
    it; web and the worker carry `DISCORD_BOT_TOKEN` only so `discord_enabled()` decides whether to queue Discord rows
    (`web/core/task_backends.py` `discord_enabled`).
-4. **Team account passwords**: in Authentik, mirrored in `SchoolInfo.password` for packet emails
+4. **Zulip bot API key** (`web/portal/settings.py` `ZULIP_API_KEY`): posts as the bot, reads every stream the bot is
+   subscribed to (each team's, staff's, ops') and fetches any upload the bot can see. The chat process acts with it;
+   web and the worker carry the `ZULIP_*` settings only so they queue Zulip rows (`web/core/task_backends.py`
+   `configured_chat_backends`), and the client refuses a site that isn't https, as every request carries the key
+   (`chat/zulip/client.py` `ZulipClient`).
+5. **Team account passwords**: in Authentik, mirrored in `SchoolInfo.password` for packet emails
    (`web/core/authentik_utils.py` `_store_password`), in the bulk reset CSV (only to whoever ran the reset) and in
    packet emails.
-5. **Scoring integrity**: point adjustments, inject grades, incident and red team scores that decide placings.
-6. **`SECRET_KEY` and sessions**: sign sessions, CSRF tokens and OAuth state.
-7. **Registrant contact details**: school contact names and email addresses.
-8. **Availability during an event**: ticketing, box resets and scoring must keep working for every team.
-9. **The start message**: the default VM credentials posted to every team at the start, in
+6. **Scoring integrity**: point adjustments, inject grades, incident and red team scores that decide placings.
+7. **`SECRET_KEY` and sessions**: sign sessions, CSRF tokens and OAuth state.
+8. **Registrant contact details**: school contact names and email addresses.
+9. **Availability during an event**: ticketing, box resets and scoring must keep working for every team.
+10. **The start message**: the default VM credentials posted to every team at the start, in
    `CompetitionConfig.start_message`, in queued copies (`QueuedAnnouncement`) and in the payload of each broadcast row a
    start queues (one per chat backend), whose task ids the start records in `CompetitionConfig.start_broadcasts`
    (`web/core/services/competition.py` `run_competition`). Its audit row stores only its length (`set_start_message`), and its broadcast summary omits the message (`bot/competition_actions.py` `BroadcastResult.ops_summary`).
@@ -52,12 +58,13 @@ flowchart LR
     subgraph Internet
         B[Browser: competitors, staff, public]
         D[Discord users]
+        U[Zulip users]
     end
     subgraph Portal
         W[Web: Django under gunicorn]
         Q[(Postgres: rows, QueuedTask queue, uploaded files)]
         K[Worker: competition timer, group refresh, Quotient sync, worker queue]
-        C[Chat: discord.py, Discord queue, role sync]
+        C[Chat: discord.py, Discord queue, role sync; Zulip event loop and queue]
     end
     A[Authentik: OIDC and admin API]
     P[Proxmox API]
@@ -66,6 +73,7 @@ flowchart LR
     X[aweful-proxy HTTP API]
     M[SMTP]
     G[Discord API]
+    Z[Zulip API]
     B -- "1 HTTPS, session cookie, CSRF" --> W
     B -- "2 OIDC redirect" --> A
     A -- "2 callback, userinfo with groups" --> W
@@ -79,17 +87,22 @@ flowchart LR
     C -- "9 bot token" --> G
     W & K & C -- "10 admin credentials, team accounts only" --> N
     W & K -- "11 competition network config" --> X
+    U -- "12 messages in ticket topics, uploads" --> Z
+    Z -- "12 event queue long poll" --> C
+    C -- "13 API key: posts, upload fetches" --> Z
 ```
 
 The worker (`worker/__main__.py`) runs the competition timer, the group refresh, the Quotient sync (which reads team
 VMs from Proxmox and pushes the network config to aweful-proxy) and the worker queue (Nextcloud, and the Quotient sync
 a competition start queues: `web/core/worker_tasks.py` `WorkerQueueProcessor._sync_quotient_metadata`), so it holds the
 Authentik token, the Quotient login, the Proxmox token, the Nextcloud credentials and the aweful-proxy token. The chat
-process (`chat/__main__.py`) holds the Discord token, and the same Authentik, Nextcloud and Quotient credentials for its
-`/competition` and reset commands: `/competition start` runs the competition service, which provisions Nextcloud and
-queues the Quotient metadata sync to the worker rather than running it, and `/competition stop` syncs the final scores
-from Quotient (`web/core/services/competition.py` `_run`). It holds no Proxmox or aweful-proxy credentials and never
-reaches either.
+process (`chat/__main__.py`) holds the Discord token and the Zulip API key (each when its backend is configured), and
+the same Authentik, Nextcloud and Quotient credentials for its `/competition` and reset commands: `/competition start`
+runs the competition service, which provisions Nextcloud and queues the Quotient metadata sync to the worker rather
+than running it, and `/competition stop` syncs the final scores from Quotient (`web/core/services/competition.py`
+`_run`). It holds no Proxmox or aweful-proxy credentials and never reaches either. Its Zulip runner polls an event
+queue Zulip fills with the messages in the streams the bot is subscribed to, so it needs no public endpoint
+(`chat/zulip/runner.py` `event_loop`; `chat/zulip/client.py` `ZulipClient.register_queue`).
 
 ## Threats per boundary (STRIDE) and their mitigations
 
@@ -138,6 +151,12 @@ reaches either.
 | 9 | Bot to Discord | I: new team passwords seen by others | A bulk reset's CSVs go only to whoever ran it: as ephemeral followups in Discord (`bot/cogs/admin_competition.py` `AdminCompetitionCog._send_reset_result`), or in the answer to their own request on the web; its ops note names teams, never passwords (`web/core/authentik_utils.py` `_bulk_reset_note`) |
 | 10 | Portal to Nextcloud | E: a provision or teardown reaches a non-team account | Only `team{NN}` with 1 to `MAX_TEAMS` is provisioned or deleted, and answers must be 2xx OCS JSON naming that exact `user_id` (`web/core/nextcloud.py` `_team_account`, `NextcloudManager.provision_team_user`, `NextcloudManager.delete_team_user`, `NextcloudManager._check`, `NextcloudManager._json`, `NextcloudManager._user_id`); operators see `reason_for`, the message alone (`web/core/nextcloud.py` `reason_for`); property tests cover every reader (`web/core/tests/test_properties_readers.py`) |
 | 11 | Portal to aweful-proxy | T, D: a spoofed DNS check answer or unreachable proxy corrupts proxy config or stalls metadata sync | DNS box IP templates and Quotient's expected DNS check records are validated as IPv4 addresses and non-reverse domain names (`web/scoring/quotient_sync.py` `_parse_dns_box_ip_template`, `_extract_dns_check_network`), and proxy push failures are logged without failing `sync_quotient_metadata` (`web/portal/settings.py` `AWEFUL_PROXY_URL`, `AWEFUL_PROXY_TOKEN`; `web/scoring/quotient_sync.py` `_sync_aweful_proxy`) |
+| 12 | Zulip to chat | E: a Zulip user writes to a ticket that isn't theirs | Posting in a team's stream isn't enough: a message counts only when its sender's Zulip email matches exactly one portal account (case-insensitive) that may write to the ticket by the rule the web and the Discord thread apply (staff, or a member of the ticket's team), and the topic must name a ticket of that stream's team; anyone else is told so in the topic and nothing is saved (`chat/zulip/incoming.py` `find_ticket`, `_portal_user`, `_record`; `web/ticketing/access.py` `ticket_open_to_user`) |
+| 12 | Zulip to chat | S: a reply credited to someone else | A comment's author is the matched portal account, never a Zulip display name (`chat/zulip/incoming.py` `_portal_user`); attribution rests on the email Zulip reports, so the realm must not let users set an email they don't own (see accepted risks) |
+| 12 | Zulip to chat | D: mass pings or a flood through relayed text | Mentions in relayed text (comments, titles, broadcasts, ticket facts) are made silent (`chat/zulip/markup.py` `quiet`); a sender's messages count against the same per-actor comment rate limit as Discord's (`web/ticketing/chat_comments.py` `record_message`) |
+| 12 | Zulip to chat | T, I: an upload link fetches something it shouldn't, or too much | Only the site's own `/user_uploads/` paths, none climbing out with `..`, are fetched, each read no further than the attachment size limit, at most `MAX_UPLOADS` per message and each path once (`chat/zulip/client.py` `ZulipClient.fetch_upload`; `chat/zulip/incoming.py` `upload_links`, `MAX_UPLOADS`); the bytes are stored through the same model as a web upload (`web/core/stored_files.py` `StoredFile.from_upload`) |
+| 12 | Zulip to chat | T: a malformed event read as data | An event is read field by field, and one without the expected shape is passed over (`chat/zulip/incoming.py` `parse_message_event`, `edited_message`, `deleted_message_ids`); answers must be Zulip's JSON success (`chat/zulip/client.py` `ZulipClient._call`); property tests cover every reader (`web/core/tests/test_properties_readers.py`) |
+| 13 | Chat to Zulip | I: the API key sent in clear | The client refuses a `ZULIP_SITE` that isn't https, and fetches uploads only from that site (`chat/zulip/client.py` `ZulipClient`, `ZulipClient.fetch_upload`) |
 | all | Logs and errors | I: tokens or OAuth codes in logs | The access log drops query strings and referers (`web/gunicorn.conf.py` `access_log_format`); httpx URL logging is off (`web/core/tests/test_httpx_logging.py`); error answers come from `web/core/errors.py`: a fixed message for 404, 405 and 500, and only the view's own stated reason for 400 and 403 |
 | all | Logs and errors | T: request text forges a log line or an alert | Request text is escaped where the app logs it (`web/core/middleware.py` `_field`; `web/core/log_safety.py`), the console formatter keeps every message on one line, gunicorn escapes its access and error lines (`web/gunicorn.conf.py` `EscapingLogger`), and the Discord alert shows request text in code spans (`web/core/discord_logging.py` `_code`); property tests cover each line (`web/core/tests/test_properties_log_lines.py`) |
 | all | Secrets | S: forged sessions | The web refuses to start without a real `SECRET_KEY` (`web/portal/wsgi.py`); the session cookie is HttpOnly and SameSite=Lax, and outside `DEBUG` the session and CSRF cookies are Secure with HSTS (`web/portal/settings.py` `SESSION_COOKIE_HTTPONLY`, `SESSION_COOKIE_SAMESITE`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECURE_HSTS_SECONDS`) |
@@ -169,8 +188,17 @@ reaches either.
   sign-ins from before it and Discord links alone, by design (`web/core/authentik_utils.py` `set_team_password`).
 - **Clock skew at a reset**: a sign-in within 2 seconds before a credentials reset counts as after it, since
   `auth_time` is whole seconds and the two clocks differ (`web/core/oauth.py` `RESET_CLOCK_MARGIN`).
-- **Out of scope:** the hosting cluster, Authentik's own security, Discord's platform, and denial of service at
-  network scale.
+- **Zulip trusts the realm for identity and delivery.** A sender is matched by the email Zulip reports, so the realm
+  must show the bot real emails (email visibility that includes it, or an admin bot) and must not let anyone take an
+  email they don't own; a sender whose email matches no portal account that may write to the ticket is told so in the
+  topic, so a misconfigured realm shows. Zulip delivers only the streams the bot is subscribed to, so it must be
+  subscribed to every team stream (`chat/zulip/client.py` `ZulipClient.register_queue`).
+- **An upload is fetched with the bot's credentials.** A sender who may write to a ticket and links the secret URL of
+  a file in a stream they can't read (another team's, staff's) has the bot store it on their ticket, where they can
+  download it; the URL is the secret, and whoever holds it could pass the file on anyway (`chat/zulip/incoming.py`
+  `save_message`).
+- **Out of scope:** the hosting cluster, Authentik's own security, Discord's and Zulip's platforms (Zulip's stream
+  permissions among them), and denial of service at network scale.
 
 ## Build and deploy path
 
@@ -185,7 +213,8 @@ reaches either.
    the image runs as uid 1001, not root (`Dockerfile`). Each web container migrates under a Postgres advisory lock, so
    replicas take turns (`web/core/management/commands/prepare_database.py` `Command.handle`).
 4. A separate private GitOps repository pins that tag; production changes only when a person merges the tag bump there.
-   Production secrets live there, never in this repository. Its configmap also sets the group names, team accounts,
+   Production secrets live there (a chat backend's credentials, `DISCORD_BOT_TOKEN` or the `ZULIP_*` settings, among
+   them), never in this repository. Its configmap also sets the group names, team accounts,
    team cap and hosts: which Authentik groups grant admin and every role, which accounts a start, stop or reset
    touches, and which origins CSRF trusts, so changing one is a privilege change (`web/portal/settings.py`
    `PORTAL_GROUP_PREFIX`, `PORTAL_ADMIN_GROUP`, `TEAM_GROUP_PATTERN`, `TEAM_ACCOUNT_PATTERN`, `MAX_TEAMS`, `BASE_URL`).

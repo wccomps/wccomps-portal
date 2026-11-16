@@ -40,6 +40,12 @@ def client_for(handler: Callable[[httpx.Request], httpx.Response]) -> ZulipClien
     )
 
 
+@pytest.mark.parametrize("site", ["http://zulip.example.org", "zulip.example.org", ""])
+def test_a_site_that_isnt_https_is_refused(site):
+    with pytest.raises(ValueError, match="https"):
+        ZulipClient(site, "portal-bot@zulip.example.org", "test-key")
+
+
 async def test_send_stream_message_posts_to_the_stream_topic_and_answers_the_id():
     recorder = Recorder({"result": "success", "msg": "", "id": 42})
 
@@ -112,7 +118,7 @@ async def test_an_error_answer_raises_zulip_error_with_its_code(call):
         await call(client_for(recorder))
 
     assert error.value.code == "BAD_EVENT_QUEUE_ID"
-    assert error.value.message == "Bad event queue ID"
+    assert str(error.value) == "BAD_EVENT_QUEUE_ID: Bad event queue ID"
 
 
 async def test_an_answer_that_is_not_json_raises_with_its_status():
@@ -151,7 +157,7 @@ async def test_fetch_upload_downloads_the_file_with_the_bot_credentials():
         recorder.append(request)
         return httpx.Response(200, stream=Chunks([b"abc", b"def"]))
 
-    assert await client_for(handler).fetch_upload("/user_uploads/2/ab/notes.txt", max_bytes=6) == b"abcdef"
+    assert await client_for(handler).fetch_upload("/user_uploads/2/ab/notes.txt", limit=7) == b"abcdef"
 
     (request,) = recorder
     assert request.method == "GET"
@@ -159,29 +165,20 @@ async def test_fetch_upload_downloads_the_file_with_the_bot_credentials():
     assert request.headers["authorization"] == AUTH
 
 
-async def test_fetch_upload_stops_reading_past_the_limit():
+async def test_fetch_upload_reads_no_further_than_the_limit():
     body = Chunks([b"a" * 4, b"b" * 4, b"c" * 4, b"d" * 4])
     client = client_for(lambda request: httpx.Response(200, stream=body))
 
-    assert await client.fetch_upload("/user_uploads/2/ab/big.bin", max_bytes=6) is None
+    assert await client.fetch_upload("/user_uploads/2/ab/big.bin", limit=7) == b"aaaabbb"
 
     assert body.read == 2
-
-
-async def test_fetch_upload_refuses_a_declared_size_past_the_limit_without_reading():
-    body = Chunks([b"a" * 16])
-    client = client_for(lambda request: httpx.Response(200, headers={"Content-Length": "16"}, stream=body))
-
-    assert await client.fetch_upload("/user_uploads/2/ab/big.bin", max_bytes=6) is None
-
-    assert body.read == 0
 
 
 async def test_fetch_upload_raises_on_an_error_status():
     client = client_for(lambda request: httpx.Response(404, content=b"not found"))
 
     with pytest.raises(ZulipError) as error:
-        await client.fetch_upload("/user_uploads/2/ab/gone.txt", max_bytes=6)
+        await client.fetch_upload("/user_uploads/2/ab/gone.txt", limit=7)
 
     assert error.value.code == "HTTP_404"
 
@@ -200,6 +197,6 @@ async def test_fetch_upload_sends_credentials_only_to_the_sites_uploads(path):
         pytest.fail(f"requested {request.url}")
 
     with pytest.raises(ZulipError) as error:
-        await client_for(handler).fetch_upload(path, max_bytes=6)
+        await client_for(handler).fetch_upload(path, limit=7)
 
     assert error.value.code == "NOT_AN_UPLOAD"

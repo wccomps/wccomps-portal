@@ -12,8 +12,9 @@ from bot.discord_manager import recreate_team_infrastructure, setup_team_infrast
 from bot.role_sync import competition_guild, sync_member_roles, sync_roles
 from bot.thread_creator import add_to_team_threads, ensure_ticket_thread
 from bot.ticket_dashboard import trigger_dashboard
-from bot.utils import add_field, log_to_ops_channel, send_parts
+from bot.utils import add_fields, log_to_ops_channel, send_parts
 from core.broadcast import parse_broadcast_target
+from core.chat_notices import Card, ticket_update
 from core.heartbeat import QUEUE_DISCORD, beat, beat_for
 from core.models import QueuedTask
 from core.queued_tasks import (
@@ -176,7 +177,6 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
 
     async def _handle_post_ticket_update(self, payload: PostTicketUpdate, progress: TaskProgress[StepsState]) -> None:
         action = payload.action
-        actor = payload.actor
 
         ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
         trigger_dashboard(self.bot)
@@ -186,40 +186,16 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
             logger.info(f"Ticket {ticket.ticket_number} has no Discord thread; update '{action}' not mirrored")
             return
 
-        if action == "resolved":
-            notes = payload.resolution_notes
-            points = payload.points_charged
-            embed = discord.Embed(
-                title="Ticket Resolved",
-                color=discord.Color.green(),
-            )
-            embed.add_field(name="Resolved By", value=actor, inline=True)
-            embed.add_field(name="Points Charged", value=str(points), inline=True)
-            add_field(embed, "Resolution Notes", notes, inline=False)
-            await thread.send(embed=embed)
-        elif action == "claimed":
-            await thread.send(f"Ticket claimed by **{actor}**")
-        elif action == "assigned":
-            await thread.send(f"Ticket assigned to **{payload.assignee}** by **{actor}**")
-        elif action == "unclaimed":
-            await thread.send(f"Ticket unclaimed by **{actor}**")
-        elif action == "cancelled":
-            await thread.send(f"Ticket cancelled by **{actor}**")
-        elif action == "reopened":
+        if action == "reopened" and (thread.archived or thread.locked):
             # Resolving archived and locked the thread (cogs/ticketing.py); only staff can post in a locked one
-            if thread.archived or thread.locked:
-                await thread.edit(archived=False, locked=False)
-            msg = f"Ticket reopened by **{actor}**"
-            if payload.reason:
-                msg += f"\nReason: {payload.reason}"
-            await send_parts(thread, msg, progress=progress)
-        elif action == "points_adjusted":
-            msg = f"Ticket points adjusted to **{payload.points_charged}** by **{actor}**"
-            if payload.reason:
-                msg += f"\nReason: {payload.reason}"
-            await send_parts(thread, msg, progress=progress)
-        else:
-            await thread.send(f"Ticket updated: {action} by **{actor}**")
+            await thread.edit(archived=False, locked=False)
+        match ticket_update(payload):
+            case Card() as card:
+                embed = discord.Embed(title=card.title, color=discord.Color.green())
+                add_fields(embed, card.fields, time_style="F")
+                await thread.send(embed=embed)
+            case str(text):
+                await send_parts(thread, text, progress=progress)
 
         logger.info(f"Posted ticket update ({action}) to thread {thread.id}")
 
