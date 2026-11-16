@@ -10,6 +10,7 @@ from django.conf import settings
 from bot.discord_manager import (
     TeamInfrastructureError,
     delete_team_infrastructure,
+    guest_role_permissions,
     recreate_team_infrastructure,
     setup_team_infrastructure,
 )
@@ -546,6 +547,17 @@ async def test_org_named_guest_roles_and_reasons_follow_the_short_name(team, moc
     assert guests["WCComps Room Judge"] not in overwrites
     assert kwargs["reason"] == "Example team category"
     assert guild.create_role.await_args.kwargs["reason"] == "Example team role"
+
+
+@pytest.mark.parametrize(("setting", "talks"), [("Example Owners", True), ("", False)])
+def test_the_server_owner_role_comes_from_its_setting(monkeypatch, setting, talks):
+    """The configured server owner role talks in every team category; unset, no role by that name gets in."""
+    monkeypatch.setattr(settings, "DISCORD_SERVER_OWNER_ROLE", setting)
+    roles = guest_role_permissions()
+    assert ("Example Owners" in roles) is talks
+    assert "WRCCDC Server Owners" not in roles
+    if talks:
+        assert roles["Example Owners"]["send_messages"] is True
 
 
 @pytest_asyncio.fixture
