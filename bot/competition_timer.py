@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from bot.competition_actions import run_competition, update_status_channel
 from bot.heartbeat import beat, beat_for
-from bot.utils import log_to_ops_channel, recycle_db_connection, run_blocking
+from bot.utils import log_to_ops_channel, run_blocking
 from core.models import CompetitionConfig
 from core.services.competition import (
     END_AFTER_STOP,
@@ -23,6 +23,7 @@ from core.services.competition import (
     give_up_timer_series,
     queue_due_countdown,
 )
+from core.utils import recycle_db_connection
 
 logger = logging.getLogger(__name__)
 

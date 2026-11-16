@@ -13,8 +13,8 @@ from django.utils import timezone
 
 from bot.cogs.help_panels import HelpPanelsCog, TicketButton, _has_button
 from bot.role_sync import sync_member_roles
+from bot.utils import announcement as announcement_text
 from bot.utils import (
-    TaskProgress,
     category_chat_channel,
     find_team_category,
     find_team_role,
@@ -24,9 +24,9 @@ from bot.utils import (
     team_category_name,
     team_role_name,
 )
-from bot.utils import announcement as announcement_text
 from core.models import QueuedAnnouncement, QueuedTask
 from core.queued_tasks import SetupTeamInfrastructure
+from core.task_queue import TaskProgress
 from team.models import Team
 from ticketing.models import Ticket
 

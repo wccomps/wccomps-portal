@@ -11,7 +11,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from bot.tests.discord_fakes import competition_thread
-from bot.utils import DISCORD_MESSAGE_CHAR_LIMIT, TaskProgress, fit, split_message
+from bot.utils import DISCORD_MESSAGE_CHAR_LIMIT, fit, split_message
+from core.task_queue import TaskProgress
 
 
 @given(st.text(alphabet=st.characters(codec="utf-8") | st.just("\n"), max_size=7000))

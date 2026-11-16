@@ -189,31 +189,70 @@ def test_handing_over_a_team_with_old_channels_queues_their_removal_ahead_of_a_l
     add_to_school_list(event, [_row(2, "School Two")], "gold")
     QueuedTask.enqueue(SetupTeamInfrastructure(team_number=2))
 
-    queued = QueuedTask.objects.order_by("created_at", "pk").values_list("task_type", "payload__team_number")
-    assert list(queued) == [("clear_team_channels", 2), ("setup_team_infrastructure", 2)]
+    queued = QueuedTask.objects.order_by("created_at", "pk").values_list("task_type", "backend", "payload__team_number")
+    assert list(queued) == [
+        ("clear_team_channels", "discord", 2),
+        ("reset_nextcloud_team", "worker", 2),
+        ("setup_team_infrastructure", "discord", 2),
+    ]
     assert Team.objects.get(pk=teams[1].pk).channels_need_clearing
 
 
-def test_two_hand_overs_queue_one_removal(event, teams):
+def test_two_hand_overs_queue_one_removal_and_one_reset(event, teams):
+    """The second hand-over finds both still pending."""
     from core.models import QueuedTask
-    from registration.services import set_team_school
 
     Team.objects.filter(pk=teams[1].pk).update(discord_role_id=5, discord_category_id=6)
     set_team_school(teams[1], "School Two", contact_email="a@example.com")
     set_team_school(teams[1], "School Three", contact_email="a@example.com")
 
-    assert list(QueuedTask.objects.values_list("task_type", flat=True)) == ["clear_team_channels"]
+    queued = QueuedTask.objects.order_by("created_at", "pk").values_list("task_type", flat=True)
+    assert list(queued) == ["clear_team_channels", "reset_nextcloud_team"]
 
 
-def test_the_same_school_keeping_its_team_queues_no_removal(event, teams):
+def _handed_over_again(team):
+    """The team's school changes once its first assignment's queued work is done."""
     from core.models import QueuedTask
-    from registration.services import set_team_school
+
+    set_team_school(team, "School Two", contact_email="a@example.com")
+    QueuedTask.objects.update(status="completed")
+    set_team_school(team, "School Three", contact_email="a@example.com")
+    return list(QueuedTask.objects.filter(status="pending").values_list("task_type", "backend", "payload__team_number"))
+
+
+def test_a_hand_over_without_discord_leftovers_resets_the_nextcloud_account(event, teams):
+    assert _handed_over_again(teams[1]) == [("reset_nextcloud_team", "worker", 2)]
+    assert not Team.objects.get(pk=teams[1].pk).channels_need_clearing
+
+
+def test_a_hand_over_with_linked_members_still_resets_the_nextcloud_account(event, teams):
+    from django.contrib.auth.models import User
+
+    from team.models import DiscordLink
+
+    Team.objects.filter(pk=teams[1].pk).update(discord_role_id=5, discord_category_id=6)
+    user = User.objects.create(username="member02")
+    DiscordLink.objects.create(discord_id=22, discord_username="m", user=user, team=teams[1], is_active=True)
+
+    assert _handed_over_again(teams[1]) == [("reset_nextcloud_team", "worker", 2)]
+
+
+def test_a_hand_over_without_discord_resets_the_nextcloud_account(event, teams, settings):
+    settings.DISCORD_BOT_TOKEN = ""
+    Team.objects.filter(pk=teams[1].pk).update(discord_role_id=5, discord_category_id=6)
+
+    assert _handed_over_again(teams[1]) == [("reset_nextcloud_team", "worker", 2)]
+
+
+def test_the_same_school_keeping_its_team_queues_no_removal_or_reset(event, teams):
+    from core.models import QueuedTask
 
     set_team_school(teams[1], "School Two", contact_email="a@example.com")
+    QueuedTask.objects.update(status="completed")
     Team.objects.filter(pk=teams[1].pk).update(discord_role_id=5, discord_category_id=6)
     set_team_school(teams[1], "School Two", contact_email="b@example.com")
 
-    assert not QueuedTask.objects.exists()
+    assert not QueuedTask.objects.filter(status="pending").exists()
     assert not Team.objects.get(pk=teams[1].pk).channels_need_clearing
 
 

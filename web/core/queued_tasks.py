@@ -1,8 +1,9 @@
 """The work the portal queues: one payload dataclass per QueuedTask type.
 
 TaskPayload is the registry. QueuedTask.task_type's choices come from it, QueuedTask.enqueue
-takes one of its members and writes one row per backend from backends_for, and the bot's
-dispatch matches on it exhaustively, so mypy rejects a payload type the bot cannot handle.
+takes one of its members and writes one row per backend from backends_for, and each backend's
+dispatch (core.task_queue.QueueProcessor) matches on it exhaustively, so mypy rejects a payload
+type a backend cannot handle.
 """
 
 from dataclasses import dataclass
@@ -139,6 +140,27 @@ class ClearTeamChannels:
     team_number: int
 
 
+@dataclass(frozen=True, kw_only=True)
+class ReconcileNextcloud:
+    """Delete every team's Nextcloud account while the open event is still open_event_id (None, none open), asking
+    again before each team, then provision the active teams' accounts for an open event when nothing stopped it."""
+
+    task_type: ClassVar = "reconcile_nextcloud"
+    label: ClassVar = "Reconcile Nextcloud Accounts"
+    requested_by: str
+    open_event_id: int | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class ResetNextcloudTeam:
+    """Delete a team's Nextcloud account and files, and provision it again when the team is active: the team was
+    handed to a new school."""
+
+    task_type: ClassVar = "reset_nextcloud_team"
+    label: ClassVar = "Reset a Team's Nextcloud Account"
+    team_number: int
+
+
 # Every configured chat backend gets its own row of these
 type ChatNotice = (
     PostComment | BroadcastMessage | LogToChannel | PostTicketUpdate | TicketCreated | CompetitionStatusChanged
@@ -149,16 +171,24 @@ type DiscordOnly = (
     SyncMemberRoles | SetupTeamInfrastructure | SyncRoles | AddUserToThread | ReconcileTeams | ClearTeamChannels
 )
 
-type TaskPayload = ChatNotice | DiscordOnly
+# The worker handles these, whatever chat systems are configured
+type WorkerTask = ReconcileNextcloud | ResetNextcloudTeam
+
+type TaskPayload = ChatNotice | DiscordOnly | WorkerTask
 
 _CHAT_NOTICES: tuple[type[ChatNotice], ...] = get_args(ChatNotice.__value__)
 _DISCORD_ONLY: tuple[type[DiscordOnly], ...] = get_args(DiscordOnly.__value__)
+_WORKER_TASKS: tuple[type[WorkerTask], ...] = get_args(WorkerTask.__value__)
 
-PAYLOAD_TYPES: dict[str, type[TaskPayload]] = {cls.task_type: cls for cls in _CHAT_NOTICES + _DISCORD_ONLY}
+PAYLOAD_TYPES: dict[str, type[TaskPayload]] = {
+    cls.task_type: cls for cls in _CHAT_NOTICES + _DISCORD_ONLY + _WORKER_TASKS
+}
 
 
 def backends_for(payload: TaskPayload) -> list[TaskBackend]:
     """The backends that get a row of this payload, from its group."""
     if isinstance(payload, _CHAT_NOTICES):
         return chat_backends()
+    if isinstance(payload, _WORKER_TASKS):
+        return [TaskBackend.WORKER]
     return [TaskBackend.DISCORD] if discord_enabled() else []

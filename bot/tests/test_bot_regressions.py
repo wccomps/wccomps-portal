@@ -268,8 +268,8 @@ def test_a_long_web_broadcast_is_sent_in_parts(bot_world: World, target: str, me
     from asgiref.sync import async_to_sync
 
     from bot.discord_queue import DiscordQueueProcessor
-    from bot.utils import TaskProgress
     from core.queued_tasks import BroadcastMessage
+    from core.task_queue import TaskProgress
 
     with rolled_back(), discord_world(bot_world, confirm=True) as fakes:
         processor = DiscordQueueProcessor(fakes.bot)

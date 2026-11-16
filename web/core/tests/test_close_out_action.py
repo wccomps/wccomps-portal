@@ -41,6 +41,7 @@ def _close_out(client, **data):
 def _team_with_school(number=1):
     team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
     set_team_school(team, f"School {number}", contact_email="c@example.edu")
+    QueuedTask.objects.all().delete()  # the new school's Nextcloud reset: these tests watch what Close Out queues
     ServiceScore.objects.create(team=team, service_points=Decimal(100))
     return team
 

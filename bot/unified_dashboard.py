@@ -19,10 +19,9 @@ from bot.utils import (
     fit,
     fit_lines,
     log_to_ops_channel,
-    recycle_db_connection,
 )
 from core.models import BotState
-from core.utils import shorten
+from core.utils import recycle_db_connection, shorten
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)

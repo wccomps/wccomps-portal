@@ -402,7 +402,7 @@ class TestDiscordQueueOrdering:
             "bot.discord_queue.log_to_ops_channel",
             side_effect=track_processing,
         ):
-            await processor._process_pending_tasks()
+            await processor.process_pending()
 
         # Verify tasks processed in order
         assert processed_ids == ["first", "second", "third"]
@@ -440,7 +440,7 @@ class TestDiscordQueueOrdering:
         )
 
         with patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock):
-            await processor._process_pending_tasks()
+            await processor.process_pending()
 
         await task_ready.arefresh_from_db()
         await task_future.arefresh_from_db()
@@ -468,7 +468,7 @@ class TestDiscordQueueOrdering:
             )
 
         with patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock):
-            await processor._process_pending_tasks()
+            await processor.process_pending()
 
         # Count completed tasks - should be max 10
         completed = await QueuedTask.objects.filter(status="completed").acount()
@@ -488,7 +488,7 @@ class TestDiscordQueueOrdering:
             )
             raise RuntimeError("Discord hiccup")
 
-        with patch.object(processor, "_dispatch", side_effect=reset_meanwhile):
+        with patch.object(processor, "dispatch", side_effect=reset_meanwhile):
             await processor._process_task(task)
 
         rows = [row async for row in QueuedTask.objects.all()]
@@ -524,7 +524,7 @@ class TestDiscordQueueOrdering:
             patch("bot.discord_queue.log_to_ops_channel", side_effect=slow),
             patch("bot.discord_queue.beat", side_effect=lambda: beats.append(len(handled))),
         ):
-            await processor._process_pending_tasks()
+            await processor.process_pending()
 
         assert beats == [0, 1, 2, 3]
 
@@ -680,14 +680,19 @@ class TestStrandedTasks:
         old = await QueuedTask.objects.acreate(
             task_type="log_to_channel", payload={"message": "old"}, status="processing"
         )
+        workers = await QueuedTask.objects.acreate(
+            task_type="reset_nextcloud_team", backend="worker", payload={"team_number": 3}, status="processing"
+        )
         await QueuedTask.objects.filter(pk=old.pk).aupdate(created_at=timezone.now() - timedelta(days=300))
 
-        await DiscordQueueProcessor._recover_stranded_tasks()
+        await DiscordQueueProcessor(MagicMock()).recover_stranded()
 
         await recent.arefresh_from_db()
         await old.arefresh_from_db()
+        await workers.arefresh_from_db()
         assert recent.status == "pending"
         assert old.status == "failed"
+        assert workers.status == "processing"  # the worker queue's to recover
 
     async def test_task_claimed_elsewhere_is_not_handled(self) -> None:
         task = await QueuedTask.objects.acreate(task_type="log_to_channel", payload={"message": "hi"})
@@ -695,7 +700,7 @@ class TestStrandedTasks:
         handler = AsyncMock()
         processor = DiscordQueueProcessor(MagicMock())
 
-        with patch.object(processor, "_dispatch", handler):
+        with patch.object(processor, "dispatch", handler):
             await processor._process_task(task)
 
         handler.assert_not_awaited()
@@ -778,10 +783,10 @@ class TestTaskDeletedWhileRunning:
                     raise outcome
 
         with (
-            patch.object(processor, "_dispatch", side_effect=dispatch),
+            patch.object(processor, "dispatch", side_effect=dispatch),
             patch("bot.discord_queue.log_to_ops_channel", new_callable=AsyncMock) as ops,
         ):
-            await processor._process_pending_tasks()
+            await processor.process_pending()
 
         assert not await QueuedTask.objects.filter(pk=doomed.pk).aexists()
         await later.arefresh_from_db()

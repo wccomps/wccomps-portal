@@ -346,14 +346,14 @@ async def test_the_command_resets_and_says_what_it_did(competition: Team, mock_i
 )
 async def test_each_queued_cleanup_runs_its_job(payload: dict[str, object], open_event_id: int | None) -> None:
     from bot.heartbeat import beat
-    from bot.utils import TaskProgress
+    from core.task_queue import TaskProgress
 
     task = await QueuedTask.objects.acreate(task_type="reconcile_teams", payload=payload)
     processor = DiscordQueueProcessor(MagicMock())
     guild = MagicMock()
     processor._guild = MagicMock(return_value=guild)
     with patch("bot.competition_actions.reconcile_teams", new_callable=AsyncMock) as run:
-        await processor._dispatch(task.typed_payload(), TaskProgress())
+        await processor.dispatch(task.typed_payload(), TaskProgress())
 
     run.assert_awaited_once_with(processor.bot, guild, "gold", open_event_id, beat)
 
@@ -605,35 +605,32 @@ async def test_a_failing_teardown_reports_the_teams_left_before_it_raises(compet
     assert "Could not delete the role or category of teams 03" in summary
 
 
-async def test_opening_an_event_deletes_and_provisions_nextcloud_accounts(competition: Team, settings: Any) -> None:
+async def test_the_discord_teardown_leaves_nextcloud_to_the_worker(competition: Team, settings: Any) -> None:
+    """ReconcileNextcloud, queued beside it, deletes and provisions the Nextcloud accounts."""
     settings.NEXTCLOUD_URL = "https://files.test"
     settings.NEXTCLOUD_USERNAME = "admin"
     settings.NEXTCLOUD_PASSWORD = "secret"
     opened = await _open_event()
-    await Team.objects.acreate(team_number=4, team_name="Team 04", is_active=False)
-    nc = MagicMock()
-    nc.__enter__.return_value = nc
-    nc.delete_team_user.side_effect = [True, False]
 
     with (
-        patch("bot.competition_actions.NextcloudManager", return_value=nc),
+        patch("core.nextcloud.NextcloudManager") as nextcloud,
         patch("bot.competition_actions.log_to_ops_channel", new_callable=AsyncMock) as ops,
         patch("bot.competition_actions.update_status_channel", new_callable=AsyncMock),
         patch("bot.role_sync.sync_roles", _sync_removing(0)),
     ):
         await reconcile_teams(MagicMock(), _guild("Team 03"), "gold", opened, _no_beat)
 
-    assert [c.args[0] for c in nc.delete_team_user.call_args_list] == [3, 4]
-    assert [c.args[0] for c in nc.provision_team_user.call_args_list] == [3]
+    nextcloud.assert_not_called()
     audit = await AuditLog.objects.aget(action="competition_cleanup")
-    assert audit.details["deleted_nextcloud_users"] == 1
-    summary = ops.await_args.args[1]
-    assert "Deleted 1 Nextcloud team accounts" in summary
+    assert "deleted_nextcloud_users" not in audit.details
+    assert "Nextcloud" not in ops.await_args.args[1]
 
 
-async def test_clear_team_channels_resets_nextcloud_for_handed_over_team(competition: Team, settings: Any) -> None:
-    from bot.utils import TaskProgress
-    from core.nextcloud import NextcloudAPIError
+async def test_clear_team_channels_clears_a_handed_over_team_without_nextcloud(
+    competition: Team, settings: Any
+) -> None:
+    """ResetNextcloudTeam, queued beside it, resets the team's Nextcloud account."""
+    from core.task_queue import TaskProgress
 
     settings.NEXTCLOUD_URL = "https://files.test"
     settings.NEXTCLOUD_USERNAME = "admin"
@@ -647,17 +644,9 @@ async def test_clear_team_channels_resets_nextcloud_for_handed_over_team(competi
     guild.roles = []
     guild.get_role.side_effect = lambda role_id: None
     processor._guild = MagicMock(return_value=guild)
-    nc = MagicMock()
-    nc.__enter__.return_value = nc
-    nc.delete_team_user.side_effect = [NextcloudAPIError("HTTP 502"), True]
 
-    with patch("core.nextcloud.NextcloudManager", return_value=nc):
-        with pytest.raises(NextcloudAPIError):
-            await processor._dispatch(task.typed_payload(), TaskProgress())
-        # channels_need_clearing stays True so a retry runs the Nextcloud reset again
-        assert await Team.objects.filter(pk=competition.pk, channels_need_clearing=True).aexists()
-        await processor._dispatch(task.typed_payload(), TaskProgress())
+    with patch("core.nextcloud.NextcloudManager") as nextcloud:
+        await processor.dispatch(task.typed_payload(), TaskProgress())
 
-    assert nc.delete_team_user.call_count == 2
-    nc.provision_team_user.assert_called_once_with(3)
+    nextcloud.assert_not_called()
     assert not await Team.objects.filter(pk=competition.pk, channels_need_clearing=True).aexists()

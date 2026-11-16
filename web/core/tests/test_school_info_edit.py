@@ -244,10 +244,12 @@ def linked_team():
     from django.contrib.auth.models import User
     from registration.services import set_team_school
 
+    from core.models import QueuedTask
     from team.models import DiscordLink
 
     team = Team.objects.create(team_number=4, team_name="Team 04")
     set_team_school(team, "Example University", contact_email="coach@example.edu")
+    QueuedTask.objects.all().delete()  # the first school's Nextcloud reset, so tests see only what the edit queues
     Team.objects.filter(pk=team.pk).update(discord_role_id=5, discord_category_id=6)
     user = User.objects.create(username="member04")
     DiscordLink.objects.create(discord_id=44, discord_username="m", user=user, team=team, is_active=True)
@@ -297,7 +299,7 @@ def test_a_different_school_unlinks_the_members_and_clears_the_channels(client, 
     assert (audit.target_id, audit.details["reason"]) == (44, "school_changed")
     assert Team.objects.get(pk=linked_team.pk).channels_need_clearing
     queued = sorted(QueuedTask.objects.values_list("task_type", flat=True))
-    assert queued == ["clear_team_channels", "sync_member_roles"]
+    assert queued == ["clear_team_channels", "reset_nextcloud_team", "sync_member_roles"]
 
 
 def test_a_different_school_says_when_the_password_reset_failed(client, linked_team):

@@ -119,8 +119,8 @@ def _matches(value: object, annotation: object) -> bool:
 
 
 class QueuedTask(models.Model):
-    """Work queued for one backend (the bot's queue in bot/discord_queue.py); the task types are core/queued_tasks.py's
-    payloads."""
+    """Work queued for one backend (its core.task_queue.QueueProcessor runs it); the task types are
+    core/queued_tasks.py's payloads."""
 
     STATUS_CHOICES = [
         ("pending", "Pending"),

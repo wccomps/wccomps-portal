@@ -15,7 +15,7 @@ from scoring.snapshot import SNAPSHOT_VERSION, serialize_scorecard
 
 from core.competition_utils import WipedData, wipe_competition_data
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement, QueuedTask
-from core.queued_tasks import ClearTeamChannels, ReconcileTeams
+from core.queued_tasks import ClearTeamChannels, ReconcileNextcloud, ReconcileTeams, ResetNextcloudTeam
 from core.services.competition import run_lock
 from core.services.linking import COMPETITION_CLEANUP, unlink_teams
 from team.models import DiscordLink, SchoolInfo, Team, default_team_name
@@ -128,9 +128,11 @@ def set_team_school(
         raise TeamTakenError(f"Team {team.team_number} already has a school: {info.school_name}.")
     held = (info.school_id if info else None) if isinstance(previous_school, Held) else previous_school
     if not rename and held != school.pk:
-        # The last school's announcements and Discord channels aren't the new one's
+        # The last school's announcements, Discord channels and Nextcloud files aren't the new one's; queued in this
+        # transaction, so nothing is reset for a hand-over that rolls back
         QueuedAnnouncement.objects.filter(team=team).delete()
         _clear_old_channels(team)
+        _reset_nextcloud(team)
     if info is None:
         info = SchoolInfo.objects.create(team=team, **fields)
     else:
@@ -194,6 +196,23 @@ def _clear_old_channels(team: Team) -> None:
     )
     if not pending.exists():
         QueuedTask.enqueue(ClearTeamChannels(team_number=team.team_number))
+
+
+def _reset_nextcloud(team: Team) -> None:
+    """Queue the reset of the team's Nextcloud account and files, unless one is already pending, whether or not it
+    has Discord leftovers or linked members."""
+    pending = QueuedTask.objects.filter(
+        task_type=ResetNextcloudTeam.task_type, status="pending", payload__team_number=team.team_number
+    )
+    if not pending.exists():
+        QueuedTask.enqueue(ResetNextcloudTeam(team_number=team.team_number))
+
+
+def queue_team_reconcile(actor: str, open_event_id: int | None) -> None:
+    """Queue the teardown and set-up of the team channels and of the Nextcloud accounts, for the open event
+    open_event_id (None, none open), in the caller's transaction."""
+    QueuedTask.enqueue(ReconcileTeams(requested_by=actor, open_event_id=open_event_id))
+    QueuedTask.enqueue(ReconcileNextcloud(requested_by=actor, open_event_id=open_event_id))
 
 
 def activate_teams(teams: list[Team]) -> int:
@@ -389,7 +408,7 @@ def import_school_list(event: Event | NewEvent, rows: list[SchoolListRow], updat
     opening = not event.is_active
     event.open()
     if opening:
-        QueuedTask.enqueue(ReconcileTeams(requested_by=updated_by, open_event_id=event.pk))
+        queue_team_reconcile(updated_by, event.pk)
         # Queued for team numbers whose channels the teardown removed; a new school would get them on linking
         QueuedAnnouncement.objects.all().delete()
     # So a team keeping its school in an event already open keeps its Discord channels and announcements
@@ -616,7 +635,7 @@ def _close_out(target: Event | NewEvent, actor: str) -> CloseOutOutcome:
         event.close()
         _reset_for_next_event(config)
         # Committed with the close-out, so the bot never tears Discord down for a close-out that rolled back
-        QueuedTask.enqueue(ReconcileTeams(requested_by=actor))
+        queue_team_reconcile(actor, None)
         AuditLog.objects.create(
             action=EVENT_CLOSED_OUT,
             admin_user=actor,
@@ -870,7 +889,7 @@ def reset_for_discord_cleanup(actor: str) -> DiscordCleanupReset:
             target_id=config.pk,
             details={"unlinked": reset.unlinked, "queued_announcements_deleted": reset.announcements},
         )
-        QueuedTask.enqueue(ReconcileTeams(requested_by=actor))
+        queue_team_reconcile(actor, None)
     return reset
 
 

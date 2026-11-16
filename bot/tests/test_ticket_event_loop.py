@@ -11,8 +11,8 @@ from bot.cogs.admin_tickets import AdminTicketsCog
 from bot.discord_queue import DiscordQueueProcessor
 from bot.tests.discord_fakes import competition_thread
 from bot.ticket_dashboard import ResolveTicketModal, TicketActionView
-from bot.utils import TaskProgress
 from core.models import QueuedTask
+from core.task_queue import TaskProgress
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory
 

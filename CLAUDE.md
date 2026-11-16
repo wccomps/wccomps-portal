@@ -81,12 +81,14 @@ the unparenthesized form is used intentionally throughout.
 
 ### Task Queue
 - Web code queues work with `QueuedTask.enqueue(<payload>)`, which writes one row per backend
-  (`core.task_backends.TaskBackend`) and returns them; the bot's `DiscordQueueProcessor` consumes the `discord` rows
+  (`core.task_backends.TaskBackend`) and returns them; each backend's `core.task_queue.QueueProcessor` subclass
+  consumes its own rows: the bot's `DiscordQueueProcessor` the `discord` ones, `core.worker_tasks.WorkerQueueProcessor`
+  the `worker` ones (the bot runs it too, until the worker process exists)
 - Each task type is a payload dataclass in `core/queued_tasks.py`, in one group of the `TaskPayload` union:
-  `ChatNotice` (a row for every configured chat backend, `chat_backends()`) or `DiscordOnly` (a row only when Discord
-  is configured, `DISCORD_BOT_TOKEN`); so no configured backend means no row. A new one also needs a `case` in
-  `DiscordQueueProcessor._dispatch`, which mypy checks is exhaustive, and a migration, since `QueuedTask.task_type`'s
-  choices come from the union
+  `ChatNotice` (a row for every configured chat backend, `chat_backends()`), `DiscordOnly` (a row only when Discord
+  is configured, `DISCORD_BOT_TOKEN`) or `WorkerTask` (always a `worker` row); so no configured chat backend means
+  no chat row. A new one also needs a `case` in its backends' `dispatch` (`DiscordQueueProcessor.dispatch` is checked
+  exhaustive by mypy), and a migration, since `QueuedTask.task_type`'s choices come from the union
 - `enqueue(..., origin=...)` skips the chat system an event came from
 - A payload's `ticket_id` also sets the task's ticket FK, so deleting a ticket drops its pending tasks
 - A handler's return value is stored in `QueuedTask.result`; the payload is input only

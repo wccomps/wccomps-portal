@@ -160,12 +160,13 @@ def test_the_replaced_actions_are_gone(admin_client, action):
     CompetitionConfig.objects.update_or_create(pk=1, defaults={"applications_enabled": False})
     _open_event()
     _team_with_school()
+    queued = list(QueuedTask.objects.values_list("pk", flat=True))  # the school's Nextcloud reset
 
     response = _post(admin_client, action, confirm="yolo")
 
     assert response.status_code == 400
     assert "Unknown action" in response.json()["error"]
-    assert not QueuedTask.objects.exists()
+    assert list(QueuedTask.objects.values_list("pk", flat=True)) == queued
 
 
 def test_a_partial_start_is_reported_incomplete_not_success(admin_client):
