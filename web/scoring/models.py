@@ -10,6 +10,7 @@ from django.utils.functional import cached_property
 from core.models import Approvable
 from core.stored_files import MAX_SCREENSHOT_SIZE, StoredFile
 from core.utils import shorten
+from core.validators import validate_jsonb_storable
 
 
 def format_boxes_display(boxes: list[str] | str | None) -> str:
@@ -109,10 +110,14 @@ class QuotientMetadataCache(models.Model):
 
     boxes = models.JSONField(
         default=list,
+        blank=True,
+        validators=[validate_jsonb_storable],
         help_text="List of boxes from Quotient metadata",
     )
     services = models.JSONField(
         default=list,
+        blank=True,
+        validators=[validate_jsonb_storable],
         help_text="List of services from Quotient metadata",
     )
 

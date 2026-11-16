@@ -169,8 +169,9 @@ def _sync_aweful_proxy(client: QuotientClient, boxes_data: list[BoxData]) -> Non
 def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
     """Sync the box, service and IP metadata behind the scoring form dropdowns from Quotient and Proxmox.
 
-    Raises ValueError if Quotient is unreachable. The last synced metadata stays: one failed fetch mid-competition
-    must not empty the red-team and incident dropdowns. Competition cleanup deletes it between events.
+    Raises ValueError if Quotient is unreachable, or its metadata can't be read or stored. The last synced metadata
+    stays: one failed fetch mid-competition must not empty the red-team and incident dropdowns. Competition cleanup
+    deletes it between events.
     """
     client = QuotientClient()
     # A sync is an explicit fetch; the client's 5-minute cache is for page renders
@@ -202,19 +203,13 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
         }
         boxes_data.append(box_dict)
 
-    metadata = QuotientMetadataCache.objects.first()
-    _merge_proxmox_boxes(boxes_data, metadata.boxes if metadata else [])
-    if metadata:
-        metadata.boxes = boxes_data
-        metadata.services = services_data
-        metadata.synced_by = user
-        metadata.save()
-    else:
-        metadata = QuotientMetadataCache.objects.create(
-            boxes=boxes_data,
-            services=services_data,
-            synced_by=user,
-        )
+    metadata = QuotientMetadataCache.objects.first() or QuotientMetadataCache()
+    _merge_proxmox_boxes(boxes_data, metadata.boxes)
+    metadata.boxes = boxes_data
+    metadata.services = services_data
+    metadata.synced_by = user
+    _check_storable(metadata, "Quotient's metadata")
+    metadata.save()
 
     # Keep the reactive inject scaling current: inject point values live in the titles.
     injects = client.get_injects(force_refresh=True)
@@ -229,12 +224,13 @@ def sync_quotient_metadata(user: User | None = None) -> QuotientMetadataCache:
 UPTIME_PLACES = Decimal(10) ** -ServiceDetail._meta.get_field("uptime").decimal_places
 
 
-def _check_storable(row: models.Model, where: str) -> None:
-    """ValueError when a value Quotient sent doesn't fit its column (a name too long, points too large)."""
+def _check_storable(row: models.Model, what: str) -> None:
+    """ValueError when a value Quotient sent can't be stored (a name too long, points too large, text jsonb
+    refuses)."""
     try:
         row.clean_fields(exclude=["team", "synced_by"])
     except ValidationError as e:
-        raise ValueError(f"Quotient's scores for {where} don't fit the portal's: {'; '.join(e.messages)}") from e
+        raise ValueError(f"{what} can't be stored: {'; '.join(e.messages)}") from e
 
 
 def sync_service_scores(user: User | None = None) -> dict[str, int]:
@@ -281,7 +277,7 @@ def sync_service_scores(user: User | None = None) -> dict[str, int]:
             for svc in team_export.services
         ]
         for row in (score, *details):
-            _check_storable(row, f"team {team.team_number}")
+            _check_storable(row, f"Quotient's scores for team {team.team_number}")
         rows.append((team, score, details))
 
     with transaction.atomic():
