@@ -5,6 +5,7 @@ prefix (e.g. aclear_all_tickets) made with _make_async().
 """
 
 import functools
+import re
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
@@ -18,6 +19,9 @@ from core.models import QueuedTask
 from core.queued_tasks import TicketCreated
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketCategory, TicketHistory
+
+# What create_ticket_atomic numbers a ticket: T, the team's number and the team's ticket count, each at least 3 digits
+TICKET_NUMBER_RE = re.compile(r"T\d{3,}-\d{3,}")
 
 
 def _make_async[**P, T](fn: Callable[P, T]) -> Callable[P, Awaitable[T]]:

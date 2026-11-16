@@ -283,8 +283,9 @@ CODE_EXCEPTIONS = {
     "can go once that migration is squashed",
     "web/scoring/snapshot.py:context_from_snapshot": "Reads back the scorecard snapshots Close Out stores in "
     "EventResult; no page shows a stored result yet",
-    "chat/zulip/client.py:ZulipClient": ZULIP_RUNNER,
-    "chat/zulip/client.py:send_stream_message": ZULIP_RUNNER,
+    "chat/zulip/outgoing.py:ZulipQueueProcessor": ZULIP_RUNNER,
+    "chat/zulip/naming.py:team_for_stream": ZULIP_RUNNER,
+    "chat/zulip/naming.py:ticket_number_from_topic": ZULIP_RUNNER,
     "chat/zulip/client.py:register_queue": ZULIP_RUNNER,
     "chat/zulip/client.py:get_events": ZULIP_RUNNER,
     "chat/zulip/client.py:fetch_upload": ZULIP_RUNNER,
@@ -438,19 +439,7 @@ def test_every_url_name_is_linked() -> None:
 DJANGO_SETTINGS = {name for name in dir(global_settings) if name.isupper()} | {"ROOT_URLCONF", "MAILERS"}
 
 # setting -> why it stays although nothing reads it
-_ZULIP_NOTICES = "read by the Zulip notices (chat.zulip.outgoing), the next commit of this PR"
-SETTING_EXCEPTIONS: dict[str, str] = dict.fromkeys(
-    (
-        "ZULIP_TEAM_STREAM",
-        "ZULIP_STAFF_STREAM",
-        "ZULIP_ANNOUNCEMENTS_STREAM",
-        "ZULIP_OPS_STREAM",
-        "ZULIP_OPS_TOPIC",
-        "ZULIP_TEAM_MENTION",
-        "ZULIP_STAFF_MENTION",
-    ),
-    _ZULIP_NOTICES,
-)
+SETTING_EXCEPTIONS: dict[str, str] = {}
 
 
 def test_every_setting_is_read() -> None:
