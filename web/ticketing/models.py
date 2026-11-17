@@ -191,7 +191,7 @@ class TicketComment(models.Model):
     @property
     def author_name(self) -> str:
         """Who wrote it, as chat shows it: the portal user's username, else "Unknown"."""
-        return (self.author.username if self.author else "") or "Unknown"
+        return self.author.username if self.author else "Unknown"
 
     def __str__(self) -> str:
         return f"Comment by {self.author_name} on {self.ticket.ticket_number}"

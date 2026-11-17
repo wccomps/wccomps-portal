@@ -2,7 +2,7 @@
 # Discord bot, the Zulip runner, or both.
 #   cp .env.example .env    # fill it in
 #   docker compose up -d     # published image; `docker compose up -d --build` runs this checkout
-#   docker compose --profile chat up -d   # also the chat process, once DISCORD_BOT_TOKEN or the ZULIP_* settings are set
+#   docker compose --profile chat up -d   # also the chat process, once DISCORD_BOT_TOKEN or the ZULIP_* trio is set
 # The web app listens on http://localhost:${WEB_PORT:-8000}; put it behind an HTTPS reverse proxy
 # (with DJANGO_DEBUG=False the session and CSRF cookies are HTTPS-only).
 

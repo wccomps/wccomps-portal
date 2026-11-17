@@ -1,6 +1,7 @@
 """Where a ticket lives in Zulip: each team's stream (ZULIP_TEAM_STREAM), and in it one topic per ticket, named by
-the ticket's number so a message in the topic maps back to the ticket. The topic is stored on the ticket when its first
-message is sent (Ticket.zulip_topic), so a later title edit doesn't move it."""
+the ticket's number so a message in the topic maps back to the ticket. Ticket.zulip_topic owns the name: the first
+message sent to the ticket stores it, so a later title edit doesn't move it, and a rename in Zulip (resolving the
+topic, moving it) updates it (chat.zulip.incoming), so later messages follow what Zulip shows."""
 
 from functools import cache
 
@@ -31,10 +32,22 @@ def team_for_stream(name: str) -> int | None:
     return _team_numbers(settings.ZULIP_TEAM_STREAM).get(name)
 
 
-def ticket_topic(ticket: Ticket) -> str:
-    """The topic a ticket's messages go to: the one stored on it, else its number and title on one line, cut with "…"
-    to Zulip's limit. A topic is plain text, so Markdown in the title is shown as typed."""
-    return ticket.zulip_topic or fit(f"{ticket.ticket_number}: {' '.join(ticket.title.split())}", TOPIC_CHAR_LIMIT)
+def topic_name(ticket: Ticket) -> str:
+    """A new topic's name: the ticket's number and title on one line, cut with "…" to Zulip's limit. A topic is plain
+    text, so Markdown in the title is shown as typed."""
+    return fit(f"{ticket.ticket_number}: {' '.join(ticket.title.split())}", TOPIC_CHAR_LIMIT)
+
+
+async def ticket_topic(ticket: Ticket) -> str:
+    """The topic a ticket's messages go to: the one stored on it, else a new one (topic_name), stored unless another
+    send stored one first, which is then used."""
+    if not ticket.zulip_topic:
+        tickets = Ticket.objects.filter(pk=ticket.pk)
+        if await tickets.filter(zulip_topic="").aupdate(zulip_topic=topic_name(ticket)):
+            ticket.zulip_topic = topic_name(ticket)
+        else:
+            ticket.zulip_topic = await tickets.values_list("zulip_topic", flat=True).aget()
+    return ticket.zulip_topic
 
 
 def ticket_number_from_topic(topic: str) -> str | None:

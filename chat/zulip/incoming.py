@@ -2,7 +2,8 @@
 do), and their edits and deletes carry over to the comment. Only a sender whose Zulip email is the portal account of
 one of the ticket's team or of ticket staff writes to a ticket; anyone else is told so in the topic. Files uploaded
 with a message are stored on the ticket as its attachments, as a Discord thread's are; they stay out of the comment
-and aren't posted to the other chat backends.
+and aren't posted to the other chat backends. A topic renamed in Zulip (resolved, moved) becomes the ticket's stored
+topic (Ticket.zulip_topic), so the portal's later messages follow it.
 
 The event fields read here are Zulip's JSON: anything can be missing or of another type, so each reader checks what it
 uses and passes over an event it can't read."""
@@ -20,12 +21,11 @@ from django.contrib.auth.models import User
 
 from chat.zulip.client import UPLOAD_PREFIX, ZulipClient, ZulipError
 from chat.zulip.markup import quiet
-from chat.zulip.naming import team_for_stream, ticket_number_from_topic
+from chat.zulip.naming import TOPIC_CHAR_LIMIT, team_for_stream, ticket_number_from_topic
 from core.task_backends import TaskBackend
 from ticketing import chat_comments
 from ticketing.access import ticket_open_to_user
 from ticketing.models import Ticket, TicketAttachment
-from ticketing.utils import storable
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,10 @@ NOT_LINKED = (
     "only the team's members and staff linked to the portal by their Zulip email can add to a ticket; this message "
     "was not added to it."
 )
+# The realm of Zulip's system (cross-realm) bots, such as the Notification Bot that posts "marked this topic as
+# resolved". A message carries its sender's realm as sender_realm_str (zerver/lib/message_cache.py in Zulip's server),
+# and these bots live in the realm its settings name SYSTEM_BOT_REALM (zproject/default_settings.py there).
+SYSTEM_BOT_REALM = "zulipinternal"
 
 
 @dataclass(frozen=True)
@@ -61,8 +65,8 @@ def _all_text(values: tuple[object, ...]) -> TypeGuard[tuple[str, ...]]:
 
 
 def parse_message_event(event: Mapping[str, object]) -> IncomingMessage | None:
-    """The stream message a "message" event carries; None for a direct message, an event it can't read, or the bot's
-    own message (a notice it posted)."""
+    """The stream message a "message" event carries; None for a direct message, an event it can't read, the bot's
+    own message (a notice it posted), or one from Zulip's system bots."""
     message = event.get("message")
     if event.get("type") != "message" or not isinstance(message, dict) or message.get("type") != "stream":
         return None
@@ -72,7 +76,7 @@ def parse_message_event(event: Mapping[str, object]) -> IncomingMessage | None:
     if message_id is None or sender_id is None or not _all_text(texts):
         return None
     stream, topic, email, name, content = texts
-    if email.lower() == settings.ZULIP_BOT_EMAIL.lower():
+    if email.lower() == settings.ZULIP_BOT_EMAIL.lower() or message.get("sender_realm_str") == SYSTEM_BOT_REALM:
         return None
     return IncomingMessage(message_id, stream, topic, sender_id, email, name, content)
 
@@ -84,6 +88,22 @@ def edited_message(event: Mapping[str, object]) -> tuple[int, str] | None:
     if event.get("type") != "update_message" or message_id is None or not isinstance(content, str):
         return None
     return message_id, content
+
+
+def renamed_topic(event: Mapping[str, object]) -> tuple[str, str, str] | None:
+    """(stream, old topic, new topic) of an "update_message" event that renamed a topic within its stream, as resolving
+    or moving it in Zulip does; None for one that moved a single message (the topic keeps the rest), moved messages
+    to another stream, names a topic the ticket can't store, or can't be read."""
+    moved_on = event.get("propagate_mode") in ("change_later", "change_all")
+    if event.get("type") != "update_message" or not moved_on or "new_stream_id" in event:
+        return None
+    texts = (event.get("stream_name"), event.get("orig_subject"), event.get("subject"))
+    if not _all_text(texts):
+        return None
+    stream, old, new = texts
+    if old == new or not 0 < len(new) <= TOPIC_CHAR_LIMIT or "\x00" in new:
+        return None
+    return stream, old, new
 
 
 def deleted_message_ids(event: Mapping[str, object]) -> list[int]:
@@ -137,6 +157,7 @@ def comment_text(content: str) -> str:
 class _Recorded:
     refused: str = ""  # what to tell the sender: nothing was saved
     ticket: Ticket | None = None  # the ticket to store the message's uploads on; None when there are none to store
+    author: User | None = None  # the portal account the uploads are credited to
 
 
 def _record(msg: IncomingMessage, has_uploads: bool) -> _Recorded:
@@ -156,12 +177,12 @@ def _record(msg: IncomingMessage, has_uploads: bool) -> _Recorded:
         actor_key=f"zulip:{msg.sender_id}",
         author=author,
         text=comment_text(msg.content),
-        has_files=has_uploads,
+        has_files=has_uploads and not TicketAttachment.objects.filter(zulip_message_id=msg.message_id).exists(),
     )
     if recorded.refused:
         logger.warning(f"Rate limit refused Zulip message {msg.message_id} from {msg.sender_id}: {recorded.refused}")
         return _Recorded(refused=f"{recorded.refused}; this message was not added to the ticket. Please slow down.")
-    return _Recorded(ticket=ticket if recorded.store_files else None)
+    return _Recorded(ticket=ticket, author=author) if recorded.store_files else _Recorded()
 
 
 async def _reply(msg: IncomingMessage, client: ZulipClient, text: str, about: str) -> None:
@@ -173,11 +194,11 @@ async def _reply(msg: IncomingMessage, client: ZulipClient, text: str, about: st
 
 
 async def _store_uploads(
-    client: ZulipClient, msg: IncomingMessage, ticket: Ticket, uploads: list[tuple[str, str]]
+    client: ZulipClient, msg: IncomingMessage, ticket: Ticket, author: User, uploads: list[tuple[str, str]]
 ) -> None:
-    """Store each upload on the ticket, typed from its bytes as a web upload is, and react with a paperclip once one
-    is stored. A file over TicketAttachment's size limit, or one that can't be fetched or stored, is replied to in
-    the topic in Discord's words and the rest go on."""
+    """Store each upload on the ticket, credited to the sender's portal account and typed from its bytes as a web
+    upload is, and react with a paperclip once one is stored. A file over TicketAttachment's size limit, or one that
+    can't be fetched or stored, is replied to in the topic in Discord's words and the rest go on."""
     stored = False
     for name, path in uploads:
         try:
@@ -189,7 +210,7 @@ async def _store_uploads(
                 data,
                 name,
                 ticket=ticket,
-                uploaded_by=storable(msg.sender_name)[:100],
+                uploaded_by=author.username,
                 zulip_message_id=msg.message_id,
             )
             await attachment.asave()
@@ -214,18 +235,33 @@ async def save_message(client: ZulipClient, msg: IncomingMessage) -> None:
     recorded = await sync_to_async(_record)(msg, bool(uploads))
     if recorded.refused:
         await _reply(msg, client, recorded.refused, "a message was refused")
-    elif recorded.ticket is not None:
+    elif recorded.ticket is not None and recorded.author is not None:
         if len(uploads) > MAX_UPLOADS:
             text = f"only a message's first {MAX_UPLOADS} files are added to the ticket; post the rest in another one."
             await _reply(msg, client, text, "files were left out")
-        await _store_uploads(client, msg, recorded.ticket, uploads[:MAX_UPLOADS])
+        await _store_uploads(client, msg, recorded.ticket, recorded.author, uploads[:MAX_UPLOADS])
 
 
 async def apply_edit(event: Mapping[str, object]) -> None:
-    """A message's new text onto its comment. Not passed on to the other chat backends."""
+    """A message's new text onto its comment, while the comment's author may still write to the ticket
+    (ticketing.chat_comments.apply_edit). Not passed on to the other chat backends."""
     if (edit := edited_message(event)) is not None:
         message_id, content = edit
         await sync_to_async(chat_comments.apply_edit)(TaskBackend.ZULIP, message_id, comment_text(content))
+
+
+def follow_rename(stream: str, old: str, new: str) -> None:
+    """Store a renamed topic's new name on the ticket the old name, else the new one, belongs to (find_ticket), so
+    the portal's later messages go where Zulip now shows the ticket's."""
+    ticket = find_ticket(stream, old) or find_ticket(stream, new)
+    if ticket is not None and Ticket.objects.filter(pk=ticket.pk).exclude(zulip_topic=new).update(zulip_topic=new):
+        logger.info(f"Ticket {ticket.ticket_number}'s Zulip topic is now {new!r}")
+
+
+async def apply_rename(event: Mapping[str, object]) -> None:
+    """Follow a topic renamed in Zulip (follow_rename)."""
+    if (rename := renamed_topic(event)) is not None:
+        await sync_to_async(follow_rename)(*rename)
 
 
 async def apply_delete(event: Mapping[str, object]) -> None:
@@ -235,12 +271,14 @@ async def apply_delete(event: Mapping[str, object]) -> None:
 
 
 async def handle_event(client: ZulipClient, event: Mapping[str, object]) -> None:
-    """One event from the queue: a message, an edit or a delete; any other (Zulip's heartbeat) needs nothing."""
+    """One event from the queue: a message, an edit or topic rename, or a delete; any other (Zulip's heartbeat) needs
+    nothing."""
     match event.get("type"):
         case "message":
             if (msg := parse_message_event(event)) is not None:
                 await save_message(client, msg)
         case "update_message":
             await apply_edit(event)
+            await apply_rename(event)
         case "delete_message":
             await apply_delete(event)

@@ -11,8 +11,9 @@ from django.urls import reverse
 
 from chat.tests.conftest import FakeZulip
 from chat.zulip.client import ZulipError
+from chat.zulip.incoming import apply_rename
 from chat.zulip.markup import to_zulip
-from chat.zulip.naming import team_for_stream, team_stream, ticket_number_from_topic, ticket_topic
+from chat.zulip.naming import team_for_stream, team_stream, ticket_number_from_topic, topic_name
 from chat.zulip.outgoing import MISSING_STREAMS, ZulipQueueProcessor
 from core.models import CompetitionConfig, QueuedTask
 from core.queued_tasks import (
@@ -50,19 +51,19 @@ async def run(processor: ZulipQueueProcessor, payload: TaskPayload, task: Queued
     return await processor.dispatch(payload, task)
 
 
-def test_ticket_topic_long_title_fits_and_maps_back(ticket: Ticket) -> None:
+def test_topic_name_long_title_fits_and_maps_back(ticket: Ticket) -> None:
     ticket.title = "x" * 200 + " **bold** `code`"
-    assert len(ticket_topic(ticket)) <= 60
-    assert ticket_number_from_topic(ticket_topic(ticket)) == ticket.ticket_number
+    assert len(topic_name(ticket)) <= 60
+    assert ticket_number_from_topic(topic_name(ticket)) == ticket.ticket_number
 
 
-def test_ticket_topic_is_one_line(ticket: Ticket) -> None:
+def test_topic_name_is_one_line(ticket: Ticket) -> None:
     ticket.title = "Web\nserver   down"
-    assert ticket_topic(ticket) == "T003-001: Web server down"
+    assert topic_name(ticket) == "T003-001: Web server down"
 
 
 def test_a_topic_resolved_in_zulip_still_maps_back(ticket: Ticket) -> None:
-    assert ticket_number_from_topic(f"✔ {ticket_topic(ticket)}") == ticket.ticket_number
+    assert ticket_number_from_topic(f"✔ {topic_name(ticket)}") == ticket.ticket_number
 
 
 def test_team_stream_maps_back_to_its_team(settings) -> None:
@@ -160,7 +161,7 @@ async def test_ticket_created_posts_topic_and_staff_alert(processor, fake_zulip,
     settings.ZULIP_TEAM_MENTION, settings.ZULIP_STAFF_MENTION = "Team {number:02d}", "Support"
     await run(processor, TicketCreated(ticket_id=ticket.id))
     (stream, topic, content), (staff_stream, _, alert) = fake_zulip.sent
-    assert (stream, topic) == ("team03", ticket_topic(ticket))
+    assert (stream, topic) == ("team03", topic_name(ticket))
     assert content.splitlines()[0] == "@*Team 03* @*Support* New ticket T003-001: Web server down"
     assert staff_stream == "tickets"
     assert f"{settings.BASE_URL}{reverse('ticket_detail', args=[ticket.ticket_number])}" in alert
@@ -185,6 +186,37 @@ async def test_the_topic_stays_put_when_the_title_changes(processor, fake_zulip,
     assert (await Ticket.objects.aget(pk=ticket.pk)).zulip_topic == "T003-001: Web server down"
 
 
+async def test_a_ticket_without_its_created_notice_keeps_one_topic(processor, fake_zulip, ticket_with_comment):
+    """A ticket from before Zulip was set up gets no TicketCreated row: its first send of any kind stores the topic."""
+    ticket, comment = ticket_with_comment
+    await run(processor, PostComment(ticket_id=ticket.id, comment_id=comment.id))
+    await Ticket.objects.filter(pk=ticket.pk).aupdate(title="Renamed")
+    await run(processor, PostTicketUpdate(ticket_id=ticket.id, action="claimed", actor="support1"))
+
+    assert {topic for _, topic, _ in fake_zulip.sent} == {"T003-001: Web server down"}
+    assert (await Ticket.objects.aget(pk=ticket.pk)).zulip_topic == "T003-001: Web server down"
+
+
+async def test_a_notice_follows_a_topic_resolved_in_zulip(processor, fake_zulip, ticket):
+    await run(processor, TicketCreated(ticket_id=ticket.id))
+    resolved = f"✔ {topic_name(ticket)}"
+    await apply_rename(
+        {
+            "type": "update_message",
+            "message_id": 1,
+            "stream_name": "team03",
+            "orig_subject": topic_name(ticket),
+            "subject": resolved,
+            "propagate_mode": "change_all",
+        }
+    )
+    fake_zulip.sent.clear()
+
+    await run(processor, PostTicketUpdate(ticket_id=ticket.id, action="reopened", actor="team", reason="Still down"))
+
+    assert [(stream, topic) for stream, topic, _ in fake_zulip.sent] == [("team03", resolved)]
+
+
 async def test_ticket_created_retry_skips_the_post_already_made(processor, fake_zulip, ticket):
     fake_zulip.fail_once_on = "tickets"
     payload = TicketCreated(ticket_id=ticket.id)
@@ -206,7 +238,7 @@ async def test_comment_posts_to_ticket_topic_with_mentions_silenced(processor, f
     ticket, comment = ticket_with_comment
     await TicketComment.objects.filter(pk=comment.pk).aupdate(comment_text="ping @**all** and @*Support*")
     await run(processor, PostComment(ticket_id=ticket.id, comment_id=comment.id))
-    assert fake_zulip.sent == [("team03", ticket_topic(ticket), "**Unknown**\nping @_**all** and @_*Support*")]
+    assert fake_zulip.sent == [("team03", topic_name(ticket), "**Unknown**\nping @_**all** and @_*Support*")]
 
 
 async def test_long_comment_sent_in_parts_and_resumed(processor, fake_zulip, ticket_with_comment):
@@ -256,7 +288,7 @@ async def test_ticket_update_wording(processor, fake_zulip, ticket):
         "**Ticket Resolved**\n**Resolved By:** support1\n**Points Charged:** 5\n**Resolution Notes:** Fix @_**all**",
         "Ticket reopened by **team**\nReason: Still down",
     ]
-    assert {topic for _, topic, _ in fake_zulip.sent} == {ticket_topic(ticket)}
+    assert {topic for _, topic, _ in fake_zulip.sent} == {topic_name(ticket)}
 
 
 async def test_log_to_channel_posts_to_ops_topic(processor, fake_zulip):

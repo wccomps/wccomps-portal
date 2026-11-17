@@ -29,14 +29,14 @@ async def run(client: ZulipClient) -> None:
 
 
 async def event_loop(client: ZulipClient) -> None:
-    """Poll and handle events until cancelled. A lost queue is registered again at once; when the new one is lost
-    too before a poll is answered, or on any other failure, the loop waits first, each wait doubling up to
-    MAX_BACKOFF_SECONDS. events-zulip beats after each handled poll or waited-out failure, so only a stuck loop goes
+    """Poll and handle events until cancelled. A queue lost after a poll was answered is registered again at once;
+    one lost before its first poll is answered, or any other failure, makes the loop wait first, each wait doubling up
+    to MAX_BACKOFF_SECONDS. events-zulip beats after each handled poll or waited-out failure, so only a stuck loop goes
     stale."""
     queue: tuple[str, int] | None = None
     backoff = FIRST_BACKOFF_SECONDS
-    lost_queue = False
     while True:
+        fresh = queue is None
         try:
             if queue is None:
                 queue = await client.register_queue()
@@ -46,8 +46,7 @@ async def event_loop(client: ZulipClient) -> None:
         except ZulipError as e:
             if e.code == BAD_EVENT_QUEUE_ID:
                 queue = None
-                if not lost_queue:
-                    lost_queue = True
+                if not fresh:
                     logger.info("Zulip lost the event queue; registering a new one")
                     continue
             logger.warning(f"Zulip refused the event queue request ({e}); retrying in {backoff}s")
@@ -56,7 +55,7 @@ async def event_loop(client: ZulipClient) -> None:
             logger.warning(f"Could not reach Zulip for events ({e!r}); retrying in {backoff}s")
             backoff = await _wait(backoff)
         else:
-            backoff, lost_queue = FIRST_BACKOFF_SECONDS, False
+            backoff = FIRST_BACKOFF_SECONDS
             queue = queue_id, await _handle(client, events, last_event_id)
         record(EVENTS_ZULIP)
 

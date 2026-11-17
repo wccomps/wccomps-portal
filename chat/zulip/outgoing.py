@@ -90,13 +90,13 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
         return None
 
     async def _send_ops(self, message: str) -> None:
-        content = fit(to_zulip(message), ZULIP_MESSAGE_CHAR_LIMIT)
-        await self._send(settings.ZULIP_OPS_STREAM, settings.ZULIP_OPS_TOPIC, content)
+        await self._send(settings.ZULIP_OPS_STREAM, settings.ZULIP_OPS_TOPIC, message)
 
     async def _send(self, stream: str, topic: str, content: str) -> None:
-        """Post content, written for Zulip, to the topic; a stream that doesn't exist fails the task for good."""
+        """Post content to the topic, its times converted and cut to Zulip's limit; a stream that doesn't exist fails
+        the task for good."""
         try:
-            await self.client.send_stream_message(stream, topic, content)
+            await self.client.send_stream_message(stream, topic, fit(to_zulip(content), ZULIP_MESSAGE_CHAR_LIMIT))
         except ZulipError as e:
             if e.code == STREAM_DOES_NOT_EXIST:
                 raise PermanentTaskError(f"No Zulip stream {stream}: create it, then resend") from e
@@ -117,26 +117,24 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
 
     async def _ticket_created(self, payload: TicketCreated, progress: TaskProgress[StepsState]) -> None:
         """The ticket's summary in its topic, then an alert with its link in the staff stream; a retry skips the one
-        already sent. The topic is stored on the ticket first, so every later message (and a retry) goes to it."""
+        already sent."""
         tickets = Ticket.objects.select_related("team", "category", "assigned_to")
         ticket = await _target(tickets, id=payload.ticket_id)
-        if not ticket.zulip_topic:
-            ticket.zulip_topic = ticket_topic(ticket)
-            await Ticket.objects.filter(pk=ticket.pk).aupdate(zulip_topic=ticket.zulip_topic)
+        topic = await ticket_topic(ticket)
         url = settings.BASE_URL.rstrip("/") + reverse("ticket_detail", args=[ticket.ticket_number])
         alert = f"New ticket [{ticket.ticket_number}]({url}) from {quiet(ticket.team.team_name)}: {quiet(ticket.title)}"
         sends = [
             (team_stream(ticket.team.team_number), _ticket_summary(ticket)),
-            (settings.ZULIP_STAFF_STREAM, fit(to_zulip(alert), ZULIP_MESSAGE_CHAR_LIMIT)),
+            (settings.ZULIP_STAFF_STREAM, alert),
         ]
-        await self._send_each(ticket.zulip_topic, sends, progress)
+        await self._send_each(topic, sends, progress)
 
     async def _post_comment(self, payload: PostComment, progress: TaskProgress[StepsState]) -> None:
         ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
         comment = await _target(TicketComment.objects.select_related("author"), id=payload.comment_id)
         # A web comment has no length limit; send all of it, in as many messages as it takes
         text = f"**{quiet(comment.author_name)}**\n{quiet(comment.comment_text)}"
-        await self._send_parts(team_stream(ticket.team.team_number), ticket_topic(ticket), text, progress)
+        await self._send_parts(team_stream(ticket.team.team_number), await ticket_topic(ticket), text, progress)
 
     async def _post_ticket_update(self, payload: PostTicketUpdate, progress: TaskProgress[StepsState]) -> None:
         ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
@@ -145,7 +143,7 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
                 text = _card(card)
             case str(update):
                 text = quiet(update)
-        await self._send_parts(team_stream(ticket.team.team_number), ticket_topic(ticket), text, progress)
+        await self._send_parts(team_stream(ticket.team.team_number), await ticket_topic(ticket), text, progress)
 
     async def _broadcast(self, payload: BroadcastMessage, progress: TaskProgress[BroadcastState]) -> dict[str, object]:
         """The announcements stream, or each target team's stream (core.broadcast.target_teams). A team without a
@@ -160,15 +158,14 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
 
         match target:
             case Announcements():
-                content = fit(to_zulip(quiet(payload.message)), ZULIP_MESSAGE_CHAR_LIMIT)
-                await self._send(settings.ZULIP_ANNOUNCEMENTS_STREAM, ANNOUNCEMENT_TOPIC, content)
+                await self._send(settings.ZULIP_ANNOUNCEMENTS_STREAM, ANNOUNCEMENT_TOPIC, quiet(payload.message))
                 return {"stream": settings.ZULIP_ANNOUNCEMENTS_STREAM}
             case AllTeams() | Teams():
                 teams, not_found = await target_teams(target)
 
         state = progress.state
         reached, refused = state.setdefault("reached", []), state.setdefault("refused", {})
-        content = fit(to_zulip(announcement(payload.sender, quiet(payload.message))), ZULIP_MESSAGE_CHAR_LIMIT)
+        content = announcement(payload.sender, quiet(payload.message))
         for team in teams:
             number = team.team_number
             if number in reached or str(number) in refused:

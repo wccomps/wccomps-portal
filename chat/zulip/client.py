@@ -23,7 +23,6 @@ class ZulipError(Exception):
 
 class ZulipClient:
     def __init__(self, site: str, email: str, api_key: str, transport: httpx.AsyncBaseTransport | None = None) -> None:
-        """ValueError for a site that isn't https: every request carries the API key."""
         if not site.lower().startswith("https://"):
             raise ValueError(f"ZULIP_SITE must be an https:// URL, not {site!r}: every request carries the API key")
         self._http = httpx.AsyncClient(

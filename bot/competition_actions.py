@@ -22,7 +22,7 @@ from bot.utils import (
     team_chat_channel,
 )
 from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams, target_teams
-from core.chat_notices import CompetitionStatus, competition_status, status_card
+from core.chat_notices import CompetitionStatus, status_card
 from core.heartbeat import beat
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.queued_tasks import PermanentTaskError
@@ -81,8 +81,9 @@ STATUS_COLORS = {
 
 def _build_status_embed(config: CompetitionConfig) -> discord.Embed:
     card = status_card(config)
-    status = competition_status(config)
-    embed = discord.Embed(title=card.title, description=f"**{status}**", color=STATUS_COLORS[status])
+    embed = discord.Embed(
+        title=card.title, description=f"**{card.headline}**", color=STATUS_COLORS[CompetitionStatus(card.headline)]
+    )
     add_fields(embed, card.fields, time_style="F")
     embed.set_footer(text="Last updated")
     embed.timestamp = discord.utils.utcnow()

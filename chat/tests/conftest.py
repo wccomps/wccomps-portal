@@ -24,7 +24,8 @@ class FakeZulip:
         self.reactions: list[tuple[int, str]] = []
         self.missing_streams: set[str] = set()
         self.fail_once_on: str | None = None  # a stream whose next send answers HTTP 502
-        self.events: list[list[dict[str, object]]] = []  # one list per get_events call
+        # One answer per get_events call: its events, or an error it raises
+        self.events: list[list[dict[str, object]] | ZulipError] = []
         self.get_events_errors: list[ZulipError] = []
         self.registered = 0
         self.uploads: dict[str, bytes] = {}
@@ -60,7 +61,10 @@ class FakeZulip:
             raise self.get_events_errors.pop(0)
         if not self.events:
             raise asyncio.CancelledError  # ends the runner under test
-        return self.events.pop(0)
+        answer = self.events.pop(0)
+        if isinstance(answer, ZulipError):
+            raise answer
+        return answer
 
     async def fetch_upload(self, path: str, limit: int) -> bytes:
         self.fetched.append(path)

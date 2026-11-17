@@ -1049,14 +1049,17 @@ def on_message(run: Run, data: Draws, cog: Any) -> Go:
 
 
 def saved_message(run: Run, data: Draws) -> tuple[Any, int]:
-    """A channel and a message id, the message saved as a ticket comment when the channel is a ticket's thread."""
+    """A channel and a message id, the message saved as a ticket comment when the channel is a ticket's thread,
+    written by the role's portal account as the listener saves it (none for the unlinked role)."""
     from ticketing.models import TicketComment
 
     channel = channel_for(run, data)
     ticket = Ticket.objects.filter(discord_thread_id=channel.id).first()
     message_id = data.draw(st.integers(1, 2**63 - 1), label="message id")
     if ticket and data.draw(st.booleans(), label="was saved"):
-        TicketComment.objects.create(ticket=ticket, comment_text="before", discord_message_id=message_id)
+        TicketComment.objects.create(
+            ticket=ticket, author=run.world.users.get(run.role), comment_text="before", discord_message_id=message_id
+        )
     return channel, message_id
 
 

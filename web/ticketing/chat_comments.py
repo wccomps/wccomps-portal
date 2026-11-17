@@ -1,7 +1,8 @@
 """A message in a ticket's chat thread or topic becomes the ticket's comment the same way on every chat backend:
 counted once against the rate limit, saved once, and queued for the other chat backends. Its edits and deletes carry
-over to the comment and go no further (the copies elsewhere keep their text). Each backend decides first who may
-write to the ticket, and stores the message's files itself."""
+over to the comment and go no further (the copies elsewhere keep their text); an edit only while the comment's author
+may still write to the ticket. Each backend decides first who may write to the ticket, and stores the message's files
+itself."""
 
 import logging
 from dataclasses import dataclass
@@ -12,7 +13,8 @@ from django.db import transaction
 from core.models import QueuedTask
 from core.queued_tasks import PostComment
 from core.task_backends import TaskBackend
-from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketComment
+from ticketing.access import ticket_open_to_user
+from ticketing.models import CommentRateLimit, Ticket, TicketComment
 from ticketing.utils import storable
 
 logger = logging.getLogger(__name__)
@@ -29,11 +31,6 @@ class Recorded:
     store_files: bool = False  # the message has files not yet saved, and the caller stores them now
 
 
-def _files_saved(origin: TaskBackend, message_id: int) -> bool:
-    """Whether the message's files are already the ticket's attachments: only a Zulip message's record its id."""
-    return origin == TaskBackend.ZULIP and TicketAttachment.objects.filter(zulip_message_id=message_id).exists()
-
-
 def record_message(
     ticket: Ticket,
     origin: TaskBackend,
@@ -42,16 +39,15 @@ def record_message(
     actor_key: str,
     author: User | None,
     text: str,
-    has_files: bool,
+    has_files: bool,  # the message has files not yet saved: the caller stores them when store_files comes back
 ) -> Recorded:
     """Save a chat message's text as the ticket's comment and queue it for the other chat backends, counting the
-    message once against the rate limit (text and files together). A message whose text and files are already saved
-    (an event delivered again) is passed over, and so is one with neither."""
+    message once against the rate limit (text and files together). A message with no new text or files (an event
+    delivered again) is passed over."""
     field, text = _MESSAGE_ID_FIELD[origin], storable(text)
     with transaction.atomic():
         new_comment = bool(text) and not TicketComment.objects.filter(**{field: message_id}).exists()
-        new_files = has_files and not _files_saved(origin, message_id)
-        if not (new_comment or new_files):
+        if not (new_comment or has_files):
             return Recorded()
         allowed, reason = CommentRateLimit.check_rate_limit(ticket.id, actor_key)
         if not allowed:
@@ -68,13 +64,18 @@ def record_message(
         logger.info(
             f"Saved {origin.label} message {message_id} as comment {comment.id} on ticket {ticket.ticket_number}"
         )
-    return Recorded(store_files=new_files)
+    return Recorded(store_files=has_files)
 
 
 def apply_edit(origin: TaskBackend, message_id: int, text: str) -> None:
-    """A chat message's new text onto its comment, if it has one."""
-    if TicketComment.objects.filter(**{_MESSAGE_ID_FIELD[origin]: message_id}).update(comment_text=storable(text)):
-        logger.info(f"Synced the edit of {origin.label} message {message_id} to its comment")
+    """A chat message's new text onto its comment, if it has one whose author may still write to the ticket
+    (ticketing.access.ticket_open_to_user): an author since disabled or moved off the team changes nothing."""
+    comments = TicketComment.objects.select_related("ticket", "author__usergroups")
+    comment = comments.filter(**{_MESSAGE_ID_FIELD[origin]: message_id}).first()
+    if comment is None or comment.author is None or not ticket_open_to_user(comment.ticket, comment.author):
+        return
+    TicketComment.objects.filter(pk=comment.pk).update(comment_text=storable(text))
+    logger.info(f"Synced the edit of {origin.label} message {message_id} to its comment")
 
 
 def apply_delete(origin: TaskBackend, message_ids: list[int]) -> None:

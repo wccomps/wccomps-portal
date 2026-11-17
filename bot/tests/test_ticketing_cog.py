@@ -223,9 +223,12 @@ class TestTicketingCog:
             discord_thread_id=5555666777,
         )
 
-        # Create existing comment
+        # Create existing comment, written by a member of the ticket's team
+        author = await User.objects.acreate(username="editor")
+        await UserGroups.objects.acreate(user=author, authentik_id="editor-uid", groups=[team.authentik_group])
         comment = await TicketComment.objects.acreate(
             ticket=ticket,
+            author=author,
             comment_text="Original text",
             discord_message_id=8888999000,
         )

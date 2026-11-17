@@ -13,9 +13,9 @@ Competition management platform for WRCCDC: Discord bot, Django web app, and Aut
 ## Run with Docker
 
 ```bash
-cp .env.example .env   # fill in credentials (DB password, Discord token or Zulip bot, Authentik OAuth client)
+cp .env.example .env   # fill in credentials (DB password, Authentik OAuth client, and DISCORD_BOT_TOKEN or the ZULIP_* trio)
 docker compose up -d   # Postgres, web and worker from ghcr.io/wccomps/wccomps-portal; --build runs this checkout
-docker compose --profile chat up -d   # also the chat process, with DISCORD_BOT_TOKEN or the ZULIP_* settings set
+docker compose --profile chat up -d   # also the chat process, for the chat backends set in .env
 ```
 
 The web app listens on `localhost:${WEB_PORT:-8000}`. Put it behind an HTTPS reverse proxy: with

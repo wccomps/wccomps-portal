@@ -101,7 +101,7 @@ the unparenthesized form is used intentionally throughout.
   processor is a `QueueProcessor[P]` over its groups, and mypy checks its match exhaustive over them; a row outside
   them fails at once), and a migration, since `QueuedTask.task_type`'s choices come from the union
 - What a chat notice says (a ticket update, a ticket's facts, the competition status) lives in `core.chat_notices`;
-  each chat backend only renders it (Discord as embeds, Zulip as Markdown)
+  each chat backend only renders it (a `Card` as a Discord embed or as Zulip Markdown lines)
 - An ops notice goes through `core.services.ops.notify_ops` (audited, then a `LogToChannel` row), never a direct
   `LogToChannel` enqueue
 - A payload's `ticket_id` also sets the task's ticket FK, so deleting a ticket drops its pending tasks

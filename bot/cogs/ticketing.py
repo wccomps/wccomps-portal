@@ -257,6 +257,7 @@ class TicketingCog(commands.Cog):
             return
 
         ticket = await Ticket.objects.filter(discord_thread_id=after.channel.id).afirst()
+        # The editor's Discord link must still reach the ticket; chat_comments.apply_edit checks the comment's author
         if not ticket or not await may_write_to_ticket(ticket, after.author.id):
             return
 

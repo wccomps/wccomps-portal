@@ -36,7 +36,13 @@ from quotient.client import (
 )
 
 from chat.zulip.client import ZulipClient, ZulipError
-from chat.zulip.incoming import IncomingMessage, deleted_message_ids, edited_message, parse_message_event
+from chat.zulip.incoming import (
+    IncomingMessage,
+    deleted_message_ids,
+    edited_message,
+    parse_message_event,
+    renamed_topic,
+)
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
 from core.nextcloud import NextcloudAPIError, NextcloudManager
 from core.proxmox import ProxmoxAPIError, ProxmoxClient, ProxmoxSnapshot, ProxmoxTaskStatus, ProxmoxVM
@@ -140,6 +146,15 @@ ZULIP_EVENTS = {
         {"type": "update_message", "id": 1, "message_id": 77, "content": "edited"},
         {"type": "delete_message", "id": 2, "message_id": 77, "message_ids": [77, 78]},
         {"type": "heartbeat", "id": 3},
+        {
+            "type": "update_message",
+            "id": 4,
+            "message_id": 77,
+            "stream_name": "team03",
+            "orig_subject": "T003-001 Web",
+            "subject": "✔ T003-001 Web",
+            "propagate_mode": "change_all",
+        },
     ],
 }
 
@@ -399,7 +414,7 @@ def check_bool(result: object) -> None:
 def zulip_events_read() -> object:
     """A poll's events, each through the readers chat.zulip.incoming handles it with."""
     events = zulip(lambda c: c.get_events("1517975029:0", -1))()
-    return [(parse_message_event(e), edited_message(e), deleted_message_ids(e)) for e in events]
+    return [(parse_message_event(e), edited_message(e), deleted_message_ids(e), renamed_topic(e)) for e in events]
 
 
 def _zulip_id(value: object) -> bool:
@@ -415,16 +430,20 @@ def check_zulip_events_read(result: object) -> None:
             and all(is_str(v) for v in (m.stream, m.topic, m.sender_email, m.sender_name, m.content))
         )
 
+    def renamed_ok(r: object) -> bool:
+        return r is None or (isinstance(r, tuple) and len(r) == 3 and all(is_str(v) for v in r))
+
     def ok(r: object) -> bool:
         return isinstance(r, list) and all(
             message_ok(message)
             and (edit is None or (_zulip_id(edit[0]) and is_str(edit[1])))
             and isinstance(deleted, list)
             and all(_zulip_id(i) for i in deleted)
-            for message, edit, deleted in r
+            and renamed_ok(renamed)
+            for message, edit, deleted, renamed in r
         )
 
-    outcome(result, ok, "each event's message, edit and deleted ids, or None")
+    outcome(result, ok, "each event's message, edit, deleted ids and renamed topic, or None")
 
 
 AM = "web/core/authentik_manager.py:AuthentikManager"
