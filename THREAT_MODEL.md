@@ -173,9 +173,10 @@ queue Zulip fills with the messages in the streams the bot is subscribed to, so 
 - **Gold team holds near-admin power by design**: credential resets, app and account toggles, broadcasts and packet
   passwords. Only `PORTAL_ADMIN_GROUP` (default `Portal_Admin`, WRCCDC's `WCComps_Discord_Admin`) reaches Django admin.
 - **Upstream truth.** Quotient's scores and Proxmox's VM state are validated for shape, not for honesty.
-- **Cloudflare's client address is trusted only when configured.** A deployment behind Cloudflare sets
+- **The proxy's client address is trusted only when configured.** A deployment behind Cloudflare, or behind a proxy
+  that overwrites `CF-Connecting-IP` with the client address and is the origin's only way in, sets
   `TRUST_CF_CONNECTING_IP=true`; the self-hosting `docker-compose.yml` leaves it off, so its limits key on the
-  connecting address.
+  connecting address, which behind any other proxy is the proxy's (docs/self-hosting.md "The reverse proxy").
 - **Inline scripts are allowed by the CSP**, so script injection defence rests on escaping, which the escaping tests
   guard.
 - **Team passwords are deliberately readable by admins and gold team**: packet emails need them in clear text.

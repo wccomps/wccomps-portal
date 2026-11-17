@@ -2,7 +2,7 @@
 
 How to run the portal for your own competition: the processes, the Authentik setup it needs, the optional
 integrations, Discord and Zulip, and every setting. Settings are environment variables; `.env.example` lists them all,
-grouped as below, with a working or empty value.
+and the [settings reference](#settings-reference) gives each one's default and meaning.
 
 ## The processes
 
@@ -34,9 +34,11 @@ docker compose up -d                  # Postgres, web and worker from the publis
 docker compose --profile chat up -d   # also the chat process, once DISCORD_BOT_TOKEN or the ZULIP_* trio is set
 ```
 
-`docker compose up -d --build` runs the checkout instead; `PORTAL_TAG` picks the published tag (default `main`). The
-web app listens on `localhost:${WEB_PORT:-8000}`. Put it behind an HTTPS reverse proxy: with `DJANGO_DEBUG=False` the
-session and CSRF cookies are HTTPS-only. The worker and chat services have the health checks above.
+`docker compose up -d --build` runs the checkout instead; `PORTAL_TAG` picks the published tag. Compose's Postgres
+refuses to start until `DB_PASSWORD` is set. Compose publishes the web app's port (`WEB_PORT`) on every host
+interface, and Docker's port rules get past host firewalls such as ufw: set `WEB_PORT=127.0.0.1:8000` to publish it
+on localhost only when the reverse proxy below runs on the same host, or block the port, so clients reach the portal
+only through the proxy. The worker and chat services have the health checks above.
 
 ### Without Docker
 
@@ -57,6 +59,27 @@ uv run python -m core.health worker                   # exits 0 while the worker
 WeasyPrint (scorecard PDFs) needs Pango, Cairo and GDK-Pixbuf from the system; the `Dockerfile` lists the Debian
 packages.
 
+### The reverse proxy
+
+Put the web app behind an HTTPS reverse proxy: with `DJANGO_DEBUG=False` the session and CSRF cookies are HTTPS-only.
+The proxy must:
+
+- pass the client's `Host` header through, and set `X-Forwarded-Proto: https`, replacing any value the client sent.
+  The portal builds its sign-in redirect URI from them, and Authentik refuses one that isn't
+  `https://<portal host>/auth/callback/`. The host must be in `ALLOWED_HOSTS`.
+- unless it is Cloudflare, set `CF-Connecting-IP` to the client's address, replacing any value the client sent, with
+  `TRUST_CF_CONNECTING_IP=True` on web. Otherwise the registration form's rate limit, which is per address, counts
+  every client as the proxy, so a few registrations shut registration for everyone.
+
+With `TRUST_CF_CONNECTING_IP` on, clients can set their own address unless the origin is reachable only through the
+proxy (or Cloudflare), so make it so. With nginx:
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Forwarded-Proto https;
+proxy_set_header CF-Connecting-IP $remote_addr;
+```
+
 ## Authentik
 
 Authentik is the only sign-in and the only source of roles. The portal needs an OAuth2/OpenID provider to sign in with,
@@ -72,7 +95,7 @@ and an API token for everything else.
    account's key, `preferred_username` its portal username.
 3. Set `AUTHENTIK_CLIENT_ID` and `AUTHENTIK_SECRET` to the provider's client ID and secret, and `AUTHENTIK_OIDC_URL` to
    `https://<authentik>/application/o/<application slug>/`. The portal builds the authorize, token, userinfo and
-   end-session URLs from it (no discovery); it defaults to `AUTHENTIK_URL/application/o/discord-bot/`.
+   end-session URLs from it (no discovery).
 
 A user's groups are read at each sign-in and again by the worker every 5 minutes, so a group change takes effect within
 5 minutes (at once on the next sign-in). A disabled Authentik account holds no permissions.
@@ -87,7 +110,7 @@ as an empty list, not an error; run the readiness checks on the Competition page
 |---|---|---|
 | Users | view, change, reset password | Reading every user and their groups (group refresh, team accounts), enabling and disabling team accounts at a start and stop, storing a linked Discord ID in the user's attributes, setting team passwords |
 | Groups | view, add user | Reading group names; the readiness fix that puts a team account in its team group |
-| Authenticated sessions | view, delete | Ending a team account's sessions when its credentials are reset. The readiness check "Authentik sessions visible" tests the view permission (it passes only when the token sees at least one session, so sign in to Authentik first); it can't test delete |
+| Authenticated sessions | view, delete | Ending a team account's sessions when its credentials are reset. The readiness check "Authentik sessions visible" tests the view permission: with one account per team, it passes only when the token sees at least one session, so sign in to Authentik first; with several accounts per team it passes at once, since the portal resets no team credentials. It can't test delete |
 | Applications | view | Finding each controlled application by slug |
 | Providers | view (`authentik_core.view_provider`, global) | Listing applications to choose controlled applications from |
 | Policy bindings | view, change | Enabling and disabling each controlled application's blue team binding |
@@ -96,14 +119,14 @@ The token can't create accounts or groups: create them in Authentik.
 
 ### Permission groups
 
-Each role's group is `PORTAL_GROUP_PREFIX` (default `Portal_`) plus a fixed suffix (`web/core/permission_constants.py`
-`PERMISSION_MAP`); the admin group is its own setting. Create the ones you use:
+Each role's group is `PORTAL_GROUP_PREFIX` plus a fixed suffix (`web/core/permission_constants.py` `PERMISSION_MAP`);
+the admin group is its own setting. Create the ones you use (named here with the default prefix):
 
 | Group | Grants |
 |---|---|
-| `PORTAL_ADMIN_GROUP` (default `Portal_Admin`) | Everything, including Django's admin at `/admin/` |
+| `PORTAL_ADMIN_GROUP` | Everything, including Django's admin at `/admin/` |
 | `Portal_GoldTeam` | Gold team, and every white, orange and blue team permission: the competition and its setup, teams and their accounts, broadcasts, packets, scorecards, ticket categories |
-| `Portal_WhiteTeam`, `Portal_WhiteTeam_Lead` | White team pages (inject grading, incident reports); the lead adds the white team lead's |
+| `Portal_WhiteTeam`, `Portal_WhiteTeam_Lead` | White team pages (inject grading, incident reports); the lead adds the white team lead's, and needs `Portal_WhiteTeam` too for the white team pages |
 | `Portal_OrangeTeam`, `Portal_OrangeTeam_Lead` | Orange team pages; the lead adds the orange team lead's |
 | `Portal_RedTeam` | Red team findings |
 | `Portal_Ticketing_Support` | Working tickets |
@@ -111,18 +134,13 @@ Each role's group is `PORTAL_GROUP_PREFIX` (default `Portal_`) plus a fixed suff
 | `Portal_BlackTeam` | Only its Discord role |
 | A team's group (below) | That team's blue team access: its own tickets and packets |
 
-With Discord, the black, white, orange, red and gold team groups also grant the Discord role in `BLACKTEAM_ROLE_ID`,
-`WHITETEAM_ROLE_ID` and so on.
-
 ### Teams and team accounts
 
-`prepare_database` creates teams 1 to `MAX_TEAMS` (default 50) the first time. A new team's Authentik group is
-`TEAM_GROUP_PATTERN` (default `PORTAL_GROUP_PREFIX` plus `BlueTeam{number:02d}`, so `Portal_BlueTeam01`); after that
-each team keeps the group stored on it (editable in Django's admin). An active team's group grants blue team access
-to its members.
+`prepare_database` creates teams 1 to `MAX_TEAMS` the first time. A new team's Authentik group is
+`TEAM_GROUP_PATTERN` (`Portal_BlueTeam01` by default); after that each team keeps the group stored on it (editable in
+Django's admin). An active team's group grants blue team access to its members.
 
-`TEAM_ACCOUNT_PATTERN` (default `team{number}`) says which Authentik accounts are a team's; `{number}` stands for the
-team's two-digit number.
+`TEAM_ACCOUNT_PATTERN` says which Authentik accounts are a team's; `{number}` stands for the team's two-digit number.
 
 - **One shared account per team** (the default): a pattern with no regular expression operator names the team's one
   account by exact username (`team01`, `team02`, ...). Every member of the team signs in with it, and the portal can
@@ -160,7 +178,7 @@ pulls in. Set `QUOTIENT_API_URL` and an `[[admin]]` account from Quotient's `eve
 - A ticket's service is matched to Quotient's check `box-service`.
 
 Without Quotient, inject grading says Quotient is unavailable, box lists stay empty, the stop's score sync step fails
-(the stop still completes), and the worker logs the failed sync every 15 minutes.
+(the stop still completes), and the worker logs the failed sync once and retries it every 15 minutes.
 
 ### Proxmox
 
@@ -169,13 +187,14 @@ Reset / Scrub"): the VM is rolled back to a snapshot (`PROXMOX_DEFAULT_SNAPSHOT`
 ticket is resolved. The Quotient sync also adds the team VMs Quotient doesn't score (routers, firewalls) to the box
 lists.
 
-- `PROXMOX_API_URL` is one host or several, comma-separated (a GET moves on to the next when one is down);
-  `PROXMOX_API_TOKEN` is `user@realm!tokenid=secret`.
+- `PROXMOX_API_URL` is one host or several, comma-separated: a request moves on to the next host when one refuses the
+  connection, and a GET also when one times out or answers 502, 503 or 504. `PROXMOX_API_TOKEN` is
+  `user@realm!tokenid=secret`.
 - The team VMs follow one layout (`web/core/proxmox.py`): team N's VMs are in the pool `blue-team-NN`, with VMIDs from
   `10000 + N*100` to `10000 + N*100 + 99`, named `teamNN-<host>`. Tags aren't used.
 - The token reads pools, lists, rolls back and starts VMs, and reads task status. Proxmox's documentation names the
-  privileges for those calls (Pool.Audit, VM.Audit, VM.Snapshot.Rollback, VM.PowerMgmt, Sys.Audit); a
-  privilege-separated token needs them on the token itself.
+  privileges for those calls (Pool.Audit, VM.Audit, VM.Snapshot.Rollback, VM.PowerMgmt, Sys.Audit). A
+  privilege-separated token holds only what both it and its user hold, so grant them to the user and the token.
 - `PROXMOX_CA_FILE` trusts the cluster's own CA; `PROXMOX_VERIFY_SSL=False` turns verification off.
 
 Without Proxmox, a box reset ticket shows Proxmox as unreachable and is resolved by hand.
@@ -195,7 +214,7 @@ through Authentik. The account's name is the team's account username (`team01`; 
 - A competition start makes the active teams' accounts; opening an event remakes them; Close Out and the Discord
   `/competition cleanup-competition` delete them with their files; handing a team to a new school remakes its account.
 - Set `NEXTCLOUD_URL`, a Nextcloud admin as `NEXTCLOUD_USERNAME` and `NEXTCLOUD_PASSWORD`, and
-  `NEXTCLOUD_OIDC_PROVIDER_ID` to the numeric id of the Authentik provider in `user_oidc` (default 1).
+  `NEXTCLOUD_OIDC_PROVIDER_ID` to the numeric id of the Authentik provider in `user_oidc`.
 
 It runs in the worker, so it works with or without a chat backend. Without the three settings the Nextcloud steps are
 skipped.
@@ -203,8 +222,9 @@ skipped.
 ### Email
 
 Packets and scorecards are emailed from `DEFAULT_FROM_EMAIL`, packets with `DEFAULT_REPLY_TO_EMAIL` as Reply-To when
-set. The default backend is SMTP with the `EMAIL_*` settings; `.env.example` sets the console backend, which prints each
-message to the log instead.
+set. The backend is SMTP with the `EMAIL_*` settings unless `EMAIL_BACKEND` names another.
+`django.core.mail.backends.console.EmailBackend` prints each message to the log instead and sends nothing; packets
+carry team passwords, so use it only for testing.
 
 ### Error alerts
 
@@ -227,25 +247,15 @@ its original text. Files posted in one are stored on the ticket and not re-poste
 
 1. Create a Discord application with a bot, and turn on its privileged intents **Server Members** and **Message
    Content**. Set `DISCORD_BOT_TOKEN` to its token.
-2. Invite it to the competition server (`DISCORD_GUILD_ID`) and, if staff link from a separate one, the volunteer server
-   (`VOLUNTEER_GUILD_ID`, where only `/link` is registered). The bot creates and deletes team roles, categories and
-   channels, sets their permissions, makes private ticket threads, pins and deletes messages and assigns roles, so
-   give it Manage Roles, Manage Channels, Manage Threads, Create Private Threads, Manage Messages, Send Messages,
-   Send Messages in Threads, Embed Links, Attach Files and Read Message History. Its role must be above every role it
-   assigns.
-3. Create the roles and channels and set their IDs (Developer Mode, right-click, Copy ID). Each ID defaults to 0, which
-   turns off what needs it; at startup the bot logs the required ones still at 0 and posts them to the ops log channel,
-   and the readiness checks list them.
-
-| Setting | What it is |
-|---|---|
-| `DISCORD_LOG_CHANNEL_ID` | Ops log: role sync summaries, failed tasks, admin command audits, competition notices |
-| `DISCORD_TICKET_QUEUE_CHANNEL_ID` | Staff ticket dashboard, one message refreshed every 10 seconds |
-| `DISCORD_ANNOUNCEMENT_CHANNEL_ID` | Broadcasts to the announcements target, mentioning the blue team role |
-| `DISCORD_WELCOME_CHANNEL_ID` | Optional: the ticket panel (a Create Ticket button) |
-| `DISCORD_LINK_CHANNEL_ID` | Optional: the Link Account panel; other messages posted there are deleted and answered with a link by DM |
-| `BLUETEAM_ROLE_ID` | Every linked team member's role |
-| `BLACKTEAM_ROLE_ID`, `WHITETEAM_ROLE_ID`, `ORANGETEAM_ROLE_ID`, `REDTEAM_ROLE_ID`, `GOLDTEAM_ROLE_ID` | The role for each Authentik group (`Portal_BlackTeam` and so on) |
+2. Invite it to the competition server (`DISCORD_GUILD_ID`) and the volunteer server (`VOLUNTEER_GUILD_ID`), where
+   staff only `/link`. Both are required; with one server, set `VOLUNTEER_GUILD_ID` to the `DISCORD_GUILD_ID` value.
+   Give the bot **Administrator**: the team categories it creates deny @everyone, which takes away the bot's own access
+   without it, and Discord refuses a channel permission the bot sets but doesn't hold itself. Its role must be above
+   every role it assigns. Broadcasts ping the blue team role, which needs that role mentionable or the bot's Mention
+   All Roles permission (Administrator includes it).
+3. Create the roles and channels in [Discord settings](#discord-settings) and set their IDs (Developer Mode,
+   right-click, Copy ID). An ID at 0 turns off what needs it; at startup the bot logs the required ones still at 0 and
+   posts them to the ops log channel, and the readiness checks list them.
 
 Members run `/link`, sign in to the portal, and get their roles; a team member also gets the team's role (`Team NN`) and
 category (`team NN`, with `teamNN-chat` and `teamNN-voice`), which the bot creates. Besides the white and orange team
@@ -253,70 +263,69 @@ roles, these roles see every team category when they exist, found by name: `<ORG
 `Orange Team Guest`, `Black Team Guest`, `<ORG_SHORT_NAME> Room Judge` (read only), `<ORG_SHORT_NAME> Operations Team`,
 and `DISCORD_SERVER_OWNER_ROLE` when set.
 
-The bot syncs its slash commands when they change; `SYNC_COMMANDS=true` forces a sync at every start.
-
 ### Zulip
 
 1. Create a bot in the Zulip realm and set `ZULIP_SITE` (https only), `ZULIP_BOT_EMAIL` and `ZULIP_API_KEY`.
-2. Create the streams: one per team (`ZULIP_TEAM_STREAM`, default `team{number:02d}`), the staff ticket stream
-   (`ZULIP_STAFF_STREAM`, `tickets`), announcements (`ZULIP_ANNOUNCEMENTS_STREAM`, `announcements`) and ops
-   (`ZULIP_OPS_STREAM` and topic `ZULIP_OPS_TOPIC`, both `ops`). Subscribe the bot to all of them: Zulip delivers the
-   bot only the streams it is subscribed to. A notice for a missing stream fails, and the ops stream is told to create
-   it.
-3. Let the bot see members' real email addresses: a realm email visibility setting that includes the bot, or an admin
-   bot.
+2. Create the streams in [Zulip settings](#zulip-settings) (one per team, staff tickets, announcements and ops) and
+   subscribe the bot to all of them: Zulip delivers the bot only the streams it is subscribed to. A notice for a
+   missing stream fails, and the ops stream is told to create it.
+3. Let the bot see members' email addresses, which it looks up for each reply. A member's email visibility (a personal
+   setting; the realm sets its default for new users) must include the bot: members, or admins with an admin bot.
+   Everyone isn't needed.
 
 Each ticket gets a topic in its team's stream, named by its number and title, and a notice in the staff stream; a new
-ticket mentions the user groups `ZULIP_TEAM_MENTION` (a pattern such as `Team {number:02d}`) and `ZULIP_STAFF_MENTION`
-when set. Broadcasts go to the announcements stream or each team stream, ops notices and competition status to the ops
-stream. The runner long-polls Zulip, so it needs no public address.
+ticket mentions the user groups `ZULIP_TEAM_MENTION` and `ZULIP_STAFF_MENTION` when set. Broadcasts go to the
+announcements stream or each team stream, ops notices and competition status to the ops stream. The runner long-polls
+Zulip, so it needs no public address.
 
 A message in a ticket's topic becomes a comment, and its uploads (up to 10) are stored on the ticket, only when the
-sender's Zulip email matches, ignoring case, exactly one portal account that may write to the ticket: staff, or a
-member of the ticket's team. A portal account exists from its first sign-in, with the email Authentik gives it, so
-members sign in to the portal once and keep the same email in Zulip and Authentik. With one shared account per team,
-that is the shared account's email, so only a member using it in Zulip can reply there; the others reply in the portal.
-Anyone else is told so in the topic and nothing is saved. Tickets are opened in the portal (or Discord), not in Zulip.
+sender's Zulip account email (step 3) matches, ignoring case, exactly one portal account that may write to the ticket:
+staff, or a member of the ticket's team. A portal account exists from its first sign-in, with the email Authentik
+gives it, so members sign in to the portal once and keep the same email in Zulip and Authentik. With one shared
+account per team, that is the shared account's email, so only a member using it in Zulip can reply there; the others
+reply in the portal. Anyone else is told so in the topic and nothing is saved. Tickets are opened in the portal (or
+Discord), not in Zulip.
 
 The portal trusts the realm for this (`THREAT_MODEL.md`, accepted risks): the realm must not let anyone take an email
 address they don't own, and the bot sees every message in the streams it is subscribed to.
 
 ## Ticket categories
 
-The first migration seeds six categories: Service Scoring Validation, Box Reset / Scrub (the Proxmox box reset),
+Ticketing migration 0009 seeds six categories: Service Scoring Validation, Box Reset / Scrub (the Proxmox box reset),
 Scoring Service Check, Black Team Phone Consultation, Black Team Hands-on Consultation, and Other / General Issue, each
 with its point cost and required fields. Edit, add or delete them at `/ops/admin/categories/` (gold team or ticketing
 admin). If you replace Box Reset / Scrub, point `BOX_RESET_CATEGORY_ID` at the new category's ID.
 
 ## Settings reference
 
-Every setting, with its default when unset. `.env.example` has the same groups.
+Every setting, with its default when unset and its meaning. `.env.example` has the same groups.
 
 ### Required
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `ORG_NAME` | empty (refused) | Your organization's name; signs packet emails |
-| `ORG_SHORT_NAME` | empty (refused) | Short name; heads email subjects and scorecards, and starts the Discord guest role names |
+| `ORG_SHORT_NAME` | empty (refused) | Short name; heads email subjects and scorecards, and starts the Observers, Room Judge and Operations Team role names |
 | `AUTHENTIK_URL` | empty (refused) | Authentik's address, for the API |
 | `DEFAULT_FROM_EMAIL` | empty (refused) | From address of packet and scorecard emails |
 | `DJANGO_SECRET_KEY` | random per process (the web server refuses) | Signs sessions, CSRF tokens and OAuth state; keep it fixed |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1` | Host names the portal answers to, comma-separated |
 | `BASE_URL` | `http://localhost:5000` | The portal's public address, for links in chat and email; an https one is CSRF's trusted origin |
 | `AUTHENTIK_OIDC_URL` | `AUTHENTIK_URL/application/o/discord-bot/` | The sign-in provider's OpenID base |
-| `AUTHENTIK_CLIENT_ID`, `AUTHENTIK_SECRET` | none (sign-in answers "OAuth is not configured") | The provider's client ID and secret |
+| `AUTHENTIK_CLIENT_ID` | none (sign-in answers "OAuth is not configured") | The provider's client ID |
+| `AUTHENTIK_SECRET` | none (sign-in fails at the token exchange) | The provider's client secret |
 | `AUTHENTIK_TOKEN` | empty | The API token |
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | `localhost`, `5432`, `wccomps`, `wccomps`, `wccomps` | Postgres. Compose sets `DB_HOST` and `DB_PORT` itself and creates the database with the other three |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | `localhost`, `5432`, `wccomps`, `wccomps`, `wccomps` | Postgres. Compose sets `DB_HOST` and `DB_PORT` itself and creates the database with the other three; its Postgres refuses to start while `DB_PASSWORD` is empty |
 
 ### Optional
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `DJANGO_DEBUG` | `False` | `True` only on a developer's machine; it also lets the cookies go over plain HTTP |
-| `TRUST_CF_CONNECTING_IP` | off | `true` when every request comes through Cloudflare, so rate limits and the access log use its client address |
-| `WEB_PORT` | `8000` | Port Compose publishes the web app on |
+| `TRUST_CF_CONNECTING_IP` | off | `true` when every request reaches web through Cloudflare, or a proxy that sets `CF-Connecting-IP` to the client's address ([The reverse proxy](#the-reverse-proxy)), so the registration rate limit and the app's access log use the client address |
+| `WEB_PORT` | `8000` | Port Compose publishes the web app on, on every interface; `127.0.0.1:8000` publishes it on localhost only |
 | `PORTAL_TAG` | `main` | Image tag Compose runs |
-| `GUNICORN_WORKERS` | `4` | Gunicorn workers; each holds a database connection |
+| `GUNICORN_WORKERS` | `4` | Gunicorn workers; each holds a database connection, plus one per thread while packets are emailed, so keep workers times web replicas well under Postgres `max_connections` (120 in Compose) |
 | `EMAIL_BACKEND` | `django.core.mail.backends.smtp.EmailBackend` | Django email backend |
 | `EMAIL_HOST`, `EMAIL_PORT` | `localhost`, `587` | SMTP server |
 | `EMAIL_USE_TLS`, `EMAIL_USE_SSL` | `True`, `False` | SMTP encryption |
@@ -335,22 +344,28 @@ Every setting, with its default when unset. `.env.example` has the same groups.
 | `HTTPX_DEFAULT_TIMEOUT` | `10` | Seconds for outside calls: Authentik, Proxmox, Nextcloud, aweful-proxy, Zulip, the Quotient login |
 | `DISCORD_WEBHOOK_TIMEOUT` | `5` | Seconds for the error alert post |
 | `DISCORD_ERROR_WEBHOOK_URL` | empty (off) | Discord webhook for error alerts; must be https |
-| `BOT_HEARTBEAT_DIR` | `/app/run/heartbeat` | Where the worker and chat write the heartbeats `core.health` reads; set it to a writable directory outside the image |
+| `BOT_HEARTBEAT_DIR` | `/app/run/heartbeat` (the image creates it) | Where the worker and chat write the heartbeats `core.health` reads; for a plain run, set it to a writable directory |
 
-### Discord
+### Discord settings
+
+An ID at `0` turns off what needs it.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `DISCORD_BOT_TOKEN` | empty (Discord off) | The bot's token; any value configures Discord |
-| `DISCORD_GUILD_ID` | `0` | Competition server |
-| `VOLUNTEER_GUILD_ID` | `0` | Volunteer server (`/link` only) |
-| `DISCORD_LOG_CHANNEL_ID`, `DISCORD_TICKET_QUEUE_CHANNEL_ID`, `DISCORD_ANNOUNCEMENT_CHANNEL_ID` | `0` | Ops log, ticket dashboard and announcements channels |
-| `DISCORD_WELCOME_CHANNEL_ID`, `DISCORD_LINK_CHANNEL_ID` | `0` (no panel) | Ticket panel and link panel channels |
-| `BLUETEAM_ROLE_ID`, `BLACKTEAM_ROLE_ID`, `WHITETEAM_ROLE_ID`, `ORANGETEAM_ROLE_ID`, `REDTEAM_ROLE_ID`, `GOLDTEAM_ROLE_ID` | `0` | Role IDs |
+| `DISCORD_GUILD_ID` | `0` | Competition server, where roles are synced |
+| `VOLUNTEER_GUILD_ID` | `0` | Volunteer server, where staff only `/link`; required, so with one server set it to the `DISCORD_GUILD_ID` value |
+| `DISCORD_LOG_CHANNEL_ID` | `0` | Ops log: role sync summaries, failed tasks, admin command audits, competition notices |
+| `DISCORD_TICKET_QUEUE_CHANNEL_ID` | `0` | Staff ticket dashboard, one message updated within 10 seconds of a ticket change |
+| `DISCORD_ANNOUNCEMENT_CHANNEL_ID` | `0` | Broadcasts to the announcements target, pinging the blue team role |
+| `DISCORD_WELCOME_CHANNEL_ID` | `0` (no panel) | The ticket panel (a Create Ticket button) |
+| `DISCORD_LINK_CHANNEL_ID` | `0` (no panel) | The Link Account panel; other messages posted there are deleted and answered with a link by DM |
+| `BLUETEAM_ROLE_ID` | `0` | Every linked team member's role |
+| `BLACKTEAM_ROLE_ID`, `WHITETEAM_ROLE_ID`, `ORANGETEAM_ROLE_ID`, `REDTEAM_ROLE_ID`, `GOLDTEAM_ROLE_ID` | `0` | The role each of the black, white, orange, red and gold team groups grants |
 | `DISCORD_SERVER_OWNER_ROLE` | empty (none) | Name of a role that may talk in every team category |
-| `SYNC_COMMANDS` | off | `true` forces a slash command sync at startup |
+| `SYNC_COMMANDS` | off (the bot syncs its slash commands when they change) | `true` forces a sync at every start |
 
-### Zulip
+### Zulip settings
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -358,8 +373,8 @@ Every setting, with its default when unset. `.env.example` has the same groups.
 | `ZULIP_TEAM_STREAM` | `team{number:02d}` | Each team's stream, a pattern using `{number}` |
 | `ZULIP_STAFF_STREAM` | `tickets` | New ticket notices for staff |
 | `ZULIP_ANNOUNCEMENTS_STREAM` | `announcements` | Broadcasts to the announcements target |
-| `ZULIP_OPS_STREAM`, `ZULIP_OPS_TOPIC` | `ops`, `ops` | Ops notices |
-| `ZULIP_TEAM_MENTION` | empty (none) | User group a new ticket mentions in its team's stream, a pattern using `{number}` |
+| `ZULIP_OPS_STREAM`, `ZULIP_OPS_TOPIC` | `ops`, `ops` | Ops notices and competition status |
+| `ZULIP_TEAM_MENTION` | empty (none) | User group a new ticket mentions in its team's stream, a pattern using `{number}` such as `Team {number:02d}` |
 | `ZULIP_STAFF_MENTION` | empty (none) | Staff user group a new ticket mentions |
 
 ### Region names
@@ -375,15 +390,3 @@ Every setting, with its default when unset. `.env.example` has the same groups.
 
 Changing a group, team account or team cap setting changes who holds which permission, and which accounts a start,
 stop or reset touches.
-
-## Operating notes
-
-- One worker and one chat process per deployment; web may have several replicas (each migrates under a lock at start).
-- Health: `/livez/` for web; `python -m core.health worker` and `python -m core.health chat` exit non-zero when a
-  loop's heartbeat is stale or missing, so a stuck connection gets the container restarted. The chat check covers the
-  backends configured in its environment.
-- Queued work has one row per configured backend, written by the process that queues it: keep the chat settings the
-  same on web, the worker and chat. A task that fails for good is reported to ops.
-- Starts, stops and Close Out take one Postgres advisory lock, so only one runs at a time.
-- Run the readiness checks on the Competition page before each event: Authentik accounts, groups, session access,
-  application bindings, Discord settings, Quotient, packets and school info.

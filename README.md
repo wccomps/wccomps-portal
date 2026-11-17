@@ -13,17 +13,12 @@ Competition management platform for WRCCDC: Discord bot, Django web app, and Aut
 ## Run with Docker
 
 ```bash
-cp .env.example .env   # fill in credentials (DB password, Authentik OAuth client, and DISCORD_BOT_TOKEN or the ZULIP_* trio)
-docker compose up -d   # Postgres, web and worker from ghcr.io/wccomps/wccomps-portal; --build runs this checkout
-docker compose --profile chat up -d   # also the chat process, for the chat backends set in .env
+cp .env.example .env && docker compose up -d
 ```
 
-The web app listens on `localhost:${WEB_PORT:-8000}`. Put it behind an HTTPS reverse proxy: with
-`DJANGO_DEBUG=False` the session and CSRF cookies are HTTPS-only. Run exactly one worker and one chat process per
-deployment.
-
-[docs/self-hosting.md](docs/self-hosting.md) covers running your own: the processes, the Authentik setup, team
-accounts and permission groups, Quotient, Proxmox, Nextcloud and aweful-proxy, Discord and Zulip, and every setting.
+[docs/self-hosting.md](docs/self-hosting.md) covers running your own: the processes, Compose and a plain run, the
+reverse proxy, the Authentik setup, team accounts and permission groups, Quotient, Proxmox, Nextcloud and aweful-proxy,
+Discord and Zulip, and every setting.
 
 ## Development
 
@@ -31,15 +26,10 @@ accounts and permission groups, Quotient, Proxmox, Nextcloud and aweful-proxy, D
 uv sync
 docker compose -f docker-compose.test.yml up -d --wait   # Postgres on localhost:5433
 DB_HOST=localhost DB_PORT=5433 DB_USER=test_user DB_PASSWORD=test_password DB_NAME=wccomps_test uv run pytest
-
-# Run the app locally (settings read the environment; they don't load .env themselves)
-cp .env.example .env   # then fill in credentials; DB_* pointing at your Postgres
-set -a; . ./.env; set +a
-export PYTHONPATH="$PWD/web" BOT_HEARTBEAT_DIR="$PWD/run/heartbeat"
-(cd web && uv run python manage.py prepare_database && uv run python manage.py runserver)
-uv run python -m worker  # the worker, from the repo root, in another shell
-uv run python -m chat    # the chat process (Discord bot, Zulip runner, or both), from the repo root, in another shell
 ```
+
+To run the app locally, follow the guide's "Without Docker", with `uv sync` (dev dependencies included) and
+`uv run python manage.py runserver` in `web/` in place of gunicorn.
 
 ## Production
 
@@ -52,4 +42,4 @@ Runs on the deoxys Kubernetes cluster, deployed by Argo CD from `wccomps/wccomps
 - **Bot not responding:** `kubectl -n wccomps-portal logs deploy/bot`
 - **OAuth errors:** the Authentik provider must list `https://<host>/auth/callback/` for the host used
 - **Permissions stale:** the worker re-reads everyone's Authentik groups every 5 minutes. A login refreshes that user's
-  groups at once for the web; the bot's own permission cache can lag up to 5 minutes more
+  groups at once, for the web and the bot alike

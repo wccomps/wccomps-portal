@@ -1,8 +1,8 @@
 """.env.example lists every environment variable the portal reads, and nothing it doesn't.
 
 Read: a literal name in `os.environ.get(...)`, `os.getenv(...)` or `os.environ[...]` in tracked production Python
-(tests, conftest.py, migrations and browser tests excluded): web/portal/settings.py, and the readers that skip Django
-settings (web/gunicorn.conf.py, web/core/heartbeat.py, web/core/discord_logging.py, bot/client.py). Also a variable
+(tests, conftest.py, migrations and browser tests excluded), or a chat backend's setting in
+`core.heartbeat.CHAT_BACKENDS`, which `python -m core.health chat` reads from the environment by name. Also a variable
 docker-compose.yml interpolates (`${NAME}`, `${NAME:-default}`), since .env.example is copied to compose's `.env`, which
 compose reads for interpolation as well as passing it to every service.
 
@@ -12,8 +12,10 @@ would set it empty, which is not the default for most of them).
 
 import ast
 import re
+from collections import Counter
 from functools import cache
 
+from core.heartbeat import CHAT_BACKENDS
 from core.tests.guards import REPO_DIR, tracked_files
 
 EXAMPLE = REPO_DIR / ".env.example"
@@ -66,6 +68,9 @@ def read_names() -> dict[str, str]:
             found.setdefault(name, path)
     for name in INTERPOLATED.findall(COMPOSE.read_text(encoding="utf-8")):
         found.setdefault(name, "docker-compose.yml")
+    for backend in CHAT_BACKENDS:
+        for name in backend.settings:
+            found.setdefault(name, "web/core/heartbeat.py")
     return found
 
 
@@ -93,8 +98,7 @@ def test_every_listed_name_is_read() -> None:
 
 
 def test_no_name_is_listed_twice() -> None:
-    names = listed_names()
-    twice = sorted({name for name in names if names.count(name) > 1})
+    twice = sorted(name for name, count in Counter(listed_names()).items() if count > 1)
     assert not twice, f".env.example lists these more than once: {twice}"
 
 
