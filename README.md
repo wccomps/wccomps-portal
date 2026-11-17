@@ -19,19 +19,24 @@ docker compose --profile chat up -d   # also the chat process, for the chat back
 ```
 
 The web app listens on `localhost:${WEB_PORT:-8000}`. Put it behind an HTTPS reverse proxy: with
-`DJANGO_DEBUG=False` the session and CSRF cookies are HTTPS-only. Run exactly one chat process per deployment.
+`DJANGO_DEBUG=False` the session and CSRF cookies are HTTPS-only. Run exactly one worker and one chat process per
+deployment.
+
+[docs/self-hosting.md](docs/self-hosting.md) covers running your own: the processes, the Authentik setup, team
+accounts and permission groups, Quotient, Proxmox, Nextcloud and aweful-proxy, Discord and Zulip, and every setting.
 
 ## Development
 
 ```bash
 uv sync
 docker compose -f docker-compose.test.yml up -d --wait   # Postgres on localhost:5433
-uv run pytest
+DB_HOST=localhost DB_PORT=5433 DB_USER=test_user DB_PASSWORD=test_password DB_NAME=wccomps_test uv run pytest
 
 # Run the app locally (settings read the environment; they don't load .env themselves)
-cp .env.example .env   # then fill in credentials; DB_* pointing at the Postgres above
+cp .env.example .env   # then fill in credentials; DB_* pointing at your Postgres
 set -a; . ./.env; set +a
-cd web && uv run python manage.py prepare_database && uv run python manage.py runserver
+export PYTHONPATH="$PWD/web" BOT_HEARTBEAT_DIR="$PWD/run/heartbeat"
+(cd web && uv run python manage.py prepare_database && uv run python manage.py runserver)
 uv run python -m worker  # the worker, from the repo root, in another shell
 uv run python -m chat    # the chat process (Discord bot, Zulip runner, or both), from the repo root, in another shell
 ```
