@@ -1,3 +1,4 @@
+from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ from .models import (
     EventArchive,
     EventResult,
     EventTeamAssignment,
+    RegistrationEventEnrollment,
     School,
     Season,
     TeamRegistration,
@@ -83,6 +85,65 @@ class Held(Enum):
 def school_shown(info: SchoolInfo | None) -> tuple[int, str] | None:
     """The team's school as an edit page shows it: its id and name key, so a rename since is a change too."""
     return (info.school_id, info.school.name_key) if info is not None else None
+
+
+@dataclass(frozen=True)
+class SchoolClash:
+    """Why the review page flags a registration: the other pending or approved registrations of its school for one of
+    its events, oldest first, and the team already holding its school."""
+
+    same_school: list[TeamRegistration]
+    held_by: Team | None
+
+    @property
+    def approved_twin(self) -> bool:
+        """Another approved one: the review page offers Reject on an approved registration then."""
+        return any(other.status == "approved" for other in self.same_school)
+
+
+def school_clashes() -> dict[int, SchoolClash]:
+    """The pending and approved registrations for events still to come whose school (by normalize_school_name)
+    another such registration names for one of the same events, or a team holds that wasn't given to it; by id.
+
+    A student can register a rival school's name with their own email: approving both, or the wrong one, would send
+    the rival's team password to them. Earlier seasons' registrations of a school don't count: it registers again.
+    """
+    school_of: dict[int, str] = {}
+    at_event: defaultdict[tuple[str, int], set[int]] = defaultdict(set)
+    for registration_id, school_name, event_id in RegistrationEventEnrollment.objects.filter(
+        registration__status__in=("pending", "approved"), event__is_finalized=False
+    ).values_list("registration_id", "registration__school_name", "event_id"):
+        school_of[registration_id] = key = normalize_school_name(school_name)
+        at_event[key, event_id].add(registration_id)
+
+    same_school: defaultdict[int, set[int]] = defaultdict(set)
+    for registration_ids in at_event.values():
+        for registration_id in registration_ids:
+            same_school[registration_id] |= registration_ids - {registration_id}
+
+    holders = {info.school.name_key: info.team for info in SchoolInfo.objects.select_related("school", "team")}
+    given = set(
+        EventTeamAssignment.objects.filter(registration_id__in=school_of).values_list("registration_id", "team_id")
+    )
+    held_by = {
+        registration_id: team
+        for registration_id, key in school_of.items()
+        if (team := holders.get(key)) is not None and (registration_id, team.pk) not in given
+    }
+
+    flagged = {registration_id for registration_id, others in same_school.items() if others} | held_by.keys()
+    shown = TeamRegistration.objects.prefetch_related("contacts").in_bulk(
+        set[int]().union(*(same_school[registration_id] for registration_id in flagged))
+    )
+    return {
+        registration_id: SchoolClash(
+            same_school=sorted(
+                (shown[other] for other in same_school[registration_id]), key=lambda r: (r.submitted_at, r.pk)
+            ),
+            held_by=held_by.get(registration_id),
+        )
+        for registration_id in flagged
+    }
 
 
 @transaction.atomic

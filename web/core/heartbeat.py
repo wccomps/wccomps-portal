@@ -22,6 +22,7 @@ DEFAULT_DIR = "/app/run/heartbeat"
 TIMER = "timer"
 GROUPS = "groups"
 QUOTIENT = "quotient"
+SESSIONS = "sessions"
 QUEUE_WORKER = "queue-worker"
 QUEUE_DISCORD = "queue-discord"
 DASHBOARD = "dashboard"
@@ -29,20 +30,22 @@ QUEUE_ZULIP = "queue-zulip"
 EVENTS_ZULIP = "events-zulip"
 
 # Allowed age per heartbeat, several missed passes each. The worker: competition timer every 60s, group refresh every
-# 5 min, Quotient sync every 5 min (every 15 min while backing off, so two backed-off passes), its queue polls every
-# 2s. The chat process's Discord runner: its queue polls every 2s, the dashboard every 10s. Its Zulip runner: its
-# queue polls every 2s; its event loop beats at least every 2x120s (long-poll timeout, then the longest retry wait).
+# 5 min, Quotient sync every 5 min (every 15 min while backing off, so two backed-off passes), expired session
+# cleanup every hour (three missed passes and its run time), its queue polls every 2s. The chat process's Discord
+# runner: its queue polls every 2s, the dashboard every 10s. Its Zulip runner: its queue polls every 2s; its event
+# loop beats at least every 2x120s (long-poll timeout, then the longest retry wait).
 BUDGETS: dict[str, int] = {
     TIMER: 300,
     GROUPS: 900,
     QUOTIENT: 1800,
+    SESSIONS: 3 * 3600 + 600,
     QUEUE_WORKER: 60,
     QUEUE_DISCORD: 60,
     DASHBOARD: 120,
     QUEUE_ZULIP: 60,
     EVENTS_ZULIP: 600,
 }
-WORKER_HEARTBEATS: tuple[str, ...] = (TIMER, GROUPS, QUOTIENT, QUEUE_WORKER)
+WORKER_HEARTBEATS: tuple[str, ...] = (TIMER, GROUPS, QUOTIENT, SESSIONS, QUEUE_WORKER)
 
 
 @dataclass(frozen=True)

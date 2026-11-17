@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 from typing import NamedTuple
 
@@ -5,11 +6,12 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 from django.utils.functional import cached_property
 
 from core.models import Approvable
 from core.stored_files import MAX_SCREENSHOT_SIZE, StoredFile
-from core.utils import shorten
+from core.utils import advisory_xact_lock, shorten
 from core.validators import validate_jsonb_storable
 
 
@@ -396,8 +398,16 @@ class RedTeamScreenshot(StoredFile):
         return f"{self.filename} ({self.finding})"
 
 
+# Who sees and reviews every team's incident reports: White Team (the permission's groups hold Gold Team and admins)
+INCIDENT_STAFF = "white_team"
+
+
 class IncidentReport(Approvable):
     """Blue team incident report submission."""
+
+    # A team's reports per window: each can carry MAX_SUBMISSION_SIZE of screenshots into Postgres
+    SUBMISSION_LIMIT = 10
+    SUBMISSION_WINDOW = timedelta(hours=1)
 
     team = models.ForeignKey(
         "team.Team",
@@ -464,6 +474,23 @@ class IncidentReport(Approvable):
     @property
     def affected_boxes_display(self) -> str:
         return format_boxes_display(self.affected_boxes)
+
+    @classmethod
+    def over_submission_limit(cls, team_id: int) -> bool:
+        """Whether the team has filed SUBMISSION_LIMIT reports within SUBMISSION_WINDOW. Call it in the transaction
+        that saves the report: it takes an advisory lock on the team until that ends, so submissions at once can't all
+        pass."""
+        advisory_xact_lock(f"incident_reports:team:{team_id}")
+        since = timezone.now() - cls.SUBMISSION_WINDOW
+        return cls.objects.filter(team_id=team_id, created_at__gte=since).count() >= cls.SUBMISSION_LIMIT
+
+    @classmethod
+    def limit_reached_message(cls) -> str:
+        minutes = int(cls.SUBMISSION_WINDOW.total_seconds() // 60)
+        return (
+            f"Your team has filed {cls.SUBMISSION_LIMIT} incident reports in the last {minutes} minutes. "
+            "Wait a while before filing another."
+        )
 
 
 class IncidentScreenshot(StoredFile):

@@ -62,7 +62,7 @@ def test_warming_freezes_what_it_loaded_so_the_workers_share_it(_no_freeze_in_th
 
 
 def test_the_wsgi_module_warms_so_preload_runs_it_before_gunicorn_binds(monkeypatch):
-    monkeypatch.setenv("DJANGO_SECRET_KEY", "test-only-key")
+    monkeypatch.setenv("DJANGO_SECRET_KEY", "test-only-key-0123456789-abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJ")
     sys.modules.pop("portal.wsgi", None)
 
     with patch("portal.warmup.warm") as warm:

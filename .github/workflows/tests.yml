@@ -116,7 +116,7 @@ jobs:
         run: |
           cd web && DJANGO_SETTINGS_MODULE=portal.settings uv run python manage.py collectstatic --noinput
         env:
-          DJANGO_SECRET_KEY: test-secret-key-for-ci
+          DJANGO_SECRET_KEY: test-only-django-secret-key-for-ci-runs-not-a-real-secret-0123456789
 
       - name: Install Chromium
         if: inputs.browser
@@ -127,14 +127,14 @@ jobs:
         run: uv run pytest -m "not browser" --junitxml=test-results.xml
         env:
           PYTHONPATH: ${{ github.workspace }}/web:${{ github.workspace }}
-          DJANGO_SECRET_KEY: test-secret-key-for-ci
+          DJANGO_SECRET_KEY: test-only-django-secret-key-for-ci-runs-not-a-real-secret-0123456789
 
       - name: Run the browser tests
         if: inputs.browser
         run: uv run pytest -m browser -n0 --junitxml=test-results.xml
         env:
           PYTHONPATH: ${{ github.workspace }}/web:${{ github.workspace }}
-          DJANGO_SECRET_KEY: test-secret-key-for-ci
+          DJANGO_SECRET_KEY: test-only-django-secret-key-for-ci-runs-not-a-real-secret-0123456789
 
       - name: Keep the results
         if: always()

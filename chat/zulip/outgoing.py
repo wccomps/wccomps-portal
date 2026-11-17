@@ -11,7 +11,6 @@ from typing import TypedDict, assert_never
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.urls import reverse
 
 from chat.zulip.client import ZulipClient, ZulipError
 from chat.zulip.markup import fit, quiet, to_zulip, zulip_time
@@ -32,8 +31,9 @@ from core.queued_tasks import (
 )
 from core.task_backends import TaskBackend
 from core.task_queue import QueueProcessor, StepsState, TaskProgress, _target
-from core.utils import announcement, split_message
+from core.utils import announcement
 from ticketing.models import Ticket, TicketComment
+from ticketing.utils import relay_parts, ticket_url
 
 logger = logging.getLogger(__name__)
 
@@ -103,17 +103,21 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
             raise
 
     async def _send_each(self, topic: str, sends: list[tuple[str, str]], progress: TaskProgress[StepsState]) -> None:
-        """Post each (stream, content) to the topic, skipping those an earlier attempt sent."""
+        """Post each (stream, content) to the topic, skipping those an earlier attempt sent, and beating the queue's
+        heartbeat after each."""
         for n, (stream, content) in enumerate(sends):
             if n < progress.done:
                 continue
             await self._send(stream, topic, content)
             await progress.advance()
+            beat()
 
-    async def _send_parts(self, stream: str, topic: str, text: str, progress: TaskProgress[StepsState]) -> None:
-        """Send text in as many messages as Zulip's limit takes, skipping the parts an earlier attempt sent."""
-        parts = split_message(to_zulip(text), ZULIP_MESSAGE_CHAR_LIMIT)
-        await self._send_each(topic, [(stream, part) for part in parts], progress)
+    async def _send_parts(self, ticket: Ticket, text: str, progress: TaskProgress[StepsState]) -> None:
+        """Send text to the ticket's topic in at most ticketing.utils.relay_parts' few messages under Zulip's limit, the
+        last pointing to the ticket's page when it is cut, skipping the parts an earlier attempt sent."""
+        parts = relay_parts(to_zulip(text), ZULIP_MESSAGE_CHAR_LIMIT, ticket_url(ticket.ticket_number))
+        stream = team_stream(ticket.team.team_number)
+        await self._send_each(await ticket_topic(ticket), [(stream, part) for part in parts], progress)
 
     async def _ticket_created(self, payload: TicketCreated, progress: TaskProgress[StepsState]) -> None:
         """The ticket's summary in its topic, then an alert with its link in the staff stream; a retry skips the one
@@ -121,7 +125,7 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
         tickets = Ticket.objects.select_related("team", "category", "assigned_to")
         ticket = await _target(tickets, id=payload.ticket_id)
         topic = await ticket_topic(ticket)
-        url = settings.BASE_URL.rstrip("/") + reverse("ticket_detail", args=[ticket.ticket_number])
+        url = ticket_url(ticket.ticket_number)
         alert = f"New ticket [{ticket.ticket_number}]({url}) from {quiet(ticket.team.team_name)}: {quiet(ticket.title)}"
         sends = [
             (team_stream(ticket.team.team_number), _ticket_summary(ticket)),
@@ -132,9 +136,7 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
     async def _post_comment(self, payload: PostComment, progress: TaskProgress[StepsState]) -> None:
         ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
         comment = await _target(TicketComment.objects.select_related("author"), id=payload.comment_id)
-        # A web comment has no length limit; send all of it, in as many messages as it takes
-        text = f"**{quiet(comment.author_name)}**\n{quiet(comment.comment_text)}"
-        await self._send_parts(team_stream(ticket.team.team_number), await ticket_topic(ticket), text, progress)
+        await self._send_parts(ticket, f"**{quiet(comment.author_name)}**\n{quiet(comment.comment_text)}", progress)
 
     async def _post_ticket_update(self, payload: PostTicketUpdate, progress: TaskProgress[StepsState]) -> None:
         ticket = await _target(Ticket.objects.select_related("team"), id=payload.ticket_id)
@@ -143,7 +145,7 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
                 text = _card(card)
             case str(update):
                 text = quiet(update)
-        await self._send_parts(team_stream(ticket.team.team_number), await ticket_topic(ticket), text, progress)
+        await self._send_parts(ticket, text, progress)
 
     async def _broadcast(self, payload: BroadcastMessage, progress: TaskProgress[BroadcastState]) -> dict[str, object]:
         """The announcements stream, or each target team's stream (core.broadcast.target_teams). A team without a

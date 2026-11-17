@@ -57,12 +57,12 @@ def test_on_a_phone_a_long_name_leaves_log_out_whole_and_on_the_screen(live_serv
         page.goto(f"{live_server.url}/ops/school-info/")
         page.locator(".nav-toggle").click()
 
-        log_out = page.get_by_role("link", name="Log out")
+        log_out = page.get_by_role("button", name="Log out")
         box = log_out.bounding_box()
         assert box
         assert box["x"] + box["width"] <= 375
         lines = log_out.evaluate(
-            "a => { const r = document.createRange(); r.selectNodeContents(a);"
+            "el => { const r = document.createRange(); r.selectNodeContents(el);"
             " return new Set(Array.from(r.getClientRects(), rect => Math.round(rect.top))).size; }"
         )
         assert lines == 1

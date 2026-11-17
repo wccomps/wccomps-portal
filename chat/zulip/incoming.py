@@ -20,13 +20,13 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.auth.models import User
 
-from chat.zulip.client import UPLOAD_PREFIX, ZulipClient, ZulipError
+from chat.zulip.client import UPLOAD_PREFIX, ZulipClient, ZulipError, is_upload_path
 from chat.zulip.markup import quiet
 from chat.zulip.naming import TOPIC_CHAR_LIMIT, team_for_stream, ticket_number_from_topic
 from core.task_backends import TaskBackend
 from ticketing import chat_comments
 from ticketing.access import ticket_open_to_user
-from ticketing.models import Ticket, TicketAttachment
+from ticketing.models import CommentRateLimit, Ticket, TicketAttachment
 
 logger = logging.getLogger(__name__)
 
@@ -138,13 +138,13 @@ def _portal_user(email: str) -> User | None:
 
 def upload_links(content: str) -> list[tuple[str, str]]:
     """(name, path) of each file a message's text links as uploaded to this Zulip, once per path (without a query or
-    fragment, which fetch the same file); a link anywhere else, or one whose path climbs out of /user_uploads/, is
-    passed over."""
+    fragment, which fetch the same file); a link anywhere else, or one whose path isn't plainly an upload
+    (chat.zulip.client.is_upload_path), is passed over."""
     found: dict[str, str] = {}
     for match in _UPLOAD_LINK.finditer(content):
         name, link = match.groups()
         path = re.split(r"[?#]", link, maxsplit=1)[0]
-        if ".." not in path.split("/"):
+        if is_upload_path(path):
             found.setdefault(path, name)
     return [(name, path) for path, name in found.items()]
 
@@ -174,14 +174,14 @@ def _record(msg: IncomingMessage, ticket: Ticket, email: str, has_uploads: bool)
         ticket,
         TaskBackend.ZULIP,
         message_id=msg.message_id,
-        actor_key=f"zulip:{msg.sender_id}",
+        actor_key=CommentRateLimit.user_key(author),
         author=author,
         text=comment_text(msg.content),
         has_files=has_files,
     )
     if refused:
-        logger.warning(f"Rate limit refused Zulip message {msg.message_id} from {msg.sender_id}: {refused}")
-        return _Recorded(refused=f"{refused}; this message was not added to the ticket. Please slow down.")
+        logger.warning(f"Refused Zulip message {msg.message_id} from {msg.sender_id}: {refused}")
+        return _Recorded(refused=f"{refused}. This message was not added to the ticket.")
     return _Recorded(store_on=(ticket, author) if has_files else None)
 
 
@@ -198,7 +198,8 @@ async def _store_uploads(
 ) -> None:
     """Store each upload on the ticket, credited to the sender's portal account and typed from its bytes as a web
     upload is, and react with a paperclip once one is stored. A file over TicketAttachment's size limit, or one that
-    can't be fetched or stored, is replied to in the topic in Discord's words and the rest go on."""
+    can't be fetched or stored, is replied to in the topic in Discord's words and the rest go on; once the ticket takes
+    no more (TicketAttachment.store) that is replied and the rest are left out."""
     stored = False
     for name, path in uploads:
         try:
@@ -213,7 +214,9 @@ async def _store_uploads(
                 uploaded_by=author.username,
                 zulip_message_id=msg.message_id,
             )
-            await attachment.asave()
+            if problem := await sync_to_async(attachment.store)():
+                await _reply(msg, client, f"{problem}. Files from here on were not added.", "a file was refused")
+                break
         except Exception:
             logger.exception(f"Failed to store an attachment of Zulip message {msg.message_id} for ticket #{ticket.id}")
             await _reply(msg, client, "Failed to store an attachment. Please try again.", "a file was not stored")

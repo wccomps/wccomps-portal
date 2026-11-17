@@ -991,8 +991,37 @@ fieldset:has([required]) > legend.required::after,
     margin-left: auto;
 }
 
-.nav-utils a {
+.nav-utils a,
+.nav-logout {
     flex: none;
+}
+
+/* Log out is a POST (a cross-site link can't sign anyone out), drawn as the nav's links are */
+.nav-logout {
+    margin: 0;
+}
+
+.nav-logout button {
+    background: transparent;
+    border: 0;
+    color: var(--header-link-color, #fff);
+    padding: 8px 15px;
+    margin-right: 5px;
+    border-radius: 4px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.nav-logout button:hover {
+    background-color: var(--header-bg, #417690);
+}
+
+.nav-logout button:focus {
+    outline: 2px solid var(--header-link-color, #fff);
+    outline-offset: 2px;
 }
 
 /* Mobile layout */

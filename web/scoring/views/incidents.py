@@ -15,11 +15,8 @@ from team.models import Team
 
 from ..calculator import calculate_suggested_recovery_points, suggest_red_score_matches
 from ..forms import IncidentMatchForm, IncidentReportForm
-from ..models import IncidentReport, IncidentScreenshot
+from ..models import INCIDENT_STAFF, IncidentReport, IncidentScreenshot
 from ..quotient_sync import get_box_metadata
-
-# Who sees and reviews every team's incident reports: White Team (the permission's groups hold Gold Team and admins)
-INCIDENT_STAFF = "white_team"
 
 
 @transaction.atomic
@@ -39,31 +36,36 @@ def submit_incident_report(request: HttpRequest) -> HttpResponse:
         form = IncidentReportForm(team, is_admin, request.POST, request.FILES)
 
         if form.is_valid():
-            try:
-                screenshots = read_screenshots(request.FILES.getlist("screenshots"), IncidentScreenshot)
-            except UploadError as e:
-                messages.error(request, f"File upload failed: {e}")
+            # Staff aren't limited; the team's lock lasts until this view's transaction ends, so this report counts for
+            # the next
+            if team is not None and IncidentReport.over_submission_limit(team.pk):
+                messages.error(request, IncidentReport.limit_reached_message())
             else:
-                incident = form.save(commit=False)
-
-                if is_admin:
-                    incident.team = form.cleaned_data["team"]
-                elif team is not None:
-                    incident.team = team
+                try:
+                    screenshots = read_screenshots(request.FILES.getlist("screenshots"), IncidentScreenshot)
+                except UploadError as e:
+                    messages.error(request, f"File upload failed: {e}")
                 else:
-                    # This should never happen due to earlier validation
-                    messages.error(request, "Team assignment error")
-                    return redirect("leaderboard_page")
+                    incident = form.save(commit=False)
 
-                incident.submitted_by = user
-                incident.save()
+                    if is_admin:
+                        incident.team = form.cleaned_data["team"]
+                    elif team is not None:
+                        incident.team = team
+                    else:
+                        # This should never happen due to earlier validation
+                        messages.error(request, "Team assignment error")
+                        return redirect("leaderboard_page")
 
-                for screenshot in screenshots:
-                    screenshot.incident = incident
-                    screenshot.save()
+                    incident.submitted_by = user
+                    incident.save()
 
-                messages.success(request, f"Incident report #{incident.id} submitted successfully")
-                return redirect("scoring:view_incident_report", incident_id=incident.id)
+                    for screenshot in screenshots:
+                        screenshot.incident = incident
+                        screenshot.save()
+
+                    messages.success(request, f"Incident report #{incident.id} submitted successfully")
+                    return redirect("scoring:view_incident_report", incident_id=incident.id)
     else:
         form = IncidentReportForm(team, is_admin)
 

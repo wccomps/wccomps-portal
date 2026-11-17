@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from django.contrib.auth.models import User
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -311,12 +312,53 @@ async def test_redelivered_message_saved_once(fake_zulip, ticket):
 
 
 async def test_rate_limit_blocks_and_replies(fake_zulip, ticket):
-    for n in range(6):  # 5 per minute per ticket (CommentRateLimit.check_rate_limit)
+    for n in range(6):  # 5 per minute per ticket (CommentRateLimit.TICKET_LIMIT)
         await save_message(fake_zulip, message(topic=topic_name(ticket), message_id=100 + n, content=f"m{n}"))
 
     assert await TicketComment.objects.acount() == 5
     [reply] = fake_zulip.sent_to("team03")
     assert "not added to the ticket" in reply
+
+
+async def test_the_senders_portal_account_has_one_budget_on_every_surface(fake_zulip, ticket):
+    """Its web and Discord posts count against its Zulip ones: a team's shared account gets one budget."""
+    member = await User.objects.aget(username="member03")
+    for _ in range(CommentRateLimit.ACTOR_LIMIT):
+        await CommentRateLimit.objects.acreate(ticket=None, actor_key=CommentRateLimit.user_key(member))
+
+    await save_message(fake_zulip, message(topic=topic_name(ticket), content="one more"))
+
+    assert not await TicketComment.objects.aexists()
+    [reply] = fake_zulip.sent_to("team03")
+    assert "User rate limit exceeded" in reply
+
+
+async def test_a_message_past_the_comment_limit_is_refused_whole(fake_zulip, ticket):
+    """Refused, not cut, as the web form refuses it: the comment is never part of what was said."""
+    fake_zulip.uploads = {"/user_uploads/2/ab/a.txt": b"log"}
+    content = "x" * TicketComment.MAX_LENGTH + "y [a.txt](/user_uploads/2/ab/a.txt)"
+
+    await save_message(fake_zulip, message(topic=topic_name(ticket), content=content))
+
+    assert not await TicketComment.objects.aexists()
+    assert not await TicketAttachment.objects.aexists()
+    assert not await CommentRateLimit.objects.aexists()
+    [reply] = fake_zulip.sent_to("team03")
+    assert f"Comment too long ({TicketComment.MAX_LENGTH + 1}/{TicketComment.MAX_LENGTH} characters)" in reply
+
+
+async def test_a_message_at_the_comment_limit_is_saved(fake_zulip, ticket):
+    await save_message(fake_zulip, message(topic=topic_name(ticket), content="x" * TicketComment.MAX_LENGTH))
+
+    assert len((await TicketComment.objects.aget()).comment_text) == TicketComment.MAX_LENGTH
+
+
+async def test_an_edit_past_the_comment_limit_changes_nothing(fake_zulip, ticket):
+    await save_message(fake_zulip, message(topic=topic_name(ticket), message_id=77, content="first"))
+
+    await apply_edit({"type": "update_message", "message_id": 77, "content": "x" * (TicketComment.MAX_LENGTH + 1)})
+
+    assert (await TicketComment.objects.aget()).comment_text == "first"
 
 
 async def test_a_refusal_zulip_cant_take_is_logged(fake_zulip, ticket, caplog):
@@ -366,7 +408,8 @@ async def test_an_edit_by_an_author_since_disabled_changes_nothing(fake_zulip, t
 def test_upload_links_finds_the_sites_uploads_only():
     content = (
         "logs [a.txt](/user_uploads/2/ab/a.txt) and [site](https://example.org/x.png) "
-        "[b](/user_uploads/2/../../api/v1/users) [again](/user_uploads/2/ab/a.txt) [](/user_uploads/2/cd/c.png)"
+        "[b](/user_uploads/2/../../api/v1/users) [again](/user_uploads/2/ab/a.txt) [](/user_uploads/2/cd/c.png) "
+        "[c](/user_uploads/%2e%2e/api/v1/messages/1) [d](/user_uploads/2/ab\\..\\..\\api) [e](/user_uploads/2/./x.png)"
     )
 
     assert upload_links(content) == [("a.txt", "/user_uploads/2/ab/a.txt"), ("", "/user_uploads/2/cd/c.png")]
@@ -389,6 +432,7 @@ def test_upload_links_reads_any_text(content):
     assert len(paths) == len(set(paths))
     for path in paths:
         assert path.startswith(UPLOAD_PREFIX) and ".." not in path.split("/")
+        assert "%" not in path and "\\" not in path
         assert "#" not in path and "?" not in path
 
 
@@ -481,6 +525,36 @@ async def test_a_redelivered_upload_is_stored_once(fake_zulip, ticket):
 
     assert [a.zulip_message_id async for a in TicketAttachment.objects.all()] == [77]
     assert fake_zulip.reactions == [(77, "paperclip")]
+
+
+@pytest.mark.parametrize("status", [Ticket.STATUS_RESOLVED, Ticket.STATUS_CANCELLED])
+async def test_a_closed_ticket_takes_no_uploads(fake_zulip, ticket, status):
+    await Ticket.objects.filter(pk=ticket.pk).aupdate(status=status)
+    fake_zulip.uploads = {"/user_uploads/2/ab/a.txt": b"log", "/user_uploads/2/ab/b.txt": b"log"}
+    content = "[a.txt](/user_uploads/2/ab/a.txt) [b.txt](/user_uploads/2/ab/b.txt)"
+
+    await save_message(fake_zulip, message(topic=topic_name(ticket), content=content))
+
+    assert not await TicketAttachment.objects.aexists()
+    # One reply for the message, not one per file
+    assert fake_zulip.sent_to("team03") == [
+        f"Member: Ticket is {status}; files can't be added to it. Files from here on were not added."
+    ]
+    assert fake_zulip.reactions == []
+
+
+async def test_uploads_past_the_teams_byte_cap_are_refused(fake_zulip, ticket, monkeypatch):
+    monkeypatch.setattr(TicketAttachment, "MAX_TEAM_BYTES", 5)
+    await TicketAttachment.objects.acreate(
+        ticket=ticket, file_data=b"abc", filename="old.txt", mime_type="text/plain", uploaded_by="x"
+    )
+    fake_zulip.uploads = {"/user_uploads/2/ab/a.txt": b"log"}
+
+    await save_message(fake_zulip, message(topic=topic_name(ticket), content="[a.txt](/user_uploads/2/ab/a.txt)"))
+
+    assert await TicketAttachment.objects.acount() == 1
+    [reply] = fake_zulip.sent_to("team03")
+    assert "total limit" in reply
 
 
 # ---------------------------------------------------------------------------------------------------------------

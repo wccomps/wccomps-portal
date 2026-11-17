@@ -15,6 +15,8 @@ for _name, _value in {
     "DEFAULT_REPLY_TO_EMAIL": "info@wccomps.org",
     "DISCORD_BOT_TOKEN": "test-token",
     "DISCORD_SERVER_OWNER_ROLE": "WRCCDC Server Owners",
+    # A fixed key as strong as portal.required asks, so the processes' startup checks pass (public: tests only)
+    "DJANGO_SECRET_KEY": "test-only-key-0123456789-abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJ",
 }.items():
     os.environ.setdefault(_name, _value)
 

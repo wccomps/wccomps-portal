@@ -23,9 +23,23 @@
                 </c-table_header>
             </tr>
         </c-slot>
-        {% for registration in registrations %}
+        {% for registration, clash in registrations %}
             <tr>
-                <td>{{ registration.school_name }}</td>
+                <td>
+                    {{ registration.school_name }}
+                    {% if clash %}
+                        <br>
+                        <c-badge variant="warning">Duplicate school</c-badge>
+                        {% for other in clash.same_school %}
+                            <br>
+                            <small>Also registered by {{ other.primary_contact.email|default:"no contact" }} ({{ other.get_status_display }})</small>
+                        {% endfor %}
+                        {% if clash.held_by %}
+                            <br>
+                            <small>Already held by Team {{ clash.held_by.team_number|stringformat:"02d" }}</small>
+                        {% endif %}
+                    {% endif %}
+                </td>
                 {% with contact=registration.primary_contact %}
                     <td>{{ contact.email }}</td>
                     <td>{{ contact.phone }}</td>
@@ -45,6 +59,8 @@
                                 Approve
                             </c-button>
                         </c-form>
+                    {% endif %}
+                    {% if registration.status == "pending" or registration.status == "approved" and clash.approved_twin %}
                         <c-link href="{% url 'registration_reject' registration.id %}"
                                 variant="danger">Reject</c-link>
                     {% endif %}
