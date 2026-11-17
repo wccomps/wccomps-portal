@@ -42,7 +42,7 @@ def test_ticket_filed_with_typed_fields(category, fields, live_server, pw_browse
             for selector, value in fields.items():
                 page.locator(selector).fill(value)
             with page.expect_navigation():
-                page.click("button[type=submit]")
+                page.get_by_role("button", name="Create Ticket").click()
 
         ticket = Ticket.objects.get(title=f"Fallback ticket {category}")
         assert ticket.hostname == fields.get("#hostname", "")
@@ -76,7 +76,7 @@ def test_the_last_synced_boxes_and_services_stay_pickable_while_quotient_is_down
             page.fill("#title", "Picked service")
             page.select_option("#service_name", "web01:HTTP")
             with page.expect_navigation():
-                page.click("button[type=submit]")
+                page.get_by_role("button", name="Create Ticket").click()
 
         assert Ticket.objects.get(title="Picked service").service_name == "web01:HTTP"
     finally:
