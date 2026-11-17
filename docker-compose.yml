@@ -3,8 +3,9 @@
 #   cp .env.example .env    # fill it in
 #   docker compose up -d     # published image; `docker compose up -d --build` runs this checkout
 #   docker compose --profile chat up -d   # also the chat process, once DISCORD_BOT_TOKEN or the ZULIP_* trio is set
-# The web app listens on http://localhost:${WEB_PORT:-8000}; put it behind an HTTPS reverse proxy
-# (with DJANGO_DEBUG=False the session and CSRF cookies are HTTPS-only).
+# The web app is published on port ${WEB_PORT:-8000} of every host interface (WEB_PORT=127.0.0.1:8000 keeps it local);
+# put it behind an HTTPS reverse proxy, as docs/self-hosting.md "The reverse proxy" describes (with
+# DJANGO_DEBUG=False the session and CSRF cookies are HTTPS-only).
 
 services:
   postgres:
