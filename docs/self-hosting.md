@@ -197,7 +197,7 @@ lists.
   privilege-separated token holds only what both it and its user hold, so grant them to the user and the token.
 - `PROXMOX_CA_FILE` trusts the cluster's own CA; `PROXMOX_VERIFY_SSL=False` turns verification off.
 
-Without Proxmox, a box reset ticket shows Proxmox as unreachable and is resolved by hand.
+Without Proxmox, a box reset ticket says Proxmox isn't configured and is resolved by hand.
 
 ### aweful-proxy
 

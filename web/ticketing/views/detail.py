@@ -207,8 +207,8 @@ def ticket_box_reset_panel(request: HttpRequest, ticket_number: str) -> HttpResp
     matched_vm = None
     snapshots = None
     proxmox_unreachable = False
-    if normalize_ticket_host(team_number, ticket.hostname) is not None:
-        client = get_proxmox_client()
+    client = get_proxmox_client()
+    if client.configured and normalize_ticket_host(team_number, ticket.hostname) is not None:
         vms = client.list_team_vms(team_number)
         matched_vm = match_team_vm(vms, team_number, ticket.hostname) if vms is not None else None
         snapshots = client.list_snapshots(matched_vm.node, matched_vm.vmid) if matched_vm is not None else None
@@ -232,6 +232,7 @@ def ticket_box_reset_panel(request: HttpRequest, ticket_number: str) -> HttpResp
         {
             "ticket": ticket,
             "actions": ticket_actions(user, ticket),
+            "proxmox_configured": client.configured,
             "proxmox_unreachable": proxmox_unreachable,
             "matched_vm": matched_vm,
             "snapshots": snapshots,
