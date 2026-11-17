@@ -1,10 +1,10 @@
 """Messages in a ticket's Zulip topic become the ticket's comments (ticketing.chat_comments, as a Discord thread's
-do), and their edits and deletes carry over to the comment. Only a sender whose Zulip email is the portal account of
-one of the ticket's team or of ticket staff writes to a ticket; anyone else is told so in the topic. Files uploaded
-with a message are stored on the ticket as its attachments, as a Discord thread's are; they stay out of the comment
-and aren't posted to the other chat backends. A topic renamed in Zulip (resolved, retitled) to a name that still
-starts with its ticket's number becomes the ticket's stored topic (Ticket.zulip_topic), so the portal's later messages
-follow it.
+do), and their edits and deletes carry over to the comment. Only a sender whose real Zulip email (as Zulip gives it to
+the bot) is the portal account of one of the ticket's team or of ticket staff writes to a ticket; anyone else is told
+so in the topic. Files uploaded with a message are stored on the ticket as its attachments, as a Discord thread's are;
+they stay out of the comment and aren't posted to the other chat backends. A topic renamed in Zulip (resolved,
+retitled) to a name that still starts with its ticket's number becomes the ticket's stored topic (Ticket.zulip_topic),
+so the portal's later messages follow it.
 
 The event fields read here are Zulip's JSON: anything can be missing or of another type, so each reader checks what it
 uses and passes over an event it can't read."""
@@ -40,6 +40,9 @@ NOT_LINKED = (
     "only the team's members and staff linked to the portal by their Zulip email can add to a ticket; this message "
     "was not added to it."
 )
+NOT_CHECKED = (
+    "the portal could not check who sent this message, so it was not added to the ticket; please send it again."
+)
 # Realm of Zulip's system bots (e.g. the Notification Bot's "marked this topic as resolved"); messages carry it as
 # sender_realm_str (Zulip's zerver/lib/message_cache.py; SYSTEM_BOT_REALM in zproject/default_settings.py)
 SYSTEM_BOT_REALM = "zulipinternal"
@@ -51,7 +54,6 @@ class IncomingMessage:
     stream: str
     topic: str
     sender_id: int
-    sender_email: str
     sender_name: str
     content: str
 
@@ -78,7 +80,7 @@ def parse_message_event(event: Mapping[str, object]) -> IncomingMessage | None:
     stream, topic, email, name, content = texts
     if email.lower() == settings.ZULIP_BOT_EMAIL.lower() or message.get("sender_realm_str") == SYSTEM_BOT_REALM:
         return None
-    return IncomingMessage(message_id, stream, topic, sender_id, email, name, content)
+    return IncomingMessage(message_id, stream, topic, sender_id, name, content)
 
 
 def edited_message(event: Mapping[str, object]) -> tuple[int, str] | None:
@@ -160,13 +162,10 @@ class _Recorded:
     store_on: tuple[Ticket, User] | None = None
 
 
-def _record(msg: IncomingMessage, has_uploads: bool) -> _Recorded:
-    """Record a message in a ticket's topic through ticketing.chat_comments, when its sender may write to the ticket;
-    a message outside a ticket's topic is passed over."""
-    ticket = find_ticket(msg.stream, msg.topic)
-    if ticket is None:
-        return _Recorded()
-    author = _portal_user(msg.sender_email)
+def _record(msg: IncomingMessage, ticket: Ticket, email: str, has_uploads: bool) -> _Recorded:
+    """Record a message in its ticket's topic through ticketing.chat_comments, when its sender (by the email Zulip
+    gives the bot for them) may write to the ticket."""
+    author = _portal_user(email)
     if author is None or not ticket_open_to_user(ticket, author):
         logger.warning(f"Zulip message {msg.message_id} from {msg.sender_id} not added: no portal account may write")
         return _Recorded(refused=NOT_LINKED)
@@ -230,10 +229,21 @@ async def _store_uploads(
 
 async def save_message(client: ZulipClient, msg: IncomingMessage) -> None:
     """Turn a message in a ticket's topic into the ticket's comment and its first MAX_UPLOADS uploads into the
-    ticket's attachments. A sender who may not write to the ticket, or one over the rate limit, gets nothing saved
-    and is told in the topic (the message stays in Zulip)."""
+    ticket's attachments; a message outside a ticket's topic is passed over. The sender is matched by the email Zulip
+    gives the bot for them (ZulipClient.get_user_email), not the message's sender_email, a placeholder unless the
+    sender shows their address to everyone. A sender who may not write to the ticket, or one over the rate limit, gets
+    nothing saved and is told in the topic (the message stays in Zulip); so is one Zulip couldn't be asked about."""
+    ticket = await sync_to_async(find_ticket)(msg.stream, msg.topic)
+    if ticket is None:
+        return
+    try:
+        email = await client.get_user_email(msg.sender_id)
+    except ZulipError, httpx.HTTPError:
+        logger.exception(f"Could not look up the sender of Zulip message {msg.message_id}")
+        await _reply(msg, client, NOT_CHECKED, "a sender was not looked up")
+        return
     uploads = upload_links(msg.content)
-    recorded = await sync_to_async(_record)(msg, bool(uploads))
+    recorded = await sync_to_async(_record)(msg, ticket, email, bool(uploads))
     if recorded.refused:
         await _reply(msg, client, recorded.refused, "a message was refused")
     elif recorded.store_on is not None:

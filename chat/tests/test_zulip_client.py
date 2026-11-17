@@ -101,6 +101,42 @@ async def test_get_events_long_polls_the_queue_and_answers_its_events():
     assert request.extensions["timeout"]["read"] == LONG_POLL_READ_TIMEOUT
 
 
+async def test_get_user_email_answers_the_users_real_address():
+    user = {"user_id": 9, "email": "user9@zulip.example.org", "delivery_email": "member@example.org"}
+    recorder = Recorder({"result": "success", "msg": "", "user": user})
+
+    assert await client_for(recorder).get_user_email(9) == "member@example.org"
+
+    request = recorder.request
+    assert request.method == "GET"
+    assert request.url.path == "/api/v1/users/9"
+    assert request.headers["authorization"] == AUTH
+
+
+@pytest.mark.parametrize(
+    "user",
+    [
+        {"user_id": 9, "email": "member@example.org"},
+        {"user_id": 9, "email": "user9@zulip.example.org", "delivery_email": None},
+    ],
+    ids=["before_zulip_7_public", "hidden_from_the_bot"],
+)
+async def test_get_user_email_falls_back_to_email_without_a_delivery_email(user):
+    """Before Zulip 7.0 a public address has no delivery_email; one hidden from the bot has it null, and email is
+    Zulip's placeholder, which matches no portal account."""
+    recorder = Recorder({"result": "success", "msg": "", "user": user})
+
+    assert await client_for(recorder).get_user_email(9) == user["email"]
+
+
+@pytest.mark.parametrize("answer", [{}, {"user": None}, {"user": {"user_id": 9}}, {"user": {"email": ""}}])
+async def test_get_user_email_without_an_email_raises(answer):
+    with pytest.raises(ZulipError) as error:
+        await client_for(Recorder({"result": "success", "msg": "", **answer})).get_user_email(9)
+
+    assert error.value.code == "BAD_ANSWER"
+
+
 @pytest.mark.parametrize(
     "call",
     [
@@ -108,8 +144,9 @@ async def test_get_events_long_polls_the_queue_and_answers_its_events():
         lambda c: c.add_reaction(77, "paperclip"),
         lambda c: c.register_queue(),
         lambda c: c.get_events("1517975029:0", 2),
+        lambda c: c.get_user_email(9),
     ],
-    ids=["send_stream_message", "add_reaction", "register_queue", "get_events"],
+    ids=["send_stream_message", "add_reaction", "register_queue", "get_events", "get_user_email"],
 )
 async def test_an_error_answer_raises_zulip_error_with_its_code(call):
     recorder = Recorder({"result": "error", "code": "BAD_EVENT_QUEUE_ID", "msg": "Bad event queue ID"}, status=400)

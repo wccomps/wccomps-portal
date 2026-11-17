@@ -17,7 +17,8 @@ MakeTeams = Callable[..., Awaitable[None]]
 
 
 class FakeZulip:
-    """Stands in for ZulipClient: records sends; streams in missing_streams answer STREAM_DOES_NOT_EXIST."""
+    """Stands in for ZulipClient: records sends; streams in missing_streams answer STREAM_DOES_NOT_EXIST. A user's
+    email is user_emails' (team 3's member is user 9), or Zulip's placeholder for one the bot can't see."""
 
     def __init__(self) -> None:
         self.sent: list[tuple[str, str, str]] = []  # (stream, topic, content)
@@ -30,6 +31,9 @@ class FakeZulip:
         self.registered = 0
         self.uploads: dict[str, bytes] = {}
         self.fetched: list[str] = []
+        self.user_emails: dict[int, str] = {9: "member@example.org"}
+        self.user_lookups: list[int] = []
+        self.user_lookup_error: Exception | None = None  # what get_user_email raises
         self._message_id = 1000
 
     @property
@@ -70,6 +74,12 @@ class FakeZulip:
         self.fetched.append(path)
         return self.uploads[path][:limit]
 
+    async def get_user_email(self, user_id: int) -> str:
+        self.user_lookups.append(user_id)
+        if self.user_lookup_error is not None:
+            raise self.user_lookup_error
+        return self.user_emails.get(user_id, f"user{user_id}@zulip.example.org")
+
 
 def message(
     *,
@@ -78,12 +88,11 @@ def message(
     content: str = "hi",
     message_id: int = 77,
     sender_id: int = 9,
-    sender_email: str = "member@example.org",
     sender_name: str = "Member",
 ) -> IncomingMessage:
-    """A message in a Zulip topic, as parse_message_event gives it: by default from team 3's member (the ticket
-    fixture's portal account) in team 3's stream."""
-    return IncomingMessage(message_id, stream, topic, sender_id, sender_email, sender_name, content)
+    """A message in a Zulip topic, as parse_message_event gives it: by default from team 3's member (user 9, the
+    ticket fixture's portal account by FakeZulip.user_emails) in team 3's stream."""
+    return IncomingMessage(message_id, stream, topic, sender_id, sender_name, content)
 
 
 async def portal_account(username: str, email: str, groups: list[str], *, active: bool = True) -> User:

@@ -126,6 +126,10 @@ NEXTCLOUD_USER = {"ocs": {"meta": {"status": "ok", "statuscode": 200}, "data": {
 ZULIP_DONE = {"result": "success", "msg": ""}
 ZULIP_SENT = {**ZULIP_DONE, "id": 42}
 ZULIP_QUEUE = {**ZULIP_DONE, "queue_id": "1517975029:0", "last_event_id": -1}
+ZULIP_USER = {
+    **ZULIP_DONE,
+    "user": {"user_id": 9, "email": "user9@zulip.test", "delivery_email": "member@example.org", "full_name": "Member"},
+}
 ZULIP_EVENTS = {
     **ZULIP_DONE,
     "events": [
@@ -427,7 +431,7 @@ def check_zulip_events_read(result: object) -> None:
             isinstance(m, IncomingMessage)
             and _zulip_id(m.message_id)
             and _zulip_id(m.sender_id)
-            and all(is_str(v) for v in (m.stream, m.topic, m.sender_email, m.sender_name, m.content))
+            and all(is_str(v) for v in (m.stream, m.topic, m.sender_name, m.content))
         )
 
     def renamed_ok(r: object) -> bool:
@@ -700,6 +704,14 @@ READERS = [
         (ZULIP_EVENTS,),
         lambda r: outcome(r, lambda e: isinstance(e, list) and all(isinstance(v, dict) for v in e), "a list of events"),
         (f"{ZC}.get_events", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_get_user_email",
+        zulip(lambda c: c.get_user_email(9)),
+        (ZULIP_USER,),
+        lambda r: outcome(r, lambda e: is_str(e) and bool(e), "an email"),
+        (f"{ZC}.get_user_email", f"{ZC}._call"),
         raises=(ZulipError,),
     ),
     Reader(

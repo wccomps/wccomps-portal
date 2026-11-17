@@ -1,6 +1,7 @@
 """Messages in a ticket's Zulip topic become its comments: only the stream's own team's tickets, only from a sender
-whose Zulip email is the portal account of the team's member or ticket staff, each message once, under the same rate
-limit as the web and Discord; edits (while the author may still write) and deletes carry over and go no further.
+whose real Zulip email (looked up, not the message's placeholder) is the portal account of the team's member or ticket
+staff, each message once, under the same rate limit as the web and Discord; edits (while the author may still write)
+and deletes carry over and go no further.
 Uploaded files become the ticket's attachments, each message's once, credited to the sender's portal account. A topic
 renamed in Zulip becomes the ticket's stored topic. The runner's event loop re-registers a lost queue and rides out
 Zulip being unreachable."""
@@ -18,6 +19,7 @@ from chat.zulip import runner
 from chat.zulip.client import LONG_POLL_READ_TIMEOUT, UPLOAD_PREFIX, ZulipError
 from chat.zulip.incoming import (
     MAX_UPLOADS,
+    NOT_CHECKED,
     NOT_LINKED,
     IncomingMessage,
     apply_delete,
@@ -71,7 +73,7 @@ def event(topic: str, *, message_id: int = 77, event_id: int = 0, **fields: obje
 
 def test_a_stream_message_is_read():
     assert parse_message_event(event("T003-001: Web", content="help")) == IncomingMessage(
-        77, "team03", "T003-001: Web", 9, "member@example.org", "Member", "help"
+        77, "team03", "T003-001: Web", 9, "Member", "help"
     )
 
 
@@ -107,6 +109,7 @@ async def test_a_system_bots_message_in_a_ticket_topic_saves_nothing_and_gets_no
 
     assert not await TicketComment.objects.aexists()
     assert fake_zulip.sent == []
+    assert fake_zulip.user_lookups == []
 
 
 def test_edits_and_deletes_are_read():
@@ -217,28 +220,33 @@ async def test_a_topic_naming_no_ticket_is_ignored(fake_zulip, ticket):
 
     assert not await TicketComment.objects.aexists()
     assert fake_zulip.sent == []
+    assert fake_zulip.user_lookups == []  # no lookup for a message no ticket takes
 
 
 async def test_sender_matched_by_email_writes_as_that_account(fake_zulip, ticket, django_user_model):
     member = await django_user_model.objects.aget(email="member@example.org")
+    fake_zulip.user_emails[9] = "MEMBER@example.org"
 
-    await save_message(fake_zulip, message(topic=topic_name(ticket), sender_email="MEMBER@example.org"))
+    await save_message(fake_zulip, message(topic=topic_name(ticket)))
 
     assert (await TicketComment.objects.aget()).author_id == member.id
+    assert fake_zulip.user_lookups == [9]
 
 
 async def test_ticket_staff_may_write_to_any_teams_ticket(fake_zulip, ticket):
     staff = await portal_account("support", "support@example.org", [PERMISSION_MAP["ticketing_support"][0]])
 
-    await save_message(fake_zulip, message(topic=topic_name(ticket), sender_email="support@example.org"))
+    fake_zulip.user_emails[9] = "support@example.org"
+    await save_message(fake_zulip, message(topic=topic_name(ticket)))
 
     assert (await TicketComment.objects.aget()).author_id == staff.id
 
 
 async def _refused(fake_zulip: FakeZulip, ticket: Ticket, email: str) -> None:
     fake_zulip.uploads = {"/user_uploads/2/ab/a.txt": b"log"}
+    fake_zulip.user_emails[9] = email
     content = "hello [a.txt](/user_uploads/2/ab/a.txt)"
-    await save_message(fake_zulip, message(topic=topic_name(ticket), sender_email=email, content=content))
+    await save_message(fake_zulip, message(topic=topic_name(ticket), content=content))
 
     assert not await TicketComment.objects.aexists()
     assert not await TicketAttachment.objects.aexists()
@@ -249,6 +257,27 @@ async def _refused(fake_zulip: FakeZulip, ticket: Ticket, email: str) -> None:
 @pytest.mark.parametrize("email", ["nobody@example.org", ""])
 async def test_a_sender_with_no_portal_account_is_told_and_nothing_is_saved(fake_zulip, ticket, email):
     await _refused(fake_zulip, ticket, email)
+
+
+async def test_a_sender_whose_address_zulip_hides_is_refused(fake_zulip, ticket):
+    """Zulip gives a placeholder (user<id>@<host>) for a sender whose email visibility leaves the bot out."""
+    await _refused(fake_zulip, ticket, "user9@zulip.example.org")
+
+
+@pytest.mark.parametrize("error", [ZulipError("BAD_REQUEST", "No such user"), httpx.ConnectError("refused")])
+async def test_a_sender_zulip_cant_be_asked_about_is_told_to_send_again(fake_zulip, ticket, caplog, error):
+    """Not NOT_LINKED: no one was found not to match; nothing is saved and the failure is logged."""
+    fake_zulip.user_lookup_error = error
+    fake_zulip.uploads = {"/user_uploads/2/ab/a.txt": b"log"}
+
+    await save_message(fake_zulip, message(topic=topic_name(ticket), content="hi [a.txt](/user_uploads/2/ab/a.txt)"))
+
+    assert not await TicketComment.objects.aexists()
+    assert not await TicketAttachment.objects.aexists()
+    assert not await CommentRateLimit.objects.aexists()
+    assert fake_zulip.fetched == []
+    assert fake_zulip.sent_to("team03") == [f"Member: {NOT_CHECKED}"]
+    assert "Could not look up the sender of Zulip message 77" in caplog.text
 
 
 async def test_an_email_shared_by_two_accounts_names_no_one(fake_zulip, ticket, django_user_model):

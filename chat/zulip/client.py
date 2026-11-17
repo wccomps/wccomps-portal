@@ -1,5 +1,5 @@
-"""An async client for the parts of Zulip's REST API the portal uses: sending to a stream, reacting, the event queue
-and downloading an upload. The bot authenticates with its email and API key (HTTP basic auth)."""
+"""An async client for the parts of Zulip's REST API the portal uses: sending to a stream, reacting, the event queue,
+a user's email and downloading an upload. The bot authenticates with its email and API key (HTTP basic auth)."""
 
 import json
 
@@ -90,6 +90,19 @@ class ZulipClient:
         if not isinstance(events, list) or not all(isinstance(event, dict) for event in events):
             raise ZulipError("BAD_ANSWER", "no list of events")
         return events
+
+    async def get_user_email(self, user_id: int) -> str:
+        """A user's real email address (GET /users/{user_id}): delivery_email, which Zulip fills when the user's
+        email_address_visibility lets the bot see it (members for any bot, admins for an admin bot), else email.
+        Without that access delivery_email is null and email is a placeholder (user<id>@<host>) that matches no portal
+        account; a server before Zulip 7.0 leaves delivery_email out when the address is public, and email is then the
+        real one."""
+        answer = await self._call("GET", f"users/{user_id}")
+        user = answer.get("user")
+        email = (user.get("delivery_email") or user.get("email")) if isinstance(user, dict) else None
+        if not isinstance(email, str) or not email:
+            raise ZulipError("BAD_ANSWER", "no user email")
+        return email
 
     async def fetch_upload(self, path: str, limit: int) -> bytes:
         """An uploaded file's first limit bytes (path as a message links it, /user_uploads/...), read no further: ask
