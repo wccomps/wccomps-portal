@@ -152,22 +152,39 @@ def test_a_move_that_renames_no_topic_is_passed_over(fields):
     assert renamed_topic(rename("T003-001: Web", "✔ T003-001: Web", **fields)) is None
 
 
-async def test_a_rename_in_zulip_becomes_the_tickets_topic(ticket):
+async def test_a_rename_in_zulip_keeping_the_number_becomes_the_tickets_topic(ticket):
     await apply_rename(rename(topic_name(ticket), f"✔ {topic_name(ticket)}"))
     assert (await Ticket.objects.aget(pk=ticket.pk)).zulip_topic == f"✔ {topic_name(ticket)}"
 
     await apply_rename(rename(f"✔ {topic_name(ticket)}", topic_name(ticket)))  # unresolved again
     assert (await Ticket.objects.aget(pk=ticket.pk)).zulip_topic == topic_name(ticket)
 
+    await apply_rename(rename(topic_name(ticket), f"{ticket.ticket_number}: web is back"))  # retitled
+    assert (await Ticket.objects.aget(pk=ticket.pk)).zulip_topic == f"{ticket.ticket_number}: web is back"
 
-async def test_a_topic_renamed_to_name_the_ticket_becomes_its_topic(ticket):
+
+@pytest.mark.parametrize("new", ["lunch", "T003-002: DNS", "T005-001: DNS"])
+async def test_a_rename_dropping_the_tickets_number_keeps_the_stored_topic(ticket, new):
+    """Without the number (or naming another ticket) replies there no longer reach the ticket; the portal keeps
+    posting to the stored name."""
+    await Ticket.objects.filter(pk=ticket.pk).aupdate(zulip_topic=topic_name(ticket))
+
+    await apply_rename(rename(topic_name(ticket), new))
+
+    assert (await Ticket.objects.aget(pk=ticket.pk)).zulip_topic == topic_name(ticket)
+
+
+async def test_a_topic_renamed_to_name_a_ticket_takes_nothing_over(ticket):
+    await Ticket.objects.filter(pk=ticket.pk).aupdate(zulip_topic=topic_name(ticket))
+
     await apply_rename(rename("help", f"{ticket.ticket_number}: web"))
-    assert (await Ticket.objects.aget(pk=ticket.pk)).zulip_topic == f"{ticket.ticket_number}: web"
+
+    assert (await Ticket.objects.aget(pk=ticket.pk)).zulip_topic == topic_name(ticket)
 
 
 async def test_a_rename_in_another_teams_stream_changes_nothing(ticket, team5_ticket):
-    await apply_rename(rename(topic_name(ticket), "moved", stream_name="team05"))
-    assert not await Ticket.objects.filter(zulip_topic="moved").aexists()
+    await apply_rename(rename(topic_name(ticket), f"✔ {topic_name(ticket)}", stream_name="team05"))
+    assert not await Ticket.objects.filter(zulip_topic=f"✔ {topic_name(ticket)}").aexists()
 
 
 # ---------------------------------------------------------------------------------------------------------------

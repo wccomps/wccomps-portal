@@ -2,8 +2,9 @@
 do), and their edits and deletes carry over to the comment. Only a sender whose Zulip email is the portal account of
 one of the ticket's team or of ticket staff writes to a ticket; anyone else is told so in the topic. Files uploaded
 with a message are stored on the ticket as its attachments, as a Discord thread's are; they stay out of the comment
-and aren't posted to the other chat backends. A topic renamed in Zulip (resolved, moved) becomes the ticket's stored
-topic (Ticket.zulip_topic), so the portal's later messages follow it.
+and aren't posted to the other chat backends. A topic renamed in Zulip (resolved, retitled) to a name that still
+starts with its ticket's number becomes the ticket's stored topic (Ticket.zulip_topic), so the portal's later messages
+follow it.
 
 The event fields read here are Zulip's JSON: anything can be missing or of another type, so each reader checks what it
 uses and passes over an event it can't read."""
@@ -39,9 +40,8 @@ NOT_LINKED = (
     "only the team's members and staff linked to the portal by their Zulip email can add to a ticket; this message "
     "was not added to it."
 )
-# The realm of Zulip's system (cross-realm) bots, such as the Notification Bot that posts "marked this topic as
-# resolved". A message carries its sender's realm as sender_realm_str (zerver/lib/message_cache.py in Zulip's server),
-# and these bots live in the realm its settings name SYSTEM_BOT_REALM (zproject/default_settings.py there).
+# Realm of Zulip's system bots (e.g. the Notification Bot's "marked this topic as resolved"); messages carry it as
+# sender_realm_str (Zulip's zerver/lib/message_cache.py; SYSTEM_BOT_REALM in zproject/default_settings.py)
 SYSTEM_BOT_REALM = "zulipinternal"
 
 
@@ -156,8 +156,8 @@ def comment_text(content: str) -> str:
 @dataclass(frozen=True)
 class _Recorded:
     refused: str = ""  # what to tell the sender: nothing was saved
-    ticket: Ticket | None = None  # the ticket to store the message's uploads on; None when there are none to store
-    author: User | None = None  # the portal account the uploads are credited to
+    # The ticket to store the message's uploads on and the portal account they're credited to; None when none to store
+    store_on: tuple[Ticket, User] | None = None
 
 
 def _record(msg: IncomingMessage, has_uploads: bool) -> _Recorded:
@@ -170,19 +170,20 @@ def _record(msg: IncomingMessage, has_uploads: bool) -> _Recorded:
     if author is None or not ticket_open_to_user(ticket, author):
         logger.warning(f"Zulip message {msg.message_id} from {msg.sender_id} not added: no portal account may write")
         return _Recorded(refused=NOT_LINKED)
-    recorded = chat_comments.record_message(
+    has_files = has_uploads and not TicketAttachment.objects.filter(zulip_message_id=msg.message_id).exists()
+    refused = chat_comments.record_message(
         ticket,
         TaskBackend.ZULIP,
         message_id=msg.message_id,
         actor_key=f"zulip:{msg.sender_id}",
         author=author,
         text=comment_text(msg.content),
-        has_files=has_uploads and not TicketAttachment.objects.filter(zulip_message_id=msg.message_id).exists(),
+        has_files=has_files,
     )
-    if recorded.refused:
-        logger.warning(f"Rate limit refused Zulip message {msg.message_id} from {msg.sender_id}: {recorded.refused}")
-        return _Recorded(refused=f"{recorded.refused}; this message was not added to the ticket. Please slow down.")
-    return _Recorded(ticket=ticket, author=author) if recorded.store_files else _Recorded()
+    if refused:
+        logger.warning(f"Rate limit refused Zulip message {msg.message_id} from {msg.sender_id}: {refused}")
+        return _Recorded(refused=f"{refused}; this message was not added to the ticket. Please slow down.")
+    return _Recorded(store_on=(ticket, author) if has_files else None)
 
 
 async def _reply(msg: IncomingMessage, client: ZulipClient, text: str, about: str) -> None:
@@ -235,11 +236,11 @@ async def save_message(client: ZulipClient, msg: IncomingMessage) -> None:
     recorded = await sync_to_async(_record)(msg, bool(uploads))
     if recorded.refused:
         await _reply(msg, client, recorded.refused, "a message was refused")
-    elif recorded.ticket is not None and recorded.author is not None:
+    elif recorded.store_on is not None:
         if len(uploads) > MAX_UPLOADS:
             text = f"only a message's first {MAX_UPLOADS} files are added to the ticket; post the rest in another one."
             await _reply(msg, client, text, "files were left out")
-        await _store_uploads(client, msg, recorded.ticket, recorded.author, uploads[:MAX_UPLOADS])
+        await _store_uploads(client, msg, *recorded.store_on, uploads[:MAX_UPLOADS])
 
 
 async def apply_edit(event: Mapping[str, object]) -> None:
@@ -251,10 +252,14 @@ async def apply_edit(event: Mapping[str, object]) -> None:
 
 
 def follow_rename(stream: str, old: str, new: str) -> None:
-    """Store a renamed topic's new name on the ticket the old name, else the new one, belongs to (find_ticket), so
-    the portal's later messages go where Zulip now shows the ticket's."""
-    ticket = find_ticket(stream, old) or find_ticket(stream, new)
-    if ticket is not None and Ticket.objects.filter(pk=ticket.pk).exclude(zulip_topic=new).update(zulip_topic=new):
+    """Store a renamed topic's new name on the ticket the old name belongs to (find_ticket) while the new name still
+    starts with that ticket's number (resolving, unresolving or retitling it in Zulip), so the portal's later messages
+    go where Zulip now shows the ticket's. A rename to a name without the number, or naming another ticket, changes
+    nothing: the portal keeps posting to the stored name."""
+    ticket = find_ticket(stream, old)
+    if ticket is None or ticket_number_from_topic(new) != ticket.ticket_number:
+        return
+    if Ticket.objects.filter(pk=ticket.pk).exclude(zulip_topic=new).update(zulip_topic=new):
         logger.info(f"Ticket {ticket.ticket_number}'s Zulip topic is now {new!r}")
 
 

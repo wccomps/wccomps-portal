@@ -5,7 +5,6 @@ may still write to the ticket. Each backend decides first who may write to the t
 itself."""
 
 import logging
-from dataclasses import dataclass
 
 from django.contrib.auth.models import User
 from django.db import transaction
@@ -25,12 +24,6 @@ DELETED_TEXT = "[Message deleted]"
 _MESSAGE_ID_FIELD = {TaskBackend.DISCORD: "discord_message_id", TaskBackend.ZULIP: "zulip_message_id"}
 
 
-@dataclass(frozen=True)
-class Recorded:
-    refused: str = ""  # why the rate limit refused the message; nothing was saved
-    store_files: bool = False  # the message has files not yet saved, and the caller stores them now
-
-
 def record_message(
     ticket: Ticket,
     origin: TaskBackend,
@@ -39,19 +32,19 @@ def record_message(
     actor_key: str,
     author: User | None,
     text: str,
-    has_files: bool,  # the message has files not yet saved: the caller stores them when store_files comes back
-) -> Recorded:
+    has_files: bool,  # the message has files not yet saved, which the caller stores unless refused
+) -> str:
     """Save a chat message's text as the ticket's comment and queue it for the other chat backends, counting the
-    message once against the rate limit (text and files together). A message with no new text or files (an event
-    delivered again) is passed over."""
+    message once against the rate limit (text and files together); why the rate limit refused it (nothing saved), or
+    "". A message with no new text or files (an event delivered again) is passed over."""
     field, text = _MESSAGE_ID_FIELD[origin], storable(text)
     with transaction.atomic():
         new_comment = bool(text) and not TicketComment.objects.filter(**{field: message_id}).exists()
         if not (new_comment or has_files):
-            return Recorded()
+            return ""
         allowed, reason = CommentRateLimit.check_rate_limit(ticket.id, actor_key)
         if not allowed:
-            return Recorded(refused=reason)
+            return reason
         CommentRateLimit.objects.create(ticket=ticket, actor_key=actor_key)
         comment = None
         if new_comment:
@@ -64,12 +57,13 @@ def record_message(
         logger.info(
             f"Saved {origin.label} message {message_id} as comment {comment.id} on ticket {ticket.ticket_number}"
         )
-    return Recorded(store_files=has_files)
+    return ""
 
 
 def apply_edit(origin: TaskBackend, message_id: int, text: str) -> None:
     """A chat message's new text onto its comment, if it has one whose author may still write to the ticket
-    (ticketing.access.ticket_open_to_user): an author since disabled or moved off the team changes nothing."""
+    (ticketing.access.ticket_open_to_user): an author since disabled or moved off the team changes nothing, and nor
+    does an edit to a comment with no portal author (an older or unlinked row)."""
     comments = TicketComment.objects.select_related("ticket", "author__usergroups")
     comment = comments.filter(**{_MESSAGE_ID_FIELD[origin]: message_id}).first()
     if comment is None or comment.author is None or not ticket_open_to_user(comment.ticket, comment.author):

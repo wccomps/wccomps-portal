@@ -195,7 +195,7 @@ class TicketingCog(commands.Cog):
             return
 
         author = await sync_to_async(get_user_for_ticket)(discord_id=message.author.id)
-        recorded = await sync_to_async(chat_comments.record_message)(
+        refused = await sync_to_async(chat_comments.record_message)(
             ticket,
             TaskBackend.DISCORD,
             message_id=message.id,
@@ -205,11 +205,11 @@ class TicketingCog(commands.Cog):
             has_files=bool(message.attachments),
         )
 
-        if recorded.refused:
+        if refused:
             try:
                 await message.delete()
                 await message.channel.send(
-                    f"{message.author.mention} {recorded.refused}. Please slow down.",
+                    f"{message.author.mention} {refused}. Please slow down.",
                     delete_after=10,
                     allowed_mentions=pinging(users=[message.author]),
                 )
@@ -218,34 +218,33 @@ class TicketingCog(commands.Cog):
                 logger.warning("Cannot delete message due to permissions")
             return
 
-        if recorded.store_files:
-            for attachment in message.attachments:
-                if problem := TicketAttachment.too_big(attachment.size):
-                    await message.channel.send(
-                        f"{message.author.mention} {problem}. Please use a file sharing service.",
-                        delete_after=30,
-                        allowed_mentions=pinging(users=[message.author]),
-                    )
-                    continue
+        for attachment in message.attachments:
+            if problem := TicketAttachment.too_big(attachment.size):
+                await message.channel.send(
+                    f"{message.author.mention} {problem}. Please use a file sharing service.",
+                    delete_after=30,
+                    allowed_mentions=pinging(users=[message.author]),
+                )
+                continue
 
-                try:
-                    # Typed from its bytes, as a web upload is
-                    stored = TicketAttachment.with_file(
-                        await attachment.read(), attachment.filename, ticket=ticket, uploaded_by=str(message.author)
-                    )
-                    await stored.asave()
+            try:
+                # Typed from its bytes, as a web upload is
+                stored = TicketAttachment.with_file(
+                    await attachment.read(), attachment.filename, ticket=ticket, uploaded_by=str(message.author)
+                )
+                await stored.asave()
 
-                    logger.info(f"Stored attachment {stored.filename} for ticket #{ticket.id}")
+                logger.info(f"Stored attachment {stored.filename} for ticket #{ticket.id}")
 
-                    await message.add_reaction("📎")
+                await message.add_reaction("📎")
 
-                except Exception as e:
-                    logger.exception(f"Failed to store an attachment for ticket #{ticket.id}: {e}")
-                    await message.channel.send(
-                        f"{message.author.mention} Failed to store an attachment. Please try again.",
-                        delete_after=30,
-                        allowed_mentions=pinging(users=[message.author]),
-                    )
+            except Exception as e:
+                logger.exception(f"Failed to store an attachment for ticket #{ticket.id}: {e}")
+                await message.channel.send(
+                    f"{message.author.mention} Failed to store an attachment. Please try again.",
+                    delete_after=30,
+                    allowed_mentions=pinging(users=[message.author]),
+                )
 
     @commands.Cog.listener()
     async def on_message_edit(self, _before: discord.Message, after: discord.Message) -> None:
