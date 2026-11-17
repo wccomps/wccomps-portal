@@ -112,7 +112,10 @@
                     </button>
                 {% endif %}
                 <span class="nav-user">{% firstof authentik_username user.username %}</span>
-                <a href="{% url 'oauth_logout' %}">Log out</a>
+                <c-form action="{% url 'oauth_logout' %}" class="nav-logout">
+                    {% csrf_token %}
+                    <button type="submit">Log out</button>
+                </c-form>
             </div>
         </div>
     </nav>

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 import pytest
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -42,7 +43,8 @@ def test_fit_marks_cut_text() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
-async def test_web_comment_over_the_message_limit_is_sent_in_parts() -> None:
+async def test_a_long_web_comment_is_sent_in_two_parts_pointing_to_the_rest() -> None:
+    """Two messages at most, beating the heartbeat after each: one comment can't hold up the queue."""
     from django.contrib.auth.models import User
 
     from bot.discord_queue import DiscordQueueProcessor
@@ -67,14 +69,18 @@ async def test_web_comment_over_the_message_limit_is_sent_in_parts() -> None:
     bot = MagicMock(spec=discord.Client)
     bot.get_channel.return_value = thread
 
-    with patch("bot.discord_queue.ensure_ticket_thread", new=AsyncMock(return_value=thread)):
+    with (
+        patch("bot.discord_queue.ensure_ticket_thread", new=AsyncMock(return_value=thread)),
+        patch("bot.utils.beat") as beat,
+    ):
         await DiscordQueueProcessor(bot)._handle_post_comment(task.typed_payload(), TaskProgress.of(task))
 
     sent = [call.args[0] for call in thread.send.call_args_list]
-    assert len(sent) == 3
+    assert len(sent) == 2
+    assert beat.call_count == 2
     assert all(len(part) <= DISCORD_MESSAGE_CHAR_LIMIT for part in sent)
     assert sent[0].startswith("**volunteer**\n")
-    assert "".join(sent).count("y") == text.count("y")
+    assert sent[-1].endswith(f"The rest is on the portal: {settings.BASE_URL.rstrip('/')}/tickets/T003-001/")
 
 
 @pytest.mark.asyncio

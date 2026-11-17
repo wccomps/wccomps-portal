@@ -12,7 +12,7 @@ from bot.discord_manager import recreate_team_infrastructure, setup_team_infrast
 from bot.role_sync import competition_guild, sync_member_roles, sync_roles
 from bot.thread_creator import add_to_team_threads, ensure_ticket_thread
 from bot.ticket_dashboard import trigger_dashboard
-from bot.utils import add_fields, log_to_ops_channel, send_parts
+from bot.utils import DISCORD_MESSAGE_CHAR_LIMIT, add_fields, log_to_ops_channel, send_parts
 from core.broadcast import parse_broadcast_target
 from core.chat_notices import Card, ticket_update
 from core.heartbeat import QUEUE_DISCORD, beat, beat_for
@@ -40,6 +40,7 @@ from core.task_queue import QueueProcessor, StepsState, TaskProgress, _target
 from core.utils import role_sync_summary
 from team.models import DiscordLink, Team
 from ticketing.models import Ticket, TicketComment
+from ticketing.utils import relay_parts, ticket_url
 
 logger = logging.getLogger(__name__)
 
@@ -171,8 +172,10 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
             logger.info(f"Ticket {ticket.ticket_number} has no Discord thread; comment {comment.id} not mirrored")
             return
 
-        # A web comment has no length limit; send all of it, in as many messages as it takes
-        await send_parts(thread, f"**{comment.author_name}**\n{comment.comment_text}", progress=progress)
+        # In at most two messages, the rest left to the ticket's page: the queue runs one task at a time
+        text = f"**{comment.author_name}**\n{comment.comment_text}"
+        parts = relay_parts(text, DISCORD_MESSAGE_CHAR_LIMIT, ticket_url(ticket.ticket_number))
+        await send_parts(thread, text, progress=progress, parts=parts)
         logger.info(f"Posted comment {comment.id} to thread {thread.id}")
 
     async def _handle_post_ticket_update(self, payload: PostTicketUpdate, progress: TaskProgress[StepsState]) -> None:
@@ -195,7 +198,8 @@ class DiscordQueueProcessor(QueueProcessor[ChatNotice | DiscordOnly]):
                 add_fields(embed, card.fields, time_style="F")
                 await thread.send(embed=embed)
             case str(text):
-                await send_parts(thread, text, progress=progress)
+                parts = relay_parts(text, DISCORD_MESSAGE_CHAR_LIMIT, ticket_url(ticket.ticket_number))
+                await send_parts(thread, text, progress=progress, parts=parts)
 
         logger.info(f"Posted ticket update ({action}) to thread {thread.id}")
 

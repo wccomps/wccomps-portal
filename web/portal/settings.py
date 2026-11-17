@@ -10,18 +10,31 @@ django_stubs_ext.monkeypatch()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+_TRUE, _FALSE = {"1", "true", "yes", "on"}, {"0", "false", "no", "off"}
 
-# The random fallback lets tools and tests run without a key; portal/wsgi.py refuses to serve without one.
+
+def env_bool(name: str, default: bool) -> bool:
+    """A yes/no environment variable: 1, true, yes or on, or 0, false, no or off, in any case; unset or empty is the
+    default. Anything else is refused, so a typo can't quietly turn off a check such as certificate verification."""
+    value = os.environ.get(name, "").strip().lower()
+    if not value:
+        return default
+    if value in _TRUE | _FALSE:
+        return value in _TRUE
+    raise ImproperlyConfigured(f"{name} must be true or false (or 1/0, yes/no, on/off), not {value!r}")
+
+
+# The random fallback lets tools and tests run without a key; portal.required stops the servers without a strong one
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", secrets.token_urlsafe(50))
 
-DEBUG = os.environ.get("DJANGO_DEBUG", "False") == "True"
+DEBUG = env_bool("DJANGO_DEBUG", False)
 
 # A component attribute that cotton would drop (core.cotton) fails the render when True, else logs an error
 STRICT_COMPONENT_ATTRS = DEBUG
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
-TRUST_CF_CONNECTING_IP = os.environ.get("TRUST_CF_CONNECTING_IP", "").strip().lower() in {"1", "true", "yes"}
+TRUST_CF_CONNECTING_IP = env_bool("TRUST_CF_CONNECTING_IP", False)
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 
@@ -29,6 +42,10 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 # https only, and a same-host form needs no trusted origin.
 _address = urlsplit(BASE_URL)
 CSRF_TRUSTED_ORIGINS = [f"https://{_address.netloc}"] if _address.scheme == "https" and _address.netloc else []
+
+# Form fields other than files (a comment, a pasted CSV) in one request: a larger body is refused (400) before a view
+# reads it. Files are capped by the views (core.stored_files) and the proxy's body size limit.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 256 * 1024
 
 
 INSTALLED_APPS = [
@@ -258,13 +275,17 @@ QUOTIENT_PASSWORD = os.environ.get("QUOTIENT_PASSWORD", "")
 PROXMOX_API_URL = os.environ.get("PROXMOX_API_URL", "")
 PROXMOX_API_TOKEN = os.environ.get("PROXMOX_API_TOKEN", "")
 PROXMOX_CA_FILE = os.environ.get("PROXMOX_CA_FILE", "")
-PROXMOX_VERIFY_SSL = os.environ.get("PROXMOX_VERIFY_SSL", "True") == "True"
+PROXMOX_VERIFY_SSL = env_bool("PROXMOX_VERIFY_SSL", True)
 PROXMOX_DEFAULT_SNAPSHOT = os.environ.get("PROXMOX_DEFAULT_SNAPSHOT", "clean")
 # The ticket category whose tickets get the Proxmox box reset (seeded in ticketing 0009 as "Box Reset / Scrub")
 BOX_RESET_CATEGORY_ID = int(os.environ.get("BOX_RESET_CATEGORY_ID", "2"))
 
 AWEFUL_PROXY_URL = os.environ.get("AWEFUL_PROXY_URL", "")
 AWEFUL_PROXY_TOKEN = os.environ.get("AWEFUL_PROXY_TOKEN", "")
+
+# Settings among portal.required.HTTPS_SETTINGS (comma-separated) whose URL may be plain http: only for a service on a
+# network nobody else can read, such as an in-cluster address. Empty: every credentialed URL must be https.
+ALLOW_HTTP_URLS = [name.strip() for name in os.environ.get("ALLOW_HTTP_URLS", "").split(",") if name.strip()]
 
 NEXTCLOUD_URL = os.environ.get("NEXTCLOUD_URL", "")
 NEXTCLOUD_USERNAME = os.environ.get("NEXTCLOUD_USERNAME", "")
@@ -281,8 +302,8 @@ MAILERS = {
                 "OPTIONS": {
                     "host": os.environ.get("EMAIL_HOST", "localhost"),
                     "port": int(os.environ.get("EMAIL_PORT", "587")),
-                    "use_tls": os.environ.get("EMAIL_USE_TLS", "True") == "True",
-                    "use_ssl": os.environ.get("EMAIL_USE_SSL", "False") == "True",
+                    "use_tls": env_bool("EMAIL_USE_TLS", True),
+                    "use_ssl": env_bool("EMAIL_USE_SSL", False),
                     "username": os.environ.get("EMAIL_HOST_USER", ""),
                     "password": os.environ.get("EMAIL_HOST_PASSWORD", ""),
                 }

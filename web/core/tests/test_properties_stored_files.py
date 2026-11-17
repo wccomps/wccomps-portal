@@ -15,7 +15,7 @@ from core.stored_files import (
     DOWNLOAD_MIME,
     MAX_NAME_LENGTH,
     clean_name,
-    detect_inline_type,
+    detect_type,
     file_response,
     stored_type,
 )
@@ -52,23 +52,24 @@ def test_the_stored_type_is_the_bytes_for_an_inline_type_and_the_name_otherwise(
     """An image pasted without an extension still stores as an image, so its ticket shows a preview."""
     kind = stored_type(data, name)
     assert len(kind) <= 100
-    if detect_inline_type(data):
-        assert kind == detect_inline_type(data)
+    if detect_type(data):
+        assert kind == detect_type(data)
     else:
         assert not kind.startswith("image/") and kind != "application/pdf"
 
 
 @given(data=file_bytes(), name=file_names(), inline=st.booleans())
-def test_a_served_file_shows_inline_only_as_an_image_or_pdf_and_is_sandboxed_otherwise(
+def test_a_served_file_shows_inline_only_as_a_raster_image_and_is_always_sandboxed(
     data: bytes, name: str, inline: bool
 ) -> None:
     response = file_response(data, clean_name(name, "file"), inline=inline)
-    inline_type = detect_inline_type(data)
-    shown = inline and inline_type is not None
-    assert response["Content-Type"] == (inline_type or DOWNLOAD_MIME)
+    detected = detect_type(data)
+    shown = inline and detected is not None and detected.startswith("image/")
+    assert response["Content-Type"] == (detected or DOWNLOAD_MIME)
     assert response["Content-Disposition"].startswith("inline" if shown else "attachment")
-    if not (shown and inline_type == "application/pdf"):
-        assert response["Content-Security-Policy"].startswith("sandbox")
+    assert response["Content-Security-Policy"].startswith("sandbox")
+    assert response["Cross-Origin-Resource-Policy"] == "same-origin"
+    assert response["X-Content-Type-Options"] == "nosniff"
 
 
 @pytest.mark.django_db

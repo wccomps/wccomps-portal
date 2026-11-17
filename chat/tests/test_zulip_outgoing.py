@@ -241,13 +241,18 @@ async def test_comment_posts_to_ticket_topic_with_mentions_silenced(processor, f
     assert fake_zulip.sent == [("team03", topic_name(ticket), "**Unknown**\nping @_**all** and @_*Support*")]
 
 
-async def test_long_comment_sent_in_parts_and_resumed(processor, fake_zulip, ticket_with_comment):
+async def test_long_comment_sent_in_two_parts_and_resumed(
+    processor, fake_zulip, ticket_with_comment, monkeypatch, settings
+):
+    """At most two messages, the last pointing to the rest, beating the heartbeat after each sent."""
     ticket, comment = ticket_with_comment
     await TicketComment.objects.filter(pk=comment.pk).aupdate(comment_text="\n".join(["x" * 999] * 25))
     payload = PostComment(ticket_id=ticket.id, comment_id=comment.id)
     task = await claimed(payload)
     send = fake_zulip.send_stream_message
     calls: list[int] = []
+    beats: list[int] = []
+    monkeypatch.setattr("chat.zulip.outgoing.beat", lambda: beats.append(1))
 
     async def fail_second(stream: str, topic: str, content: str) -> int:
         calls.append(1)
@@ -260,8 +265,10 @@ async def test_long_comment_sent_in_parts_and_resumed(processor, fake_zulip, tic
         await run(processor, payload, task)
     await run(processor, payload, task)
     parts = fake_zulip.sent_to("team03")
-    assert len(parts) == 3 and all(len(part) <= 10000 for part in parts)
-    assert "\n".join(parts).count("x" * 999) == 25
+    assert len(parts) == 2 and all(len(part) <= 10000 for part in parts)
+    assert parts[-1].endswith(f"The rest is on the portal: {settings.BASE_URL.rstrip('/')}/tickets/T003-001/")
+    assert len(calls) == 3  # the retry skipped the part already sent
+    assert len(beats) == 2
 
 
 async def test_times_are_converted_before_the_text_is_split(processor, fake_zulip, ticket_with_comment):

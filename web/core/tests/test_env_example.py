@@ -40,11 +40,14 @@ def _is_os_environ(node: ast.expr) -> bool:
 
 
 def _env_names(tree: ast.Module) -> set[str]:
-    """The literal names a module reads from the environment."""
+    """The literal names a module reads from the environment, through os.environ, os.getenv or settings.py's
+    env_bool."""
     names: set[str] = set()
     for node in ast.walk(tree):
         key: ast.expr | None = None
-        if isinstance(node, ast.Call) and node.args and isinstance(node.func, ast.Attribute):
+        if isinstance(node, ast.Call) and node.args and isinstance(node.func, ast.Name) and node.func.id == "env_bool":
+            key = node.args[0]
+        elif isinstance(node, ast.Call) and node.args and isinstance(node.func, ast.Attribute):
             func = node.func
             if (func.attr == "get" and _is_os_environ(func.value)) or (
                 func.attr == "getenv" and isinstance(func.value, ast.Name) and func.value.id == "os"
@@ -81,7 +84,8 @@ def listed_names() -> list[str]:
 def test_the_readers_are_found() -> None:
     """The scan still sees settings.py and a reader outside it, so a change to how settings are read can't empty it."""
     found = read_names()
-    assert found.get("DJANGO_SECRET_KEY") == "web/portal/settings.py"
+    assert found.get("ORG_NAME") == "web/portal/settings.py"
+    assert found.get("PROXMOX_VERIFY_SSL") == "web/portal/settings.py"  # through env_bool
     assert found.get("BOT_HEARTBEAT_DIR") == "web/core/heartbeat.py"
     assert found.get("PORTAL_TAG") == "docker-compose.yml"
 

@@ -17,8 +17,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portal.settings")
 django.setup()
 
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
-from portal.required import missing_settings
+from portal.required import refuse_to_start
 
 from chat.zulip import runner as zulip_runner
 from chat.zulip.client import ZulipClient
@@ -37,8 +36,7 @@ def main() -> None:
         wanted = "; or ".join(f"{', '.join(b.settings)} for {TaskBackend(b.name).label}" for b in CHAT_BACKENDS)
         logger.error(f"No chat backend configured: set {wanted}")
         sys.exit(1)
-    if missing := missing_settings():
-        raise ImproperlyConfigured(f"{', '.join(missing)} not set; the chat process needs them")
+    refuse_to_start("the chat process")
     try:
         runners = [RUNNERS[backend]() for backend in backends]
     except ValueError as e:

@@ -2,6 +2,8 @@
 a user's email and downloading an upload. The bot authenticates with its email and API key (HTTP basic auth)."""
 
 import json
+import re
+from urllib.parse import unquote
 
 import httpx
 from django.conf import settings
@@ -10,6 +12,15 @@ from django.conf import settings
 LONG_POLL_READ_TIMEOUT = 120.0
 EVENT_TYPES = ["message", "update_message", "delete_message"]
 UPLOAD_PREFIX = "/user_uploads/"
+# An upload as Zulip links it: its realm's id, then letters, digits, ".", "_", "-" and "/". No "%" or "\", which a proxy
+# or server on the way could decode or normalize into a path outside the uploads
+_UPLOAD_PATH = re.compile(re.escape(UPLOAD_PREFIX) + r"\d+/[A-Za-z0-9._/-]+")
+
+
+def is_upload_path(path: str) -> bool:
+    """Whether path is only ever one of the site's uploads: all of it _UPLOAD_PATH, with no "." or ".." segment once
+    percent-decoded (the bot's credentials go with the request)."""
+    return _UPLOAD_PATH.fullmatch(path) is not None and not {".", ".."} & set(unquote(path).split("/"))
 
 
 class ZulipError(Exception):
@@ -106,9 +117,9 @@ class ZulipClient:
 
     async def fetch_upload(self, path: str, limit: int) -> bytes:
         """An uploaded file's first limit bytes (path as a message links it, /user_uploads/...), read no further: ask
-        for one byte past a size cap to tell a file over it. Only the site's own uploads: the request carries the
-        bot's credentials."""
-        if not path.startswith(UPLOAD_PREFIX) or ".." in path.split("/"):
+        for one byte past a size cap to tell a file over it. Only the site's own uploads (is_upload_path): the request
+        carries the bot's credentials."""
+        if not is_upload_path(path):
             raise ZulipError("NOT_AN_UPLOAD", path)
         async with self._http.stream("GET", path) as response:
             if not response.is_success:

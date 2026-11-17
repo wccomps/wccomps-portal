@@ -93,8 +93,8 @@ def pages(world: World) -> Iterator[tuple[ViewCase, str, str]]:
     for module in VIEW_MODULES:
         for case in module.CASES:
             for name in (case.name, *case.also):
-                # A sign-out GET ends the world's sessions; a JSON endpoint and a POST-only view are no page
-                if "logout" in name or "GET" not in case.methods or is_json_endpoint(CALLBACKS[name]):
+                # A JSON endpoint and a POST-only view (sign-out among them) are no page
+                if "GET" not in case.methods or is_json_endpoint(CALLBACKS[name]):
                     continue
                 if not _shown(name):
                     continue

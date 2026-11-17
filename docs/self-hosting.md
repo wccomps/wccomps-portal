@@ -12,12 +12,23 @@ version, since they share the models.
 | Process | Command | What it does | Liveness |
 |---|---|---|---|
 | web | `gunicorn portal.wsgi:application` (the image's default) | The portal's pages: tickets, scoring, inject grading, packets, registration, the ops pages. Its entrypoint (`web/entrypoint.sh`) first runs `manage.py prepare_database`: migrations under a lock, then teams 1 to `MAX_TEAMS` if there are none. | `GET /livez/` (no database); `GET /health/` also queries the database |
-| worker | `python -m worker` | The competition timer (scheduled starts and stops), the Authentik group refresh every 5 minutes, the Quotient metadata sync every 5 minutes (15 while Quotient is unreachable), which also reads Proxmox and pushes to aweful-proxy, and the worker queue: Nextcloud accounts and the Quotient sync a competition start queues. It talks to no chat system. | `python -m core.health worker` |
+| worker | `python -m worker` | The competition timer (scheduled starts and stops), the Authentik group refresh every 5 minutes, the Quotient metadata sync every 5 minutes (15 while Quotient is unreachable), which also reads Proxmox and pushes to aweful-proxy, the expired session cleanup (Django's clearsessions) every hour, and the worker queue: Nextcloud accounts and the Quotient sync a competition start queues. It talks to no chat system. | `python -m core.health worker` |
 | chat | `python -m chat` | A runner for each configured chat backend, in one event loop: the Discord bot when `DISCORD_BOT_TOKEN` is set, the Zulip runner when `ZULIP_SITE`, `ZULIP_BOT_EMAIL` and `ZULIP_API_KEY` are all set. It exits at once when neither is configured. | `python -m core.health chat` |
 
-The web server, the worker and the chat process refuse to start while any of `AUTHENTIK_URL`, `DEFAULT_FROM_EMAIL`,
-`ORG_NAME` or `ORG_SHORT_NAME` is empty (`web/portal/required.py`). The web server also refuses without
-`DJANGO_SECRET_KEY`, or with the placeholder `.env.example` ships.
+The web server, the worker and the chat process refuse to start (`web/portal/required.py` `refuse_to_start`), naming
+every reason at once, while:
+
+- any of `AUTHENTIK_URL`, `DEFAULT_FROM_EMAIL`, `ORG_NAME` or `ORG_SHORT_NAME` is empty;
+- `DJANGO_SECRET_KEY` is unset, the placeholder `.env.example` ships, shorter than 50 characters, or made of fewer
+  than 5 distinct characters (Django's own `security.W009` rule);
+- a service URL whose requests carry a credential isn't https: `AUTHENTIK_URL`, `AUTHENTIK_OIDC_URL`, and when set
+  `NEXTCLOUD_URL`, `QUOTIENT_API_URL`, each host in `PROXMOX_API_URL`, and `AWEFUL_PROXY_URL` when
+  `AWEFUL_PROXY_TOKEN` is set. A service reached over a network nobody else can read (an in-cluster address) may be
+  plain http when `ALLOW_HTTP_URLS` names its setting, such as `ALLOW_HTTP_URLS=AWEFUL_PROXY_URL`.
+
+A yes/no setting (`DJANGO_DEBUG`, `TRUST_CF_CONNECTING_IP`, `PROXMOX_VERIFY_SSL`, `EMAIL_USE_TLS`, `EMAIL_USE_SSL`)
+takes `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0` in any case; empty is its default, and any other value stops
+every process, so a typo can't quietly turn certificate checks or STARTTLS off.
 
 Run exactly one worker and exactly one chat process per deployment. Each queue consumer, at its start, puts back the
 tasks its backend left half done (`recover_stranded` in `web/core/task_queue.py`); a second copy would take a task the
@@ -34,11 +45,19 @@ docker compose up -d                  # Postgres, web and worker from the publis
 docker compose --profile chat up -d   # also the chat process, once DISCORD_BOT_TOKEN or the ZULIP_* trio is set
 ```
 
-`docker compose up -d --build` runs the checkout instead; `PORTAL_TAG` picks the published tag. Compose's Postgres
-refuses to start until `DB_PASSWORD` is set. Compose publishes the web app's port (`WEB_PORT`) on every host
-interface, and Docker's port rules get past host firewalls such as ufw: set `WEB_PORT=127.0.0.1:8000` to publish it
-on localhost only when the reverse proxy below runs on the same host, or block the port, so clients reach the portal
-only through the proxy. The worker and chat services have the health checks above.
+`docker compose up -d --build` runs the checkout instead; `PORTAL_TAG` picks the published tag (a `sha-<commit>` tag
+pins one build; `main` moves with every merge). Compose's Postgres refuses to start until `DB_PASSWORD` is set, and its
+image is pinned by digest.
+
+Compose publishes the web app on `127.0.0.1:8000` (`WEB_PORT`), for the reverse proxy below on the same host. Docker's
+port rules get past host firewalls such as ufw, so publish it wider (`WEB_PORT=8000`, every interface) only on
+purpose: a client that reaches gunicorn directly skips the proxy's request limits and, with `TRUST_CF_CONNECTING_IP`
+on, can set its own address. The worker and chat services have the health checks above.
+
+Web, the worker and the chat process run with a read-only root filesystem, no Linux capabilities and
+`no-new-privileges`; each writes only to its `/tmp` (uploads, fontconfig) and `/app/run` (heartbeats), both tmpfs. The
+chat service gets `.env` without `PROXMOX_API_TOKEN`, `AWEFUL_PROXY_TOKEN` and `EMAIL_HOST_PASSWORD`, which it never
+uses, so a flaw in the code that reads Discord and Zulip messages can't reach them.
 
 ### Without Docker
 
@@ -61,15 +80,19 @@ packages.
 
 ### The reverse proxy
 
-Put the web app behind an HTTPS reverse proxy: with `DJANGO_DEBUG=False` the session and CSRF cookies are HTTPS-only.
+Put the web app behind an HTTPS reverse proxy: with `DJANGO_DEBUG=false` the session and CSRF cookies are HTTPS-only.
 The proxy must:
 
 - pass the client's `Host` header through, and set `X-Forwarded-Proto: https`, replacing any value the client sent.
   The portal builds its sign-in redirect URI from them, and Authentik refuses one that isn't
   `https://<portal host>/auth/callback/`. The host must be in `ALLOWED_HOSTS`.
 - unless it is Cloudflare, set `CF-Connecting-IP` to the client's address, replacing any value the client sent, with
-  `TRUST_CF_CONNECTING_IP=True` on web. Otherwise the registration form's rate limit, which is per address, counts
+  `TRUST_CF_CONNECTING_IP=true` on web. Otherwise the registration form's rate limit, which is per address, counts
   every client as the proxy, so a few registrations shut registration for everyone.
+- cap the request body and read it before passing it on. The largest upload the portal takes is a 50 MB set of
+  screenshots (`MAX_SUBMISSION_SIZE` in `web/core/stored_files.py`), so 55 MB leaves room for the form around it. Web
+  runs 4 sync gunicorn workers, each held for a whole request, so a client sending a body slowly ties one up; nginx
+  buffers the whole body first and gives up on a client that stalls.
 
 With `TRUST_CF_CONNECTING_IP` on, clients can set their own address unless the origin is reachable only through the
 proxy (or Cloudflare), so make it so. With nginx:
@@ -78,7 +101,14 @@ proxy (or Cloudflare), so make it so. With nginx:
 proxy_set_header Host $host;
 proxy_set_header X-Forwarded-Proto https;
 proxy_set_header CF-Connecting-IP $remote_addr;
+client_max_body_size 55m;
+client_body_timeout 30s;
+proxy_request_buffering on;
 ```
+
+The portal itself refuses (400) a request whose form fields other than files come to more than 256 KB
+(`DATA_UPLOAD_MAX_MEMORY_SIZE` in `web/portal/settings.py`), and each upload past its own limit: 10 MB for a ticket
+attachment or screenshot, 25 MB for a packet, 50 MB for one submission's screenshots.
 
 ## Authentik
 
@@ -102,18 +132,43 @@ A user's groups are read at each sign-in and again by the worker every 5 minutes
 
 ### The API token
 
-`AUTHENTIK_TOKEN` is a token of an Authentik service account whose role holds the permissions below
-(`web/core/authentik_manager.py`). Authentik lists only what a token may view, so a missing view permission shows up
-as an empty list, not an error; run the readiness checks on the Competition page after setting it up.
+`AUTHENTIK_TOKEN` is a token of an Authentik service account. Authentik lists only what a token may view, so a missing
+view permission shows up as an empty list, not an error; run the readiness checks on the Competition page after
+setting it up.
 
-| Object | Permissions | Used for |
-|---|---|---|
-| Users | view, change, reset password | Reading every user and their groups (group refresh, team accounts), enabling and disabling team accounts at a start and stop, storing a linked Discord ID in the user's attributes, setting team passwords |
-| Groups | view, add user | Reading group names; the readiness fix that puts a team account in its team group |
-| Authenticated sessions | view, delete | Ending a team account's sessions when its credentials are reset. The readiness check "Authentik sessions visible" tests the view permission: with one account per team, it passes only when the token sees at least one session, so sign in to Authentik first; with several accounts per team it passes at once, since the portal resets no team credentials. It can't test delete |
-| Applications | view | Finding each controlled application by slug |
-| Providers | view (`authentik_core.view_provider`, global) | Listing applications to choose controlled applications from |
-| Policy bindings | view, change | Enabling and disabling each controlled application's blue team binding |
+#### Authentik token permissions
+
+Web, the worker and the chat process (which reads Discord and Zulip messages) all hold the token, so grant it no more
+than the portal uses. Give the service account's role each permission below at the scope shown: a global permission
+applies to every object of its kind, an object permission (the object's Permissions tab in Authentik's admin) only to
+the objects named. Never give it change or reset password on all users, nor change on all policy bindings: a leaked
+token holding them could set an Authentik admin's password, or remove the bindings that guard Authentik's own
+applications.
+
+| Object | Permission | Scope | Used for (`web/core/authentik_manager.py`) |
+|---|---|---|---|
+| Users | view | global | Reading every user and their groups for the group refresh and team accounts (`list_all_users`, `find_user`) |
+| Users | change | object: each team account (`team01`, ...) | Enabling and disabling team accounts at a start and stop (`set_user_active`); storing a linked Discord ID in the account's attributes (`update_user_discord_id`) |
+| Users | reset password | object: each team account | Setting team passwords (`set_password`) |
+| Groups | view | global | Reading group names (`list_all_groups`) |
+| Groups | add user | object: each team group | The readiness fix that puts a team account in its team group (`add_user_to_group`) |
+| Authenticated sessions | view, delete | global | Ending a team account's sessions when its credentials are reset (`user_sessions`, `end_sessions`, `sees_any_sessions`); see below |
+| Applications | view | global | Finding each controlled application by slug (`get_application_by_slug`) |
+| Providers | view (`authentik_core.view_provider`) | global | Listing applications to choose controlled applications from (`list_applications`) |
+| Policy bindings | view | global | Finding each controlled application's blue team binding (`get_blueteam_binding`) |
+| Policy bindings | change | object: each controlled application's blue team binding | Enabling and disabling it at a start and stop (`update_binding_enabled`) |
+
+Notes:
+
+- Sessions are made at each sign-in, so no object permission can name them ahead of time: session view and delete
+  stay global. The most a leaked token does with them is sign people out.
+- With change only on team accounts, linking a staff member's Discord account doesn't store the Discord ID in their
+  Authentik attributes (logged, and the link still works); nothing in the portal reads that attribute back.
+- Grant the object permissions again for each team account, team group or controlled application added later;
+  without them, a start, stop or reset fails for it.
+- The readiness check "Authentik sessions visible" tests the view permission: with one account per team, it passes only
+  when the token sees at least one session, so sign in to Authentik first; with several accounts per team it passes at
+  once, since the portal resets no team credentials. It can't test delete.
 
 The token can't create accounts or groups: create them in Authentik.
 
@@ -195,7 +250,8 @@ lists.
 - The token reads pools, lists, rolls back and starts VMs, and reads task status. Proxmox's documentation names the
   privileges for those calls (Pool.Audit, VM.Audit, VM.Snapshot.Rollback, VM.PowerMgmt, Sys.Audit). A
   privilege-separated token holds only what both it and its user hold, so grant them to the user and the token.
-- `PROXMOX_CA_FILE` trusts the cluster's own CA; `PROXMOX_VERIFY_SSL=False` turns verification off.
+- `PROXMOX_CA_FILE` trusts the cluster's own CA; `PROXMOX_VERIFY_SSL=false` turns verification off. Every host in
+  `PROXMOX_API_URL` must be https.
 
 Without Proxmox, a box reset ticket says Proxmox isn't configured and is resolved by hand.
 
@@ -203,7 +259,9 @@ Without Proxmox, a box reset ticket says Proxmox isn't configured and is resolve
 
 Each Quotient metadata sync posts the team network layout it reads from Quotient (team count, address masks, the team
 DNS server and domain) to `AWEFUL_PROXY_URL/config`, with `AWEFUL_PROXY_TOKEN` as a Bearer token when set. A failed
-post is only logged. Without `AWEFUL_PROXY_URL` nothing is posted.
+post is only logged. Without `AWEFUL_PROXY_URL` nothing is posted. With a token the URL must be https, unless the proxy
+is reached over a network nobody else can read (an in-cluster Service) and `ALLOW_HTTP_URLS` names
+`AWEFUL_PROXY_URL`.
 
 ### Nextcloud
 
@@ -229,7 +287,8 @@ carry team passwords, so use it only for testing.
 ### Error alerts
 
 `DISCORD_ERROR_WEBHOOK_URL`, a Discord channel webhook (https only), gets an alert for each server error and each
-error the portal logs to `wccomps.errors`. It works without the Discord bot.
+error the portal logs to `wccomps.errors`; a repeat within 10 minutes, or more than 5 in a minute, is held back and
+counted in the next alert. It works without the Discord bot.
 
 ## Chat
 
@@ -306,12 +365,12 @@ Every setting, with its default when unset and its meaning. `.env.example` has t
 |---|---|---|
 | `ORG_NAME` | empty (refused) | Your organization's name; signs packet emails |
 | `ORG_SHORT_NAME` | empty (refused) | Short name; heads email subjects and scorecards, and starts the Observers, Room Judge and Operations Team role names |
-| `AUTHENTIK_URL` | empty (refused) | Authentik's address, for the API |
+| `AUTHENTIK_URL` | empty (refused) | Authentik's address, for the API; https |
 | `DEFAULT_FROM_EMAIL` | empty (refused) | From address of packet and scorecard emails |
-| `DJANGO_SECRET_KEY` | random per process (the web server refuses) | Signs sessions, CSRF tokens and OAuth state; keep it fixed |
+| `DJANGO_SECRET_KEY` | random per process (the servers refuse) | Signs sessions, CSRF tokens and OAuth state; keep it fixed. At least 50 characters with 5 or more distinct ones |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1` | Host names the portal answers to, comma-separated |
 | `BASE_URL` | `http://localhost:5000` | The portal's public address, for links in chat and email; an https one is CSRF's trusted origin |
-| `AUTHENTIK_OIDC_URL` | `AUTHENTIK_URL/application/o/discord-bot/` | The sign-in provider's OpenID base |
+| `AUTHENTIK_OIDC_URL` | `AUTHENTIK_URL/application/o/discord-bot/` | The sign-in provider's OpenID base; https |
 | `AUTHENTIK_CLIENT_ID` | none (sign-in answers "OAuth is not configured") | The provider's client ID |
 | `AUTHENTIK_SECRET` | none (sign-in fails at the token exchange) | The provider's client secret |
 | `AUTHENTIK_TOKEN` | empty | The API token |
@@ -321,25 +380,26 @@ Every setting, with its default when unset and its meaning. `.env.example` has t
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `DJANGO_DEBUG` | `False` | `True` only on a developer's machine; it also lets the cookies go over plain HTTP |
-| `TRUST_CF_CONNECTING_IP` | off | `true` when every request reaches web through Cloudflare, or a proxy that sets `CF-Connecting-IP` to the client's address ([The reverse proxy](#the-reverse-proxy)), so the registration rate limit and the app's access log use the client address |
-| `WEB_PORT` | `8000` | Port Compose publishes the web app on, on every interface; `127.0.0.1:8000` publishes it on localhost only |
-| `PORTAL_TAG` | `main` | Image tag Compose runs |
+| `DJANGO_DEBUG` | `false` | `true` only on a developer's machine; it also lets the cookies go over plain HTTP |
+| `TRUST_CF_CONNECTING_IP` | `false` | `true` when every request reaches web through Cloudflare, or a proxy that sets `CF-Connecting-IP` to the client's address ([The reverse proxy](#the-reverse-proxy)), so the registration rate limit and the app's access log use the client address |
+| `WEB_PORT` | `127.0.0.1:8000` | Where Compose publishes the web app: localhost only; `8000` publishes it on every interface |
+| `PORTAL_TAG` | `main` | Image tag Compose runs; a `sha-<commit>` tag pins one build |
 | `GUNICORN_WORKERS` | `4` | Gunicorn workers; each holds a database connection, plus one per thread while packets are emailed, so keep workers times web replicas well under Postgres `max_connections` (120 in Compose) |
 | `EMAIL_BACKEND` | `django.core.mail.backends.smtp.EmailBackend` | Django email backend |
 | `EMAIL_HOST`, `EMAIL_PORT` | `localhost`, `587` | SMTP server |
-| `EMAIL_USE_TLS`, `EMAIL_USE_SSL` | `True`, `False` | SMTP encryption |
+| `EMAIL_USE_TLS`, `EMAIL_USE_SSL` | `true`, `false` | SMTP encryption: STARTTLS, or TLS from the start |
 | `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` | empty | SMTP login |
 | `DEFAULT_REPLY_TO_EMAIL` | empty (none) | Reply-To of packet emails |
 | `SERVER_EMAIL` | `DEFAULT_FROM_EMAIL` | Django's error mail sender; the portal sets no `ADMINS`, so Django sends none |
-| `QUOTIENT_API_URL`, `QUOTIENT_USERNAME`, `QUOTIENT_PASSWORD` | empty (off) | Quotient |
-| `PROXMOX_API_URL`, `PROXMOX_API_TOKEN` | empty (off) | Proxmox hosts and token |
+| `QUOTIENT_API_URL`, `QUOTIENT_USERNAME`, `QUOTIENT_PASSWORD` | empty (off) | Quotient; the URL must be https |
+| `PROXMOX_API_URL`, `PROXMOX_API_TOKEN` | empty (off) | Proxmox hosts (each https) and token |
 | `PROXMOX_CA_FILE` | empty (system CAs) | CA file for the Proxmox hosts |
-| `PROXMOX_VERIFY_SSL` | `True` | Verify the Proxmox certificate (only the exact text `True` turns it on) |
+| `PROXMOX_VERIFY_SSL` | `true` | Verify the Proxmox certificate |
 | `PROXMOX_DEFAULT_SNAPSHOT` | `clean` | Snapshot a box reset offers first |
 | `BOX_RESET_CATEGORY_ID` | `2` | The ticket category with the box reset |
-| `AWEFUL_PROXY_URL`, `AWEFUL_PROXY_TOKEN` | empty (off) | aweful-proxy |
-| `NEXTCLOUD_URL`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_PASSWORD` | empty (off) | Nextcloud and its admin login |
+| `AWEFUL_PROXY_URL`, `AWEFUL_PROXY_TOKEN` | empty (off) | aweful-proxy; with a token, the URL must be https |
+| `ALLOW_HTTP_URLS` | empty (all https) | Service URL settings, comma-separated, allowed to be plain http: only for a service on a network nobody else can read, such as `AWEFUL_PROXY_URL` at an in-cluster address |
+| `NEXTCLOUD_URL`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_PASSWORD` | empty (off) | Nextcloud and its admin login; the URL must be https |
 | `NEXTCLOUD_OIDC_PROVIDER_ID` | `1` | The Authentik provider's id in Nextcloud's `user_oidc` app |
 | `HTTPX_DEFAULT_TIMEOUT` | `10` | Seconds for outside calls: Authentik, Proxmox, Nextcloud, aweful-proxy, Zulip, the Quotient login |
 | `DISCORD_WEBHOOK_TIMEOUT` | `5` | Seconds for the error alert post |

@@ -1,24 +1,46 @@
-"""The error webhook embed: request text shows as inert text within Discord limits, and a refused alert is logged."""
+"""The error webhook embed: request text shows as inert text within Discord limits, and a refused alert is logged.
+Alerts go out from a background thread, a repeat or a burst held back, so an error a visitor causes on purpose
+neither holds up requests nor floods the channel."""
 
 import logging
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import httpx
 from django.contrib.auth.models import AnonymousUser
 
-from core.discord_logging import DiscordWebhookHandler
+from core.discord_logging import PER_MINUTE, REPEAT_WINDOW, DiscordWebhookHandler
 
 LINK = "[Sign in again](https://attacker.example/login)"
 LIVE = "https://attacker.example/x <@123> <@&456> <#789> <t:1700000000> @everyone"
 
 
-def _embed(record: logging.LogRecord, response: httpx.Response | None = None) -> dict:
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _handler(clock: Clock | None = None) -> DiscordWebhookHandler:
     with patch.dict("os.environ", {"DISCORD_ERROR_WEBHOOK_URL": "https://discord.example/api/webhooks/1/x"}):
-        handler = DiscordWebhookHandler()
-    with patch("core.discord_logging.httpx.post", return_value=response or httpx.Response(204)) as post:
-        handler.emit(record)
-    return post.call_args.kwargs["json"]["embeds"][0]
+        return DiscordWebhookHandler(clock or Clock())
+
+
+def _embed(record: logging.LogRecord) -> dict:
+    return _handler().payload(record)["embeds"][0]
+
+
+def _posted(handler: DiscordWebhookHandler, records: list[logging.LogRecord]) -> list[dict]:
+    """The embeds handler posts for records, once its sender has sent all it was given."""
+    with patch("core.discord_logging.httpx.post", return_value=httpx.Response(204)) as post:
+        for record in records:
+            handler.emit(record)
+        handler.outbox.join()
+    return [call.kwargs["json"]["embeds"][0] for call in post.call_args_list]
 
 
 def _record(message: str, args: tuple, path: str = "/", error: str = f"bad value ```{LINK}") -> logging.LogRecord:
@@ -79,8 +101,12 @@ def test_no_run_of_backticks_closes_the_traceback_block() -> None:
 
 
 def test_a_refused_alert_is_logged_on_the_console(caplog) -> None:
-    with caplog.at_level("WARNING", logger="core.discord_logging"):
-        _embed(_record("failed", ()), httpx.Response(400, text="Invalid Form Body"))
+    handler = _handler()
+    with (
+        caplog.at_level("WARNING", logger="core.discord_logging"),
+        patch("core.discord_logging.httpx.post", return_value=httpx.Response(400, text="Invalid Form Body")),
+    ):
+        handler.send(handler.payload(_record("failed", ())))
 
     assert any("400" in r.getMessage() for r in caplog.records if r.name == "core.discord_logging")
 
@@ -101,3 +127,44 @@ def test_a_traceback_shows_bidi_and_control_characters_escaped_and_keeps_its_lin
     lines = traceback.split("\n")
     assert len(lines) > 3
     assert all(line.isprintable() for line in lines)
+
+
+def test_logging_an_error_does_not_wait_for_discord() -> None:
+    """A slow or hanging webhook would hold the request's worker for the whole timeout."""
+    handler = _handler()
+    answered = threading.Event()
+
+    def slow_post(*_args: object, **_kwargs: object) -> httpx.Response:
+        answered.wait(10)
+        return httpx.Response(204)
+
+    with patch("core.discord_logging.httpx.post", side_effect=slow_post) as post:
+        started = time.monotonic()
+        handler.emit(_record("failed", ()))
+        assert time.monotonic() - started < 1
+        answered.set()
+        handler.outbox.join()
+    post.assert_called_once()
+
+
+def test_a_repeated_error_is_sent_once_per_window_then_says_how_many_were_held_back() -> None:
+    clock = Clock()
+    handler = _handler(clock)
+    # The same error on different paths: the path is the message's argument, not its template
+    repeats = [_record("Internal Server Error: %s", (f"/x/{n}",), path=f"/x/{n}") for n in range(30)]
+
+    assert len(_posted(handler, repeats)) == 1
+
+    clock.now += REPEAT_WINDOW
+    (later,) = _posted(handler, [_record("Internal Server Error: %s", ("/y",), path="/y")])
+    assert _field(later, "Held back").startswith("29 alerts")
+
+
+def test_distinct_errors_are_capped_per_minute() -> None:
+    clock = Clock()
+    handler = _handler(clock)
+
+    assert len(_posted(handler, [_record(f"failure {n}", ()) for n in range(PER_MINUTE * 3)])) == PER_MINUTE
+
+    clock.now += 60
+    assert len(_posted(handler, [_record("another failure", ())])) == 1

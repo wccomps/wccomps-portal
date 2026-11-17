@@ -1,7 +1,7 @@
 """Incident/red-team evidence files are never rendered as pages on the portal's origin (stored XSS).
 
 Any file type is still accepted (teams upload PDFs, text, CSV, archives as evidence); only real
-images and PDFs are shown inline, decided from the file's bytes rather than the client's claim.
+raster images are shown inline, decided from the file's bytes rather than the client's claim.
 """
 
 import io
@@ -110,13 +110,17 @@ def test_png_still_displays_inline(incident, gold_team_user):
     assert "sandbox" in response["Content-Security-Policy"]
 
 
-def test_pdf_still_displays_inline(incident, gold_team_user):
+def test_a_pdf_downloads_sandboxed(incident, gold_team_user):
+    """A browser's PDF viewer runs the file's own script and links, so a team's PDF is never shown on the origin."""
     shot = IncidentScreenshot.objects.create(incident=incident, file_data=PDF, filename="IR.pdf", mime_type="x")
 
     response = _get(gold_team_user, reverse("scoring:incident_screenshot", args=[shot.id]))
 
     assert response["Content-Type"] == "application/pdf"
-    assert response["Content-Disposition"].startswith("inline")
+    assert response["Content-Disposition"].startswith("attachment")
+    assert "sandbox" in response["Content-Security-Policy"]
+    assert response["Cross-Origin-Resource-Policy"] == "same-origin"
+    assert response["X-Content-Type-Options"] == "nosniff"
 
 
 def test_stored_svg_red_file_is_downloaded_not_rendered(red_team_user, gold_team_user):
