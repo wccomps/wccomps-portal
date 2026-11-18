@@ -120,6 +120,22 @@ def test_approve_is_refused_while_another_registration_of_the_school_is_approved
     ) in response.content.decode()
 
 
+def test_approve_refused_by_an_approved_registration_with_no_contact_names_no_email(client, event):
+    """Its contacts deleted in the admin, the approved one has no email to name: the refusal still reads whole."""
+    other = _registration(event, "Example University", "student@example.com", status="approved")
+    other.contacts.all().delete()
+    real = _registration(event, "example university", "captain@example.edu")
+
+    response = client.post(reverse("registration_approve", args=[real.pk]), follow=True)
+
+    real.refresh_from_db()
+    assert real.status == "pending"
+    assert (
+        "Registration for example university was not approved: another registration for that school is already "
+        "approved for one of its events."
+    ) in response.content.decode()
+
+
 @pytest.mark.parametrize("other", ["pending", "approved an earlier season"])
 def test_approve_takes_when_no_other_registration_of_the_school_is_approved_for_its_events(client, event, other):
     if other == "pending":

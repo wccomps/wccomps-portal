@@ -51,6 +51,19 @@ def test_setting_a_school_never_writes_the_stored_password():
     assert SchoolInfo.objects.get().contact_email == "new@example.edu"
 
 
+def test_a_new_spelling_of_a_school_writes_only_its_name():
+    """The key a rename (set_team_school) gives the record isn't put back from the copy for_name read."""
+    School.for_name("Example University")
+
+    with CaptureQueriesContext(connection) as queries:
+        school = School.for_name("example  UNIVERSITY")
+
+    updates = _updates(queries, "registration_school")
+    assert updates
+    assert all('"name_key"' not in sql for sql in updates)
+    assert School.objects.get().name == school.name == "example UNIVERSITY"
+
+
 @pytest.fixture
 def event():
     season = Season.objects.create(name="2026", year=2026, is_active=True)
