@@ -191,6 +191,12 @@ def advisory_lock(key: int | str, *, wait: bool = False, conn: BaseDatabaseWrapp
                     raise
 
 
+def advisory_xact_lock(key: str) -> None:
+    """Wait for the transaction-scoped advisory lock on key, held until the outermost transaction ends."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", [key])
+
+
 def _inline(lines: Iterator[str]) -> Iterator[str]:
     """The operation's lines, ending with a failure line if it raises."""
     try:

@@ -757,7 +757,7 @@ class TestOAuthLogout:
                 "userinfo_endpoint": "https://auth.example.com/userinfo/",
                 "end_session_endpoint": "https://auth.example.com/end-session/",
             }
-            client.get("/auth/logout/")
+            client.post("/auth/logout/")
 
         # Verify logged out
         assert "_auth_user_id" not in client.session
@@ -777,7 +777,27 @@ class TestOAuthLogout:
                 "userinfo_endpoint": "https://auth.example.com/userinfo/",
                 "end_session_endpoint": "https://auth.example.com/end-session/",
             }
-            response = client.get("/auth/logout/")
+            response = client.post("/auth/logout/")
 
         assert response.status_code == 302
         assert "auth.example.com/end-session" in response.url
+
+    def test_a_get_leaves_the_user_signed_in(self):
+        """A link another site plants (or an image) can't sign anyone out."""
+        client = Client()
+        client.force_login(User.objects.create_user(username="logoutuser3"))
+
+        response = client.get("/auth/logout/")
+
+        assert response.status_code == 405
+        assert "_auth_user_id" in client.session
+
+    def test_a_post_without_the_csrf_token_leaves_the_user_signed_in(self):
+        """Another site's form posts without the token."""
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(User.objects.create_user(username="logoutuser4"))
+
+        response = client.post("/auth/logout/")
+
+        assert response.status_code == 403
+        assert "_auth_user_id" in client.session

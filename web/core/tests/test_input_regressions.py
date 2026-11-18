@@ -31,7 +31,7 @@ from registration.services import SchoolListRow, import_school_list
 from scoring.models import RedTeamScreenshot, ScoringTemplate
 
 from core.forms import SchoolInfoEditForm
-from core.stored_files import DOWNLOAD_MIME, detect_inline_type
+from core.stored_files import DOWNLOAD_MIME, detect_type
 from core.tests.strategies import (
     content_types,
     datetime_text,
@@ -213,9 +213,10 @@ def test_a_ticket_attachment_is_typed_from_its_bytes(
         for attachment in TicketAttachment.objects.filter(ticket=ticket):
             url = reverse("ticket_attachment_download", args=[ticket.ticket_number, attachment.pk]) + "?inline=1"
             download = client.get(url)
-            inline_type = detect_inline_type(content)
-            assert download["Content-Type"] == (inline_type or DOWNLOAD_MIME)
-            assert download["Content-Disposition"].startswith("inline" if inline_type else "attachment")
+            detected = detect_type(content)
+            assert download["Content-Type"] == (detected or DOWNLOAD_MIME)
+            shown = detected is not None and detected.startswith("image/")
+            assert download["Content-Disposition"].startswith("inline" if shown else "attachment")
 
 
 @pytest.mark.django_db

@@ -10,10 +10,11 @@ from bot.tests.discord_fakes import bot_with, recording_thread, ticket_message
 from core.models import QueuedTask
 from team.models import Team
 from ticketing.models import Ticket, TicketCategory
+from ticketing.utils import ticket_url
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 
-LONG = "\n".join(f"line {n:04d} " + "x" * 80 for n in range(60))  # about three Discord messages
+LONG = "\n".join(f"line {n:04d} " + "x" * 80 for n in range(60))  # about three Discord messages; a relay sends two
 
 
 def flaky_send(sent: list[str], fail_on: int) -> AsyncMock:
@@ -61,7 +62,8 @@ async def test_a_long_comment_retried_after_its_second_part_failed_sends_each_pa
     with patch("bot.discord_queue.competition_guild", return_value=MagicMock(spec=discord.Guild)):
         await run_twice(DiscordQueueProcessor(bot_with(thread)), task)
 
-    assert len(thread.texts) == len(set(thread.texts)) == 3
+    assert len(thread.texts) == len(set(thread.texts)) == 2
+    assert thread.texts[-1].endswith(ticket_url(ticket.ticket_number))
 
 
 async def test_a_long_reopen_reason_retried_sends_each_part_once(ticket: Ticket) -> None:
@@ -77,7 +79,8 @@ async def test_a_long_reopen_reason_retried_sends_each_part_once(ticket: Ticket)
     with patch("bot.discord_queue.competition_guild", return_value=MagicMock(spec=discord.Guild)):
         await run_twice(DiscordQueueProcessor(bot_with(thread)), task)
 
-    assert len(thread.texts) == len(set(thread.texts)) == 3
+    assert len(thread.texts) == len(set(thread.texts)) == 2
+    assert thread.texts[-1].endswith(ticket_url(ticket.ticket_number))
 
 
 async def test_a_team_broadcast_retried_reaches_only_the_teams_it_missed() -> None:

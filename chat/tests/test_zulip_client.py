@@ -227,6 +227,16 @@ async def test_fetch_upload_raises_on_an_error_status():
         "@elsewhere.example.org/user_uploads/x",
         "/user_uploads/../api/v1/users",
         "/api/v1/users",
+        # Encoded or backslashed climbs a proxy or server could decode or normalize into another path
+        "/user_uploads/%2e%2e/api/v1/messages/1",
+        "/user_uploads/2/%2E%2E/%2e%2e/api/v1/users",
+        "/user_uploads/2/ab/..%2f..%2fapi/v1/users",
+        "/user_uploads/2/ab\\..\\..\\api/v1/users",
+        "/user_uploads/2/./ab/x.png",
+        "/user_uploads/2/ab/../../api",
+        "/user_uploads/x/ab/notes.txt",
+        "/user_uploads/2/",
+        "/user_uploads/2/ab/notes.txt\n",
     ],
 )
 async def test_fetch_upload_sends_credentials_only_to_the_sites_uploads(path):

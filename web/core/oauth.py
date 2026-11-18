@@ -19,6 +19,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 
 from .auth_utils import get_role_based_landing_url, lock_account
 from .models import CredentialsReset, UserGroups
@@ -354,8 +355,10 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
     return redirect(next_url)
 
 
+@require_POST
 def oauth_logout(request: HttpRequest) -> HttpResponse:
-    """Log out user and redirect to Authentik end session."""
+    """Log out user and redirect to Authentik end session. A POST with the CSRF token, so another site's link or
+    form can't sign anyone out."""
     config = _get_oauth_config()
 
     logout(request)

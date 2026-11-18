@@ -2,7 +2,11 @@
 counted once against the rate limit, saved once, and queued for the other chat backends. Its edits and deletes carry
 over to the comment and go no further (the copies elsewhere keep their text); an edit only while the comment's author
 may still write to the ticket. Each backend decides first who may write to the ticket, and stores the message's files
-itself."""
+itself.
+
+Text longer than TicketComment.MAX_LENGTH is refused, as the web form refuses it, never cut: a stored comment is
+always all its message said, and the sender is told to split it (the message stays in chat). An edit past it is not
+applied."""
 
 import logging
 
@@ -29,23 +33,24 @@ def record_message(
     origin: TaskBackend,
     *,
     message_id: int,
-    actor_key: str,
+    actor_key: str,  # CommentRateLimit.user_key of the sender's portal account
     author: User | None,
     text: str,
     has_files: bool,  # the message has files not yet saved, which the caller stores unless refused
 ) -> str:
     """Save a chat message's text as the ticket's comment and queue it for the other chat backends, counting the
-    message once against the rate limit (text and files together); why the rate limit refused it (nothing saved), or
-    "". A message with no new text or files (an event delivered again) is passed over."""
+    message once against the rate limit (text and files together); why it was refused (nothing saved: text past
+    TicketComment.MAX_LENGTH, or the rate limit), or "". A message with no new text or files (an event delivered again)
+    is passed over."""
     field, text = _MESSAGE_ID_FIELD[origin], storable(text)
     with transaction.atomic():
         new_comment = bool(text) and not TicketComment.objects.filter(**{field: message_id}).exists()
         if not (new_comment or has_files):
             return ""
-        allowed, reason = CommentRateLimit.check_rate_limit(ticket.id, actor_key)
-        if not allowed:
+        if new_comment and len(text) > TicketComment.MAX_LENGTH:
+            return too_long(len(text))
+        if reason := CommentRateLimit.take(ticket, actor_key):
             return reason
-        CommentRateLimit.objects.create(ticket=ticket, actor_key=actor_key)
         comment = None
         if new_comment:
             comment = TicketComment.objects.create(
@@ -60,15 +65,24 @@ def record_message(
     return ""
 
 
+def too_long(length: int) -> str:
+    return f"Comment too long ({length}/{TicketComment.MAX_LENGTH} characters); split it into shorter messages"
+
+
 def apply_edit(origin: TaskBackend, message_id: int, text: str) -> None:
     """A chat message's new text onto its comment, if it has one whose author may still write to the ticket
-    (ticketing.access.ticket_open_to_user): an author since disabled or moved off the team changes nothing, and nor
-    does an edit to a comment with no portal author (an older or unlinked row)."""
+    (ticketing.access.ticket_open_to_user) and the text fits TicketComment.MAX_LENGTH: an author since disabled or
+    moved off the team changes nothing, and nor does an edit to a comment with no portal author (an older or unlinked
+    row)."""
+    text = storable(text)
+    if len(text) > TicketComment.MAX_LENGTH:
+        logger.info(f"Did not sync the edit of {origin.label} message {message_id}: {too_long(len(text))}")
+        return
     comments = TicketComment.objects.select_related("ticket", "author__usergroups")
     comment = comments.filter(**{_MESSAGE_ID_FIELD[origin]: message_id}).first()
     if comment is None or comment.author is None or not ticket_open_to_user(comment.ticket, comment.author):
         return
-    TicketComment.objects.filter(pk=comment.pk).update(comment_text=storable(text))
+    TicketComment.objects.filter(pk=comment.pk).update(comment_text=text)
     logger.info(f"Synced the edit of {origin.label} message {message_id} to its comment")
 
 

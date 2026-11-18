@@ -9,6 +9,7 @@ from discord import app_commands
 from django.conf import settings
 
 from core.chat_notices import Field
+from core.heartbeat import beat
 from core.task_queue import StepsState, TaskProgress
 from core.utils import missing_discord_settings, split_message
 from team.models import MAX_TEAMS, Team
@@ -101,16 +102,21 @@ async def send_parts(
     *,
     progress: TaskProgress[StepsState],
     allowed_mentions: discord.AllowedMentions = ALLOWED_MENTIONS,
+    parts: list[str] | None = None,
 ) -> None:
-    """Send text in as many messages as it takes (split_message), so none is past Discord's 2000 characters, skipping
-    the parts progress says an earlier attempt sent. Only the first may ping what allowed_mentions allows: the rest is
-    the sender's text."""
+    """Send text in as many messages as it takes (split_message), so none is past Discord's 2000 characters, or as the
+    parts given (ticketing.utils.relay_parts), skipping the parts progress says an earlier attempt sent, and beating
+    the queue's heartbeat after each. Only the first may ping what allowed_mentions allows: the rest is the sender's
+    text."""
+    if parts is None:
+        parts = split_message(text, DISCORD_MESSAGE_CHAR_LIMIT)
     done = progress.done
-    for n, part in enumerate(split_message(text, DISCORD_MESSAGE_CHAR_LIMIT)):
+    for n, part in enumerate(parts):
         if n < done:
             continue
         await channel.send(part, allowed_mentions=allowed_mentions if n == 0 else ALLOWED_MENTIONS)
         await progress.advance()
+        beat()
 
 
 async def send_announcement(

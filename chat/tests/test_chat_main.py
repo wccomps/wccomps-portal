@@ -91,11 +91,19 @@ def test_chat_exits_without_backends(settings, no_zulip, not_started, zulip_not_
     assert "DISCORD_BOT_TOKEN" in caplog.text and "ZULIP_SITE" in caplog.text
 
 
-def test_chat_refuses_to_start_without_required_settings(settings, no_zulip, not_started, monkeypatch):
+def test_chat_refuses_to_start_without_required_settings(settings, no_zulip, not_started):
     settings.DISCORD_BOT_TOKEN = "token"
-    monkeypatch.setattr(chat_main, "missing_settings", lambda: ["ORG_NAME"])
+    settings.ORG_NAME = ""
 
-    with pytest.raises(ImproperlyConfigured, match="ORG_NAME"):
+    with pytest.raises(ImproperlyConfigured, match="^ORG_NAME not set; the chat process refuses to start"):
+        chat_main.main()
+
+
+def test_chat_refuses_to_start_with_a_plain_http_service_url(settings, no_zulip, not_started):
+    settings.DISCORD_BOT_TOKEN = "token"
+    settings.NEXTCLOUD_URL = "http://cloud.example.org"
+
+    with pytest.raises(ImproperlyConfigured, match="NEXTCLOUD_URL must be https"):
         chat_main.main()
 
 

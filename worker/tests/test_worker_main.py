@@ -23,13 +23,23 @@ def test_worker_imports_no_discord():
     assert out.stdout.strip().splitlines()[-1] == "False", out.stdout + out.stderr
 
 
-def test_the_worker_refuses_to_start_without_required_settings(monkeypatch):
+def test_the_worker_refuses_to_start_without_required_settings(monkeypatch, settings):
     from worker import __main__ as worker_main
 
-    monkeypatch.setattr(worker_main, "missing_settings", lambda: ["ORG_NAME"])
+    settings.ORG_NAME = ""
     monkeypatch.setattr(worker_main.asyncio, "run", lambda _coro: pytest.fail("the worker started"))
 
-    with pytest.raises(ImproperlyConfigured, match="ORG_NAME"):
+    with pytest.raises(ImproperlyConfigured, match="^ORG_NAME not set; the worker refuses to start"):
+        worker_main.main()
+
+
+def test_the_worker_refuses_to_start_with_a_weak_secret_key(monkeypatch):
+    from worker import __main__ as worker_main
+
+    monkeypatch.setenv("DJANGO_SECRET_KEY", "changeme")
+    monkeypatch.setattr(worker_main.asyncio, "run", lambda _coro: pytest.fail("the worker started"))
+
+    with pytest.raises(ImproperlyConfigured, match="DJANGO_SECRET_KEY is too weak"):
         worker_main.main()
 
 
@@ -55,6 +65,7 @@ async def test_a_crashing_loop_ends_the_worker(monkeypatch):
     monkeypatch.setattr(worker_main, "WorkerQueueProcessor", _Queue)
     monkeypatch.setattr(worker_main, "competition_timer_loop", _forever)
     monkeypatch.setattr(worker_main, "quotient_sync_loop", _forever)
+    monkeypatch.setattr(worker_main, "session_cleanup_loop", _forever)
     monkeypatch.setattr(worker_main, "group_refresh_loop", crash)
 
     with pytest.raises(ExceptionGroup) as ended:

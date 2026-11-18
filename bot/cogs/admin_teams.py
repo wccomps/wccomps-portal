@@ -146,7 +146,7 @@ class AdminTeamsCog(commands.Cog):
 
             except Exception as e:
                 logger.exception(f"Error unlinking user {user_id}: {e}")
-                results.append(f"User ID {user_id}: failed ({shorten(str(e), 50)})")
+                results.append(f"User ID {user_id}: failed (see the bot's log)")
                 error_count += 1
 
         if len(user_ids) == 1:

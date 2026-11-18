@@ -2,11 +2,16 @@ import re
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import models
+from django.contrib.auth.models import User
+from django.core.validators import MaxLengthValidator
+from django.db import models, transaction
+from django.db.models import Sum
+from django.db.models.functions import Length
 from django.utils import timezone
 
 from core.models import Approvable
 from core.stored_files import StoredFile
+from core.utils import advisory_xact_lock
 
 
 def parse_playbook_steps(text: str) -> list[str]:
@@ -153,6 +158,9 @@ class Ticket(Approvable):
 
 class TicketAttachment(StoredFile):
     MAX_SIZE = 10 * 1024 * 1024  # 10MB, from the web or a ticket's chat topic
+    # Files live in Postgres, so these bound what one team can fill it with, whichever way the files come in
+    MAX_PER_TICKET = 20
+    MAX_TEAM_BYTES = 200 * 1024 * 1024
     DEFAULT_NAME = "attachment"
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="attachments")
@@ -167,9 +175,30 @@ class TicketAttachment(StoredFile):
     def __str__(self) -> str:
         return f"{self.filename} ({self.ticket.ticket_number})"
 
+    def store(self) -> str:
+        """Save the file unless its ticket is resolved or cancelled, already holds MAX_PER_TICKET files, or the team's
+        tickets would hold more than MAX_TEAM_BYTES with it; why not, or "" once saved. Checked and saved under an
+        advisory lock on the team, so uploads at once can't pass a cap together."""
+        team_id = self.ticket.team_id
+        with transaction.atomic():
+            advisory_xact_lock(f"ticket_attachments:team:{team_id}")
+            status = Ticket.objects.values_list("status", flat=True).get(pk=self.ticket_id)
+            if status in (Ticket.STATUS_RESOLVED, Ticket.STATUS_CANCELLED):
+                return f"Ticket is {status}; files can't be added to it"
+            if TicketAttachment.objects.filter(ticket_id=self.ticket_id).count() >= self.MAX_PER_TICKET:
+                return f"Ticket already has the maximum of {self.MAX_PER_TICKET} attachments"
+            stored = TicketAttachment.objects.filter(ticket__team_id=team_id).aggregate(total=Sum(Length("file_data")))
+            if (stored["total"] or 0) + len(self.file_data) > self.MAX_TEAM_BYTES:
+                return f"Your team's attachments would pass their {self.MAX_TEAM_BYTES // (1024 * 1024)}MB total limit"
+            self.save()
+        return ""
+
 
 class TicketComment(models.Model):
     """Comment on ticket (bidirectional with the chat backends)."""
+
+    # Two Discord messages' worth; the web form and every chat path refuse a longer one
+    MAX_LENGTH = 4000
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="comments")
     author = models.ForeignKey(
@@ -180,7 +209,7 @@ class TicketComment(models.Model):
         related_name="ticket_comments",
         help_text="User who authored this comment",
     )
-    comment_text = models.TextField()
+    comment_text = models.TextField(validators=[MaxLengthValidator(MAX_LENGTH)])
     posted_at = models.DateTimeField(auto_now_add=True)
     discord_message_id = models.BigIntegerField(null=True, blank=True)
     zulip_message_id = models.BigIntegerField(null=True, blank=True, db_index=True)
@@ -219,10 +248,15 @@ class TicketHistory(models.Model):
 
 
 class CommentRateLimit(models.Model):
-    """Rate limiting for ticket comments (5/min per ticket, 10/min per actor).
+    """Rate limiting for ticket comments and uploads (5/min per ticket, 10/min per actor), on every surface.
 
-    actor_key names who posted: "web:<User id>", "discord:<Discord user id>" or "zulip:<Zulip user id>".
+    actor_key names who posted: "user:<User id>" (user_key), so a team's shared account has one budget across the web,
+    Discord and Zulip.
     """
+
+    TICKET_LIMIT = 5
+    ACTOR_LIMIT = 10
+    WINDOW = timedelta(minutes=1)
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, null=True, blank=True)
     # db_default: the previous release's pods insert rows without it while a deploy rolls out
@@ -238,26 +272,25 @@ class CommentRateLimit(models.Model):
     def __str__(self) -> str:
         return f"Comment by {self.actor_key} at {self.posted_at}"
 
+    @staticmethod
+    def user_key(user: User) -> str:
+        return f"user:{user.pk}"
+
     @classmethod
-    def check_rate_limit(cls, ticket_id: int, actor_key: str) -> tuple[bool, str]:
-        """Return (is_allowed, reason_if_blocked)."""
-        one_minute_ago = timezone.now() - timedelta(minutes=1)
-        cls.objects.filter(posted_at__lt=one_minute_ago).delete()
-
-        ticket_comments = cls.objects.filter(ticket_id=ticket_id, posted_at__gte=one_minute_ago).count()
-
-        if ticket_comments >= 5:
-            return (
-                False,
-                f"Ticket rate limit exceeded ({ticket_comments}/5 comments in last minute)",
-            )
-
-        user_comments = cls.objects.filter(actor_key=actor_key, posted_at__gte=one_minute_ago).count()
-
-        if user_comments >= 10:
-            return (
-                False,
-                f"User rate limit exceeded ({user_comments}/10 comments in last minute)",
-            )
-
-        return True, ""
+    def take(cls, ticket: Ticket, actor_key: str) -> str:
+        """Count a post against the limits; why they refuse it (nothing counted), or "" once counted. The check and
+        the count run under advisory locks on the ticket, then the actor, so posts at once can't all pass; inside a
+        caller's transaction the locks are held until it ends."""
+        with transaction.atomic():
+            advisory_xact_lock(f"comment_rate:ticket:{ticket.pk}")
+            advisory_xact_lock(f"comment_rate:actor:{actor_key}")
+            since = timezone.now() - cls.WINDOW
+            cls.objects.filter(ticket_id=ticket.pk, actor_key=actor_key, posted_at__lt=since).delete()
+            ticket_posts = cls.objects.filter(ticket_id=ticket.pk, posted_at__gte=since).count()
+            if ticket_posts >= cls.TICKET_LIMIT:
+                return f"Ticket rate limit exceeded ({ticket_posts}/{cls.TICKET_LIMIT} comments in last minute)"
+            actor_posts = cls.objects.filter(actor_key=actor_key, posted_at__gte=since).count()
+            if actor_posts >= cls.ACTOR_LIMIT:
+                return f"User rate limit exceeded ({actor_posts}/{cls.ACTOR_LIMIT} comments in last minute)"
+            cls.objects.create(ticket=ticket, actor_key=actor_key)
+        return ""
