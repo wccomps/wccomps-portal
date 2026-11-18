@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import cast
 
+from django.conf import settings
+from django.core.exceptions import BadRequest
 from django.db import models
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.urls import reverse
@@ -15,12 +17,18 @@ from orange_team.models import OrangeAssignment
 from scoring.models import IncidentReport, InjectScore, RedTeamScore
 
 from core.admin_views.places import SetupSection, setup_url
-from core.authentik_manager import SESSIONS_HIDDEN, AuthentikAPIError, AuthentikManager, reason_for
+from core.authentik_manager import (
+    HASHED_USER_ID,
+    SESSIONS_HIDDEN,
+    AuthentikAPIError,
+    AuthentikManager,
+    reason_for,
+)
 from core.models import AuditLog, CompetitionConfig
 from core.task_backends import discord_enabled
-from core.team_accounts import accounts_by_team, require_single_account
+from core.team_accounts import accounts_by_team, require_single_account, team_folder
 from core.utils import ndjson_done
-from team.models import Team, single_account, team_username
+from team.models import Team, single_account, team_group_name, team_username
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -66,12 +74,12 @@ def _check_discord_settings() -> CheckResult:
 
 
 def _check_team_accounts_exist() -> CheckResult:
-    """Verify all active team accounts exist in Authentik: each team's one account, or with several accounts per team,
-    at least one in the team's group (core.team_accounts)."""
+    """Verify all active team accounts exist in Authentik: each team's one account, or with several accounts per team
+    or in team folder mode, at least one in the team's group or the team folder (core.team_accounts)."""
     active_teams = Team.objects.filter(is_active=True)
     if not active_teams.exists():
         return ("warn", "No active teams", None)
-    if not single_account():
+    if team_folder() or not single_account():
         return _check_group_accounts_exist([team.team_number for team in active_teams.order_by("team_number")])
 
     with AuthentikManager() as mgr:
@@ -90,7 +98,7 @@ def _check_team_accounts_exist() -> CheckResult:
 
 
 def _check_group_accounts_exist(numbers: list[int]) -> CheckResult:
-    """With several accounts per team: every team has a member of its group matching its account pattern."""
+    """Every team has an account matching its pattern among its group's members, or in the team folder."""
     with AuthentikManager() as mgr:
         accounts = accounts_by_team(mgr, numbers)
     missing = [n for n in numbers if not accounts[n].matched]
@@ -101,10 +109,11 @@ def _check_group_accounts_exist(numbers: list[int]) -> CheckResult:
             for n in missing[:5]
         )
         suffix = f"... (+{len(missing) - 5})" if len(missing) > 5 else ""
+        where = f"the team folder {settings.TEAM_ACCOUNT_PATH}" if team_folder() else "their group"
         return (
             "fail",
-            f"{len(missing)} without an account in their group: {names}{suffix}. Create them in Authentik; the "
-            "portal's token can't.",
+            f"{len(missing)} without an account in {where}: {names}{suffix}. Create them in Authentik; the portal's "
+            "token can't.",
             None,
         )
     return ("pass", f"All {len(numbers)} teams have accounts", None)
@@ -112,7 +121,10 @@ def _check_group_accounts_exist(numbers: list[int]) -> CheckResult:
 
 def _check_team_group_membership() -> CheckResult:
     """Verify each active team's account is in the team's Authentik group (Team.authentik_group). Only a
-    single-account team's account can be outside it: with several, a team's accounts are its group's members."""
+    single-account team's account can be outside it: with several, a team's accounts are its group's members. In team
+    folder mode there are no groups: each active team's stored group must be the one its folder accounts are given."""
+    if team_folder():
+        return _check_folder_team_groups()
     if not single_account():
         return ("pass", "Team accounts are their groups' members", None)
     active_teams = Team.objects.filter(is_active=True)
@@ -142,6 +154,71 @@ def _check_team_group_membership() -> CheckResult:
     return ("pass", "All accounts in correct groups", None)
 
 
+def _check_folder_team_groups() -> CheckResult:
+    """In team folder mode a team's accounts hold its TEAM_GROUP_PATTERN name, so an active team whose stored group
+    was changed would hold no account."""
+    active_teams = Team.objects.filter(is_active=True)
+    if not active_teams.exists():
+        return ("warn", "No active teams", None)
+    renamed = [team for team in active_teams if team.authentik_group != team_group_name(team.team_number)]
+    if renamed:
+        names = ", ".join(f"team {t.team_number:02d} ({t.authentik_group})" for t in renamed[:5])
+        suffix = f"... (+{len(renamed) - 5})" if len(renamed) > 5 else ""
+        return (
+            "fail",
+            f"{len(renamed)} with a group other than TEAM_GROUP_PATTERN gives: {names}{suffix}. Their accounts come "
+            "from the team folder and hold the pattern's group; set each team's group back in Django's admin.",
+            None,
+        )
+    return ("pass", f"Team accounts come from the team folder {settings.TEAM_ACCOUNT_PATH}", None)
+
+
+def _check_usernames_fixed() -> CheckResult:
+    """In team folder mode a team comes from the folder plus a full username match, so users must not choose their
+    own usernames: a team account could rename itself into another team."""
+    try:
+        with AuthentikManager() as mgr:
+            allowed = mgr.users_may_change_username()
+    except AuthentikAPIError as e:
+        return (
+            "fail",
+            f"Could not read Authentik's system settings ({reason_for(e)}); the portal's token needs view System "
+            "settings to confirm users can't change their usernames",
+            None,
+        )
+    if allowed:
+        return (
+            "fail",
+            "Authentik lets users change their username (System settings, Allow users to change username): a team "
+            "account could rename itself into another team. Turn it off.",
+            None,
+        )
+    return ("pass", "Users can't change their Authentik usernames", None)
+
+
+def _check_sub_mode() -> CheckResult:
+    """In team folder mode a sign-in finds its account by uid == sub, which holds only under the hashed user ID
+    subject mode."""
+    client_id = settings.AUTHENTIK_CLIENT_ID or ""
+    with AuthentikManager() as mgr:
+        sub_mode = mgr.oauth2_sub_mode(client_id)
+    if sub_mode is None:
+        return (
+            "fail",
+            "The portal's token sees no OAuth2 provider with the client ID AUTHENTIK_CLIENT_ID; grant it view on "
+            "that provider",
+            None,
+        )
+    if sub_mode != HASHED_USER_ID:
+        return (
+            "fail",
+            f"The portal's OAuth2 provider has subject mode {sub_mode}; team folder sign-ins need "
+            '"Based on the User\'s hashed ID" (hashed_user_id), or accounts of one team rename each other',
+            None,
+        )
+    return ("pass", "The portal's OAuth2 provider uses the hashed user ID as sub", None)
+
+
 def _check_session_access() -> CheckResult:
     """The portal's token must see sessions, or a credentials reset leaves the team's Authentik sessions open."""
     if not single_account():
@@ -168,7 +245,7 @@ def _configure_apps_link() -> dict[str, str]:
 
 
 def _check_blueteam_bindings() -> CheckResult:
-    """Verify BlueTeam group bindings exist on all controlled apps."""
+    """Verify BlueTeam group or policy bindings exist on all controlled apps (AuthentikManager.get_blueteam_binding)."""
     config = CompetitionConfig.get_config()
     apps = config.controlled_applications
     if not apps:
@@ -359,9 +436,15 @@ def _check_multiple_teams() -> CheckResult:
 
 
 def checks() -> list[tuple[str, Callable[[], CheckResult]]]:
-    """The readiness checks to run; the Discord one only when Discord is configured."""
+    """The readiness checks to run; the Discord one only when Discord is configured, the team folder ones only in
+    team folder mode."""
     discord = [("Discord IDs configured", _check_discord_settings)] if discord_enabled() else []
-    return [*discord, *_CHECKS]
+    folder = (
+        [("Usernames fixed", _check_usernames_fixed), ("Sign-in subject mode", _check_sub_mode)]
+        if team_folder()
+        else []
+    )
+    return [*discord, *folder, *_CHECKS]
 
 
 _CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
@@ -414,8 +497,14 @@ def stream_readiness_checks() -> Iterator[str]:
     yield ndjson_done(msg, success=success)
 
 
+FOLDER_HAS_NO_GROUPS = "Team accounts come from the team folder (TEAM_ACCOUNT_PATH); there are no team groups to fix"
+
+
 def fix_group_membership(request: HttpRequest, authentik_username: str) -> JsonResponse:
-    """Add team accounts to their correct Authentik groups, auditing the ones it changed."""
+    """Add team accounts to their correct Authentik groups, auditing the ones it changed. Refused in team folder mode,
+    where team accounts belong to no group."""
+    if team_folder():
+        raise BadRequest(FOLDER_HAS_NO_GROUPS)
     require_single_account()
     active_teams = Team.objects.filter(is_active=True)
     fixed: list[str] = []

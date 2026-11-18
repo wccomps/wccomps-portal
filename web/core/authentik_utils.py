@@ -19,20 +19,23 @@ from .models import AuditLog, CredentialsReset, QueuedTask
 from .queued_tasks import SetupTeamInfrastructure
 from .services.linking import CREDENTIALS_RESET, TEAM_RESET, unlink_teams
 from .services.ops import notify_ops
-from .team_accounts import SEVERAL_ACCOUNTS
+from .team_accounts import SEVERAL_ACCOUNTS, folder_team_number, team_folder
 from .utils import shorten
 
 logger = logging.getLogger(__name__)
 
 
 def _team_user(manager: AuthentikManager, team_number: int) -> AuthentikUser:
-    """A single-account team's Authentik account; AuthentikAPIError saying why when there is none."""
+    """A single-account team's Authentik account, in team folder mode only one in the team folder; AuthentikAPIError
+    saying why when there is none."""
     if team_number < 1 or team_number > MAX_TEAMS:
         raise AuthentikAPIError(f"Team number must be between 1 and {MAX_TEAMS}")
     username = team_username(team_number)
     user = manager.find_user(username)
     if user is None:
         raise AuthentikAPIError(f"User {username} not found")
+    if team_folder() and folder_team_number(user) != team_number:
+        raise AuthentikAPIError(f"User {username} is not in the team folder")
     return user
 
 

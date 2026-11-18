@@ -1,4 +1,6 @@
-"""Keep stored Authentik groups in step with Authentik between logins."""
+"""Keep stored Authentik groups in step with Authentik between logins. In team folder mode
+(core.team_accounts.folder_team_group) a team folder account also holds its team's group, which is no Authentik
+group."""
 
 import logging
 from dataclasses import dataclass
@@ -8,6 +10,7 @@ from django.db import connection, transaction
 
 from core.authentik_manager import AuthentikManager
 from core.models import UserGroups
+from core.team_accounts import folder_team_group
 from core.utils import database_clock
 
 logger = logging.getLogger(__name__)
@@ -33,6 +36,7 @@ class _Group(NamedTuple):
 class _User(NamedTuple):
     is_active: bool
     groups: list[str]
+    team_group: str | None
 
 
 def _expand(direct: list[str], groups: dict[str, _Group]) -> list[str]:
@@ -80,7 +84,7 @@ def _take_lock(*, wait: bool) -> bool:
 def _refresh(manager: AuthentikManager) -> GroupRefreshResult:
     read_at = database_clock()
     groups = {g["pk"]: _Group(g["name"], g["parents"]) for g in manager.list_all_groups()}
-    users = {u["uid"]: _User(u["is_active"], u["groups"]) for u in manager.list_all_users()}
+    users = {u["uid"]: _User(u["is_active"], u["groups"], folder_team_group(u)) for u in manager.list_all_users()}
     if not users:
         raise GroupRefreshAbortedError("Authentik returned no users")
     # A short group listing would silently strip those groups from everyone (and, via the role sync,
@@ -103,7 +107,7 @@ def _refresh(manager: AuthentikManager) -> GroupRefreshResult:
     not_newer = UserGroups.objects.exclude(groups_updated_at__gte=read_at)
     for row in rows:
         user = users.get(row.authentik_id)
-        current = _expand(user.groups, groups) if user else []
+        current = _current(user, groups) if user else []
         active = bool(user and user.is_active)
         if current == sorted(row.groups) and active == row.account_active:
             unchanged.append(row.pk)
@@ -119,3 +123,9 @@ def _refresh(manager: AuthentikManager) -> GroupRefreshResult:
     not_newer.filter(pk__in=unchanged).update(groups_updated_at=read_at)
 
     return GroupRefreshResult(checked=len(rows), changed=changed)
+
+
+def _current(user: _User, groups: dict[str, _Group]) -> list[str]:
+    """A user's group names: its groups with their ancestors, and in team folder mode its team's group."""
+    names = _expand(user.groups, groups)
+    return sorted({*names, user.team_group}) if user.team_group else names

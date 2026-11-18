@@ -22,7 +22,9 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from .auth_utils import get_role_based_landing_url, lock_account
+from .authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
 from .models import CredentialsReset, UserGroups
+from .team_accounts import folder_team_group, team_folder, team_folder_account
 from .utils import database_clock
 
 logger = logging.getLogger(__name__)
@@ -160,6 +162,11 @@ def _before_reset(signed_in_at: float, reset_at: datetime) -> bool:
     return signed_in_at < reset_at.timestamp() - RESET_CLOCK_MARGIN
 
 
+def _usable_username(text: object) -> bool:
+    """Whether text can be a portal username: non-empty text without a NUL that fits the column."""
+    return isinstance(text, str) and bool(text) and "\x00" not in text and _fits(text, User, "username")
+
+
 def _claims(userinfo: dict[str, object]) -> tuple[str, str, str, list[str]]:
     """The sub, username (the email when there is none), email and group names the account is made from;
     ValueError when they can't make one: missing, not text, a NUL, or longer than their columns."""
@@ -169,15 +176,30 @@ def _claims(userinfo: dict[str, object]) -> tuple[str, str, str, list[str]]:
     groups = userinfo.get("groups", [])
     if not isinstance(sub, str) or not sub or not _fits(sub, UserGroups, "authentik_id"):
         raise ValueError("no usable sub claim")
-    if not isinstance(username, str) or not username or not _fits(username, User, "username"):
+    if not isinstance(username, str) or not _usable_username(username):
         raise ValueError("no usable username")
     if not isinstance(email, str) or not _fits(email, User, "email"):
         raise ValueError("an unusable email")
     if not isinstance(groups, list) or not all(isinstance(g, str) for g in groups):
         raise ValueError("groups that aren't a list of names")
-    if "\x00" in sub + username + email + "".join(groups):
+    if "\x00" in sub + email + "".join(groups):
         raise ValueError("a NUL character")
     return sub, username, email, groups
+
+
+def _team_folder_account(authentik_id: str, username: str, groups: list[str]) -> tuple[str, list[str]]:
+    """In team folder mode, the account's own username (found by uid == sub) and its claimed groups plus its team's
+    group; for anyone not in the folder, the claims. AuthentikAPIError when Authentik can't be asked."""
+    with AuthentikManager() as manager:
+        account = team_folder_account(manager, authentik_id)
+    if account is None:
+        return username, groups
+    own = account["username"]
+    if not _usable_username(own):
+        logger.warning(f"Team folder account {username} has an unusable Authentik username, so it signs in as claimed")
+        own = username
+    team_group = folder_team_group(account)
+    return own, sorted({*groups, team_group}) if team_group else groups
 
 
 def oauth_callback(request: HttpRequest) -> HttpResponse:
@@ -303,6 +325,17 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
             {"error_title": "Authentication Failed", "error_message": "Invalid user data."},
         )
 
+    if team_folder():
+        try:
+            username, groups = _team_folder_account(authentik_id, username, groups)
+        except AuthentikAPIError as e:
+            logger.warning(f"Sign-in of {username} refused: the team folder lookup failed: {reason_for(e)}")
+            return render(
+                request,
+                "core/oauth_error.html",
+                {"error_title": "Sign-in Unavailable", "error_message": "Try again in a moment."},
+                status=503,
+            )
     next_url = _next_url(request, state_data)
     # Accounts are keyed by the Authentik sub only: usernames get reused, and matching on
     # them would hand a new identity someone else's account

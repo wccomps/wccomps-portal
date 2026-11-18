@@ -201,6 +201,8 @@ TEAM_GROUP_PATTERN = os.environ.get("TEAM_GROUP_PATTERN", f"{PORTAL_GROUP_PREFIX
 TEAM_ACCOUNT_PATTERN = os.environ.get("TEAM_ACCOUNT_PATTERN", "team{number}")
 if "{number}" not in TEAM_ACCOUNT_PATTERN:
     raise ImproperlyConfigured("TEAM_ACCOUNT_PATTERN must contain {number}, or every team shares the same accounts")
+# Team folder mode: the Authentik user path holding team accounts when there are no team groups; empty uses team groups
+TEAM_ACCOUNT_PATH = os.environ.get("TEAM_ACCOUNT_PATH", "")
 try:
     _distinct_groups = TEAM_GROUP_PATTERN.format(number=1) != TEAM_GROUP_PATTERN.format(number=2)
 except KeyError, IndexError, ValueError:
