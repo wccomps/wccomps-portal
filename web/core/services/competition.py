@@ -15,7 +15,7 @@ from core.authentik_utils import set_team_account_active
 from core.heartbeat import beat
 from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, QueuedTask
 from core.queued_tasks import BroadcastMessage, CompetitionStatusChanged, SyncQuotientMetadata
-from core.team_accounts import accounts_by_team
+from core.team_accounts import accounts_by_team, blueteam_kinds, team_folder
 from core.utils import BlockingSteps, advisory_lock, format_competition_time
 from team.models import MAX_TEAMS, active_team_numbers, team_username
 
@@ -30,6 +30,8 @@ COMPETITION_STARTED = "competition_started"
 COMPETITION_STOPPED = "competition_stopped"
 # A start's reason for an active team whose group has no account matching its pattern, or that has no group
 NO_TEAM_ACCOUNT = "no team account in its group"
+# The same reason in team folder mode
+NO_FOLDER_ACCOUNT = "no team account in the team folder"
 TIMER_GAVE_UP = "competition_timer_gave_up"
 COMPETITION_COUNTDOWN_QUEUED = "competition_countdown_queued"
 
@@ -316,18 +318,19 @@ def _run(
             logger.warning(f"Failed to list the team accounts: {e}")
             account_steps = [(f"team {n:02d}", reason_for(e)) for n in numbers]
         else:
+            no_account = NO_FOLDER_ACCOUNT if team_folder() else NO_TEAM_ACCOUNT
             for number in numbers:
                 matched = accounts[number].matched
                 account_steps.extend((username, None) for username in matched)
                 if not matched and enable:
-                    account_steps.append((f"team {number:02d}", NO_TEAM_ACCOUNT))
+                    account_steps.append((f"team {number:02d}", no_account))
         result.accounts_total = len(account_steps)
         total = len(result.controlled_apps) + len(account_steps) + 2 + (1 if provision_nextcloud else 0)
         step = 0
         for slug in result.controlled_apps:
             step += 1
             try:
-                manager.set_application_enabled(slug, enable)
+                manager.set_application_enabled(slug, enable, blueteam_kinds())
             except AuthentikAPIError as e:
                 logger.warning(f"Failed to {'enable' if enable else 'disable'} application '{slug}': {e}")
                 why = reason_for(e)

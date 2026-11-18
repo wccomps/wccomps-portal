@@ -1,13 +1,15 @@
-"""Keep stored Authentik groups in step with Authentik between logins."""
+"""Keep stored Authentik groups in step with Authentik between logins. In team folder mode a team's group comes from
+the folder alone (core.team_accounts.TeamGroups.held)."""
 
 import logging
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import NamedTuple
 
 from django.db import connection, transaction
 
-from core.authentik_manager import AuthentikManager
+from core.authentik_manager import AuthentikManager, AuthentikUserEntry
 from core.models import UserGroups
+from core.team_accounts import TeamGroups, team_folder, team_groups
 from core.utils import database_clock
 
 logger = logging.getLogger(__name__)
@@ -25,27 +27,17 @@ class GroupRefreshResult:
     changed: int
 
 
-class _Group(NamedTuple):
-    name: str
-    parents: list[str]
-
-
-class _User(NamedTuple):
-    is_active: bool
-    groups: list[str]
-
-
-def _expand(direct: list[str], groups: dict[str, _Group]) -> list[str]:
-    """Direct group pks plus all their ancestors, as sorted names (what the OIDC groups claim holds)."""
+def with_ancestors(direct: Iterable[str], parents: Mapping[str, list[str]]) -> set[str]:
+    """These group pks and all their ancestors, given each group's parent pks; a pk parents lacks is left out."""
     seen: set[str] = set()
     stack = list(direct)
     while stack:
         pk = stack.pop()
-        if pk in seen or pk not in groups:
+        if pk in seen or pk not in parents:
             continue
         seen.add(pk)
-        stack.extend(groups[pk].parents)
-    return sorted(groups[pk].name for pk in seen)
+        stack.extend(parents[pk])
+    return seen
 
 
 def refresh_user_groups(manager: AuthentikManager) -> GroupRefreshResult:
@@ -79,14 +71,18 @@ def _take_lock(*, wait: bool) -> bool:
 
 def _refresh(manager: AuthentikManager) -> GroupRefreshResult:
     read_at = database_clock()
-    groups = {g["pk"]: _Group(g["name"], g["parents"]) for g in manager.list_all_groups()}
-    users = {u["uid"]: _User(u["is_active"], u["groups"]) for u in manager.list_all_users()}
+    listed = manager.list_all_groups()
+    names = {g["pk"]: g["name"] for g in listed}
+    parents = {g["pk"]: g["parents"] for g in listed}
+    folder = team_folder()
+    users = {u["uid"]: u for u in manager.list_all_users(with_path=folder)}
+    folder_teams = team_groups() if folder else None
     if not users:
         raise GroupRefreshAbortedError("Authentik returned no users")
     # A short group listing would silently strip those groups from everyone (and, via the role sync,
     # their Discord roles), so any group a user or another group refers to must be in it.
-    referenced = {pk for u in users.values() for pk in u.groups} | {p for g in groups.values() for p in g.parents}
-    if unknown := referenced - groups.keys():
+    referenced = {pk for u in users.values() for pk in u["groups"]} | {p for ps in parents.values() for p in ps}
+    if unknown := referenced - parents.keys():
         raise GroupRefreshAbortedError(
             f"Authentik's group list is missing {len(unknown)} groups that users or other groups refer to"
         )
@@ -103,8 +99,8 @@ def _refresh(manager: AuthentikManager) -> GroupRefreshResult:
     not_newer = UserGroups.objects.exclude(groups_updated_at__gte=read_at)
     for row in rows:
         user = users.get(row.authentik_id)
-        current = _expand(user.groups, groups) if user else []
-        active = bool(user and user.is_active)
+        current = _current(user, names, parents, folder_teams) if user else []
+        active = bool(user and user["is_active"])
         if current == sorted(row.groups) and active == row.account_active:
             unchanged.append(row.pk)
             continue
@@ -119,3 +115,12 @@ def _refresh(manager: AuthentikManager) -> GroupRefreshResult:
     not_newer.filter(pk__in=unchanged).update(groups_updated_at=read_at)
 
     return GroupRefreshResult(checked=len(rows), changed=changed)
+
+
+def _current(
+    user: AuthentikUserEntry, names: dict[str, str], parents: dict[str, list[str]], folder_teams: TeamGroups | None
+) -> list[str]:
+    """A user's group names: its groups with their ancestors (what the OIDC groups claim holds), sorted; in team folder
+    mode, team groups as the folder gives."""
+    held = sorted(names[pk] for pk in with_ancestors(user["groups"], parents))
+    return folder_teams.held(user, held) if folder_teams else held

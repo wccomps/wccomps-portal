@@ -22,6 +22,11 @@ def team_stream(team_number: int) -> str:
     return settings.ZULIP_TEAM_STREAM.format(number=team_number)
 
 
+def team_broadcast_stream(team_number: int) -> str:
+    """The stream a broadcast to the team goes to: ZULIP_TEAM_BROADCAST_STREAM, else the team's stream."""
+    return (settings.ZULIP_TEAM_BROADCAST_STREAM or settings.ZULIP_TEAM_STREAM).format(number=team_number)
+
+
 @cache
 def _team_numbers(template: str) -> dict[str, int]:
     return {template.format(number=number): number for number in range(1, MAX_TEAMS + 1)}
