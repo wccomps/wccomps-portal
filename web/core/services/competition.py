@@ -15,7 +15,7 @@ from core.authentik_utils import set_team_account_active
 from core.heartbeat import beat
 from core.models import MAX_TEAM_MEMBERS_LIMIT, AuditLog, CompetitionConfig, QueuedTask
 from core.queued_tasks import BroadcastMessage, CompetitionStatusChanged, SyncQuotientMetadata
-from core.team_accounts import accounts_by_team, team_folder
+from core.team_accounts import accounts_by_team, blueteam_kinds, team_folder
 from core.utils import BlockingSteps, advisory_lock, format_competition_time
 from team.models import MAX_TEAMS, active_team_numbers, team_username
 
@@ -330,7 +330,7 @@ def _run(
         for slug in result.controlled_apps:
             step += 1
             try:
-                manager.set_application_enabled(slug, enable)
+                manager.set_application_enabled(slug, enable, blueteam_kinds())
             except AuthentikAPIError as e:
                 logger.warning(f"Failed to {'enable' if enable else 'disable'} application '{slug}': {e}")
                 why = reason_for(e)

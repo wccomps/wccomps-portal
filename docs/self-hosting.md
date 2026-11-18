@@ -141,21 +141,21 @@ setting it up.
 Web, the worker and the chat process (which reads Discord and Zulip messages) all hold the token, so grant it no more
 than the portal uses. Give the service account's role each permission below at the scope shown: a global permission
 applies to every object of its kind, an object permission (the object's Permissions tab in Authentik's admin) only to
-the objects named. Never give it change or reset password on all users, nor change on all policy bindings: a leaked
-token holding them could set an Authentik admin's password, or remove the bindings that guard Authentik's own
-applications.
+the objects named. Never give it reset password on all users, nor change on all policy bindings: a leaked token
+holding them could set an Authentik admin's password, or remove the bindings that guard Authentik's own applications.
+Nor change on all users, except as the team folder section below allows, an accepted risk in `THREAT_MODEL.md`.
 
 | Object | Permission | Scope | Used for (`web/core/authentik_manager.py`) |
 |---|---|---|---|
-| Users | view | global | Reading every user and their groups (and, in team folder mode, their folders) for the group refresh, team accounts and team folder sign-ins (`list_all_users`, `list_team_folder_users`, `find_user`) |
+| Users | view | global | Reading every user and their groups (and, in team folder mode, their folders and attributes) for the group refresh, team accounts, team folder sign-ins and the readiness check "Usernames fixed" (`list_all_users`, `team_folder_pages`, `find_user`) |
 | Users | change | object: each team account (`team01`, ...) | Enabling and disabling team accounts at a start and stop (`set_user_active`); storing a linked Discord ID in the account's attributes (`update_user_discord_id`) |
 | Users | reset password | object: each team account | Setting team passwords (`set_password`) |
-| Groups | view | global | Reading group names (`list_all_groups`) |
+| Groups | view | global | Reading group names (and, in team folder mode, their attributes for the readiness check "Usernames fixed") (`list_all_groups`) |
 | Groups | add user | object: each team group | The readiness fix that puts a team account in its team group (`add_user_to_group`) |
 | Authenticated sessions | view, delete | global | Ending a team account's sessions when its credentials are reset (`user_sessions`, `end_sessions`, `sees_any_sessions`); see below |
 | Applications | view | global | Finding each controlled application by slug (`get_application_by_slug`) |
 | Providers | view (`authentik_core.view_provider`) | global | Listing applications to choose controlled applications from (`list_applications`) |
-| Policy bindings | view | global | Finding each controlled application's blue team binding (`get_blueteam_binding`) |
+| Policy bindings | view | global | Finding each controlled application's blue team binding (`app_bindings`) |
 | Policy bindings | change | object: each controlled application's blue team binding | Enabling and disabling it at a start and stop (`update_binding_enabled`) |
 | System settings | view (`authentik_rbac.view_system_settings`) | global | Team folder mode only: the readiness check that users can't change their usernames (`users_may_change_username`) |
 | OAuth2/OpenID providers | view | object: the portal's sign-in provider | Team folder mode only: the readiness check of its subject mode (`oauth2_sub_mode`) |
@@ -193,7 +193,7 @@ here with the default prefix):
 | A team's group (below) | `TEAM_GROUP_PATTERN` | That team's blue team access: its own tickets and packets |
 
 To use groups you already have, name each role's group directly; a name may contain spaces, and a setting left unset
-or set empty keeps its default. Each role needs its own group: the portal refuses to start when two role settings name
+or set empty keeps its default (`PORTAL_ADMIN_GROUP` included). Each role needs its own group: the portal refuses to start when two role settings name
 the same one. A region whose green team works tickets and whose gold and black teams are `Gold Team` and
 `Black Team`:
 
@@ -230,9 +230,9 @@ missing ones.
 
 An Authentik that keeps team accounts in a user folder (the user's path) instead of team groups sets
 `TEAM_ACCOUNT_PATH` to that folder, such as `blue-users`. Then an account in that folder whose username fully matches
-one team's `TEAM_ACCOUNT_PATTERN` is that team's account and holds the team's `TEAM_GROUP_PATTERN` name as a group,
-though no such Authentik group exists. An account outside the folder, or in it with a username matching no team
-(`bond007`), is on no team. Empty (the default), teams are their groups, as above.
+one team's `TEAM_ACCOUNT_PATTERN` is that team's account and holds the team's group (its group in Django's admin, at
+first the `TEAM_GROUP_PATTERN` name), though no such Authentik group exists. An account outside the folder, or in it
+with a username matching no team (`bond007`), is on no team. Empty (the default), teams are their groups, as above.
 
 For example, with accounts `team01a` to `team01i`, `team02a`, ... in the folder `blue-users`:
 
@@ -242,26 +242,33 @@ TEAM_ACCOUNT_PATTERN=team{number}[a-i]
 TEAM_GROUP_PATTERN=Team-Blue-{number:02d}
 ```
 
-- **Membership.** The group refresh (every 5 minutes) gives each folder account its team's group, and a sign-in does
-  too, so blue team access, the team's tickets and its Discord role follow the folder. A scope mapping that already puts
-  the team's group in the `groups` claim (such as `"groups": ["Team-Blue-" + user.username[-3:-1]]` for folder
-  accounts) works unchanged, as long as its names are the ones `TEAM_GROUP_PATTERN` gives. Keep each team's group in
-  Django's admin at the pattern's name; the readiness check "Group membership correct" lists any team whose isn't.
+- **Membership.** The group refresh (every 5 minutes) and each sign-in give each folder account its team's group, so
+  blue team access, the team's tickets and its Discord role follow the folder. Only the folder does: both drop every
+  team's group (each team's group in Django's admin and each `TEAM_GROUP_PATTERN` name) from the `groups` claim and
+  from the account's Authentik groups first. A scope mapping that puts the team's group in the claim (such as
+  `"groups": ["Team-Blue-" + user.username[-3:-1]]`) can stay, and grants nothing by itself.
 - **Usernames can't be self-chosen (required).** A team comes from the folder plus a full username match, so a user
   who could rename their own account could move it into another team (`team03a` renamed `team07e`). Keep Authentik's
-  System settings "Allow users to change username" (`default_user_change_username`) off, its default; the readiness
-  check "Usernames fixed" fails when it's on or the token can't read it.
+  System settings "Allow users to change username" (`default_user_change_username`) off, its default, and don't set
+  the `goauthentik.io/user/can-change-username` attribute, which overrides it, on a folder account or its groups. The
+  readiness check "Usernames fixed" fails when the setting is on or the token can't read it, or a folder account or
+  one of its groups (with their parents) sets the attribute. It can't see a custom user settings flow: keep the
+  brand's default one, or one whose username policy is the default's.
 - **Portal usernames.** A scope mapping may give several accounts of a team one `preferred_username` (`team03a` and
   `team03b` both as `team03`). At each sign-in the portal looks the account up in the folder by its `uid` and, when
   found, uses its own Authentik username, so each account keeps its own portal account. This needs the provider's
   Subject mode at its default, "Based on the User's hashed ID" (`hashed_user_id`), which makes `sub` the user's `uid`;
   the readiness check "Sign-in subject mode" fails otherwise. Each web process remembers what it read of the folder
-  for 60 seconds and stops reading at the page holding the account, so a burst of team sign-ins shares its reads; a
-  sign-in not in the folder (staff) costs one full listing of the folder per 60 seconds. When Authentik can't be
-  asked, the sign-in is refused with "Try again in a moment" (logged).
+  for 60 seconds and stops reading at the page holding the account, so a burst of team sign-ins shares its reads; each
+  account not in the folder (staff) costs one full listing per 60 seconds. An account not in the folder signs in with
+  its claimed username and its claimed groups other than team groups. When Authentik can't be asked, only a sign-in
+  whose claim names a staff role's or the admin group goes ahead (without team groups); every other one is refused
+  with "Try again in a moment" (logged).
 - **Start and stop.** A start enables each active team's folder accounts and a stop disables them, read from one
   listing of the folder (each row's path checked). Grant the token change on each team account again whenever the
-  accounts are recreated (see the permissions table).
+  accounts are recreated (see the permissions table). Granting change on all users instead saves that, at the cost
+  `THREAT_MODEL.md` accepts under "A team folder deployment may give the token change on all users": a leaked token
+  could then edit any account, admins included.
 - **Controlled applications.** In team folder mode a controlled application's blue team binding may also be to a
   policy whose name contains `blueteam`, such as an expression policy named `BlueTeam access`:
 
@@ -269,7 +276,12 @@ TEAM_GROUP_PATTERN=Team-Blue-{number:02d}
   return request.user.path == "blue-users"
   ```
 
-  A start enables that binding and a stop disables it, as with a group binding.
+  A start enables that binding and a stop disables it, as with a group binding. Keep only one blue team binding: a
+  start and stop toggle only one (a policy one before a group one), and the readiness check "App bindings configured"
+  fails an app with more, naming the extra ones to remove. Authentik lets every user into an
+  application with no enabled binding, and the recreated team accounts are enabled before the event, so disabling a
+  lone blue team binding would open the app to everyone. Give each controlled application a second binding that isn't
+  a blue team one, such as to the staff group: the readiness check fails an app without one enabled.
 - **Not available:** the readiness fix that puts accounts in their team groups. Password resets and the packet's
   credentials work only with one account per team, as without the folder.
 
@@ -280,7 +292,8 @@ controlled applications, chosen on the Competition setup page (`/ops/admin/compe
 one needs a policy binding to a group whose name contains `blueteam` (any case), such as a group holding the team
 groups, or in team folder mode to a policy whose name contains it (see the team folder above); a start enables that
 binding and a stop disables it. A start is refused while the list is empty, and the readiness check "App bindings
-configured" fails for an application without such a binding.
+configured" fails for an application without such a binding, and in team folder mode for one without a second enabled
+binding.
 
 ## Optional integrations
 
@@ -501,8 +514,8 @@ An ID at `0` turns off what needs it.
 |---|---|---|
 | `ZULIP_SITE`, `ZULIP_BOT_EMAIL`, `ZULIP_API_KEY` | empty (Zulip off) | The realm (https) and the bot's email and API key; all three configure Zulip |
 | `ZULIP_TEAM_STREAM` | `team{number:02d}` | Each team's stream, a pattern using `{number}`; tickets live here |
-| `ZULIP_TEAM_BROADCAST_STREAM` | empty (`ZULIP_TEAM_STREAM`) | Each team's stream for broadcasts to teams (all teams or a range), a pattern using `{number}` that gives each team its own stream (the portal refuses to start otherwise) |
-| `ZULIP_TEAM_BROADCAST_TOPIC` | `announcements` | The topic of a broadcast to teams; may use `{number}`, and no other `{}` field |
+| `ZULIP_TEAM_BROADCAST_STREAM` | empty (`ZULIP_TEAM_STREAM`) | Each team's stream for broadcasts to teams (all teams or a range), a pattern using `{number}`; the portal refuses to start unless it gives every team from 1 to `MAX_TEAMS` its own stream, none another team's `ZULIP_TEAM_STREAM` |
+| `ZULIP_TEAM_BROADCAST_TOPIC` | `announcements` | The topic of a broadcast to teams; may use `{number}`, and no other `{}` field; empty keeps the default |
 | `ZULIP_STAFF_STREAM` | `tickets` | New ticket notices for staff; empty sends none (the team stream's post is the only one) |
 | `ZULIP_ANNOUNCEMENTS_STREAM` | `announcements` | Broadcasts to the announcements target |
 | `ZULIP_OPS_STREAM`, `ZULIP_OPS_TOPIC` | `ops`, `ops` | Ops notices and competition status |

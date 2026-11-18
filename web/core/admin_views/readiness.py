@@ -2,7 +2,7 @@
 
 import json
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import cast
@@ -21,14 +21,25 @@ from core.authentik_manager import (
     HASHED_USER_ID,
     SESSIONS_HIDDEN,
     AuthentikAPIError,
+    AuthentikGroupEntry,
     AuthentikManager,
+    AuthentikUserEntry,
+    blueteam_binding,
+    is_blueteam_binding,
     reason_for,
 )
 from core.models import AuditLog, CompetitionConfig
+from core.services.user_groups import with_ancestors
 from core.task_backends import discord_enabled
-from core.team_accounts import accounts_by_team, require_single_account, team_folder
+from core.team_accounts import (
+    accounts_by_team,
+    blueteam_kinds,
+    require_single_account,
+    team_folder,
+    team_folder_users,
+)
 from core.utils import ndjson_done
-from team.models import Team, single_account, team_group_name, team_username
+from team.models import Team, single_account, team_username
 from ticketing.models import Ticket
 
 logger = logging.getLogger(__name__)
@@ -63,6 +74,11 @@ def _progress(
 type CheckResult = tuple[str, str, dict[str, str] | None]
 
 
+def _first_five(names: list[str]) -> str:
+    """The first five names, and how many more."""
+    return ", ".join(names[:5]) + (f"... (+{len(names) - 5})" if len(names) > 5 else "")
+
+
 def _check_discord_settings() -> CheckResult:
     """Required Discord role/channel/guild IDs must be set in the environment (they default to 0)."""
     from core.utils import missing_discord_settings
@@ -80,53 +96,48 @@ def _check_team_accounts_exist() -> CheckResult:
     if not active_teams.exists():
         return ("warn", "No active teams", None)
     if team_folder() or not single_account():
-        return _check_group_accounts_exist([team.team_number for team in active_teams.order_by("team_number")])
+        return _check_matched_accounts_exist([team.team_number for team in active_teams.order_by("team_number")])
 
     with AuthentikManager() as mgr:
         existing = {u["username"] for u in mgr.list_all_users()}
     missing = [username for team in active_teams if (username := team_username(team.team_number)) not in existing]
 
     if missing:
-        names = ", ".join(missing[:5])
-        suffix = f"... (+{len(missing) - 5})" if len(missing) > 5 else ""
         return (
             "fail",
-            f"{len(missing)} missing: {names}{suffix}. Create them in Authentik; the portal's token can't.",
+            f"{len(missing)} missing: {_first_five(missing)}. Create them in Authentik; the portal's token can't.",
             None,
         )
     return ("pass", f"All {active_teams.count()} team accounts exist", None)
 
 
-def _check_group_accounts_exist(numbers: list[int]) -> CheckResult:
+def _check_matched_accounts_exist(numbers: list[int]) -> CheckResult:
     """Every team has an account matching its pattern among its group's members, or in the team folder."""
     with AuthentikManager() as mgr:
         accounts = accounts_by_team(mgr, numbers)
     missing = [n for n in numbers if not accounts[n].matched]
 
     if missing:
-        names = ", ".join(
-            f"team {n:02d}" + (f" (other members: {', '.join(accounts[n].skipped)})" if accounts[n].skipped else "")
-            for n in missing[:5]
+        names = _first_five(
+            [
+                f"team {n:02d}" + (f" (other members: {', '.join(accounts[n].skipped)})" if accounts[n].skipped else "")
+                for n in missing
+            ]
         )
-        suffix = f"... (+{len(missing) - 5})" if len(missing) > 5 else ""
         where = f"the team folder {settings.TEAM_ACCOUNT_PATH}" if team_folder() else "their group"
         return (
             "fail",
-            f"{len(missing)} without an account in {where}: {names}{suffix}. Create them in Authentik; the portal's "
-            "token can't.",
+            f"{len(missing)} without an account in {where}: {names}. Create them in Authentik; the portal's token "
+            "can't.",
             None,
         )
     return ("pass", f"All {len(numbers)} teams have accounts", None)
 
 
 def _check_team_group_membership() -> CheckResult:
-    """Verify each active team's account is in the team's Authentik group (Team.authentik_group). Only a
-    single-account team's account can be outside it: with several, a team's accounts are its group's members. In team
-    folder mode there are no groups: each active team's stored group must be the one its folder accounts are given."""
-    if team_folder():
-        return _check_folder_team_groups()
-    if not single_account():
-        return ("pass", "Team accounts are their groups' members", None)
+    """Verify each active team's account is in the team's Authentik group (Team.authentik_group), with one account per
+    team and team groups (checks()): with several, a team's accounts are its group's members, and in team folder mode
+    there are no groups."""
     active_teams = Team.objects.filter(is_active=True)
     if not active_teams.exists():
         return ("warn", "No active teams", None)
@@ -144,56 +155,65 @@ def _check_team_group_membership() -> CheckResult:
             misconfigured.append(username)
 
     if misconfigured:
-        names = ", ".join(misconfigured[:5])
-        suffix = f"... (+{len(misconfigured) - 5})" if len(misconfigured) > 5 else ""
         return (
             "fail",
-            f"{len(misconfigured)} in wrong group: {names}{suffix}",
+            f"{len(misconfigured)} in wrong group: {_first_five(misconfigured)}",
             {"type": "fix", "key": "fix_group_membership", "label": "Fix Group Membership"},
         )
     return ("pass", "All accounts in correct groups", None)
 
 
-def _check_folder_team_groups() -> CheckResult:
-    """In team folder mode a team's accounts hold its TEAM_GROUP_PATTERN name, so an active team whose stored group
-    was changed would hold no account."""
-    active_teams = Team.objects.filter(is_active=True)
-    if not active_teams.exists():
-        return ("warn", "No active teams", None)
-    renamed = [team for team in active_teams if team.authentik_group != team_group_name(team.team_number)]
-    if renamed:
-        names = ", ".join(f"team {t.team_number:02d} ({t.authentik_group})" for t in renamed[:5])
-        suffix = f"... (+{len(renamed) - 5})" if len(renamed) > 5 else ""
-        return (
-            "fail",
-            f"{len(renamed)} with a group other than TEAM_GROUP_PATTERN gives: {names}{suffix}. Their accounts come "
-            "from the team folder and hold the pattern's group; set each team's group back in Django's admin.",
-            None,
-        )
-    return ("pass", f"Team accounts come from the team folder {settings.TEAM_ACCOUNT_PATH}", None)
-
-
 def _check_usernames_fixed() -> CheckResult:
     """In team folder mode a team comes from the folder plus a full username match, so users must not choose their
-    own usernames: a team account could rename itself into another team."""
-    try:
-        with AuthentikManager() as mgr:
+    own usernames: a team account could rename itself into another team. Authentik's default user settings flow lets
+    a user rename itself when the CAN_CHANGE_USERNAME attribute of the user or one of its groups says so, else by the
+    system setting; a custom settings flow can skip both, which no check here sees (docs/self-hosting.md)."""
+    with AuthentikManager() as mgr:
+        try:
             allowed = mgr.users_may_change_username()
-    except AuthentikAPIError as e:
+        except AuthentikAPIError as e:
+            return (
+                "fail",
+                f"Could not read Authentik's system settings ({reason_for(e)}); the portal's token needs view System "
+                "settings to confirm users can't change their usernames",
+                None,
+            )
+        if allowed:
+            return (
+                "fail",
+                "Authentik lets users change their username (System settings, Allow users to change username): a "
+                "team account could rename itself into another team. Turn it off.",
+                None,
+            )
+        folder = team_folder_users(mgr)
+        groups = mgr.list_all_groups()
+    renamers = _may_rename(folder, groups)
+    if renamers:
         return (
             "fail",
-            f"Could not read Authentik's system settings ({reason_for(e)}); the portal's token needs view System "
-            "settings to confirm users can't change their usernames",
-            None,
-        )
-    if allowed:
-        return (
-            "fail",
-            "Authentik lets users change their username (System settings, Allow users to change username): a team "
-            "account could rename itself into another team. Turn it off.",
+            f"{len(renamers)} team folder accounts may change their username through the {CAN_CHANGE_USERNAME} "
+            f"attribute, on the account or one of its groups: {_first_five(renamers)}. Remove it.",
             None,
         )
     return ("pass", "Users can't change their Authentik usernames", None)
+
+
+# The user or group attribute Authentik's default user settings flow reads before the system setting
+CAN_CHANGE_USERNAME = "goauthentik.io/user/can-change-username"
+
+
+def _sets_rename(entry: Mapping[str, object]) -> bool:
+    attributes = entry.get("attributes")
+    return isinstance(attributes, dict) and bool(attributes.get(CAN_CHANGE_USERNAME))
+
+
+def _may_rename(users: list[AuthentikUserEntry], groups: list[AuthentikGroupEntry]) -> list[str]:
+    """The usernames whose attributes, or whose groups' (with their ancestors), set CAN_CHANGE_USERNAME, sorted."""
+    parents = {group["pk"]: group["parents"] for group in groups}
+    setting = {group["pk"] for group in groups if _sets_rename(group)}
+    return sorted(
+        user["username"] for user in users if _sets_rename(user) or with_ancestors(user["groups"], parents) & setting
+    )
 
 
 def _check_sub_mode() -> CheckResult:
@@ -245,26 +265,55 @@ def _configure_apps_link() -> dict[str, str]:
 
 
 def _check_blueteam_bindings() -> CheckResult:
-    """Verify BlueTeam group or policy bindings exist on all controlled apps (AuthentikManager.get_blueteam_binding)."""
+    """Verify BlueTeam group or policy bindings exist on all controlled apps (core.authentik_manager.blueteam_binding).
+    In team folder mode an app may have only one blue team binding of either kind, as a start and stop toggle only the
+    one they prefer, and also needs an enabled binding that isn't a blue team one: Authentik lets everyone into an app
+    with no enabled binding, so disabling a lone blue team binding at a stop would open it to every user, the recreated
+    team accounts included."""
     config = CompetitionConfig.get_config()
     apps = config.controlled_applications
     if not apps:
         return ("warn", "No controlled apps configured", _configure_apps_link())
 
     missing: list[str] = []
+    several: list[str] = []
+    lone: list[str] = []
+    kinds = blueteam_kinds()
     with AuthentikManager() as mgr:
         for slug in apps:
             app = mgr.get_application_by_slug(slug)
             if not app:
                 missing.append(f"{slug} (not found)")
                 continue
-            if not mgr.get_blueteam_binding(app["pk"]):
+            bindings = mgr.app_bindings(app["pk"])
+            toggled = blueteam_binding(bindings, kinds)
+            if not toggled:
                 missing.append(slug)
+            elif team_folder():
+                blue = [b for b in bindings if any(is_blueteam_binding(b, kind) for kind in kinds)]
+                if others := [b["pk"] for b in blue if b is not toggled]:
+                    several.append(f"{slug} (extra {', '.join(others)})")
+                if not any(b.get("enabled") is True for b in bindings if all(b is not x for x in blue)):
+                    lone.append(slug)
 
     if missing:
         return (
             "fail",
             f"Missing bindings: {', '.join(missing)}",
+            _configure_apps_link(),
+        )
+    if several:
+        return (
+            "fail",
+            f"More than one blue team binding: {', '.join(several)}. A start and stop toggle only one, so remove the "
+            "extra ones.",
+            _configure_apps_link(),
+        )
+    if lone:
+        return (
+            "fail",
+            f"Only a blue team binding: {', '.join(lone)}. A stop disables it, and Authentik lets every user into an "
+            "app with no enabled binding; add a second binding, such as to the staff group.",
             _configure_apps_link(),
         )
     return ("pass", f"Bindings exist for all {len(apps)} apps", None)
@@ -415,11 +464,10 @@ def _check_school_info() -> CheckResult:
     teams_with_info = set(SchoolInfo.objects.filter(team__is_active=True).values_list("team_id", flat=True))
     missing = active_teams.exclude(id__in=teams_with_info)
     if missing.exists():
-        names = ", ".join(f"Team {t.team_number}" for t in missing[:5])
-        suffix = f"... (+{missing.count() - 5})" if missing.count() > 5 else ""
+        names = _first_five([f"Team {t.team_number}" for t in missing])
         return (
             "warn",
-            f"{missing.count()} team{'s' if missing.count() != 1 else ''} missing school info: {names}{suffix}",
+            f"{missing.count()} team{'s' if missing.count() != 1 else ''} missing school info: {names}",
             {"type": "link", "url": reverse("school_info"), "label": "Manage Schools"},
         )
     return ("pass", f"All {active_teams.count()} teams have school info", None)
@@ -436,20 +484,21 @@ def _check_multiple_teams() -> CheckResult:
 
 
 def checks() -> list[tuple[str, Callable[[], CheckResult]]]:
-    """The readiness checks to run; the Discord one only when Discord is configured, the team folder ones only in
-    team folder mode."""
+    """The readiness checks to run: the Discord one only when Discord is configured, the team folder ones only in team
+    folder mode, and the group membership one only with one account per team in team groups."""
     discord = [("Discord IDs configured", _check_discord_settings)] if discord_enabled() else []
     folder = (
         [("Usernames fixed", _check_usernames_fixed), ("Sign-in subject mode", _check_sub_mode)]
         if team_folder()
         else []
     )
-    return [*discord, *folder, *_CHECKS]
+    group = (
+        [("Group membership correct", _check_team_group_membership)] if single_account() and not team_folder() else []
+    )
+    return [*discord, *folder, ("Team accounts exist", _check_team_accounts_exist), *group, *_CHECKS]
 
 
 _CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
-    ("Team accounts exist", _check_team_accounts_exist),
-    ("Group membership correct", _check_team_group_membership),
     ("Authentik sessions visible", _check_session_access),
     ("App bindings configured", _check_blueteam_bindings),
     ("Multiple teams registered", _check_multiple_teams),

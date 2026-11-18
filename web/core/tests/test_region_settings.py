@@ -109,6 +109,7 @@ def use_groups(settings, prod: dict[str, object]) -> None:
     """The role group settings settings.py gave prod, as the running settings."""
     for name in ROLE_GROUP_SETTINGS:
         setattr(settings, name, prod[name])
+    settings.PORTAL_ROLE_GROUPS = prod["PORTAL_ROLE_GROUPS"]
 
 
 def test_suite_runs_as_wrccdc():
@@ -352,6 +353,31 @@ def test_bad_broadcast_stream_or_topic_is_refused_at_load(monkeypatch, name, val
         runpy.run_path(SETTINGS_PATH)
 
 
+def test_a_broadcast_stream_teams_past_two_share_is_refused_at_load(monkeypatch):
+    """Teams 1 and 2 differ, but teams 1 and 10 to 19 all get "Team 1 Chat"."""
+    monkeypatch.setenv("ZULIP_TEAM_BROADCAST_STREAM", "Team {number!s:.1} Chat")
+    with pytest.raises(ImproperlyConfigured, match="every team from 1 to MAX_TEAMS its own stream"):
+        runpy.run_path(SETTINGS_PATH)
+
+
+def test_a_teams_own_ticket_stream_may_be_its_broadcast_stream(monkeypatch):
+    monkeypatch.setenv("ZULIP_TEAM_BROADCAST_STREAM", "team{number:02d}")
+    assert runpy.run_path(SETTINGS_PATH)["ZULIP_TEAM_BROADCAST_STREAM"] == "team{number:02d}"
+
+
+def test_a_broadcast_stream_naming_another_teams_ticket_stream_is_refused_at_load(monkeypatch):
+    """Team 1's broadcasts in "Team 10 Support", team 10's ticket stream, would show to team 10."""
+    monkeypatch.setenv("ZULIP_TEAM_STREAM", "Team {number} Support")
+    monkeypatch.setenv("ZULIP_TEAM_BROADCAST_STREAM", "Team {number}0 Support")
+    with pytest.raises(ImproperlyConfigured, match="team 01 the stream 'Team 10 Support', team 10's ZULIP_TEAM_STREAM"):
+        runpy.run_path(SETTINGS_PATH)
+
+
+def test_an_empty_broadcast_topic_keeps_its_default(monkeypatch):
+    monkeypatch.setenv("ZULIP_TEAM_BROADCAST_TOPIC", "")
+    assert runpy.run_path(SETTINGS_PATH)["ZULIP_TEAM_BROADCAST_TOPIC"] == "announcements"
+
+
 def test_broadcast_stream_per_team_and_plain_topic_load(monkeypatch):
     monkeypatch.setenv("ZULIP_TEAM_BROADCAST_STREAM", "Team {number:02d} Chat")
     monkeypatch.setenv("ZULIP_TEAM_BROADCAST_TOPIC", "automation-messages")
@@ -370,9 +396,21 @@ def test_two_roles_naming_one_group_are_refused_at_load(monkeypatch, first, seco
 
 
 def test_a_role_group_set_empty_keeps_its_default(monkeypatch):
-    prod = load_settings(monkeypatch, {"PORTAL_RED_GROUP": "", "PORTAL_TICKETING_SUPPORT_GROUP": ""})
+    prod = load_settings(
+        monkeypatch, {"PORTAL_ADMIN_GROUP": "", "PORTAL_RED_GROUP": "", "PORTAL_TICKETING_SUPPORT_GROUP": ""}
+    )
+    assert prod["PORTAL_ADMIN_GROUP"] == "Portal_Admin"
     assert prod["PORTAL_RED_GROUP"] == "Portal_RedTeam"
     assert prod["PORTAL_TICKETING_SUPPORT_GROUP"] == "Portal_Ticketing_Support"
+
+
+def test_every_role_group_setting_is_in_the_role_table(monkeypatch):
+    """PERMISSION_MAP, GROUP_ROLE_MAPPING and the duplicate check all read PORTAL_ROLE_GROUPS."""
+    prod = load_settings(monkeypatch, {})
+    roles = prod["PORTAL_ROLE_GROUPS"]
+    assert isinstance(roles, dict)
+    assert sorted(f"PORTAL_{role.upper()}_GROUP" for role in roles) == sorted(ROLE_GROUP_SETTINGS)
+    assert all(prod[f"PORTAL_{role.upper()}_GROUP"] == group for role, group in roles.items())
 
 
 def test_site_name_reaches_pages(admin_client, settings):

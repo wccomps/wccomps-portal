@@ -9,7 +9,7 @@ folder or group member with another name (an admin account in the group) is neve
 import re
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -60,11 +60,36 @@ def folder_team_number(user: Mapping[str, object]) -> int | None:
     return numbers[0] if len(numbers) == 1 else None
 
 
-def folder_team_group(user: Mapping[str, object]) -> str | None:
-    """The team group a team folder account holds without being in it (folder_team_number's team's
-    TEAM_GROUP_PATTERN name), or None."""
-    number = folder_team_number(user)
-    return None if number is None else team_group_name(number)
+def blueteam_kinds() -> tuple[str, ...]:
+    """What a controlled application's blue team binding may bind, the preferred first: in team folder mode a policy
+    (the folder has no group to bind) or a group, otherwise a group only."""
+    return ("policy", "group") if team_folder() else ("group",)
+
+
+@dataclass(frozen=True)
+class TeamGroups:
+    """In team folder mode, each team's group by number (team_group_names over every number) and every name that is a
+    team's group (each Team.authentik_group and each TEAM_GROUP_PATTERN name), which only the folder grants."""
+
+    by_number: dict[int, str]
+    names: frozenset[str]
+
+    def held(self, account: Mapping[str, object] | None, groups: Iterable[str]) -> list[str]:
+        """The groups a user holds in team folder mode: its groups (from Authentik or the claim) other than team groups,
+        plus its team's group when the account (as listed with its path) is in the folder and folder_team_number gives
+        it a team. Neither a claim nor an Authentik group makes anyone a team's."""
+        held = {group for group in groups if group not in self.names}
+        number = folder_team_number(account) if account is not None else None
+        if number is not None:
+            held.add(self.by_number[number])
+        return sorted(held)
+
+
+def team_groups() -> TeamGroups:
+    """TeamGroups, read from the database."""
+    numbers = list(range(1, MAX_TEAMS + 1))
+    by_number = team_group_names(numbers)
+    return TeamGroups(by_number, frozenset({*by_number.values(), *map(team_group_name, numbers)}))
 
 
 FOLDER_CACHE_SECONDS = 60.0
@@ -79,15 +104,11 @@ class _FolderCache:
         self.accounts: dict[str, tuple[AuthentikUserEntry, float]] = {}
         self.absent: dict[str, float] = {}
 
-    def clear(self) -> None:
-        self.accounts.clear()
-        self.absent.clear()
-
     def answer(self, uid: str, now: float) -> tuple[bool, AuthentikUserEntry | None]:
-        """(known, account): known when a read in the last FOLDER_CACHE_SECONDS found the uid in this folder, or
+        """(known, account): known when a read in the last FOLDER_CACHE_SECONDS found the uid in the folder, or
         listed the whole folder without it."""
         cached = self.accounts.get(uid)
-        if cached and now - cached[1] < FOLDER_CACHE_SECONDS and cached[0]["path"] == settings.TEAM_ACCOUNT_PATH:
+        if cached and now - cached[1] < FOLDER_CACHE_SECONDS:
             return True, cached[0]
         lacked_at = self.absent.get(uid)
         return lacked_at is not None and now - lacked_at < FOLDER_CACHE_SECONDS, None
@@ -100,17 +121,21 @@ class _FolderCache:
 _folder_cache = _FolderCache()
 
 
+def team_folder_users(manager: AuthentikManager) -> list[AuthentikUserEntry]:
+    """Every user in the team folder (settings.TEAM_ACCOUNT_PATH), from one listing."""
+    return [user for page in manager.team_folder_pages(settings.TEAM_ACCOUNT_PATH) for user in page]
+
+
 def team_folder_account(manager: AuthentikManager, uid: str) -> AuthentikUserEntry | None:
-    """The team folder account with this uid, or None when the folder has none. Answers from _folder_cache when it
-    can; otherwise reads the folder a page at a time, stopping at the page holding the uid, and remembers every
-    account read. A uid the whole folder lacks (staff) is remembered too, so it costs one full listing per
-    FOLDER_CACHE_SECONDS. AuthentikAPIError when Authentik can't be asked."""
+    """The team folder account with this uid, or None; cached per process for FOLDER_CACHE_SECONDS, a uid the folder
+    lacks included. AuthentikAPIError when Authentik can't be asked."""
+    # Held through the read, so one read serves a burst of sign-ins; the HTTPX timeouts bound the wait
     with _folder_cache.lock:
         known, account = _folder_cache.answer(uid, time.monotonic())
         if known:
             return account
         _folder_cache.forget_stale(time.monotonic())
-        for page in manager.team_folder_pages():
+        for page in manager.team_folder_pages(settings.TEAM_ACCOUNT_PATH):
             read_at = time.monotonic()
             for user in page:
                 _folder_cache.accounts[user["uid"]] = (user, read_at)
@@ -152,7 +177,7 @@ def accounts_by_team(manager: AuthentikManager, numbers: list[int]) -> dict[int,
     exact username when toggled, in its group or not); with several, its group's matching members, from one listing of
     users and one of groups."""
     if team_folder():
-        folder = manager.list_team_folder_users()
+        folder = team_folder_users(manager)
         return {
             n: TeamAccounts(sorted(u["username"] for u in folder if folder_team_number(u) == n), []) for n in numbers
         }

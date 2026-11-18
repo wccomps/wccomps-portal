@@ -1,22 +1,23 @@
-"""Which Authentik groups grant each permission: each role's group is its own setting (portal.settings)."""
+"""Which Authentik groups grant each permission: the groups of the roles holding it (portal.settings.PORTAL_ROLE_GROUPS,
+one setting per role)."""
 
 from django.conf import settings
 
-_ADMIN = settings.PORTAL_ADMIN_GROUP
-_GOLD = settings.PORTAL_GOLD_GROUP
-_TICKETING_ADMIN = settings.PORTAL_TICKETING_ADMIN_GROUP
+_ROLES: dict[str, tuple[str, ...]] = {
+    "admin": ("admin",),
+    "ticketing_admin": ("ticketing_admin", "admin"),
+    "ticketing_support": ("ticketing_support", "ticketing_admin", "admin"),
+    "gold_team": ("gold", "admin"),
+    "white_team": ("white", "gold", "admin"),
+    "orange_team": ("orange", "gold", "admin"),
+    "white_team_lead": ("white_lead", "gold", "admin"),
+    "orange_team_lead": ("orange_lead", "gold", "admin"),
+    "red_team": ("red", "admin"),
+    "blue_team": ("gold", "admin"),
+}
 
 PERMISSION_MAP: dict[str, list[str]] = {
-    "admin": [_ADMIN],
-    "ticketing_admin": [_TICKETING_ADMIN, _ADMIN],
-    "ticketing_support": [settings.PORTAL_TICKETING_SUPPORT_GROUP, _TICKETING_ADMIN, _ADMIN],
-    "gold_team": [_GOLD, _ADMIN],
-    "white_team": [settings.PORTAL_WHITE_GROUP, _GOLD, _ADMIN],
-    "orange_team": [settings.PORTAL_ORANGE_GROUP, _GOLD, _ADMIN],
-    "white_team_lead": [settings.PORTAL_WHITE_LEAD_GROUP, _GOLD, _ADMIN],
-    "orange_team_lead": [settings.PORTAL_ORANGE_LEAD_GROUP, _GOLD, _ADMIN],
-    "red_team": [settings.PORTAL_RED_GROUP, _ADMIN],
-    "blue_team": [_GOLD, _ADMIN],
+    permission: [settings.PORTAL_ROLE_GROUPS[role] for role in roles] for permission, roles in _ROLES.items()
 }
 
 # Permissions an active team's group grants as well (TeamQuerySet.held_by), which only the database knows
