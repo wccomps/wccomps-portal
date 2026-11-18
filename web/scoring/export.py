@@ -1,18 +1,21 @@
-import hashlib
 import json
 import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from io import BytesIO, StringIO
-from typing import Protocol
+from typing import Protocol, TypedDict
 
 from django.conf import settings
+from django.db.models import BinaryField, CharField, F, Func, Value
+from django.db.models.functions import Length
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.text import slugify
 
 from core.csv_export import csv_writer
+from ticketing.chat_comments import comment_origin
 from ticketing.models import Ticket, TicketAttachment, TicketComment, TicketHistory
 
 from .calculator import Standing, compute_standings
@@ -135,36 +138,49 @@ def _fetch_ticket_comments() -> list[TicketComment]:
 
 
 def _comment_source(comment: TicketComment) -> str:
-    """Where the comment was written: a Discord thread, a Zulip topic, or the portal's ticket page."""
-    if comment.discord_message_id is not None:
-        return "discord"
-    if comment.zulip_message_id is not None:
-        return "zulip"
-    return "web"
+    """Where the comment was written: the chat backend's name, or "web" for the portal's ticket page."""
+    origin = comment_origin(comment)
+    return origin.value if origin else "web"
 
 
 def _fetch_ticket_history() -> list[TicketHistory]:
     return list(TicketHistory.objects.select_related("ticket__team", "actor").order_by("ticket__ticket_number", "pk"))
 
 
-@dataclass(frozen=True)
-class AttachmentRow:
-    """A ticket attachment's record without its bytes, which the export leaves out (up to 200MB a team), with their
-    size and SHA-256, so a copy found elsewhere can be matched to it."""
-
-    attachment: TicketAttachment
+class AttachmentRow(TypedDict):
+    ticket__ticket_number: str
+    ticket__team__team_number: int
+    filename: str
+    mime_type: str
     size: int
     sha256: str
+    uploaded_by: str
+    uploaded_at: datetime
 
 
 def _fetch_ticket_attachments() -> list[AttachmentRow]:
-    rows = []
-    attachments = TicketAttachment.objects.select_related("ticket__team").order_by("ticket__ticket_number", "pk")
-    for attachment in attachments.iterator(chunk_size=20):
-        data = attachment.file_data
-        rows.append(AttachmentRow(attachment, len(data), hashlib.sha256(data).hexdigest()))
-        attachment.file_data = b""  # One file in memory at a time
-    return rows
+    """Each attachment's record without the file (teams may store 200MB each), with the file's size and SHA-256,
+    worked out in Postgres, so a copy found elsewhere can be matched to it."""
+    size = Length("file_data")
+    sha256 = Func(
+        Func(F("file_data"), function="SHA256", output_field=BinaryField()),
+        Value("hex"),
+        function="ENCODE",
+        output_field=CharField(),
+    )
+    rows = TicketAttachment.objects.order_by("ticket__ticket_number", "pk").annotate(size=size, sha256=sha256)
+    return list(
+        rows.values(
+            "ticket__ticket_number",
+            "ticket__team__team_number",
+            "filename",
+            "mime_type",
+            "size",
+            "sha256",
+            "uploaded_by",
+            "uploaded_at",
+        )
+    )
 
 
 DATASETS: dict[str, ExportableDataset] = {
@@ -323,14 +339,14 @@ DATASETS: dict[str, ExportableDataset] = {
     "ticket_attachments": Dataset[AttachmentRow](
         "ticket_attachments",
         [
-            Column("Ticket Number", "ticket_number", lambda a: a.attachment.ticket.ticket_number),
-            Column("Team Number", "team_number", lambda a: a.attachment.ticket.team.team_number),
-            Column("Filename", "filename", lambda a: a.attachment.filename),
-            Column("Type", "mime_type", lambda a: a.attachment.mime_type),
-            Column("Size", "size", lambda a: a.size),
-            Column("SHA-256", "sha256", lambda a: a.sha256),
-            Column("Uploaded By", "uploaded_by", lambda a: a.attachment.uploaded_by),
-            Column("Uploaded At", "uploaded_at", lambda a: a.attachment.uploaded_at.isoformat()),
+            Column("Ticket Number", "ticket_number", lambda a: a["ticket__ticket_number"]),
+            Column("Team Number", "team_number", lambda a: a["ticket__team__team_number"]),
+            Column("Filename", "filename", lambda a: a["filename"]),
+            Column("Type", "mime_type", lambda a: a["mime_type"]),
+            Column("Size", "size", lambda a: a["size"]),
+            Column("SHA-256", "sha256", lambda a: a["sha256"]),
+            Column("Uploaded By", "uploaded_by", lambda a: a["uploaded_by"]),
+            Column("Uploaded At", "uploaded_at", lambda a: a["uploaded_at"].isoformat()),
         ],
         _fetch_ticket_attachments,
     ),
