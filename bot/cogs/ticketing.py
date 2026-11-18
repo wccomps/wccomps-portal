@@ -20,7 +20,7 @@ from core.task_backends import TaskBackend
 from core.utils import run_blocking
 from team.models import DiscordLink
 from ticketing import chat_comments
-from ticketing.models import Ticket, TicketAttachment, TicketCategory, TicketHistory
+from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory, TicketHistory
 from ticketing.utils import get_user_for_ticket
 
 logger = logging.getLogger(__name__)
@@ -194,12 +194,15 @@ class TicketingCog(commands.Cog):
         if not ticket or not await may_write_to_ticket(ticket, message.author.id):
             return
 
+        # None only if the link ended since may_write_to_ticket checked it
         author = await sync_to_async(get_user_for_ticket)(discord_id=message.author.id)
+        if author is None:
+            return
         refused = await sync_to_async(chat_comments.record_message)(
             ticket,
             TaskBackend.DISCORD,
             message_id=message.id,
-            actor_key=f"discord:{message.author.id}",
+            actor_key=CommentRateLimit.user_key(author),
             author=author,
             text=message.content,
             has_files=bool(message.attachments),
@@ -209,11 +212,11 @@ class TicketingCog(commands.Cog):
             try:
                 await message.delete()
                 await message.channel.send(
-                    f"{message.author.mention} {refused}. Please slow down.",
+                    f"{message.author.mention} {refused}. This message was not added to the ticket.",
                     delete_after=10,
                     allowed_mentions=pinging(users=[message.author]),
                 )
-                logger.warning(f"Rate limit exceeded for user {message.author.id} on ticket #{ticket.id}")
+                logger.warning(f"Refused a message from user {message.author.id} on ticket #{ticket.id}: {refused}")
             except discord.Forbidden:
                 logger.warning("Cannot delete message due to permissions")
             return
@@ -228,11 +231,21 @@ class TicketingCog(commands.Cog):
                 continue
 
             try:
-                # Typed from its bytes, as a web upload is
+                # Typed from its bytes, as a web upload is, and credited to the portal account, as a Zulip upload is
                 stored = TicketAttachment.with_file(
-                    await attachment.read(), attachment.filename, ticket=ticket, uploaded_by=str(message.author)
+                    await attachment.read(),
+                    attachment.filename,
+                    ticket=ticket,
+                    uploaded_by=author.username,
                 )
-                await stored.asave()
+                if problem := await sync_to_async(stored.store)():
+                    # The rest would be refused too (or the ticket is near its team's cap): one reply, not one each
+                    await message.channel.send(
+                        f"{message.author.mention} {problem}. Files from here on were not added.",
+                        delete_after=30,
+                        allowed_mentions=pinging(users=[message.author]),
+                    )
+                    break
 
                 logger.info(f"Stored attachment {stored.filename} for ticket #{ticket.id}")
 

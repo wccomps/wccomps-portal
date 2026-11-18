@@ -75,13 +75,17 @@ AUTHENTIK_USER = {
     "attributes": {"discord_id": "1"},
 }
 USERS = {"results": [AUTHENTIK_USER], "pagination": PAGE}
+FOLDER_USERS = {"results": [{**AUTHENTIK_USER, "username": "team01a", "path": "blue-users"}], "pagination": PAGE}
+SYSTEM_SETTINGS = {"default_user_change_username": False, "default_user_change_name": True, "avatars": "initials"}
+OAUTH2_PROVIDERS = {"results": [{"pk": 1, "client_id": "portal", "sub_mode": "hashed_user_id"}], "pagination": PAGE}
 GROUPS = {"results": [{"pk": "g1", "name": "WCComps_BlueTeam01", "parents": []}], "pagination": PAGE}
 SESSIONS = {"results": [{"uuid": "00000000-0000-4000-8000-000000000001", "user": 7}], "pagination": PAGE}
 PROVIDERS = {"results": [{"pk": 1, "assigned_application_slug": "netbird"}], "pagination": PAGE}
 APPLICATION = {"pk": "app-1", "slug": "netbird", "name": "Netbird"}
 BINDINGS = {
     "results": [
-        {"pk": "b-1", "target": "app-1", "enabled": True, "group": "g1", "group_obj": {"name": "WCComps_BlueTeam"}}
+        {"pk": "b-1", "target": "app-1", "enabled": True, "group": "g1", "group_obj": {"name": "WCComps_BlueTeam"}},
+        {"pk": "b-2", "target": "app-1", "enabled": True, "policy": "p1", "policy_obj": {"name": "BlueTeam access"}},
     ]
 }
 ERROR = {"detail": "Not allowed"}
@@ -197,6 +201,21 @@ def check_users(result: object) -> None:
         ),
         "users with a pk, username, uid, is_active and group pks",
     )
+
+
+def check_folder_users(*, in_folder_only: bool) -> Callable[[object], None]:
+    """check_users, each user with its path too (in the team folder, for the folder's listing)."""
+
+    def check(result: object) -> None:
+        check_users(result)
+        wanted = (lambda p: p == "blue-users") if in_folder_only else is_str
+        outcome(
+            result,
+            lambda r: isinstance(r, list) and all(wanted(u["path"]) for u in r),
+            "users with their path" + (" in the team folder" if in_folder_only else ""),
+        )
+
+    return check
 
 
 def check_groups(result: object) -> None:
@@ -485,11 +504,15 @@ READERS = [
         raises=(AuthentikAPIError,),
     ),
     Reader(
-        "get_blueteam_binding",
-        lambda: authentik().get_blueteam_binding("app-1"),
+        "app_bindings",
+        lambda: authentik().app_bindings("app-1"),
         (BINDINGS,),
-        lambda r: outcome(r, lambda b: b is None or (isinstance(b, dict) and is_str(b.get("pk"))), "None or a binding"),
-        (f"{AM}.get_blueteam_binding", f"{AM}._list_all", *READ),
+        lambda r: outcome(
+            r,
+            lambda bs: isinstance(bs, list) and all(isinstance(b, dict) and b.get("target") == "app-1" for b in bs),
+            "the app's bindings",
+        ),
+        (f"{AM}.app_bindings", f"{AM}._list_all", *READ),
         raises=(AuthentikAPIError,),
     ),
     Reader(
@@ -502,7 +525,7 @@ READERS = [
     ),
     Reader(
         "set_application_enabled",
-        lambda: authentik().set_application_enabled("netbird", False),
+        lambda: authentik().set_application_enabled("netbird", False, ("policy", "group")),
         (APPLICATION, BINDINGS, DONE),
         lambda r: outcome(r, lambda v: v is None, "None"),
         (f"{AM}.set_application_enabled",),
@@ -563,6 +586,38 @@ READERS = [
         (USERS,),
         check_users,
         (f"{AM}.list_all_users", f"{AM}._list_all", *READ),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "list_all_users_team_folder",
+        lambda: authentik().list_all_users(with_path=True),
+        (FOLDER_USERS,),
+        check_folder_users(in_folder_only=False),
+        (f"{AM}.list_all_users", f"{AM}._list_all", *READ),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "team_folder_pages",
+        lambda: [user for page in authentik().team_folder_pages("blue-users") for user in page],
+        (FOLDER_USERS,),
+        check_folder_users(in_folder_only=True),
+        (f"{AM}.team_folder_pages", f"{AM}._pages", *READ),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "users_may_change_username",
+        lambda: authentik().users_may_change_username(),
+        (SYSTEM_SETTINGS,),
+        check_bool,
+        (f"{AM}.users_may_change_username", f"{AM}._check", f"{AM}._json"),
+        raises=(AuthentikAPIError,),
+    ),
+    Reader(
+        "oauth2_sub_mode",
+        lambda: authentik().oauth2_sub_mode("portal"),
+        (OAUTH2_PROVIDERS,),
+        lambda r: outcome(r, lambda m: m is None or is_str(m), "None or a sub mode"),
+        (f"{AM}.oauth2_sub_mode", f"{AM}._list_all", *READ),
         raises=(AuthentikAPIError,),
     ),
     Reader(

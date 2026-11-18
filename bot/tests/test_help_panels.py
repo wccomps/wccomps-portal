@@ -8,6 +8,7 @@ import pytest
 from django.contrib.auth.models import User
 
 from bot.cogs.help_panels import (
+    TICKET_FAILED,
     CategorySelect,
     HelpPanelsCog,
     TeamHelpView,
@@ -143,3 +144,19 @@ async def test_post_ticket_panel_lists_categories(
 async def _empty_history() -> Any:
     for _ in ():
         yield
+
+
+async def test_a_failed_ticket_tells_the_team_nothing_of_the_exception(mock_interaction: Any) -> None:
+    """A database error's text names tables, columns and hosts: the team gets a fixed message, the log the rest."""
+    leak = 'relation "ticketing_ticket" violates constraint on db-host'
+    with (
+        patch("bot.cogs.help_panels.linked_team_member", AsyncMock(return_value=MagicMock())),
+        patch("bot.cogs.help_panels.file_ticket", side_effect=RuntimeError(leak)),
+        patch("bot.cogs.help_panels.logger") as log,
+    ):
+        await create_ticket(mock_interaction, category_id="91", description="help")
+
+    sent = mock_interaction.followup.send.await_args
+    assert sent.args[0] == TICKET_FAILED
+    assert "ticketing_ticket" not in str(sent)
+    log.exception.assert_called_once()

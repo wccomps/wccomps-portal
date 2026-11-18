@@ -119,20 +119,31 @@ def test_assign_teams_skips_a_school_that_already_has_a_team(gold_team_user, eve
     assert EventTeamAssignment.objects.filter(event=event).count() == 1
 
 
-def test_assign_teams_gives_one_team_to_registrations_of_the_same_school(gold_team_user, event):
+def test_assign_teams_assigns_none_of_two_approved_registrations_of_the_same_school(gold_team_user, event):
+    """Not first-wins: the earlier one could be a student's registration of a rival school, with the student's email."""
     Team.objects.create(team_number=4, team_name="Team 04")
     Team.objects.create(team_number=5, team_name="Team 05")
-    _enrolled(event, "Example University")
-    _enrolled(event, "example  university")
+    Team.objects.create(team_number=6, team_name="Team 06")
+    impostor = _enrolled(event, "Example University", ("captain", "student@example.com"))
+    real = _enrolled(event, "example  university", ("captain", "captain@example.edu"))
+    _enrolled(event, "Other College", ("captain", "other@example.edu"))
     client = Client()
     client.force_login(gold_team_user)
 
     response = client.post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
 
-    assert EventTeamAssignment.objects.filter(event=event).count() == 1
+    assert list(EventTeamAssignment.objects.values_list("school__name", flat=True)) == ["Other College"]
+    assert list(SchoolInfo.objects.values_list("contact_email", flat=True)) == ["other@example.edu"]
     content = response.content.decode()
     assert "Assigned 1 team" in content
-    assert "already has a team" in content
+    assert "Not assigned: Example University: more than one approved registration names that school." in content
+
+    # Staff reject the impostor (approved, so rejectable only as one of two), then assign again
+    client.post(reverse("registration_reject", args=[impostor.pk]), {"reason": "Not the school"})
+    client.post(reverse("registration_assign_teams", args=[event.pk]))
+
+    assert EventTeamAssignment.objects.get(school__name_key="example university").registration == real
+    assert SchoolInfo.objects.get(school__name_key="example university").contact_email == "captain@example.edu"
 
 
 def test_assign_teams_adds_each_school_to_the_school_list_with_its_captain(gold_team_user, event):

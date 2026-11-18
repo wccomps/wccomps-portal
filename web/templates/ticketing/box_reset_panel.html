@@ -1,6 +1,8 @@
 {% load cotton %}
 <div class="d-flex justify-between items-center flex-wrap gap-10">
-    {% if proxmox_unreachable %}
+    {% if not proxmox_configured %}
+        <p class="text-muted m-0">Proxmox isn't configured.</p>
+    {% elif proxmox_unreachable %}
         <p class="text-muted m-0">Proxmox isn't reachable.</p>
     {% elif not ticket.hostname %}
         <p class="text-muted m-0">No hostname specified for this ticket.</p>

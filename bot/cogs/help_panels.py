@@ -21,6 +21,8 @@ from ticketing.models import TicketCategory
 
 logger = logging.getLogger(__name__)
 
+TICKET_FAILED = "Failed to create the ticket. Try again, or ask in your team channel if it keeps failing."
+
 
 async def create_ticket(
     interaction: discord.Interaction,
@@ -53,9 +55,10 @@ async def create_ticket(
             ip_address=ip_address,
             service_name=service_name,
         )
-    except Exception as e:
-        logger.error(f"Failed to create ticket: {e}", exc_info=True)
-        await interaction.followup.send(f"Failed to create ticket: {e!s}", ephemeral=True)
+    except Exception:
+        # The exception's text can name tables, columns or hosts: it goes to the log, never to the team
+        logger.exception("Failed to create ticket")
+        await interaction.followup.send(TICKET_FAILED, ephemeral=True)
         return
     if isinstance(filed, str):
         await interaction.followup.send(filed, ephemeral=True)

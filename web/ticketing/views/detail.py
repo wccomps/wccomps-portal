@@ -7,6 +7,7 @@ from typing import cast
 from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -18,6 +19,7 @@ from ticketing.access import TICKET_STAFF, ticket_actions, ticket_open_to
 from ticketing.forms import TicketCommentForm
 from ticketing.models import (
     BOX_RESET_CATEGORY_ID,
+    CommentRateLimit,
     Ticket,
     TicketAttachment,
     TicketCategory,
@@ -75,6 +77,7 @@ def ticket_detail(request: HttpRequest, ticket_number: str) -> HttpResponse:
         "comments": comments,
         "comments_version": list_version(comments),
         "attachments": attachments,
+        "comment_max_length": TicketComment.MAX_LENGTH,
         "status_display": ticket.status.upper().replace("_", " "),
         "actions": ticket_actions(user, ticket),
     }
@@ -102,26 +105,17 @@ def ticket_comment(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
     form = TicketCommentForm(request.POST)
     if not form.is_valid():
-        messages.error(request, "Comment cannot be empty")
+        messages.error(request, " ".join(map(str, form.errors["comment"])))
         return redirect("ticket_detail", ticket_number=ticket.ticket_number)
     comment_text = form.cleaned_data["comment"]
 
-    from ticketing.models import CommentRateLimit
-
-    is_allowed, reason = CommentRateLimit.check_rate_limit(ticket.id, f"web:{user.id}")
-    if not is_allowed:
-        messages.error(request, reason)
-        return redirect("ticket_detail", ticket_number=ticket.ticket_number)
-
-    CommentRateLimit.objects.create(ticket=ticket, actor_key=f"web:{user.id}")
-
-    comment = TicketComment.objects.create(
-        ticket=ticket,
-        author=user,
-        comment_text=comment_text,
-    )
-
-    QueuedTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=comment.id))
+    with transaction.atomic():
+        # Counted and saved under the rate limit's locks, so comments posted at once can't all pass it
+        if reason := CommentRateLimit.take(ticket, CommentRateLimit.user_key(user)):
+            messages.error(request, reason)
+            return redirect("ticket_detail", ticket_number=ticket.ticket_number)
+        comment = TicketComment.objects.create(ticket=ticket, author=user, comment_text=comment_text)
+        QueuedTask.enqueue(PostComment(ticket_id=ticket.id, comment_id=comment.id))
 
     logger.info(f"Comment posted on ticket {ticket.ticket_number} by {authentik_username} (web)")
 
@@ -207,8 +201,8 @@ def ticket_box_reset_panel(request: HttpRequest, ticket_number: str) -> HttpResp
     matched_vm = None
     snapshots = None
     proxmox_unreachable = False
-    if normalize_ticket_host(team_number, ticket.hostname) is not None:
-        client = get_proxmox_client()
+    client = get_proxmox_client()
+    if client.configured and normalize_ticket_host(team_number, ticket.hostname) is not None:
         vms = client.list_team_vms(team_number)
         matched_vm = match_team_vm(vms, team_number, ticket.hostname) if vms is not None else None
         snapshots = client.list_snapshots(matched_vm.node, matched_vm.vmid) if matched_vm is not None else None
@@ -232,6 +226,7 @@ def ticket_box_reset_panel(request: HttpRequest, ticket_number: str) -> HttpResp
         {
             "ticket": ticket,
             "actions": ticket_actions(user, ticket),
+            "proxmox_configured": client.configured,
             "proxmox_unreachable": proxmox_unreachable,
             "matched_vm": matched_vm,
             "snapshots": snapshots,

@@ -45,7 +45,7 @@ def admin_broadcast_action(request: HttpRequest) -> HttpResponse:
 def admin_sync_roles(request: HttpRequest) -> HttpResponse:
     if not discord_enabled():
         raise Http404("Discord is not configured")
-    return render(request, "admin/sync_roles.html", {"example_group": f"{settings.PORTAL_GROUP_PREFIX}GoldTeam"})
+    return render(request, "admin/sync_roles.html", {"example_group": settings.PORTAL_GOLD_GROUP})
 
 
 @json_endpoint

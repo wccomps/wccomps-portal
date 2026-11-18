@@ -165,8 +165,8 @@ class ResetNextcloudTeam:
 
 @dataclass(frozen=True, kw_only=True)
 class SyncQuotientMetadata:
-    """Sync the Quotient metadata (Proxmox IPs, aweful-proxy config) as requested_by; queued by a start so the chat
-    process needs no Proxmox or aweful-proxy credentials."""
+    """Sync the Quotient metadata (plus team VMs from Proxmox, and the aweful-proxy config) as requested_by; queued by
+    a start so the chat process needs no Proxmox or aweful-proxy credentials."""
 
     task_type: ClassVar = "sync_quotient_metadata"
     label: ClassVar = "Sync Quotient Metadata"

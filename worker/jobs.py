@@ -1,4 +1,5 @@
-"""The worker's periodic jobs: the competition timer, the Authentik group refresh and the Quotient sync.
+"""The worker's periodic jobs: the competition timer, the Authentik group refresh, the Quotient sync and the expired
+session cleanup.
 
 None of them talks to a chat system: what they announce is queued (notify_ops, the competition service's status
 refreshes). Each loop runs a pass at once, then one each interval from the start of the last, and advances its
@@ -11,11 +12,12 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from asgiref.sync import sync_to_async
+from django.core.management import call_command
 from django.utils import timezone
 from scoring.quotient_sync import sync_quotient_metadata
 
 from core.authentik_manager import AuthentikManager
-from core.heartbeat import GROUPS, QUOTIENT, TIMER, beat, beat_for
+from core.heartbeat import GROUPS, QUOTIENT, SESSIONS, TIMER, beat, beat_for
 from core.models import CompetitionConfig
 from core.services.competition import (
     END_AFTER_STOP,
@@ -45,6 +47,7 @@ REFRESH_MINUTES = 5
 SYNC_MINUTES = 5
 # Quotient is routinely off between competitions; check less often and log state changes only
 BACKOFF_MINUTES = 15
+SESSION_CLEANUP_MINUTES = 60
 
 
 async def _every(name: str, seconds: Callable[[], float], run_pass: Callable[[], Awaitable[None]]) -> None:
@@ -229,3 +232,18 @@ class QuotientSync:
 async def quotient_sync_loop() -> None:
     sync = QuotientSync()
     await _every(QUOTIENT, lambda: sync.interval_minutes * 60, sync.run_pass)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Session cleanup: deletes expired sessions, which every anonymous visit to the sign-in page adds one of
+# ---------------------------------------------------------------------------------------------------------------
+
+
+async def session_cleanup_loop() -> None:
+    await _every(SESSIONS, lambda: SESSION_CLEANUP_MINUTES * 60, session_cleanup_pass)
+
+
+async def session_cleanup_pass() -> None:
+    """Run Django's clearsessions once. A failure raises, so the pass skips its heartbeat: a worker that can't reach
+    the database is not alive in any useful sense."""
+    await run_blocking(call_command, "clearsessions")

@@ -456,10 +456,12 @@ class TestLinkHijackProtection:
 
         html = client.get(f"/auth/link-callback?token={attacker_token.token}").content.decode()
 
-        form = html[html.index("<form") : html.index("</form>")]
+        # The form that carries the token (the nav's logout button is a form too)
+        at = html.index(attacker_token.token)
+        form = html[html.rindex("<form", 0, at) : html.index("</form>", at)]
         assert 'method="post"' in form
         assert "csrfmiddlewaretoken" in form
-        assert attacker_token.token in form
+        assert 'action="/auth/logout/"' not in form
 
 
 class TestLinkTokenExpiry:

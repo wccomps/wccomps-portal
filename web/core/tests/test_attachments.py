@@ -9,7 +9,7 @@ from django.test import Client
 
 from core.models import UserGroups
 from team.models import Team
-from ticketing.models import Ticket, TicketAttachment, TicketCategory
+from ticketing.models import CommentRateLimit, Ticket, TicketAttachment, TicketCategory
 
 pytestmark = pytest.mark.django_db
 
@@ -569,8 +569,9 @@ class TestAttachmentSecurity:
             assert attachment.filename == expected_basename
             assert bytes(attachment.file_data) == file_content
 
-            # Clean up for next iteration
+            # Clean up for next iteration, the rate limit's count among it
             attachment.delete()
+            CommentRateLimit.objects.all().delete()
 
     def test_directory_traversal_cannot_read_arbitrary_files(self, setup_tickets: dict[str, Any]) -> None:
         """Test that we can't use attachment download to read arbitrary system files."""

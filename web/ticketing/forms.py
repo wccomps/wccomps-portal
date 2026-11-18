@@ -7,7 +7,7 @@ from django.db.models import QuerySet
 from core.proxmox import is_valid_snapshot_name
 from core.widgets import ToggleButtonSelect
 from team.models import Team
-from ticketing.models import Ticket, TicketCategory
+from ticketing.models import Ticket, TicketCategory, TicketComment
 
 TICKET_FIELD_CHOICES = [
     ("hostname", "Hostname"),
@@ -282,7 +282,9 @@ class CreateTicketPageForm(CreateTicketForm):
 
 
 class TicketCommentForm(forms.Form):
-    comment = forms.CharField()
+    comment = forms.CharField(
+        max_length=TicketComment.MAX_LENGTH, error_messages={"required": "Comment cannot be empty"}
+    )
 
 
 class TicketReassignForm(forms.Form):
