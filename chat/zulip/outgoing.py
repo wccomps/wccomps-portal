@@ -42,7 +42,6 @@ ZULIP_MESSAGE_CHAR_LIMIT = 10000
 STREAM_DOES_NOT_EXIST = "STREAM_DOES_NOT_EXIST"
 ANNOUNCEMENT_TOPIC = "announcements"
 STATUS_TOPIC = "competition status"
-# teams: each team's number and the stream it lacks, such as "02 (team02)"
 MISSING_STREAMS = "No Zulip stream for teams {teams}. Create the streams, then send it again to those teams."
 
 

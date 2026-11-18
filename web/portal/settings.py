@@ -189,47 +189,62 @@ AUTHENTIK_OIDC_URL = os.environ.get(
     f"{AUTHENTIK_URL}/application/o/discord-bot/" if AUTHENTIK_URL else "",
 )
 
-# Authentik group names (read by core.permission_constants): each role's group, by default this prefix plus a fixed
-# suffix; a name may contain spaces
+# Authentik group names: each role's group, by default this prefix plus a fixed suffix; a name may contain spaces
 PORTAL_GROUP_PREFIX = os.environ.get("PORTAL_GROUP_PREFIX", "Portal_")
-PORTAL_ADMIN_GROUP = os.environ.get("PORTAL_ADMIN_GROUP", f"{PORTAL_GROUP_PREFIX}Admin")
-# A role setting that is unset or empty takes its default
-PORTAL_GOLD_GROUP = os.environ.get("PORTAL_GOLD_GROUP") or f"{PORTAL_GROUP_PREFIX}GoldTeam"
-PORTAL_WHITE_GROUP = os.environ.get("PORTAL_WHITE_GROUP") or f"{PORTAL_GROUP_PREFIX}WhiteTeam"
-PORTAL_WHITE_LEAD_GROUP = os.environ.get("PORTAL_WHITE_LEAD_GROUP") or f"{PORTAL_GROUP_PREFIX}WhiteTeam_Lead"
-PORTAL_ORANGE_GROUP = os.environ.get("PORTAL_ORANGE_GROUP") or f"{PORTAL_GROUP_PREFIX}OrangeTeam"
-PORTAL_ORANGE_LEAD_GROUP = os.environ.get("PORTAL_ORANGE_LEAD_GROUP") or f"{PORTAL_GROUP_PREFIX}OrangeTeam_Lead"
-PORTAL_RED_GROUP = os.environ.get("PORTAL_RED_GROUP") or f"{PORTAL_GROUP_PREFIX}RedTeam"
-# Grants no permission: only its Discord role (GROUP_ROLE_MAPPING)
-PORTAL_BLACK_GROUP = os.environ.get("PORTAL_BLACK_GROUP") or f"{PORTAL_GROUP_PREFIX}BlackTeam"
-PORTAL_TICKETING_ADMIN_GROUP = os.environ.get("PORTAL_TICKETING_ADMIN_GROUP") or f"{PORTAL_GROUP_PREFIX}Ticketing_Admin"
-PORTAL_TICKETING_SUPPORT_GROUP = (
-    os.environ.get("PORTAL_TICKETING_SUPPORT_GROUP") or f"{PORTAL_GROUP_PREFIX}Ticketing_Support"
-)
-# Two roles sharing a group would grant each other's permissions, and GROUP_ROLE_MAPPING would keep only one's role
-_role_setting_of: dict[str, str] = {}
-for _setting, _group in {
-    "PORTAL_ADMIN_GROUP": PORTAL_ADMIN_GROUP,
-    "PORTAL_GOLD_GROUP": PORTAL_GOLD_GROUP,
-    "PORTAL_WHITE_GROUP": PORTAL_WHITE_GROUP,
-    "PORTAL_WHITE_LEAD_GROUP": PORTAL_WHITE_LEAD_GROUP,
-    "PORTAL_ORANGE_GROUP": PORTAL_ORANGE_GROUP,
-    "PORTAL_ORANGE_LEAD_GROUP": PORTAL_ORANGE_LEAD_GROUP,
-    "PORTAL_RED_GROUP": PORTAL_RED_GROUP,
-    "PORTAL_BLACK_GROUP": PORTAL_BLACK_GROUP,
-    "PORTAL_TICKETING_ADMIN_GROUP": PORTAL_TICKETING_ADMIN_GROUP,
-    "PORTAL_TICKETING_SUPPORT_GROUP": PORTAL_TICKETING_SUPPORT_GROUP,
-}.items():
-    if _group in _role_setting_of:
+_role_group_setting: dict[str, str] = {}  # each role group, with the setting naming it
+
+
+def _role_group(setting: str, value: str | None, suffix: str) -> str:
+    """A role's group: the setting's value, unset or empty meaning PORTAL_GROUP_PREFIX plus suffix. Two roles sharing a
+    group would grant each other's permissions, and GROUP_ROLE_MAPPING would keep only one's role, so a group another
+    role setting names is refused."""
+    group = value or f"{PORTAL_GROUP_PREFIX}{suffix}"
+    if group in _role_group_setting:
         raise ImproperlyConfigured(
-            f"{_role_setting_of[_group]} and {_setting} both name the Authentik group {_group!r}; give each its own"
+            f"{_role_group_setting[group]} and {setting} both name the Authentik group {group!r}; give each its own"
         )
-    _role_setting_of[_group] = _setting
+    _role_group_setting[group] = setting
+    return group
+
+
+PORTAL_ADMIN_GROUP = _role_group("PORTAL_ADMIN_GROUP", os.environ.get("PORTAL_ADMIN_GROUP"), "Admin")
+PORTAL_GOLD_GROUP = _role_group("PORTAL_GOLD_GROUP", os.environ.get("PORTAL_GOLD_GROUP"), "GoldTeam")
+PORTAL_WHITE_GROUP = _role_group("PORTAL_WHITE_GROUP", os.environ.get("PORTAL_WHITE_GROUP"), "WhiteTeam")
+PORTAL_WHITE_LEAD_GROUP = _role_group(
+    "PORTAL_WHITE_LEAD_GROUP", os.environ.get("PORTAL_WHITE_LEAD_GROUP"), "WhiteTeam_Lead"
+)
+PORTAL_ORANGE_GROUP = _role_group("PORTAL_ORANGE_GROUP", os.environ.get("PORTAL_ORANGE_GROUP"), "OrangeTeam")
+PORTAL_ORANGE_LEAD_GROUP = _role_group(
+    "PORTAL_ORANGE_LEAD_GROUP", os.environ.get("PORTAL_ORANGE_LEAD_GROUP"), "OrangeTeam_Lead"
+)
+PORTAL_RED_GROUP = _role_group("PORTAL_RED_GROUP", os.environ.get("PORTAL_RED_GROUP"), "RedTeam")
+# Grants no permission: only its Discord role (GROUP_ROLE_MAPPING)
+PORTAL_BLACK_GROUP = _role_group("PORTAL_BLACK_GROUP", os.environ.get("PORTAL_BLACK_GROUP"), "BlackTeam")
+PORTAL_TICKETING_ADMIN_GROUP = _role_group(
+    "PORTAL_TICKETING_ADMIN_GROUP", os.environ.get("PORTAL_TICKETING_ADMIN_GROUP"), "Ticketing_Admin"
+)
+PORTAL_TICKETING_SUPPORT_GROUP = _role_group(
+    "PORTAL_TICKETING_SUPPORT_GROUP", os.environ.get("PORTAL_TICKETING_SUPPORT_GROUP"), "Ticketing_Support"
+)
+# Each role's group, which core.permission_constants.PERMISSION_MAP reads
+PORTAL_ROLE_GROUPS = {
+    "admin": PORTAL_ADMIN_GROUP,
+    "gold": PORTAL_GOLD_GROUP,
+    "white": PORTAL_WHITE_GROUP,
+    "white_lead": PORTAL_WHITE_LEAD_GROUP,
+    "orange": PORTAL_ORANGE_GROUP,
+    "orange_lead": PORTAL_ORANGE_LEAD_GROUP,
+    "red": PORTAL_RED_GROUP,
+    "black": PORTAL_BLACK_GROUP,
+    "ticketing_admin": PORTAL_TICKETING_ADMIN_GROUP,
+    "ticketing_support": PORTAL_TICKETING_SUPPORT_GROUP,
+}
 # A new team's default Authentik group, a str.format pattern given the team's number
 TEAM_GROUP_PATTERN = os.environ.get("TEAM_GROUP_PATTERN", f"{PORTAL_GROUP_PREFIX}BlueTeam{{number:02d}}")
 # A team's accounts, with the literal text {number} standing for the team's two-digit number: a pattern with no regular
 # expression operator names the team's one account, by exact username; otherwise the team's accounts are the members
-# of its group whose username fully matches this regular expression ("team{number}[a-i]" gives each team nine)
+# of its group whose username fully matches this regular expression ("team{number}[a-i]" gives each team nine); with
+# TEAM_ACCOUNT_PATH set, the folder's users matching it
 TEAM_ACCOUNT_PATTERN = os.environ.get("TEAM_ACCOUNT_PATTERN", "team{number}")
 if "{number}" not in TEAM_ACCOUNT_PATTERN:
     raise ImproperlyConfigured("TEAM_ACCOUNT_PATTERN must contain {number}, or every team shares the same accounts")
@@ -262,9 +277,9 @@ ZULIP_API_KEY = os.environ.get("ZULIP_API_KEY", "")
 # stream and topic for ops log lines
 ZULIP_TEAM_STREAM = os.environ.get("ZULIP_TEAM_STREAM", "team{number:02d}")
 # A broadcast to teams: each team's stream (a pattern using {number}; empty: ZULIP_TEAM_STREAM) and topic (may use
-# {number}). Tickets stay in ZULIP_TEAM_STREAM.
+# {number}; empty: announcements). Tickets stay in ZULIP_TEAM_STREAM.
 ZULIP_TEAM_BROADCAST_STREAM = os.environ.get("ZULIP_TEAM_BROADCAST_STREAM", "")
-ZULIP_TEAM_BROADCAST_TOPIC = os.environ.get("ZULIP_TEAM_BROADCAST_TOPIC", "announcements")
+ZULIP_TEAM_BROADCAST_TOPIC = os.environ.get("ZULIP_TEAM_BROADCAST_TOPIC") or "announcements"
 for _setting, _pattern in (
     ("ZULIP_TEAM_BROADCAST_STREAM", ZULIP_TEAM_BROADCAST_STREAM),
     ("ZULIP_TEAM_BROADCAST_TOPIC", ZULIP_TEAM_BROADCAST_TOPIC),
@@ -275,10 +290,21 @@ for _setting, _pattern in (
         raise ImproperlyConfigured(
             f"{_setting} must be a str.format pattern given the team's number, such as Team {{number:02d}} Chat"
         ) from None
-# One stream for every team would show each team's broadcasts to all of them
-_one_stream = ZULIP_TEAM_BROADCAST_STREAM.format(number=1) == ZULIP_TEAM_BROADCAST_STREAM.format(number=2)
-if ZULIP_TEAM_BROADCAST_STREAM and _one_stream:
-    raise ImproperlyConfigured("ZULIP_TEAM_BROADCAST_STREAM must use {number}, giving each team its own stream")
+# A team's broadcasts in a stream another team reads (its broadcast stream or its ticket stream) would show to them
+if ZULIP_TEAM_BROADCAST_STREAM:
+    _broadcast = {n: ZULIP_TEAM_BROADCAST_STREAM.format(number=n) for n in range(1, MAX_TEAMS + 1)}
+    if len(set(_broadcast.values())) < len(_broadcast):
+        raise ImproperlyConfigured(
+            "ZULIP_TEAM_BROADCAST_STREAM must give every team from 1 to MAX_TEAMS its own stream, such as "
+            "Team {number:02d} Chat"
+        )
+    _ticket_team = {ZULIP_TEAM_STREAM.format(number=n): n for n in range(1, MAX_TEAMS + 1)}
+    for _number, _stream in _broadcast.items():
+        if _ticket_team.get(_stream, _number) != _number:
+            raise ImproperlyConfigured(
+                f"ZULIP_TEAM_BROADCAST_STREAM gives team {_number:02d} the stream {_stream!r}, team "
+                f"{_ticket_team[_stream]:02d}'s ZULIP_TEAM_STREAM"
+            )
 ZULIP_STAFF_STREAM = os.environ.get("ZULIP_STAFF_STREAM", "tickets")
 ZULIP_ANNOUNCEMENTS_STREAM = os.environ.get("ZULIP_ANNOUNCEMENTS_STREAM", "announcements")
 ZULIP_OPS_STREAM = os.environ.get("ZULIP_OPS_STREAM", "ops")

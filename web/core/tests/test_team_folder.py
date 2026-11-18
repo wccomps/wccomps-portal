@@ -15,18 +15,20 @@ from django.http import HttpResponse
 from django.test import Client
 from django.utils import timezone
 
+from core import team_accounts
 from core.admin_views.readiness import (
+    CAN_CHANGE_USERNAME,
+    _check_blueteam_bindings,
     _check_sub_mode,
     _check_team_accounts_exist,
-    _check_team_group_membership,
     _check_usernames_fixed,
     checks,
 )
-from core.authentik_manager import AuthentikAPIError, AuthentikManager
+from core.authentik_manager import AuthentikAPIError, AuthentikManager, blueteam_binding
 from core.models import CompetitionConfig, UserGroups
 from core.services.competition import NO_FOLDER_ACCOUNT, run_competition
 from core.services.user_groups import refresh_user_groups
-from core.team_accounts import FOLDER_CACHE_SECONDS, _folder_cache, accounts_by_team
+from core.team_accounts import FOLDER_CACHE_SECONDS, _FolderCache, accounts_by_team, blueteam_kinds
 from core.utils import drain
 from team.models import Team
 
@@ -65,6 +67,7 @@ class FakeAuthentik:
     def __init__(self, users: list[dict[str, object]], bindings: list[dict[str, object]] | None = None) -> None:
         self.users = users
         self.bindings = bindings or []
+        self.groups: list[dict[str, object]] = []
         self.writes: list[tuple[str, str, object]] = []
         self.listed_pages: list[int] = []
         self.page_size = 100
@@ -93,7 +96,7 @@ class FakeAuthentik:
             more = page * self.page_size < len(users)
             return httpx.Response(200, json={"results": chunk, "pagination": {"next": page + 1 if more else 0}})
         if path == "/api/v3/core/groups/":
-            return httpx.Response(200, json={"results": [], "pagination": {"next": 0}})
+            return httpx.Response(200, json={"results": self.groups, "pagination": {"next": 0}})
         if path == "/api/v3/core/applications/vpn/":
             return httpx.Response(200, json={"pk": "app-1", "slug": "vpn"})
         if path == "/api/v3/policies/bindings/":
@@ -117,10 +120,8 @@ class FakeAuthentik:
 
 
 @pytest.fixture(autouse=True)
-def _fresh_folder_cache() -> Iterator[None]:
-    _folder_cache.clear()
-    yield
-    _folder_cache.clear()
+def _fresh_folder_cache(monkeypatch) -> None:
+    monkeypatch.setattr(team_accounts, "_folder_cache", _FolderCache())
 
 
 @pytest.fixture
@@ -205,6 +206,28 @@ def test_a_refreshed_folder_account_holds_its_team(teams):
     assert list(Team.objects.held_by(_groups("uid-team01a")).values_list("team_number", flat=True)) == [1]
 
 
+def test_a_folder_account_holds_its_teams_stored_group(teams):
+    """Team.authentik_group decides who holds a team, so a team whose group was renamed keeps its accounts."""
+    Team.objects.filter(team_number=2).update(authentik_group="Renamed02")
+    _stored("uid-team02a", ["Team-Blue-02"])
+    refresh_user_groups(FakeAuthentik(USERS).manager())
+
+    assert _groups("uid-team02a") == ["Renamed02"]
+    assert list(Team.objects.held_by(_groups("uid-team02a")).values_list("team_number", flat=True)) == [2]
+
+
+def test_an_authentik_group_named_like_a_team_grants_nothing_in_the_folder_mode(teams):
+    """A real Authentik group with a team's name (left over, or made by someone) is no team: only the folder is."""
+    fake = FakeAuthentik([{**u, "groups": ["g1"]} if u["username"] in ("bond007", "team02a") else u for u in USERS])
+    fake.groups = [{"pk": "g1", "name": "Team-Blue-01", "parents": []}]
+    _stored("uid-bond007", [])
+    _stored("uid-team02a", [])
+    refresh_user_groups(fake.manager())
+
+    assert _groups("uid-bond007") == []
+    assert _groups("uid-team02a") == ["Team-Blue-02"]
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # Start and stop
 # ---------------------------------------------------------------------------------------------------------------
@@ -285,31 +308,84 @@ def test_a_start_fails_an_active_team_with_no_folder_account(authentik):
 # ---------------------------------------------------------------------------------------------------------------
 
 
+GROUP_BINDING = {
+    "pk": "b-2",
+    "target": "app-1",
+    "enabled": True,
+    "group": "g1",
+    "group_obj": {"name": "Portal_BlueTeam"},
+}
+STAFF_BINDING = {"pk": "b-3", "target": "app-1", "enabled": True, "group": "g9", "group_obj": {"name": "Staff"}}
+
+
+def _binding(fake: FakeAuthentik) -> dict[str, object] | None:
+    return blueteam_binding(fake.manager().app_bindings("app-1"), blueteam_kinds())
+
+
 def test_a_policy_binding_on_another_application_is_not_taken(team_folder):
     other = {**POLICY_BINDING, "target": "app-2"}
-    assert FakeAuthentik([], [other]).manager().get_blueteam_binding("app-1") is None
+    assert _binding(FakeAuthentik([], [other])) is None
 
 
 def test_a_policy_binding_counts_only_in_team_folder_mode(settings):
     """Without the folder a policy named like the blue team (a "deny-blueteam" policy) is no gate to toggle."""
-    group = {"pk": "b-2", "target": "app-1", "enabled": True, "group": "g1", "group_obj": {"name": "Portal_BlueTeam"}}
-    fake = FakeAuthentik([], [dict(POLICY_BINDING), group])
+    fake = FakeAuthentik([], [dict(POLICY_BINDING), dict(GROUP_BINDING)])
 
     settings.TEAM_ACCOUNT_PATH = ""
-    assert fake.manager().get_blueteam_binding("app-1") == group
+    assert _binding(fake) == GROUP_BINDING
     fake.bindings = [dict(POLICY_BINDING)]
-    assert fake.manager().get_blueteam_binding("app-1") is None
+    assert _binding(fake) is None
     settings.TEAM_ACCOUNT_PATH = FOLDER
-    assert fake.manager().get_blueteam_binding("app-1") == POLICY_BINDING
+    assert _binding(fake) == POLICY_BINDING
+
+
+def test_the_folder_mode_prefers_the_policy_binding_to_a_group_one(team_folder):
+    """An app keeping a leftover blue team group binding beside the policy that lets the folder in: a start and stop
+    toggle the policy."""
+    assert _binding(FakeAuthentik([], [dict(GROUP_BINDING), dict(POLICY_BINDING)])) == POLICY_BINDING
 
 
 @pytest.mark.parametrize("folder", ["", FOLDER])
 def test_a_group_binding_is_found_in_either_mode(settings, folder):
     settings.TEAM_ACCOUNT_PATH = folder
-    group = {"pk": "b-2", "target": "app-1", "enabled": True, "group": "g1", "group_obj": {"name": "Portal_BlueTeam"}}
     unrelated = {"pk": "b-3", "target": "app-1", "enabled": True, "policy": "p2", "policy_obj": {"name": "Staff"}}
-    binding = FakeAuthentik([], [unrelated, group]).manager().get_blueteam_binding("app-1")
+    binding = _binding(FakeAuthentik([], [unrelated, dict(GROUP_BINDING)]))
     assert binding is not None and binding["pk"] == "b-2"
+
+
+@pytest.fixture
+def controlled_vpn() -> None:
+    CompetitionConfig.objects.update_or_create(pk=1, defaults={"controlled_applications": ["vpn"]})
+
+
+def test_readiness_fails_a_lone_blue_team_binding_in_the_folder_mode(team_folder, controlled_vpn):
+    """With the blue team binding the app's only enabled one, a stop disabling it lets every Authentik user in."""
+    fake = FakeAuthentik([], [dict(POLICY_BINDING), {**STAFF_BINDING, "enabled": False}])
+    with _readiness(fake):
+        severity, detail, _ = _check_blueteam_bindings()
+        assert severity == "fail" and "vpn" in detail and "second binding" in detail
+        fake.bindings[1]["enabled"] = True
+        assert _check_blueteam_bindings()[0] == "pass"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [GROUP_BINDING, {**POLICY_BINDING, "pk": "b-2"}],
+    ids=["a policy and a group", "two policies"],
+)
+def test_readiness_fails_more_than_one_blue_team_binding_in_the_folder_mode(team_folder, controlled_vpn, extra):
+    """A start and stop toggle only the preferred binding, so another would stay as it was; nor is another blue team
+    binding the app's second binding."""
+    fake = FakeAuthentik([], [dict(POLICY_BINDING), dict(extra), dict(STAFF_BINDING)])
+    with _readiness(fake):
+        severity, detail, _ = _check_blueteam_bindings()
+
+    assert severity == "fail" and "vpn (extra b-2)" in detail and "remove the extra ones" in detail
+
+
+def test_a_lone_blue_team_group_binding_passes_without_the_folder(controlled_vpn):
+    with _readiness(FakeAuthentik([], [dict(GROUP_BINDING)])):
+        assert _check_blueteam_bindings()[0] == "pass"
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -378,6 +454,23 @@ def test_an_account_outside_the_folder_signs_in_as_claimed(teams):
     assert _groups("uid-team01c") == []
 
 
+@pytest.mark.parametrize(
+    ("username", "held"),
+    [
+        ("team01c", []),  # outside the folder
+        ("bond007", []),  # in it, matching no team
+        ("team02a", ["Team-Blue-02"]),  # its own team's group, not the claimed one
+        ("staff", []),  # not in the folder at all
+    ],
+)
+def test_a_claimed_team_group_is_never_taken_at_sign_in(teams, username, held):
+    """The scope mapping may claim a team's group for anyone; only the folder gives one, at sign-in too."""
+    claim = {"sub": f"uid-{username}", "preferred_username": username, "groups": ["Team-Blue-01", "Portal_GoldTeam"]}
+    _sign_in(FakeAuthentik(USERS), claim)
+
+    assert _groups(f"uid-{username}") == sorted(["Portal_GoldTeam", *held])
+
+
 def test_when_authentik_cant_be_asked_the_sign_in_is_refused(teams, caplog):
     """Signing in as claimed would let team03a and team03b rename each other, the thing the lookup prevents."""
     fake = FakeAuthentik(USERS)
@@ -388,6 +481,29 @@ def test_when_authentik_cant_be_asked_the_sign_in_is_refused(teams, caplog):
     assert b"Try again in a moment" in response.content
     assert not UserGroups.objects.exists()
     assert "team folder lookup failed" in caplog.text
+
+
+def test_when_authentik_cant_be_asked_a_staff_sign_in_goes_ahead(teams, settings, caplog):
+    """Staff and admins sign in while the folder can't be read: their claim names a staff role's group."""
+    fake = FakeAuthentik(USERS)
+    fake.fail = True
+    claim = [settings.PORTAL_GOLD_GROUP, "Team-Blue-01"]
+
+    _sign_in(fake, {"sub": "uid-staff", "preferred_username": "gold-admin", "groups": claim})
+
+    assert User.objects.get(usergroups__authentik_id="uid-staff").username == "gold-admin"
+    assert _groups("uid-staff") == [settings.PORTAL_GOLD_GROUP]
+    assert "Team folder lookup failed" in caplog.text
+
+
+def test_when_authentik_cant_be_asked_a_folder_account_claiming_no_group_is_refused(teams):
+    """A region whose scope mapping makes up no team group: the account would sign in under the stripped name."""
+    fake = FakeAuthentik(USERS)
+    fake.fail = True
+
+    _sign_in(fake, {"sub": "uid-team01a", "preferred_username": "team01"}, expect=503)
+
+    assert not UserGroups.objects.exists()
 
 
 def test_sign_ins_share_the_folder_read_for_a_minute(teams):
@@ -403,7 +519,8 @@ def test_sign_ins_share_the_folder_read_for_a_minute(teams):
     _sign_in(fake, _claimed("team02a"))  # on page 2, not read yet
     assert fake.listed_pages == [1, 1, 2]
 
-    _folder_cache.accounts = {u: (user, at - FOLDER_CACHE_SECONDS) for u, (user, at) in _folder_cache.accounts.items()}
+    cache = team_accounts._folder_cache
+    cache.accounts = {u: (user, at - FOLDER_CACHE_SECONDS) for u, (user, at) in cache.accounts.items()}
     _sign_in(fake, _claimed("team01a"))
     assert fake.listed_pages == [1, 1, 2, 1]
 
@@ -444,15 +561,6 @@ def test_readiness_lists_an_active_team_without_a_folder_account(teams):
     assert "team 02" in detail and FOLDER in detail and "team 01" not in detail
 
 
-def test_readiness_checks_team_groups_against_the_pattern_not_authentik(teams):
-    with patch("core.admin_views.readiness.AuthentikManager", side_effect=AssertionError("asked Authentik")):
-        assert _check_team_group_membership()[0] == "pass"
-        Team.objects.filter(team_number=2).update(authentik_group="Renamed02")
-        severity, detail, action = _check_team_group_membership()
-
-    assert severity == "fail" and "team 02 (Renamed02)" in detail and action is None
-
-
 def _readiness(fake: FakeAuthentik):
     return patch("core.admin_views.readiness.AuthentikManager", side_effect=lambda: fake.manager())
 
@@ -472,6 +580,23 @@ def test_readiness_fails_while_users_may_change_their_username(team_folder):
     assert severity == "fail" and "view System settings" in detail
 
 
+@pytest.mark.parametrize("on", ["account", "group", "parent group"])
+def test_readiness_fails_a_folder_account_whose_attributes_let_it_rename_itself(team_folder, on):
+    """Authentik's default user settings flow reads the attribute on the user and its groups before the system
+    setting."""
+    fake = FakeAuthentik([{**_user(11, "team01a"), "groups": ["g2"]}, _user(21, "team02a")])
+    fake.groups = [{"pk": "g1", "name": "Parent", "parents": []}, {"pk": "g2", "name": "Child", "parents": ["g1"]}]
+    with _readiness(fake):
+        assert _check_usernames_fixed()[0] == "pass"
+        if on == "account":
+            fake.users[0]["attributes"] = {CAN_CHANGE_USERNAME: True}
+        else:
+            fake.groups[0 if on == "parent group" else 1]["attributes"] = {CAN_CHANGE_USERNAME: True}
+        severity, detail, _ = _check_usernames_fixed()
+
+    assert severity == "fail" and "team01a" in detail and "team02a" not in detail
+
+
 def test_readiness_fails_unless_the_portals_provider_uses_the_hashed_user_id(team_folder):
     fake = FakeAuthentik([])
     with _readiness(fake):
@@ -487,6 +612,10 @@ def test_readiness_fails_unless_the_portals_provider_uses_the_hashed_user_id(tea
 
 
 def test_the_team_folder_checks_run_only_in_team_folder_mode(team_folder, settings):
-    assert {"Usernames fixed", "Sign-in subject mode"} <= {name for name, _ in checks()}
+    names = [name for name, _ in checks()]
+    assert {"Usernames fixed", "Sign-in subject mode"} <= set(names) and "Group membership correct" not in names
     settings.TEAM_ACCOUNT_PATH = ""
-    assert not {"Usernames fixed", "Sign-in subject mode"} & {name for name, _ in checks()}
+    assert not {"Usernames fixed", "Sign-in subject mode", "Group membership correct"} & {name for name, _ in checks()}
+    settings.TEAM_ACCOUNT_PATTERN = "team{number}"
+    names = [name for name, _ in checks()]
+    assert names.index("Group membership correct") == names.index("Team accounts exist") + 1

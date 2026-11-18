@@ -203,11 +203,6 @@ def check_users(result: object) -> None:
     )
 
 
-def in_team_folder(call: Callable[[], object]) -> object:
-    with override_settings(TEAM_ACCOUNT_PATH="blue-users"):
-        return call()
-
-
 def check_folder_users(*, in_folder_only: bool) -> Callable[[object], None]:
     """check_users, each user with its path too (in the team folder, for the folder's listing)."""
 
@@ -509,11 +504,15 @@ READERS = [
         raises=(AuthentikAPIError,),
     ),
     Reader(
-        "get_blueteam_binding",
-        lambda: authentik().get_blueteam_binding("app-1"),
+        "app_bindings",
+        lambda: authentik().app_bindings("app-1"),
         (BINDINGS,),
-        lambda r: outcome(r, lambda b: b is None or (isinstance(b, dict) and is_str(b.get("pk"))), "None or a binding"),
-        (f"{AM}.get_blueteam_binding", f"{AM}._list_all", *READ),
+        lambda r: outcome(
+            r,
+            lambda bs: isinstance(bs, list) and all(isinstance(b, dict) and b.get("target") == "app-1" for b in bs),
+            "the app's bindings",
+        ),
+        (f"{AM}.app_bindings", f"{AM}._list_all", *READ),
         raises=(AuthentikAPIError,),
     ),
     Reader(
@@ -526,7 +525,7 @@ READERS = [
     ),
     Reader(
         "set_application_enabled",
-        lambda: authentik().set_application_enabled("netbird", False),
+        lambda: authentik().set_application_enabled("netbird", False, ("policy", "group")),
         (APPLICATION, BINDINGS, DONE),
         lambda r: outcome(r, lambda v: v is None, "None"),
         (f"{AM}.set_application_enabled",),
@@ -591,18 +590,18 @@ READERS = [
     ),
     Reader(
         "list_all_users_team_folder",
-        lambda: in_team_folder(lambda: authentik().list_all_users()),
+        lambda: authentik().list_all_users(with_path=True),
         (FOLDER_USERS,),
         check_folder_users(in_folder_only=False),
         (f"{AM}.list_all_users", f"{AM}._list_all", *READ),
         raises=(AuthentikAPIError,),
     ),
     Reader(
-        "list_team_folder_users",
-        lambda: in_team_folder(lambda: authentik().list_team_folder_users()),
+        "team_folder_pages",
+        lambda: [user for page in authentik().team_folder_pages("blue-users") for user in page],
         (FOLDER_USERS,),
         check_folder_users(in_folder_only=True),
-        (f"{AM}.list_team_folder_users", f"{AM}.team_folder_pages", f"{AM}._pages", *READ),
+        (f"{AM}.team_folder_pages", f"{AM}._pages", *READ),
         raises=(AuthentikAPIError,),
     ),
     Reader(

@@ -7,6 +7,7 @@ import math
 import secrets
 import time
 from datetime import datetime
+from typing import TypeGuard
 from urllib.parse import urlencode
 
 import httpx
@@ -24,7 +25,7 @@ from django.views.decorators.http import require_POST
 from .auth_utils import get_role_based_landing_url, lock_account
 from .authentik_manager import AuthentikAPIError, AuthentikManager, reason_for
 from .models import CredentialsReset, UserGroups
-from .team_accounts import folder_team_group, team_folder, team_folder_account
+from .team_accounts import TeamGroups, team_folder, team_folder_account, team_groups
 from .utils import database_clock
 
 logger = logging.getLogger(__name__)
@@ -162,7 +163,7 @@ def _before_reset(signed_in_at: float, reset_at: datetime) -> bool:
     return signed_in_at < reset_at.timestamp() - RESET_CLOCK_MARGIN
 
 
-def _usable_username(text: object) -> bool:
+def _usable_username(text: object) -> TypeGuard[str]:
     """Whether text can be a portal username: non-empty text without a NUL that fits the column."""
     return isinstance(text, str) and bool(text) and "\x00" not in text and _fits(text, User, "username")
 
@@ -176,7 +177,7 @@ def _claims(userinfo: dict[str, object]) -> tuple[str, str, str, list[str]]:
     groups = userinfo.get("groups", [])
     if not isinstance(sub, str) or not sub or not _fits(sub, UserGroups, "authentik_id"):
         raise ValueError("no usable sub claim")
-    if not isinstance(username, str) or not _usable_username(username):
+    if not _usable_username(username):
         raise ValueError("no usable username")
     if not isinstance(email, str) or not _fits(email, User, "email"):
         raise ValueError("an unusable email")
@@ -187,19 +188,21 @@ def _claims(userinfo: dict[str, object]) -> tuple[str, str, str, list[str]]:
     return sub, username, email, groups
 
 
-def _team_folder_account(authentik_id: str, username: str, groups: list[str]) -> tuple[str, list[str]]:
-    """In team folder mode, the account's own username (found by uid == sub) and its claimed groups plus its team's
-    group; for anyone not in the folder, the claims. AuthentikAPIError when Authentik can't be asked."""
+def _team_folder_account(
+    authentik_id: str, username: str, groups: list[str], teams: TeamGroups
+) -> tuple[str, list[str]]:
+    """In team folder mode, the account's own username (found by uid == sub) and the groups it holds
+    (TeamGroups.held); for anyone not in the folder, the claimed username and the claimed groups other than team
+    groups. AuthentikAPIError when Authentik can't be asked."""
     with AuthentikManager() as manager:
         account = team_folder_account(manager, authentik_id)
     if account is None:
-        return username, groups
+        return username, teams.held(None, groups)
     own = account["username"]
     if not _usable_username(own):
         logger.warning(f"Team folder account {username} has an unusable Authentik username, so it signs in as claimed")
         own = username
-    team_group = folder_team_group(account)
-    return own, sorted({*groups, team_group}) if team_group else groups
+    return own, teams.held(account, groups)
 
 
 def oauth_callback(request: HttpRequest) -> HttpResponse:
@@ -326,16 +329,22 @@ def oauth_callback(request: HttpRequest) -> HttpResponse:
         )
 
     if team_folder():
+        teams = team_groups()
         try:
-            username, groups = _team_folder_account(authentik_id, username, groups)
+            username, groups = _team_folder_account(authentik_id, username, groups, teams)
         except AuthentikAPIError as e:
-            logger.warning(f"Sign-in of {username} refused: the team folder lookup failed: {reason_for(e)}")
-            return render(
-                request,
-                "core/oauth_error.html",
-                {"error_title": "Sign-in Unavailable", "error_message": "Try again in a moment."},
-                status=503,
-            )
+            # A team account can't be told apart without the folder, whatever its claim; only a claim naming a staff
+            # role's or the admin group signs in, with no team group
+            if set(groups).isdisjoint(settings.PORTAL_ROLE_GROUPS.values()):
+                logger.warning(f"Sign-in of {username} refused: the team folder lookup failed: {reason_for(e)}")
+                return render(
+                    request,
+                    "core/oauth_error.html",
+                    {"error_title": "Sign-in Unavailable", "error_message": "Try again in a moment."},
+                    status=503,
+                )
+            logger.warning(f"Team folder lookup failed ({reason_for(e)}); {username} claims a staff role, signs in")
+            groups = teams.held(None, groups)
     next_url = _next_url(request, state_data)
     # Accounts are keyed by the Authentik sub only: usernames get reused, and matching on
     # them would hand a new identity someone else's account
