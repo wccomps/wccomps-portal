@@ -189,10 +189,42 @@ AUTHENTIK_OIDC_URL = os.environ.get(
     f"{AUTHENTIK_URL}/application/o/discord-bot/" if AUTHENTIK_URL else "",
 )
 
-# Authentik group names: each role's group is this prefix plus a fixed suffix (core.permission_constants); the admin
-# group and the team groups are their own settings below
+# Authentik group names (read by core.permission_constants): each role's group, by default this prefix plus a fixed
+# suffix; a name may contain spaces
 PORTAL_GROUP_PREFIX = os.environ.get("PORTAL_GROUP_PREFIX", "Portal_")
 PORTAL_ADMIN_GROUP = os.environ.get("PORTAL_ADMIN_GROUP", f"{PORTAL_GROUP_PREFIX}Admin")
+# A role setting that is unset or empty takes its default
+PORTAL_GOLD_GROUP = os.environ.get("PORTAL_GOLD_GROUP") or f"{PORTAL_GROUP_PREFIX}GoldTeam"
+PORTAL_WHITE_GROUP = os.environ.get("PORTAL_WHITE_GROUP") or f"{PORTAL_GROUP_PREFIX}WhiteTeam"
+PORTAL_WHITE_LEAD_GROUP = os.environ.get("PORTAL_WHITE_LEAD_GROUP") or f"{PORTAL_GROUP_PREFIX}WhiteTeam_Lead"
+PORTAL_ORANGE_GROUP = os.environ.get("PORTAL_ORANGE_GROUP") or f"{PORTAL_GROUP_PREFIX}OrangeTeam"
+PORTAL_ORANGE_LEAD_GROUP = os.environ.get("PORTAL_ORANGE_LEAD_GROUP") or f"{PORTAL_GROUP_PREFIX}OrangeTeam_Lead"
+PORTAL_RED_GROUP = os.environ.get("PORTAL_RED_GROUP") or f"{PORTAL_GROUP_PREFIX}RedTeam"
+# Grants no permission: only its Discord role (GROUP_ROLE_MAPPING)
+PORTAL_BLACK_GROUP = os.environ.get("PORTAL_BLACK_GROUP") or f"{PORTAL_GROUP_PREFIX}BlackTeam"
+PORTAL_TICKETING_ADMIN_GROUP = os.environ.get("PORTAL_TICKETING_ADMIN_GROUP") or f"{PORTAL_GROUP_PREFIX}Ticketing_Admin"
+PORTAL_TICKETING_SUPPORT_GROUP = (
+    os.environ.get("PORTAL_TICKETING_SUPPORT_GROUP") or f"{PORTAL_GROUP_PREFIX}Ticketing_Support"
+)
+# Two roles sharing a group would grant each other's permissions, and GROUP_ROLE_MAPPING would keep only one's role
+_role_setting_of: dict[str, str] = {}
+for _setting, _group in {
+    "PORTAL_ADMIN_GROUP": PORTAL_ADMIN_GROUP,
+    "PORTAL_GOLD_GROUP": PORTAL_GOLD_GROUP,
+    "PORTAL_WHITE_GROUP": PORTAL_WHITE_GROUP,
+    "PORTAL_WHITE_LEAD_GROUP": PORTAL_WHITE_LEAD_GROUP,
+    "PORTAL_ORANGE_GROUP": PORTAL_ORANGE_GROUP,
+    "PORTAL_ORANGE_LEAD_GROUP": PORTAL_ORANGE_LEAD_GROUP,
+    "PORTAL_RED_GROUP": PORTAL_RED_GROUP,
+    "PORTAL_BLACK_GROUP": PORTAL_BLACK_GROUP,
+    "PORTAL_TICKETING_ADMIN_GROUP": PORTAL_TICKETING_ADMIN_GROUP,
+    "PORTAL_TICKETING_SUPPORT_GROUP": PORTAL_TICKETING_SUPPORT_GROUP,
+}.items():
+    if _group in _role_setting_of:
+        raise ImproperlyConfigured(
+            f"{_role_setting_of[_group]} and {_setting} both name the Authentik group {_group!r}; give each its own"
+        )
+    _role_setting_of[_group] = _setting
 # A new team's default Authentik group, a str.format pattern given the team's number
 TEAM_GROUP_PATTERN = os.environ.get("TEAM_GROUP_PATTERN", f"{PORTAL_GROUP_PREFIX}BlueTeam{{number:02d}}")
 # A team's accounts, with the literal text {number} standing for the team's two-digit number: a pattern with no regular
@@ -225,9 +257,28 @@ DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 ZULIP_SITE = os.environ.get("ZULIP_SITE", "")
 ZULIP_BOT_EMAIL = os.environ.get("ZULIP_BOT_EMAIL", "")
 ZULIP_API_KEY = os.environ.get("ZULIP_API_KEY", "")
-# Where Zulip notices go: each team's stream (a str.format pattern using {number}), the staff ticket stream, the
-# announcements stream, and the stream and topic for ops log lines
+# Where Zulip notices go: each team's stream (a str.format pattern using {number}), the staff ticket stream (empty: no
+# separate staff alert, the new ticket's post in its team's stream is the only one), the announcements stream, and the
+# stream and topic for ops log lines
 ZULIP_TEAM_STREAM = os.environ.get("ZULIP_TEAM_STREAM", "team{number:02d}")
+# A broadcast to teams: each team's stream (a pattern using {number}; empty: ZULIP_TEAM_STREAM) and topic (may use
+# {number}). Tickets stay in ZULIP_TEAM_STREAM.
+ZULIP_TEAM_BROADCAST_STREAM = os.environ.get("ZULIP_TEAM_BROADCAST_STREAM", "")
+ZULIP_TEAM_BROADCAST_TOPIC = os.environ.get("ZULIP_TEAM_BROADCAST_TOPIC", "announcements")
+for _setting, _pattern in (
+    ("ZULIP_TEAM_BROADCAST_STREAM", ZULIP_TEAM_BROADCAST_STREAM),
+    ("ZULIP_TEAM_BROADCAST_TOPIC", ZULIP_TEAM_BROADCAST_TOPIC),
+):
+    try:
+        _pattern.format(number=1)
+    except KeyError, IndexError, ValueError, TypeError, AttributeError:
+        raise ImproperlyConfigured(
+            f"{_setting} must be a str.format pattern given the team's number, such as Team {{number:02d}} Chat"
+        ) from None
+# One stream for every team would show each team's broadcasts to all of them
+_one_stream = ZULIP_TEAM_BROADCAST_STREAM.format(number=1) == ZULIP_TEAM_BROADCAST_STREAM.format(number=2)
+if ZULIP_TEAM_BROADCAST_STREAM and _one_stream:
+    raise ImproperlyConfigured("ZULIP_TEAM_BROADCAST_STREAM must use {number}, giving each team its own stream")
 ZULIP_STAFF_STREAM = os.environ.get("ZULIP_STAFF_STREAM", "tickets")
 ZULIP_ANNOUNCEMENTS_STREAM = os.environ.get("ZULIP_ANNOUNCEMENTS_STREAM", "announcements")
 ZULIP_OPS_STREAM = os.environ.get("ZULIP_OPS_STREAM", "ops")
@@ -255,11 +306,11 @@ REDTEAM_ROLE_ID = int(os.environ.get("REDTEAM_ROLE_ID", "0"))
 GOLDTEAM_ROLE_ID = int(os.environ.get("GOLDTEAM_ROLE_ID", "0"))
 
 GROUP_ROLE_MAPPING = {
-    f"{PORTAL_GROUP_PREFIX}BlackTeam": BLACKTEAM_ROLE_ID,
-    f"{PORTAL_GROUP_PREFIX}WhiteTeam": WHITETEAM_ROLE_ID,
-    f"{PORTAL_GROUP_PREFIX}OrangeTeam": ORANGETEAM_ROLE_ID,
-    f"{PORTAL_GROUP_PREFIX}RedTeam": REDTEAM_ROLE_ID,
-    f"{PORTAL_GROUP_PREFIX}GoldTeam": GOLDTEAM_ROLE_ID,
+    PORTAL_BLACK_GROUP: BLACKTEAM_ROLE_ID,
+    PORTAL_WHITE_GROUP: WHITETEAM_ROLE_ID,
+    PORTAL_ORANGE_GROUP: ORANGETEAM_ROLE_ID,
+    PORTAL_RED_GROUP: REDTEAM_ROLE_ID,
+    PORTAL_GOLD_GROUP: GOLDTEAM_ROLE_ID,
 }
 
 # Staff link their accounts from the volunteer guild (/link only); roles live in the competition guild

@@ -14,7 +14,7 @@ from django.conf import settings
 
 from chat.zulip.client import ZulipClient, ZulipError
 from chat.zulip.markup import fit, quiet, to_zulip, zulip_time
-from chat.zulip.naming import team_stream, ticket_topic
+from chat.zulip.naming import team_broadcast_stream, team_stream, ticket_topic
 from core.broadcast import AllTeams, Announcements, Teams, parse_broadcast_target, target_teams
 from core.chat_notices import Card, Field, category_name, status_card, ticket_fields, ticket_update
 from core.heartbeat import QUEUE_ZULIP, beat, beat_for
@@ -42,6 +42,7 @@ ZULIP_MESSAGE_CHAR_LIMIT = 10000
 STREAM_DOES_NOT_EXIST = "STREAM_DOES_NOT_EXIST"
 ANNOUNCEMENT_TOPIC = "announcements"
 STATUS_TOPIC = "competition status"
+# teams: each team's number and the stream it lacks, such as "02 (team02)"
 MISSING_STREAMS = "No Zulip stream for teams {teams}. Create the streams, then send it again to those teams."
 
 
@@ -120,17 +121,16 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
         await self._send_each(await ticket_topic(ticket), [(stream, part) for part in parts], progress)
 
     async def _ticket_created(self, payload: TicketCreated, progress: TaskProgress[StepsState]) -> None:
-        """The ticket's summary in its topic, then an alert with its link in the staff stream; a retry skips the one
-        already sent."""
+        """The ticket's summary in its topic, then, when ZULIP_STAFF_STREAM is set, an alert with its link in the staff
+        stream; a retry skips the one already sent."""
         tickets = Ticket.objects.select_related("team", "category", "assigned_to")
         ticket = await _target(tickets, id=payload.ticket_id)
         topic = await ticket_topic(ticket)
         url = ticket_url(ticket.ticket_number)
         alert = f"New ticket [{ticket.ticket_number}]({url}) from {quiet(ticket.team.team_name)}: {quiet(ticket.title)}"
-        sends = [
-            (team_stream(ticket.team.team_number), _ticket_summary(ticket)),
-            (settings.ZULIP_STAFF_STREAM, alert),
-        ]
+        sends = [(team_stream(ticket.team.team_number), _ticket_summary(ticket))]
+        if settings.ZULIP_STAFF_STREAM:
+            sends.append((settings.ZULIP_STAFF_STREAM, alert))
         await self._send_each(topic, sends, progress)
 
     async def _post_comment(self, payload: PostComment, progress: TaskProgress[StepsState]) -> None:
@@ -148,9 +148,10 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
         await self._send_parts(ticket, text, progress)
 
     async def _broadcast(self, payload: BroadcastMessage, progress: TaskProgress[BroadcastState]) -> dict[str, object]:
-        """The announcements stream, or each target team's stream (core.broadcast.target_teams). A team without a
-        stream is refused for good; those and the range's numbers with no team are reported to ops once every team is
-        reached or refused. Any other failure is retried, skipping the teams recorded in progress."""
+        """The announcements stream, or each target team's broadcast stream and topic (ZULIP_TEAM_BROADCAST_STREAM and
+        ZULIP_TEAM_BROADCAST_TOPIC; core.broadcast.target_teams). A team without a stream is refused for good; those
+        and the range's numbers with no team are reported to ops once every team is reached or refused. Any other
+        failure is retried, skipping the teams recorded in progress."""
         if not payload.target or not payload.message:
             raise PermanentTaskError("Missing target or message in payload")
         try:
@@ -176,7 +177,8 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
             if not await progress.still_running():
                 raise PermanentTaskError("The broadcast was stopped before it reached every team")
             try:
-                await self._send(team_stream(number), ANNOUNCEMENT_TOPIC, content)
+                topic = settings.ZULIP_TEAM_BROADCAST_TOPIC.format(number=number)
+                await self._send(team_broadcast_stream(number), topic, content)
             except PermanentTaskError as e:
                 refused[str(number)] = str(e)
             else:
@@ -189,7 +191,8 @@ class ZulipQueueProcessor(QueueProcessor[ChatNotice]):
         if not_found:
             problems.append(f"Not found: {', '.join(f'Team {number:02d}' for number in not_found)}")
         if missing:
-            problems.append(MISSING_STREAMS.format(teams=", ".join(f"{number:02d}" for number in missing)))
+            streams = ", ".join(f"{number:02d} ({team_broadcast_stream(number)})" for number in missing)
+            problems.append(MISSING_STREAMS.format(teams=streams))
         if problems:
             await self._send_ops("\n".join([f"Broadcast from {payload.sender} to {payload.target}:", *problems]))
         return {"delivered": list(reached), "missing": missing, "not_found": not_found}

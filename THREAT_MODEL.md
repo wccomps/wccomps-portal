@@ -230,7 +230,7 @@ queue Zulip fills with the messages in the streams the bot is subscribed to, so 
    team cap and hosts: which Authentik groups grant admin and every role, which accounts a start, stop or reset
    touches, and which origins CSRF trusts, so changing one is a privilege change (`web/portal/settings.py`
    `PORTAL_GROUP_PREFIX`, `PORTAL_ADMIN_GROUP`, `TEAM_GROUP_PATTERN`, `TEAM_ACCOUNT_PATTERN`, `TEAM_ACCOUNT_PATH`,
-   `MAX_TEAMS`, `BASE_URL`).
+   `MAX_TEAMS`, `BASE_URL`, and each role's group setting such as `PORTAL_GOLD_GROUP`).
    The repository's defaults are neutral (`Portal_` groups, a local `BASE_URL` that CSRF trusts no origin for), not
    WRCCDC's; the web server, the worker and the chat process refuse to start while a required setting is empty, the
    secret key is weak or a credentialed service URL isn't https (`web/portal/required.py` `refuse_to_start`, called in
@@ -248,6 +248,6 @@ The repository maintainers own this file. Update it in the same pull request whe
 - changes the build, the dependency policy or the deploy path;
 - changes the default or a deployment's value of a group, team account, team cap or host setting
   (`web/portal/settings.py` `PORTAL_GROUP_PREFIX`, `PORTAL_ADMIN_GROUP`, `TEAM_GROUP_PATTERN`, `TEAM_ACCOUNT_PATTERN`,
-  `TEAM_ACCOUNT_PATH`, `MAX_TEAMS`, `BASE_URL`).
+  `TEAM_ACCOUNT_PATH`, `MAX_TEAMS`, `BASE_URL`, and each role's group setting such as `PORTAL_GOLD_GROUP`).
 
 Review it in full before each event, alongside the readiness checks.
