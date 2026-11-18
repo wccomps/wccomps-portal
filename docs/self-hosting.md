@@ -147,7 +147,7 @@ applications.
 
 | Object | Permission | Scope | Used for (`web/core/authentik_manager.py`) |
 |---|---|---|---|
-| Users | view | global | Reading every user and their groups for the group refresh and team accounts (`list_all_users`, `find_user`) |
+| Users | view | global | Reading every user and their groups (and, in team folder mode, their folders) for the group refresh, team accounts and team folder sign-ins (`list_all_users`, `list_team_folder_users`, `find_user`) |
 | Users | change | object: each team account (`team01`, ...) | Enabling and disabling team accounts at a start and stop (`set_user_active`); storing a linked Discord ID in the account's attributes (`update_user_discord_id`) |
 | Users | reset password | object: each team account | Setting team passwords (`set_password`) |
 | Groups | view | global | Reading group names (`list_all_groups`) |
@@ -157,6 +157,8 @@ applications.
 | Providers | view (`authentik_core.view_provider`) | global | Listing applications to choose controlled applications from (`list_applications`) |
 | Policy bindings | view | global | Finding each controlled application's blue team binding (`get_blueteam_binding`) |
 | Policy bindings | change | object: each controlled application's blue team binding | Enabling and disabling it at a start and stop (`update_binding_enabled`) |
+| System settings | view (`authentik_rbac.view_system_settings`) | global | Team folder mode only: the readiness check that users can't change their usernames (`users_may_change_username`) |
+| OAuth2/OpenID providers | view | object: the portal's sign-in provider | Team folder mode only: the readiness check of its subject mode (`oauth2_sub_mode`) |
 
 Notes:
 
@@ -209,13 +211,61 @@ A competition start enables each active team's accounts and opens the controlled
 team's accounts and closes them. Create the accounts in Authentik before the event; the readiness checks list the
 missing ones.
 
+### Teams without Authentik groups (team folder)
+
+An Authentik that keeps team accounts in a user folder (the user's path) instead of team groups sets
+`TEAM_ACCOUNT_PATH` to that folder, such as `blue-users`. Then an account in that folder whose username fully matches
+one team's `TEAM_ACCOUNT_PATTERN` is that team's account and holds the team's `TEAM_GROUP_PATTERN` name as a group,
+though no such Authentik group exists. An account outside the folder, or in it with a username matching no team
+(`bond007`), is on no team. Empty (the default), teams are their groups, as above.
+
+For example, with accounts `team01a` to `team01i`, `team02a`, ... in the folder `blue-users`:
+
+```
+TEAM_ACCOUNT_PATH=blue-users
+TEAM_ACCOUNT_PATTERN=team{number}[a-i]
+TEAM_GROUP_PATTERN=Team-Blue-{number:02d}
+```
+
+- **Membership.** The group refresh (every 5 minutes) gives each folder account its team's group, and a sign-in does
+  too, so blue team access, the team's tickets and its Discord role follow the folder. A scope mapping that already puts
+  the team's group in the `groups` claim (such as `"groups": ["Team-Blue-" + user.username[-3:-1]]` for folder
+  accounts) works unchanged, as long as its names are the ones `TEAM_GROUP_PATTERN` gives. Keep each team's group in
+  Django's admin at the pattern's name; the readiness check "Group membership correct" lists any team whose isn't.
+- **Usernames can't be self-chosen (required).** A team comes from the folder plus a full username match, so a user
+  who could rename their own account could move it into another team (`team03a` renamed `team07e`). Keep Authentik's
+  System settings "Allow users to change username" (`default_user_change_username`) off, its default; the readiness
+  check "Usernames fixed" fails when it's on or the token can't read it.
+- **Portal usernames.** A scope mapping may give several accounts of a team one `preferred_username` (`team03a` and
+  `team03b` both as `team03`). At each sign-in the portal looks the account up in the folder by its `uid` and, when
+  found, uses its own Authentik username, so each account keeps its own portal account. This needs the provider's
+  Subject mode at its default, "Based on the User's hashed ID" (`hashed_user_id`), which makes `sub` the user's `uid`;
+  the readiness check "Sign-in subject mode" fails otherwise. Each web process remembers what it read of the folder
+  for 60 seconds and stops reading at the page holding the account, so a burst of team sign-ins shares its reads; a
+  sign-in not in the folder (staff) costs one full listing of the folder per 60 seconds. When Authentik can't be
+  asked, the sign-in is refused with "Try again in a moment" (logged).
+- **Start and stop.** A start enables each active team's folder accounts and a stop disables them, read from one
+  listing of the folder (each row's path checked). Grant the token change on each team account again whenever the
+  accounts are recreated (see the permissions table).
+- **Controlled applications.** In team folder mode a controlled application's blue team binding may also be to a
+  policy whose name contains `blueteam`, such as an expression policy named `BlueTeam access`:
+
+  ```python
+  return request.user.path == "blue-users"
+  ```
+
+  A start enables that binding and a stop disables it, as with a group binding.
+- **Not available:** the readiness fix that puts accounts in their team groups. Password resets and the packet's
+  credentials work only with one account per team, as without the folder.
+
 ### Controlled applications
 
 The Authentik applications teams get only while the competition runs (a VPN, a remote desktop gateway) are its
 controlled applications, chosen on the Competition setup page (`/ops/admin/competition/setup/`, "Team access"). Each
 one needs a policy binding to a group whose name contains `blueteam` (any case), such as a group holding the team
-groups; a start enables that binding and a stop disables it. A start is refused while the list is empty, and the
-readiness check "App bindings configured" fails for an application without such a binding.
+groups, or in team folder mode to a policy whose name contains it (see the team folder above); a start enables that
+binding and a stop disables it. A start is refused while the list is empty, and the readiness check "App bindings
+configured" fails for an application without such a binding.
 
 ## Optional integrations
 
@@ -446,6 +496,7 @@ An ID at `0` turns off what needs it.
 | `PORTAL_ADMIN_GROUP` | `PORTAL_GROUP_PREFIX` plus `Admin` | The admin group |
 | `TEAM_GROUP_PATTERN` | `PORTAL_GROUP_PREFIX` plus `BlueTeam{number:02d}` | A new team's Authentik group; must use `{number}` |
 | `TEAM_ACCOUNT_PATTERN` | `team{number}` | A team's Authentik accounts; must contain `{number}` |
+| `TEAM_ACCOUNT_PATH` | empty (team groups) | The Authentik user folder holding team accounts, for an Authentik with no team groups; see "Teams without Authentik groups (team folder)" |
 | `MAX_TEAMS` | `50` | Highest team number |
 
 Changing a group, team account or team cap setting changes who holds which permission, and which accounts a start,
