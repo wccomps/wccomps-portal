@@ -13,6 +13,9 @@
             <c-slot name="toolbar">
                 <c-link href="{% url 'registration_event_edit' event_id=event.id %}"
                         variant="change">Edit Event</c-link>
+                {% if has_archive %}
+                    <c-link href="{% url 'registration_event_archive' event_id=event.id %}">Download Close Out Archive (ZIP)</c-link>
+                {% endif %}
             </c-slot>
             <c-detail_grid>
                 <c-detail_row label="Date">
