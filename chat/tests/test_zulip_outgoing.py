@@ -89,7 +89,8 @@ async def test_broadcast_all_teams_skips_missing_stream(processor, fake_zulip, m
     fake_zulip.missing_streams = {"team02"}
     result = await run(processor, BroadcastMessage(target="all-teams", message="m", sender="gold"))
     assert [s for s in fake_zulip.sent_streams if s != "ops"] == ["team01", "team03"]
-    assert fake_zulip.sent_to("ops") == [f"Broadcast from gold to all-teams:\n{MISSING_STREAMS.format(teams='02')}"]
+    notice = MISSING_STREAMS.format(teams="02 (team02)")
+    assert fake_zulip.sent_to("ops") == [f"Broadcast from gold to all-teams:\n{notice}"]
     assert result == {"delivered": [1, 3], "missing": [2], "not_found": []}
 
 
@@ -139,6 +140,46 @@ async def test_ranged_broadcast_never_posts_to_shared_stream(processor, fake_zul
     await run(processor, BroadcastMessage(target="3-5", message="m", sender="gold"))
     assert fake_zulip.sent_streams == ["team03", "team04", "team05"]
     assert fake_zulip.sent[0][2] == "**Announcement from gold:**\n\nm"
+
+
+async def test_team_broadcast_defaults_to_the_team_stream_announcements_topic(processor, fake_zulip, make_teams):
+    await make_teams(active=[1, 2])
+    await run(processor, BroadcastMessage(target="all-teams", message="m", sender="gold"))
+    assert [(stream, topic) for stream, topic, _ in fake_zulip.sent] == [
+        ("team01", "announcements"),
+        ("team02", "announcements"),
+    ]
+
+
+@pytest.mark.parametrize("target", ["all-teams", "1-2"])
+async def test_team_broadcast_goes_to_its_own_stream_and_topic(processor, fake_zulip, make_teams, settings, target):
+    settings.ZULIP_TEAM_BROADCAST_STREAM = "Team {number:02d} Chat"
+    settings.ZULIP_TEAM_BROADCAST_TOPIC = "automation-messages"
+    await make_teams(active=[1, 2, 3])
+    await run(processor, BroadcastMessage(target=target, message="m", sender="gold"))
+    assert [(stream, topic) for stream, topic, _ in fake_zulip.sent][:2] == [
+        ("Team 01 Chat", "automation-messages"),
+        ("Team 02 Chat", "automation-messages"),
+    ]
+    assert "team01" not in fake_zulip.sent_streams
+
+
+async def test_missing_broadcast_stream_is_reported(processor, fake_zulip, make_teams, settings):
+    settings.ZULIP_TEAM_BROADCAST_STREAM = "Team {number:02d} Chat"
+    await make_teams(active=[1, 2])
+    fake_zulip.missing_streams = {"Team 02 Chat"}
+    result = await run(processor, BroadcastMessage(target="all-teams", message="m", sender="gold"))
+    notice = MISSING_STREAMS.format(teams="02 (Team 02 Chat)")
+    assert fake_zulip.sent_to("ops") == [f"Broadcast from gold to all-teams:\n{notice}"]
+    assert result == {"delivered": [1], "missing": [2], "not_found": []}
+
+
+async def test_tickets_stay_on_the_team_stream_beside_a_broadcast_stream(processor, fake_zulip, ticket, settings):
+    settings.ZULIP_TEAM_BROADCAST_STREAM = "Team {number:02d} Chat"
+    settings.ZULIP_TEAM_BROADCAST_TOPIC = "automation-messages"
+    await run(processor, TicketCreated(ticket_id=ticket.id))
+    assert [(stream, topic) for stream, topic, _ in fake_zulip.sent][0] == ("team03", topic_name(ticket))
+    assert fake_zulip.sent_streams == ["team03", "tickets"]
 
 
 async def test_broadcast_to_announcements_stream(processor, fake_zulip, make_teams):
@@ -225,6 +266,20 @@ async def test_ticket_created_retry_skips_the_post_already_made(processor, fake_
         await run(processor, payload, task)
     await run(processor, payload, task)
     assert fake_zulip.sent_streams == ["team03", "tickets"]
+
+
+async def test_no_staff_stream_makes_one_post_and_a_retry_sends_nothing_more(processor, fake_zulip, ticket, settings):
+    """With ZULIP_STAFF_STREAM empty the team stream's post, mentioning ZULIP_STAFF_MENTION, is the only one."""
+    settings.ZULIP_STAFF_STREAM, settings.ZULIP_STAFF_MENTION = "", "Support"
+    fake_zulip.fail_once_on = "team03"
+    payload = TicketCreated(ticket_id=ticket.id)
+    task = await claimed(payload)
+    with pytest.raises(ZulipError):
+        await run(processor, payload, task)
+    await run(processor, payload, task)
+    await run(processor, payload, task)
+    assert fake_zulip.sent_streams == ["team03"]
+    assert fake_zulip.sent[0][2].startswith("@*Support* New ticket T003-001")
 
 
 async def test_missing_team_stream_fails_ticket_post_for_good(processor, fake_zulip, ticket_with_comment):

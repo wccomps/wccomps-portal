@@ -8,16 +8,18 @@ from unittest.mock import patch
 
 import portal
 import pytest
+from django.contrib.auth.models import User
 from django.core.exceptions import ImproperlyConfigured
 from django.urls import reverse
 from portal.required import REQUIRED_SETTINGS, missing_settings
 
-from core import permission_constants
+from bot.role_sync import role_grants
+from core import auth_utils, permission_constants
 from core.admin_views import readiness
 from core.authentik_manager import AuthentikGroupEntry, AuthentikUserEntry
-from core.models import AuditLog, QueuedTask
+from core.models import AuditLog, QueuedTask, UserGroups
 from core.team_accounts import SEVERAL_ACCOUNTS, TeamAccounts, team_accounts
-from team.models import MAX_TEAMS, Team, single_account, team_group_name, team_username
+from team.models import MAX_TEAMS, DiscordLink, Team, single_account, team_group_name, team_username
 
 TODAY_PERMISSION_MAP = {  # permission_constants.py at f207dc23
     "admin": ["WCComps_Discord_Admin"],
@@ -42,9 +44,23 @@ WRCCDC_ENV = {
     "DEFAULT_FROM_EMAIL": "noreply@wccomps.org",
     "DEFAULT_REPLY_TO_EMAIL": "info@wccomps.org",
 }
+# The settings naming each role's Authentik group
+ROLE_GROUP_SETTINGS = (
+    "PORTAL_ADMIN_GROUP",
+    "PORTAL_GOLD_GROUP",
+    "PORTAL_WHITE_GROUP",
+    "PORTAL_WHITE_LEAD_GROUP",
+    "PORTAL_ORANGE_GROUP",
+    "PORTAL_ORANGE_LEAD_GROUP",
+    "PORTAL_RED_GROUP",
+    "PORTAL_BLACK_GROUP",
+    "PORTAL_TICKETING_ADMIN_GROUP",
+    "PORTAL_TICKETING_SUPPORT_GROUP",
+)
 # Every variable the neutral defaults stand in for
 REGION_ENV = (
     *WRCCDC_ENV,
+    *ROLE_GROUP_SETTINGS,
     "AUTHENTIK_OIDC_URL",
     "SERVER_EMAIL",
     "SITE_NAME",
@@ -75,12 +91,24 @@ def user(username: str, *group_pks: str) -> AuthentikUserEntry:
 
 
 @pytest.fixture
-def reload_permissions(settings):
-    """Reload permission_constants under the test's settings, then put back the map built from the defaults. This
-    teardown runs before the settings fixture restores them, so reloading here would keep the test's names."""
+def reload_permissions(settings, monkeypatch):
+    """Reload permission_constants under the test's settings (auth_utils, which decides grants, sees the new map), then
+    put back the map built from the defaults. This teardown runs before the settings fixture restores them, so
+    reloading here would keep the test's names."""
     original = permission_constants.PERMISSION_MAP
-    yield lambda: importlib.reload(permission_constants)
+
+    def reload() -> None:
+        importlib.reload(permission_constants)
+        monkeypatch.setattr(auth_utils, "PERMISSION_MAP", permission_constants.PERMISSION_MAP)
+
+    yield reload
     permission_constants.PERMISSION_MAP = original
+
+
+def use_groups(settings, prod: dict[str, object]) -> None:
+    """The role group settings settings.py gave prod, as the running settings."""
+    for name in ROLE_GROUP_SETTINGS:
+        setattr(settings, name, prod[name])
 
 
 def test_suite_runs_as_wrccdc():
@@ -91,10 +119,54 @@ def test_suite_runs_as_wrccdc():
     assert single_account()
 
 
-def test_prefix_changes_every_group(settings, reload_permissions):
-    settings.PORTAL_GROUP_PREFIX, settings.PORTAL_ADMIN_GROUP = "Region_", "Region_Admin"
+def test_prefix_changes_every_group(monkeypatch, settings, reload_permissions):
+    prod = load_settings(monkeypatch, {"PORTAL_GROUP_PREFIX": "Region_"})
+    use_groups(settings, prod)
     reload_permissions()
     assert permission_constants.PERMISSION_MAP["ticketing_admin"] == ["Region_Ticketing_Admin", "Region_Admin"]
+    groups = {group for groups in permission_constants.PERMISSION_MAP.values() for group in groups}
+    assert all(group.startswith("Region_") for group in [*groups, *prod["GROUP_ROLE_MAPPING"]])
+
+
+@pytest.mark.parametrize("name", ["Region_Support", "Green Team"])
+def test_a_role_group_named_directly_grants_the_role(monkeypatch, settings, reload_permissions, name):
+    """A region names a role's group outright (here ticketing support, as Green team), spaces and all: that group
+    grants the role and the prefixed default no longer does; the other roles keep their default names."""
+    prod = load_settings(monkeypatch, WRCCDC_ENV | {"PORTAL_TICKETING_SUPPORT_GROUP": name})
+    use_groups(settings, prod)
+    reload_permissions()
+
+    assert auth_utils.groups_grant([name], "ticketing_support")
+    assert not auth_utils.groups_grant(["WCComps_Ticketing_Support"], "ticketing_support")
+    assert not auth_utils.groups_grant([name], "ticketing_admin")
+    assert auth_utils.groups_grant(["WCComps_Ticketing_Admin"], "ticketing_support")
+    assert permission_constants.PERMISSION_MAP["gold_team"] == ["WCComps_GoldTeam", "WCComps_Discord_Admin"]
+
+
+@pytest.mark.django_db
+def test_a_spaced_group_name_reaches_permissions_and_discord_roles(monkeypatch, settings, reload_permissions):
+    """A signed-in member of "White Team" holds the white team permission, and role sync gives a member of "White
+    Team" and "Black Team" both groups' Discord roles."""
+    env = {
+        "PORTAL_WHITE_GROUP": "White Team",
+        "PORTAL_BLACK_GROUP": "Black Team",
+        "WHITETEAM_ROLE_ID": "8",
+        "BLACKTEAM_ROLE_ID": "7",
+    }
+    prod = load_settings(monkeypatch, WRCCDC_ENV | env)
+    use_groups(settings, prod)
+    settings.GROUP_ROLE_MAPPING = prod["GROUP_ROLE_MAPPING"]
+    reload_permissions()
+    member = User.objects.create_user("judge")
+    UserGroups.objects.create(user=member, authentik_id="judge", groups=["White Team", "Black Team"])
+    DiscordLink.objects.create(user=member, discord_id=77, discord_username="judge", is_active=True)
+
+    assert auth_utils.has_permission(member, "white_team")
+    assert list(auth_utils.users_granted("white_team")) == [member]
+    assert not auth_utils.has_permission(member, "gold_team")
+    grants = role_grants()
+    assert grants.by_member == {77: frozenset({7, 8})}
+    assert {7, 8} <= grants.managed
 
 
 def test_pattern_needs_whole_name_and_own_number(settings):
@@ -195,6 +267,10 @@ def test_neutral_defaults(monkeypatch):
     assert prod["DEFAULT_REPLY_TO_EMAIL"] == ""
     assert prod["PORTAL_GROUP_PREFIX"] == "Portal_"
     assert prod["PORTAL_ADMIN_GROUP"] == "Portal_Admin"
+    assert prod["PORTAL_GOLD_GROUP"] == "Portal_GoldTeam"
+    assert prod["PORTAL_WHITE_LEAD_GROUP"] == "Portal_WhiteTeam_Lead"
+    assert prod["PORTAL_BLACK_GROUP"] == "Portal_BlackTeam"
+    assert prod["PORTAL_TICKETING_SUPPORT_GROUP"] == "Portal_Ticketing_Support"
     assert prod["TEAM_GROUP_PATTERN"] == "Portal_BlueTeam{number:02d}"
     assert prod["TEAM_ACCOUNT_PATTERN"] == "team{number}"
     assert prod["ORG_NAME"] == ""
@@ -219,7 +295,14 @@ def test_wrccdc_configmap_gives_today(monkeypatch, settings, reload_permissions)
     assert prod["AUTHENTIK_OIDC_URL"] == "https://auth.wccomps.org/application/o/discord-bot/"
     assert prod["SERVER_EMAIL"] == "noreply@wccomps.org"
     assert prod["TEAM_GROUP_PATTERN"] == "WCComps_BlueTeam{number:02d}"
-    settings.PORTAL_GROUP_PREFIX, settings.PORTAL_ADMIN_GROUP = prod["PORTAL_GROUP_PREFIX"], prod["PORTAL_ADMIN_GROUP"]
+    assert set(prod["GROUP_ROLE_MAPPING"]) == {  # settings.py at f207dc23
+        "WCComps_BlackTeam",
+        "WCComps_WhiteTeam",
+        "WCComps_OrangeTeam",
+        "WCComps_RedTeam",
+        "WCComps_GoldTeam",
+    }
+    use_groups(settings, prod)
     reload_permissions()
     assert permission_constants.PERMISSION_MAP == TODAY_PERMISSION_MAP
 
@@ -250,6 +333,46 @@ def test_pattern_without_number_is_refused_at_load(monkeypatch, name, value):
     monkeypatch.setenv(name, value)
     with pytest.raises(ImproperlyConfigured, match=name):
         runpy.run_path(SETTINGS_PATH)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("ZULIP_TEAM_BROADCAST_STREAM", "automation"),  # one stream every team sees
+        ("ZULIP_TEAM_BROADCAST_STREAM", "Team {num} Chat"),
+        ("ZULIP_TEAM_BROADCAST_STREAM", "Team {number[0]} Chat"),
+        ("ZULIP_TEAM_BROADCAST_TOPIC", "news {num}"),
+        ("ZULIP_TEAM_BROADCAST_TOPIC", "news {"),
+        ("ZULIP_TEAM_BROADCAST_TOPIC", "news {0}"),
+    ],
+)
+def test_bad_broadcast_stream_or_topic_is_refused_at_load(monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ImproperlyConfigured, match=name):
+        runpy.run_path(SETTINGS_PATH)
+
+
+def test_broadcast_stream_per_team_and_plain_topic_load(monkeypatch):
+    monkeypatch.setenv("ZULIP_TEAM_BROADCAST_STREAM", "Team {number:02d} Chat")
+    monkeypatch.setenv("ZULIP_TEAM_BROADCAST_TOPIC", "automation-messages")
+    prod = runpy.run_path(SETTINGS_PATH)
+    assert prod["ZULIP_TEAM_BROADCAST_STREAM"].format(number=3) == "Team 03 Chat"
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [("PORTAL_WHITE_GROUP", "PORTAL_ORANGE_GROUP"), ("PORTAL_ADMIN_GROUP", "PORTAL_TICKETING_SUPPORT_GROUP")],
+)
+def test_two_roles_naming_one_group_are_refused_at_load(monkeypatch, first, second):
+    env = {first: "Volunteers", second: "Volunteers"}
+    with pytest.raises(ImproperlyConfigured, match=f"{first} and {second} both name"):
+        load_settings(monkeypatch, env)
+
+
+def test_a_role_group_set_empty_keeps_its_default(monkeypatch):
+    prod = load_settings(monkeypatch, {"PORTAL_RED_GROUP": "", "PORTAL_TICKETING_SUPPORT_GROUP": ""})
+    assert prod["PORTAL_RED_GROUP"] == "Portal_RedTeam"
+    assert prod["PORTAL_TICKETING_SUPPORT_GROUP"] == "Portal_Ticketing_Support"
 
 
 def test_site_name_reaches_pages(admin_client, settings):

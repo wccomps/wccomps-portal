@@ -176,20 +176,35 @@ The token can't create accounts or groups: create them in Authentik.
 
 ### Permission groups
 
-Each role's group is `PORTAL_GROUP_PREFIX` plus a fixed suffix (`web/core/permission_constants.py` `PERMISSION_MAP`);
-the admin group is its own setting. Create the ones you use (named here with the default prefix):
+Each role's group is its own setting, named in the table; by default it is `PORTAL_GROUP_PREFIX` plus a fixed suffix
+(`web/portal/settings.py`, read by `web/core/permission_constants.py` `PERMISSION_MAP`). Create the ones you use (named
+here with the default prefix):
 
-| Group | Grants |
-|---|---|
-| `PORTAL_ADMIN_GROUP` | Everything, including Django's admin at `/admin/` |
-| `Portal_GoldTeam` | Gold team, and every white, orange and blue team permission: the competition and its setup, teams and their accounts, broadcasts, packets, scorecards, ticket categories |
-| `Portal_WhiteTeam`, `Portal_WhiteTeam_Lead` | White team pages (inject grading, incident reports); the lead adds the white team lead's, and needs `Portal_WhiteTeam` too for the white team pages |
-| `Portal_OrangeTeam`, `Portal_OrangeTeam_Lead` | Orange team pages; the lead adds the orange team lead's |
-| `Portal_RedTeam` | Red team findings |
-| `Portal_Ticketing_Support` | Working tickets |
-| `Portal_Ticketing_Admin` | Ticketing support, plus ticket administration and ticket categories |
-| `Portal_BlackTeam` | Only its Discord role |
-| A team's group (below) | That team's blue team access: its own tickets and packets |
+| Group (setting) | Default | Grants |
+|---|---|---|
+| `PORTAL_ADMIN_GROUP` | `Portal_Admin` | Everything, including Django's admin at `/admin/` |
+| `PORTAL_GOLD_GROUP` | `Portal_GoldTeam` | Gold team, and every white, orange and blue team permission: the competition and its setup, teams and their accounts, broadcasts, packets, scorecards, ticket categories |
+| `PORTAL_WHITE_GROUP`, `PORTAL_WHITE_LEAD_GROUP` | `Portal_WhiteTeam`, `Portal_WhiteTeam_Lead` | White team pages (inject grading, incident reports); the lead adds the white team lead's, and needs the white team group too for the white team pages |
+| `PORTAL_ORANGE_GROUP`, `PORTAL_ORANGE_LEAD_GROUP` | `Portal_OrangeTeam`, `Portal_OrangeTeam_Lead` | Orange team pages; the lead adds the orange team lead's |
+| `PORTAL_RED_GROUP` | `Portal_RedTeam` | Red team findings |
+| `PORTAL_TICKETING_SUPPORT_GROUP` | `Portal_Ticketing_Support` | Working tickets |
+| `PORTAL_TICKETING_ADMIN_GROUP` | `Portal_Ticketing_Admin` | Ticketing support, plus ticket administration and ticket categories |
+| `PORTAL_BLACK_GROUP` | `Portal_BlackTeam` | Only its Discord role |
+| A team's group (below) | `TEAM_GROUP_PATTERN` | That team's blue team access: its own tickets and packets |
+
+To use groups you already have, name each role's group directly; a name may contain spaces, and a setting left unset
+or set empty keeps its default. Each role needs its own group: the portal refuses to start when two role settings name
+the same one. A region whose green team works tickets and whose gold and black teams are `Gold Team` and
+`Black Team`:
+
+```
+PORTAL_TICKETING_SUPPORT_GROUP="Green Team"
+PORTAL_GOLD_GROUP="Gold Team"
+PORTAL_BLACK_GROUP="Black Team"
+```
+
+A renamed role's default name then grants nothing. The black, white, orange, red and gold team settings also name the
+groups `BLACKTEAM_ROLE_ID` and the other role settings map to Discord roles.
 
 ### Teams and team accounts
 
@@ -375,17 +390,22 @@ and `DISCORD_SERVER_OWNER_ROLE` when set.
 ### Zulip
 
 1. Create a bot in the Zulip realm and set `ZULIP_SITE` (https only), `ZULIP_BOT_EMAIL` and `ZULIP_API_KEY`.
-2. Create the streams in [Zulip settings](#zulip-settings) (one per team, staff tickets, announcements and ops) and
+2. Create the streams in [Zulip settings](#zulip-settings) (one per team, each team's broadcast stream when
+   `ZULIP_TEAM_BROADCAST_STREAM` is set, staff tickets when `ZULIP_STAFF_STREAM` is set, announcements and ops) and
    subscribe the bot to all of them: Zulip delivers the bot only the streams it is subscribed to. A notice for a
    missing stream fails, and the ops stream is told to create it.
 3. Let the bot see members' email addresses, which it looks up for each reply. A member's email visibility (a personal
    setting; the realm sets its default for new users) must include the bot: members, or admins with an admin bot.
    Everyone isn't needed.
 
-Each ticket gets a topic in its team's stream, named by its number and title, and a notice in the staff stream; a new
-ticket mentions the user groups `ZULIP_TEAM_MENTION` and `ZULIP_STAFF_MENTION` when set. Broadcasts go to the
-announcements stream or each team stream, ops notices and competition status to the ops stream. The runner long-polls
-Zulip, so it needs no public address.
+Each ticket gets a topic in its team's stream (`ZULIP_TEAM_STREAM`), named by its number and title, and a notice in the
+staff stream; a new ticket mentions the user groups `ZULIP_TEAM_MENTION` and `ZULIP_STAFF_MENTION` when set. With
+`ZULIP_STAFF_STREAM` empty there is no separate staff notice: the new ticket's post in its team's stream, mentioning
+`ZULIP_STAFF_MENTION`, is the only one. Broadcasts go to the announcements stream, or to each team's broadcast stream
+and topic (`ZULIP_TEAM_BROADCAST_STREAM`, by default the team's stream, and `ZULIP_TEAM_BROADCAST_TOPIC`, by default
+`announcements`); a region that keeps team chat apart from tickets might set `Team {number:02d} Chat` and
+`automation-messages`. Ops notices and competition status go to the ops stream. The runner long-polls Zulip, so it
+needs no public address.
 
 A message in a ticket's topic becomes a comment, and its uploads (up to 10) are stored on the ticket, only when the
 sender's Zulip account email (step 3) matches, ignoring case, exactly one portal account that may write to the ticket:
@@ -480,8 +500,10 @@ An ID at `0` turns off what needs it.
 | Setting | Default | Meaning |
 |---|---|---|
 | `ZULIP_SITE`, `ZULIP_BOT_EMAIL`, `ZULIP_API_KEY` | empty (Zulip off) | The realm (https) and the bot's email and API key; all three configure Zulip |
-| `ZULIP_TEAM_STREAM` | `team{number:02d}` | Each team's stream, a pattern using `{number}` |
-| `ZULIP_STAFF_STREAM` | `tickets` | New ticket notices for staff |
+| `ZULIP_TEAM_STREAM` | `team{number:02d}` | Each team's stream, a pattern using `{number}`; tickets live here |
+| `ZULIP_TEAM_BROADCAST_STREAM` | empty (`ZULIP_TEAM_STREAM`) | Each team's stream for broadcasts to teams (all teams or a range), a pattern using `{number}` that gives each team its own stream (the portal refuses to start otherwise) |
+| `ZULIP_TEAM_BROADCAST_TOPIC` | `announcements` | The topic of a broadcast to teams; may use `{number}`, and no other `{}` field |
+| `ZULIP_STAFF_STREAM` | `tickets` | New ticket notices for staff; empty sends none (the team stream's post is the only one) |
 | `ZULIP_ANNOUNCEMENTS_STREAM` | `announcements` | Broadcasts to the announcements target |
 | `ZULIP_OPS_STREAM`, `ZULIP_OPS_TOPIC` | `ops`, `ops` | Ops notices and competition status |
 | `ZULIP_TEAM_MENTION` | empty (none) | User group a new ticket mentions in its team's stream, a pattern using `{number}` such as `Team {number:02d}` |
@@ -492,8 +514,9 @@ An ID at `0` turns off what needs it.
 | Setting | Default | Meaning |
 |---|---|---|
 | `SITE_NAME` | `<ORG_SHORT_NAME> Portal` | Page titles |
-| `PORTAL_GROUP_PREFIX` | `Portal_` | Start of every role's Authentik group name |
+| `PORTAL_GROUP_PREFIX` | `Portal_` | Start of every role group's default name |
 | `PORTAL_ADMIN_GROUP` | `PORTAL_GROUP_PREFIX` plus `Admin` | The admin group |
+| `PORTAL_GOLD_GROUP`, `PORTAL_WHITE_GROUP`, `PORTAL_WHITE_LEAD_GROUP`, `PORTAL_ORANGE_GROUP`, `PORTAL_ORANGE_LEAD_GROUP`, `PORTAL_RED_GROUP`, `PORTAL_BLACK_GROUP`, `PORTAL_TICKETING_ADMIN_GROUP`, `PORTAL_TICKETING_SUPPORT_GROUP` | `PORTAL_GROUP_PREFIX` plus `GoldTeam`, `WhiteTeam`, `WhiteTeam_Lead`, `OrangeTeam`, `OrangeTeam_Lead`, `RedTeam`, `BlackTeam`, `Ticketing_Admin`, `Ticketing_Support` | Each role's group; see "Permission groups" |
 | `TEAM_GROUP_PATTERN` | `PORTAL_GROUP_PREFIX` plus `BlueTeam{number:02d}` | A new team's Authentik group; must use `{number}` |
 | `TEAM_ACCOUNT_PATTERN` | `team{number}` | A team's Authentik accounts; must contain `{number}` |
 | `TEAM_ACCOUNT_PATH` | empty (team groups) | The Authentik user folder holding team accounts, for an Authentik with no team groups; see "Teams without Authentik groups (team folder)" |

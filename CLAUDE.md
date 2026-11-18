@@ -82,8 +82,9 @@ the unparenthesized form is used intentionally throughout.
 - A team's record (ticket, incident report, attachment) is looked up with `team_record_or_404`: another team's
   record is a 404, the same as a missing one, never a 403
 - `PORTAL_ADMIN_GROUP` (default `Portal_Admin`, WRCCDC's `WCComps_Discord_Admin`) grants access to everything; each
-  other role's group is `PORTAL_GROUP_PREFIX` (default `Portal_`, WRCCDC's `WCComps_`) plus a fixed suffix, and a new
-  team's group is `TEAM_GROUP_PATTERN` (after that, `Team.authentik_group`)
+  other role's group is its own setting (`PORTAL_GOLD_GROUP`, `PORTAL_TICKETING_SUPPORT_GROUP`, ...), by default
+  `PORTAL_GROUP_PREFIX` (default `Portal_`, WRCCDC's `WCComps_`) plus a fixed suffix; a name may contain spaces. A
+  new team's group is `TEAM_GROUP_PATTERN` (after that, `Team.authentik_group`)
 
 ### Task Queue
 - Web code queues work with `QueuedTask.enqueue(<payload>)`, which writes one row per backend
