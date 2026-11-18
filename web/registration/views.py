@@ -464,8 +464,7 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
 @require_GET
 @require_permission("gold_team")
 def event_archive(request: HttpRequest, event_id: int) -> HttpResponse:
-    """The zip Close Out took of the event's live data before deleting it: every export dataset, with the tickets'
-    comments (their chat threads), history and attachment records (Gold Team only)."""
+    """The zip Close Out took of the event's live data before deleting it."""
     archive = get_object_or_404(EventArchive.objects.select_related("event"), event_id=event_id)
     response = HttpResponse(bytes(archive.data), content_type="application/zip")
     response["Content-Disposition"] = f'attachment; filename="{slugify(archive.event.name)}_close_out_archive.zip"'

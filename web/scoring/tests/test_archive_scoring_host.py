@@ -62,7 +62,8 @@ def _members(target: Path) -> dict[str, bytes]:
 
 
 def test_archive_holds_the_events_submissions_and_divisor_log(event_dir, archive_dir, docker):
-    target, digest = archive(event_dir, archive_dir)
+    target, digest, links = archive(event_dir, archive_dir)
+    assert links == []
 
     assert sorted(p.name for p in archive_dir.iterdir()) == [target.name, f"{target.name}.sha256"]
     assert target.name.startswith("2027-inv9-example-scoring-host-")
@@ -80,25 +81,46 @@ def test_archive_holds_the_events_submissions_and_divisor_log(event_dir, archive
     assert verify(target) == []
 
 
-def test_links_are_archived_as_the_files_they_point_to(tmp_path, archive_dir, docker, monkeypatch):
+def test_links_inside_submissions_are_left_out_and_named(tmp_path, archive_dir, docker, monkeypatch):
     """A submissions directory kept on another disk behind a symlink, an event directory reached through one, and a
-    hard-linked upload all end up as plain files the check accepts."""
+    hard-linked upload are archived; a symlink below submissions/ is not followed (it could name any file on the
+    host) but is listed in the manifest."""
     real_event = tmp_path / "disk" / "2027-inv9-example"
     elsewhere = tmp_path / "disk" / "uploads"
     (elsewhere / "2" / "38").mkdir(parents=True)
     (elsewhere / "2" / "38" / "1").write_bytes(b"attempt 1")
     os.link(elsewhere / "2" / "38" / "1", elsewhere / "2" / "38" / "2")
+    secret = tmp_path / "secret"
+    secret.write_bytes(b"host file")
+    (elsewhere / "2" / "38" / "3").symlink_to(secret)
+    (elsewhere / "2" / "linked").symlink_to(tmp_path)
     real_event.mkdir()
     (real_event / "submissions").symlink_to(elsewhere)
     (tmp_path / "events").mkdir()
     (tmp_path / "events" / "2027-inv9-example").symlink_to(real_event)
     monkeypatch.setenv("FAKE_EVENT_DIR", str(tmp_path / "events" / "2027-inv9-example"))
 
-    target, _ = archive(real_event, archive_dir)
+    target, _, links = archive(real_event, archive_dir)
 
     members = _members(target)
+    manifest = json.loads(members.pop("manifest.json"))
+    assert set(members) == {"divisor.log", "submissions/2/38/1", "submissions/2/38/2"}
     assert (members["submissions/2/38/1"], members["submissions/2/38/2"]) == (b"attempt 1", b"attempt 1")
+    assert links == manifest["links_left_out"] == ["2/38/3", "2/linked"]
     assert verify(target) == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads every directory")
+def test_an_unreadable_directory_stops_the_archive(event_dir, archive_dir, docker):
+    locked = event_dir / "submissions" / "3"
+    locked.mkdir()
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(ArchiveError, match="Could not read"):
+            archive(event_dir, archive_dir)
+    finally:
+        locked.chmod(0o700)
+    assert list(archive_dir.iterdir()) == []
 
 
 def test_another_events_divisor_is_not_taken(event_dir, archive_dir, docker, monkeypatch):
@@ -129,7 +151,7 @@ def test_an_existing_file_is_never_replaced(event_dir, archive_dir, docker, monk
             return fixed
 
     monkeypatch.setattr(archive_scoring_host, "datetime", Frozen)
-    first, _ = archive(event_dir, archive_dir)
+    first, _, _ = archive(event_dir, archive_dir)
     kept = first.read_bytes()
 
     with pytest.raises(ArchiveError, match="already exists"):
@@ -139,7 +161,7 @@ def test_an_existing_file_is_never_replaced(event_dir, archive_dir, docker, monk
 
 
 def test_verify_catches_a_changed_or_damaged_copy(event_dir, archive_dir, docker):
-    target, _ = archive(event_dir, archive_dir)
+    target, _, _ = archive(event_dir, archive_dir)
     checksum = target.with_name(f"{target.name}.sha256")
 
     # A file swapped inside a rebuilt tarball, with a matching .sha256: only the manifest can tell

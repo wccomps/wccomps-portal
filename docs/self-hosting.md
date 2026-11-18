@@ -325,7 +325,9 @@ python3 archive_scoring_host.py verify <archive directory>/<event>-scoring-host-
 ```
 
 It writes a tarball of the submissions, the log and a manifest of each file's SHA-256, with a `.sha256` beside it,
-and never replaces a file. Run `verify` again on the copy wherever you keep it.
+both readable only by you. It never replaces a file (it names them by hard link, so the archive directory's
+filesystem must support hard links), and it leaves out any symlink under `submissions/`, listing it instead. Run
+`verify` again on the copy wherever you keep it.
 
 ### Proxmox
 

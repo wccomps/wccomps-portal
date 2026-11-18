@@ -9,12 +9,14 @@ once the event is over and before its containers are recreated:
     python3 archive_scoring_host.py verify <archive directory>/<event>-scoring-host-<UTC time>.tar.gz
 
 archive writes <event>-scoring-host-<UTC time>.tar.gz and its .sha256 into the archive directory, readable only by
-their owner, and never replaces a file there. The tarball holds:
-- submissions/: the event directory's submissions (inject uploads, by inject, team and attempt), each file stored
-  with its contents (a symlink or hard link is stored as the file it points to);
+their owner, and never replaces a file there (it names them by hard link, so the directory's filesystem must support
+hard links). The tarball holds:
+- submissions/: every regular file under the event directory's submissions (inject uploads, by inject, team and
+  attempt). Symlinks below it are left out and listed in the manifest: following one would let whoever can write
+  there choose any file on the host. A submissions directory that is itself a symlink is followed;
 - divisor.log: `docker logs` of the event's divisor container, the source addresses the runners used and when
   (the container is found by its Compose labels, so another event's divisor is never taken for this one);
-- manifest.json: the event, when and from which container, and each file's size and SHA-256.
+- manifest.json: the event, when and from which container, each file's size and SHA-256, and the links left out.
 verify checks a copy, wherever it was moved, against its .sha256 file and its manifest.
 
 Standard library only, and Python 3.11 or later: the scoring host doesn't have the portal's environment.
@@ -99,8 +101,7 @@ def write_divisor_log(container: str, path: Path) -> None:
 
 
 def _add(tar: tarfile.TarFile, path: Path, arcname: str) -> dict[str, object]:
-    """Store the file's contents under arcname as a regular member, whatever kind of link reached it, and return its
-    manifest entry."""
+    """Store the regular file's contents under arcname and return its manifest entry."""
     info = tarfile.TarInfo(arcname)
     stat = path.stat()
     info.size, info.mtime, info.mode = stat.st_size, int(stat.st_mtime), 0o600
@@ -109,8 +110,27 @@ def _add(tar: tarfile.TarFile, path: Path, arcname: str) -> dict[str, object]:
     return {"size": info.size, "sha256": sha256_of(path)}
 
 
-def archive(event_dir: Path, archive_dir: Path) -> tuple[Path, str]:
-    """Write the event's tarball and its .sha256 into archive_dir; return the tarball's path and SHA-256."""
+def _submissions(root: Path) -> tuple[list[Path], list[str]]:
+    """Every regular file under root, and the symlinks below it (left out, relative to root). A directory that can't
+    be read stops the archive rather than leaving its files out unnoticed."""
+
+    def refuse(error: OSError) -> None:
+        raise ArchiveError(f"Could not read {error.filename}: {error.strerror}")
+
+    files, links = [], []
+    for directory, subdirectories, names in os.walk(root, onerror=refuse):
+        for name in [*subdirectories, *names]:
+            path = Path(directory) / name
+            if path.is_symlink():
+                links.append(path.relative_to(root).as_posix())
+            elif name in names and path.is_file():
+                files.append(path)
+    return sorted(files), sorted(links)
+
+
+def archive(event_dir: Path, archive_dir: Path) -> tuple[Path, str, list[str]]:
+    """Write the event's tarball and its .sha256 into archive_dir; return the tarball's path, its SHA-256 and the
+    symlinks under submissions/ it left out."""
     event_dir = event_dir.resolve()
     submissions = (event_dir / SUBMISSIONS).resolve()
     if not submissions.is_dir():
@@ -129,33 +149,44 @@ def archive(event_dir: Path, archive_dir: Path) -> tuple[Path, str]:
         divisor_log = work / DIVISOR_LOG
         write_divisor_log(container, divisor_log)
         tarball = work / target.name
-        files = {}
-        with tarfile.open(tarball, "w:gz") as tar:
-            files[DIVISOR_LOG] = _add(tar, divisor_log, DIVISOR_LOG)
-            for path in sorted(p for p in submissions.rglob("*") if p.is_file()):
-                arcname = f"{SUBMISSIONS}/{path.relative_to(submissions).as_posix()}"
-                files[arcname] = _add(tar, path, arcname)
-            manifest = {"event": event_dir.name, "created_at": now.isoformat(), "divisor_container": container}
-            data = (json.dumps({**manifest, "files": files}, indent=2, sort_keys=True) + "\n").encode()
-            info = tarfile.TarInfo(MANIFEST)
-            info.size, info.mtime, info.mode = len(data), int(now.timestamp()), 0o600
-            tar.addfile(info, io.BytesIO(data))
-        tarball.chmod(0o600)
-        digest = sha256_of(tarball)
-        sidecar = work / checksum.name
-        sidecar.write_text(f"{digest}  {target.name}\n")
-        sidecar.chmod(0o600)
+        paths, links = _submissions(submissions)
+        try:
+            with tarfile.open(tarball, "w:gz") as tar:
+                files = {DIVISOR_LOG: _add(tar, divisor_log, DIVISOR_LOG)}
+                for path in paths:
+                    arcname = f"{SUBMISSIONS}/{path.relative_to(submissions).as_posix()}"
+                    files[arcname] = _add(tar, path, arcname)
+                manifest = {
+                    "event": event_dir.name,
+                    "created_at": now.isoformat(),
+                    "divisor_container": container,
+                    "files": files,
+                    "links_left_out": links,
+                }
+                data = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
+                info = tarfile.TarInfo(MANIFEST)
+                info.size, info.mtime, info.mode = len(data), int(now.timestamp()), 0o600
+                tar.addfile(info, io.BytesIO(data))
+            tarball.chmod(0o600)
+            digest = sha256_of(tarball)
+            sidecar = work / checksum.name
+            sidecar.write_text(f"{digest}  {target.name}\n")
+            sidecar.chmod(0o600)
+        except OSError as e:
+            raise ArchiveError(f"Could not build the tarball: {e}; nothing was kept") from None
         # A hard link never replaces a file: if another run took either name meanwhile, this one gives up
         try:
             os.link(tarball, target)
         except FileExistsError:
             raise ArchiveError(f"{target} already exists; nothing was replaced") from None
+        except OSError as e:
+            raise ArchiveError(f"Could not name {target} ({e}); the archive directory needs hard links") from None
         try:
             os.link(sidecar, checksum)
         except OSError as e:
             target.unlink()
             raise ArchiveError(f"Could not write {checksum}: {e}; nothing was kept") from None
-    return target, digest
+    return target, digest, links
 
 
 def verify(tarball: Path) -> list[str]:
@@ -181,7 +212,7 @@ def verify(tarball: Path) -> list[str]:
             for name in sorted(files.keys() & members.keys()):
                 if hashlib.file_digest(read(members[name]), "sha256").hexdigest() != files[name]["sha256"]:
                     problems.append(f"{name} does not match its manifest entry")
-    except (OSError, ValueError, KeyError, TypeError, tarfile.TarError) as e:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, tarfile.TarError) as e:
         return [f"Could not read {tarball.name}: {e}"]
     return problems
 
@@ -204,10 +235,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{args.tarball}: matches its .sha256 and manifest")
         return 0
     try:
-        target, digest = archive(args.event_dir, args.archive_dir)
+        target, digest, links = archive(args.event_dir, args.archive_dir)
     except ArchiveError as e:
         print(e, file=sys.stderr)
         return 1
+    for link in links:
+        print(f"Left out the symlink submissions/{link}", file=sys.stderr)
     print(f"{target}\n{digest}")
     return 0
 

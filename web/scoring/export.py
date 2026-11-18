@@ -2,7 +2,6 @@ import json
 import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
 from io import BytesIO, StringIO
 from typing import Protocol, TypedDict
@@ -13,6 +12,7 @@ from django.db.models.functions import Length
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.text import slugify
+from django_stubs_ext import WithAnnotations
 
 from core.csv_export import csv_writer
 from ticketing.chat_comments import comment_origin
@@ -147,39 +147,27 @@ def _fetch_ticket_history() -> list[TicketHistory]:
     return list(TicketHistory.objects.select_related("ticket__team", "actor").order_by("ticket__ticket_number", "pk"))
 
 
-class AttachmentRow(TypedDict):
-    ticket__ticket_number: str
-    ticket__team__team_number: int
-    filename: str
-    mime_type: str
+class AttachmentDigest(TypedDict):
     size: int
     sha256: str
-    uploaded_by: str
-    uploaded_at: datetime
 
 
-def _fetch_ticket_attachments() -> list[AttachmentRow]:
-    """Each attachment's record without the file (teams may store 200MB each), with the file's size and SHA-256,
-    worked out in Postgres, so a copy found elsewhere can be matched to it."""
-    size = Length("file_data")
+type DigestedAttachment = WithAnnotations[TicketAttachment, AttachmentDigest]
+
+
+def _fetch_ticket_attachments() -> list[DigestedAttachment]:
+    """Each attachment's record without the file (teams may store 200MB each; the manager never reads it), with the
+    file's size and SHA-256 worked out in Postgres, so a copy found elsewhere can be matched to it."""
     sha256 = Func(
         Func(F("file_data"), function="SHA256", output_field=BinaryField()),
         Value("hex"),
         function="ENCODE",
         output_field=CharField(),
     )
-    rows = TicketAttachment.objects.order_by("ticket__ticket_number", "pk").annotate(size=size, sha256=sha256)
     return list(
-        rows.values(
-            "ticket__ticket_number",
-            "ticket__team__team_number",
-            "filename",
-            "mime_type",
-            "size",
-            "sha256",
-            "uploaded_by",
-            "uploaded_at",
-        )
+        TicketAttachment.objects.select_related("ticket__team")
+        .order_by("ticket__ticket_number", "pk")
+        .annotate(size=Length("file_data"), sha256=sha256)
     )
 
 
@@ -336,17 +324,17 @@ DATASETS: dict[str, ExportableDataset] = {
         ],
         _fetch_ticket_history,
     ),
-    "ticket_attachments": Dataset[AttachmentRow](
+    "ticket_attachments": Dataset[DigestedAttachment](
         "ticket_attachments",
         [
-            Column("Ticket Number", "ticket_number", lambda a: a["ticket__ticket_number"]),
-            Column("Team Number", "team_number", lambda a: a["ticket__team__team_number"]),
-            Column("Filename", "filename", lambda a: a["filename"]),
-            Column("Type", "mime_type", lambda a: a["mime_type"]),
-            Column("Size", "size", lambda a: a["size"]),
-            Column("SHA-256", "sha256", lambda a: a["sha256"]),
-            Column("Uploaded By", "uploaded_by", lambda a: a["uploaded_by"]),
-            Column("Uploaded At", "uploaded_at", lambda a: a["uploaded_at"].isoformat()),
+            Column("Ticket Number", "ticket_number", lambda a: a.ticket.ticket_number),
+            Column("Team Number", "team_number", lambda a: a.ticket.team.team_number),
+            Column("Filename", "filename", lambda a: a.filename),
+            Column("Type", "mime_type", lambda a: a.mime_type),
+            Column("Size", "size", lambda a: a.size),
+            Column("SHA-256", "sha256", lambda a: a.sha256),
+            Column("Uploaded By", "uploaded_by", lambda a: a.uploaded_by),
+            Column("Uploaded At", "uploaded_at", lambda a: a.uploaded_at.isoformat()),
         ],
         _fetch_ticket_attachments,
     ),

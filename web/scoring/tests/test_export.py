@@ -924,7 +924,11 @@ class TestExportDownloads:
 
         assert response["Content-Type"] == "application/zip"
         names = zipfile.ZipFile(io.BytesIO(response.content)).namelist()
-        assert names == [f"{filename}.{ext}" for _, _, filename in EXPORT_DOWNLOADS for ext in ("csv", "json")]
+        # The ticket thread, history and attachment records have no download of their own: the zip, and so the Close
+        # Out archive, is where they are kept
+        zip_only = ["ticket_comments", "ticket_history", "ticket_attachments"]
+        expected = [filename for _, _, filename in EXPORT_DOWNLOADS] + zip_only
+        assert names == [f"{filename}.{ext}" for filename in expected for ext in ("csv", "json")]
 
     @pytest.mark.parametrize(("short_name", "prefix"), [("WCComps", "wccomps"), ("Example League", "example-league")])
     def test_zip_is_named_for_the_org(self, admin_user, settings, short_name, prefix):
