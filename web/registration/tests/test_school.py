@@ -98,9 +98,9 @@ def test_event_detail_shows_an_imported_assignment_for_an_enrolled_school(gold_t
 
     response = client.get(reverse("registration_event_detail", args=[event.pk]))
 
-    [item] = response.context["enrollment_data"]
-    assert item["assignment"] == imported
-    assert item["can_assign"] is False
+    [item] = response.context["rows"]
+    assert item.assignment == imported
+    assert item.can_assign is False
     assert b"Team 04" in response.content
 
 
@@ -419,6 +419,26 @@ def test_event_detail_offers_no_unassign_for_an_earlier_event(gold_team_user, ev
     content = _client(gold_team_user).get(reverse("registration_event_detail", args=[past.pk])).content.decode()
 
     assert "Team 04" in content
+    assert not UNASSIGN.search(content)
+
+
+def test_event_detail_lists_the_schools_an_imported_event_had(gold_team_user, event):
+    """A past event with imported assignments and no enrollments lists its teams from the assignments."""
+    past = Event.objects.create(season=event.season, name="Qualifier", event_type="qualifier", date=date(2026, 1, 3))
+    for number, name in [(7, "Other College"), (4, "Example University")]:
+        team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}")
+        EventTeamAssignment.objects.create(event=past, team=team, school=School.for_name(name))
+
+    response = _client(gold_team_user).get(reverse("registration_event_detail", args=[past.pk]))
+
+    assert [(row.assignment.school.name, row.registration) for row in response.context["rows"]] == [
+        ("Example University", None),
+        ("Other College", None),
+    ]
+    content = response.content.decode()
+    assert "No registration" in content
+    assert "Team 04" in content
+    assert "Team 07" in content
     assert not UNASSIGN.search(content)
 
 
