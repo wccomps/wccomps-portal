@@ -129,6 +129,44 @@ def test_category_with_zero_weight_adds_nothing() -> None:
     assert standing.total_score == Decimal("40.00")
 
 
+def test_a_one_percent_weight_still_scales_and_can_set_the_pool() -> None:
+    # Inject's 10 / 0.01 = 1000 beats service's 99 / 0.99 = 100: service scales by 0.99 * 1000 / 99 = 10, inject by 1.
+    ScoringTemplate.objects.create(
+        service_weight=Decimal("99"),
+        inject_weight=Decimal("1"),
+        orange_weight=Decimal("0"),
+        service_max=Decimal("99"),
+        inject_max=Decimal("10"),
+    )
+    team = _team(1, "5")
+    _inject(team, "inj", "3")
+
+    standing = _standing(team)
+
+    assert (standing.service_points, standing.inject_points) == (Decimal("50.00"), Decimal("3.00"))
+    assert standing.total_score == Decimal("53.00")
+
+
+def test_a_raw_max_of_one_point_still_scales() -> None:
+    ScoringTemplate.objects.create(
+        service_weight=Decimal("50"),
+        inject_weight=Decimal("50"),
+        orange_weight=Decimal("0"),
+        service_max=Decimal("1"),
+        inject_max=Decimal("1"),
+    )
+    team = _team(1, "1")
+    _inject(team, "inj", "1")
+
+    standing = _standing(team)
+
+    assert (standing.service_points, standing.inject_points, standing.total_score) == (
+        Decimal("1.00"),
+        Decimal("1.00"),
+        Decimal("2.00"),
+    )
+
+
 def _scale_one_category(category: str) -> Team:
     """A template where `category` scales by a fraction, and a team whose scaled points land on half a cent."""
     weights = {"service_weight": Decimal("50"), "inject_weight": Decimal("0"), "orange_weight": Decimal("0")}
