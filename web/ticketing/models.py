@@ -125,6 +125,9 @@ class Ticket(Approvable):
         null=True, blank=True, help_text="The bot's ticket message with action buttons in the thread"
     )
     thread_archive_scheduled_at = models.DateTimeField(null=True, blank=True)
+    # The topic in the team's Zulip stream that the ticket-created notice opened; every later notice goes to it.
+    # Blank until then
+    zulip_topic = models.CharField(max_length=60, blank=True, db_default="", default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -149,12 +152,14 @@ class Ticket(Approvable):
 
 
 class TicketAttachment(StoredFile):
-    MAX_SIZE = 10 * 1024 * 1024  # 10MB, from the web or a ticket's Discord thread
+    MAX_SIZE = 10 * 1024 * 1024  # 10MB, from the web or a ticket's chat topic
     DEFAULT_NAME = "attachment"
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="attachments")
     uploaded_by = models.CharField(max_length=100)
     uploaded_at = models.DateTimeField(auto_now_add=True)
+    # The Zulip message it came with, so a redelivered message stores it once
+    zulip_message_id = models.BigIntegerField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ["uploaded_at"]
@@ -164,7 +169,7 @@ class TicketAttachment(StoredFile):
 
 
 class TicketComment(models.Model):
-    """Comment on ticket (bidirectional with Discord)."""
+    """Comment on ticket (bidirectional with the chat backends)."""
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="comments")
     author = models.ForeignKey(
@@ -178,13 +183,18 @@ class TicketComment(models.Model):
     comment_text = models.TextField()
     posted_at = models.DateTimeField(auto_now_add=True)
     discord_message_id = models.BigIntegerField(null=True, blank=True)
+    zulip_message_id = models.BigIntegerField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ["posted_at"]
 
+    @property
+    def author_name(self) -> str:
+        """Who wrote it, as chat shows it: the portal user's username, else "Unknown"."""
+        return self.author.username if self.author else "Unknown"
+
     def __str__(self) -> str:
-        author_name = str(self.author) if self.author else "Unknown"
-        return f"Comment by {author_name} on {self.ticket.ticket_number}"
+        return f"Comment by {self.author_name} on {self.ticket.ticket_number}"
 
 
 class TicketHistory(models.Model):
@@ -209,26 +219,27 @@ class TicketHistory(models.Model):
 
 
 class CommentRateLimit(models.Model):
-    """Rate limiting for ticket comments (5/min per ticket, 10/min per user).
+    """Rate limiting for ticket comments (5/min per ticket, 10/min per actor).
 
-    discord_id stores the caller's Discord user ID on bot comments and Django User.id on web comments.
+    actor_key names who posted: "web:<User id>", "discord:<Discord user id>" or "zulip:<Zulip user id>".
     """
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, null=True, blank=True)
-    discord_id = models.BigIntegerField()
+    # db_default: the previous release's pods insert rows without it while a deploy rolls out
+    actor_key = models.CharField(max_length=64, db_default="")
     posted_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         indexes = [
             models.Index(fields=["ticket", "-posted_at"]),
-            models.Index(fields=["discord_id", "-posted_at"]),
+            models.Index(fields=["actor_key", "-posted_at"]),
         ]
 
     def __str__(self) -> str:
-        return f"Comment by {self.discord_id} at {self.posted_at}"
+        return f"Comment by {self.actor_key} at {self.posted_at}"
 
     @classmethod
-    def check_rate_limit(cls, ticket_id: int, discord_id: int) -> tuple[bool, str]:
+    def check_rate_limit(cls, ticket_id: int, actor_key: str) -> tuple[bool, str]:
         """Return (is_allowed, reason_if_blocked)."""
         one_minute_ago = timezone.now() - timedelta(minutes=1)
         cls.objects.filter(posted_at__lt=one_minute_ago).delete()
@@ -241,7 +252,7 @@ class CommentRateLimit(models.Model):
                 f"Ticket rate limit exceeded ({ticket_comments}/5 comments in last minute)",
             )
 
-        user_comments = cls.objects.filter(discord_id=discord_id, posted_at__gte=one_minute_ago).count()
+        user_comments = cls.objects.filter(actor_key=actor_key, posted_at__gte=one_minute_ago).count()
 
         if user_comments >= 10:
             return (

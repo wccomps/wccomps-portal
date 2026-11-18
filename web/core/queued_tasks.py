@@ -11,7 +11,7 @@ any other type fails at once.
 from dataclasses import dataclass
 from typing import ClassVar, TypedDict, get_args
 
-from core.task_backends import TaskBackend, discord_enabled, zulip_enabled
+from core.task_backends import TaskBackend, configured_chat_backends
 
 
 class PermanentTaskError(Exception):
@@ -203,7 +203,12 @@ BACKEND_TASKS: dict[TaskBackend, tuple[type[TaskPayload], ...]] = {
 }
 
 
-def backends_for(payload: TaskPayload) -> list[TaskBackend]:
-    """The configured backends that run this payload's group."""
-    configured = {TaskBackend.DISCORD: discord_enabled(), TaskBackend.ZULIP: zulip_enabled(), TaskBackend.WORKER: True}
-    return [backend for backend, types in BACKEND_TASKS.items() if configured[backend] and isinstance(payload, types)]
+def backends_for(payload: TaskPayload, origin: TaskBackend | None = None) -> list[TaskBackend]:
+    """The configured backends that run this payload's group, but not origin, the backend the payload came from (a
+    comment made in a Discord thread is already there)."""
+    configured = {TaskBackend.WORKER, *configured_chat_backends()}
+    return [
+        backend
+        for backend, types in BACKEND_TASKS.items()
+        if backend in configured and backend != origin and isinstance(payload, types)
+    ]

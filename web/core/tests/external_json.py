@@ -102,15 +102,19 @@ def serving(answers_: list[Answer]) -> Iterator[list[str]]:
     gets the same page again); yields the URLs requested."""
     requested: list[str] = []
 
-    def handle(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+    def handle(self: httpx.HTTPTransport | httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:
         if len(requested) >= MAX_REQUESTS:
             raise EndlessRequests(f"{MAX_REQUESTS} requests, the last {request.url}")
         answer = answers_[min(len(requested), len(answers_) - 1)]
         requested.append(str(request.url))
         return httpx.Response(answer.status, content=answer.body, request=request)
 
+    async def handle_async(self: httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:
+        return handle(self, request)
+
     with (
         patch.object(httpx.HTTPTransport, "handle_request", handle),
+        patch.object(httpx.AsyncHTTPTransport, "handle_async_request", handle_async),
         patch.object(httpx._config, "create_ssl_context", return_value=_SERVING_SSL_CONTEXT),
     ):
         yield requested

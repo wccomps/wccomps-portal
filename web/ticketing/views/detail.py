@@ -108,12 +108,12 @@ def ticket_comment(request: HttpRequest, ticket_number: str) -> HttpResponse:
 
     from ticketing.models import CommentRateLimit
 
-    is_allowed, reason = CommentRateLimit.check_rate_limit(ticket.id, user.id)
+    is_allowed, reason = CommentRateLimit.check_rate_limit(ticket.id, f"web:{user.id}")
     if not is_allowed:
         messages.error(request, reason)
         return redirect("ticket_detail", ticket_number=ticket.ticket_number)
 
-    CommentRateLimit.objects.create(ticket=ticket, discord_id=user.id)
+    CommentRateLimit.objects.create(ticket=ticket, actor_key=f"web:{user.id}")
 
     comment = TicketComment.objects.create(
         ticket=ticket,

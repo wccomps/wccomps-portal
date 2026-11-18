@@ -10,7 +10,7 @@ from discord.ext import commands
 from django.conf import settings
 
 from bot.permissions import permission_check
-from bot.utils import ConfirmView, log_to_ops_channel, split_message
+from bot.utils import DISCORD_MESSAGE_CHAR_LIMIT, ConfirmView, log_to_ops_channel
 from core.authentik_utils import (
     BulkPasswordResetResult,
     credentials_csv,
@@ -39,6 +39,7 @@ from core.utils import (
     parse_datetime_to_utc,
     run_blocking,
     shorten,
+    split_message,
 )
 from team.models import active_team_numbers, team_username
 
@@ -151,7 +152,7 @@ class AdminCompetitionCog(commands.Cog):
             )
         else:
             details = summary + details
-        for chunk in split_message(details) if details else []:
+        for chunk in split_message(details, DISCORD_MESSAGE_CHAR_LIMIT) if details else []:
             await interaction.followup.send(chunk, ephemeral=True)
 
     @staticmethod
@@ -163,7 +164,7 @@ class AdminCompetitionCog(commands.Cog):
             f"Stopped: Discord closes this command's replies before another batch could finish, so these "
             f"{len(team_numbers)} teams were not reset; run the command again for them: {names}"
         )
-        for chunk in split_message(message):
+        for chunk in split_message(message, DISCORD_MESSAGE_CHAR_LIMIT):
             await interaction.followup.send(chunk, ephemeral=True)
 
     @competition_group.command(name="set-max-members", description="[ADMIN] Set maximum team members globally")

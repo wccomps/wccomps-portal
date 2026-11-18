@@ -7,10 +7,11 @@ fails on one without a case in READERS. A case serves each of the reader's reque
 that request gets (external_json), calls the reader, and checks what comes back.
 """
 
+import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -34,6 +35,14 @@ from quotient.client import (
     TeamUptime,
 )
 
+from chat.zulip.client import ZulipClient, ZulipError
+from chat.zulip.incoming import (
+    IncomingMessage,
+    deleted_message_ids,
+    edited_message,
+    parse_message_event,
+    renamed_topic,
+)
 from core.authentik_manager import AuthentikAPIError, AuthentikManager
 from core.nextcloud import NextcloudAPIError, NextcloudManager
 from core.proxmox import ProxmoxAPIError, ProxmoxClient, ProxmoxSnapshot, ProxmoxTaskStatus, ProxmoxVM
@@ -114,6 +123,44 @@ PROXMOX_SNAPSHOTS = {
 PROXMOX_UPID = {"data": "UPID:pve01:00001A2B:00000001:65000000:qmrollback:10105:user@pam!token:"}
 PROXMOX_TASK_STATUS = {"data": {"status": "stopped", "exitstatus": "OK"}}
 NEXTCLOUD_USER = {"ocs": {"meta": {"status": "ok", "statuscode": 200}, "data": {"user_id": "team01"}}}
+ZULIP_DONE = {"result": "success", "msg": ""}
+ZULIP_SENT = {**ZULIP_DONE, "id": 42}
+ZULIP_QUEUE = {**ZULIP_DONE, "queue_id": "1517975029:0", "last_event_id": -1}
+ZULIP_USER = {
+    **ZULIP_DONE,
+    "user": {"user_id": 9, "email": "user9@zulip.test", "delivery_email": "member@example.org", "full_name": "Member"},
+}
+ZULIP_EVENTS = {
+    **ZULIP_DONE,
+    "events": [
+        {
+            "type": "message",
+            "id": 0,
+            "message": {
+                "id": 77,
+                "type": "stream",
+                "display_recipient": "team03",
+                "subject": "T003-001 Web",
+                "sender_id": 9,
+                "sender_email": "member@example.org",
+                "sender_full_name": "Member",
+                "content": "hi",
+            },
+        },
+        {"type": "update_message", "id": 1, "message_id": 77, "content": "edited"},
+        {"type": "delete_message", "id": 2, "message_id": 77, "message_ids": [77, 78]},
+        {"type": "heartbeat", "id": 3},
+        {
+            "type": "update_message",
+            "id": 4,
+            "message_id": 77,
+            "stream_name": "team03",
+            "orig_subject": "T003-001 Web",
+            "subject": "✔ T003-001 Web",
+            "propagate_mode": "change_all",
+        },
+    ],
+}
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -344,6 +391,19 @@ def nextcloud() -> NextcloudManager:
     return NextcloudManager(base_url="https://nextcloud.test", username="admin", password="secret")
 
 
+def zulip[T](method: Callable[[ZulipClient], Awaitable[T]]) -> Callable[[], T]:
+    """Calls a ZulipClient method with a client of its own, outside any event loop (as the reader tests run)."""
+
+    async def run() -> T:
+        client = ZulipClient("https://zulip.test", "portal-bot@zulip.test", "key")
+        try:
+            return await method(client)
+        finally:
+            await client.aclose()
+
+    return lambda: asyncio.run(run())
+
+
 def error_from_answer() -> object:
     """_handle_response_error reads an error answer's body: it gets the first answer served, as is."""
 
@@ -355,6 +415,41 @@ def check_bool(result: object) -> None:
     outcome(result, lambda r: type(r) is bool, "a bool")
 
 
+def zulip_events_read() -> object:
+    """A poll's events, each through the readers chat.zulip.incoming handles it with."""
+    events = zulip(lambda c: c.get_events("1517975029:0", -1))()
+    return [(parse_message_event(e), edited_message(e), deleted_message_ids(e), renamed_topic(e)) for e in events]
+
+
+def _zulip_id(value: object) -> bool:
+    return type(value) is int and 0 < value < 2**63
+
+
+def check_zulip_events_read(result: object) -> None:
+    def message_ok(m: object) -> bool:
+        return m is None or (
+            isinstance(m, IncomingMessage)
+            and _zulip_id(m.message_id)
+            and _zulip_id(m.sender_id)
+            and all(is_str(v) for v in (m.stream, m.topic, m.sender_name, m.content))
+        )
+
+    def renamed_ok(r: object) -> bool:
+        return r is None or (isinstance(r, tuple) and len(r) == 3 and all(is_str(v) for v in r))
+
+    def ok(r: object) -> bool:
+        return isinstance(r, list) and all(
+            message_ok(message)
+            and (edit is None or (_zulip_id(edit[0]) and is_str(edit[1])))
+            and isinstance(deleted, list)
+            and all(_zulip_id(i) for i in deleted)
+            and renamed_ok(renamed)
+            for message, edit, deleted, renamed in r
+        )
+
+    outcome(result, ok, "each event's message, edit, deleted ids and renamed topic, or None")
+
+
 AM = "web/core/authentik_manager.py:AuthentikManager"
 NC = "web/core/nextcloud.py:NextcloudManager"
 QC = "web/quotient/client.py:QuotientClient"
@@ -362,6 +457,7 @@ QJ = "web/quotient/client.py:_json"
 PX = "web/core/proxmox.py:ProxmoxClient"
 PJ = "web/core/proxmox.py:_json"
 READ = (f"{AM}._results", f"{AM}._json")
+ZC = "chat/zulip/client.py:ZulipClient"
 USER = (f"{AM}.find_user", *READ)
 NC_USER = (f"{NC}._user_id", f"{NC}._json")
 READERS = [
@@ -573,6 +669,58 @@ READERS = [
         check_bool,
         (f"{NC}.delete_team_user", *NC_USER),
         raises=(NextcloudAPIError,),
+    ),
+    Reader(
+        "zulip_send_stream_message",
+        zulip(lambda c: c.send_stream_message("team03", "T003-001 Web", "hi")),
+        (ZULIP_SENT,),
+        lambda r: outcome(r, is_int, "a message id"),
+        (f"{ZC}.send_stream_message", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_add_reaction",
+        zulip(lambda c: c.add_reaction(77, "paperclip")),
+        (ZULIP_DONE,),
+        lambda r: outcome(r, lambda v: v is None, "None"),
+        (f"{ZC}.add_reaction", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_register_queue",
+        zulip(lambda c: c.register_queue()),
+        (ZULIP_QUEUE,),
+        lambda r: outcome(
+            r,
+            lambda q: isinstance(q, tuple) and is_str(q[0]) and bool(q[0]) and is_int(q[1]),
+            "a queue id and event id",
+        ),
+        (f"{ZC}.register_queue", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_get_events",
+        zulip(lambda c: c.get_events("1517975029:0", -1)),
+        (ZULIP_EVENTS,),
+        lambda r: outcome(r, lambda e: isinstance(e, list) and all(isinstance(v, dict) for v in e), "a list of events"),
+        (f"{ZC}.get_events", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_get_user_email",
+        zulip(lambda c: c.get_user_email(9)),
+        (ZULIP_USER,),
+        lambda r: outcome(r, lambda e: is_str(e) and bool(e), "an email"),
+        (f"{ZC}.get_user_email", f"{ZC}._call"),
+        raises=(ZulipError,),
+    ),
+    Reader(
+        "zulip_events_read",
+        zulip_events_read,
+        (ZULIP_EVENTS,),
+        check_zulip_events_read,
+        (f"{ZC}.get_events", f"{ZC}._call"),
+        raises=(ZulipError,),
     ),
 ]
 

@@ -3,7 +3,7 @@
 from django.conf import settings
 from django.db import models
 
-from core.heartbeat import discord_configured
+from core.heartbeat import CHAT_BACKENDS
 
 
 class TaskBackend(models.TextChoices):
@@ -12,9 +12,10 @@ class TaskBackend(models.TextChoices):
     WORKER = "worker", "Worker"
 
 
+def configured_chat_backends() -> list[TaskBackend]:
+    """The chat backends whose settings core.heartbeat.CHAT_BACKENDS names are all set."""
+    return [TaskBackend(b.name) for b in CHAT_BACKENDS if b.configured(lambda key: getattr(settings, key))]
+
+
 def discord_enabled() -> bool:
-    return discord_configured(settings.DISCORD_BOT_TOKEN)
-
-
-def zulip_enabled() -> bool:
-    return bool(settings.ZULIP_SITE and settings.ZULIP_BOT_EMAIL and settings.ZULIP_API_KEY)
+    return TaskBackend.DISCORD in configured_chat_backends()

@@ -373,7 +373,7 @@ def _seed_admin_only_models(teams: list[Team], ticket: Ticket, admin_user: User)
     LinkAttempt.objects.create(discord_id=1, discord_username="linker", authentik_username="prop-admin", success=False)
     LinkRateLimit.objects.create(discord_id=1)
     TicketHistory.objects.create(ticket=ticket, action="created", actor=admin_user)
-    CommentRateLimit.objects.create(ticket=ticket, discord_id=1)
+    CommentRateLimit.objects.create(ticket=ticket, actor_key="web:1")
     ServiceScore.objects.create(team=teams[0])
     ScoringExclusion.objects.create(team=teams[2])
 

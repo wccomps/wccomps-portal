@@ -14,21 +14,22 @@ from registration.stage import event_stage
 
 from bot.discord_manager import delete_team_infrastructure, setup_team_infrastructure
 from bot.utils import (
-    announcement,
+    add_fields,
     log_to_ops_channel,
     room_judge_role_name,
     send_announcement,
     send_parts,
     team_chat_channel,
 )
-from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams
+from core.broadcast import AllTeams, Announcements, BroadcastTarget, Teams, target_teams
+from core.chat_notices import CompetitionStatus, status_card
 from core.heartbeat import beat
 from core.models import AuditLog, CompetitionConfig, QueuedAnnouncement
 from core.queued_tasks import PermanentTaskError
 from core.services.competition import START_MESSAGE_SENDER
 from core.task_queue import StepsState, TaskProgress
-from core.utils import shorten
-from team.models import MAX_TEAMS, Team
+from core.utils import announcement, shorten
+from team.models import Team
 
 logger = logging.getLogger(__name__)
 
@@ -71,55 +72,21 @@ async def update_status_channel(bot: discord.Client) -> bool:
         return False
 
 
+STATUS_COLORS = {
+    CompetitionStatus.RUNNING: discord.Color.green(),
+    CompetitionStatus.SCHEDULED: discord.Color.blue(),
+    CompetitionStatus.STOPPED: discord.Color.red(),
+}
+
+
 def _build_status_embed(config: CompetitionConfig) -> discord.Embed:
-    if config.applications_enabled:
-        status = "RUNNING"
-        color = discord.Color.green()
-    elif config.schedule_will_start():
-        status = "SCHEDULED"
-        color = discord.Color.blue()
-    else:
-        status = "STOPPED"
-        color = discord.Color.red()
-
+    card = status_card(config)
     embed = discord.Embed(
-        title="Competition Status",
-        description=f"**{status}**",
-        color=color,
+        title=card.title, description=f"**{card.headline}**", color=STATUS_COLORS[CompetitionStatus(card.headline)]
     )
-
-    if config.competition_start_time:
-        embed.add_field(
-            name="Scheduled Start",
-            value=f"<t:{int(config.competition_start_time.timestamp())}:F>",
-            inline=True,
-        )
-
-    if config.competition_end_time:
-        embed.add_field(
-            name="Scheduled End",
-            value=f"<t:{int(config.competition_end_time.timestamp())}:F>",
-            inline=True,
-        )
-
-    if config.controlled_applications:
-        apps_str = ", ".join(config.controlled_applications)
-        embed.add_field(
-            name="Controlled Applications",
-            value=apps_str,
-            inline=False,
-        )
-
-    account_status = "Enabled" if config.applications_enabled else "Disabled"
-    embed.add_field(
-        name="Team Accounts",
-        value=f"{account_status} ({MAX_TEAMS} teams)",
-        inline=True,
-    )
-
+    add_fields(embed, card.fields, time_style="F")
     embed.set_footer(text="Last updated")
     embed.timestamp = discord.utils.utcnow()
-
     return embed
 
 
@@ -386,11 +353,7 @@ async def _recipients(
     match target:
         case Announcements():
             return [(0, "Announcements", to_announcements)]
-        case AllTeams():
-            teams = [t async for t in Team.objects.filter(is_active=True).order_by("team_number")]
-        case Teams(numbers):
-            by_number = {t.team_number: t async for t in Team.objects.filter(team_number__in=numbers)}
-            result.missing = [f"Team {n:02d}" for n in numbers if n not in by_number]
-            teams = [by_number[n] for n in numbers if n in by_number]
-    teams.sort(key=lambda team: team.team_number)
-    return [(team.team_number, f"Team {team.team_number:02d}", to_team(team)) for team in teams]
+        case AllTeams() | Teams():
+            teams, missing = await target_teams(target)
+            result.missing = [f"Team {n:02d}" for n in missing]
+            return [(team.team_number, f"Team {team.team_number:02d}", to_team(team)) for team in teams]

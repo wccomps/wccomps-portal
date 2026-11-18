@@ -215,7 +215,6 @@ VULTURE_CONFIDENCE = 60
 DJANGO_MODEL_OPTION = "Django reads this model Meta option by name"
 DJANGO_ADMIN_OPTION = "Django admin reads this ModelAdmin or inline option by name"
 DJANGO_FORM_OPTION = "Django reads this form option by name"
-
 # fnmatch pattern over "path:name", or "@decorator" for anything with that decorator -> why it stays
 CODE_EXCEPTIONS = {
     "web/portal/urls.py:handler*": "Django reads the root URLconf's error handlers by name",
@@ -240,7 +239,6 @@ CODE_EXCEPTIONS = {
     "*:lookup_name": "Django reads a lookup's lookup_name to match field__name in a filter",
     "*/apps.py:*Config": "Django loads the app config named in INSTALLED_APPS' app",
     "web/core/cotton.py:__str__": "str() calls it when a component writes {{ attrs }}",
-    "web/core/utils.py:aclose": "contextlib.aclosing calls it",
     "*/management/commands/*:Command": "manage.py runs a command by its file name",
     "*/management/commands/*:handle": "manage.py calls Command.handle",
     "*/management/commands/*:help": "manage.py help prints a command's help text",

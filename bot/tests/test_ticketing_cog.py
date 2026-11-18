@@ -223,9 +223,12 @@ class TestTicketingCog:
             discord_thread_id=5555666777,
         )
 
-        # Create existing comment
+        # Create existing comment, written by a member of the ticket's team
+        author = await User.objects.acreate(username="editor")
+        await UserGroups.objects.acreate(user=author, authentik_id="editor-uid", groups=[team.authentik_group])
         comment = await TicketComment.objects.acreate(
             ticket=ticket,
+            author=author,
             comment_text="Original text",
             discord_message_id=8888999000,
         )
@@ -381,6 +384,38 @@ class TestTicketingCog:
         assert comment.author.username == "comment_author"
         assert comment.comment_text == "This is a test message"
         assert comment.discord_message_id == 999888777666
+
+        # With only Discord configured the thread already shows it: nothing is queued
+        assert not await QueuedTask.objects.aexists()
+
+    async def test_on_message_queues_the_comment_for_zulip_only(
+        self, cog: TicketingCog, team: Team, scoring_check_category: TicketCategory, zulip_configured: None
+    ) -> None:
+        ticket = await Ticket.objects.acreate(
+            ticket_number="T042-102",
+            team=team,
+            category=scoring_check_category,
+            title="Mirrored",
+            description="Test",
+            status="open",
+            discord_thread_id=7777888111,
+        )
+        message = AsyncMock(spec=discord.Message)
+        message.author = Mock()
+        message.author.bot = False
+        message.author.id = 123456789
+        message.id = 999888777555
+        message.content = "Seen in Zulip too"
+        message.channel = Mock(spec=discord.Thread)
+        message.channel.id = ticket.discord_thread_id
+        message.attachments = []
+
+        await cog.on_message(message)
+
+        comment = await TicketComment.objects.aget(discord_message_id=message.id)
+        tasks = [task async for task in QueuedTask.objects.all()]
+        assert [(t.task_type, t.backend, t.ticket_id) for t in tasks] == [("post_comment", "zulip", ticket.id)]
+        assert tasks[0].payload == {"ticket_id": ticket.id, "comment_id": comment.id}
 
     async def test_on_message_prevents_duplicate_comments(
         self, cog: TicketingCog, team: Team, scoring_check_category: TicketCategory
@@ -608,6 +643,23 @@ class TestTicketCommand:
         thread_tasks = QueuedTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
         assert await thread_tasks.acount() == 1
 
+    async def test_create_ticket_queues_its_thread_and_its_zulip_topic(
+        self,
+        cog: TicketingCog,
+        team: Team,
+        discord_link: DiscordLink,
+        interaction: AsyncMock,
+        box_reset_category: TicketCategory,
+        zulip_configured: None,
+    ) -> None:
+        await cog.create_ticket.callback(
+            cog, interaction, category="2", description="reset please", hostname="web01", ip_address="10.0.0.5"
+        )
+
+        ticket = await Ticket.objects.aget(team=team)
+        created = QueuedTask.objects.filter(task_type="ticket_created_web", ticket=ticket, status="pending")
+        assert sorted([task.backend async for task in created]) == ["discord", "zulip"]
+
     async def test_create_ticket_defers_first_and_queues_the_thread_even_if_the_reply_fails(
         self,
         cog: TicketingCog,
@@ -706,13 +758,14 @@ class TestRateLimiting:
 
         # Create 5 rate limit entries for this ticket (at the limit)
         for i in range(5):
-            await CommentRateLimit.objects.acreate(ticket=ticket, discord_id=111222333 + i)
+            await CommentRateLimit.objects.acreate(ticket=ticket, actor_key=f"discord:{111222333 + i}")
 
         # Create message from a user
         message = AsyncMock(spec=discord.Message)
         message.author = Mock()
         message.author.bot = False
         message.author.id = 999888777  # Different user
+        message.id = 444555666888
         message.author.mention = "<@999888777>"
         message.channel = Mock(spec=discord.Thread)
         message.channel.id = ticket.discord_thread_id
@@ -738,7 +791,7 @@ class TestRateLimiting:
         # Create 10 rate limit entries for same user (user-level limit is 10/min)
         user_id = 555444333
         for _i in range(10):
-            await CommentRateLimit.objects.acreate(ticket=ticket, discord_id=user_id)
+            await CommentRateLimit.objects.acreate(ticket=ticket, actor_key=f"discord:{user_id}")
 
         # Try to comment on the original ticket
         message = AsyncMock(spec=discord.Message)
@@ -854,6 +907,7 @@ class TestAttachmentHandling:
         message.author.bot = False
         message.author.id = 123456789
         message.author.mention = "<@123456789>"
+        message.id = 777888999111
         message.channel = AsyncMock(spec=discord.Thread)
         message.channel.id = ticket.discord_thread_id
         message.content = ""

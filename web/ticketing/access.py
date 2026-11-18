@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from django.contrib.auth.models import User
 
-from core.auth_utils import has_permission
+from core.auth_utils import get_user_team, has_permission
 from team.models import Team
 from ticketing.lifecycle import assignee_refusal, refusal
 from ticketing.models import Ticket
@@ -17,6 +17,11 @@ def ticket_open_to(ticket: Ticket, *, staff: bool, team: Team | None) -> bool:
     """Whether someone may see and write to the ticket: ticket staff, or a member of its team (team: the one the
     person's own groups put them on)."""
     return staff or (team is not None and team.pk == ticket.team_id)
+
+
+def ticket_open_to_user(ticket: Ticket, user: User) -> bool:
+    """ticket_open_to for a portal account, from its own groups as on the web: none while it is disabled."""
+    return ticket_open_to(ticket, staff=has_permission(user, TICKET_STAFF), team=get_user_team(user))
 
 
 @dataclass(frozen=True)

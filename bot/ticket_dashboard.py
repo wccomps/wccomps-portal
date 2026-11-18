@@ -9,9 +9,10 @@ from bot.utils import (
     DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT,
     DISCORD_EMBED_TITLE_CHAR_LIMIT,
     DISCORD_EMBED_TOTAL_CHAR_LIMIT,
-    add_field,
+    add_fields,
     fit,
 )
+from core.chat_notices import category_name, ticket_fields
 from ticketing.access import TICKET_STAFF
 from ticketing.models import Ticket
 
@@ -29,36 +30,15 @@ def get_ticket_color(status: str) -> discord.Color:
 
 
 def format_ticket_embed(ticket: Ticket) -> discord.Embed:
-    """The ticket as its thread shows it. A blank field is left out (Discord refuses one), each is cut to its
-    limit, and the description takes what is left of the embed's 6000 characters."""
-    cat = ticket.category
-
+    """The ticket as its thread shows it (core.chat_notices.ticket_fields). A blank field is left out (Discord refuses
+    one), each is cut to its limit, and the description takes what is left of the embed's 6000 characters."""
     embed = discord.Embed(
         title=fit(f"Ticket {ticket.ticket_number}: {ticket.title}", DISCORD_EMBED_TITLE_CHAR_LIMIT),
         color=get_ticket_color(ticket.status),
         timestamp=ticket.created_at,
     )
-
-    add_field(embed, "Team", f"{ticket.team.team_name} (#{ticket.team.team_number})", inline=True)
-    add_field(embed, "Status", ticket.status.replace("_", " ").title(), inline=True)
-    add_field(embed, "Hostname", ticket.hostname, inline=True)
-    add_field(embed, "Service", ticket.service_name, inline=True)
-    add_field(embed, "IP Address", ticket.ip_address or "", inline=True)
-    if ticket.assigned_to:
-        add_field(embed, "Assigned To", ticket.assigned_to.username)
-
-    points = cat.points if cat else 0
-    if cat and cat.variable_points:
-        add_field(embed, "Point Impact", "Variable", inline=True)
-    elif points > 0:
-        add_field(embed, "Point Impact", f"{points} points", inline=True)
-
-    if ticket.resolved_at:
-        add_field(embed, "Resolved At", discord.utils.format_dt(ticket.resolved_at, style="R"), inline=True)
-        add_field(embed, "Resolution Notes", ticket.resolution_notes)
-
-    cat_name = cat.display_name if cat else f"Category {ticket.category_id}"
-    embed.set_footer(text=fit(f"Category: {cat_name}", 2048))
+    add_fields(embed, ticket_fields(ticket), time_style="R")
+    embed.set_footer(text=fit(f"Category: {category_name(ticket)}", 2048))
     room = DISCORD_EMBED_TOTAL_CHAR_LIMIT - len(embed)
     embed.description = fit(ticket.description, min(DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT, room)) or None
 
