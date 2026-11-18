@@ -48,6 +48,15 @@ def test_inject_max_none_without_any_values() -> None:
     assert inject_max_from_titles(_injects("A", "B")) is None
 
 
+def test_inject_max_none_when_the_titles_add_up_to_nothing() -> None:
+    assert inject_max_from_titles([]) is None
+    assert inject_max_from_titles(_injects("A (0 pts)")) is None
+
+
+def test_inject_max_of_a_single_point() -> None:
+    assert inject_max_from_titles(_injects("A (1 pts)")) == Decimal("1")
+
+
 def _detail(team: Team, name: str, points: str, uptime: str) -> None:
     ServiceDetail.objects.create(team=team, service_name=name, points=Decimal(points), uptime=Decimal(uptime))
 
@@ -81,6 +90,31 @@ def test_service_max_none_without_uptime() -> None:
     assert service_max_from_details() is None
 
 
+def test_service_max_trusts_a_sample_at_the_reliable_uptime_floor() -> None:
+    t1 = Team.objects.create(team_number=1, team_name="T1")
+    _detail(t1, "web", "100", "0.1")
+    assert service_max_from_details() == Decimal("1000")
+
+
+def test_service_max_none_when_a_scored_service_has_only_unreliable_samples() -> None:
+    t1 = Team.objects.create(team_number=1, team_name="T1")
+    _detail(t1, "web", "100", "0.5")
+    _detail(t1, "ssh", "10", "0.0999")
+    assert service_max_from_details() is None
+
+
+def test_service_max_of_a_single_point() -> None:
+    t1 = Team.objects.create(team_number=1, team_name="T1")
+    _detail(t1, "web", "1", "1")
+    assert service_max_from_details() == Decimal("1")
+
+
+def test_service_max_none_when_it_rounds_to_nothing() -> None:
+    t1 = Team.objects.create(team_number=1, team_name="T1")
+    _detail(t1, "web", "0.01", "1")
+    assert service_max_from_details() is None
+
+
 def test_set_template_max_writes_when_present() -> None:
     ScoringTemplate.objects.create(
         service_weight=Decimal("40"), inject_weight=Decimal("40"), orange_weight=Decimal("20")
@@ -96,6 +130,20 @@ def test_set_template_max_skips_none() -> None:
     set_template_max("inject_max", None)
     t.refresh_from_db()
     assert t.inject_max == Decimal("99")  # unchanged
+
+
+def test_set_template_max_skips_a_value_the_column_cannot_hold() -> None:
+    t = ScoringTemplate.objects.create(inject_max=Decimal("99"))
+    set_template_max("inject_max", Decimal("1000000000"))
+    t.refresh_from_db()
+    assert t.inject_max == Decimal("99")
+
+
+def test_set_template_max_is_not_recorded_as_a_human_edit(admin_user) -> None:
+    t = ScoringTemplate.objects.create(updated_by=admin_user)
+    set_template_max("service_max", Decimal("500"))
+    t.refresh_from_db()
+    assert (t.service_max, t.updated_by) == (Decimal("500"), None)
 
 
 def test_set_template_max_skips_without_template() -> None:
