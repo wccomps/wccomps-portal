@@ -1,7 +1,7 @@
 # One image for every process: they share the Django models and must run the same version.
 #   web (default): entrypoint.sh applies migrations under a lock, then gunicorn (web/gunicorn.conf.py)
 #   worker: entrypoint cleared, run from /app: `python -m worker`
-#   chat: entrypoint cleared, run from /app: `python -m chat` (the Discord bot)
+#   chat: entrypoint cleared, run from /app: `python -m chat` (the Discord and Zulip runners, whichever are configured)
 # The Python .python-version pins (local uv and CI read it too): a test that passes on one patch can fail on another.
 # uv sync below reads the file and, with downloads off, refuses an image whose Python differs; test_python_pin checks
 # this tag against it.
@@ -61,5 +61,5 @@ RUN groupadd --system --gid 1001 app \
 USER 1001:1001
 
 ENTRYPOINT ["/entrypoint.sh"]
-# Bind address, workers (GUNICORN_WORKERS), threads (GUNICORN_THREADS), timeout and logging live in web/gunicorn.conf.py
+# Bind address, workers (GUNICORN_WORKERS), timeout and logging live in web/gunicorn.conf.py
 CMD ["gunicorn", "portal.wsgi:application"]

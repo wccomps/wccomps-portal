@@ -342,6 +342,11 @@ def _stream_box_reset(ticket_id: int, user_id: int, authentik_username: str, sna
             yield ndjson_done(error, success=False)
             return
 
+        client = get_proxmox_client()
+        if not client.configured:
+            yield ndjson_done("Proxmox isn't configured.", success=False)
+            return
+
         if normalize_ticket_host(ticket.team.team_number, ticket.hostname) is None:
             yield ndjson_done(
                 f"No Proxmox VM matched hostname '{ticket.hostname}' for Team {ticket.team.team_number}.",
@@ -349,7 +354,6 @@ def _stream_box_reset(ticket_id: int, user_id: int, authentik_username: str, sna
             )
             return
 
-        client = get_proxmox_client()
         vms = client.list_team_vms(ticket.team.team_number)
         if vms is None:
             yield ndjson_done("Proxmox isn't reachable.", success=False)
