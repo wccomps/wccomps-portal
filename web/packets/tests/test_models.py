@@ -1,8 +1,11 @@
 """Tests for packet models."""
 
+import re
 from datetime import timedelta
 
 import pytest
+from django.test import Client
+from django.urls import reverse
 from django.utils import timezone
 
 from team.models import Team
@@ -65,6 +68,15 @@ class TestPacket:
         """Test marking packet as completed."""
         packet.mark_as_completed()
         assert packet.status == "completed"
+
+    @pytest.mark.parametrize("mark", ["mark_as_distributing", "mark_as_completed"])
+    def test_a_status_written_from_a_stale_row_keeps_web_access_turned_off_since(self, packet, mark):
+        Packet.objects.filter(pk=packet.pk).update(web_access_enabled=False)
+
+        getattr(packet, mark)()
+
+        packet.refresh_from_db()
+        assert packet.web_access_enabled is False
 
 
 @pytest.mark.django_db
@@ -134,3 +146,59 @@ class TestPacketDistribution:
             1,
             "team01",
         )
+
+    def test_a_send_written_from_a_stale_row_keeps_a_download_recorded_since(self, team, packet):
+        distribution = PacketDistribution.objects.create(packet=packet, team=team)
+        PacketDistribution.objects.get(pk=distribution.pk).record_download("team01")
+
+        distribution.mark_as_sent("team01@example.edu")
+
+        distribution.refresh_from_db()
+        assert (distribution.email_status, distribution.download_count, distribution.downloaded_by) == (
+            "sent",
+            1,
+            "team01",
+        )
+
+
+STATS = {"total": 6, "pending": 1, "sent": 2, "failed": 3, "downloaded": 4}
+
+
+@pytest.fixture
+def counted_packet(packet):
+    """A sent packet whose six teams give every count a different value (see STATS)."""
+    rows = [("pending", False), ("sent", True), ("sent", True), ("failed", True), ("failed", True), ("failed", False)]
+    for number, (status, downloaded) in enumerate(rows, start=1):
+        team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=True)
+        PacketDistribution.objects.create(
+            packet=packet, team=team, email_status=status, downloaded_at=timezone.now() if downloaded else None
+        )
+    packet.status = "completed"
+    packet.save()
+    return packet
+
+
+@pytest.mark.django_db
+class TestDistributionStats:
+    def test_each_count_is_its_own(self, counted_packet):
+        annotated = Packet.objects.with_distribution_stats().get(pk=counted_packet.pk)
+
+        assert annotated.get_distribution_stats() == STATS
+
+    def test_the_packet_page_shows_each_count(self, counted_packet, gold_team_user):
+        client = Client()
+        client.force_login(gold_team_user)
+
+        content = client.get(reverse("packet_detail", args=[counted_packet.id])).content.decode()
+
+        spans = {text.strip() for text in re.findall(r">([^<>]*)</span>", content)}
+        assert {"6 teams", "2 sent", "1 pending", "3 failed", "4 downloaded"} <= spans
+
+    def test_the_packet_history_shows_each_count(self, counted_packet, gold_team_user):
+        client = Client()
+        client.force_login(gold_team_user)
+
+        content = " ".join(client.get(reverse("packets_list")).content.decode().split())
+
+        assert "2 sent, 4 downloaded" in content
+        assert "3 failed" in content
