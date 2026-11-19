@@ -132,3 +132,31 @@ def test_a_feedback_edit_holding_a_score_does_not_deadlock_the_wipe(team):
 
     assert not wiping.is_alive() and not editing.is_alive()
     assert _not_refusals(errors) == []
+
+
+def test_a_locked_team_still_takes_a_new_link(team):
+    """The team lock is FOR NO KEY UPDATE, so while an unlink or the wipe holds a team, a link to it can still be
+    made: the new row's foreign key needs only a key share lock on the team."""
+    errors: list[BaseException] = []
+    team_locked = threading.Event()
+    release = threading.Event()
+
+    def hold() -> None:
+        assert Team.objects.filter(pk=team.pk).lock() == [team.pk]
+        team_locked.set()
+        release.wait(10)
+
+    holding = _in_thread(hold, errors)
+    try:
+        assert team_locked.wait(10)
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("SET LOCAL lock_timeout = '2s'")
+            joiner = User.objects.create(username="joiner06")
+            DiscordLink.objects.create(user=joiner, discord_id=607, discord_username="j", team=team, is_active=True)
+    finally:
+        release.set()
+        holding.join(30)
+
+    assert errors == []
+    assert DiscordLink.objects.filter(team=team, is_active=True).count() == 2
