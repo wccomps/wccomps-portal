@@ -1,6 +1,9 @@
 """Tests for packet models."""
 
+from datetime import timedelta
+
 import pytest
+from django.utils import timezone
 
 from team.models import Team
 
@@ -107,3 +110,27 @@ class TestPacketDistribution:
         distribution.record_download("testuser2")
         assert distribution.download_count == 2
         assert distribution.downloaded_by == "testuser2"
+
+    def test_a_download_keeps_the_first_download_time_and_moves_the_last(self, team, packet):
+        distribution = PacketDistribution.objects.create(packet=packet, team=team)
+        first = timezone.now() - timedelta(hours=1)
+        PacketDistribution.objects.filter(pk=distribution.pk).update(downloaded_at=first, updated_at=first)
+
+        distribution.record_download("team01")
+
+        assert distribution.downloaded_at == first
+        assert distribution.last_downloaded_at > first
+        assert distribution.updated_at == distribution.last_downloaded_at
+
+    def test_a_failure_written_from_a_stale_row_keeps_a_download_recorded_since(self, team, packet):
+        distribution = PacketDistribution.objects.create(packet=packet, team=team)
+        PacketDistribution.objects.get(pk=distribution.pk).record_download("team01")
+
+        distribution.mark_as_failed("bounced")
+
+        distribution.refresh_from_db()
+        assert (distribution.email_status, distribution.download_count, distribution.downloaded_by) == (
+            "failed",
+            1,
+            "team01",
+        )
