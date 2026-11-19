@@ -212,6 +212,17 @@ def test_get_standing_finds_the_team_or_404() -> None:
         get_standing(3, standings)
 
 
+def test_an_inactive_teams_approved_scores_stay_out_of_the_standings() -> None:
+    _unit_template()
+    active = _team(1, "10")
+    inactive = Team.objects.create(team_number=2, team_name="Team 2", is_active=False)
+    _inject(inactive, "inj", "30")
+
+    standings = compute_standings()
+
+    assert [(s.team, s.total_score) for s in standings] == [(active, Decimal("10.00"))]
+
+
 def _finding(user: User, team: Team, **fields: object) -> RedTeamScore:
     finding = RedTeamScore.objects.create(points_per_team=Decimal("50"), submitted_by=user, **fields)
     finding.affected_teams.add(team)
