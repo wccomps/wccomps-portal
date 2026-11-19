@@ -179,6 +179,25 @@ def test_an_account_matching_no_team_in_the_folder_gets_none(team_folder, userna
     assert _groups(f"uid-{username}") == []
 
 
+@pytest.mark.parametrize("username", ["team00a", "team51a"])
+def test_a_folder_account_named_for_a_number_past_the_teams_gets_none(team_folder, username):
+    """Team numbers run from 1 to MAX_TEAMS (50), so a folder account fully matching the pattern for 00 or 51 is on
+    no team."""
+    _stored(f"uid-{username}", ["Team-Blue-01"])
+
+    refresh_user_groups(FakeAuthentik([*USERS, _user(101, username)]).manager())
+
+    assert _groups(f"uid-{username}") == []
+
+
+def test_the_last_teams_folder_account_holds_its_group(team_folder):
+    _stored("uid-team50a", [])
+
+    refresh_user_groups(FakeAuthentik([*USERS, _user(150, "team50a")]).manager())
+
+    assert _groups("uid-team50a") == ["Team-Blue-50"]
+
+
 def test_with_the_folder_unset_the_refresh_gives_no_team_group(team_folder, settings):
     settings.TEAM_ACCOUNT_PATH = ""
     _stored("uid-team01a", ["Team-Blue-01"])
@@ -523,6 +542,25 @@ def test_sign_ins_share_the_folder_read_for_a_minute(teams):
     cache.accounts = {u: (user, at - FOLDER_CACHE_SECONDS) for u, (user, at) in cache.accounts.items()}
     _sign_in(fake, _claimed("team01a"))
     assert fake.listed_pages == [1, 1, 2, 1]
+
+
+def test_rereading_for_a_stale_account_keeps_the_other_recent_reads(teams):
+    """A sign-in whose account was read over a minute ago reads the folder up to that account again. Accounts read
+    within the minute, and a staff account the folder lacked within the minute, still sign in from the earlier read."""
+    fake = FakeAuthentik(USERS)
+    fake.page_size = 2
+    staff = {"sub": "uid-staff", "preferred_username": "gold-admin", "groups": ["Portal_GoldTeam"]}
+    _sign_in(fake, staff)
+    assert fake.listed_pages == [1, 2, 3, 4]
+
+    cache = team_accounts._folder_cache
+    user, read_at = cache.accounts["uid-team01a"]
+    cache.accounts["uid-team01a"] = (user, read_at - FOLDER_CACHE_SECONDS)
+    _sign_in(fake, _claimed("team01a"))
+    _sign_in(fake, _claimed("team02a"))
+    _sign_in(fake, staff)
+
+    assert fake.listed_pages == [1, 2, 3, 4, 1]
 
 
 def test_a_sign_in_outside_the_folder_lists_it_once_a_minute(teams):
