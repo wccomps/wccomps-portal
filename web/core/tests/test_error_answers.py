@@ -142,6 +142,22 @@ def test_staff_see_every_teams_ticket(other_team: Team) -> None:
     assert response.status_code == 200
 
 
+def test_a_team_gets_the_attachment_it_asks_for_of_its_own() -> None:
+    """The lookup picks the record among the team's own: each download is its file, and an id it lacks is a 404."""
+    client = signed_in("blue_team")
+    own = ticket(Team.objects.get(team_number=1), "T001-001")
+    first, second = (
+        TicketAttachment.objects.create(ticket=own, file_data=data, filename="a.txt", mime_type="text/plain")
+        for data in (b"first", b"second")
+    )
+    for attachment, data in ((first, b"first"), (second, b"second")):
+        response = client.get(reverse("ticket_attachment_download", args=["T001-001", attachment.pk]))
+        assert response.status_code == 200
+        assert response.getvalue() == data
+    missing = client.get(reverse("ticket_attachment_download", args=["T001-001", second.pk + 1000]))
+    assert missing.status_code == 404
+
+
 # JSON endpoints ----------------------------------------------------------------------------------------------------
 
 

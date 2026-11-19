@@ -1,11 +1,13 @@
 """Tests for auth_utils.py permission functions."""
 
+import json
 import re
 
 import pytest
 from django.contrib.auth.models import AnonymousUser, User
 from django.http import HttpResponse
 from django.test import RequestFactory
+from django.urls import reverse
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -19,10 +21,12 @@ from core.auth_utils import (
     has_permission,
     permission_groups_of,
     require_permission,
+    sign_out_everywhere,
     users_granted,
 )
 from core.models import UserGroups
 from core.tests.guards import REPO_DIR, fail_with, tracked_files
+from core.tests.roles import role_user
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
@@ -224,6 +228,22 @@ class TestRequirePermissionDecorator:
         with pytest.raises(PermissionDenied, match="Only ticketing admins"):
             protected_view(request)
 
+    def test_a_refusal_without_a_message_answers_the_default_one(self, blue_team_user):
+        """With no error_message the 403 says core.errors' own words."""
+        from django.core.exceptions import PermissionDenied
+
+        from core.errors import MESSAGES, permission_denied
+
+        @require_permission("ticketing_admin")
+        def protected_view(request):
+            return HttpResponse("success")
+
+        request = RequestFactory().get("/test/", headers={"Accept": "application/json"})
+        request.user = blue_team_user
+        with pytest.raises(PermissionDenied) as refused:
+            protected_view(request)
+        assert json.loads(permission_denied(request, refused.value).content) == {"error": MESSAGES[403]}
+
     def test_decorator_sends_anonymous_user_to_sign_in(self):
         """A signed-out visitor is sent to sign in, coming back to the page after."""
 
@@ -236,6 +256,54 @@ class TestRequirePermissionDecorator:
         response = protected_view(request)
         assert response.status_code == 302
         assert response.url == "/auth/login/?next=%2Ftest%2F"
+
+
+@pytest.mark.parametrize(
+    ("role", "url_name"),
+    [
+        ("ticketing_support", "ticket_list"),
+        ("white_team", "leaderboard_page"),
+        ("gold_team", "leaderboard_page"),
+        ("red_team", "scoring:submit_red_score"),
+        ("orange_team", "orange_team:dashboard"),
+        ("blue_team", "ticket_list"),
+    ],
+)
+def test_each_role_lands_on_its_own_page(role: str, url_name: str) -> None:
+    assert get_role_based_landing_url(permission_groups_of(role_user(role))) == reverse(url_name)
+
+
+class TestDjangoAdminPermissions:
+    """Django's model permissions (has_perm, through core.auth_backends) belong to an active portal admin only."""
+
+    def test_an_active_admin_holds_them(self):
+        admin = role_user("admin")
+        assert admin.has_perm("core.view_auditlog")
+        assert admin.has_module_perms("core")
+
+    def test_a_disabled_admin_holds_none(self):
+        admin = role_user("admin")
+        admin.is_active = False
+        assert not admin.has_perm("core.view_auditlog")
+        assert not admin.has_module_perms("core")
+
+    @pytest.mark.parametrize("role", ["gold_team", "ticketing_admin", "blue_team"])
+    def test_another_role_holds_none(self, role: str):
+        user = role_user(role)
+        assert not user.has_perm("core.view_auditlog")
+        assert not user.has_module_perms("core")
+
+
+def test_signing_out_everywhere_writes_only_the_password() -> None:
+    """A rename saved since the user was read stays: the sign-out doesn't put back the copy it was given."""
+    stale = role_user("blue_team")
+    User.objects.filter(pk=stale.pk).update(username="renamed")
+
+    sign_out_everywhere(stale)
+
+    saved = User.objects.get(pk=stale.pk)
+    assert saved.username == "renamed"
+    assert not saved.has_usable_password()
 
 
 class TestGroupsGrantProperties:
