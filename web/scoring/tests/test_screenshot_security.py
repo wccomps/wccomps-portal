@@ -12,7 +12,7 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from core.stored_files import UploadError
+from core.stored_files import MAX_SCREENSHOTS, UploadError
 from scoring.models import IncidentReport, IncidentScreenshot, RedTeamScore, RedTeamScreenshot
 from team.models import Team
 
@@ -59,6 +59,19 @@ def test_upload_reads_are_bounded():
     upload.size = None
     with pytest.raises(UploadError):
         RedTeamScreenshot.from_upload(upload)
+    # Read no further than one byte past the limit, which is how it knows the file is too big
+    assert upload.file.tell() == RedTeamScreenshot.MAX_SIZE + 1
+
+
+@pytest.mark.parametrize("size", [None, RedTeamScreenshot.MAX_SIZE + 1])
+@pytest.mark.parametrize(("name", "named"), [("big.png", "big.png"), ("\u202e", "screenshot.png")])
+def test_an_oversize_upload_is_refused_naming_it_or_the_default_when_its_name_cleans_away(size, name, named):
+    upload = SimpleUploadedFile(name, b"", content_type="image/png")
+    upload.file = io.BytesIO(PNG + b"\x00" * RedTeamScreenshot.MAX_SIZE)
+    upload.size = size
+    with pytest.raises(UploadError) as refused:
+        RedTeamScreenshot.from_upload(upload)
+    assert str(refused.value) == f"{named}: File too large (max 10MB)"
 
 
 # --- download views (also cover rows stored before the fix) ----------------------------------------
@@ -234,6 +247,20 @@ def test_red_team_finding_with_screenshots_is_saved(team, red_team_user, mock_qu
     assert RedTeamScreenshot.objects.filter(finding=RedTeamScore.objects.get()).count() == 2
 
 
+def test_a_finding_with_the_most_screenshots_allowed_is_saved(team, red_team_user, mock_quotient_client):
+    response = _submit_red(red_team_user, [_upload(PNG, f"s{n}.png") for n in range(MAX_SCREENSHOTS)])
+
+    assert response.status_code == 302
+    assert RedTeamScreenshot.objects.filter(finding=RedTeamScore.objects.get()).count() == MAX_SCREENSHOTS
+
+
+def test_too_many_screenshots_are_refused_saying_how_many_are_allowed(team, red_team_user, mock_quotient_client):
+    response = _submit_red(red_team_user, [_upload(PNG, f"s{n}.png") for n in range(MAX_SCREENSHOTS + 1)])
+
+    assert b"File upload failed: Maximum 20 screenshots allowed per submission" in response.content
+    assert not RedTeamScore.objects.exists()
+
+
 def test_a_refused_screenshot_is_named_among_the_others(team, red_team_user, mock_quotient_client, monkeypatch):
     monkeypatch.setattr(RedTeamScreenshot, "MAX_SIZE", len(PNG))
     response = _submit_red(red_team_user, [_upload(PNG, "fits.png"), _upload(PNG + b"more", "too-big.png")])
@@ -251,6 +278,31 @@ def test_total_submission_size_is_bounded(team, red_team_user, mock_quotient_cli
 
     assert response.status_code == 200
     assert b"Total upload size cannot exceed" in response.content
+    assert not RedTeamScore.objects.exists()
+
+
+def test_a_submission_of_exactly_the_total_size_allowed_is_saved(
+    team, red_team_user, mock_quotient_client, monkeypatch
+):
+    import core.stored_files
+
+    monkeypatch.setattr(core.stored_files, "MAX_SUBMISSION_SIZE", 2 * len(PNG))
+    response = _submit_red(red_team_user, [_upload(PNG, "first.png"), _upload(PNG, "second.png")])
+
+    assert response.status_code == 302
+    assert RedTeamScreenshot.objects.filter(finding=RedTeamScore.objects.get()).count() == 2
+
+
+def test_a_submission_too_big_in_total_is_refused_naming_the_limit(
+    team, red_team_user, mock_quotient_client, monkeypatch
+):
+    import core.stored_files
+
+    monkeypatch.setattr(core.stored_files, "MAX_SUBMISSION_SIZE", 2 * 1024 * 1024)
+    half_and_more = PNG + b"\x00" * (1024 * 1024)
+    response = _submit_red(red_team_user, [_upload(half_and_more, "first.png"), _upload(half_and_more, "second.png")])
+
+    assert b"File upload failed: Total upload size cannot exceed 2MB" in response.content
     assert not RedTeamScore.objects.exists()
 
 
