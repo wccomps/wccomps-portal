@@ -2,6 +2,7 @@
 
 import logging
 
+import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
@@ -122,6 +123,46 @@ def test_a_logged_newline_and_a_literal_backslash_n_stay_distinct() -> None:
 
     assert '"GET /a\\nb"' in logged_path("/a\nb")
     assert '"GET /a\\\\nb"' in logged_path("/a\\nb")
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_a_logged_path_keeps_its_spaces_inside_its_quotes(raises: bool) -> None:
+    """The path is the one quoted field, so a space in it is written as is (an unquoted field escapes it)."""
+    from django.contrib.auth.models import AnonymousUser
+    from django.http import HttpResponse
+    from django.test import RequestFactory
+
+    from core.middleware import AccessLoggingMiddleware
+
+    def view(request):
+        if raises:
+            raise RuntimeError("boom")
+        return HttpResponse()
+
+    request = RequestFactory().get("/")
+    request.path = "/a b/"
+    request.user = AnonymousUser()
+
+    messages = _logged(lambda: AccessLoggingMiddleware(view)(request))
+
+    assert messages and all('"GET /a b/"' in message for message in messages), messages
+
+
+def test_a_request_without_a_host_header_logs_a_dash_for_it() -> None:
+    from django.contrib.auth.models import AnonymousUser
+    from django.http import HttpResponse
+    from django.test import RequestFactory
+
+    from core.middleware import AccessLoggingMiddleware
+
+    request = RequestFactory().get("/")
+    request.META.pop("HTTP_HOST", None)
+    request.user = AnonymousUser()
+
+    (message,) = _logged(lambda: AccessLoggingMiddleware(lambda r: HttpResponse())(request))
+
+    # client_ip user host "method path" ...
+    assert message.split()[1:4] == ["-", "-", '"GET']
 
 
 def test_an_unhandled_exception_keeps_its_traceback() -> None:

@@ -86,13 +86,22 @@ def test_a_nul_character_in_a_path_is_refused(admin_client: Client, text: str) -
 @given(text=with_nul, fetch=st.booleans())
 @example(text="\x00", fetch=False)
 def test_a_nul_character_in_a_query_is_refused(admin_client: Client, text: str, fetch: bool) -> None:
-    """The ticket review's search filtered on it and failed with a 500."""
+    """The ticket review's search filtered on it and failed with a 500. A page asks for plain text saying why, a fetch
+    for JSON."""
     headers = {"Sec-Fetch-Mode": "cors"} if fetch else {}
     with rolled_back():
         response = admin_client.get(reverse("ops_review_tickets"), {"search": text}, headers=headers)
     assert response.status_code == 400
     if fetch:
-        assert response.json()["error"]
+        assert response.json() == {"error": NUL_MESSAGE}
+    else:
+        assert (response["Content-Type"], response.content.decode()) == ("text/plain; charset=utf-8", NUL_MESSAGE)
+
+
+def test_a_nul_character_in_a_query_parameters_name_is_refused(admin_client: Client) -> None:
+    response = admin_client.get(reverse("ops_review_tickets"), {"sea\x00rch": "x"})
+
+    assert response.status_code == 400
 
 
 @given(text=with_nul)
