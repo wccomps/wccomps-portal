@@ -21,6 +21,10 @@ pytestmark = pytest.mark.django_db
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
 PDF = b"%PDF-1.7\n" + b"\x00" * 64
+WEBP = b"RIFF\x24\x00\x00\x00WEBPVP8 " + b"\x00" * 64
+SHORTEST_WEBP = b"RIFF\x04\x00\x00\x00WEBP"
+WAV = b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 64
+WEBP_NOT_RIFF = b"RIFX\x24\x00\x00\x00WEBPVP8 " + b"\x00" * 64
 HTML = b"<html><script>fetch('/ops/admin/competition/action/',{method:'POST'})</script></html>"
 SVG = b'<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>'
 TEXT = b"team01 pii dump\n"
@@ -36,6 +40,10 @@ def _upload(data: bytes, name: str = "shot.png", content_type: str = "image/png"
         (PNG, "text/html", "image/png"),
         (JPEG, "image/jpeg", "image/jpeg"),
         (PDF, "application/pdf", "application/pdf"),
+        (WEBP, "image/webp", "image/webp"),
+        (SHORTEST_WEBP, "image/webp", "image/webp"),
+        (WAV, "image/webp", "application/octet-stream"),
+        (WEBP_NOT_RIFF, "image/webp", "application/octet-stream"),
         (HTML, "image/png", "application/octet-stream"),
         (SVG, "image/svg+xml", "application/octet-stream"),
         (TEXT, "text/plain", "application/octet-stream"),
