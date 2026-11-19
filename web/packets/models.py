@@ -112,21 +112,14 @@ class Packet(StoredFile):
         return f"{self.title} ({self.status})"
 
     def get_distribution_stats(self) -> dict[str, int]:
-        if "total_distributions" in self.__dict__:
-            return {
-                "total": int(self.__dict__["total_distributions"]),
-                "pending": int(self.__dict__["pending_count"]),
-                "sent": int(self.__dict__["sent_count"]),
-                "failed": int(self.__dict__["failed_count"]),
-                "downloaded": int(self.__dict__["downloaded_count"]),
-            }
-        return self.distributions.aggregate(
-            total=Count("pk"),
-            pending=Count("pk", filter=Q(email_status="pending")),
-            sent=Count("pk", filter=Q(email_status="sent")),
-            failed=Count("pk", filter=Q(email_status="failed")),
-            downloaded=Count("pk", filter=Q(downloaded_at__isnull=False)),
-        )
+        """The counts a packet read through with_distribution_stats() carries."""
+        return {
+            "total": int(self.__dict__["total_distributions"]),
+            "pending": int(self.__dict__["pending_count"]),
+            "sent": int(self.__dict__["sent_count"]),
+            "failed": int(self.__dict__["failed_count"]),
+            "downloaded": int(self.__dict__["downloaded_count"]),
+        }
 
     def is_ready_for_distribution(self) -> bool:
         return self.status == "draft"
