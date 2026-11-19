@@ -73,6 +73,17 @@ def test_service_max_uses_highest_uptime_per_service() -> None:
     assert result == Decimal("2232")  # 1116 + 1116
 
 
+def test_service_max_keeps_the_highest_reliable_uptime_whichever_team_reports_it() -> None:
+    t1, t2, t3 = (Team.objects.create(team_number=n, team_name=f"T{n}") for n in (1, 2, 3))
+    # web: the best sample comes from the middle team; dns: from the first team.
+    _detail(t1, "web", "400", "0.5")  # 800
+    _detail(t2, "web", "900", "0.9")  # 1000
+    _detail(t3, "web", "300", "0.6")  # 500
+    _detail(t1, "dns", "160", "0.8")  # 200
+    _detail(t2, "dns", "50", "0.5")  # 100
+    assert service_max_from_details() == Decimal("1200")
+
+
 def test_service_max_ignores_zero_point_best_sample() -> None:
     # The highest-uptime team scored 0 (port up, content/auth check failed); it must not
     # "cover" the service with a 0 contribution. The real scorer (lower uptime) sets the max.
