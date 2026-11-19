@@ -4,11 +4,22 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 from scoring.calculator import compute_standings, get_standing
-from scoring.models import AttackType, InjectScore, RedTeamScore, ScoringTemplate, ServiceDetail, ServiceScore
+from scoring.models import (
+    AttackType,
+    IncidentReport,
+    InjectScore,
+    RedTeamScore,
+    ScoringExclusion,
+    ScoringTemplate,
+    ServiceDetail,
+    ServiceScore,
+)
 from scoring.scorecard import build_scorecard_context
 from team.models import Team
+from ticketing.models import Ticket
 
 pytestmark = pytest.mark.django_db
 
@@ -144,3 +155,61 @@ def test_red_findings_are_the_teams_approved_ones_by_attack_type(three_teams) ->
 
     assert list(context["red_scores"]) == [by_sqli, by_xss]
     assert context["red_total"] == Decimal("75")
+
+
+def test_every_scored_category_is_ranked_even_after_an_empty_one(three_teams) -> None:
+    # Orange (nobody scored) comes before red, SLA, recovery and adjustments in the category list.
+    red = User.objects.create_user("red")
+    ServiceScore.objects.filter(team=three_teams[0]).update(sla_violations=Decimal("-10"))
+    finding = RedTeamScore.objects.create(points_per_team=Decimal("25"), submitted_by=red, is_approved=True)
+    finding.affected_teams.add(three_teams[2])
+    IncidentReport.objects.create(
+        team=three_teams[1],
+        submitted_by=red,
+        attack_description="x",
+        source_ip="10.0.0.1",
+        attack_detected_at=timezone.now(),
+        points_returned=Decimal("30"),
+        is_approved=True,
+    )
+    Ticket.objects.create(
+        ticket_number="T-0001", team=three_teams[0], title="t", status="resolved", points_charged=20, is_approved=True
+    )
+
+    ranks = _context(three_teams[0])["stats"]["category_ranks"]
+
+    assert set(ranks) == {"services", "injects", "red", "sla", "recovery", "adjustments"}
+    assert (ranks["sla"]["value"], ranks["recovery"]["value"], ranks["adjustments"]["value"]) == (
+        Decimal("-10"),
+        Decimal("0"),
+        Decimal("-20"),
+    )
+
+
+def test_a_team_exactly_at_the_average_is_not_below_it(three_teams) -> None:
+    ServiceScore.objects.filter(team=three_teams[1]).update(service_points=Decimal("200"))
+    for team, points in zip(three_teams, ("40", "20", "0"), strict=True):
+        InjectScore.objects.create(
+            team=team, inject_id="inj-c", inject_name="Inject C", points_awarded=Decimal(points), is_approved=True
+        )
+
+    stats = _context(three_teams[1])["stats"]
+
+    services = stats["category_ranks"]["services"]
+    assert (services["delta"], services["below_avg"]) == (0, False)
+    inject_c = next(inject for inject in stats["inject_stats"] if inject["name"] == "Inject C")
+    assert (inject_c["delta"], inject_c["below_avg"]) == (0, False)
+
+
+def test_an_excluded_teams_scorecard_rates_its_injects_against_the_ranked_teams(three_teams) -> None:
+    ScoringExclusion.objects.create(team=three_teams[2])
+    InjectScore.objects.create(
+        team=three_teams[2], inject_id="solo", inject_name="Solo", points_awarded=Decimal("5"), is_approved=True
+    )
+
+    by_name = {inject["name"]: inject for inject in _context(three_teams[2])["stats"]["inject_stats"]}
+
+    solo = by_name["Solo"]
+    assert (solo["rank"], solo["avg"], solo["max"], solo["delta"]) == (1, Decimal("0"), Decimal("0"), 5)
+    shared = by_name["Inject A"]
+    assert (shared["rank"], shared["avg"], shared["max"]) == (3, Decimal("40"), Decimal("50"))
