@@ -454,6 +454,16 @@ def test_an_account_outside_the_folder_signs_in_as_claimed(teams):
     assert _groups("uid-team01c") == []
 
 
+def test_a_folder_account_whose_authentik_username_cant_be_one_signs_in_as_claimed(teams, caplog):
+    """A folder account named past the username column (or with a NUL) keeps the claimed name, and it is logged."""
+    fake = FakeAuthentik([*USERS, _user(41, "team01" + "d" * 200, uid="uid-long")])
+
+    _sign_in(fake, {"sub": "uid-long", "preferred_username": "team01"})
+
+    assert User.objects.get(usergroups__authentik_id="uid-long").username == "team01"
+    assert "unusable Authentik username" in caplog.text
+
+
 @pytest.mark.parametrize(
     ("username", "held"),
     [

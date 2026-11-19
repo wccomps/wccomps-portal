@@ -438,6 +438,20 @@ class TestOAuthCallback:
         assert not new.is_superuser
         assert not new.is_staff
 
+    def test_a_reused_username_as_long_as_the_column_moves_its_holder_aside_within_it(self, oauth_state_session):
+        """The holder's new name keeps as much of the old one as fits beside the suffix."""
+        client, state = oauth_state_session
+        name = "n" * User._meta.get_field("username").max_length
+        old = User.objects.create_user(username=name)
+        UserGroups.objects.create(user=old, authentik_id="old-sub", groups=[])
+
+        assert self._login(client, state, {"sub": "new-sub", "preferred_username": name}).status_code == 302
+
+        old.refresh_from_db()
+        suffix = f"~replaced-{old.pk}"
+        assert old.username == name[: len(name) - len(suffix)] + suffix
+        assert User.objects.get(usergroups__authentik_id="new-sub").username == name
+
     def test_renamed_user_takes_their_new_name_from_a_stale_holder(self, oauth_state_session):
         """Portal username follows Authentik's: /link looks the Authentik user up by it."""
         client, state = oauth_state_session

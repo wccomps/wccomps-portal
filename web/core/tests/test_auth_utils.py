@@ -150,6 +150,34 @@ class TestHasPermission:
             has_permission(admin_user, name)
 
 
+# What each test role (core.tests.roles) holds: the admin group everything, gold every team role's permission and
+# blue_team without a team, a lead their team's permission too, a ticketing admin ticketing support's too.
+TEAM_ROLES = {"gold_team", "white_team", "orange_team", "white_team_lead", "orange_team_lead", "blue_team"}
+ROLE_PERMISSIONS: dict[str, set[str]] = {
+    "no_role": set(),
+    "blue_team": {"blue_team"},
+    "red_team": {"red_team"},
+    "gold_team": TEAM_ROLES,
+    "white_team": {"white_team"},
+    "white_team_lead": {"white_team", "white_team_lead"},
+    "orange_team": {"orange_team"},
+    "orange_team_lead": {"orange_team", "orange_team_lead"},
+    "ticketing_support": {"ticketing_support"},
+    "ticketing_admin": {"ticketing_support", "ticketing_admin"},
+    "admin": {"admin", "ticketing_admin", "ticketing_support", "red_team", *TEAM_ROLES},
+}
+
+
+@pytest.mark.parametrize("role", list(ROLE_PERMISSIONS))
+def test_each_role_holds_exactly_its_permissions(role: str) -> None:
+    user = role_user(role)
+    assert {permission for permission in PERMISSION_MAP if has_permission(user, permission)} == ROLE_PERMISSIONS[role]
+
+
+def test_the_admin_group_grants_every_permission() -> None:
+    assert ROLE_PERMISSIONS["admin"] == set(PERMISSION_MAP)
+
+
 class TestGetPermissionsContext:
     """Tests for get_permissions_context function."""
 
