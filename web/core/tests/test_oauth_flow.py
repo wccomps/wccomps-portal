@@ -5,13 +5,27 @@ These tests verify the full OAuth callback logic without requiring
 a real Authentik server.
 """
 
+import re
+import time
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from django.contrib.auth.models import User
+from django.core import signing
 from django.test import Client
+from django.utils import timezone
 
 from core.models import CredentialsReset, UserGroups
+
+OAUTH_CONFIG = {
+    "client_id": "test-client-id",
+    "client_secret": "test-secret",
+    "authorization_endpoint": "https://auth.example.com/authorize/",
+    "token_endpoint": "https://auth.example.com/token/",
+    "userinfo_endpoint": "https://auth.example.com/userinfo/",
+    "end_session_endpoint": "https://auth.example.com/end-session/",
+}
 
 
 @pytest.fixture
@@ -747,6 +761,254 @@ class TestOAuthCallback:
         # Should NOT redirect to the external URL
         assert response.status_code == 302
         assert "evil.com" not in response.url
+
+
+def _authentik_answer(body: object = None, *, failure: Exception | None = None) -> MagicMock:
+    answer = MagicMock()
+    answer.json.return_value = body
+    answer.raise_for_status = MagicMock(side_effect=failure)
+    return answer
+
+
+def _callback_with(client: Client, query: dict[str, str], token: MagicMock, userinfo: MagicMock):
+    with (
+        patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
+        patch("core.oauth.httpx.Client") as mock_httpx,
+    ):
+        mock_client = mock_httpx.return_value.__enter__.return_value
+        mock_client.post.return_value = token
+        mock_client.get.return_value = userinfo
+        return client.get("/auth/callback/", query)
+
+
+GOOD_TOKEN = {"access_token": "test-token"}
+GOOD_USERINFO = {"sub": "refused-sub", "preferred_username": "refused", "groups": []}
+HTTP_FAILURE = httpx.HTTPStatusError("502", request=MagicMock(), response=MagicMock())
+
+
+def _shown(response) -> tuple[int, str, str]:
+    """The error page's status, its browser title (the error's, then the site's name) and its message."""
+    title = re.search(r"<title>(.*?)</title>", response.content.decode(), re.S)
+    assert title, response.content
+    return response.status_code, title.group(1).strip(), response.context["error_message"]
+
+
+@pytest.mark.django_db
+class TestEachRefusal:
+    """Every way a sign-in fails answers the error page saying why, and signs nobody in."""
+
+    @pytest.fixture(autouse=True)
+    def _site_name(self, settings):
+        settings.SITE_NAME = "Example Portal"
+
+    @pytest.mark.parametrize(
+        ("query", "title", "message"),
+        [
+            ({"error": "access_denied"}, "Login Cancelled", "You cancelled the login."),
+            ({"error": "server_error", "error_description": "down"}, "Login Failed", "Please try again."),
+            ({"code": "test-code"}, "Session Expired", "Please try again."),
+            ({"code": "test-code", "state": "forged"}, "Security Error", "Please try again."),
+        ],
+    )
+    def test_a_refusal_before_the_state_is_read(self, client, query, title, message):
+        response = client.get("/auth/callback/", query)
+
+        assert _shown(response) == (200, f"{title} - Example Portal", message)
+        assert "_auth_user_id" not in client.session
+
+    def test_an_expired_state(self, client):
+        with patch("django.core.signing.time.time", return_value=time.time() - 600):
+            state = signing.dumps({"n": "test-nonce", "next": "/"})
+
+        response = client.get("/auth/callback/", {"code": "test-code", "state": state})
+
+        assert _shown(response) == (200, "Session Expired - Example Portal", "Please try again.")
+
+    def test_a_state_this_browser_did_not_start(self, oauth_state_session):
+        _client, state = oauth_state_session
+        other = Client()
+
+        response = other.get("/auth/callback/", {"code": "test-code", "state": state})
+
+        assert _shown(response) == (200, "Session Expired - Example Portal", "Please try logging in again.")
+
+    @pytest.mark.parametrize(
+        ("query", "token", "userinfo", "message"),
+        [
+            ({}, GOOD_TOKEN, GOOD_USERINFO, None),
+            ({"code": "test-code"}, None, GOOD_USERINFO, "Please try again."),
+            ({"code": "test-code"}, {"access_token": ""}, GOOD_USERINFO, "Please try again."),
+            ({"code": "test-code"}, {"access_token": 7}, GOOD_USERINFO, "Please try again."),
+            ({"code": "test-code"}, GOOD_TOKEN, None, "Please try again."),
+            ({"code": "test-code"}, GOOD_TOKEN, {"sub": "refused-sub"}, "Invalid user data."),
+        ],
+    )
+    def test_a_refusal_after_the_state_is_read(self, oauth_state_session, query, token, userinfo, message):
+        """No code is a failed login; an exchange or userinfo request that fails, no access token or no usable
+        claims is a failed authentication."""
+        client, state = oauth_state_session
+        token_answer = _authentik_answer(token, failure=HTTP_FAILURE if token is None else None)
+        userinfo_answer = _authentik_answer(userinfo, failure=HTTP_FAILURE if userinfo is None else None)
+
+        response = _callback_with(client, {**query, "state": state}, token_answer, userinfo_answer)
+
+        title = "Login Failed" if message is None else "Authentication Failed"
+        assert _shown(response) == (200, f"{title} - Example Portal", message or "Please try again.")
+        assert "_auth_user_id" not in client.session
+        assert not UserGroups.objects.exists()
+
+    def test_a_sign_in_from_before_a_reset_offers_a_fresh_sign_in_back_to_its_page(self, client):
+        session = client.session
+        session["oauth_nonce"] = "reset-nonce"
+        session.save()
+        state = signing.dumps({"n": "reset-nonce", "next": "/ops/tickets/", "t": int(time.time()) - 60})
+        CredentialsReset.objects.create(authentik_id="refused-sub", reset_at=timezone.now())
+
+        response = _callback_with(
+            client,
+            {"code": "test-code", "state": state},
+            _authentik_answer(GOOD_TOKEN),
+            _authentik_answer(GOOD_USERINFO),
+        )
+
+        assert _shown(response) == (
+            200,
+            "Signed Out - Example Portal",
+            "This account's password was reset after you signed in. Sign in again with it.",
+        )
+        assert response.context["retry_url"] == "/auth/login/?prompt=login&next=%2Fops%2Ftickets%2F"
+        assert "_auth_user_id" not in client.session
+        assert not UserGroups.objects.exists()
+
+    def test_authentiks_error_and_its_reason_are_logged(self, client, caplog):
+        with caplog.at_level("WARNING", logger="core.oauth"):
+            client.get("/auth/callback/", {"error": "server_error", "error_description": "the database is down"})
+
+        assert [r.getMessage() for r in caplog.records if r.name == "core.oauth"] == [
+            "OAuth error: server_error - the database is down"
+        ]
+
+
+@pytest.mark.django_db
+def test_the_code_is_redeemed_and_the_claims_read_as_authentik_expects(oauth_state_session):
+    """The token request carries the grant, the code, the client's credentials and the redirect URI the login sent;
+    the userinfo request carries the access token the exchange answered. Both give up after the configured timeout,
+    so a hung Authentik can't hold the sign-in open."""
+    from urllib.parse import parse_qs
+
+    from django.conf import settings
+
+    client, state = oauth_state_session
+    sent: list[httpx.Request] = []
+    bodies = [GOOD_TOKEN, GOOD_USERINFO]
+
+    def handle(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json=bodies[len(sent) - 1], request=request)
+
+    with (
+        patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
+        patch.object(httpx.HTTPTransport, "handle_request", handle),
+    ):
+        response = client.get("/auth/callback/", {"code": "the-code", "state": state})
+
+    assert response.status_code == 302
+    token, userinfo = sent
+    assert (token.method, str(token.url)) == ("POST", OAUTH_CONFIG["token_endpoint"])
+    assert parse_qs(token.content.decode()) == {
+        "grant_type": ["authorization_code"],
+        "client_id": ["test-client-id"],
+        "client_secret": ["test-secret"],
+        "code": ["the-code"],
+        "redirect_uri": ["http://testserver/auth/callback/"],
+    }
+    assert (userinfo.method, str(userinfo.url)) == ("GET", OAUTH_CONFIG["userinfo_endpoint"])
+    assert userinfo.headers["Authorization"] == "Bearer test-token"
+    assert UserGroups.objects.get().authentik_id == GOOD_USERINFO["sub"]
+    timeout = settings.HTTPX_DEFAULT_TIMEOUT
+    assert (
+        token.extensions["timeout"]
+        == userinfo.extensions["timeout"]
+        == dict.fromkeys(("connect", "read", "write", "pool"), timeout)
+    )
+
+
+SUB = "s" * 64  # UserGroups.authentik_id's column
+EMAIL = "e" * 242 + "@example.edu"  # User.email's 254
+NAME = "n" * 150  # User.username's
+
+
+@pytest.mark.django_db
+class TestClaims:
+    """The account a sign-in makes from Authentik's userinfo claims, or its refusal when they can't make one."""
+
+    def _sign_in(self, oauth_state_session, userinfo):
+        client, state = oauth_state_session
+        return client, _callback_with(
+            client,
+            {"code": "test-code", "state": state},
+            _authentik_answer(GOOD_TOKEN),
+            _authentik_answer(userinfo),
+        )
+
+    @pytest.mark.parametrize(
+        ("userinfo", "account"),
+        [
+            (
+                {"sub": "a", "preferred_username": "alice", "email": "alice@example.edu", "groups": ["G1", "G2"]},
+                ("a", "alice", "alice@example.edu", ["G1", "G2"]),
+            ),
+            ({"sub": "a", "email": "alice@example.edu"}, ("a", "alice@example.edu", "alice@example.edu", [])),
+            (
+                {"sub": "a", "preferred_username": "", "email": "x@example.edu"},
+                ("a", "x@example.edu", "x@example.edu", []),
+            ),
+            ({"sub": "a", "preferred_username": "alice", "email": None}, ("a", "alice", "", [])),
+            ({"sub": SUB, "preferred_username": NAME, "email": EMAIL}, (SUB, NAME, EMAIL, [])),
+        ],
+    )
+    def test_an_account_from_the_claims(self, oauth_state_session, userinfo, account):
+        """The username is the email when there is none; no email is an empty one, no groups none; each claim may
+        fill its column."""
+        client, response = self._sign_in(oauth_state_session, userinfo)
+
+        assert response.status_code == 302
+        row = UserGroups.objects.select_related("user").get()
+        assert (row.authentik_id, row.user.username, row.user.email, row.groups) == account
+        assert int(client.session["_auth_user_id"]) == row.user.pk
+
+    @pytest.mark.parametrize(
+        "userinfo",
+        [
+            {"preferred_username": "alice"},
+            {"sub": "", "preferred_username": "alice"},
+            {"sub": 7, "preferred_username": "alice"},
+            {"sub": SUB + "s", "preferred_username": "alice"},
+            {"sub": "a\x00", "preferred_username": "alice"},
+            {"sub": "a"},
+            {"sub": "a", "preferred_username": 7},
+            {"sub": "a", "preferred_username": "al\x00ice"},
+            {"sub": "a", "preferred_username": NAME + "n"},
+            {"sub": "a", "preferred_username": "alice", "email": 7},
+            {"sub": "a", "preferred_username": "alice", "email": "e" + EMAIL},
+            {"sub": "a", "preferred_username": "alice", "email": "alice\x00@example.edu"},
+            {"sub": "a", "preferred_username": "alice", "groups": "G1"},
+            {"sub": "a", "preferred_username": "alice", "groups": None},
+            {"sub": "a", "preferred_username": "alice", "groups": ["G1", 7]},
+            {"sub": "a", "preferred_username": "alice", "groups": ["G1", "G\x00"]},
+        ],
+    )
+    def test_claims_that_make_no_account_are_refused(self, oauth_state_session, userinfo):
+        """A missing, empty or non-text sub or username, a NUL, a claim past its column, or groups that aren't a
+        list of names."""
+        client, response = self._sign_in(oauth_state_session, userinfo)
+
+        assert (response.context["error_title"], response.context["error_message"]) == (
+            "Authentication Failed",
+            "Invalid user data.",
+        )
+        assert not UserGroups.objects.exists()
+        assert "_auth_user_id" not in client.session
 
 
 @pytest.mark.django_db
