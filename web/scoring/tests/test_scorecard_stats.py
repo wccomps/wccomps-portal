@@ -3,9 +3,10 @@
 from decimal import Decimal
 
 import pytest
+from django.contrib.auth.models import User
 
 from scoring.calculator import compute_standings, get_standing
-from scoring.models import InjectScore, ScoringTemplate, ServiceDetail, ServiceScore
+from scoring.models import AttackType, InjectScore, RedTeamScore, ScoringTemplate, ServiceDetail, ServiceScore
 from scoring.scorecard import build_scorecard_context
 from team.models import Team
 
@@ -121,3 +122,25 @@ def test_sla_penalties_worse_than_average_are_an_insight(three_teams) -> None:
 
     assert "SLA penalties (-10.00) are worse than average (-4)" in first
     assert not any(insight.startswith("SLA") for insight in second)
+
+
+def test_red_findings_are_the_teams_approved_ones_by_attack_type(three_teams) -> None:
+    red = User.objects.create_user("red")
+    sqli, xss = AttackType.objects.create(name="SQL injection"), AttackType.objects.create(name="XSS")
+
+    def finding(attack_type: AttackType, points: str, teams: list[Team], approved: bool = True) -> RedTeamScore:
+        row = RedTeamScore.objects.create(
+            attack_type=attack_type, points_per_team=Decimal(points), submitted_by=red, is_approved=approved
+        )
+        row.affected_teams.set(teams)
+        return row
+
+    by_xss = finding(xss, "25", [three_teams[0]])
+    by_sqli = finding(sqli, "50", three_teams[:2])
+    finding(sqli, "100", [three_teams[0]], approved=False)
+    finding(xss, "200", [three_teams[1]])
+
+    context = _context(three_teams[0])
+
+    assert list(context["red_scores"]) == [by_sqli, by_xss]
+    assert context["red_total"] == Decimal("75")

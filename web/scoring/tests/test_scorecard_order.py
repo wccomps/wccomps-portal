@@ -32,6 +32,15 @@ def test_orange_scorecard_list_breaks_ties_by_pk():
     assert context["orange_scores"].query.order_by == ("description", "pk")
 
 
+def test_red_scorecard_list_breaks_ties_by_pk():
+    _team_with_school()
+    standings = compute_standings()
+
+    context = build_scorecard_context(standings[0], standings)
+
+    assert context["red_scores"].query.order_by == ("attack_type__name", "pk")
+
+
 def test_inject_scorecard_list_breaks_ties_by_pk():
     team = _team_with_school()
     InjectScore.objects.create(
