@@ -377,3 +377,4 @@ def test_an_invalid_type_or_number_is_not_also_called_a_clash(active_season_with
 
     assert not form.is_valid()
     assert list(form.errors) == [error_on]
+    assert len(form.errors[error_on]) == 1
