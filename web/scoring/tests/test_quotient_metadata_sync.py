@@ -80,6 +80,41 @@ def test_an_unreachable_quotient_is_reported_not_answered_as_a_server_error(admi
     assert not AuditLog.objects.filter(action="quotient_metadata_synced").exists()
 
 
+def test_metadata_jsonb_cant_store_is_reported_naming_the_text(admin_user):
+    """A box name holding a NUL is refused before the save, and the page names the text."""
+    from quotient.client import QuotientBox, QuotientInfrastructure
+
+    QuotientMetadataCache.objects.create(boxes=[{"name": "web", "ip": "10.0.0.5"}])
+
+    response = _post_sync(admin_user, QuotientInfrastructure(boxes=[QuotientBox(name="db\x00", ip="", services=[])]))
+
+    assert response.json() == {
+        "success": False,
+        "message": "Sync failed: Quotient's metadata can't be stored: "
+        "'db\\x00' holds a NUL character or a lone surrogate, which can't be stored.",
+    }
+    assert QuotientMetadataCache.objects.get().boxes == [{"name": "web", "ip": "10.0.0.5"}]
+
+
+def test_the_admin_refuses_metadata_whose_key_jsonb_cant_store(admin_user):
+    """An object's key is text too: the admin's form says so rather than the save failing."""
+    from django.test import Client
+    from django.urls import reverse
+
+    client = Client()
+    client.force_login(admin_user)
+    response = client.post(
+        reverse("admin:scoring_quotientmetadatacache_add"),
+        {"boxes": '[{"na\\u0000me": "web"}]', "services": "[]"},
+    )
+
+    assert response.status_code == 200
+    assert response.context["adminform"].form.errors["boxes"] == [
+        "'na\\x00me' holds a NUL character or a lone surrogate, which can't be stored."
+    ]
+    assert not QuotientMetadataCache.objects.exists()
+
+
 def test_metadata_sync_merges_unscored_proxmox_team_vms_and_keeps_them_on_proxmox_blip():
     from quotient.client import QuotientBox, QuotientInfrastructure, QuotientService
 
