@@ -58,6 +58,20 @@ def test_a_sign_in_during_the_refresh_keeps_what_it_read(oauth_state_session):  
     assert (row.groups, row.account_active) == (["WCComps_BlueTeam06"], True)
 
 
+def test_a_first_sign_in_during_the_refresh_keeps_what_it_read(oauth_state_session):  # noqa: F811
+    """The account's row is made by a sign-in that read Authentik after the refresh did: the refresh's older answer
+    (the account still disabled) doesn't land over it."""
+    client, state = oauth_state_session
+
+    def a_first_sign_in_commits() -> None:
+        _in_another_thread(lambda: test_oauth_flow.TestOAuthCallback._login(client, state, SIGNED_IN))
+
+    _refresh_reading([{"uid": "sub-06", "is_active": False, "groups": []}], a_first_sign_in_commits)
+
+    row = UserGroups.objects.get(authentik_id="sub-06")
+    assert (row.groups, row.account_active) == (["WCComps_BlueTeam06"], True)
+
+
 def test_a_refresh_during_a_sign_in_keeps_what_it_read(oauth_state_session):  # noqa: F811
     """The account was disabled after this sign-in read Authentik: the sign-in must not mark it enabled again."""
     client, state = oauth_state_session

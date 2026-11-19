@@ -3,6 +3,7 @@ one user folder. These run against a fake Authentik that, like the real one with
 whatever path is asked for, so each row's path has to be checked."""
 
 import json
+import re
 from collections.abc import Iterator
 from datetime import timedelta
 from unittest.mock import patch
@@ -491,6 +492,19 @@ def test_when_authentik_cant_be_asked_the_sign_in_is_refused(teams, caplog):
     assert b"Try again in a moment" in response.content
     assert not UserGroups.objects.exists()
     assert "team folder lookup failed" in caplog.text
+
+
+def test_the_refused_sign_in_says_it_is_unavailable_for_now(teams, settings):
+    """The page names the outage, not the person: signing in again shortly works."""
+    settings.SITE_NAME = "Example Portal"
+    fake = FakeAuthentik(USERS)
+    fake.fail = True
+
+    response = _sign_in(fake, _claimed("team01a"), expect=503)
+
+    title = re.search(r"<title>(.*?)</title>", response.content.decode(), re.S)
+    assert title and title.group(1).strip() == "Sign-in Unavailable - Example Portal"
+    assert response.context["error_message"] == "Try again in a moment."
 
 
 def test_when_authentik_cant_be_asked_a_staff_sign_in_goes_ahead(teams, settings, caplog):

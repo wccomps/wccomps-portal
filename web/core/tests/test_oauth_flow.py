@@ -482,6 +482,19 @@ class TestOAuthCallback:
         assert stale.username == f"new-name~replaced-{stale.pk}"
         assert UserGroups.objects.get(user=stale).authentik_id == "deleted-id"
 
+    def test_a_sign_in_begun_at_the_front_page_lands_on_the_roles_own_page(self, oauth_state_session, settings):
+        """A login with no page to return to (its next is /) goes to the role's landing page."""
+        from django.urls import reverse
+
+        client, state = oauth_state_session
+
+        response = self._login(
+            client, state, {"sub": "w", "preferred_username": "w", "groups": [settings.PORTAL_WHITE_GROUP]}
+        )
+
+        assert response.status_code == 302
+        assert response.url == reverse("leaderboard_page")
+
     def test_moved_aside_account_takes_its_current_name_on_login(self, oauth_state_session):
         """An account whose name was taken, but whose identity was only renamed, logs in normally."""
         client, state = oauth_state_session
@@ -857,6 +870,20 @@ class TestEachRefusal:
         assert "_auth_user_id" not in client.session
         assert not UserGroups.objects.exists()
 
+    @pytest.mark.parametrize("failing", ["token", "userinfo"])
+    def test_a_failed_request_to_authentik_is_logged_with_its_error(self, oauth_state_session, caplog, failing):
+        client, state = oauth_state_session
+        failure = httpx.HTTPStatusError(f"the {failing} endpoint answered 502", request=MagicMock(), response=None)
+        token = _authentik_answer(GOOD_TOKEN, failure=failure if failing == "token" else None)
+        userinfo = _authentik_answer(GOOD_USERINFO, failure=failure if failing == "userinfo" else None)
+
+        with caplog.at_level("ERROR", logger="core.oauth"):
+            _callback_with(client, {"code": "test-code", "state": state}, token, userinfo)
+
+        logged = [r.getMessage() for r in caplog.records if r.name == "core.oauth"]
+        assert len(logged) == 1
+        assert f"the {failing} endpoint answered 502" in logged[0]
+
     def test_a_sign_in_from_before_a_reset_offers_a_fresh_sign_in_back_to_its_page(self, client):
         session = client.session
         session["oauth_nonce"] = "reset-nonce"
@@ -978,30 +1005,32 @@ class TestClaims:
         assert int(client.session["_auth_user_id"]) == row.user.pk
 
     @pytest.mark.parametrize(
-        "userinfo",
+        ("userinfo", "reason"),
         [
-            {"preferred_username": "alice"},
-            {"sub": "", "preferred_username": "alice"},
-            {"sub": 7, "preferred_username": "alice"},
-            {"sub": SUB + "s", "preferred_username": "alice"},
-            {"sub": "a\x00", "preferred_username": "alice"},
-            {"sub": "a"},
-            {"sub": "a", "preferred_username": 7},
-            {"sub": "a", "preferred_username": "al\x00ice"},
-            {"sub": "a", "preferred_username": NAME + "n"},
-            {"sub": "a", "preferred_username": "alice", "email": 7},
-            {"sub": "a", "preferred_username": "alice", "email": "e" + EMAIL},
-            {"sub": "a", "preferred_username": "alice", "email": "alice\x00@example.edu"},
-            {"sub": "a", "preferred_username": "alice", "groups": "G1"},
-            {"sub": "a", "preferred_username": "alice", "groups": None},
-            {"sub": "a", "preferred_username": "alice", "groups": ["G1", 7]},
-            {"sub": "a", "preferred_username": "alice", "groups": ["G1", "G\x00"]},
+            ({"preferred_username": "alice"}, "no usable sub claim"),
+            ({"sub": "", "preferred_username": "alice"}, "no usable sub claim"),
+            ({"sub": 7, "preferred_username": "alice"}, "no usable sub claim"),
+            ({"sub": SUB + "s", "preferred_username": "alice"}, "no usable sub claim"),
+            ({"sub": "a\x00", "preferred_username": "alice"}, "a NUL character"),
+            ({"sub": "a"}, "no usable username"),
+            ({"sub": "a", "preferred_username": 7}, "no usable username"),
+            ({"sub": "a", "preferred_username": "al\x00ice"}, "no usable username"),
+            ({"sub": "a", "preferred_username": NAME + "n"}, "no usable username"),
+            ({"sub": "a", "preferred_username": "alice", "email": 7}, "an unusable email"),
+            ({"sub": "a", "preferred_username": "alice", "email": "e" + EMAIL}, "an unusable email"),
+            ({"sub": "a", "preferred_username": "alice", "email": "alice\x00@example.edu"}, "a NUL character"),
+            ({"sub": "a", "preferred_username": "alice", "groups": "G1"}, "groups that aren't a list of names"),
+            ({"sub": "a", "preferred_username": "alice", "groups": None}, "groups that aren't a list of names"),
+            ({"sub": "a", "preferred_username": "alice", "groups": ["G1", 7]}, "groups that aren't a list of names"),
+            ({"sub": "a", "preferred_username": "alice", "groups": ["G1", "G\x00"]}, "a NUL character"),
         ],
     )
-    def test_claims_that_make_no_account_are_refused(self, oauth_state_session, userinfo):
+    def test_claims_that_make_no_account_are_refused(self, oauth_state_session, caplog, userinfo, reason):
         """A missing, empty or non-text sub or username, a NUL, a claim past its column, or groups that aren't a
-        list of names."""
-        client, response = self._sign_in(oauth_state_session, userinfo)
+        list of names. The page only says the data was invalid; the log says which claim, for whoever fixes the
+        scope mapping."""
+        with caplog.at_level("ERROR", logger="core.oauth"):
+            client, response = self._sign_in(oauth_state_session, userinfo)
 
         assert (response.context["error_title"], response.context["error_message"]) == (
             "Authentication Failed",
@@ -1009,6 +1038,7 @@ class TestClaims:
         )
         assert not UserGroups.objects.exists()
         assert "_auth_user_id" not in client.session
+        assert [r.getMessage() for r in caplog.records if r.name == "core.oauth"] == [f"Userinfo unusable: {reason}"]
 
 
 @pytest.mark.django_db
