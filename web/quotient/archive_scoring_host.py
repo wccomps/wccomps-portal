@@ -12,9 +12,9 @@ archive writes <event>-scoring-host-<UTC time>.tar.gz and its .sha256 into the a
 their owner, and never replaces a file there (it names them by hard link, so the directory's filesystem must support
 hard links). The tarball holds:
 - submissions/: every regular file under the event directory's submissions (inject uploads, by inject, team and
-  attempt), read without following a symlink. Symlinks below it are left out and listed in the manifest: following
-  one would let whoever can write there choose any file on the host. A submissions directory that is itself a
-  symlink is followed, and a directory or file that can't be read stops the archive;
+  attempt), read without following a symlink. Symlinks found while listing it are left out and listed in the
+  manifest: following one would let whoever can write there choose any file on the host. A submissions directory
+  that is itself a symlink is followed, and a directory or file that can't be read stops the archive;
 - divisor.log: `docker logs` of the event's divisor container, the source addresses the runners used and when
   (the container is found by its Compose labels, so another event's divisor is never taken for this one);
 - manifest.json: the event, when and from which container, each file's size and SHA-256, and the links left out.
@@ -129,9 +129,10 @@ def _add(tar: tarfile.TarFile, file: BinaryIO, arcname: str) -> dict[str, object
 def _add_submissions(tar: tarfile.TarFile, root: Path, files: dict[str, dict[str, object]]) -> list[str]:
     """Store every regular file under root and return the symlinks below it, left out, relative to root.
 
-    Each directory is entered and each file opened through its parent's descriptor without following a symlink, so
-    a link swapped in while the archive runs is refused, not followed. A directory or file that can't be read stops
-    the archive (an OSError) rather than leaving files out unnoticed."""
+    Each file is opened through its parent's descriptor without following a symlink, so a file swapped for a link
+    while the archive runs is refused, not followed. A directory swapped for a link after it was listed is skipped by
+    os.fwalk, unlisted. A directory or file that can't be read stops the archive (an OSError) rather than leaving
+    files out unnoticed."""
 
     def refuse(error: OSError) -> None:
         raise error

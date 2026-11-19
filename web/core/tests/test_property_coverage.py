@@ -192,7 +192,7 @@ FORM_TESTS = (
 EXCEPTIONS: dict[str, str] = {
     "bot:listener:bot/cogs/help_panels.py:HelpPanelsCog.on_ready": "takes no input: it posts the help panels",
     "web/quotient/archive_scoring_host.py:_HashingReader.read": "copies a scoring-host file's bytes into a tarball, "
-    "unparsed; the script runs off the portal on the operator's own files",
+    "unparsed; the script runs off the portal",
 }
 # Readers of another service's JSON that can't have a property test, each with why
 READER_EXCEPTIONS: dict[str, str] = {}
