@@ -231,6 +231,30 @@ class TestAuthentikRequiredMiddleware:
 
         assert response.status_code == 200
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/health/",
+            "/livez/",
+            "/register/",
+            "/auth/login/",
+            "/auth/callback/",
+            "/auth/logout/",
+            "/auth/link",
+            "/admin/login/",
+        ],
+    )
+    def test_an_anonymous_visitor_reaches_each_exempt_page(self, middleware, path):
+        """The probes, the sign-in and sign-out flow, Discord linking and the admin's sign-in page (which sends a
+        visitor on to /auth/login/ itself) answer a visitor who hasn't signed in."""
+        request = RequestFactory().get(path)
+        request.user = AnonymousUser()
+
+        response = middleware(request)
+
+        assert response.status_code == 200
+        assert response.content == b"OK"
+
 
 # Must match AuthentikRequiredMiddleware whitelist
 MIDDLEWARE_WHITELIST_PREFIXES = ["/static/"]
