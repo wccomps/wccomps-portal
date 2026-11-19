@@ -122,9 +122,9 @@ def test_the_archive_is_taken_before_the_wipe(event):
     assert final_scores.splitlines()[1].startswith("1,")
 
 
-def test_the_archive_keeps_each_tickets_thread_history_and_files(event, client, gold_team_user):
+def test_the_archive_keeps_each_tickets_thread_history_and_attachment_records(event, client, gold_team_user):
     """A ticket's comments are its chat thread as the portal recorded it: the archive keeps them, the history and
-    what each attachment was, and the event page offers the archive once the wipe has deleted them."""
+    what each attachment was, and its download serves them once the wipe has deleted them."""
     blue = User.objects.create_user("blue1")
     ticket = Ticket.objects.create(ticket_number="T001-001", team=Team.objects.get(team_number=1), title="Help")
     TicketComment.objects.create(ticket=ticket, author=blue, comment_text="Yes, start the call", discord_message_id=7)

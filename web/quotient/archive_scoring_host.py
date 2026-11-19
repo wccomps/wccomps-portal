@@ -12,8 +12,9 @@ archive writes <event>-scoring-host-<UTC time>.tar.gz and its .sha256 into the a
 their owner, and never replaces a file there (it names them by hard link, so the directory's filesystem must support
 hard links). The tarball holds:
 - submissions/: every regular file under the event directory's submissions (inject uploads, by inject, team and
-  attempt). Symlinks below it are left out and listed in the manifest: following one would let whoever can write
-  there choose any file on the host. A submissions directory that is itself a symlink is followed;
+  attempt), read without following a symlink. Symlinks below it are left out and listed in the manifest: following
+  one would let whoever can write there choose any file on the host. A submissions directory that is itself a
+  symlink is followed, and a directory or file that can't be read stops the archive;
 - divisor.log: `docker logs` of the event's divisor container, the source addresses the runners used and when
   (the container is found by its Compose labels, so another event's divisor is never taken for this one);
 - manifest.json: the event, when and from which container, each file's size and SHA-256, and the links left out.
@@ -23,17 +24,19 @@ Standard library only, and Python 3.11 or later: the scoring host doesn't have t
 """
 
 import argparse
+import errno
 import hashlib
 import io
 import json
 import os
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import BinaryIO, cast
 
 SUBMISSIONS = "submissions"
 DIVISOR_LOG = "divisor.log"
@@ -100,32 +103,61 @@ def write_divisor_log(container: str, path: Path) -> None:
         raise ArchiveError(f"docker logs {container} failed: {path.read_text(errors='replace').strip()}")
 
 
-def _add(tar: tarfile.TarFile, path: Path, arcname: str) -> dict[str, object]:
-    """Store the regular file's contents under arcname and return its manifest entry."""
+class _HashingReader:
+    """Hands tarfile the file's bytes and hashes exactly those, so the manifest describes what the tarball holds."""
+
+    def __init__(self, file: BinaryIO) -> None:
+        self.file = file
+        self.digest = hashlib.sha256()
+
+    def read(self, size: int = -1) -> bytes:
+        data = self.file.read(size)
+        self.digest.update(data)
+        return data
+
+
+def _add(tar: tarfile.TarFile, file: BinaryIO, arcname: str) -> dict[str, object]:
+    """Store the open regular file's contents under arcname and return its manifest entry."""
+    stat_result = os.fstat(file.fileno())
     info = tarfile.TarInfo(arcname)
-    stat = path.stat()
-    info.size, info.mtime, info.mode = stat.st_size, int(stat.st_mtime), 0o600
-    with path.open("rb") as file:
-        tar.addfile(info, file)
-    return {"size": info.size, "sha256": sha256_of(path)}
+    info.size, info.mtime, info.mode = stat_result.st_size, int(stat_result.st_mtime), 0o600
+    reader = _HashingReader(file)
+    tar.addfile(info, reader)
+    return {"size": info.size, "sha256": reader.digest.hexdigest()}
 
 
-def _submissions(root: Path) -> tuple[list[Path], list[str]]:
-    """Every regular file under root, and the symlinks below it (left out, relative to root). A directory that can't
-    be read stops the archive rather than leaving its files out unnoticed."""
+def _add_submissions(tar: tarfile.TarFile, root: Path, files: dict[str, dict[str, object]]) -> list[str]:
+    """Store every regular file under root and return the symlinks below it, left out, relative to root.
+
+    Each directory is entered and each file opened through its parent's descriptor without following a symlink, so
+    a link swapped in while the archive runs is refused, not followed. A directory or file that can't be read stops
+    the archive (an OSError) rather than leaving files out unnoticed."""
 
     def refuse(error: OSError) -> None:
-        raise ArchiveError(f"Could not read {error.filename}: {error.strerror}")
+        raise error
 
-    files, links = [], []
-    for directory, subdirectories, names in os.walk(root, onerror=refuse):
-        for name in [*subdirectories, *names]:
-            path = Path(directory) / name
-            if path.is_symlink():
-                links.append(path.relative_to(root).as_posix())
-            elif name in names and path.is_file():
-                files.append(path)
-    return sorted(files), sorted(links)
+    links: list[str] = []
+    for directory, subdirectories, names, dir_fd in os.fwalk(root, onerror=refuse):
+        here = Path(directory).relative_to(root)
+        subdirectories.sort()
+        links.extend(
+            (here / name).as_posix()
+            for name in subdirectories
+            if stat.S_ISLNK(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode)
+        )
+        for name in sorted(names):
+            relative = (here / name).as_posix()
+            try:
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+            except OSError as e:
+                if e.errno != errno.ELOOP:
+                    raise
+                links.append(relative)
+                continue
+            with os.fdopen(fd, "rb") as file:
+                if stat.S_ISREG(os.fstat(fd).st_mode):
+                    files[f"{SUBMISSIONS}/{relative}"] = _add(tar, file, f"{SUBMISSIONS}/{relative}")
+    return sorted(links)
 
 
 def archive(event_dir: Path, archive_dir: Path) -> tuple[Path, str, list[str]]:
@@ -143,19 +175,16 @@ def archive(event_dir: Path, archive_dir: Path) -> tuple[Path, str, list[str]]:
     checksum = checksum_path(target)
     if target.exists() or checksum.exists():
         raise ArchiveError(f"{target} or its .sha256 already exists; nothing was replaced")
-
-    with tempfile.TemporaryDirectory(dir=archive_dir) as scratch:
-        work = Path(scratch)
-        divisor_log = work / DIVISOR_LOG
-        write_divisor_log(container, divisor_log)
-        tarball = work / target.name
-        paths, links = _submissions(submissions)
-        try:
+    try:
+        with tempfile.TemporaryDirectory(dir=archive_dir) as scratch:
+            work = Path(scratch)
+            divisor_log = work / DIVISOR_LOG
+            write_divisor_log(container, divisor_log)
+            tarball = work / target.name
             with tarfile.open(tarball, "w:gz") as tar:
-                files = {DIVISOR_LOG: _add(tar, divisor_log, DIVISOR_LOG)}
-                for path in paths:
-                    arcname = f"{SUBMISSIONS}/{path.relative_to(submissions).as_posix()}"
-                    files[arcname] = _add(tar, path, arcname)
+                with divisor_log.open("rb") as file:
+                    files = {DIVISOR_LOG: _add(tar, file, DIVISOR_LOG)}
+                links = _add_submissions(tar, submissions, files)
                 manifest = {
                     "event": event_dir.name,
                     "created_at": now.isoformat(),
@@ -172,21 +201,26 @@ def archive(event_dir: Path, archive_dir: Path) -> tuple[Path, str, list[str]]:
             sidecar = work / checksum.name
             sidecar.write_text(f"{digest}  {target.name}\n")
             sidecar.chmod(0o600)
-        except OSError as e:
-            raise ArchiveError(f"Could not build the tarball: {e}; nothing was kept") from None
-        # A hard link never replaces a file: if another run took either name meanwhile, this one gives up
-        try:
-            os.link(tarball, target)
-        except FileExistsError:
-            raise ArchiveError(f"{target} already exists; nothing was replaced") from None
-        except OSError as e:
-            raise ArchiveError(f"Could not name {target} ({e}); the archive directory needs hard links") from None
-        try:
-            os.link(sidecar, checksum)
-        except OSError as e:
-            target.unlink()
-            raise ArchiveError(f"Could not write {checksum}: {e}; nothing was kept") from None
+            _name_without_replacing(tarball, sidecar, target, checksum)
+    except OSError as e:
+        raise ArchiveError(f"Could not archive: {e}; nothing was kept") from None
     return target, digest, links
+
+
+def _name_without_replacing(tarball: Path, sidecar: Path, target: Path, checksum: Path) -> None:
+    """Give the finished files their names by hard link, which never replaces a file: if another run took either
+    name meanwhile, this one gives up and keeps nothing."""
+    try:
+        os.link(tarball, target)
+    except FileExistsError:
+        raise ArchiveError(f"{target} already exists; nothing was replaced") from None
+    except OSError as e:
+        raise ArchiveError(f"Could not name {target} ({e}); the archive directory needs hard links") from None
+    try:
+        os.link(sidecar, checksum)
+    except OSError as e:
+        target.unlink()
+        raise ArchiveError(f"Could not write {checksum}: {e}; nothing was kept") from None
 
 
 def verify(tarball: Path) -> list[str]:
@@ -206,13 +240,18 @@ def verify(tarball: Path) -> list[str]:
             def read(member: tarfile.TarInfo) -> io.BufferedReader:
                 return cast(io.BufferedReader, tar.extractfile(member))  # a regular member always has a file
 
-            files = json.load(read(members.pop(MANIFEST)))["files"]
+            manifest = json.load(read(members.pop(MANIFEST)))
+            files = manifest.get("files") if isinstance(manifest, dict) else None
+            if not isinstance(files, dict) or not all(
+                isinstance(entry, dict) and isinstance(entry.get("sha256"), str) for entry in files.values()
+            ):
+                return [f"{MANIFEST} in {tarball.name} is not a manifest"]
             problems = [f"{name} is in the manifest but not in the tarball" for name in sorted(files.keys() - members)]
             problems += [f"{name} is in the tarball but not in the manifest" for name in sorted(members.keys() - files)]
             for name in sorted(files.keys() & members.keys()):
                 if hashlib.file_digest(read(members[name]), "sha256").hexdigest() != files[name]["sha256"]:
                     problems.append(f"{name} does not match its manifest entry")
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, tarfile.TarError) as e:
+    except (OSError, ValueError, tarfile.TarError) as e:
         return [f"Could not read {tarball.name}: {e}"]
     return problems
 

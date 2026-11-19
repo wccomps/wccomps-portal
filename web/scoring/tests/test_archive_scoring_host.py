@@ -111,12 +111,14 @@ def test_links_inside_submissions_are_left_out_and_named(tmp_path, archive_dir, 
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads every directory")
-def test_an_unreadable_directory_stops_the_archive(event_dir, archive_dir, docker):
+@pytest.mark.parametrize("mode", [0o000, 0o444], ids=["unlistable", "unenterable"])
+def test_an_unreadable_directory_stops_the_archive(event_dir, archive_dir, docker, mode):
     locked = event_dir / "submissions" / "3"
     locked.mkdir()
-    locked.chmod(0o000)
+    (locked / "1").write_bytes(b"attempt 1")
+    locked.chmod(mode)
     try:
-        with pytest.raises(ArchiveError, match="Could not read"):
+        with pytest.raises(ArchiveError, match="Could not archive"):
             archive(event_dir, archive_dir)
     finally:
         locked.chmod(0o700)
