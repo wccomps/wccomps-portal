@@ -81,10 +81,11 @@ def test_archive_holds_the_events_submissions_and_divisor_log(event_dir, archive
     assert verify(target) == []
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads every directory")
 def test_links_inside_submissions_are_left_out_and_named(tmp_path, archive_dir, docker, monkeypatch):
-    """A submissions directory kept on another disk behind a symlink, an event directory reached through one, and a
-    hard-linked upload are archived; a symlink below submissions/ is not followed (it could name any file on the
-    host) but is listed in the manifest."""
+    """An event directory and a submissions directory reached through symlinks, and a hard-linked upload, are
+    archived; a symlink below submissions/ is never followed (it could name any file on the host), even to a directory
+    the user can't read, but is listed in the manifest."""
     real_event = tmp_path / "disk" / "2027-inv9-example"
     elsewhere = tmp_path / "disk" / "uploads"
     (elsewhere / "2" / "38").mkdir(parents=True)
@@ -94,19 +95,26 @@ def test_links_inside_submissions_are_left_out_and_named(tmp_path, archive_dir, 
     secret.write_bytes(b"host file")
     (elsewhere / "2" / "38" / "3").symlink_to(secret)
     (elsewhere / "2" / "linked").symlink_to(tmp_path)
+    locked = tmp_path / "locked"
+    locked.mkdir(mode=0o000)
+    (elsewhere / "2" / "locked").symlink_to(locked)
     real_event.mkdir()
     (real_event / "submissions").symlink_to(elsewhere)
     (tmp_path / "events").mkdir()
-    (tmp_path / "events" / "2027-inv9-example").symlink_to(real_event)
-    monkeypatch.setenv("FAKE_EVENT_DIR", str(tmp_path / "events" / "2027-inv9-example"))
+    event = tmp_path / "events" / "2027-inv9-example"
+    event.symlink_to(real_event)
+    monkeypatch.setenv("FAKE_EVENT_DIR", str(event))
 
-    target, _, links = archive(real_event, archive_dir)
+    try:
+        target, _, links = archive(event, archive_dir)
+    finally:
+        locked.chmod(0o700)
 
     members = _members(target)
     manifest = json.loads(members.pop("manifest.json"))
     assert set(members) == {"divisor.log", "submissions/2/38/1", "submissions/2/38/2"}
     assert (members["submissions/2/38/1"], members["submissions/2/38/2"]) == (b"attempt 1", b"attempt 1")
-    assert links == manifest["links_left_out"] == ["2/38/3", "2/linked"]
+    assert links == manifest["links_left_out"] == ["2/38/3", "2/linked", "2/locked"]
     assert verify(target) == []
 
 

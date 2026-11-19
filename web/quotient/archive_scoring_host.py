@@ -139,20 +139,24 @@ def _add_submissions(tar: tarfile.TarFile, root: Path, files: dict[str, dict[str
     links: list[str] = []
     for directory, subdirectories, names, dir_fd in os.fwalk(root, onerror=refuse):
         here = Path(directory).relative_to(root)
-        subdirectories.sort()
-        links.extend(
-            (here / name).as_posix()
-            for name in subdirectories
-            if stat.S_ISLNK(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode)
-        )
+        linked = {n for n in subdirectories if stat.S_ISLNK(os.stat(n, dir_fd=dir_fd, follow_symlinks=False).st_mode)}
+        links.extend((here / name).as_posix() for name in linked)
+        # In place, so fwalk never opens a symlinked directory (it would follow the link to look)
+        subdirectories[:] = sorted(set(subdirectories) - linked)
         for name in sorted(names):
             relative = (here / name).as_posix()
+            kind = os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode
+            if stat.S_ISLNK(kind):
+                links.append(relative)
+                continue
+            if not stat.S_ISREG(kind):
+                continue  # a socket, FIFO or device is no upload
             try:
                 fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
             except OSError as e:
                 if e.errno != errno.ELOOP:
                     raise
-                links.append(relative)
+                links.append(relative)  # swapped for a symlink since the stat
                 continue
             with os.fdopen(fd, "rb") as file:
                 if stat.S_ISREG(os.fstat(fd).st_mode):
@@ -173,8 +177,6 @@ def archive(event_dir: Path, archive_dir: Path) -> tuple[Path, str, list[str]]:
     now = datetime.now(UTC)
     target = archive_dir / f"{event_dir.name}-scoring-host-{now:%Y%m%dT%H%M%SZ}.tar.gz"
     checksum = checksum_path(target)
-    if target.exists() or checksum.exists():
-        raise ArchiveError(f"{target} or its .sha256 already exists; nothing was replaced")
     try:
         with tempfile.TemporaryDirectory(dir=archive_dir) as scratch:
             work = Path(scratch)
@@ -279,7 +281,8 @@ def main(argv: list[str] | None = None) -> int:
         print(e, file=sys.stderr)
         return 1
     for link in links:
-        print(f"Left out the symlink submissions/{link}", file=sys.stderr)
+        # Escaped: a file name from submissions/ can hold terminal control sequences
+        print(f"Left out the symlink {ascii(f'{SUBMISSIONS}/{link}')}", file=sys.stderr)
     print(f"{target}\n{digest}")
     return 0
 
