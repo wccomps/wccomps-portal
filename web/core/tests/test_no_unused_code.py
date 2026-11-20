@@ -218,6 +218,7 @@ DJANGO_FORM_OPTION = "Django reads this form option by name"
 # fnmatch pattern over "path:name", or "@decorator" for anything with that decorator -> why it stays
 CODE_EXCEPTIONS = {
     "web/portal/urls.py:handler*": "Django reads the root URLconf's error handlers by name",
+    "web/quotient/archive_scoring_host.py:mtime": "tarfile writes a member's TarInfo.mtime into the tarball",
     # discord.py registers these through their decorators or calls them by name
     "@*.command": "discord.py registers a slash command through its decorator",
     "@discord.ui.button": "discord.py calls a button callback when the button is pressed",

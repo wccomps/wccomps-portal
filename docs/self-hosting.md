@@ -313,6 +313,22 @@ pulls in. Set `QUOTIENT_API_URL` and an `[[admin]]` account from Quotient's `eve
 Without Quotient, inject grading says Quotient is unavailable, box lists stay empty, the stop's score sync step fails
 (the stop still completes), and the worker logs the failed sync once and retries it every 15 minutes.
 
+Close Out keeps the portal's side of an event in its archive (Download Close Out Archive on the event's page): every
+export, plus each ticket's comments (its Discord thread or Zulip topic as the portal recorded it), its history, and
+each attachment's name, size and SHA-256 (not the file). Quotient's inject submissions and the divisor's log (the
+source addresses the runners used) stay on the scoring host, where the next event's containers replace the log. Copy
+`web/quotient/archive_scoring_host.py` there and run it once the event is over, before recreating its containers:
+
+```bash
+python3 archive_scoring_host.py archive <event's Compose directory> <archive directory>
+python3 archive_scoring_host.py verify <archive directory>/<event>-scoring-host-<time>.tar.gz
+```
+
+It writes a tarball of the submissions, the log and a manifest of each file's SHA-256, with a `.sha256` beside it,
+both readable only by you. It never replaces a file (it names them by hard link, so the archive directory's
+filesystem must support hard links), and it leaves out any symlink under `submissions/`, listing it instead. Run
+`verify` again on the copy wherever you keep it.
+
 ### Proxmox
 
 With Proxmox, staff reset a box from a ticket in the box reset category (`BOX_RESET_CATEGORY_ID`, the seeded "Box

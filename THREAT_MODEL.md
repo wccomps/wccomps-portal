@@ -14,6 +14,7 @@ a cited file or name no longer exists); a change that moves a trust boundary upd
 | Zulip realm member | A Zulip account in the realm, whose email and display name Zulip reports and the portal doesn't verify | To write to a ticket that isn't theirs, or as someone else; mass pings through the bot; files from streams they can't read |
 | Staff member over reach | One staff role (red, orange, white, ticketing) | Another role's powers: changing scores, reading team credentials, resetting accounts |
 | Hostile upstream answer | A malformed or spoofed Authentik, Quotient, Proxmox, Nextcloud or Zulip response | A crash, a wrong grant, or a write made from bad data |
+| Scoring host user | A local account on the scoring host, or write access to an event's `submissions/` | The archived team uploads and runner addresses; to slip a host file into an archive or replace one. Whoever can write the event's Compose directory itself is as trusted as the operator: they control the Compose file and can point `submissions` at any directory the operator can read |
 
 Competitors are adversarial and score points for disruption, so every blue team member is assumed to probe the portal
 during an event.
@@ -50,6 +51,14 @@ during an event.
    `QueueProcessor._record`, `TaskProgress.still_running`, `TaskProgress.while_running`; `web/core/admin.py`
    `QueuedTaskAdmin.retry_failed_tasks`). For broadcasts queued before starts recorded them,
    `web/core/migrations/0024_scrub_start_broadcasts.py` scrubs the finished ones and hands unfinished ones to the next reset.
+11. **Event records kept after Close Out**: the close-out archive (`EventArchive.data`, `web/registration/models.py`),
+   written in the Close Out transaction before the wipe and never deleted: every export dataset, with every team's
+   ticket comments (their Discord threads and Zulip topics as the portal recorded them), ticket history and
+   attachment names, sizes and SHA-256 (not the files) (`web/registration/services.py` `_freeze_results`;
+   `web/scoring/export.py` `DATASETS`). Only Gold Team downloads it (`web/registration/views.py` `event_archive`), as
+   it does the same datasets live (`web/scoring/views/export.py`). Off the portal, the scoring host's archive script
+   writes a tarball of the teams' inject uploads and the divisor log of runner source addresses
+   (`web/quotient/archive_scoring_host.py`).
 
 ## Trust boundaries and data flows
 
@@ -74,6 +83,7 @@ flowchart LR
     M[SMTP]
     G[Discord API]
     Z[Zulip API]
+    H[Scoring host: Quotient, archive script]
     B -- "1 HTTPS, session cookie, CSRF" --> W
     B -- "2 OIDC redirect" --> A
     A -- "2 callback, userinfo with groups" --> W
@@ -90,6 +100,7 @@ flowchart LR
     U -- "12 messages in ticket topics, uploads" --> Z
     Z -- "12 event queue long poll" --> C
     C -- "13 API key: posts, upload fetches" --> Z
+    O[Operator] -- "14 runs the archive script" --> H
 ```
 
 The worker (`worker/__main__.py`) runs the competition timer, the group refresh, the Quotient sync (which reads team
@@ -110,6 +121,7 @@ queue Zulip fills with the messages in the streams the bot is subscribed to, so 
 |---|---|---|---|
 | 1 | Browser to web | E: a role reaches a page or action it lacks | Every view carries `require_permission` (`web/core/auth_utils.py` `require_permission`) or checks itself; the views harness drives every URL as every role and fails on a wrong answer (`web/core/tests/views_harness.py`), and `web/core/tests/test_property_coverage.py` fails on a URL without a row |
 | 1 | Browser to web | I: a team reads another team's ticket, report or attachment | `team_record_or_404` filters to the caller's team, so another team's record is a 404 like a missing one (`web/core/auth_utils.py` `team_record_or_404`); the ticket page and the bot's ticket thread and buttons share one rule (`web/ticketing/access.py` `ticket_open_to`) |
+| 1 | Browser to web | I: someone outside Gold Team reads every team's ticket threads in the close-out archive or an export | The archive download and every export view carry `require_permission("gold_team")` (`web/registration/views.py` `event_archive`; `web/scoring/views/export.py`); team text in the CSVs goes through `safe_cell` against formula injection (`web/core/csv_export.py`) |
 | 1 | Browser to web | T: a team member files a ticket as another team | The create ticket form ignores a posted team unless the view passes the teams to pick from, which it does only for gold team, admins and ticketing admins (`web/ticketing/forms.py` `CreateTicketForm`, `web/ticketing/views/create.py` `create_ticket`, `web/ticketing/tests/test_create_ticket_as_ticketing_admin.py`) |
 | 1 | Browser to web | T: cross-site request forgery | `CsrfViewMiddleware` on, no `csrf_exempt` view (`web/core/tests/test_csrf_coverage.py`); views read POST fields through Django forms (`web/core/tests/test_no_raw_post.py`) |
 | 1 | Browser to web | T, E: script injection through stored or reflected text | Templates and cotton attributes escape every value (`web/core/cotton.py`, `web/core/tests/test_cotton_escaping.py`, `web/core/tests/test_list_filter_escaping.py`, `web/core/tests/test_ticket_detail_escaping.py`); scripts are vendored (`web/core/tests/test_no_third_party_scripts.py`); `frame-ancestors 'none'` (`web/core/middleware.py` `SecurityHeadersMiddleware`) |
@@ -163,6 +175,7 @@ queue Zulip fills with the messages in the streams the bot is subscribed to, so 
 | 12 | Zulip to chat | T: a malformed event read as data | An event is read field by field, and one without the expected shape is passed over (`chat/zulip/incoming.py` `parse_message_event`, `edited_message`, `deleted_message_ids`, `renamed_topic`); answers must be Zulip's JSON success (`chat/zulip/client.py` `ZulipClient._call`); property tests cover every reader (`web/core/tests/test_properties_readers.py`) |
 | 13 | Chat to Zulip | I: the API key sent in clear | The client refuses a `ZULIP_SITE` that isn't https, and fetches uploads only from that site (`chat/zulip/client.py` `ZulipClient`, `ZulipClient.fetch_upload`) |
 | 13 | Chat to Zulip | I: one team's broadcasts reach another team | A broadcast to teams goes to each team's own `ZULIP_TEAM_BROADCAST_STREAM` (by default its ticket stream); the settings refuse to load a pattern that gives two teams from 1 to `MAX_TEAMS` one stream, or a team another team's `ZULIP_TEAM_STREAM` (`web/portal/settings.py` `ZULIP_TEAM_BROADCAST_STREAM`; `chat/zulip/naming.py` `team_broadcast_stream`). Who may read each stream is the realm's to set |
+| 14 | Operator on the scoring host | I, T: a local user reads the archived team uploads and runner addresses, slips a host file into an archive through a symlink or hard link in `submissions/` (including a file swapped for a symlink while the archive runs), or replaces an archive | The operator runs the script with docker access (as good as root on that host). It walks `submissions/` by directory descriptor and opens each file through its parent's descriptor without following a symlink, stores only regular files and takes each one's size, contents and SHA-256 from that one open file, lists the symlinks it finds while listing each directory instead of following them (a directory swapped for a symlink after its listing is skipped, unlisted), and names every member by its path relative to `submissions/` (`web/quotient/archive_scoring_host.py` `_add_submissions`, `_add`); a hard link is a regular file, so keeping a hard link to a file its writer can't read out of `submissions/` rests on the kernel's `fs.protected_hardlinks=1` (Debian's default), which the script doesn't check; it writes the tarball and its `.sha256` mode 0600 and names them by hard link, which never replaces a file (`_name_without_replacing`); `verify` reads a copy's members without extracting them (`verify`). Who else can reach the archive directory is the operator's to set |
 | all | Logs and errors | I: tokens or OAuth codes in logs | The access log drops query strings and referers (`web/gunicorn.conf.py` `access_log_format`); httpx URL logging is off (`web/core/tests/test_httpx_logging.py`); error answers come from `web/core/errors.py`: a fixed message for 404, 405 and 500, and only the view's own stated reason for 400 and 403 |
 | all | Logs and errors | T: request text forges a log line or an alert | Request text is escaped where the app logs it (`web/core/middleware.py` `_field`; `web/core/log_safety.py`), the console formatter keeps every message on one line, gunicorn escapes its access and error lines (`web/gunicorn.conf.py` `EscapingLogger`), and the Discord alert shows request text in code spans (`web/core/discord_logging.py` `_code`); property tests cover each line (`web/core/tests/test_properties_log_lines.py`) |
 | all | Secrets | S: forged sessions | The web server, the worker and the chat process refuse to start without a fixed `DJANGO_SECRET_KEY` of at least 50 characters and 5 distinct ones, the `.env.example` placeholder counting as none (`web/portal/required.py` `secret_key_problem`); the session cookie is HttpOnly and SameSite=Lax, and outside `DEBUG` the session and CSRF cookies are Secure with HSTS (`web/portal/settings.py` `SESSION_COOKIE_HTTPONLY`, `SESSION_COOKIE_SAMESITE`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECURE_HSTS_SECONDS`) |

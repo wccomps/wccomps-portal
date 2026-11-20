@@ -10,7 +10,8 @@ from django.db.models import Count, Q
 from django.forms import CheckboxSelectMultiple
 from django.http import HttpRequest, HttpResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.utils.text import slugify
+from django.views.decorators.http import require_GET, require_POST
 from django_stubs_ext import WithAnnotations
 from packets.models import packets_sent
 
@@ -24,6 +25,7 @@ from .forms import EventForm, RegistrationForm, RejectRegistrationForm, SeasonFo
 from .locks import school_list_lock
 from .models import (
     Event,
+    EventArchive,
     EventTeamAssignment,
     RegistrationEventEnrollment,
     RegistrationOpen,
@@ -453,9 +455,20 @@ def event_detail(request: HttpRequest, event_id: int) -> HttpResponse:
         "packets_sent": sent,
         # Only the open event's teams can be unassigned, and only until packets go out
         "can_unassign": event.is_active and not sent,
+        "has_archive": EventArchive.objects.filter(event=event).exists(),
     }
 
     return render(request, "registration/events/detail.html", context)
+
+
+@require_GET
+@require_permission("gold_team")
+def event_archive(request: HttpRequest, event_id: int) -> HttpResponse:
+    """The zip Close Out took of the event's live data before deleting it."""
+    archive = get_object_or_404(EventArchive.objects.select_related("event"), event_id=event_id)
+    response = HttpResponse(bytes(archive.data), content_type="application/zip")
+    response["Content-Disposition"] = f'attachment; filename="{slugify(archive.event.name)}_close_out_archive.zip"'
+    return response
 
 
 @require_permission("gold_team")
