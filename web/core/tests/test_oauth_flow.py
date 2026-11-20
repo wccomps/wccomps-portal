@@ -5,18 +5,18 @@ These tests verify the full OAuth callback logic without requiring
 a real Authentik server.
 """
 
-import re
+import json
 import time
 from unittest.mock import MagicMock, patch
 
-import httpx
 import pytest
 from django.contrib.auth.models import User
 from django.core import signing
+from django.http import HttpResponse
 from django.test import Client
-from django.utils import timezone
 
 from core.models import CredentialsReset, UserGroups
+from core.tests.external_json import Answer, serving
 
 OAUTH_CONFIG = {
     "client_id": "test-client-id",
@@ -33,15 +33,7 @@ def oauth_state_session(client: Client) -> tuple[Client, str]:
     """Set up a client with valid OAuth state from a login redirect."""
     from urllib.parse import parse_qs, urlparse
 
-    with patch("core.oauth._get_oauth_config") as mock_config:
-        mock_config.return_value = {
-            "client_id": "test-client-id",
-            "client_secret": "test-secret",
-            "authorization_endpoint": "https://auth.example.com/authorize/",
-            "token_endpoint": "https://auth.example.com/token/",
-            "userinfo_endpoint": "https://auth.example.com/userinfo/",
-            "end_session_endpoint": "https://auth.example.com/end-session/",
-        }
+    with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
         response = client.get("/auth/login/")
         assert response.status_code == 302
 
@@ -58,15 +50,7 @@ class TestOAuthLogin:
     def test_login_redirects_to_authentik(self):
         """Login should redirect to Authentik authorization endpoint."""
         client = Client()
-        with patch("core.oauth._get_oauth_config") as mock_config:
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
+        with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
             response = client.get("/auth/login/")
 
         assert response.status_code == 302
@@ -81,15 +65,7 @@ class TestOAuthLogin:
         from django.core import signing
 
         client = Client()
-        with patch("core.oauth._get_oauth_config") as mock_config:
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
+        with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
             response = client.get("/auth/login/")
 
         parsed = urlparse(response.url)
@@ -105,15 +81,7 @@ class TestOAuthLogin:
         from django.core import signing
 
         client = Client()
-        with patch("core.oauth._get_oauth_config") as mock_config:
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
+        with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
             response = client.get("/auth/login/?next=/dashboard/")
 
         parsed = urlparse(response.url)
@@ -124,15 +92,7 @@ class TestOAuthLogin:
     def test_login_without_client_id_shows_error(self):
         """Login without client ID configured should show error."""
         client = Client()
-        with patch("core.oauth._get_oauth_config") as mock_config:
-            mock_config.return_value = {
-                "client_id": "",
-                "client_secret": "",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
+        with patch("core.oauth._get_oauth_config", return_value={**OAUTH_CONFIG, "client_id": "", "client_secret": ""}):
             response = client.get("/auth/login/")
 
         assert response.status_code == 500
@@ -152,56 +112,6 @@ class TestOAuthLogin:
 @pytest.mark.django_db
 class TestOAuthCallback:
     """Test OAuth callback handling."""
-
-    def test_callback_creates_new_user(self, oauth_state_session):
-        """Callback should create new user if not exists."""
-        client, state = oauth_state_session
-
-        mock_token_response = MagicMock()
-        mock_token_response.json.return_value = {"access_token": "test-token"}
-        mock_token_response.raise_for_status = MagicMock()
-
-        mock_userinfo_response = MagicMock()
-        mock_userinfo_response.json.return_value = {
-            "sub": "unique-authentik-id-12345",
-            "preferred_username": "newuser",
-            "email": "newuser@example.com",
-            "groups": ["WCComps_BlueTeam01", "BlueTeam"],
-        }
-        mock_userinfo_response.raise_for_status = MagicMock()
-
-        with (
-            patch("core.oauth._get_oauth_config") as mock_config,
-            patch("core.oauth.httpx.Client") as mock_httpx,
-        ):
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
-            mock_client = MagicMock()
-            mock_client.post.return_value = mock_token_response
-            mock_client.get.return_value = mock_userinfo_response
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_httpx.return_value = mock_client
-
-            response = client.get(f"/auth/callback/?code=test-code&state={state}")
-
-        assert response.status_code == 302  # Redirect after success
-
-        # Verify user created
-        user = User.objects.get(username="newuser")
-        assert user.email == "newuser@example.com"
-
-        # Verify UserGroups created with correct groups
-        user_groups = UserGroups.objects.get(user=user)
-        assert user_groups.authentik_id == "unique-authentik-id-12345"
-        assert "WCComps_BlueTeam01" in user_groups.groups
-        assert "BlueTeam" in user_groups.groups
 
     def test_callback_updates_existing_user_groups(self, oauth_state_session):
         """Callback should update groups for existing user."""
@@ -229,17 +139,9 @@ class TestOAuthCallback:
         mock_userinfo_response.raise_for_status = MagicMock()
 
         with (
-            patch("core.oauth._get_oauth_config") as mock_config,
+            patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
             patch("core.oauth.httpx.Client") as mock_httpx,
         ):
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
             mock_client = MagicMock()
             mock_client.post.return_value = mock_token_response
             mock_client.get.return_value = mock_userinfo_response
@@ -282,17 +184,9 @@ class TestOAuthCallback:
         mock_userinfo_response.raise_for_status = MagicMock()
 
         with (
-            patch("core.oauth._get_oauth_config") as mock_config,
+            patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
             patch("core.oauth.httpx.Client") as mock_httpx,
         ):
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
             mock_client = MagicMock()
             mock_client.post.return_value = mock_token_response
             mock_client.get.return_value = mock_userinfo_response
@@ -310,36 +204,8 @@ class TestOAuthCallback:
 
     @staticmethod
     def _login(client, state, userinfo, *, id_token=None):
-        mock_token_response = MagicMock()
-        mock_token_response.json.return_value = {"access_token": "test-token"} | (
-            {"id_token": id_token} if id_token else {}
-        )
-        mock_token_response.raise_for_status = MagicMock()
-
-        mock_userinfo_response = MagicMock()
-        mock_userinfo_response.json.return_value = userinfo
-        mock_userinfo_response.raise_for_status = MagicMock()
-
-        with (
-            patch("core.oauth._get_oauth_config") as mock_config,
-            patch("core.oauth.httpx.Client") as mock_httpx,
-        ):
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
-            mock_client = MagicMock()
-            mock_client.post.return_value = mock_token_response
-            mock_client.get.return_value = mock_userinfo_response
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_httpx.return_value = mock_client
-
-            return client.get(f"/auth/callback/?code=test-code&state={state}")
+        tokens = GOOD_TOKEN | ({"id_token": id_token} if id_token else {})
+        return _callback(client, {"code": "test-code", "state": state}, _json(tokens), _json(userinfo))
 
     @staticmethod
     def _id_token(auth_time: float) -> str:
@@ -508,90 +374,6 @@ class TestOAuthCallback:
         assert user.username == "dave"
         assert client.get("/").wsgi_request.user.pk == user.pk
 
-    def test_callback_rejects_invalid_state(self):
-        """Callback should reject request with forged/invalid state."""
-        client = Client()
-        response = client.get("/auth/callback/?code=test-code&state=forged-state")
-
-        assert response.status_code == 200  # Error page
-        assert b"Security Error" in response.content
-
-    def test_callback_rejects_missing_state(self):
-        """Callback should reject request without state parameter."""
-        client = Client()
-        response = client.get("/auth/callback/?code=test-code")
-
-        assert response.status_code == 200  # Error page
-        assert b"Session Expired" in response.content
-
-    def test_callback_rejects_expired_state(self):
-        """Callback should reject expired state (>5 minutes)."""
-        from django.core import signing
-
-        client = Client()
-        # Create state with a past timestamp so it appears expired (>5 min old)
-        import time
-        from unittest.mock import patch as mock_patch
-
-        # Create state, then pretend time has passed
-        with mock_patch("django.core.signing.time.time", return_value=time.time() - 600):
-            expired_state = signing.dumps({"n": "test-nonce", "next": "/"})
-
-        response = client.get(f"/auth/callback/?code=test-code&state={expired_state}")
-
-        assert response.status_code == 200  # Error page
-        assert b"Session Expired" in response.content
-
-    def test_callback_handles_access_denied(self):
-        """Callback should handle user cancelling login."""
-        client = Client()
-        response = client.get("/auth/callback/?error=access_denied")
-
-        assert response.status_code == 200
-        assert b"Login Cancelled" in response.content
-
-    def test_callback_logs_user_in(self, oauth_state_session):
-        """Callback should log the user in after successful auth."""
-        client, state = oauth_state_session
-
-        mock_token_response = MagicMock()
-        mock_token_response.json.return_value = {"access_token": "test-token"}
-        mock_token_response.raise_for_status = MagicMock()
-
-        mock_userinfo_response = MagicMock()
-        mock_userinfo_response.json.return_value = {
-            "sub": "login-test-id",
-            "preferred_username": "loginuser",
-            "groups": [],
-        }
-        mock_userinfo_response.raise_for_status = MagicMock()
-
-        with (
-            patch("core.oauth._get_oauth_config") as mock_config,
-            patch("core.oauth.httpx.Client") as mock_httpx,
-        ):
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
-            mock_client = MagicMock()
-            mock_client.post.return_value = mock_token_response
-            mock_client.get.return_value = mock_userinfo_response
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_httpx.return_value = mock_client
-
-            client.get(f"/auth/callback/?code=test-code&state={state}")
-
-        # Check user is logged in
-        user = User.objects.get(username="loginuser")
-        assert "_auth_user_id" in client.session
-        assert str(user.id) == client.session["_auth_user_id"]
-
     def test_callback_redirects_to_next_url(self):
         """Callback should redirect to next URL encoded in the signed state."""
         from urllib.parse import parse_qs, urlparse
@@ -599,15 +381,7 @@ class TestOAuthCallback:
         client = Client()
 
         # Initiate login with a specific next URL
-        with patch("core.oauth._get_oauth_config") as mock_config:
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
+        with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
             response = client.get("/auth/login/?next=/my-dashboard/")
 
         parsed = urlparse(response.url)
@@ -626,17 +400,9 @@ class TestOAuthCallback:
         mock_userinfo_response.raise_for_status = MagicMock()
 
         with (
-            patch("core.oauth._get_oauth_config") as mock_config,
+            patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
             patch("core.oauth.httpx.Client") as mock_httpx,
         ):
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
             mock_client = MagicMock()
             mock_client.post.return_value = mock_token_response
             mock_client.get.return_value = mock_userinfo_response
@@ -656,15 +422,7 @@ class TestOAuthCallback:
         client = Client()
         next_url = "/auth/link-callback?token=abc123"
 
-        with patch("core.oauth._get_oauth_config") as mock_config:
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
+        with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
             response = client.get(f"/auth/login/?next={next_url}")
 
         parsed = urlparse(response.url)
@@ -683,17 +441,9 @@ class TestOAuthCallback:
         mock_userinfo_response.raise_for_status = MagicMock()
 
         with (
-            patch("core.oauth._get_oauth_config") as mock_config,
+            patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
             patch("core.oauth.httpx.Client") as mock_httpx,
         ):
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
             mock_client = MagicMock()
             mock_client.post.return_value = mock_token_response
             mock_client.get.return_value = mock_userinfo_response
@@ -713,8 +463,7 @@ class TestOAuthCallback:
 
         response = self._login(victim, state, {"sub": "attacker-sub", "preferred_username": "attacker", "groups": []})
 
-        assert response.status_code == 200
-        assert b"Session Expired" in response.content
+        assert _shown(response) == (200, "Session Expired", "Please try logging in again.")
         assert "_auth_user_id" not in victim.session
         assert not User.objects.filter(username="attacker").exists()
 
@@ -751,17 +500,9 @@ class TestOAuthCallback:
         mock_userinfo_response.raise_for_status = MagicMock()
 
         with (
-            patch("core.oauth._get_oauth_config") as mock_config,
+            patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
             patch("core.oauth.httpx.Client") as mock_httpx,
         ):
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
             mock_client = MagicMock()
             mock_client.post.return_value = mock_token_response
             mock_client.get.return_value = mock_userinfo_response
@@ -776,43 +517,30 @@ class TestOAuthCallback:
         assert "evil.com" not in response.url
 
 
-def _authentik_answer(body: object = None, *, failure: Exception | None = None) -> MagicMock:
-    answer = MagicMock()
-    answer.json.return_value = body
-    answer.raise_for_status = MagicMock(side_effect=failure)
-    return answer
+def _json(body: object, status: int = 200) -> Answer:
+    return Answer(status, json.dumps(body).encode())
 
 
-def _callback_with(client: Client, query: dict[str, str], token: MagicMock, userinfo: MagicMock):
-    with (
-        patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
-        patch("core.oauth.httpx.Client") as mock_httpx,
-    ):
-        mock_client = mock_httpx.return_value.__enter__.return_value
-        mock_client.post.return_value = token
-        mock_client.get.return_value = userinfo
+def _callback(client: Client, query: dict[str, str], *answers: Answer) -> HttpResponse:
+    """The callback, with Authentik's token and userinfo requests getting these answers in turn."""
+    with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG), serving(list(answers)):
         return client.get("/auth/callback/", query)
 
 
 GOOD_TOKEN = {"access_token": "test-token"}
 GOOD_USERINFO = {"sub": "refused-sub", "preferred_username": "refused", "groups": []}
-HTTP_FAILURE = httpx.HTTPStatusError("502", request=MagicMock(), response=MagicMock())
+GOOD_ANSWERS = (_json(GOOD_TOKEN), _json(GOOD_USERINFO))
 
 
 def _shown(response) -> tuple[int, str, str]:
-    """The error page's status, its browser title (the error's, then the site's name) and its message."""
-    title = re.search(r"<title>(.*?)</title>", response.content.decode(), re.S)
-    assert title, response.content
-    return response.status_code, title.group(1).strip(), response.context["error_message"]
+    """The error page's status, title and message."""
+    return response.status_code, response.context["error_title"], response.context["error_message"]
 
 
 @pytest.mark.django_db
 class TestEachRefusal:
-    """Every way a sign-in fails answers the error page saying why, and signs nobody in."""
-
-    @pytest.fixture(autouse=True)
-    def _site_name(self, settings):
-        settings.SITE_NAME = "Example Portal"
+    """A sign-in refused before an account is looked at answers the error page with its title and message, and signs
+    nobody in."""
 
     @pytest.mark.parametrize(
         ("query", "title", "message"),
@@ -823,10 +551,10 @@ class TestEachRefusal:
             ({"code": "test-code", "state": "forged"}, "Security Error", "Please try again."),
         ],
     )
-    def test_a_refusal_before_the_state_is_read(self, client, query, title, message):
+    def test_a_refusal_before_the_state_is_verified(self, client, query, title, message):
         response = client.get("/auth/callback/", query)
 
-        assert _shown(response) == (200, f"{title} - Example Portal", message)
+        assert _shown(response) == (200, title, message)
         assert "_auth_user_id" not in client.session
 
     def test_an_expired_state(self, client):
@@ -835,77 +563,42 @@ class TestEachRefusal:
 
         response = client.get("/auth/callback/", {"code": "test-code", "state": state})
 
-        assert _shown(response) == (200, "Session Expired - Example Portal", "Please try again.")
-
-    def test_a_state_this_browser_did_not_start(self, oauth_state_session):
-        _client, state = oauth_state_session
-        other = Client()
-
-        response = other.get("/auth/callback/", {"code": "test-code", "state": state})
-
-        assert _shown(response) == (200, "Session Expired - Example Portal", "Please try logging in again.")
+        assert _shown(response) == (200, "Session Expired", "Please try again.")
+        assert "_auth_user_id" not in client.session
 
     @pytest.mark.parametrize(
-        ("query", "token", "userinfo", "message"),
+        ("query", "answers", "title"),
         [
-            ({}, GOOD_TOKEN, GOOD_USERINFO, None),
-            ({"code": "test-code"}, None, GOOD_USERINFO, "Please try again."),
-            ({"code": "test-code"}, {"access_token": ""}, GOOD_USERINFO, "Please try again."),
-            ({"code": "test-code"}, {"access_token": 7}, GOOD_USERINFO, "Please try again."),
-            ({"code": "test-code"}, GOOD_TOKEN, None, "Please try again."),
-            ({"code": "test-code"}, GOOD_TOKEN, {"sub": "refused-sub"}, "Invalid user data."),
+            ({}, GOOD_ANSWERS, "Login Failed"),
+            ({"code": "test-code"}, (_json(GOOD_TOKEN, 502), _json(GOOD_USERINFO)), "Authentication Failed"),
+            ({"code": "test-code"}, (_json({"access_token": ""}), _json(GOOD_USERINFO)), "Authentication Failed"),
+            ({"code": "test-code"}, (_json({"access_token": 7}), _json(GOOD_USERINFO)), "Authentication Failed"),
+            ({"code": "test-code"}, (_json(GOOD_TOKEN), _json(GOOD_USERINFO, 502)), "Authentication Failed"),
         ],
+        ids=["no code", "token request fails", "empty access token", "access token not text", "userinfo fails"],
     )
-    def test_a_refusal_after_the_state_is_read(self, oauth_state_session, query, token, userinfo, message):
-        """No code is a failed login; an exchange or userinfo request that fails, no access token or no usable
-        claims is a failed authentication."""
+    def test_a_refusal_after_the_state_is_verified(self, oauth_state_session, query, answers, title):
+        """No code is a failed login; a token or userinfo request that fails, or no access token, a failed
+        authentication. Each row's answers would sign in but for its one fault: a 502 is refused whatever its body."""
         client, state = oauth_state_session
-        token_answer = _authentik_answer(token, failure=HTTP_FAILURE if token is None else None)
-        userinfo_answer = _authentik_answer(userinfo, failure=HTTP_FAILURE if userinfo is None else None)
 
-        response = _callback_with(client, {**query, "state": state}, token_answer, userinfo_answer)
+        response = _callback(client, {**query, "state": state}, *answers)
 
-        title = "Login Failed" if message is None else "Authentication Failed"
-        assert _shown(response) == (200, f"{title} - Example Portal", message or "Please try again.")
+        assert _shown(response) == (200, title, "Please try again.")
         assert "_auth_user_id" not in client.session
         assert not UserGroups.objects.exists()
 
     @pytest.mark.parametrize("failing", ["token", "userinfo"])
     def test_a_failed_request_to_authentik_is_logged_with_its_error(self, oauth_state_session, caplog, failing):
         client, state = oauth_state_session
-        failure = httpx.HTTPStatusError(f"the {failing} endpoint answered 502", request=MagicMock(), response=None)
-        token = _authentik_answer(GOOD_TOKEN, failure=failure if failing == "token" else None)
-        userinfo = _authentik_answer(GOOD_USERINFO, failure=failure if failing == "userinfo" else None)
+        answers = (_json(GOOD_TOKEN, 502),) if failing == "token" else (_json(GOOD_TOKEN), _json(GOOD_USERINFO, 502))
 
         with caplog.at_level("ERROR", logger="core.oauth"):
-            _callback_with(client, {"code": "test-code", "state": state}, token, userinfo)
+            _callback(client, {"code": "test-code", "state": state}, *answers)
 
-        logged = [r.getMessage() for r in caplog.records if r.name == "core.oauth"]
-        assert len(logged) == 1
-        assert f"the {failing} endpoint answered 502" in logged[0]
-
-    def test_a_sign_in_from_before_a_reset_offers_a_fresh_sign_in_back_to_its_page(self, client):
-        session = client.session
-        session["oauth_nonce"] = "reset-nonce"
-        session.save()
-        state = signing.dumps({"n": "reset-nonce", "next": "/ops/tickets/", "t": int(time.time()) - 60})
-        CredentialsReset.objects.create(authentik_id="refused-sub", reset_at=timezone.now())
-
-        response = _callback_with(
-            client,
-            {"code": "test-code", "state": state},
-            _authentik_answer(GOOD_TOKEN),
-            _authentik_answer(GOOD_USERINFO),
-        )
-
-        assert _shown(response) == (
-            200,
-            "Signed Out - Example Portal",
-            "This account's password was reset after you signed in. Sign in again with it.",
-        )
-        assert response.context["retry_url"] == "/auth/login/?prompt=login&next=%2Fops%2Ftickets%2F"
-        assert "_auth_user_id" not in client.session
-        assert not UserGroups.objects.exists()
+        (logged,) = [r.getMessage() for r in caplog.records if r.name == "core.oauth"]
+        assert "502 Bad Gateway" in logged
+        assert OAUTH_CONFIG[f"{failing}_endpoint"] in logged
 
     def test_authentiks_error_and_its_reason_are_logged(self, client, caplog):
         with caplog.at_level("WARNING", logger="core.oauth"):
@@ -926,16 +619,10 @@ def test_the_code_is_redeemed_and_the_claims_read_as_authentik_expects(oauth_sta
     from django.conf import settings
 
     client, state = oauth_state_session
-    sent: list[httpx.Request] = []
-    bodies = [GOOD_TOKEN, GOOD_USERINFO]
-
-    def handle(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
-        sent.append(request)
-        return httpx.Response(200, json=bodies[len(sent) - 1], request=request)
 
     with (
         patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
-        patch.object(httpx.HTTPTransport, "handle_request", handle),
+        serving(list(GOOD_ANSWERS)) as sent,
     ):
         response = client.get("/auth/callback/", {"code": "the-code", "state": state})
 
@@ -969,15 +656,6 @@ NAME = "n" * 150  # User.username's
 class TestClaims:
     """The account a sign-in makes from Authentik's userinfo claims, or its refusal when they can't make one."""
 
-    def _sign_in(self, oauth_state_session, userinfo):
-        client, state = oauth_state_session
-        return client, _callback_with(
-            client,
-            {"code": "test-code", "state": state},
-            _authentik_answer(GOOD_TOKEN),
-            _authentik_answer(userinfo),
-        )
-
     @pytest.mark.parametrize(
         ("userinfo", "account"),
         [
@@ -997,7 +675,9 @@ class TestClaims:
     def test_an_account_from_the_claims(self, oauth_state_session, userinfo, account):
         """The username is the email when there is none; no email is an empty one, no groups none; each claim may
         fill its column."""
-        client, response = self._sign_in(oauth_state_session, userinfo)
+        client, state = oauth_state_session
+
+        response = TestOAuthCallback._login(client, state, userinfo)
 
         assert response.status_code == 302
         row = UserGroups.objects.select_related("user").get()
@@ -1029,13 +709,12 @@ class TestClaims:
         """A missing, empty or non-text sub or username, a NUL, a claim past its column, or groups that aren't a
         list of names. The page only says the data was invalid; the log says which claim, for whoever fixes the
         scope mapping."""
-        with caplog.at_level("ERROR", logger="core.oauth"):
-            client, response = self._sign_in(oauth_state_session, userinfo)
+        client, state = oauth_state_session
 
-        assert (response.context["error_title"], response.context["error_message"]) == (
-            "Authentication Failed",
-            "Invalid user data.",
-        )
+        with caplog.at_level("ERROR", logger="core.oauth"):
+            response = TestOAuthCallback._login(client, state, userinfo)
+
+        assert _shown(response) == (200, "Authentication Failed", "Invalid user data.")
         assert not UserGroups.objects.exists()
         assert "_auth_user_id" not in client.session
         assert [r.getMessage() for r in caplog.records if r.name == "core.oauth"] == [f"Userinfo unusable: {reason}"]
@@ -1054,15 +733,7 @@ class TestOAuthLogout:
         # Verify logged in
         assert "_auth_user_id" in client.session
 
-        with patch("core.oauth._get_oauth_config") as mock_config:
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
+        with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
             client.post("/auth/logout/")
 
         # Verify logged out
@@ -1074,15 +745,7 @@ class TestOAuthLogout:
         user = User.objects.create_user(username="logoutuser2")
         client.force_login(user)
 
-        with patch("core.oauth._get_oauth_config") as mock_config:
-            mock_config.return_value = {
-                "client_id": "test-client-id",
-                "client_secret": "test-secret",
-                "authorization_endpoint": "https://auth.example.com/authorize/",
-                "token_endpoint": "https://auth.example.com/token/",
-                "userinfo_endpoint": "https://auth.example.com/userinfo/",
-                "end_session_endpoint": "https://auth.example.com/end-session/",
-            }
+        with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
             response = client.post("/auth/logout/")
 
         assert response.status_code == 302

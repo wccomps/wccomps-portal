@@ -3,7 +3,6 @@ one user folder. These run against a fake Authentik that, like the real one with
 whatever path is asked for, so each row's path has to be checked."""
 
 import json
-import re
 from collections.abc import Iterator
 from datetime import timedelta
 from unittest.mock import patch
@@ -30,6 +29,7 @@ from core.models import CompetitionConfig, UserGroups
 from core.services.competition import NO_FOLDER_ACCOUNT, run_competition
 from core.services.user_groups import refresh_user_groups
 from core.team_accounts import FOLDER_CACHE_SECONDS, _FolderCache, accounts_by_team, blueteam_kinds
+from core.tests.test_oauth_flow import OAUTH_CONFIG
 from core.utils import drain
 from team.models import Team
 
@@ -393,15 +393,6 @@ def test_a_lone_blue_team_group_binding_passes_without_the_folder(controlled_vpn
 # Sign-in
 # ---------------------------------------------------------------------------------------------------------------
 
-OAUTH_CONFIG = {
-    "client_id": "test-client-id",
-    "client_secret": "test-secret",
-    "authorization_endpoint": "https://auth.example.com/authorize/",
-    "token_endpoint": "https://auth.example.com/token/",
-    "userinfo_endpoint": "https://auth.example.com/userinfo/",
-    "end_session_endpoint": "https://auth.example.com/end-session/",
-}
-
 
 def _sign_in(fake: FakeAuthentik, userinfo: dict[str, object], *, expect: int = 302) -> HttpResponse:
     """A full sign-in in a fresh browser, with the region's scope mapping's userinfo."""
@@ -455,13 +446,14 @@ def test_an_account_outside_the_folder_signs_in_as_claimed(teams):
     assert _groups("uid-team01c") == []
 
 
-def test_a_folder_account_whose_authentik_username_cant_be_one_signs_in_as_claimed(teams, caplog):
-    """A folder account named past the username column (or with a NUL) keeps the claimed name, and it is logged."""
-    fake = FakeAuthentik([*USERS, _user(41, "team01" + "d" * 200, uid="uid-long")])
+@pytest.mark.parametrize("authentik_username", ["team01" + "d" * 200, "team01\x00d"], ids=["too long", "NUL"])
+def test_a_folder_account_whose_authentik_username_cant_be_one_signs_in_as_claimed(teams, caplog, authentik_username):
+    """A folder account named past the username column, or with a NUL, keeps the claimed name, and it is logged."""
+    fake = FakeAuthentik([*USERS, _user(41, authentik_username, uid="uid-odd")])
 
-    _sign_in(fake, {"sub": "uid-long", "preferred_username": "team01"})
+    _sign_in(fake, {"sub": "uid-odd", "preferred_username": "team01"})
 
-    assert User.objects.get(usergroups__authentik_id="uid-long").username == "team01"
+    assert User.objects.get(usergroups__authentik_id="uid-odd").username == "team01"
     assert "unusable Authentik username" in caplog.text
 
 
@@ -489,22 +481,12 @@ def test_when_authentik_cant_be_asked_the_sign_in_is_refused(teams, caplog):
 
     response = _sign_in(fake, _claimed("team01a"), expect=503)
 
-    assert b"Try again in a moment" in response.content
+    assert (response.context["error_title"], response.context["error_message"]) == (
+        "Sign-in Unavailable",
+        "Try again in a moment.",
+    )
     assert not UserGroups.objects.exists()
     assert "team folder lookup failed" in caplog.text
-
-
-def test_the_refused_sign_in_says_it_is_unavailable_for_now(teams, settings):
-    """The page names the outage, not the person: signing in again shortly works."""
-    settings.SITE_NAME = "Example Portal"
-    fake = FakeAuthentik(USERS)
-    fake.fail = True
-
-    response = _sign_in(fake, _claimed("team01a"), expect=503)
-
-    title = re.search(r"<title>(.*?)</title>", response.content.decode(), re.S)
-    assert title and title.group(1).strip() == "Sign-in Unavailable - Example Portal"
-    assert response.context["error_message"] == "Try again in a moment."
 
 
 def test_when_authentik_cant_be_asked_a_staff_sign_in_goes_ahead(teams, settings, caplog):

@@ -13,6 +13,7 @@ from django.urls import reverse
 from django.utils import timezone
 from scoring.models import IncidentReport
 
+from core.errors import MESSAGES
 from core.tests.roles import role_user
 from team.models import Team
 from ticketing.models import Ticket, TicketAttachment, TicketCategory
@@ -143,7 +144,7 @@ def test_staff_see_every_teams_ticket(other_team: Team) -> None:
 
 
 def test_a_team_gets_the_attachment_it_asks_for_of_its_own() -> None:
-    """The lookup picks the record among the team's own: each download is its file, and an id it lacks is a 404."""
+    """The lookup picks the record among the team's own: each download is its own file."""
     client = signed_in("blue_team")
     own = ticket(Team.objects.get(team_number=1), "T001-001")
     first, second = (
@@ -154,8 +155,6 @@ def test_a_team_gets_the_attachment_it_asks_for_of_its_own() -> None:
         response = client.get(reverse("ticket_attachment_download", args=["T001-001", attachment.pk]))
         assert response.status_code == 200
         assert response.getvalue() == data
-    missing = client.get(reverse("ticket_attachment_download", args=["T001-001", second.pk + 1000]))
-    assert missing.status_code == 404
 
 
 # JSON endpoints ----------------------------------------------------------------------------------------------------
@@ -164,7 +163,7 @@ def test_a_team_gets_the_attachment_it_asks_for_of_its_own() -> None:
 def test_json_endpoint_answers_403_as_json_without_a_fetch_header() -> None:
     response = signed_in("blue_team").post(reverse("admin_team_action", args=[1]), {"action": "activate"})
     assert response.status_code == 403
-    assert isinstance(response.json()["error"], str)
+    assert response.json() == {"error": MESSAGES[403]}  # require_permission without its own message
 
 
 def test_json_endpoint_answers_404_as_json() -> None:

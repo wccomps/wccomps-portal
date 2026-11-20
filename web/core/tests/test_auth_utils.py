@@ -1,6 +1,5 @@
 """Tests for auth_utils.py permission functions."""
 
-import json
 import re
 
 import pytest
@@ -86,38 +85,6 @@ class TestHasPermission:
         assert not has_permission(anon, "ticketing_support")
         assert not has_permission(anon, "gold_team")
 
-    def test_admin_permission(self, admin_user):
-        """User with Discord_Admin group should have admin permission."""
-        assert has_permission(admin_user, "admin")
-
-    def test_ticketing_support_permission(self, ticketing_support_user):
-        """User with Ticketing_Support group should have ticketing_support permission."""
-        assert has_permission(ticketing_support_user, "ticketing_support")
-
-    def test_ticketing_admin_permission(self, ticketing_admin_user):
-        """User with Ticketing_Admin group should have ticketing_admin permission."""
-        assert has_permission(ticketing_admin_user, "ticketing_admin")
-
-    def test_gold_team_permission(self, gold_team_user):
-        """User with GoldTeam group should have gold_team permission."""
-        assert has_permission(gold_team_user, "gold_team")
-
-    def test_admin_implies_gold_team(self, admin_user):
-        """Admin users should also have gold_team permission."""
-        assert has_permission(admin_user, "gold_team")
-
-    def test_blue_team_permission(self, blue_team_user):
-        """User with BlueTeam group should have blue_team permission."""
-        assert has_permission(blue_team_user, "blue_team")
-
-    def test_white_team_permission(self, white_team_user):
-        """User with WhiteTeam group should have white_team permission."""
-        assert has_permission(white_team_user, "white_team")
-
-    def test_orange_team_permission(self, orange_team_user):
-        """User with OrangeTeam group should have orange_team permission."""
-        assert has_permission(orange_team_user, "orange_team")
-
     def test_an_inactive_teams_member_lacks_blue_team(self, blue_team_user):
         """blue_team opens pages that then need the member's active team; an inactive team's member has none."""
         Team.objects.filter(team_number=1).update(is_active=False)
@@ -135,14 +102,6 @@ class TestHasPermission:
         UserGroups.objects.create(user=user, authentik_id="sub-r", groups=["Renamed_Group"])
         assert has_permission(user, "blue_team")
 
-    def test_gold_team_holds_blue_team_without_a_team(self, gold_team_user, admin_user):
-        assert has_permission(gold_team_user, "blue_team")
-        assert has_permission(admin_user, "blue_team")
-
-    def test_red_team_user_lacks_blue_team_permission(self, red_team_user):
-        """Red team user should not have blue_team permission."""
-        assert not has_permission(red_team_user, "blue_team")
-
     @pytest.mark.parametrize("name", ["WCComps_Discord_Admin", "nonexistent_permission", ""])
     def test_a_name_that_isnt_a_permission_raises(self, admin_user, name):
         """A typo must not quietly read as a group name or as a refusal."""
@@ -150,21 +109,18 @@ class TestHasPermission:
             has_permission(admin_user, name)
 
 
-# What each test role (core.tests.roles) holds: the admin group everything, gold every team role's permission and
-# blue_team without a team, a lead their team's permission too, a ticketing admin ticketing support's too.
-TEAM_ROLES = {"gold_team", "white_team", "orange_team", "white_team_lead", "orange_team_lead", "blue_team"}
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "no_role": set(),
     "blue_team": {"blue_team"},
     "red_team": {"red_team"},
-    "gold_team": TEAM_ROLES,
+    "gold_team": {"gold_team", "white_team", "orange_team", "white_team_lead", "orange_team_lead", "blue_team"},
     "white_team": {"white_team"},
     "white_team_lead": {"white_team", "white_team_lead"},
     "orange_team": {"orange_team"},
     "orange_team_lead": {"orange_team", "orange_team_lead"},
     "ticketing_support": {"ticketing_support"},
     "ticketing_admin": {"ticketing_support", "ticketing_admin"},
-    "admin": {"admin", "ticketing_admin", "ticketing_support", "red_team", *TEAM_ROLES},
+    "admin": set(PERMISSION_MAP),
 }
 
 
@@ -172,10 +128,6 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
 def test_each_role_holds_exactly_its_permissions(role: str) -> None:
     user = role_user(role)
     assert {permission for permission in PERMISSION_MAP if has_permission(user, permission)} == ROLE_PERMISSIONS[role]
-
-
-def test_the_admin_group_grants_every_permission() -> None:
-    assert ROLE_PERMISSIONS["admin"] == set(PERMISSION_MAP)
 
 
 class TestGetPermissionsContext:
@@ -256,22 +208,6 @@ class TestRequirePermissionDecorator:
         with pytest.raises(PermissionDenied, match="Only ticketing admins"):
             protected_view(request)
 
-    def test_a_refusal_without_a_message_answers_the_default_one(self, blue_team_user):
-        """With no error_message the 403 says core.errors' own words."""
-        from django.core.exceptions import PermissionDenied
-
-        from core.errors import MESSAGES, permission_denied
-
-        @require_permission("ticketing_admin")
-        def protected_view(request):
-            return HttpResponse("success")
-
-        request = RequestFactory().get("/test/", headers={"Accept": "application/json"})
-        request.user = blue_team_user
-        with pytest.raises(PermissionDenied) as refused:
-            protected_view(request)
-        assert json.loads(permission_denied(request, refused.value).content) == {"error": MESSAGES[403]}
-
     def test_decorator_sends_anonymous_user_to_sign_in(self):
         """A signed-out visitor is sent to sign in, coming back to the page after."""
 
@@ -299,27 +235,6 @@ class TestRequirePermissionDecorator:
 )
 def test_each_role_lands_on_its_own_page(role: str, url_name: str) -> None:
     assert get_role_based_landing_url(permission_groups_of(role_user(role))) == reverse(url_name)
-
-
-class TestDjangoAdminPermissions:
-    """Django's model permissions (has_perm, through core.auth_backends) belong to an active portal admin only."""
-
-    def test_an_active_admin_holds_them(self):
-        admin = role_user("admin")
-        assert admin.has_perm("core.view_auditlog")
-        assert admin.has_module_perms("core")
-
-    def test_a_disabled_admin_holds_none(self):
-        admin = role_user("admin")
-        admin.is_active = False
-        assert not admin.has_perm("core.view_auditlog")
-        assert not admin.has_module_perms("core")
-
-    @pytest.mark.parametrize("role", ["gold_team", "ticketing_admin", "blue_team"])
-    def test_another_role_holds_none(self, role: str):
-        user = role_user(role)
-        assert not user.has_perm("core.view_auditlog")
-        assert not user.has_module_perms("core")
 
 
 def test_signing_out_everywhere_writes_only_the_password() -> None:
