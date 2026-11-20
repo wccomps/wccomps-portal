@@ -16,7 +16,6 @@ from .models import InjectScore, OrangeTeamScore, RedTeamScore, ServiceDetail
 class ScorecardPeerContext:
     """Pre-fetched inject and service rows across all teams in a standings cohort."""
 
-    ranked_team_ids: set[int]
     peer_inject_points: dict[str, list[Decimal]]
     peer_service_points: dict[str, list[Decimal]]
     injects_by_team: dict[int, list[InjectScore]]
@@ -48,7 +47,6 @@ def build_peer_context(standings: list[Standing], extra_team_ids: set[int] | Non
             peer_service_points[svc_row.service_name].append(svc_row.points)
 
     return ScorecardPeerContext(
-        ranked_team_ids=ranked_team_ids,
         peer_inject_points=peer_inject_points,
         peer_service_points=peer_service_points,
         injects_by_team=injects_by_team,
