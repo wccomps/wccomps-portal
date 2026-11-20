@@ -595,8 +595,8 @@ def generate_blueteam_password() -> str:
     """Generate a readable blue team password like "Correct-Horse-742!" or "Battery-@199-Staple"."""
     from xkcdpass import xkcd_password as xp
 
-    # Get EFF long wordlist (7,776 words)
-    wordlist = xp.generate_wordlist(wordfile=xp.locate_wordfile())
+    # The EFF long wordlist, letters only: a hyphenated word (t-shirt) would split the password at its hyphen
+    wordlist = xp.generate_wordlist(wordfile=xp.locate_wordfile(), valid_chars="[a-z]")
 
     words = xp.generate_xkcdpassword(wordlist, numwords=2, delimiter="-", case="capitalize")
 
