@@ -319,37 +319,39 @@ class HelpPanelsCog(commands.Cog):
         if not channel or not isinstance(channel, discord.TextChannel):
             logger.warning(f"Ticket channel {channel_id} not found or not a text channel")
             return
+        await post_ticket_panel(self.bot, channel)
 
-        categories_text = [
-            f"• **{cat.display_name}**: {cat.points_label}"
-            async for cat in TicketCategory.objects.filter(user_creatable=True)
-        ]
 
-        intro = (
-            "**Create a support ticket and our volunteers will assist you!**\n\n"
-            "Click the button below to create a ticket. A volunteer will respond shortly.\n\n"
-            "**Available Categories:**\n"
-        )
-        embed = discord.Embed(
-            title="Need Help?",
-            description=intro + fit_lines(categories_text, DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT - len(intro)),
-            color=discord.Color.green(),
-        )
+async def post_ticket_panel(bot: commands.Bot, channel: discord.TextChannel) -> None:
+    """Post the ticket panel to channel, or update the bot's among its last 10 messages. Module-level, since it needs
+    nothing from the cog but the bot: discord.py loads an extension as a fresh module copy, so a cog class imported
+    before load_extension never matches the loaded cog."""
+    categories_text = [
+        f"• **{cat.display_name}**: {cat.points_label}"
+        async for cat in TicketCategory.objects.filter(user_creatable=True)
+    ]
 
-        view = TeamHelpView(self.bot, show_link=False, show_ticket=True)
+    intro = (
+        "**Create a support ticket and our volunteers will assist you!**\n\n"
+        "Click the button below to create a ticket. A volunteer will respond shortly.\n\n"
+        "**Available Categories:**\n"
+    )
+    embed = discord.Embed(
+        title="Need Help?",
+        description=intro + fit_lines(categories_text, DISCORD_EMBED_DESCRIPTION_CHAR_LIMIT - len(intro)),
+        color=discord.Color.green(),
+    )
 
-        async for message in channel.history(limit=10):
-            if message.author == self.bot.user and _has_button(message, TicketButton.CUSTOM_ID):
-                await message.edit(embed=embed, view=view)
-                logger.info(f"Updated ticket panel in channel {channel_id}")
-                return
+    view = TeamHelpView(bot, show_link=False, show_ticket=True)
 
-        await channel.send(embed=embed, view=view)
-        logger.info(f"Posted ticket panel to channel {channel_id}")
+    async for message in channel.history(limit=10):
+        if message.author == bot.user and _has_button(message, TicketButton.CUSTOM_ID):
+            await message.edit(embed=embed, view=view)
+            logger.info(f"Updated ticket panel in channel {channel.id}")
+            return
 
-    async def post_team_ticket_panel(self, team_channel_id: int) -> None:
-        """Post ticket panel to a team's channel (called when team is created)."""
-        await self._post_ticket_panel(team_channel_id)
+    await channel.send(embed=embed, view=view)
+    logger.info(f"Posted ticket panel to channel {channel.id}")
 
 
 async def setup(bot: commands.Bot) -> None:
