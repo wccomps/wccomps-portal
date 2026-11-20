@@ -56,30 +56,28 @@ def school_info_csv_response(records: Iterable[SchoolInfo]) -> HttpResponse:
     return response
 
 
-def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str] | None:
-    """Infer canonical column names by inspecting header text.
+def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str]:
+    """Map each header to the column name the parser reads it as.
 
-    Maps other email columns (contain 'email'), in order, to whichever of contact_email and
-    secondary_email is still free; any beyond those are ignored. Assigns the remaining
-    unmapped column as school_name. Returns None if the headers are already exactly canonical.
+    A header naming a canonical column in any case or spacing reads as that column, unless a header spelled exactly
+    that way or an earlier one already does; it then keeps its own name, which the parser ignores as unknown. Maps
+    other email columns (contain 'email'), in order, to whichever of contact_email and secondary_email is still free;
+    any beyond those are ignored. Assigns the remaining unmapped column as school_name.
     """
     canonical = set(SCHOOL_COLUMNS)
     normalized = {f: f.strip().lower().replace(" ", "_") for f in fieldnames}
-
-    # "School Name" or " contact_email" normalizes to a canonical name but is not one: the parser reads the raw headers
-    # when there is no mapping, so it still needs one
-    if set(fieldnames) <= canonical:
-        return None
+    claimed = canonical & set(fieldnames)
 
     mapping: dict[str, str] = {}
     unmapped: list[str] = []
     skipped: list[str] = []
-    # Email slots not already taken by a column named exactly that
+    # Email slots no column's normalized name already takes
     email_columns = iter(c for c in ("contact_email", "secondary_email") if c not in normalized.values())
     for raw in fieldnames:
         norm = raw.strip().lower()
-        if norm.replace(" ", "_") in canonical:
-            mapping[raw] = norm.replace(" ", "_")
+        if (name := normalized[raw]) in canonical:
+            mapping[raw] = raw if name in claimed else name
+            claimed.add(name)
         elif "email" in norm:
             mapping[raw] = next(email_columns, norm.replace(" ", "_"))
         elif "team" in norm or norm.replace(" ", "").replace("#", "").isdigit():
@@ -253,15 +251,9 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
             return {"rows": rows, "errors": errors, "warnings": warnings}
 
         header_mapping = _infer_header_mapping(list(reader.fieldnames))
-        if header_mapping:
-            mapped_names = set(header_mapping.values())
-            warnings.append(
-                "Columns auto-detected: " + ", ".join(f"{raw} as {canon}" for raw, canon in header_mapping.items())
-            )
-        else:
-            mapped_names = set(reader.fieldnames)
-
-        headers = mapped_names
+        if detected := [f"{raw} as {name}" for raw, name in header_mapping.items() if raw != name]:
+            warnings.append("Columns auto-detected: " + ", ".join(detected))
+        headers = set(header_mapping.values())
 
         missing_headers = required_headers - headers
         if missing_headers:
@@ -273,7 +265,7 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
             warnings.append(f"Unknown columns will be ignored: {', '.join(sorted(unknown_headers))}")
 
         for row_num, raw_row in enumerate(reader, start=2):  # Start at 2 (header is row 1)
-            row = {header_mapping.get(k, k): v for k, v in raw_row.items()} if header_mapping else raw_row
+            row = {header_mapping.get(k, k): v for k, v in raw_row.items()}
             # A row is checked as the school info form checks one school: lengths, emails, no NUL characters.
             # A cell missing from a short row is None.
             # A cell may be the school info export's, so the formula guard's quote comes off first

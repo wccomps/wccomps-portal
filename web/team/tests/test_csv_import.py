@@ -126,8 +126,7 @@ captain@example.edu,Springfield High
         assert result["rows"][0]["school_name"] == "Springfield High"
         assert result["rows"][0]["contact_email"] == "captain@example.edu"
 
-    def test_canonical_headers_no_inference(self) -> None:
-        """Test that canonical headers bypass inference."""
+    def test_canonical_headers_raise_no_auto_detection_warning(self) -> None:
         csv_content = """school_name,contact_email
 Springfield High,captain@example.edu
 """
@@ -171,12 +170,11 @@ Example U,captain@example.edu,coach@example.edu
         ("header", "detected"),
         [
             ("School Name,Contact Email", "School Name as school_name, Contact Email as contact_email"),
-            ("school_name, contact_email", "school_name as school_name,  contact_email as contact_email"),
+            ("school_name, contact_email", " contact_email as contact_email"),
             ("SCHOOL_NAME,Contact_Email", "SCHOOL_NAME as school_name, Contact_Email as contact_email"),
         ],
     )
     def test_headers_naming_the_columns_in_other_case_or_spacing_are_read(self, header: str, detected: str) -> None:
-        """These were taken as canonical, so the parser read the raw names and refused them as missing columns."""
         csv_file = SimpleUploadedFile("test.csv", f"{header}\nExample U,captain@example.edu\n".encode())
 
         result = parse_csv_file(csv_file)
@@ -193,6 +191,17 @@ Example U,captain@example.edu,coach@example.edu
             "errors": [],
             "warnings": [f"Columns auto-detected: {detected}"],
         }
+
+    @pytest.mark.parametrize("variant_cell", ["", "other@example.edu"])
+    def test_exact_column_keeps_its_name_over_a_header_naming_it_in_other_case(self, variant_cell: str) -> None:
+        header = "school_name,contact_email,Contact Email"
+        csv_file = SimpleUploadedFile("test.csv", f"{header}\nExample U,captain@example.edu,{variant_cell}\n".encode())
+
+        result = parse_csv_file(csv_file)
+
+        assert result["errors"] == []
+        assert result["rows"][0]["contact_email"] == "captain@example.edu"
+        assert result["warnings"] == ["Unknown columns will be ignored: Contact Email"]
 
 
 class TestCSVValidation:
