@@ -59,6 +59,7 @@ def test_standing_school_emails():
         point_adjustments=Decimal(0),
         incident_recovery_points=Decimal(0),
         total_score=Decimal(0),
+        scaling={},
     )
     assert standing.school_emails == ["coach@example.edu"]
 
