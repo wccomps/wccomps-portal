@@ -280,6 +280,26 @@ class PacketCompletesItselfTestCase(TestCase):
         self.packet.refresh_from_db()
         self.assertEqual(self.packet.status, "cancelled")
 
+    @patch("packets.services.EmailMultiAlternatives")
+    def test_the_last_send_completes_only_its_own_packet(self, _email):
+        other = Packet.objects.create(
+            title="Other",
+            file_data=b"x",
+            filename="o.pdf",
+            mime_type="application/pdf",
+            file_size=1,
+            uploaded_by="gold",
+            status="distributing",
+        )
+        PacketDistribution.objects.create(packet=other, team=Team.objects.get(team_number=1))
+        self.dists[0].mark_as_sent("t1@example.com")
+
+        self.service.send_packet_email(self.dists[1])
+
+        self.packet.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual((self.packet.status, other.status), ("completed", "distributing"))
+
     def test_migration_completes_packets_whose_emails_all_went_out(self):
         from importlib import import_module
 
