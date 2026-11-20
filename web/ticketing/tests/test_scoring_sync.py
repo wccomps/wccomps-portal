@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 import pytest
-from scoring.calculator import calculate_team_score_detailed, compute_standings
+from scoring.calculator import Standing, compute_standings, get_standing
 from scoring.models import ServiceScore
 
 from team.models import Team
@@ -24,14 +24,18 @@ def _ticket(team: Team, points: int, approved: bool) -> Ticket:
     )
 
 
+def _standing(team: Team) -> Standing:
+    return get_standing(team.team_number, compute_standings())
+
+
 def test_calculator_sums_approved_ticket_charges_negative() -> None:
     team = Team.objects.create(team_number=1, team_name="T1")
     _ticket(team, 30, True)
     _ticket(team, 20, True)
     _ticket(team, 99, False)  # unapproved - ignored
-    breakdown = calculate_team_score_detailed(team)
-    assert breakdown["point_adjustments"] == Decimal("-50")
-    assert breakdown["total_score"] == Decimal("-50.00")
+    standing = _standing(team)
+    assert standing.point_adjustments == Decimal("-50")
+    assert standing.total_score == Decimal("-50.00")
 
 
 def test_calculator_counts_ticket_adjustments_without_servicescore() -> None:
@@ -48,9 +52,9 @@ def test_calculator_combines_service_points_and_ticket_adjustments() -> None:
     team = Team.objects.create(team_number=3, team_name="T3")
     ServiceScore.objects.create(team=team, service_points=Decimal("500"))
     _ticket(team, 40, True)
-    breakdown = calculate_team_score_detailed(team)
-    assert breakdown["service_raw"] == Decimal("500")
-    assert breakdown["point_adjustments"] == Decimal("-40")
+    standing = _standing(team)
+    assert standing.scaling["service_raw"] == Decimal("500")
+    assert standing.point_adjustments == Decimal("-40")
 
 
 def test_reopen_leaves_approved_adjustment_intact(admin_user) -> None:
@@ -59,11 +63,11 @@ def test_reopen_leaves_approved_adjustment_intact(admin_user) -> None:
 
     team = Team.objects.create(team_number=11, team_name="T11")
     t = _ticket(team, 25, approved=True)
-    assert calculate_team_score_detailed(team)["point_adjustments"] == Decimal("-25")
+    assert _standing(team).point_adjustments == Decimal("-25")
     client = Client()
     client.force_login(admin_user)
     client.post(reverse("ticket_reopen", args=[t.ticket_number]), {})
     # An approved ticket cannot be reopened, so its charge stays deducted.
     t.refresh_from_db()
     assert t.is_approved
-    assert calculate_team_score_detailed(team)["point_adjustments"] == Decimal("-25")
+    assert _standing(team).point_adjustments == Decimal("-25")

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TypedDict
 
-from .calculator import SCALING_FIELDS, Standing, calculate_team_score_detailed, get_leaderboard
+from .calculator import Standing, get_leaderboard
 from .models import InjectScore, OrangeTeamScore, RedTeamScore, ServiceDetail
 
 
@@ -259,11 +259,6 @@ def build_scorecard_context(
     )
 
     stats = _compute_scorecard_stats(score, standings, peer_context=peer_context)
-    if score.scaling:
-        scaling = dict(score.scaling)
-    else:
-        detailed = calculate_team_score_detailed(team)
-        scaling = {key: detailed[key] for key in SCALING_FIELDS}  # type: ignore[literal-required]
 
     orange_scores = (
         OrangeTeamScore.objects.filter(team=team, is_approved=True)
@@ -282,5 +277,5 @@ def build_scorecard_context(
         "orange_total": sum(o.points_awarded for o in orange_scores),
         "service_total": sum(s["points"] for s in stats["service_stats"]),
         "service_sla_total": sum(s["sla_violations"] for s in stats["service_stats"]),
-        "scaling": scaling,
+        "scaling": dict(score.scaling),
     }

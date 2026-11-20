@@ -152,6 +152,15 @@ def _raw_scores(teams: list[Team]) -> dict[int, _RawScores]:
 
 
 def _breakdown(raw: _RawScores, template: ScoringTemplate) -> DetailedScoreBreakdown:
+    """A team's score with its raw scores, modifiers and weights.
+
+    Formula:
+        total = (service × service_modifier)
+              + (inject × inject_modifier)
+              + (orange × orange_modifier)
+              + sla_violations + point_adjustments
+              + red_deductions + incident_recovery
+    """
     service_mod, inject_mod, orange_mod = _get_modifiers(template)
     scaled_service = raw["service"] * service_mod
     scaled_inject = raw["inject"] * inject_mod
@@ -185,19 +194,6 @@ def _breakdown(raw: _RawScores, template: ScoringTemplate) -> DetailedScoreBreak
 
 def _template() -> ScoringTemplate:
     return ScoringTemplate.objects.first() or ScoringTemplate()
-
-
-def calculate_team_score_detailed(team: Team) -> DetailedScoreBreakdown:
-    """A team's score with its raw scores, modifiers and weights.
-
-    Formula:
-        total = (service × service_modifier)
-              + (inject × inject_modifier)
-              + (orange × orange_modifier)
-              + sla_violations + point_adjustments
-              + red_deductions + incident_recovery
-    """
-    return _breakdown(_raw_scores([team])[team.pk], _template())
 
 
 @dataclass

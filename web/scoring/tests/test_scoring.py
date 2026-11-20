@@ -25,9 +25,11 @@ from registration.models import School
 
 from core.models import UserGroups
 from scoring.calculator import (
+    SCALING_FIELDS,
+    Standing,
     calculate_suggested_recovery_points,
-    calculate_team_score_detailed,
     compute_standings,
+    get_standing,
     suggest_red_score_matches,
 )
 from scoring.models import (
@@ -39,6 +41,10 @@ from scoring.models import (
     ServiceScore,
 )
 from team.models import SchoolInfo, Team
+
+
+def _standing(team: Team) -> Standing:
+    return get_standing(team.team_number, compute_standings())
 
 
 class ScoringFormulaTests(TestCase):
@@ -99,32 +105,32 @@ class ScoringFormulaTests(TestCase):
         )
         red_finding.affected_teams.add(self.team1)
 
-        scores = calculate_team_score_detailed(self.team1)
+        scores = _standing(self.team1)
 
         # Service: 500 × 1.0 = 500
-        self.assertEqual(scores["service_points"], Decimal("500.0"))
+        self.assertEqual(scores.service_points, Decimal("500.0"))
         # Inject: 250 × 1.0 = 250
-        self.assertEqual(scores["inject_points"], Decimal("250.0"))
+        self.assertEqual(scores.inject_points, Decimal("250.0"))
         # Orange: 50 × 1.0 = 50
-        self.assertEqual(scores["orange_points"], Decimal("50.0"))
+        self.assertEqual(scores.orange_points, Decimal("50.0"))
         # Red deduction: -100 (raw)
-        self.assertEqual(scores["red_deductions"], Decimal("-100"))
+        self.assertEqual(scores.red_deductions, Decimal("-100"))
         # SLA penalty
-        self.assertEqual(scores["sla_penalties"], Decimal("-10.00"))
+        self.assertEqual(scores.sla_penalties, Decimal("-10.00"))
         # Recovery points
-        self.assertEqual(scores["incident_recovery_points"], Decimal("0"))
+        self.assertEqual(scores.incident_recovery_points, Decimal("0"))
         # Total = 500 + 250 + 50 - 10 - 100 = 690
-        self.assertEqual(scores["total_score"], Decimal("690.0"))
+        self.assertEqual(scores.total_score, Decimal("690.0"))
 
     def test_zero_scores_all_categories(self) -> None:
         """Team with no scoring data gets total 0."""
-        scores = calculate_team_score_detailed(self.team1)
+        scores = _standing(self.team1)
 
-        self.assertEqual(scores["service_points"], Decimal("0"))
-        self.assertEqual(scores["inject_points"], Decimal("0"))
-        self.assertEqual(scores["orange_points"], Decimal("0"))
-        self.assertEqual(scores["red_deductions"], Decimal("0"))
-        self.assertEqual(scores["total_score"], Decimal("0"))
+        self.assertEqual(scores.service_points, Decimal("0"))
+        self.assertEqual(scores.inject_points, Decimal("0"))
+        self.assertEqual(scores.orange_points, Decimal("0"))
+        self.assertEqual(scores.red_deductions, Decimal("0"))
+        self.assertEqual(scores.total_score, Decimal("0"))
 
     def test_only_red_deductions(self) -> None:
         """Team with only red findings gets negative total."""
@@ -136,10 +142,10 @@ class ScoringFormulaTests(TestCase):
         )
         red.affected_teams.add(self.team1)
 
-        scores = calculate_team_score_detailed(self.team1)
+        scores = _standing(self.team1)
 
-        self.assertEqual(scores["red_deductions"], Decimal("-200"))
-        self.assertLess(scores["total_score"], Decimal("0"))
+        self.assertEqual(scores.red_deductions, Decimal("-200"))
+        self.assertLess(scores.total_score, Decimal("0"))
 
     def test_unapproved_scores_excluded(self) -> None:
         """Unapproved inject grades, red findings, and orange team checks are not counted."""
@@ -167,12 +173,12 @@ class ScoringFormulaTests(TestCase):
         )
         red.affected_teams.add(self.team1)
 
-        scores = calculate_team_score_detailed(self.team1)
+        scores = _standing(self.team1)
 
-        self.assertEqual(scores["inject_points"], Decimal("0"))
-        self.assertEqual(scores["orange_points"], Decimal("0"))
-        self.assertEqual(scores["red_deductions"], Decimal("0"))
-        self.assertEqual(scores["total_score"], Decimal("0"))
+        self.assertEqual(scores.inject_points, Decimal("0"))
+        self.assertEqual(scores.orange_points, Decimal("0"))
+        self.assertEqual(scores.red_deductions, Decimal("0"))
+        self.assertEqual(scores.total_score, Decimal("0"))
 
     def test_leaderboard_ranking(self) -> None:
         """Test that leaderboard ranks teams correctly."""
@@ -709,11 +715,11 @@ class TestIncidentFindingMatching:
             points_returned=Decimal("30.00"),
         )
 
-        scores = calculate_team_score_detailed(team)
+        scores = _standing(team)
 
         # Only reviewed incident counts - recovery is raw value for display
         # (40 points returned from reviewed incident)
-        assert scores["incident_recovery_points"] == Decimal("40.00")
+        assert scores.incident_recovery_points == Decimal("40.00")
 
     def test_suggest_red_score_matches_by_source_ip(self, create_user_with_groups) -> None:
         """Finding suggestion algorithm matches by source IP."""
@@ -848,22 +854,12 @@ class ScalingContextTests(TestCase):
             is_approved=True,
         )
 
-    def test_calculate_team_score_detailed_returns_raw_and_modifiers(self) -> None:
-        from scoring.calculator import calculate_team_score_detailed
+    def test_standing_carries_raw_scores_and_modifiers(self) -> None:
+        scaling = _standing(self.team).scaling
 
-        result = calculate_team_score_detailed(self.team)
-
-        assert "service_raw" in result
-        assert "inject_raw" in result
-        assert "orange_raw" in result
-        assert "service_modifier" in result
-        assert "inject_modifier" in result
-        assert "orange_modifier" in result
-        assert "service_weight" in result
-        assert "inject_weight" in result
-        assert "orange_weight" in result
-        assert result["service_raw"] == Decimal("8000")
-        assert result["inject_raw"] == Decimal("2000")
+        assert set(scaling) == set(SCALING_FIELDS)
+        assert scaling["service_raw"] == Decimal("8000")
+        assert scaling["inject_raw"] == Decimal("2000")
 
 
 @pytest.mark.django_db
