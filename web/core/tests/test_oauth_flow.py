@@ -5,6 +5,7 @@ These tests verify the full OAuth callback logic without requiring
 a real Authentik server.
 """
 
+import base64
 import json
 import re
 import time
@@ -17,6 +18,7 @@ from django.contrib.auth.models import User
 from django.core import signing
 from django.http import HttpResponse
 from django.test import Client
+from django.utils.html import escape
 
 from core.models import CredentialsReset, UserGroups
 from core.tests.external_json import Answer, serving
@@ -60,14 +62,20 @@ def _login(client: Client, state: str, userinfo: object, *, id_token: str | None
     return _callback(client, {"code": "test-code", "state": state}, _json(tokens), _json(userinfo))
 
 
+def _id_token(auth_time: float) -> str:
+    """An ID token whose claims say the person signed in to Authentik at auth_time (the signature isn't read)."""
+    payload = base64.urlsafe_b64encode(json.dumps({"auth_time": int(auth_time)}).encode()).decode().rstrip("=")
+    return f"header.{payload}.signature"
+
+
 def _shown(response) -> tuple[int, str, str]:
     """The error page's status, the title its browser tab shows before the site's name, and its message. The site's
     name comes from a context processor, so it shows only on a page rendered with its request."""
     title = re.search(r"<title>\s*(.*?)\s*</title>", response.content.decode(), re.S)
     assert title, response.content
-    page, _, site = title.group(1).rpartition(" - ")
-    assert site == settings.SITE_NAME
-    return response.status_code, page, response.context["error_message"]
+    site = f" - {escape(settings.SITE_NAME)}"
+    assert title.group(1).endswith(site), title.group(1)
+    return response.status_code, title.group(1).removesuffix(site), response.context["error_message"]
 
 
 @pytest.fixture
@@ -93,32 +101,14 @@ class TestOAuthLogin:
 
     def test_login_includes_signed_state_in_redirect(self):
         """Login should include a signed state parameter in the redirect URL."""
-        from urllib.parse import parse_qs, urlparse
-
-        from django.core import signing
-
-        client = Client()
-        with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
-            response = client.get("/auth/login/")
-
-        parsed = urlparse(response.url)
-        state = parse_qs(parsed.query)["state"][0]
+        state = _start_sign_in(Client())
         state_data = signing.loads(state, max_age=300)
         assert "n" in state_data  # Contains nonce
         assert len(state_data["n"]) > 10  # Secure random nonce
 
     def test_login_encodes_next_url_in_state(self):
         """Login should encode next URL in the signed state parameter."""
-        from urllib.parse import parse_qs, urlparse
-
-        from django.core import signing
-
-        client = Client()
-        with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
-            response = client.get("/auth/login/?next=/dashboard/")
-
-        parsed = urlparse(response.url)
-        state = parse_qs(parsed.query)["state"][0]
+        state = _start_sign_in(Client(), "/dashboard/")
         state_data = signing.loads(state, max_age=300)
         assert state_data["next"] == "/dashboard/"
 
@@ -150,7 +140,6 @@ class TestOAuthCallback:
         """Callback should update groups for existing user."""
         client, state = oauth_state_session
 
-        # Create existing user with old groups
         user = User.objects.create_user(username="existinguser", email="existing@example.com")
         UserGroups.objects.create(
             user=user,
@@ -171,17 +160,15 @@ class TestOAuthCallback:
 
         assert response.status_code == 302
 
-        # Verify groups updated
         user_groups = UserGroups.objects.get(user=user)
         assert "WCComps_GoldTeam" in user_groups.groups
         assert "NewGroup" in user_groups.groups
-        assert "OldGroup" not in user_groups.groups  # Old groups replaced
+        assert "OldGroup" not in user_groups.groups
 
     def test_callback_handles_username_change(self, oauth_state_session):
         """Callback should update username if changed in Authentik."""
         client, state = oauth_state_session
 
-        # Create existing user with old username
         user = User.objects.create_user(username="oldusername")
         UserGroups.objects.create(
             user=user,
@@ -195,17 +182,8 @@ class TestOAuthCallback:
 
         assert response.status_code == 302
 
-        # Verify username updated
         user.refresh_from_db()
         assert user.username == "newusername"
-
-    @staticmethod
-    def _id_token(auth_time: float) -> str:
-        import base64
-        import json
-
-        payload = base64.urlsafe_b64encode(json.dumps({"auth_time": int(auth_time)}).encode()).decode().rstrip("=")
-        return f"header.{payload}.signature"
 
     @pytest.mark.parametrize("before", [True, False])
     def test_a_sign_in_from_before_a_credentials_reset_is_refused(self, oauth_state_session, before):
@@ -221,7 +199,7 @@ class TestOAuthCallback:
         auth_time = reset_at - 10 if before else reset_at + 10
 
         response = _login(
-            client, state, {"sub": "sub-06", "preferred_username": "team06"}, id_token=self._id_token(auth_time)
+            client, state, {"sub": "sub-06", "preferred_username": "team06"}, id_token=_id_token(auth_time)
         )
 
         assert ("_auth_user_id" in client.session) is not before
@@ -411,8 +389,6 @@ class TestOAuthCallback:
     def test_callback_rejects_external_next_url(self):
         """Callback should reject next URLs pointing to external hosts."""
 
-        from django.core import signing
-
         client = Client()
         session = client.session
         session["oauth_nonce"] = "test-nonce"
@@ -423,7 +399,6 @@ class TestOAuthCallback:
 
         response = _login(client, state, {"sub": "redirect-test-id-2", "preferred_username": "safeuser", "groups": []})
 
-        # Should NOT redirect to the external URL
         assert response.status_code == 302
         assert "evil.com" not in response.url
 
