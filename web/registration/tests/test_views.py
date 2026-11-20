@@ -235,6 +235,13 @@ class AdminApproveViewTestCase(TestCase):
         self.assertIsNotNone(self.registration.approved_at)
         self.assertEqual(self.registration.approved_by, self.gold_user)
 
+    def test_approve_says_so_and_a_second_approve_says_it_is_no_longer_pending(self):
+        self.client.force_login(self.gold_user)
+        url = reverse("registration_approve", args=[self.registration.id])
+
+        self.assertContains(self.client.post(url, follow=True), "Registration for Test School has been approved.")
+        self.assertContains(self.client.post(url, follow=True), "Registration for Test School is no longer pending.")
+
 
 class AdminRejectViewTestCase(TestCase):
     """Test admin reject action view."""
@@ -261,9 +268,12 @@ class AdminRejectViewTestCase(TestCase):
         """Test rejecting a registration."""
         self.client.force_login(self.gold_user)
         response = self.client.post(
-            reverse("registration_reject", args=[self.registration.id]), {"reason": "Incomplete information"}
+            reverse("registration_reject", args=[self.registration.id]),
+            {"reason": "Incomplete information"},
+            follow=True,
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse("registration_review_list"))
+        self.assertContains(response, "Registration for Test School has been rejected.")
 
         self.registration.refresh_from_db()
         self.assertEqual(self.registration.status, "rejected")
@@ -274,12 +284,33 @@ class AdminRejectViewTestCase(TestCase):
         response = self.client.get(reverse("registration_reject", args=[self.registration.id]))
         self.assertContains(response, "Test School")
         self.assertContains(response, "test@example.com")
+        # Rendered with the request, so the form carries its CSRF token and can be submitted
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
 
     def test_reject_requires_reason(self):
         """Test reject action requires a reason."""
         self.client.force_login(self.gold_user)
         response = self.client.post(reverse("registration_reject", args=[self.registration.id]), {"reason": ""})
         self.assertEqual(response.status_code, 200)
+        self.assertEqual([str(m) for m in response.context["messages"]], ["Please provide a reason for rejection."])
+        self.assertContains(response, "Test School")
+        self.assertContains(response, "test@example.com")
+        self.registration.refresh_from_db()
+        self.assertEqual(self.registration.status, "pending")
+
+    def test_rejecting_a_rejected_registration_says_it_is_no_longer_pending_while_another_is_approved(self):
+        TeamRegistration.objects.create(school_name="Other School", status="approved")
+        self.registration.status = "rejected"
+        self.registration.save()
+        self.client.force_login(self.gold_user)
+
+        response = self.client.post(
+            reverse("registration_reject", args=[self.registration.id]), {"reason": "Duplicate"}, follow=True
+        )
+
+        self.assertEqual(
+            [str(m) for m in response.context["messages"]], ["Registration for Test School is no longer pending."]
+        )
 
 
 class SeasonViewTestCase(TestCase):
