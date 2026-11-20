@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable
 from datetime import timedelta
 
 from django.conf import settings
@@ -175,10 +176,11 @@ class TicketAttachment(StoredFile):
     def __str__(self) -> str:
         return f"{self.filename} ({self.ticket.ticket_number})"
 
-    def store(self) -> str:
+    def store(self, before_save: Callable[[], str] = lambda: "") -> str:
         """Save the file unless its ticket is resolved or cancelled, already holds MAX_PER_TICKET files, or the team's
-        tickets would hold more than MAX_TEAM_BYTES with it; why not, or "" once saved. Checked and saved under an
-        advisory lock on the team, so uploads at once can't pass a cap together."""
+        tickets would hold more than MAX_TEAM_BYTES with it, or then before_save refuses it; why not, or "" once saved.
+        Checked, before_save run and saved under an advisory lock on the team, so uploads at once can't pass a cap
+        together."""
         team_id = self.ticket.team_id
         with transaction.atomic():
             advisory_xact_lock(f"ticket_attachments:team:{team_id}")
@@ -190,6 +192,8 @@ class TicketAttachment(StoredFile):
             stored = TicketAttachment.objects.filter(ticket__team_id=team_id).aggregate(total=Sum(Length("file_data")))
             if (stored["total"] or 0) + len(self.file_data) > self.MAX_TEAM_BYTES:
                 return f"Your team's attachments would pass their {self.MAX_TEAM_BYTES // (1024 * 1024)}MB total limit"
+            if refused := before_save():
+                return refused
             self.save()
         return ""
 
