@@ -623,8 +623,8 @@ def due_preflight_report(now: datetime) -> PreflightMark | None:
 
 
 def queue_preflight_report(mark: PreflightMark, report: str, now: datetime) -> None:
-    """Queue report for ops as mark's report and record it, unless the schedule moved or the report was queued while
-    Quotient was read."""
+    """Queue report for ops as mark's report and record it, unless mark is no longer due (the schedule moved or the
+    competition started) or was queued while Quotient was read."""
     with transaction.atomic():
         config = CompetitionConfig.locked()
         if _passed_preflight_mark(config, now) != mark or mark.queued():

@@ -10,14 +10,14 @@ STALE = timedelta(minutes=10)
 
 
 def preflight_report(status: EngineStatus | None, now: datetime) -> str:
-    """The ops report of Quotient's preflight round; a team is named by its Quotient ID, which is its portal team
+    """The ops report of Quotient's preflight round; a team is named by its Quotient ID, taken as its portal team
     number."""
     if status is None:
         return "**Preflight:** couldn't read the engine status from Quotient."
     if status.preflight is None:
         return (
             "**Preflight:** can't read a preflight round: Quotient's engine status has no preflight field, so its "
-            "build predates the preflight status in GET /api/engine (dbaseqp/Quotient #208)."
+            "build predates the preflight field in GET /api/engine (upstream Quotient PR #208)."
         )
     if not status.preflight:
         return (

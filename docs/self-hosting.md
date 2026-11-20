@@ -303,8 +303,8 @@ Each of these is off until its settings are set; the rest of the portal works wi
 
 The Quotient scoring engine supplies the box and service lists (ticket forms, red team and incident forms, bot
 autocomplete), inject titles for grading, ticket service check history, the preflight report (its latest preflight
-round, queued for the ops channel 30 and 10 minutes before a scheduled start; it needs dbaseqp/Quotient #208 or later),
-and the service scores the competition stop pulls in. Set `QUOTIENT_API_URL` and an `[[admin]]` account from
+round, queued for the ops channel 30 and 10 minutes before a scheduled start; it needs upstream Quotient PR #208 or
+later), and the service scores the competition stop pulls in. Set `QUOTIENT_API_URL` and an `[[admin]]` account from
 Quotient's `event.conf` as `QUOTIENT_USERNAME` and `QUOTIENT_PASSWORD`.
 
 - A Quotient team's number is the digits in its name (`team09` is team 9); a name without digits is skipped. Ticket
