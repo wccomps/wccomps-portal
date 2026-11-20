@@ -176,6 +176,17 @@ def test_a_box_picked_with_a_service_is_kept(blue_team_user, team_1, service_cat
     assert (ticket.hostname, ticket.ip_address) == ("db01", "10.0.1.6")
 
 
+def test_a_service_picked_without_a_box_keeps_the_ip_the_team_typed(blue_team_user, team_1, service_category):
+    response = _client(blue_team_user).post(
+        reverse("create_ticket"),
+        {"title": "Down", "category": service_category.pk, "service_name": "web01:HTTP", "ip_address": "10.0.1.99"},
+    )
+
+    assert response.status_code == 302
+    ticket = Ticket.objects.get()
+    assert (ticket.hostname, ticket.ip_address) == ("web01", "10.0.1.99")
+
+
 def test_a_service_quotient_does_not_know_names_no_box(blue_team_user, team_1, service_category):
     response = _client(blue_team_user).post(
         reverse("create_ticket"),

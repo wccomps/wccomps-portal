@@ -81,7 +81,7 @@ def test_with_boxes_synced_the_page_says_the_ip_comes_from_the_picked_box(client
 
     html = client.get(reverse("create_ticket")).content.decode()
 
-    assert "Auto-filled from hostname selection" in html
+    assert ">Auto-filled from hostname selection</p>" in html
     assert 'placeholder="Select a hostname above"' in html
     assert '<option value="" selected>Select a service...</option>' in html
 
