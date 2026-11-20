@@ -3,12 +3,13 @@
 import re
 
 import pytest
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
 from django.urls import reverse
 
 from core.tests.form_html import field_error
-from packets.forms import TEAM_EXTRAS_HELP
+from packets.forms import TEAM_EXTRAS_HELP, parse_team_extras
 from packets.models import Packet
 
 pytestmark = pytest.mark.django_db
@@ -58,3 +59,22 @@ def test_a_refused_upload_without_a_file_asks_only_for_the_file(gold_client):
 
     assert field_error(html, "id_packet_file") == "This field is required."
     assert 'value="No file"' in html
+
+
+@pytest.mark.parametrize(
+    ("text", "line"),
+    [
+        ('team,key\nTeam01,a\nTeam02,"' + "x" * 140_000, 3),
+        ("team,key\nTeam01," + "y" * 140_000 + "\nTeam02,b", 2),
+        ('team,key\nTeam01,"a\n' + ("y" * 70_000 + "\n") * 3, 2),
+        ("team," + "k" * 140_000 + "\nTeam01,a", 1),
+    ],
+)
+def test_per_team_data_the_reader_gives_up_on_names_the_line_it_gave_up_on(text, line):
+    """A cell past the csv module's field limit (a quote left open) was put on the line before it, the header's on 0."""
+    with pytest.raises(ValidationError) as refused:
+        parse_team_extras(text)
+
+    assert refused.value.messages == [
+        f"The per-team data isn't CSV the upload can read (line {line}). {TEAM_EXTRAS_HELP}"
+    ]

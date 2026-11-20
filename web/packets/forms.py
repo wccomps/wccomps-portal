@@ -33,8 +33,9 @@ def parse_team_extras(csv_text: str) -> dict[str, dict[str, str]]:
             if digits and len(digits) <= 9:
                 result[str(int(digits))] = {col: (row.get(col) or "").strip() for col in other_cols}
     except csv.Error as e:
+        # line_num counts the lines read whole; the one the reader gave up on comes next
         raise forms.ValidationError(
-            f"The per-team data isn't CSV the upload can read (line {reader.line_num}). {TEAM_EXTRAS_HELP}"
+            f"The per-team data isn't CSV the upload can read (line {reader.line_num + 1}). {TEAM_EXTRAS_HELP}"
         ) from e
     if not result:
         raise forms.ValidationError(f"No row of the per-team data has a team number. {TEAM_EXTRAS_HELP}")
