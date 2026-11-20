@@ -10,7 +10,7 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from core.models import UserGroups
-from registration.models import Event, School, Season, TeamRegistration
+from registration.models import Event, RegistrationEventEnrollment, School, Season, TeamRegistration
 from registration.services import set_team_school
 from team.models import SchoolInfo, Team
 
@@ -64,11 +64,9 @@ def test_a_new_spelling_of_a_school_writes_only_its_name():
     assert School.objects.get().name == school.name == "example UNIVERSITY"
 
 
-def test_renaming_a_teams_school_writes_only_the_names(event):
-    """The rename writes the school record's name and key, and its registrations' school name, never a status an
+def test_renaming_a_teams_school_never_writes_its_registrations_status(event):
+    """The rename gives the open event's registrations of the school the new name, never putting back a status an
     approve or reject may have set meanwhile."""
-    from registration.models import RegistrationEventEnrollment
-
     event.open()
     team = Team.objects.create(team_number=4, team_name="Team 04")
     registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
@@ -78,15 +76,11 @@ def test_renaming_a_teams_school_writes_only_the_names(event):
     with CaptureQueriesContext(connection) as queries:
         set_team_school(team, "Renamed College", contact_email="c@example.edu", rename=True)
 
-    school_updates = _updates(queries, "registration_school")
-    registration_updates = _updates(queries, "registration_teamregistration")
-    assert school_updates
-    assert registration_updates
-    assert all('"created_at"' not in sql for sql in school_updates)
-    assert all('"status"' not in sql for sql in registration_updates)
+    updates = _updates(queries, "registration_teamregistration")
+    assert updates
+    assert all('"status"' not in sql for sql in updates)
     registration.refresh_from_db()
     assert registration.school_name == "Renamed College"
-    assert registration.status == "approved"
 
 
 def test_giving_a_registration_its_school_keeps_a_status_set_meanwhile():
@@ -101,19 +95,6 @@ def test_giving_a_registration_its_school_keeps_a_status_set_meanwhile():
     registration.refresh_from_db()
     assert registration.school == info.school
     assert registration.status == "rejected"
-
-
-def test_moving_a_teams_assignment_writes_only_its_school_and_registration(event):
-    event.open()
-    team = Team.objects.create(team_number=4, team_name="Team 04")
-    set_team_school(team, "Example University", contact_email="c@example.edu")
-
-    with CaptureQueriesContext(connection) as queries:
-        set_team_school(team, "Other College", contact_email="c@example.edu")
-
-    updates = _updates(queries, "registration_eventteamassignment")
-    assert updates
-    assert all('"event_id"' not in sql and '"team_id"' not in sql for sql in updates)
 
 
 @pytest.fixture

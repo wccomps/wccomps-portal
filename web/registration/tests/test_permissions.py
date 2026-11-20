@@ -1,12 +1,10 @@
 """Permission tests for registration views."""
 
-from datetime import date
-
 import pytest
 from django.test import Client
 from django.urls import reverse
 
-from registration.models import Event, RegistrationContact, RegistrationEventEnrollment, Season, TeamRegistration
+from registration.models import RegistrationContact, RegistrationEventEnrollment, TeamRegistration
 from team.models import SchoolInfo, Team
 
 pytestmark = pytest.mark.django_db
@@ -82,17 +80,13 @@ class TestSeasonManagementPermissions:
 
 
 @pytest.fixture
-def assignable():
-    """An open event with one approved, enrolled registration that has a captain, and a free team for it."""
-    season = Season.objects.create(name="2026", year=2026, is_active=True)
-    event = Event.objects.create(
-        season=season, name="Invitational", event_type="invitational", date=date(2026, 10, 3), is_active=True
-    )
+def assignable(current_event):
+    """The open event with one approved, enrolled registration that has a captain, and a free team for it."""
     registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
-    RegistrationEventEnrollment.objects.create(registration=registration, event=event)
+    RegistrationEventEnrollment.objects.create(registration=registration, event=current_event)
     RegistrationContact.objects.create(registration=registration, role="captain", name="C", email="c@example.edu")
     Team.objects.create(team_number=4, team_name="Team 04")
-    return event
+    return current_event
 
 
 class TestReviewActionPermissions:
@@ -147,4 +141,5 @@ class TestReviewActionPermissions:
         response = client.get(reverse("registration_reject", args=[registration.pk]), {"reason": "Late"})
 
         assert response.status_code == 200
+        assert 'name="reason"' in response.content.decode()
         assert TeamRegistration.objects.get().status == "pending"

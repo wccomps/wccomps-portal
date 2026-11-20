@@ -6,7 +6,15 @@ import pytest
 from packets.services import EARLIER_EVENT_PACKET, NO_EVENT_OPEN, NO_OPEN_EVENT, UNRECORDED_EVENT_PACKET
 from scoring.models import ServiceScore
 
-from registration.services import cancel_event_problem, clear_leftovers_problem, close_out_problem
+from registration.models import Season
+from registration.services import (
+    TeamFix,
+    cancel_event_problem,
+    clear_leftovers_problem,
+    close_out_fixes,
+    close_out_problem,
+    set_team_school,
+)
 from registration.stage import event_stage
 from team.models import Team
 
@@ -33,8 +41,6 @@ def test_with_no_event_cancel_and_clear_point_at_the_import():
 
 def test_a_scored_team_with_no_school_says_where_to_add_it(current_event):
     listed = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
-    from registration.services import set_team_school
-
     set_team_school(listed, "School 1", contact_email="c@example.edu")
     unlisted = Team.objects.create(team_number=2, team_name="Team 02", is_active=True)
     ServiceScore.objects.create(team=unlisted, service_points=Decimal(1))
@@ -55,8 +61,6 @@ def test_an_event_with_no_schools_says_how_to_list_them(current_event):
 
 
 def test_an_inactive_scored_team_with_no_school_is_activated_first(current_event):
-    from registration.services import close_out_fixes, set_team_school
-
     listed = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     set_team_school(listed, "School 1", contact_email="c@example.edu")
     team = Team.objects.create(team_number=2, team_name="Team 02", is_active=False)
@@ -67,14 +71,11 @@ def test_an_inactive_scored_team_with_no_school_is_activated_first(current_event
         "Team 2 has scores but no school. Activate it with Activate Team on its Teams page, then enter its school on "
         "its School Info page first."
     )
-    (fix,) = close_out_fixes(stage)
-    assert (fix.team_number, fix.activate, fix.enter_school, fix.remove_school) == (2, True, True, False)
+    assert close_out_fixes(stage) == [TeamFix(2, activate=True, enter_school=True, remove_school=False)]
 
 
 def test_an_inactive_listed_team_offers_removal_only_before_packets_went_out(current_event):
     from packets.models import Packet
-
-    from registration.services import close_out_fixes, set_team_school
 
     team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     set_team_school(team, "School 1", contact_email="c@example.edu")
@@ -103,15 +104,7 @@ def _scored(number, *, active=True):
     return team
 
 
-def _fixes(stage):
-    from registration.services import close_out_fixes
-
-    return [(fix.team_number, fix.activate, fix.enter_school, fix.remove_school) for fix in close_out_fixes(stage)]
-
-
 def test_several_inactive_listed_teams_are_named_three_and_a_count(current_event):
-    from registration.services import set_team_school
-
     for number in range(1, 5):
         set_team_school(_scored(number), f"School {number}", contact_email="c@example.edu")
     Team.objects.update(is_active=False)
@@ -121,49 +114,41 @@ def test_several_inactive_listed_teams_are_named_three_and_a_count(current_event
         "Team 1, Team 2, Team 3 and 1 more are inactive but hold a school on the list: activate them with Activate "
         "Team on their Teams page first, or remove their schools."
     )
-    assert _fixes(stage) == [(1, True, False, True), (2, True, False, True), (3, True, False, True)]
+    assert close_out_fixes(stage) == [
+        TeamFix(number, activate=True, enter_school=False, remove_school=True) for number in (1, 2, 3)
+    ]
 
 
-def test_several_scored_teams_with_no_school_are_each_told_to_enter_theirs(current_event):
-    from registration.services import set_team_school
-
+@pytest.mark.parametrize(
+    ("unschooled", "named"), [(3, "Team 2, Team 3, Team 4"), (4, "Team 2, Team 3, Team 4 and 1 more")]
+)
+def test_scored_teams_with_no_school_are_named_up_to_three_and_each_told_to_enter_theirs(
+    current_event, unschooled, named
+):
     set_team_school(_scored(1), "School 1", contact_email="c@example.edu")
-    for number in range(2, 6):
+    for number in range(2, 2 + unschooled):
         _scored(number)
 
     stage = event_stage()
     assert close_out_problem(stage) == (
-        "Team 2, Team 3, Team 4 and 1 more have scores but no school. Enter each team's school on its School Info "
-        "page first."
+        f"{named} have scores but no school. Enter each team's school on its School Info page first."
     )
-    assert _fixes(stage) == [(2, False, True, False), (3, False, True, False), (4, False, True, False)]
-
-
-def test_three_teams_are_all_named_with_no_count(current_event):
-    from registration.services import set_team_school
-
-    set_team_school(_scored(1), "School 1", contact_email="c@example.edu")
-    for number in range(2, 5):
-        _scored(number)
-
-    assert close_out_problem(event_stage()).startswith("Team 2, Team 3, Team 4 have scores but no school.")
+    assert close_out_fixes(stage) == [
+        TeamFix(number, activate=False, enter_school=True, remove_school=False) for number in (2, 3, 4)
+    ]
 
 
 def test_with_nothing_played_there_is_no_team_to_fix(current_event):
     """An inactive listed team holds back no Close Out while nothing was played: the page offers it no fix."""
-    from registration.services import set_team_school
-
     team = Team.objects.create(team_number=1, team_name="Team 01", is_active=True)
     set_team_school(team, "School 1", contact_email="c@example.edu")
     Team.objects.update(is_active=False)
 
-    assert _fixes(event_stage()) == []
+    assert close_out_fixes(event_stage()) == []
 
 
 def test_the_school_checks_wait_for_the_close_out_itself(current_event):
     """The competition page asks without them, so it offers Close Out; the close-out's own check refuses."""
-    from registration.services import set_team_school
-
     set_team_school(_scored(1), "School 1", contact_email="c@example.edu")
     Team.objects.update(is_active=False)
 
@@ -182,8 +167,6 @@ def test_with_no_event_open_and_no_active_season_close_out_points_at_the_seasons
 
 
 def test_scored_teams_with_no_school_some_inactive_are_told_to_activate_those_first(current_event):
-    from registration.services import set_team_school
-
     set_team_school(_scored(1), "School 1", contact_email="c@example.edu")
     _scored(2)
     _scored(3, active=False)
@@ -193,12 +176,13 @@ def test_scored_teams_with_no_school_some_inactive_are_told_to_activate_those_fi
         "Team 2, Team 3 have scores but no school. Activate each inactive one with Activate Team on its Teams page, "
         "then enter each team's school on its School Info page first."
     )
-    assert _fixes(stage) == [(2, False, True, False), (3, True, True, False)]
+    assert close_out_fixes(stage) == [
+        TeamFix(2, activate=False, enter_school=True, remove_school=False),
+        TeamFix(3, activate=True, enter_school=True, remove_school=False),
+    ]
 
 
 def test_with_no_event_open_and_an_empty_school_list_the_scores_have_nowhere_to_go():
-    from registration.models import Season
-
     Season.objects.create(name="2026", year=2026, is_active=True)
     _scored(1)
 

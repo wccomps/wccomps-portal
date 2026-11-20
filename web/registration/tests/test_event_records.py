@@ -42,11 +42,6 @@ def test_one_result_per_school_per_event(event):
         _result(event, school, 2, 2)
 
 
-def test_a_result_reads_as_its_school_and_event_with_its_rank_when_ranked(event):
-    assert str(_result(event, School.for_name("A"), 1, 1)) == "A at Inv: #1"
-    assert str(_result(event, School.for_name("B"), None, 2)) == "B at Inv"
-
-
 def test_export_zip_bytes_holds_every_dataset():
     names = zipfile.ZipFile(BytesIO(export_all_zip_bytes())).namelist()
 

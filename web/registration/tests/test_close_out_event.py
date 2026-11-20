@@ -345,7 +345,7 @@ def test_close_out_does_not_start_a_new_season():
 
     with pytest.raises(CloseOutError) as refused:
         close_out_event(new_event("Inv", date(2027, 10, 2), "invitational", NewSeason("2027", 2027)), "gold")
-    assert str(refused.value) == ("Close Out records the scores in the active season; it doesn't start a new season.")
+    assert str(refused.value) == "Close Out records the scores in the active season; it doesn't start a new season."
     assert list(Season.objects.all()) == [old] and old.is_active
     _assert_nothing_written(scores=1)
 

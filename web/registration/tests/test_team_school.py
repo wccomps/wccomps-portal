@@ -98,25 +98,15 @@ def test_renaming_to_a_new_spelling_renames_the_record_and_leaves_registrations_
     assert registration.school_name == "Example University"
 
 
-def test_changing_the_school_links_the_registration_given(event):
+@pytest.mark.parametrize("school_name", ["Other College", "Example University"], ids=["changed", "kept"])
+def test_an_assignment_with_no_registration_takes_the_one_given_later(event, school_name):
+    """The team's assignment, made without a registration (as an import makes it), takes the one given later, and the
+    registration takes the school, whether the school changes or stays."""
     team = _team(4)
     set_team_school(team, "Example University", contact_email="c@example.edu")
-    registration = TeamRegistration.objects.create(school_name="Other College", status="approved")
+    registration = TeamRegistration.objects.create(school_name=school_name, status="approved")
 
-    info = set_team_school(team, "Other College", contact_email="c@example.edu", registration=registration)
-
-    assert EventTeamAssignment.objects.get(event=event).registration == registration
-    registration.refresh_from_db()
-    assert registration.school == info.school
-
-
-def test_keeping_the_school_links_a_registration_given_to_an_imported_assignment(event):
-    """An imported school's assignment has no registration; given one later for the same school, it takes it."""
-    team = _team(4)
-    set_team_school(team, "Example University", contact_email="c@example.edu")
-    registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
-
-    info = set_team_school(team, "Example University", contact_email="c@example.edu", registration=registration)
+    info = set_team_school(team, school_name, contact_email="c@example.edu", registration=registration)
 
     assert EventTeamAssignment.objects.get(event=event).registration == registration
     registration.refresh_from_db()

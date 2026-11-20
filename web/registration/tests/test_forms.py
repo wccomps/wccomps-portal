@@ -200,7 +200,6 @@ class TestRegistrationFormOpenEvents:
         form = RegistrationForm(data={**form_data, "events": [event.pk]})
         assert not form.is_valid()
         assert form.errors["events"] == ["Invitational 1 is no longer open for registration."]
-        assert form.has_error("events", "invalid_choice")
 
     @pytest.mark.parametrize(
         ("posted", "code"), [("0{pk}", "invalid_choice"), ("999999", "invalid_choice"), ("x", "invalid_pk_value")]

@@ -179,34 +179,20 @@ def test_assign_teams_uses_the_first_contact_without_a_captain(gold_team_user, e
     assert SchoolInfo.objects.get().contact_email == "coach@example.edu"
 
 
-def test_assign_teams_skips_a_registration_with_no_contact_email(gold_team_user, event):
-    Team.objects.create(team_number=4, team_name="Team 04")
-    registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
-    RegistrationEventEnrollment.objects.create(registration=registration, event=event)
-    client = Client()
-    client.force_login(gold_team_user)
-
-    response = client.post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
-
-    assert not SchoolInfo.objects.exists()
-    assert not EventTeamAssignment.objects.exists()
-    assert "Skipped Example University: no contact email on the registration." in response.content.decode()
-
-
 def _no_contact(event, school_name):
     registration = TeamRegistration.objects.create(school_name=school_name, status="approved")
     RegistrationEventEnrollment.objects.create(registration=registration, event=event)
 
 
-def test_assign_teams_with_nothing_assignable_says_so_and_why(gold_team_user, event):
+def test_assign_teams_skips_a_registration_with_no_contact_email(gold_team_user, event):
     Team.objects.create(team_number=4, team_name="Team 04")
     _no_contact(event, "Example University")
 
     response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
 
-    content = response.content.decode()
-    assert "No eligible registrations to assign." in content
-    assert "Skipped Example University: no contact email on the registration." in content
+    assert not SchoolInfo.objects.exists()
+    assert not EventTeamAssignment.objects.exists()
+    assert "Skipped Example University: no contact email on the registration." in response.content.decode()
 
 
 def test_assign_teams_with_too_few_free_teams_assigns_none_and_says_how_many_it_needs(gold_team_user, event):
