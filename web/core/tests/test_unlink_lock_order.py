@@ -10,13 +10,14 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import User
-from django.db import OperationalError, connection, transaction
+from django.db import connection, transaction
 from registration.services import SERIALIZATION_FAILURE
 
 from core import competition_utils
+from core.auth_utils import sign_out_everywhere
 from core.competition_utils import wipe_competition_data
 from core.services import linking
-from core.services.linking import execute_link, unlink_teams
+from core.services.linking import SIGNED_OUT, LinkResult, execute_link, unlink_teams
 from team.models import DiscordLink, Team, TeamQuerySet
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -137,13 +138,16 @@ def test_a_feedback_edit_holding_a_score_does_not_deadlock_the_wipe(team):
 
 
 @contextmanager
-def _another_transaction_holding(team: Team) -> Iterator[None]:
-    """Another transaction holds the team's lock, as an unlink or the wipe does, until the block ends."""
+def _another_transaction_holding(team: Team, signing_out: User | None = None) -> Iterator[None]:
+    """Another transaction holds the team's lock until the block ends, as an unlink or the wipe does. With signing_out,
+    it first signs that account out everywhere, as a credentials reset does before its unlink."""
     errors: list[BaseException] = []
     team_locked = threading.Event()
     release = threading.Event()
 
     def hold() -> None:
+        if signing_out is not None:
+            sign_out_everywhere(User.objects.get(pk=signing_out.pk))
         assert Team.objects.filter(pk=team.pk).lock() == [team.pk]
         team_locked.set()
         release.wait(10)
@@ -158,11 +162,6 @@ def _another_transaction_holding(team: Team) -> Iterator[None]:
     assert errors == []
 
 
-def _lock_timeout(seconds: int) -> None:
-    with connection.cursor() as cursor:
-        cursor.execute(f"SET LOCAL lock_timeout = '{seconds}s'")
-
-
 def test_a_locked_team_still_takes_rows_that_reference_it(team):
     """The team lock is FOR NO KEY UPDATE, so while an unlink or the wipe holds a team, rows referencing it stay
     writable: an insert's foreign key check needs only a key share lock on the team. The row here is a link inserted
@@ -170,20 +169,27 @@ def test_a_locked_team_still_takes_rows_that_reference_it(team):
     joiner = User.objects.create(username="joiner06")
 
     with _another_transaction_holding(team), transaction.atomic():
-        _lock_timeout(2)
+        with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL lock_timeout = '2s'")
         DiscordLink.objects.create(user=joiner, discord_id=607, discord_username="j", team=team, is_active=True)
 
     assert DiscordLink.objects.filter(team=team, is_active=True).count() == 2
 
 
-def test_a_link_waits_while_another_transaction_holds_the_team(team):
-    """A reset's unlink holds the team lock, so a link confirmed meanwhile waits for it rather than being made beside
-    the unlink and outlasting the reset."""
-    joiner = User.objects.create(username="joiner06")
+def test_a_link_confirmed_during_a_reset_waits_for_it_and_links_nothing(team):
+    """A credentials reset signs the account out and unlinks its team under the team lock. A link confirmed meanwhile
+    by a session of that account waits for the lock, then finds the session signed out and links nothing, so no link
+    outlasts the reset."""
+    account = User.objects.create(username="team06")
+    errors: list[BaseException] = []
+    results: list[LinkResult | None] = []
 
-    with _another_transaction_holding(team), transaction.atomic():
-        _lock_timeout(1)
-        with pytest.raises(OperationalError):
-            execute_link(607, "j", joiner, team)
+    with _another_transaction_holding(team, signing_out=account):
+        linker = _in_thread(lambda: results.append(execute_link(607, "j", account, team)), errors)
+        time.sleep(OVERLAP)
+        waited = linker.is_alive()
+    linker.join(30)
 
+    assert waited
+    assert (errors, results) == ([], [SIGNED_OUT])
     assert not DiscordLink.objects.filter(discord_id=607).exists()
