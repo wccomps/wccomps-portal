@@ -280,9 +280,8 @@ INSERT = r"(?:[1-9][0-9]{2}[!@#$%&*+]|[!@#$%&*+][1-9][0-9]{2})"
 PASSWORD = re.compile(f"{INSERT}-{WORD}-{WORD}|{WORD}-{INSERT}-{WORD}|{WORD}-{WORD}-{INSERT}")
 
 
-def test_a_generated_password_keeps_both_words_when_the_word_list_has_hyphenated_words(tmp_path, monkeypatch):
-    """The EFF list has yo-yo, drop-down, felt-tip and t-shirt: one of them split the password apart at its hyphen, and
-    a number placed between the words dropped the second word."""
+def test_a_generated_password_leaves_out_hyphenated_words(tmp_path, monkeypatch):
+    """The EFF list has yo-yo, drop-down, felt-tip and t-shirt; a password is two letters-only words and the number."""
     from xkcdpass import xkcd_password
 
     words = tmp_path / "words"
