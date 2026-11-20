@@ -110,6 +110,19 @@ def test_changing_the_school_links_the_registration_given(event):
     assert registration.school == info.school
 
 
+def test_keeping_the_school_links_a_registration_given_to_an_imported_assignment(event):
+    """An imported school's assignment has no registration; given one later for the same school, it takes it."""
+    team = _team(4)
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+    registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
+
+    info = set_team_school(team, "Example University", contact_email="c@example.edu", registration=registration)
+
+    assert EventTeamAssignment.objects.get(event=event).registration == registration
+    registration.refresh_from_db()
+    assert registration.school == info.school
+
+
 def test_a_given_registration_is_linked_to_the_assignment_and_the_school(event):
     registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
 

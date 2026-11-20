@@ -89,6 +89,33 @@ def test_renaming_a_teams_school_writes_only_the_names(event):
     assert registration.status == "approved"
 
 
+def test_giving_a_registration_its_school_keeps_a_status_set_meanwhile():
+    """Only the registration's school is written: a reject since the caller read it stays."""
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    registration = TeamRegistration.objects.create(school_name="Example University", status="approved")
+    stale = TeamRegistration.objects.get(pk=registration.pk)
+    TeamRegistration.objects.filter(pk=registration.pk).update(status="rejected")
+
+    info = set_team_school(team, "Example University", contact_email="c@example.edu", registration=stale)
+
+    registration.refresh_from_db()
+    assert registration.school == info.school
+    assert registration.status == "rejected"
+
+
+def test_moving_a_teams_assignment_writes_only_its_school_and_registration(event):
+    event.open()
+    team = Team.objects.create(team_number=4, team_name="Team 04")
+    set_team_school(team, "Example University", contact_email="c@example.edu")
+
+    with CaptureQueriesContext(connection) as queries:
+        set_team_school(team, "Other College", contact_email="c@example.edu")
+
+    updates = _updates(queries, "registration_eventteamassignment")
+    assert updates
+    assert all('"event_id"' not in sql and '"team_id"' not in sql for sql in updates)
+
+
 @pytest.fixture
 def event():
     season = Season.objects.create(name="2026", year=2026, is_active=True)
