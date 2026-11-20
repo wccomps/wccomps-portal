@@ -98,16 +98,28 @@ University One,invalid-email
             (b'school_name,contact_email\nA,a@example.edu\n"' + b"x" * 140_000, 3),
             (b"school_name,contact_email\nA," + b"y" * 140_000 + b"\n", 2),
             (b'school_name,contact_email\n"' + b"x\n" * 70_000, 2),
+            (b'school_name,contact_email\nA,a@example.edu\n\n\nB,"' + b"x" * 140_000, 5),
+            (b'school_name,contact_email\r\nA,a@example.edu\r\n\r\nB,"' + b"x" * 140_000, 4),
+            (b"school_name," + b"k" * 140_000 + b"\nA,a@example.edu", 1),
         ],
     )
-    def test_a_csv_the_reader_gives_up_on_names_the_line_it_gave_up_on(self, content: bytes, line: int) -> None:
-        """A cell past the csv module's field limit (a quote left open) was put on the line before it."""
+    def test_a_csv_the_reader_gives_up_on_names_the_line_its_bad_row_starts_on(self, content: bytes, line: int) -> None:
+        """A row past the csv module's field limit (a quote left open) is refused naming the line it starts on."""
         result = parse_csv_file(SimpleUploadedFile("test.csv", content))
 
         assert result["errors"] == [
             f"The file isn't a CSV the import can read (line {line}): save it from your spreadsheet as CSV "
             "and upload it again."
         ]
+
+    def test_a_blank_line_is_not_a_row(self) -> None:
+        """Row numbers in errors count the header as row 1 and skip blank lines."""
+        content = b"school_name,contact_email\n\nA,a@example.edu\n\n\nB,not-an-email\n"
+
+        result = parse_csv_file(SimpleUploadedFile("test.csv", content))
+
+        assert [row["school_name"] for row in result["rows"]] == ["A"]
+        assert [error.split(":")[:2] for error in result["errors"]] == [["Row 3", " contact_email"]]
 
 
 class TestCSVHeaderInference:
