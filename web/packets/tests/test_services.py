@@ -163,8 +163,8 @@ class PacketDistributionServiceTestCase(TestCase):
             self.assertIn(password, call.kwargs["body"])
         row = AuditLog.objects.get(action="team_password_set")
         self.assertEqual(
-            (row.admin_user, row.target_id, row.details),
-            ("packet distribution", 1, {"password_set": True, "error": None}),
+            (row.admin_user, row.target_entity, row.target_id, row.details),
+            ("packet distribution", "team", 1, {"password_set": True, "error": None}),
         )
 
     @patch("packets.services.EmailMultiAlternatives")

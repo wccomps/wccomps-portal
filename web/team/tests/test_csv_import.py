@@ -54,34 +54,37 @@ University Three,contact3@example.edu,alt3@example.edu,Test note 3
 
         assert len(result["rows"]) == 3
         assert len(result["errors"]) == 0
+        assert result["warnings"] == []
         assert result["rows"][0]["school_name"] == "University One"
         assert result["rows"][0]["contact_email"] == "contact1@example.edu"
         assert result["rows"][0]["secondary_email"] == "alt1@example.edu"
         assert result["rows"][0]["notes"] == "Test note 1"
 
     def test_parse_csv_missing_required_columns(self) -> None:
-        """Test parsing CSV with missing required columns."""
-        csv_content = """school_name
-University One
-"""
-        csv_file = SimpleUploadedFile("test.csv", csv_content.encode("utf-8"), content_type="text/csv")
+        """Every required column the header lacks is named."""
+        csv_file = SimpleUploadedFile("test.csv", b"notes\nA note\n", content_type="text/csv")
 
         result = parse_csv_file(csv_file)
 
-        assert len(result["errors"]) > 0
-        assert "contact_email" in result["errors"][0]
+        assert result == {
+            "rows": [],
+            "errors": ["Missing required columns: contact_email, school_name"],
+            "warnings": [],
+        }
 
-    def test_parse_csv_invalid_email(self) -> None:
-        """Test parsing CSV with invalid email."""
+    def test_parse_csv_names_every_bad_row(self) -> None:
         csv_content = """school_name,contact_email
 University One,invalid-email
+,b@example.edu
 """
         csv_file = SimpleUploadedFile("test.csv", csv_content.encode("utf-8"), content_type="text/csv")
 
         result = parse_csv_file(csv_file)
 
-        assert len(result["errors"]) > 0
-        assert result["errors"][0] == "Row 2: contact_email: Enter a valid email address."
+        assert result["errors"] == [
+            "Row 2: contact_email: Enter a valid email address.",
+            "Row 3: school_name: This field is required.",
+        ]
 
     def test_parse_empty_csv(self) -> None:
         """Test parsing empty CSV."""
@@ -90,7 +93,36 @@ University One,invalid-email
 
         result = parse_csv_file(csv_file)
 
-        assert len(result["errors"]) > 0
+        assert result == {"rows": [], "errors": ["CSV file is empty or has no headers"], "warnings": []}
+
+    def test_parse_csv_with_only_headers_says_it_has_no_rows(self) -> None:
+        result = parse_csv_file(SimpleUploadedFile("test.csv", b"school_name,contact_email\n"))
+
+        assert result == {"rows": [], "errors": ["CSV file contains no data rows"], "warnings": []}
+
+    @pytest.mark.parametrize(
+        "content",
+        ["school_name,contact_email\nÉcole,a@example.edu\n".encode("cp1252"), "a,b\n".encode("utf-16")],
+        ids=["cp1252", "utf-16"],
+    )
+    def test_a_csv_that_is_not_utf8_asks_for_utf8(self, content: bytes) -> None:
+        """A spreadsheet's Windows CSV (cp1252) or its Unicode text (UTF-16) is refused, saying why."""
+        result = parse_csv_file(SimpleUploadedFile("test.csv", content))
+
+        assert result == {
+            "rows": [],
+            "errors": ["File encoding error. Please ensure the file is UTF-8 encoded."],
+            "warnings": [],
+        }
+
+    def test_a_csv_the_reader_gives_up_on_says_so(self) -> None:
+        """A quote left open runs the cell past the csv module's field limit."""
+        csv_file = SimpleUploadedFile("test.csv", b'school_name,contact_email\nA,a@example.edu\n"' + b"x" * 140_000)
+
+        [error] = parse_csv_file(csv_file)["errors"]
+
+        assert error.startswith("The file isn't a CSV the import can read (line ")
+        assert error.endswith("): save it from your spreadsheet as CSV and upload it again.")
 
 
 class TestCSVHeaderInference:
@@ -151,11 +183,61 @@ Example U,captain@example.edu,coach@example.edu
         assert result["rows"][0]["contact_email"] == "captain@example.edu"
         assert result["rows"][0]["secondary_email"] == "coach@example.edu"
 
+    def test_an_email_column_past_the_two_email_slots_is_named_and_ignored(self) -> None:
+        csv_file = SimpleUploadedFile(
+            "test.csv", b"School,Email,Email 2,Email 3\nExample U,a@example.edu,b@example.edu,c@example.edu\n"
+        )
+
+        result = parse_csv_file(csv_file)
+
+        assert result == {
+            "rows": [
+                {
+                    "school_name": "Example U",
+                    "contact_email": "a@example.edu",
+                    "secondary_email": "b@example.edu",
+                    "notes": "",
+                }
+            ],
+            "errors": [],
+            "warnings": [
+                "Columns auto-detected: Email as contact_email, Email 2 as secondary_email, Email 3 as email_3, "
+                "School as school_name",
+                "Unknown columns will be ignored: email_3",
+            ],
+        }
+
+    @pytest.mark.parametrize(
+        ("header", "ignored"),
+        [
+            # Team number columns are skipped: teams are assigned at random
+            ("Team No,# 1,Email,School", "#_1, team_no"),
+            # With school_name named, the one other column is not taken for it
+            ("school_name,Email,Coach", "coach"),
+            ("school_name,Email,Coach Name,Region", "coach_name, region"),
+        ],
+    )
+    def test_columns_that_are_not_the_schools_are_named_and_ignored(self, header: str, ignored: str) -> None:
+        cells = {"Email": "a@example.edu", "School": "Example U", "school_name": "Example U"}
+        row = ",".join(cells.get(name, "7") for name in header.split(","))
+        csv_file = SimpleUploadedFile("test.csv", f"{header}\n{row}\n".encode())
+
+        result = parse_csv_file(csv_file)
+
+        assert (result["rows"], result["errors"]) == (
+            [{"school_name": "Example U", "contact_email": "a@example.edu", "secondary_email": "", "notes": ""}],
+            [],
+        )
+        assert result["warnings"][1:] == [f"Unknown columns will be ignored: {ignored}"]
+
     @pytest.mark.parametrize(
         ("header", "row"),
         [
             ("school_name,contact_email,Coach Email", "Example U,captain@example.edu,coach@example.edu"),
             ("school_name,Coach Email,contact_email", "Example U,coach@example.edu,captain@example.edu"),
+            # Named in words, the contact column still takes contact_email whichever column comes first
+            ("School,Contact Email,Coach Email", "Example U,captain@example.edu,coach@example.edu"),
+            ("School,Coach Email,Contact Email", "Example U,coach@example.edu,captain@example.edu"),
         ],
     )
     def test_named_contact_column_wins_and_other_email_is_secondary(self, header: str, row: str) -> None:
@@ -214,12 +296,26 @@ class TestCSVValidation:
     def test_validate_not_enough_teams(self, setup_teams: list[Team]) -> None:
         result = validate_csv_data([_row(f"University {i}") for i in range(6)])
 
-        assert result["errors"] == ["The CSV has 6 schools but only 5 teams exist."]
+        assert result == {
+            "teams_to_create": [],
+            "errors": ["The CSV has 6 schools but only 5 teams exist."],
+            "warnings": [],
+        }
 
-    def test_validate_rejects_a_repeated_school(self, setup_teams: list[Team]) -> None:
-        result = validate_csv_data([_row("University One"), _row("University One")])
+    @pytest.mark.parametrize(
+        ("names", "repeated"),
+        [
+            (["Example University", "example  university"], "Example University / example  university"),
+            (["Uni One", "Uni Two", "uni one", "Uni Two"], "Uni One / uni one, Uni Two / Uni Two"),
+        ],
+        ids=["case-and-spacing", "every-repeat"],
+    )
+    def test_validate_names_every_repeated_school(
+        self, setup_teams: list[Team], names: list[str], repeated: str
+    ) -> None:
+        result = validate_csv_data([_row(name) for name in names])
 
-        assert result["errors"] == ["Each school can appear only once; repeated: University One / University One"]
+        assert result["errors"] == [f"Each school can appear only once; repeated: {repeated}"]
 
 
 def _row(school_name: str) -> dict[str, str]:
@@ -322,10 +418,11 @@ class TestTeamNamesReset:
     def test_preview_warns_which_names_are_reset(self) -> None:
         Team.objects.create(team_name="Old Shortname", team_number=1)
         Team.objects.create(team_name="BlueTeam02", team_number=2)
+        Team.objects.create(team_name="Another Name", team_number=3)
 
         result = validate_csv_data([_row("Example University")])
 
-        assert "Resets 1 team name(s) from the last event (Old Shortname)." in result["warnings"]
+        assert "Resets 2 team name(s) from the last event (Old Shortname, Another Name)." in result["warnings"]
 
 
 class TestImportOpensEvent:
@@ -367,11 +464,6 @@ class TestImportOpensEvent:
 
         assignment = EventTeamAssignment.objects.get(event=event)
         assert assignment.team == teams[1]
-
-    def test_validate_rejects_names_that_differ_only_by_case_or_spacing(self, setup_teams):
-        result = validate_csv_data([_row("Example University"), _row("example  university")])
-
-        assert result["errors"] and "repeated" in result["errors"][0]
 
     def test_preview_marks_returning_and_new_schools(self, setup_teams, season):
         past = self._event(season, "Past")
@@ -473,3 +565,65 @@ def test_with_no_season_active_any_event_choice_but_new_says_so(choice):
 
     assert not form.is_valid()
     assert form.errors["event"] == ["No season is active: import into a new event, with a new season."]
+
+
+@pytest.mark.parametrize("half", [{"new_season_name": "2027"}, {"new_season_year": "2027"}])
+def test_a_new_season_given_by_half_is_refused(half):
+    from registration.models import Season
+
+    from team.forms import ImportEventForm
+
+    season = Season.objects.create(name="2026", year=2026, is_active=True)
+    new = {"event": "new", "new_name": "Qualifier", "new_date": "2026-11-07", "new_type": "qualifier"}
+    form = ImportEventForm(new | {"current_season": season.pk} | half, season=season)
+
+    assert not form.is_valid()
+    assert form.errors == {"__all__": ["Give the new season a name and a year."]}
+
+
+def test_a_new_season_for_an_existing_event_is_refused():
+    from team.forms import ImportEventForm
+
+    event = _open_event()
+    form = ImportEventForm({"event": str(event.pk), "new_season_name": "2027"}, season=event.season)
+
+    assert not form.is_valid()
+    assert form.errors == {
+        "__all__": ["A new season needs a new event: choose New event, or leave the new season empty."]
+    }
+
+
+def test_an_upload_that_is_not_named_csv_is_refused():
+    from team.forms import CSVUploadForm
+
+    form = CSVUploadForm(files={"csv_file": SimpleUploadedFile("schools.txt", b"school_name,contact_email\n")})
+
+    assert form.errors == {"csv_file": ["File must be a CSV file (.csv)"]}
+
+
+@pytest.mark.parametrize(
+    ("size", "errors"),
+    [(10 * 1024 * 1024, {}), (10 * 1024 * 1024 + 1, {"csv_file": ["File size must be less than 10MB"]})],
+)
+def test_an_upload_may_be_10_mib_and_no_more(size, errors):
+    from team.forms import CSVUploadForm
+
+    form = CSVUploadForm(files={"csv_file": SimpleUploadedFile("schools.csv", b"x" * size)})
+
+    assert form.errors == errors
+
+
+def test_the_import_form_labels_its_event_choice_and_new_event_fields():
+    """With no event open the Add mode names "the open event"; the new event's date is a date picker."""
+    from team.forms import ImportEventForm
+
+    form = ImportEventForm(season=None)
+
+    assert form.fields["event"].choices[0] == ("", "Choose an event")
+    assert dict(form.fields["mode"].choices)["add"] == "Add schools to the open event"
+    assert [(form[name].label, form[name].help_text) for name in ("new_name", "new_date", "new_type")] == [
+        ("New event name", "Only for a new event."),
+        ("New event date", ""),
+        ("New event type", ""),
+    ]
+    assert form.fields["new_date"].widget.input_type == "date"
