@@ -92,6 +92,23 @@ University One,invalid-email
 
         assert len(result["errors"]) > 0
 
+    @pytest.mark.parametrize(
+        ("content", "line"),
+        [
+            (b'school_name,contact_email\nA,a@example.edu\n"' + b"x" * 140_000, 3),
+            (b"school_name,contact_email\nA," + b"y" * 140_000 + b"\n", 2),
+            (b'school_name,contact_email\n"' + b"x\n" * 70_000, 2),
+        ],
+    )
+    def test_a_csv_the_reader_gives_up_on_names_the_line_it_gave_up_on(self, content: bytes, line: int) -> None:
+        """A cell past the csv module's field limit (a quote left open) was put on the line before it."""
+        result = parse_csv_file(SimpleUploadedFile("test.csv", content))
+
+        assert result["errors"] == [
+            f"The file isn't a CSV the import can read (line {line}): save it from your spreadsheet as CSV "
+            "and upload it again."
+        ]
+
 
 class TestCSVHeaderInference:
     """Test auto-detection of CSV column names."""

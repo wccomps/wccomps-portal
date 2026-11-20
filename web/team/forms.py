@@ -296,9 +296,10 @@ def parse_csv_file(csv_file: UploadedFile[bytes]) -> CSVParseResult:
     except UnicodeDecodeError:
         errors.append("File encoding error. Please ensure the file is UTF-8 encoded.")
     except csv.Error:
+        # line_num counts the lines read whole; the one the reader gave up on comes next
         errors.append(
-            f"The file isn't a CSV the import can read (line {reader.line_num}): save it from your spreadsheet as CSV "
-            "and upload it again."
+            f"The file isn't a CSV the import can read (line {reader.line_num + 1}): save it from your spreadsheet as "
+            "CSV and upload it again."
         )
 
     return {"rows": rows, "errors": errors, "warnings": warnings}
