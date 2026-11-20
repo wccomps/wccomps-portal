@@ -161,6 +161,7 @@ def test_assign_teams_adds_each_school_to_the_school_list_with_its_captain(gold_
     assert info.team == assignment.team
     assert info.school == assignment.school
     assert info.contact_email == "captain@example.edu"
+    assert (info.secondary_email, info.notes) == ("", "")
     assert assignment.registration == registration
 
 
@@ -186,7 +187,50 @@ def test_assign_teams_skips_a_registration_with_no_contact_email(gold_team_user,
 
     assert not SchoolInfo.objects.exists()
     assert not EventTeamAssignment.objects.exists()
-    assert "Example University: no contact email" in response.content.decode()
+    assert "Skipped Example University: no contact email on the registration." in response.content.decode()
+
+
+def _no_contact(event, school_name):
+    registration = TeamRegistration.objects.create(school_name=school_name, status="approved")
+    RegistrationEventEnrollment.objects.create(registration=registration, event=event)
+
+
+def test_assign_teams_with_nothing_assignable_says_so_and_why(gold_team_user, event):
+    Team.objects.create(team_number=4, team_name="Team 04")
+    _no_contact(event, "Example University")
+
+    response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+
+    content = response.content.decode()
+    assert "No eligible registrations to assign." in content
+    assert "Skipped Example University: no contact email on the registration." in content
+
+
+def test_assign_teams_with_too_few_free_teams_assigns_none_and_says_how_many_it_needs(gold_team_user, event):
+    Team.objects.create(team_number=4, team_name="Team 04")
+    _enrolled(event, "Example University")
+    _enrolled(event, "Other College")
+    _no_contact(event, "Third College")
+
+    response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+
+    content = response.content.decode()
+    assert "Not enough teams available. Need 2, have 1." in content
+    assert "Skipped Third College: no contact email on the registration." in content
+    assert not SchoolInfo.objects.exists()
+    assert not EventTeamAssignment.objects.exists()
+
+
+def test_assign_teams_says_how_many_teams_it_assigned(gold_team_user, event):
+    Team.objects.create(team_number=4, team_name="Team 04")
+    Team.objects.create(team_number=5, team_name="Team 05")
+    _enrolled(event, "Example University")
+    _enrolled(event, "Other College")
+
+    response = _client(gold_team_user).post(reverse("registration_assign_teams", args=[event.pk]), follow=True)
+
+    assert "Assigned 2 teams successfully." in response.content.decode()
+    assert SchoolInfo.objects.count() == 2
 
 
 def test_assign_teams_skips_a_school_already_in_the_school_list(gold_team_user, event):

@@ -235,6 +235,13 @@ class AdminApproveViewTestCase(TestCase):
         self.assertIsNotNone(self.registration.approved_at)
         self.assertEqual(self.registration.approved_by, self.gold_user)
 
+    def test_approve_says_so_and_a_second_approve_says_it_is_no_longer_pending(self):
+        self.client.force_login(self.gold_user)
+        url = reverse("registration_approve", args=[self.registration.id])
+
+        self.assertContains(self.client.post(url, follow=True), "Registration for Test School has been approved.")
+        self.assertContains(self.client.post(url, follow=True), "Registration for Test School is no longer pending.")
+
 
 class AdminRejectViewTestCase(TestCase):
     """Test admin reject action view."""
@@ -280,6 +287,18 @@ class AdminRejectViewTestCase(TestCase):
         self.client.force_login(self.gold_user)
         response = self.client.post(reverse("registration_reject", args=[self.registration.id]), {"reason": ""})
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please provide a reason for rejection.")
+        self.registration.refresh_from_db()
+        self.assertEqual(self.registration.status, "pending")
+
+    def test_reject_says_so_and_a_second_reject_says_it_is_no_longer_pending(self):
+        self.client.force_login(self.gold_user)
+        url = reverse("registration_reject", args=[self.registration.id])
+
+        response = self.client.post(url, {"reason": "Incomplete information"}, follow=True)
+        self.assertContains(response, "Registration for Test School has been rejected.")
+        response = self.client.post(url, {"reason": "Incomplete information"}, follow=True)
+        self.assertContains(response, "Registration for Test School is no longer pending.")
 
 
 class SeasonViewTestCase(TestCase):
