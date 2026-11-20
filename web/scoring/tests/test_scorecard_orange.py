@@ -46,3 +46,12 @@ def test_scorecard_page_renders_the_orange_breakdown(gold_team_user):
     assert response.status_code == 200
     assert b"Orange Team Detail" in response.content
     assert b"Keycloak Check (max 10 pts)" in response.content
+
+
+def test_a_manual_orange_score_has_no_maximum():
+    from scoring.views.leaderboard import _scorecard_context
+
+    team = Team.objects.create(team_number=7, team_name="Team G", is_active=True)
+    _orange(team, "Manual bonus", 5)
+
+    assert [o.max_points for o in _scorecard_context(7)["orange_scores"]] == [None]

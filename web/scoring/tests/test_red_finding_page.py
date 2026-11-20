@@ -10,7 +10,7 @@ from django.test import Client
 from django.urls import reverse
 
 from core.tests.roles import role_user
-from scoring.models import RedTeamScore
+from scoring.models import IncidentReport, RedTeamIPPool, RedTeamScore
 
 pytestmark = pytest.mark.django_db
 
@@ -155,3 +155,37 @@ def test_both_pages_show_the_status_in_the_modules_toolbar(
     for html in (_review(gold_user, finding), _red(red_team_user, finding)):
         toolbar = re.search(r'<div class="toolbar">(.*?)</div>', html, re.S)
         assert toolbar and "Pending Review" in toolbar.group(1)
+
+
+@pytest.mark.parametrize(
+    ("source_ip", "pool_ips", "shown"),
+    [
+        ("10.0.0.5", None, "<code>10.0.0.5</code>"),
+        (None, "10.0.0.6\n10.0.0.7", "<code>Pool: Rotation (2 IPs)</code>"),
+        (None, None, "<code>No source IP</code>"),
+    ],
+)
+def test_the_finding_page_shows_its_source_ip_or_pool(
+    red_team_user: User, finding: RedTeamScore, source_ip: str | None, pool_ips: str | None, shown: str
+) -> None:
+    finding.source_ip = source_ip
+    if pool_ips:
+        finding.source_ip_pool = RedTeamIPPool.objects.create(
+            name="Rotation", ip_addresses=pool_ips, created_by=red_team_user
+        )
+    finding.affected_boxes = ["web01", "db01"]
+    finding.save()
+
+    html = _red(red_team_user, finding)
+
+    assert shown in html
+    assert "web01, db01" in html
+
+
+@pytest.mark.parametrize(
+    ("boxes", "shown"),
+    [(["web01", "db01"], "web01, db01"), (["web01"], "web01"), ([], ""), (None, ""), ("db01", "db01")],
+)
+def test_affected_boxes_display_as_a_comma_separated_list(boxes: list[str] | str | None, shown: str) -> None:
+    assert RedTeamScore(affected_boxes=boxes).affected_boxes_display == shown
+    assert IncidentReport(affected_boxes=boxes).affected_boxes_display == shown
