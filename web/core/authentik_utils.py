@@ -267,6 +267,30 @@ def set_team_password(team_number: int, actor: str) -> tuple[str | None, str]:
     return password, error
 
 
+def enable_team_account(team_number: int, actor: str) -> None:
+    """Turn an active team's account on; audited when it does or can't. Nothing with several accounts per team, or for
+    a team that isn't active (as the start enables only active teams' accounts)."""
+    if not single_account() or not Team.objects.filter(team_number=team_number, is_active=True).exists():
+        return
+    with AuthentikManager() as manager:
+        try:
+            user = _team_user(manager, team_number)
+            if user.get("is_active") is True:
+                return
+            manager.set_user_active(user, True)
+            error = ""
+        except AuthentikAPIError as e:
+            logger.warning(f"Failed to enable the account of team {team_number}: {e}")
+            error = reason_for(e)
+    AuditLog.objects.create(
+        action="team_account_enabled",
+        admin_user=actor,
+        target_entity="team",
+        target_id=team_number,
+        details={"enabled": not error, "error": error or None},
+    )
+
+
 # Told a team's new password as soon as Authentik has it
 type OnSet = Callable[[int, str], None]
 
