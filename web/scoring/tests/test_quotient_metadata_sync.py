@@ -139,14 +139,14 @@ def _box(name, ip, *services):
     return QuotientBox(name=name, ip=ip, services=[QuotientService(name=s, display_name=s) for s in services])
 
 
-def _sync(boxes, *, vms=(), answers=None):
-    """Sync with Quotient listing boxes, Proxmox answering vms (one answer for any team, or a {team: VMs} dict) and
-    Quotient's DNS checks answering from answers[(team, "BOX:SERVICE")]; the proxy's post."""
+def _sync(boxes, *, vms=None, answers=None):
+    """Sync with Quotient listing boxes, Proxmox answering vms[team] and Quotient's DNS checks answering
+    answers[(team, "BOX:SERVICE")]; the payload pushed to the DNS proxy, or None."""
     from django.test import override_settings
     from quotient.client import QuotientInfrastructure, ServiceCheck
 
     def team_vms(number):
-        return vms.get(number, []) if isinstance(vms, dict) else vms
+        return (vms or {}).get(number, [])
 
     def checks(team, target, force_refresh):
         debugs = (answers or {}).get((team, target), [])
@@ -162,7 +162,7 @@ def _sync(boxes, *, vms=(), answers=None):
         client.return_value.get_injects.return_value = []
         client.return_value.get_service_checks.side_effect = checks
         sync_quotient_metadata()
-    return post
+    return post.call_args.kwargs["json"] if post.called else None
 
 
 def test_metadata_sync_merges_unscored_proxmox_team_vms_and_keeps_them_on_proxmox_blip():
@@ -186,11 +186,11 @@ def test_metadata_sync_merges_unscored_proxmox_team_vms_and_keeps_them_on_proxmo
     assert get_box_choices() == [("TREX", ".12 TREX"), ("PANGEA", "PANGEA")]
     assert get_service_choices() == [("DNS", "DNS"), ("Other", "Other")]
 
-    _sync(boxes, vms=None)
+    _sync(boxes, vms={1: None})
 
     assert QuotientMetadataCache.objects.get().boxes == cache.boxes
 
-    _sync(boxes, vms=[])
+    _sync(boxes, vms={1: []})
 
     assert QuotientMetadataCache.objects.get().boxes == cache.boxes
 
@@ -208,7 +208,7 @@ def test_a_proxmox_blip_keeps_only_the_unscored_boxes_quotient_does_not_list():
         ]
     )
 
-    _sync([_box("TREX", "10.0.0.12", "DNS")], vms=None)
+    _sync([_box("TREX", "10.0.0.12", "DNS")], vms={1: None})
 
     assert QuotientMetadataCache.objects.get().boxes == [
         {"name": "TREX", "ip": "10.0.0.12", "services": [{"name": "DNS", "display_name": "DNS"}]},
@@ -227,7 +227,7 @@ def test_proxmox_vms_join_once_each_in_the_case_quotient_names_its_boxes():
         ProxmoxVM(vmid=10104, name="team01-web", host="web", node="pve01", status="running"),
     ]
 
-    _sync([_box("web", "10.0.0.5", "HTTP"), _box("dc01.acme.local", "10.0.0.6")], vms=vms)
+    _sync([_box("web", "10.0.0.5", "HTTP"), _box("dc01.acme.local", "10.0.0.6")], vms={1: vms})
 
     assert [box["name"] for box in QuotientMetadataCache.objects.get().boxes] == ["web", "dc01.acme.local", "router"]
 
@@ -261,21 +261,39 @@ def test_proxmox_and_the_dns_check_sample_active_numbered_teams_with_a_school_fi
     team(9, school=True)
     team(4, school=True)
     vms = {4: [ProxmoxVM(vmid=10401, name="team04-gate", host="gate", node="pve01", status="running")]}
-    # In sample order, team 4's check shows the domain and team 9's another domain and the network; every other
-    # team's check shows another network.
+    # In sample order, team 4's check shows the domain and team 9's another domain and the network; teams 0, 1, 2 and
+    # MAX_TEAMS + 1 show another network.
     answers = {(n, "BUGS:DNS"): [NETWORK_ONLY] for n in (0, 1, 2, MAX_TEAMS + 1)}
     answers[4, "BUGS:DNS"] = [DOMAIN_ONLY]
     answers[9, "BUGS:DNS"] = [OTHER_BOTH]
 
-    post = _sync([_box("BUGS", "10.100.1XX.10", "DNS")], vms=vms, answers=answers)
+    payload = _sync([_box("BUGS", "10.100.1XX.10", "DNS")], vms=vms, answers=answers)
 
     assert [box["name"] for box in QuotientMetadataCache.objects.get().boxes] == ["BUGS", "GATE"]
-    assert post.call_args.kwargs["json"] == {
+    assert payload == {
         "number_of_teams": MAX_TEAMS,
         "external_mask": "10.100.1xx.",
         "team_dns_server_last_octet": 10,
         "team_domain_name": "acme.anvil",
         "internal_mask": "172.16.5.",
+    }
+
+
+def test_the_dns_check_reads_only_the_first_three_sample_teams():
+    """A part only the fourth sample team's check shows doesn't reach the proxy."""
+    from team.models import Team
+
+    for number in (1, 2, 3, 4):
+        Team.objects.create(team_number=number, team_name=f"Team {number}")
+    answers = {(3, "BUGS:DNS"): [NETWORK_ONLY], (4, "BUGS:DNS"): [DOMAIN_ONLY]}
+
+    payload = _sync([_box("BUGS", "10.100.1XX.10", "DNS")], answers=answers)
+
+    assert payload == {
+        "number_of_teams": 4,
+        "external_mask": "10.100.1xx.",
+        "team_dns_server_last_octet": 10,
+        "internal_mask": "192.168.220.",
     }
 
 
@@ -361,9 +379,9 @@ def test_the_dns_proxy_config_comes_from_the_first_dns_box_that_answers_it_all()
         _box("MAIL", "10.100.1XX.25", "DNS"),
     ]
 
-    post = _sync(boxes, answers={(1, "BUGS:DNS"): [DOMAIN_ONLY, NETWORK_ONLY]})
+    payload = _sync(boxes, answers={(1, "BUGS:DNS"): [DOMAIN_ONLY, NETWORK_ONLY]})
 
-    assert post.call_args.kwargs["json"] == {
+    assert payload == {
         "external_mask": "10.100.1xx.",
         "team_dns_server_last_octet": 10,
         "team_domain_name": "acme.anvil",
@@ -374,9 +392,9 @@ def test_the_dns_proxy_config_comes_from_the_first_dns_box_that_answers_it_all()
 def test_a_dns_box_that_answers_part_of_the_config_leaves_the_rest_to_the_next():
     boxes = [_box("BUGS", "10.100.1XX.10", "DNS"), _box("NS2", "10.200.2XX.53", "DNS")]
 
-    post = _sync(boxes, answers={(1, "BUGS:DNS"): [NETWORK_ONLY], (1, "NS2:DNS"): [DOMAIN_ONLY]})
+    payload = _sync(boxes, answers={(1, "BUGS:DNS"): [NETWORK_ONLY], (1, "NS2:DNS"): [DOMAIN_ONLY]})
 
-    assert post.call_args.kwargs["json"] == {
+    assert payload == {
         "external_mask": "10.100.1xx.",
         "team_dns_server_last_octet": 10,
         "internal_mask": "192.168.220.",
@@ -397,9 +415,8 @@ def test_each_part_comes_from_the_first_sample_team_whose_check_shows_it(first_a
         Team.objects.create(team_number=number, team_name=f"Team {number}")
     answers = {(1, "BUGS:DNS"): [first_answer], (2, "BUGS:DNS"): [OTHER_BOTH]}
 
-    post = _sync([_box("BUGS", "10.100.1XX.10", "DNS")], answers=answers)
+    payload = _sync([_box("BUGS", "10.100.1XX.10", "DNS")], answers=answers)
 
-    payload = post.call_args.kwargs["json"]
     assert (payload["team_domain_name"], payload["internal_mask"]) == (domain, network)
 
 
@@ -421,9 +438,7 @@ def test_each_part_comes_from_the_first_sample_team_whose_check_shows_it(first_a
 )
 def test_the_dns_box_ip_gives_the_proxy_its_external_mask_only_with_one_team_placeholder(ip, external):
     """A check that shows nothing leaves only the box's IP to push."""
-    post = _sync([_box("BUGS", ip, "DNS")])
-
-    assert (post.call_args.kwargs["json"] if post.called else None) == external
+    assert _sync([_box("BUGS", ip, "DNS")]) == external
 
 
 @pytest.mark.parametrize(
@@ -436,6 +451,6 @@ def test_the_dns_box_ip_gives_the_proxy_its_external_mask_only_with_one_team_pla
 )
 def test_the_team_domain_is_a_checked_names_parent_unless_it_has_two_labels(debugs, domain):
     """With no teams, team 1's check is read."""
-    post = _sync([_box("BUGS", "10.100.1XX.10", "DNS")], answers={(1, "BUGS:DNS"): debugs})
+    payload = _sync([_box("BUGS", "10.100.1XX.10", "DNS")], answers={(1, "BUGS:DNS"): debugs})
 
-    assert post.call_args.kwargs["json"]["team_domain_name"] == domain
+    assert payload["team_domain_name"] == domain
