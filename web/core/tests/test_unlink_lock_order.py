@@ -177,9 +177,9 @@ def test_a_locked_team_still_takes_rows_that_reference_it(team):
 
 
 def test_a_link_confirmed_during_a_reset_waits_for_it_and_links_nothing(team):
-    """A credentials reset signs the account out and unlinks its team under the team lock. A link confirmed meanwhile
-    by a session of that account waits for the lock, then finds the session signed out and links nothing, so no link
-    outlasts the reset."""
+    """A credentials reset signs the account out and, in the same transaction, unlinks its team under the team lock.
+    A link confirmed meanwhile by a session of that account waits for the lock, then finds the session signed out and
+    links nothing, so no link outlasts the reset."""
     account = User.objects.create(username="team06")
     errors: list[BaseException] = []
     results: list[LinkResult | None] = []
