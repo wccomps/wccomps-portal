@@ -160,6 +160,27 @@ def test_with_nothing_played_there_is_no_team_to_fix(current_event):
     assert _fixes(event_stage()) == []
 
 
+def test_the_school_checks_wait_for_the_close_out_itself(current_event):
+    """The competition page asks without them, so it offers Close Out; the close-out's own check refuses."""
+    from registration.services import set_team_school
+
+    set_team_school(_scored(1), "School 1", contact_email="c@example.edu")
+    Team.objects.update(is_active=False)
+
+    stage = event_stage()
+    assert close_out_problem(stage, check_schools=False) == ""
+    assert close_out_problem(stage).startswith("Team 1 is inactive but holds a school on the list")
+
+
+def test_with_no_event_open_and_no_active_season_close_out_points_at_the_seasons_page():
+    _scored(1)
+
+    assert close_out_problem(event_stage()) == (
+        "No season is active, and Close Out records these scores at a new event in the active season. Make a season "
+        "active on the Seasons page, then close out."
+    )
+
+
 def test_scored_teams_with_no_school_some_inactive_are_told_to_activate_those_first(current_event):
     from registration.services import set_team_school
 
