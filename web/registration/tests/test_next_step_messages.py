@@ -95,3 +95,71 @@ def test_an_inactive_listed_team_offers_removal_only_before_packets_went_out(cur
     )
     assert close_out_problem(event_stage()).endswith("activate it with Activate Team on its Teams page first.")
     assert not close_out_fixes(event_stage())[0].remove_school
+
+
+def _scored(number, *, active=True):
+    team = Team.objects.create(team_number=number, team_name=f"Team {number:02d}", is_active=active)
+    ServiceScore.objects.create(team=team, service_points=Decimal(1))
+    return team
+
+
+def _fixes(stage):
+    from registration.services import close_out_fixes
+
+    return [(fix.team_number, fix.activate, fix.enter_school, fix.remove_school) for fix in close_out_fixes(stage)]
+
+
+def test_several_inactive_listed_teams_are_named_three_and_a_count(current_event):
+    from registration.services import set_team_school
+
+    for number in range(1, 5):
+        set_team_school(_scored(number), f"School {number}", contact_email="c@example.edu")
+    Team.objects.update(is_active=False)
+
+    stage = event_stage()
+    assert close_out_problem(stage) == (
+        "Team 1, Team 2, Team 3 and 1 more are inactive but hold a school on the list: activate them with Activate "
+        "Team on their Teams page first, or remove their schools."
+    )
+    assert _fixes(stage) == [(1, True, False, True), (2, True, False, True), (3, True, False, True)]
+
+
+def test_several_scored_teams_with_no_school_are_each_told_to_enter_theirs(current_event):
+    from registration.services import set_team_school
+
+    set_team_school(_scored(1), "School 1", contact_email="c@example.edu")
+    for number in range(2, 6):
+        _scored(number)
+
+    stage = event_stage()
+    assert close_out_problem(stage) == (
+        "Team 2, Team 3, Team 4 and 1 more have scores but no school. Enter each team's school on its School Info "
+        "page first."
+    )
+    assert _fixes(stage) == [(2, False, True, False), (3, False, True, False), (4, False, True, False)]
+
+
+def test_scored_teams_with_no_school_some_inactive_are_told_to_activate_those_first(current_event):
+    from registration.services import set_team_school
+
+    set_team_school(_scored(1), "School 1", contact_email="c@example.edu")
+    _scored(2)
+    _scored(3, active=False)
+
+    stage = event_stage()
+    assert close_out_problem(stage) == (
+        "Team 2, Team 3 have scores but no school. Activate each inactive one with Activate Team on its Teams page, "
+        "then enter each team's school on its School Info page first."
+    )
+    assert _fixes(stage) == [(2, False, True, False), (3, True, True, False)]
+
+
+def test_with_no_event_open_and_an_empty_school_list_the_scores_have_nowhere_to_go():
+    from registration.models import Season
+
+    Season.objects.create(name="2026", year=2026, is_active=True)
+    _scored(1)
+
+    assert close_out_problem(event_stage()) == (
+        "The school list is empty, so there are no results to keep. Enter its school on its School Info page first."
+    )
