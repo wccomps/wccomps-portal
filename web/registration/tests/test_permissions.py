@@ -142,4 +142,5 @@ class TestReviewActionPermissions:
 
         assert response.status_code == 200
         assert 'name="reason"' in response.content.decode()
+        assert not list(response.context["messages"])
         assert TeamRegistration.objects.get().status == "pending"

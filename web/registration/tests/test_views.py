@@ -268,9 +268,12 @@ class AdminRejectViewTestCase(TestCase):
         """Test rejecting a registration."""
         self.client.force_login(self.gold_user)
         response = self.client.post(
-            reverse("registration_reject", args=[self.registration.id]), {"reason": "Incomplete information"}
+            reverse("registration_reject", args=[self.registration.id]),
+            {"reason": "Incomplete information"},
+            follow=True,
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse("registration_review_list"))
+        self.assertContains(response, "Registration for Test School has been rejected.")
 
         self.registration.refresh_from_db()
         self.assertEqual(self.registration.status, "rejected")
@@ -294,17 +297,6 @@ class AdminRejectViewTestCase(TestCase):
         self.assertContains(response, "test@example.com")
         self.registration.refresh_from_db()
         self.assertEqual(self.registration.status, "pending")
-
-    def test_reject_says_the_registration_was_rejected(self):
-        self.client.force_login(self.gold_user)
-
-        response = self.client.post(
-            reverse("registration_reject", args=[self.registration.id]),
-            {"reason": "Incomplete information"},
-            follow=True,
-        )
-
-        self.assertContains(response, "Registration for Test School has been rejected.")
 
     def test_rejecting_a_rejected_registration_says_it_is_no_longer_pending_while_another_is_approved(self):
         TeamRegistration.objects.create(school_name="Other School", status="approved")
