@@ -6,10 +6,13 @@ a real Authentik server.
 """
 
 import json
+import re
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import signing
 from django.http import HttpResponse
@@ -26,21 +29,51 @@ OAUTH_CONFIG = {
     "userinfo_endpoint": "https://auth.example.com/userinfo/",
     "end_session_endpoint": "https://auth.example.com/end-session/",
 }
+GOOD_TOKEN = {"access_token": "test-token"}
+GOOD_USERINFO = {"sub": "refused-sub", "preferred_username": "refused", "groups": []}
+
+
+def _json(body: object, status: int = 200) -> Answer:
+    return Answer(status, json.dumps(body).encode())
+
+
+GOOD_ANSWERS = (_json(GOOD_TOKEN), _json(GOOD_USERINFO))
+
+
+def _start_sign_in(client: Client, next_url: str | None = None) -> str:
+    """Begin a login in this browser, coming back to next_url; the signed state Authentik hands back."""
+    with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
+        response = client.get("/auth/login/", {} if next_url is None else {"next": next_url})
+    assert response.status_code == 302
+    return parse_qs(urlparse(response.url).query)["state"][0]
+
+
+def _callback(client: Client, query: dict[str, str], *answers: Answer) -> HttpResponse:
+    """The callback, with Authentik's token and userinfo requests getting these answers in turn."""
+    with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG), serving(list(answers)):
+        return client.get("/auth/callback/", query)
+
+
+def _login(client: Client, state: str, userinfo: object, *, id_token: str | None = None) -> HttpResponse:
+    """The callback for this state, Authentik answering with an access token (and this ID token) and this userinfo."""
+    tokens = GOOD_TOKEN | ({"id_token": id_token} if id_token else {})
+    return _callback(client, {"code": "test-code", "state": state}, _json(tokens), _json(userinfo))
+
+
+def _shown(response) -> tuple[int, str, str]:
+    """The error page's status, the title its browser tab shows before the site's name, and its message. The site's
+    name comes from a context processor, so it shows only on a page rendered with its request."""
+    title = re.search(r"<title>\s*(.*?)\s*</title>", response.content.decode(), re.S)
+    assert title, response.content
+    page, _, site = title.group(1).rpartition(" - ")
+    assert site == settings.SITE_NAME
+    return response.status_code, page, response.context["error_message"]
 
 
 @pytest.fixture
 def oauth_state_session(client: Client) -> tuple[Client, str]:
-    """Set up a client with valid OAuth state from a login redirect."""
-    from urllib.parse import parse_qs, urlparse
-
-    with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
-        response = client.get("/auth/login/")
-        assert response.status_code == 302
-
-    # Extract the signed state from the redirect URL
-    parsed = urlparse(response.url)
-    state = parse_qs(parsed.query)["state"][0]
-    return client, state
+    """A browser that has begun a login, and the state it was handed."""
+    return client, _start_sign_in(client)
 
 
 @pytest.mark.django_db
@@ -125,31 +158,16 @@ class TestOAuthCallback:
             groups=["OldGroup"],
         )
 
-        mock_token_response = MagicMock()
-        mock_token_response.json.return_value = {"access_token": "test-token"}
-        mock_token_response.raise_for_status = MagicMock()
-
-        mock_userinfo_response = MagicMock()
-        mock_userinfo_response.json.return_value = {
-            "sub": "existing-authentik-id",
-            "preferred_username": "existinguser",
-            "email": "existing@example.com",
-            "groups": ["WCComps_GoldTeam", "NewGroup"],
-        }
-        mock_userinfo_response.raise_for_status = MagicMock()
-
-        with (
-            patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
-            patch("core.oauth.httpx.Client") as mock_httpx,
-        ):
-            mock_client = MagicMock()
-            mock_client.post.return_value = mock_token_response
-            mock_client.get.return_value = mock_userinfo_response
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_httpx.return_value = mock_client
-
-            response = client.get(f"/auth/callback/?code=test-code&state={state}")
+        response = _login(
+            client,
+            state,
+            {
+                "sub": "existing-authentik-id",
+                "preferred_username": "existinguser",
+                "email": "existing@example.com",
+                "groups": ["WCComps_GoldTeam", "NewGroup"],
+            },
+        )
 
         assert response.status_code == 302
 
@@ -171,41 +189,15 @@ class TestOAuthCallback:
             groups=["SomeGroup"],
         )
 
-        mock_token_response = MagicMock()
-        mock_token_response.json.return_value = {"access_token": "test-token"}
-        mock_token_response.raise_for_status = MagicMock()
-
-        mock_userinfo_response = MagicMock()
-        mock_userinfo_response.json.return_value = {
-            "sub": "user-authentik-id",
-            "preferred_username": "newusername",  # Username changed
-            "groups": ["SomeGroup"],
-        }
-        mock_userinfo_response.raise_for_status = MagicMock()
-
-        with (
-            patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
-            patch("core.oauth.httpx.Client") as mock_httpx,
-        ):
-            mock_client = MagicMock()
-            mock_client.post.return_value = mock_token_response
-            mock_client.get.return_value = mock_userinfo_response
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_httpx.return_value = mock_client
-
-            response = client.get(f"/auth/callback/?code=test-code&state={state}")
+        response = _login(
+            client, state, {"sub": "user-authentik-id", "preferred_username": "newusername", "groups": ["SomeGroup"]}
+        )
 
         assert response.status_code == 302
 
         # Verify username updated
         user.refresh_from_db()
         assert user.username == "newusername"
-
-    @staticmethod
-    def _login(client, state, userinfo, *, id_token=None):
-        tokens = GOOD_TOKEN | ({"id_token": id_token} if id_token else {})
-        return _callback(client, {"code": "test-code", "state": state}, _json(tokens), _json(userinfo))
 
     @staticmethod
     def _id_token(auth_time: float) -> str:
@@ -228,12 +220,13 @@ class TestOAuthCallback:
         CredentialsReset.objects.create(authentik_id="sub-06", reset_at=datetime.fromtimestamp(reset_at, UTC))
         auth_time = reset_at - 10 if before else reset_at + 10
 
-        response = self._login(
+        response = _login(
             client, state, {"sub": "sub-06", "preferred_username": "team06"}, id_token=self._id_token(auth_time)
         )
 
         assert ("_auth_user_id" in client.session) is not before
         if before:
+            assert _shown(response)[:2] == (200, "Signed Out")
             assert b"password was reset" in response.content
 
     def test_without_auth_time_the_sign_in_counts_from_when_it_began(self, oauth_state_session):
@@ -248,7 +241,7 @@ class TestOAuthCallback:
         UserGroups.objects.create(user=user, authentik_id="sub-06", groups=[])
         CredentialsReset.objects.create(authentik_id="sub-06", reset_at=reset_at)
 
-        self._login(client, state, {"sub": "sub-06", "preferred_username": "team06"})
+        _login(client, state, {"sub": "sub-06", "preferred_username": "team06"})
 
         assert "_auth_user_id" not in client.session
 
@@ -263,7 +256,7 @@ class TestOAuthCallback:
         CredentialsReset.objects.create(authentik_id="sub-06", reset_at=timezone.now() + timedelta(seconds=10))
         payload = base64.urlsafe_b64encode(f'{{"auth_time": {auth_time}}}'.encode()).decode().rstrip("=")
 
-        response = self._login(
+        response = _login(
             client, state, {"sub": "sub-06", "preferred_username": "team06"}, id_token=f"header.{payload}.signature"
         )
 
@@ -276,7 +269,7 @@ class TestOAuthCallback:
         user = User.objects.create(username="team05")
         UserGroups.objects.create(user=user, authentik_id="sub-05", groups=[], account_active=False)
 
-        self._login(client, state, {"sub": "sub-05", "preferred_username": "team05", "groups": ["WCComps_GoldTeam"]})
+        _login(client, state, {"sub": "sub-05", "preferred_username": "team05", "groups": ["WCComps_GoldTeam"]})
 
         assert UserGroups.objects.get(user=user).permission_groups == ["WCComps_GoldTeam"]
 
@@ -289,7 +282,7 @@ class TestOAuthCallback:
         UserGroups.objects.create(user=old, authentik_id="old-authentik-id", groups=["WCComps_Discord_Admin"])
         DiscordLink.objects.create(discord_id=111, discord_username="old-discord", user=old, is_active=True)
 
-        response = self._login(
+        response = _login(
             client, state, {"sub": "new-authentik-id", "preferred_username": "reused", "groups": ["WCComps_GoldTeam"]}
         )
 
@@ -311,7 +304,7 @@ class TestOAuthCallback:
         client, state = oauth_state_session
         old = User.objects.create_superuser(username="admin", password="unused-test-password")  # noqa: S106
 
-        self._login(client, state, {"sub": "someone-new", "preferred_username": "admin", "groups": []})
+        _login(client, state, {"sub": "someone-new", "preferred_username": "admin", "groups": []})
 
         new = User.objects.get(username="admin")
         assert new.pk != old.pk
@@ -325,7 +318,7 @@ class TestOAuthCallback:
         old = User.objects.create_user(username=name)
         UserGroups.objects.create(user=old, authentik_id="old-sub", groups=[])
 
-        assert self._login(client, state, {"sub": "new-sub", "preferred_username": name}).status_code == 302
+        assert _login(client, state, {"sub": "new-sub", "preferred_username": name}).status_code == 302
 
         old.refresh_from_db()
         suffix = f"~replaced-{old.pk}"
@@ -340,7 +333,7 @@ class TestOAuthCallback:
         stale = User.objects.create_user(username="new-name")
         UserGroups.objects.create(user=stale, authentik_id="deleted-id", groups=["WCComps_GoldTeam"])
 
-        self._login(client, state, {"sub": "my-id", "preferred_username": "new-name", "groups": []})
+        _login(client, state, {"sub": "my-id", "preferred_username": "new-name", "groups": []})
 
         me.refresh_from_db()
         stale.refresh_from_db()
@@ -354,7 +347,7 @@ class TestOAuthCallback:
 
         client, state = oauth_state_session
 
-        response = self._login(
+        response = _login(
             client, state, {"sub": "w", "preferred_username": "w", "groups": [settings.PORTAL_WHITE_GROUP]}
         )
 
@@ -367,101 +360,42 @@ class TestOAuthCallback:
         user = User.objects.create_user(username="carol~replaced-1")
         UserGroups.objects.create(user=user, authentik_id="carol-id", groups=[])
 
-        response = self._login(client, state, {"sub": "carol-id", "preferred_username": "dave", "groups": ["G"]})
+        response = _login(client, state, {"sub": "carol-id", "preferred_username": "dave", "groups": ["G"]})
 
         assert response.status_code == 302
         user.refresh_from_db()
         assert user.username == "dave"
         assert client.get("/").wsgi_request.user.pk == user.pk
 
-    def test_callback_redirects_to_next_url(self):
+    def test_callback_redirects_to_next_url(self, client):
         """Callback should redirect to next URL encoded in the signed state."""
-        from urllib.parse import parse_qs, urlparse
+        state = _start_sign_in(client, "/my-dashboard/")
 
-        client = Client()
-
-        # Initiate login with a specific next URL
-        with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
-            response = client.get("/auth/login/?next=/my-dashboard/")
-
-        parsed = urlparse(response.url)
-        state = parse_qs(parsed.query)["state"][0]
-
-        mock_token_response = MagicMock()
-        mock_token_response.json.return_value = {"access_token": "test-token"}
-        mock_token_response.raise_for_status = MagicMock()
-
-        mock_userinfo_response = MagicMock()
-        mock_userinfo_response.json.return_value = {
-            "sub": "redirect-test-id",
-            "preferred_username": "redirectuser",
-            "groups": [],
-        }
-        mock_userinfo_response.raise_for_status = MagicMock()
-
-        with (
-            patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
-            patch("core.oauth.httpx.Client") as mock_httpx,
-        ):
-            mock_client = MagicMock()
-            mock_client.post.return_value = mock_token_response
-            mock_client.get.return_value = mock_userinfo_response
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_httpx.return_value = mock_client
-
-            response = client.get(f"/auth/callback/?code=test-code&state={state}")
+        response = _login(
+            client, state, {"sub": "redirect-test-id", "preferred_username": "redirectuser", "groups": []}
+        )
 
         assert response.status_code == 302
         assert response.url == "/my-dashboard/"
 
-    def test_callback_preserves_next_url_with_query_params(self):
+    def test_callback_preserves_next_url_with_query_params(self, client):
         """Callback should preserve next URL containing query parameters (e.g. link token)."""
-        from urllib.parse import parse_qs, urlparse
-
-        client = Client()
         next_url = "/auth/link-callback?token=abc123"
+        state = _start_sign_in(client, next_url)
 
-        with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
-            response = client.get(f"/auth/login/?next={next_url}")
-
-        parsed = urlparse(response.url)
-        state = parse_qs(parsed.query)["state"][0]
-
-        mock_token_response = MagicMock()
-        mock_token_response.json.return_value = {"access_token": "test-token"}
-        mock_token_response.raise_for_status = MagicMock()
-
-        mock_userinfo_response = MagicMock()
-        mock_userinfo_response.json.return_value = {
-            "sub": "link-test-id",
-            "preferred_username": "linkuser",
-            "groups": [],
-        }
-        mock_userinfo_response.raise_for_status = MagicMock()
-
-        with (
-            patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
-            patch("core.oauth.httpx.Client") as mock_httpx,
-        ):
-            mock_client = MagicMock()
-            mock_client.post.return_value = mock_token_response
-            mock_client.get.return_value = mock_userinfo_response
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_httpx.return_value = mock_client
-
-            response = client.get(f"/auth/callback/?code=test-code&state={state}")
+        response = _login(client, state, {"sub": "link-test-id", "preferred_username": "linkuser", "groups": []})
 
         assert response.status_code == 302
         assert response.url == next_url
 
     def test_callback_rejects_state_from_another_browser(self, oauth_state_session):
-        """Login CSRF: a valid state (and code) replayed in a different browser logs nobody in."""
+        """Login CSRF: a valid state (and code) replayed in a different browser logs nobody in, even one that has
+        begun a sign-in of its own."""
         _client, state = oauth_state_session
         victim = Client()
+        _start_sign_in(victim)
 
-        response = self._login(victim, state, {"sub": "attacker-sub", "preferred_username": "attacker", "groups": []})
+        response = _login(victim, state, {"sub": "attacker-sub", "preferred_username": "attacker", "groups": []})
 
         assert _shown(response) == (200, "Session Expired", "Please try logging in again.")
         assert "_auth_user_id" not in victim.session
@@ -471,8 +405,8 @@ class TestOAuthCallback:
         client, state = oauth_state_session
         userinfo = {"sub": "once-sub", "preferred_username": "once", "groups": []}
 
-        assert self._login(client, state, userinfo).status_code == 302
-        assert b"Session Expired" in self._login(client, state, userinfo).content
+        assert _login(client, state, userinfo).status_code == 302
+        assert b"Session Expired" in _login(client, state, userinfo).content
 
     def test_callback_rejects_external_next_url(self):
         """Callback should reject next URLs pointing to external hosts."""
@@ -487,54 +421,11 @@ class TestOAuthCallback:
         # Forge a signed state with an external next URL
         state = signing.dumps({"n": "test-nonce", "next": "https://evil.com/steal"})
 
-        mock_token_response = MagicMock()
-        mock_token_response.json.return_value = {"access_token": "test-token"}
-        mock_token_response.raise_for_status = MagicMock()
-
-        mock_userinfo_response = MagicMock()
-        mock_userinfo_response.json.return_value = {
-            "sub": "redirect-test-id-2",
-            "preferred_username": "safeuser",
-            "groups": [],
-        }
-        mock_userinfo_response.raise_for_status = MagicMock()
-
-        with (
-            patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
-            patch("core.oauth.httpx.Client") as mock_httpx,
-        ):
-            mock_client = MagicMock()
-            mock_client.post.return_value = mock_token_response
-            mock_client.get.return_value = mock_userinfo_response
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_httpx.return_value = mock_client
-
-            response = client.get(f"/auth/callback/?code=test-code&state={state}")
+        response = _login(client, state, {"sub": "redirect-test-id-2", "preferred_username": "safeuser", "groups": []})
 
         # Should NOT redirect to the external URL
         assert response.status_code == 302
         assert "evil.com" not in response.url
-
-
-def _json(body: object, status: int = 200) -> Answer:
-    return Answer(status, json.dumps(body).encode())
-
-
-def _callback(client: Client, query: dict[str, str], *answers: Answer) -> HttpResponse:
-    """The callback, with Authentik's token and userinfo requests getting these answers in turn."""
-    with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG), serving(list(answers)):
-        return client.get("/auth/callback/", query)
-
-
-GOOD_TOKEN = {"access_token": "test-token"}
-GOOD_USERINFO = {"sub": "refused-sub", "preferred_username": "refused", "groups": []}
-GOOD_ANSWERS = (_json(GOOD_TOKEN), _json(GOOD_USERINFO))
-
-
-def _shown(response) -> tuple[int, str, str]:
-    """The error page's status, title and message."""
-    return response.status_code, response.context["error_title"], response.context["error_message"]
 
 
 @pytest.mark.django_db
@@ -614,10 +505,6 @@ def test_the_code_is_redeemed_and_the_claims_read_as_authentik_expects(oauth_sta
     """The token request carries the grant, the code, the client's credentials and the redirect URI the login sent;
     the userinfo request carries the access token the exchange answered. Both give up after the configured timeout,
     so a hung Authentik can't hold the sign-in open."""
-    from urllib.parse import parse_qs
-
-    from django.conf import settings
-
     client, state = oauth_state_session
 
     with (
@@ -677,7 +564,7 @@ class TestClaims:
         fill its column."""
         client, state = oauth_state_session
 
-        response = TestOAuthCallback._login(client, state, userinfo)
+        response = _login(client, state, userinfo)
 
         assert response.status_code == 302
         row = UserGroups.objects.select_related("user").get()
@@ -712,7 +599,7 @@ class TestClaims:
         client, state = oauth_state_session
 
         with caplog.at_level("ERROR", logger="core.oauth"):
-            response = TestOAuthCallback._login(client, state, userinfo)
+            response = _login(client, state, userinfo)
 
         assert _shown(response) == (200, "Authentication Failed", "Invalid user data.")
         assert not UserGroups.objects.exists()

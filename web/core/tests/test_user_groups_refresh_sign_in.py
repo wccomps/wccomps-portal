@@ -50,7 +50,7 @@ def test_a_sign_in_during_the_refresh_keeps_what_it_read(oauth_state_session):  
     UserGroups.objects.create(user=account, authentik_id="sub-06", groups=[], account_active=False)
 
     def a_sign_in_commits() -> None:
-        _in_another_thread(lambda: test_oauth_flow.TestOAuthCallback._login(client, state, SIGNED_IN))
+        _in_another_thread(lambda: test_oauth_flow._login(client, state, SIGNED_IN))
 
     _refresh_reading([{"uid": "sub-06", "is_active": False, "groups": []}], a_sign_in_commits)
 
@@ -64,7 +64,7 @@ def test_a_first_sign_in_during_the_refresh_keeps_what_it_read(oauth_state_sessi
     client, state = oauth_state_session
 
     def a_first_sign_in_commits() -> None:
-        _in_another_thread(lambda: test_oauth_flow.TestOAuthCallback._login(client, state, SIGNED_IN))
+        _in_another_thread(lambda: test_oauth_flow._login(client, state, SIGNED_IN))
 
     _refresh_reading([{"uid": "sub-06", "is_active": False, "groups": []}], a_first_sign_in_commits)
 
@@ -86,7 +86,7 @@ def test_a_refresh_during_a_sign_in_keeps_what_it_read(oauth_state_session):  # 
         return read_claims(userinfo)
 
     with patch("core.oauth._claims", side_effect=claims_read_before_a_refresh):
-        test_oauth_flow.TestOAuthCallback._login(client, state, SIGNED_IN)
+        test_oauth_flow._login(client, state, SIGNED_IN)
 
     row = UserGroups.objects.get(authentik_id="sub-06")
     assert (row.groups, row.account_active) == ([], False)
@@ -106,7 +106,7 @@ def test_a_refresh_that_changes_nothing_still_outdates_an_older_sign_in(oauth_st
         return read_claims(userinfo)
 
     with patch("core.oauth._claims", side_effect=claims_read_before_a_refresh):
-        test_oauth_flow.TestOAuthCallback._login(client, state, SIGNED_IN)
+        test_oauth_flow._login(client, state, SIGNED_IN)
 
     row = UserGroups.objects.get(authentik_id="sub-06")
     assert (row.groups, row.account_active) == ([], False)
@@ -119,7 +119,7 @@ def test_a_sign_in_on_a_pod_whose_clock_runs_ahead_does_not_hold_off_later_refre
     ahead = timezone.now() + timedelta(hours=1)
 
     with patch("django.utils.timezone.now", return_value=ahead):
-        test_oauth_flow.TestOAuthCallback._login(client, state, SIGNED_IN)
+        test_oauth_flow._login(client, state, SIGNED_IN)
     _refresh_reading([{"uid": "sub-06", "is_active": False, "groups": []}], lambda: None)
 
     assert UserGroups.objects.get(authentik_id="sub-06").account_active is False

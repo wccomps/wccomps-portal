@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterator
 from datetime import timedelta
 from unittest.mock import patch
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -29,13 +29,12 @@ from core.models import CompetitionConfig, UserGroups
 from core.services.competition import NO_FOLDER_ACCOUNT, run_competition
 from core.services.user_groups import refresh_user_groups
 from core.team_accounts import FOLDER_CACHE_SECONDS, _FolderCache, accounts_by_team, blueteam_kinds
-from core.tests.test_oauth_flow import OAUTH_CONFIG
+from core.tests.test_oauth_flow import _login, _shown, _start_sign_in
 from core.utils import drain
 from team.models import Team
 
 pytestmark = pytest.mark.django_db
 
-REAL_CLIENT = httpx.Client  # the OAuth tests' way of faking the token exchange replaces httpx.Client
 FOLDER = "blue-users"
 
 
@@ -110,7 +109,7 @@ class FakeAuthentik:
         return httpx.Response(404, json={"detail": "Not found"})
 
     def manager(self) -> AuthentikManager:
-        client = REAL_CLIENT(transport=httpx.MockTransport(self.handle))
+        client = httpx.Client(transport=httpx.MockTransport(self.handle))
         return AuthentikManager(base_url="https://auth.test", api_token="token", client=client)
 
     def toggled(self, is_active: bool) -> list[str]:
@@ -397,20 +396,9 @@ def test_a_lone_blue_team_group_binding_passes_without_the_folder(controlled_vpn
 def _sign_in(fake: FakeAuthentik, userinfo: dict[str, object], *, expect: int = 302) -> HttpResponse:
     """A full sign-in in a fresh browser, with the region's scope mapping's userinfo."""
     client = Client()
-    with patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG):
-        state = parse_qs(urlparse(client.get("/auth/login/").url).query)["state"][0]
-    token = httpx.Response(
-        200, json={"access_token": "token"}, request=httpx.Request("POST", OAUTH_CONFIG["token_endpoint"])
-    )
-    info = httpx.Response(200, json=userinfo, request=httpx.Request("GET", OAUTH_CONFIG["userinfo_endpoint"]))
-    with (
-        patch("core.oauth._get_oauth_config", return_value=OAUTH_CONFIG),
-        patch("core.oauth.AuthentikManager", side_effect=lambda: fake.manager()),
-        patch("core.oauth.httpx.Client") as http,
-    ):
-        http.return_value.__enter__.return_value.post.return_value = token
-        http.return_value.__enter__.return_value.get.return_value = info
-        response = client.get("/auth/callback/?" + urlencode({"code": "code", "state": state}))
+    state = _start_sign_in(client)
+    with patch("core.oauth.AuthentikManager", side_effect=lambda: fake.manager()):
+        response = _login(client, state, userinfo)
     assert response.status_code == expect
     return response
 
@@ -481,10 +469,7 @@ def test_when_authentik_cant_be_asked_the_sign_in_is_refused(teams, caplog):
 
     response = _sign_in(fake, _claimed("team01a"), expect=503)
 
-    assert (response.context["error_title"], response.context["error_message"]) == (
-        "Sign-in Unavailable",
-        "Try again in a moment.",
-    )
+    assert _shown(response) == (503, "Sign-in Unavailable", "Try again in a moment.")
     assert not UserGroups.objects.exists()
     assert "team folder lookup failed" in caplog.text
 

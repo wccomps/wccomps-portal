@@ -23,7 +23,7 @@ from core.tests.test_oauth_flow import oauth_state_session  # noqa: F401
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
-_login = test_oauth_flow.TestOAuthCallback._login
+_login = test_oauth_flow._login
 _id_token = test_oauth_flow.TestOAuthCallback._id_token
 
 

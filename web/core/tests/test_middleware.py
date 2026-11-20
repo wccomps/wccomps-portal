@@ -203,7 +203,6 @@ class TestAuthentikRequiredMiddleware:
 
     @pytest.mark.parametrize("path", ["/static/css/style.css", *MIDDLEWARE_WHITELIST_EXACT])
     def test_an_anonymous_visitor_reaches_each_exempt_page(self, middleware, path):
-        """The middleware lets a request from a visitor who hasn't signed in through to each exempt page."""
         request = RequestFactory().get(path)
         request.user = AnonymousUser()
 
