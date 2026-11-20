@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def _read_attachment(ticket: Ticket, uploaded_file: UploadedFile[bytes] | None, uploaded_by: str) -> TicketAttachment:
-    """The upload as an unsaved attachment (TicketAttachment.store saves it); BadRequest says why it is refused."""
+    """The upload as an unsaved attachment; BadRequest says why it is refused."""
     if not uploaded_file:
         raise BadRequest("No file provided")
 
@@ -34,16 +34,16 @@ def _read_attachment(ticket: Ticket, uploaded_file: UploadedFile[bytes] | None, 
 
 @require_POST
 def ticket_attachment_upload(request: HttpRequest, ticket_number: str) -> HttpResponse:
-    """Add a file to a ticket. A file that is read and fits (else a bad request, which writes nothing) counts against
-    the comment rate limit, as a chat message's files do; a refusal from the rate limit or from the ticket's state or a
-    cap (TicketAttachment.store) goes back to the ticket with a message."""
+    """Add a file to a ticket, counted against the comment rate limit only once the ticket's state and caps take it
+    (TicketAttachment.store); a refusal goes back to the ticket with a message, and a file that can't be read or
+    doesn't fit is a bad request."""
     user = cast(User, request.user)
     authentik_username = user.username
     ticket = team_record_or_404(
         Ticket.objects.select_related("team"), user, staff=(TICKET_STAFF,), ticket_number=ticket_number
     )
     attachment = _read_attachment(ticket, request.FILES.get("attachment"), authentik_username)
-    refused = CommentRateLimit.take(ticket, CommentRateLimit.user_key(user)) or attachment.store()
+    refused = attachment.store(lambda: CommentRateLimit.take(ticket, CommentRateLimit.user_key(user)))
     if refused:
         messages.error(request, refused)
     else:
