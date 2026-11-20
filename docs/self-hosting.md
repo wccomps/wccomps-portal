@@ -302,16 +302,19 @@ Each of these is off until its settings are set; the rest of the portal works wi
 ### Quotient
 
 The Quotient scoring engine supplies the box and service lists (ticket forms, red team and incident forms, bot
-autocomplete), inject titles for grading, ticket service check history, and the service scores the competition stop
-pulls in. Set `QUOTIENT_API_URL` and an `[[admin]]` account from Quotient's `event.conf` as `QUOTIENT_USERNAME` and
-`QUOTIENT_PASSWORD`.
+autocomplete), inject titles for grading, ticket service check history, the preflight report (its latest preflight
+round, queued for the ops channel 30 and 10 minutes before a scheduled start; it needs dbaseqp/Quotient #208 or later),
+and the service scores the competition stop pulls in. Set `QUOTIENT_API_URL` and an `[[admin]]` account from
+Quotient's `event.conf` as `QUOTIENT_USERNAME` and `QUOTIENT_PASSWORD`.
 
-- A Quotient team's number is the digits in its name (`team09` is team 9); a name without digits is skipped.
+- A Quotient team's number is the digits in its name (`team09` is team 9); a name without digits is skipped. Ticket
+  check history and the preflight report take a team's Quotient ID as its number, so create Quotient's teams in order.
 - An inject's point value comes from its title: `(10 pts)`, `(1,000 points)`.
 - A ticket's service is matched to Quotient's check `box-service`.
 
-Without Quotient, inject grading says Quotient is unavailable, box lists stay empty, the stop's score sync step fails
-(the stop still completes), and the worker logs the failed sync once and retries it every 15 minutes.
+Without Quotient, inject grading says Quotient is unavailable, box lists stay empty, no preflight report is queued, the
+stop's score sync step fails (the stop still completes), and the worker logs the failed sync once and retries it every
+15 minutes.
 
 Close Out keeps the portal's side of an event in its archive (Download Close Out Archive on the event's page): every
 export, plus each ticket's comments (its Discord thread or Zulip topic as the portal recorded it), its history, and

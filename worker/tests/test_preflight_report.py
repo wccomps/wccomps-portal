@@ -35,7 +35,8 @@ def clock(monkeypatch):
 
 
 @pytest.fixture
-def quotient(monkeypatch):
+def quotient(monkeypatch, settings):
+    settings.QUOTIENT_API_URL = "https://quotient.test"
     fake = _Quotient()
     monkeypatch.setattr(preflight, "get_quotient_client", lambda: fake)
     return fake
@@ -81,8 +82,7 @@ class TestPreflightReport:
         assert len(posts) == 2
         assert all("- **Team 2**: web-http" in p for p in posts)
 
-    async def test_a_restarted_worker_does_not_queue_a_report_again(self, clock, quotient):
-        """What was queued is recorded in the database, not in the process."""
+    async def test_a_queued_report_is_recorded_so_no_later_pass_or_restart_queues_it_again(self, clock, quotient):
         await _schedule()
         await _pass_at(clock, START - timedelta(minutes=5))
 
@@ -90,6 +90,8 @@ class TestPreflightReport:
 
         assert quotient.reads == 1
         assert len(await _posted()) == 1
+        recorded = AuditLog.objects.filter(action=competition.PreflightMark.ACTION)
+        assert [a.details async for a in recorded] == [{"start_time": START.isoformat(), "minutes": 10}]
 
     async def test_a_new_start_time_gets_its_own_reports(self, clock, quotient):
         await _schedule()
@@ -115,6 +117,15 @@ class TestPreflightReport:
         assert quotient.reads == 0
         assert await _posted() == []
 
+    async def test_nothing_is_queued_while_quotient_is_not_configured(self, clock, quotient, settings):
+        settings.QUOTIENT_API_URL = ""
+        await _schedule()
+
+        await _pass_at(clock, START - timedelta(minutes=10))
+
+        assert quotient.reads == 0
+        assert await _posted() == []
+
     async def test_an_unreachable_quotient_is_reported(self, clock, quotient):
         await _schedule()
 
@@ -130,7 +141,7 @@ class TestPreflightReport:
 
         await _schedule(START + timedelta(hours=2))
 
-        assert not await sync_to_async(competition.queue_preflight_report)(mark, "report", clock["at"])
+        await sync_to_async(competition.queue_preflight_report)(mark, "report", clock["at"])
         assert await _posted() == []
 
     async def test_a_failed_queue_leaves_the_report_due(self, clock, quotient, monkeypatch):

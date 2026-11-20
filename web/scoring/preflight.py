@@ -10,8 +10,8 @@ STALE = timedelta(minutes=10)
 
 
 def preflight_report(status: EngineStatus | None, now: datetime) -> str:
-    """The report: each team with a failing check and the services that failed, one team per line in team order, or
-    why there is no preflight round to report. A team is named by its Quotient ID, which is its portal team number."""
+    """The ops report of Quotient's preflight round; a team is named by its Quotient ID, which is its portal team
+    number."""
     if status is None:
         return "**Preflight:** couldn't read the engine status from Quotient."
     if status.preflight is None:
@@ -25,9 +25,8 @@ def preflight_report(status: EngineStatus | None, now: datetime) -> str:
             "started."
         )
     if not status.round_id or not status.round_start or now - status.round_start > STALE:
-        minutes = int(STALE.total_seconds() // 60)
         why = "Quotient's engine is paused." if not status.running else "Is Quotient's engine stuck?"
-        return f"**Preflight:** no preflight round in the last {minutes} minutes. {why}"
+        return f"**Preflight:** no preflight round in the last {STALE // timedelta(minutes=1)} minutes. {why}"
 
     header = f"**Preflight round {status.round_id}** (<t:{int(status.round_start.timestamp())}:t>)"
     if not status.checks:

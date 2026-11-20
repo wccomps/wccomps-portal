@@ -7,7 +7,9 @@ from contextlib import aclosing, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum, StrEnum
+from typing import ClassVar
 
+from django.conf import settings
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import Q
 
@@ -35,7 +37,6 @@ NO_TEAM_ACCOUNT = "no team account in its group"
 NO_FOLDER_ACCOUNT = "no team account in the team folder"
 TIMER_GAVE_UP = "competition_timer_gave_up"
 COMPETITION_COUNTDOWN_QUEUED = "competition_countdown_queued"
-PREFLIGHT_REPORT_QUEUED = "preflight_report_queued"
 
 TIMER_ACTOR = "timer"
 # Attempts the timer makes at one scheduled start or stop, one a tick, while it is left incomplete or errored
@@ -578,10 +579,28 @@ def queue_due_countdown(now: datetime) -> str | None:
 
 @dataclass(frozen=True)
 class PreflightMark:
-    """A preflight report due: the scheduled start it is for, and how many minutes before it."""
+    """A preflight report due: the scheduled start it is for and how many minutes before it; once queued, its audit
+    entry, so no pass or restart queues it again."""
+
+    ACTION: ClassVar = "preflight_report_queued"
 
     start: datetime
     minutes: int
+
+    def _details(self) -> dict[str, object]:
+        return {"start_time": self.start.isoformat(), "minutes": self.minutes}
+
+    def queued(self) -> bool:
+        return AuditLog.objects.filter(action=self.ACTION, details=self._details()).exists()
+
+    def record(self, config: CompetitionConfig) -> None:
+        AuditLog.objects.create(
+            action=self.ACTION,
+            admin_user=TIMER_ACTOR,
+            target_entity="competition_config",
+            target_id=config.pk,
+            details=self._details(),
+        )
 
 
 def _passed_preflight_mark(config: CompetitionConfig, now: datetime) -> PreflightMark | None:
@@ -594,34 +613,24 @@ def _passed_preflight_mark(config: CompetitionConfig, now: datetime) -> Prefligh
     return PreflightMark(start, min(passed)) if passed else None
 
 
-def _preflight_queued(mark: PreflightMark) -> bool:
-    return AuditLog.objects.filter(
-        action=PREFLIGHT_REPORT_QUEUED, details__start_time=mark.start.isoformat(), details__minutes=mark.minutes
-    ).exists()
-
-
 def due_preflight_report(now: datetime) -> PreflightMark | None:
-    """The preflight report due now and not yet queued, if any. A later mark covers an earlier one missed."""
+    """The preflight report due now and not yet queued, if any; none while Quotient isn't configured. A later mark
+    covers an earlier one missed."""
+    if not settings.QUOTIENT_API_URL:
+        return None
     mark = _passed_preflight_mark(CompetitionConfig.get_config(), now)
-    return None if mark is None or _preflight_queued(mark) else mark
+    return None if mark is None or mark.queued() else mark
 
 
-def queue_preflight_report(mark: PreflightMark, report: str, now: datetime) -> bool:
-    """Queue report for ops as mark's report and record it, so no pass or restart queues it again; False, queueing
-    nothing, when the schedule moved or the report was queued while Quotient was read."""
+def queue_preflight_report(mark: PreflightMark, report: str, now: datetime) -> None:
+    """Queue report for ops as mark's report and record it, unless the schedule moved or the report was queued while
+    Quotient was read."""
     with transaction.atomic():
         config = CompetitionConfig.locked()
-        if _passed_preflight_mark(config, now) != mark or _preflight_queued(mark):
-            return False
+        if _passed_preflight_mark(config, now) != mark or mark.queued():
+            return
         notify_ops(report, actor=TIMER_ACTOR)
-        AuditLog.objects.create(
-            action=PREFLIGHT_REPORT_QUEUED,
-            admin_user=TIMER_ACTOR,
-            target_entity="competition_config",
-            target_id=config.pk,
-            details={"start_time": mark.start.isoformat(), "minutes": mark.minutes},
-        )
-    return True
+        mark.record(config)
 
 
 class ConfigEditError(ValueError):

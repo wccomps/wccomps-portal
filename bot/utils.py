@@ -134,9 +134,8 @@ async def send_announcement(
 
 
 async def log_to_ops_channel(bot: discord.Client, message: str) -> bool:
-    """Post to the ops channel, in as many messages as it takes (split_message), so none is past Discord's 2000
-    characters and nothing is cut; whether it was all posted. Never raises: a failure is logged, and parts already
-    posted stay."""
+    """Post to the ops channel, split into messages within Discord's limit; whether it was all posted. Never raises: a
+    failure is logged, and parts already posted stay."""
     try:
         channel_id = settings.DISCORD_LOG_CHANNEL_ID
         if not channel_id:
