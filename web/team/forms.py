@@ -74,12 +74,12 @@ def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str]:
     # Email slots no column's normalized name already takes
     email_columns = iter(c for c in ("contact_email", "secondary_email") if c not in normalized.values())
     for raw in fieldnames:
-        norm = raw.strip().lower()
-        if (name := normalized[raw]) in canonical:
+        norm, name = raw.strip().lower(), normalized[raw]
+        if name in canonical:
             mapping[raw] = raw if name in claimed else name
             claimed.add(name)
         elif "email" in norm:
-            mapping[raw] = next(email_columns, norm.replace(" ", "_"))
+            mapping[raw] = next(email_columns, name)
         elif "team" in norm or norm.replace(" ", "").replace("#", "").isdigit():
             # Skip team number columns — teams are assigned randomly
             skipped.append(raw)
@@ -91,11 +91,11 @@ def _infer_header_mapping(fieldnames: list[str]) -> dict[str, str]:
         mapping[unmapped[0]] = "school_name"
     else:
         for raw in unmapped:
-            mapping[raw] = raw.strip().lower().replace(" ", "_")
+            mapping[raw] = normalized[raw]
 
-    # Include skipped columns so they appear in the warning but get ignored
+    # Map skipped columns so the unknown-columns warning lists them
     for raw in skipped:
-        mapping[raw] = raw.strip().lower().replace(" ", "_")
+        mapping[raw] = normalized[raw]
 
     return mapping
 
